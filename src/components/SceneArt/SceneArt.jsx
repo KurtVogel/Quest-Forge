@@ -13,7 +13,6 @@ export default function SceneArt() {
     const handleGenerateArt = () => {
         const location = state.currentLocation;
         if (!location) return;
-        if (!state.settings.apiKey) return;
 
         setIsLoading(true);
 
@@ -46,7 +45,7 @@ export default function SceneArt() {
                     </div>
                 )}
 
-                {!currentImage && !isLoading && state.currentLocation && state.settings.apiKey && (
+                {!currentImage && !isLoading && state.currentLocation && (
                     <button className="scene-art-generate-btn" onClick={handleGenerateArt}>
                         🎨 Visualize {state.currentLocation}
                     </button>

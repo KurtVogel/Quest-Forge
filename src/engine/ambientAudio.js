@@ -73,9 +73,126 @@ class AmbientAudioEngine {
         const nodes = [];
 
         switch (profileKey) {
+            case 'forest': {
+                // Wind noise + occasional bird chirps
+                const noise = this._createNoise(ctx, 0.4);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 800;
+                noise.connect(filter);
+                filter.connect(this.gainNode);
+                nodes.push(noise);
+
+                // Modulate filter for wind gusts
+                const lfo = ctx.createOscillator();
+                lfo.type = 'sine';
+                lfo.frequency.value = 0.1;
+                const lfoGain = ctx.createGain();
+                lfoGain.gain.value = 400;
+                lfo.connect(lfoGain);
+                lfoGain.connect(filter.frequency);
+                lfo.start();
+                nodes.push(lfo);
+
+                // Bird chirps
+                const chirpOsc = ctx.createOscillator();
+                chirpOsc.type = 'sine';
+                const chirpGain = ctx.createGain();
+                chirpGain.gain.value = 0;
+                chirpOsc.connect(chirpGain);
+                chirpGain.connect(this.gainNode);
+                chirpOsc.start();
+                nodes.push(chirpOsc);
+                this._scheduleChirps(ctx, chirpOsc, chirpGain);
+                break;
+            }
+            case 'dungeon': {
+                // Low drone + rumble
+                const drone1 = ctx.createOscillator();
+                drone1.type = 'sine';
+                drone1.frequency.value = 55; // A1
+                const droneGain = ctx.createGain();
+                droneGain.gain.value = 0.6;
+                drone1.connect(droneGain);
+                droneGain.connect(this.gainNode);
+                drone1.start();
+                nodes.push(drone1);
+
+                const drone2 = ctx.createOscillator();
+                drone2.type = 'sine';
+                drone2.frequency.value = 54; // Beating
+                const droneGain2 = ctx.createGain();
+                droneGain2.gain.value = 0.6;
+                drone2.connect(droneGain2);
+                droneGain2.connect(this.gainNode);
+                drone2.start();
+                nodes.push(drone2);
+
+                const rumble = this._createNoise(ctx, 0.2);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 100;
+                rumble.connect(filter);
+                filter.connect(this.gainNode);
+                nodes.push(rumble);
+                break;
+            }
+            case 'rain': {
+                // High-pass noise
+                const noise = this._createNoise(ctx, 0.5);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'highpass';
+                filter.frequency.value = 1500;
+                noise.connect(filter);
+                filter.connect(this.gainNode);
+                nodes.push(noise);
+                break;
+            }
+            case 'ocean': {
+                // Pink-ish noise with slow sweeping lowpass
+                const noise = this._createNoise(ctx, 0.4);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 400;
+                noise.connect(filter);
+                filter.connect(this.gainNode);
+                nodes.push(noise);
+
+                // Waves crashing modulation
+                const lfo = ctx.createOscillator();
+                lfo.type = 'sine';
+                lfo.frequency.value = 0.08; // Very slow
+                const lfoGain = ctx.createGain();
+                lfoGain.gain.value = 800; // Sweep up to 1200Hz
+                lfo.connect(lfoGain);
+                lfoGain.connect(filter.frequency);
+                lfo.start();
+                nodes.push(lfo);
+                break;
+            }
+            case 'combat': {
+                // Tense low heartbeat/drum rhythm
+                const kick = ctx.createOscillator();
+                kick.type = 'sine';
+                kick.frequency.value = 60;
+                const kickGain = ctx.createGain();
+                kickGain.gain.value = 0;
+                kick.connect(kickGain);
+                kickGain.connect(this.gainNode);
+                kick.start();
+                nodes.push(kick);
+                this._scheduleHeartbeat(ctx, kick, kickGain);
+                break;
+            }
             default: {
-                // Feature bypassed: Procedural Web Audio API generation disabled to allow future MP3/OGG integration
-                // Previously generated noise, filters, and oscillators here.
+                // Generic mild wind/room tone for tavern/city/etc if no specific synth set up
+                const noise = this._createNoise(ctx, 0.15);
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 400;
+                noise.connect(filter);
+                filter.connect(this.gainNode);
+                nodes.push(noise);
             }
         }
 
@@ -85,12 +202,63 @@ class AmbientAudioEngine {
     }
 
     _createNoise(ctx, volume) {
-        // Disabled logic
-        return ctx.createGain();
+        const bufferSize = ctx.sampleRate * 2; // 2 seconds of noise
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+        const noiseSource = ctx.createBufferSource();
+        noiseSource.buffer = buffer;
+        noiseSource.loop = true;
+
+        const gain = ctx.createGain();
+        gain.gain.value = volume;
+        noiseSource.connect(gain);
+        noiseSource.start();
+
+        // Add a stop method adapter to standard buffer source
+        return {
+            connect: (dst) => gain.connect(dst),
+            disconnect: () => { noiseSource.disconnect(); gain.disconnect(); },
+            stop: () => noiseSource.stop()
+        };
     }
 
     _scheduleChirps(ctx, osc, gain) {
-        // Disabled logic
+        const scheduleNext = () => {
+            if (!this.isPlaying || this.currentProfile !== 'forest') return;
+            const now = ctx.currentTime;
+            const freq = 3000 + Math.random() * 2000;
+            osc.frequency.setValueAtTime(freq, now);
+            osc.frequency.exponentialRampToValueAtTime(freq * 0.8, now + 0.1);
+
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.1, now + 0.05);
+            gain.gain.linearRampToValueAtTime(0, now + 0.1);
+
+            setTimeout(scheduleNext, 2000 + Math.random() * 8000);
+        };
+        scheduleNext();
+    }
+
+    _scheduleHeartbeat(ctx, osc, gain) {
+        const scheduleNext = () => {
+            if (!this.isPlaying || this.currentProfile !== 'combat') return;
+            const now = ctx.currentTime;
+
+            // Ba-bum
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.8, now + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+            gain.gain.setValueAtTime(0, now + 0.4);
+            gain.gain.linearRampToValueAtTime(0.6, now + 0.45);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+
+            setTimeout(scheduleNext, 1200); // 50 BPM heartbeat
+        };
+        scheduleNext();
     }
 
     stopAll() {

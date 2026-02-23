@@ -12,7 +12,7 @@ const IMAGE_CACHE = new Map();
  * @returns {Promise<string|null>} Data URL of generated image, or null on failure
  */
 export async function generateSceneImage(description, apiKey) {
-    if (!description || !apiKey) return null;
+    if (!description) return null;
 
     // Check cache
     const cacheKey = description.toLowerCase().trim();
