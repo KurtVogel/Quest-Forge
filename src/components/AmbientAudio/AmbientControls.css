@@ -1,0 +1,65 @@
+/* Ambient Audio Controls */
+
+.ambient-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.ambient-toggle {
+    background: none;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-muted);
+}
+
+.ambient-toggle:hover {
+    background: var(--surface-primary);
+}
+
+.ambient-toggle.playing {
+    border-color: var(--gold-dim);
+    background: rgba(212, 175, 55, 0.08);
+}
+
+.ambient-volume {
+    width: 60px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--border-primary);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+.ambient-volume::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--gold);
+    cursor: pointer;
+}
+
+.ambient-volume::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border: none;
+    border-radius: 50%;
+    background: var(--gold);
+    cursor: pointer;
+}
+
+.ambient-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+    white-space: nowrap;
+}

@@ -1,0 +1,149 @@
+.app-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+    background: var(--surface-secondary);
+    border-bottom: 1px solid var(--border-primary);
+    flex-shrink: 0;
+    height: 52px;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.app-title {
+    font-family: var(--font-heading);
+    font-size: 1.2rem;
+    color: var(--gold);
+    margin: 0;
+    letter-spacing: 0.02em;
+}
+
+.session-name {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    padding: 0.15rem 0.6rem;
+    background: var(--surface-primary);
+    border-radius: 4px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.api-warning {
+    font-size: 0.78rem;
+    color: var(--warning);
+    cursor: pointer;
+    padding: 0.2rem 0.5rem;
+    background: rgba(255, 193, 7, 0.1);
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.api-warning:hover {
+    background: rgba(255, 193, 7, 0.2);
+}
+
+.header-btn {
+    height: 36px;
+    padding: 0 0.5rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-primary);
+    background: var(--surface-primary);
+    font-size: 1.1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.header-btn:hover {
+    border-color: var(--gold-dim);
+    background: rgba(212, 175, 55, 0.08);
+}
+
+.app-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    /* Critical for flex overflow */
+}
+
+.sidebar {
+    width: 280px;
+    flex-shrink: 0;
+    background: var(--surface-secondary);
+    border-right: 1px solid var(--border-primary);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sidebar-right {
+    border-right: none;
+    border-left: 1px solid var(--border-primary);
+}
+
+.sidebar-section {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.sidebar-inventory {
+    border-top: 1px solid var(--border-primary);
+    max-height: 40%;
+}
+
+.main-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* === Responsive === */
+
+@media (max-width: 1024px) {
+    .sidebar {
+        width: 240px;
+    }
+}
+
+@media (max-width: 768px) {
+    .app-body {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        width: 100%;
+        max-height: 30vh;
+        border-right: none;
+        border-bottom: 1px solid var(--border-primary);
+    }
+
+    .sidebar-right {
+        border-left: none;
+        border-top: 1px solid var(--border-primary);
+        max-height: 25vh;
+    }
+
+    .sidebar-inventory {
+        max-height: 50%;
+    }
+}

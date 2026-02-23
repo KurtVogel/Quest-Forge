@@ -1,0 +1,430 @@
+.character-sheet {
+    padding: 1rem;
+    overflow-y: auto;
+    height: 100%;
+}
+
+.cs-header {
+    text-align: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-primary);
+}
+
+.cs-name {
+    font-family: var(--font-heading);
+    color: var(--gold);
+    font-size: 1.3rem;
+    margin: 0;
+}
+
+.cs-subtitle {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+}
+
+.cs-hp-section {
+    margin-bottom: 1rem;
+}
+
+.cs-hp-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.3rem;
+    font-weight: 600;
+}
+
+.cs-hp-numbers {
+    color: var(--text-primary);
+}
+
+.cs-hp-bar {
+    height: 12px;
+    background: var(--surface-primary);
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border-primary);
+}
+
+.cs-hp-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.5s ease, background 0.5s ease;
+}
+
+.cs-exp-section {
+    margin-bottom: 1.5rem;
+}
+
+.cs-exp-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.3rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.cs-exp-numbers {
+    color: var(--gold);
+}
+
+.cs-exp-bar {
+    height: 6px;
+    background: var(--surface-primary);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--border-primary);
+}
+
+.cs-exp-fill {
+    height: 100%;
+    background: var(--gold);
+    border-radius: 2px;
+    transition: width 0.5s ease;
+}
+
+.cs-conditions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.cs-condition-badge {
+    background: rgba(220, 38, 38, 0.15);
+    border: 1px solid rgba(220, 38, 38, 0.3);
+    color: #fca5a5;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.cs-combat-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.cs-combat-stat {
+    text-align: center;
+    background: var(--surface-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    padding: 0.5rem 0.25rem;
+}
+
+.cs-stat-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.cs-stat-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.cs-abilities {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.cs-ability {
+    text-align: center;
+    background: var(--surface-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    padding: 0.5rem;
+}
+
+.cs-ability-name {
+    font-size: 0.7rem;
+    color: var(--gold);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+}
+
+.cs-ability-mod {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.cs-ability-score {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.cs-section {
+    margin-bottom: 1rem;
+}
+
+.cs-section-title {
+    font-family: var(--font-heading);
+    color: var(--gold);
+    font-size: 0.85rem;
+    margin: 0 0 0.5rem 0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.cs-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.cs-list li {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.cs-list li:last-child {
+    border-bottom: none;
+}
+
+/* === Character Creation === */
+
+.char-creation-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    animation: fadeIn 0.3s ease;
+}
+
+.char-creation-modal {
+    background: var(--surface-secondary);
+    border: 1px solid var(--border-primary);
+    border-radius: 16px;
+    padding: 2rem;
+    max-width: 680px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 40px rgba(212, 175, 55, 0.1);
+}
+
+.char-creation-title {
+    font-family: var(--font-heading);
+    color: var(--gold);
+    text-align: center;
+    font-size: 1.8rem;
+    margin: 0 0 1.5rem 0;
+}
+
+.char-creation-steps {
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+    margin-bottom: 2rem;
+}
+
+.step-indicator {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--border-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    transition: all 0.3s;
+}
+
+.step-indicator.active {
+    border-color: var(--gold);
+    color: var(--gold);
+}
+
+.step-indicator.current {
+    background: var(--gold);
+    color: var(--bg-primary);
+}
+
+.creation-step h3 {
+    color: var(--text-primary);
+    margin: 0 0 1rem 0;
+    font-family: var(--font-heading);
+}
+
+.creation-hint {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+}
+
+.creation-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: var(--surface-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    font-family: var(--font-body);
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
+}
+
+.creation-input:focus {
+    border-color: var(--gold);
+}
+
+.creation-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.75rem;
+}
+
+.creation-card {
+    background: var(--surface-primary);
+    border: 2px solid var(--border-primary);
+    border-radius: 10px;
+    padding: 0.75rem;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+}
+
+.creation-card:hover {
+    border-color: var(--gold-dim);
+    background: rgba(212, 175, 55, 0.05);
+}
+
+.creation-card.selected {
+    border-color: var(--gold);
+    background: rgba(212, 175, 55, 0.1);
+    box-shadow: 0 0 12px rgba(212, 175, 55, 0.15);
+}
+
+.card-name {
+    font-family: var(--font-heading);
+    color: var(--gold);
+    font-size: 1rem;
+    margin-bottom: 0.3rem;
+}
+
+.card-desc {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.4rem;
+    line-height: 1.4;
+}
+
+.card-bonus {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.stat-assignment {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.stat-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.stat-label {
+    width: 40px;
+    font-weight: 700;
+    color: var(--gold);
+    font-size: 0.85rem;
+}
+
+.stat-choices {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.stat-choice {
+    width: 40px;
+    height: 36px;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    background: var(--surface-primary);
+    color: var(--text-primary);
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font-body);
+}
+
+.stat-choice:hover {
+    border-color: var(--gold);
+    background: rgba(212, 175, 55, 0.1);
+}
+
+.stat-value {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.8rem;
+    background: rgba(212, 175, 55, 0.1);
+    border: 1px solid var(--gold);
+    border-radius: 6px;
+    color: var(--gold);
+    font-weight: 700;
+    cursor: pointer;
+    font-family: var(--font-body);
+}
+
+.stat-remove {
+    font-size: 0.7rem;
+    opacity: 0.6;
+}
+
+.creation-summary {
+    background: var(--surface-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 10px;
+    padding: 1.25rem;
+}
+
+.summary-row {
+    padding: 0.4rem 0;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.summary-row strong {
+    color: var(--gold);
+}
+
+.char-creation-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-primary);
+}

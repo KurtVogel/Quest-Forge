@@ -1,0 +1,198 @@
+/* App-level styles including the Start Screen */
+
+/* === Start Screen === */
+
+.start-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: radial-gradient(ellipse at center, var(--surface-secondary) 0%, var(--bg-primary) 70%);
+    padding: 2rem;
+}
+
+.start-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 420px;
+    width: 100%;
+}
+
+.start-logo {
+    font-size: 4rem;
+    margin-bottom: 0.5rem;
+    animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-10px);
+    }
+}
+
+.start-title {
+    font-family: var(--font-heading);
+    color: var(--gold);
+    font-size: 2.8rem;
+    margin: 0;
+    letter-spacing: 0.04em;
+    text-shadow: 0 0 30px rgba(212, 175, 55, 0.3);
+}
+
+.start-subtitle {
+    color: var(--text-muted);
+    font-size: 1rem;
+    margin: 0.25rem 0 2.5rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.start-loading {
+    color: var(--text-muted);
+    font-size: 1.1rem;
+}
+
+.start-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+.start-btn {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    border-radius: 14px;
+    border: 1px solid var(--border-primary);
+    background: var(--surface-secondary);
+    cursor: pointer;
+    transition: all 0.25s ease;
+    text-align: left;
+    width: 100%;
+    font-family: var(--font-body);
+}
+
+.start-btn:hover {
+    border-color: var(--gold-dim);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.start-btn-icon {
+    font-size: 1.5rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.continue-btn .start-btn-icon {
+    background: rgba(212, 175, 55, 0.15);
+}
+
+.continue-btn {
+    border-color: var(--gold-dim);
+    background: linear-gradient(135deg, rgba(212, 175, 55, 0.08), rgba(212, 175, 55, 0.02));
+}
+
+.continue-btn:hover {
+    border-color: var(--gold);
+    box-shadow: 0 8px 24px rgba(212, 175, 55, 0.15);
+}
+
+.load-btn .start-btn-icon {
+    background: rgba(100, 149, 237, 0.15);
+}
+
+.new-btn .start-btn-icon {
+    background: rgba(130, 200, 130, 0.15);
+}
+
+.start-btn-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.start-btn-label {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+.start-btn-detail {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+/* === Save Slots on Start Screen === */
+
+.start-saves-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+    margin-top: 1rem;
+    max-height: 250px;
+    overflow-y: auto;
+    padding: 0.75rem;
+    background: var(--surface-primary);
+    border-radius: 12px;
+    border: 1px solid var(--border-primary);
+}
+
+.start-save-slot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.65rem 0.75rem;
+    background: var(--surface-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font-body);
+    width: 100%;
+    text-align: left;
+}
+
+.start-save-slot:hover {
+    border-color: var(--gold-dim);
+    background: rgba(212, 175, 55, 0.05);
+}
+
+.start-save-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.start-save-name {
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: var(--text-primary);
+}
+
+.start-save-meta {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.start-save-date {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-left: 0.75rem;
+}

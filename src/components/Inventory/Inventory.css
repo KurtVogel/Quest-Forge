@@ -1,0 +1,194 @@
+.inventory-panel {
+    padding: 1rem;
+    overflow-y: auto;
+    height: 100%;
+}
+
+.inv-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+
+.inv-title {
+    font-family: var(--font-heading);
+    color: var(--gold);
+    font-size: 1rem;
+    margin: 0;
+}
+
+.inv-add-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border-primary);
+    background: var(--surface-primary);
+    color: var(--gold);
+    font-size: 1.2rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.inv-add-btn:hover {
+    background: rgba(212, 175, 55, 0.1);
+    border-color: var(--gold);
+}
+
+.inv-stats-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 1rem;
+    margin-bottom: 1rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.inv-wealth {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.inv-gold {
+    color: #fbbf24;
+}
+
+.inv-silver {
+    color: #e2e8f0;
+}
+
+.inv-copper {
+    color: #b45309;
+}
+
+.inv-weight {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.inv-add-form {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+}
+
+.inv-add-input {
+    flex: 1;
+    padding: 0.4rem 0.6rem;
+    background: var(--surface-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-family: var(--font-body);
+    outline: none;
+}
+
+.inv-add-input:focus {
+    border-color: var(--gold);
+}
+
+.inv-section {
+    margin-bottom: 1rem;
+}
+
+.inv-section-title {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 0.4rem 0;
+}
+
+.inv-empty {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 0.5rem;
+}
+
+.inv-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 0.5rem;
+    background: var(--surface-primary);
+    border-radius: 6px;
+    margin-bottom: 0.3rem;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+}
+
+.inv-item.equipped {
+    border-color: rgba(212, 175, 55, 0.3);
+    background: rgba(212, 175, 55, 0.05);
+}
+
+.inv-item-info {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.inv-item-name {
+    font-size: 0.82rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.inv-item-qty {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.inv-item-detail {
+    font-size: 0.68rem;
+    color: var(--gold-dim);
+    background: rgba(212, 175, 55, 0.1);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+}
+
+.inv-item-actions {
+    display: flex;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+.inv-equip-btn,
+.inv-remove-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    border: none;
+    font-size: 0.7rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: var(--text-muted);
+    transition: all 0.2s;
+}
+
+.inv-equip-btn:hover {
+    color: var(--gold);
+    background: rgba(212, 175, 55, 0.1);
+}
+
+.inv-equip-btn.unequip {
+    color: var(--gold);
+}
+
+.inv-remove-btn:hover {
+    color: var(--danger);
+    background: rgba(220, 53, 69, 0.1);
+}

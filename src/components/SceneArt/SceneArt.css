@@ -1,0 +1,145 @@
+/* Scene Art */
+
+.scene-art-container {
+    width: 100%;
+    border-bottom: 1px solid var(--border-primary);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    justify-content: center;
+    background: var(--surface-secondary);
+}
+
+.scene-art-generate-btn {
+    margin: 1rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface-primary);
+    border: 1px solid var(--border-primary);
+    color: var(--gold);
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font-body);
+    transition: all 0.2s;
+}
+
+.scene-art-generate-btn:hover {
+    border-color: var(--gold);
+    background: rgba(212, 175, 55, 0.1);
+}
+
+.scene-art-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    font-style: italic;
+}
+
+.scene-loading-icon {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 0.5;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+.scene-art-image-wrap {
+    position: relative;
+    cursor: pointer;
+    overflow: hidden;
+    max-height: 180px;
+}
+
+.scene-art-image {
+    width: 100%;
+    height: auto;
+    display: block;
+    object-fit: cover;
+    max-height: 180px;
+    transition: transform 0.3s ease;
+    animation: sceneFadeIn 0.8s ease;
+}
+
+@keyframes sceneFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(1.05);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.scene-art-image-wrap:hover .scene-art-image {
+    transform: scale(1.03);
+}
+
+.scene-art-caption {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 0.5rem 0.75rem;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.scene-location-icon {
+    font-size: 0.85rem;
+}
+
+/* Lightbox */
+.scene-art-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.scene-art-lightbox-img {
+    max-width: 90%;
+    max-height: 80vh;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.scene-art-lightbox-caption {
+    color: var(--text-primary);
+    font-size: 1rem;
+    margin-top: 1rem;
+    font-weight: 600;
+}

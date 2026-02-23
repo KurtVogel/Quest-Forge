@@ -1,0 +1,245 @@
+.dice-panel {
+    padding: 1rem;
+    overflow-y: auto;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.dice-title {
+    font-family: var(--font-heading);
+    color: var(--gold);
+    font-size: 1rem;
+    margin: 0 0 0.75rem 0;
+    text-align: center;
+}
+
+.dice-buttons {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+}
+
+.dice-btn {
+    padding: 0.5rem;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    background: var(--surface-primary);
+    color: var(--text-primary);
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font-body);
+}
+
+.dice-btn:hover {
+    border-color: var(--gold);
+    background: rgba(212, 175, 55, 0.1);
+    transform: scale(1.05);
+}
+
+.dice-btn:active {
+    transform: scale(0.95);
+}
+
+.dice-modifier {
+    margin-bottom: 0.75rem;
+    text-align: center;
+}
+
+.modifier-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: block;
+    margin-bottom: 0.3rem;
+}
+
+.modifier-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.mod-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border-primary);
+    background: var(--surface-primary);
+    color: var(--text-primary);
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    font-family: var(--font-body);
+}
+
+.mod-btn:hover {
+    border-color: var(--gold);
+}
+
+.mod-value {
+    min-width: 35px;
+    text-align: center;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.mod-reset {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--border-primary);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--font-body);
+}
+
+.mod-reset:hover {
+    color: var(--gold);
+    border-color: var(--gold);
+}
+
+.dice-result-display {
+    text-align: center;
+    padding: 1rem;
+    background: var(--surface-primary);
+    border: 2px solid var(--border-primary);
+    border-radius: 12px;
+    margin-bottom: 0.75rem;
+    animation: rollIn 0.3s ease;
+}
+
+@keyframes rollIn {
+    from {
+        transform: scale(0.8) rotate(-10deg);
+        opacity: 0;
+    }
+
+    to {
+        transform: scale(1) rotate(0);
+        opacity: 1;
+    }
+}
+
+.dice-result-display.crit {
+    border-color: var(--gold);
+    background: rgba(212, 175, 55, 0.1);
+    box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
+}
+
+.dice-result-display.critfail {
+    border-color: var(--danger);
+    background: rgba(220, 53, 69, 0.1);
+    box-shadow: 0 0 20px rgba(220, 53, 69, 0.2);
+}
+
+.result-total {
+    font-size: 2.5rem;
+    font-weight: 800;
+    color: var(--gold);
+    line-height: 1;
+}
+
+.result-detail {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.3rem;
+}
+
+.result-crit {
+    font-size: 0.85rem;
+    color: var(--gold);
+    font-weight: 700;
+    margin-top: 0.3rem;
+    animation: pulse 0.5s ease infinite alternate;
+}
+
+.result-crit.fail {
+    color: var(--danger);
+}
+
+@keyframes pulse {
+    from {
+        opacity: 0.7;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.dice-log {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.dice-log-title {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 0.5rem 0;
+}
+
+.dice-log-entries {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.dice-log-empty {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    text-align: center;
+    padding: 1rem;
+}
+
+.dice-log-entry {
+    padding: 0.4rem 0.6rem;
+    background: var(--surface-primary);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    border-left: 3px solid var(--border-primary);
+}
+
+.dice-log-entry.crit {
+    border-left-color: var(--gold);
+}
+
+.dice-log-entry.critfail {
+    border-left-color: var(--danger);
+}
+
+.log-entry-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.log-notation {
+    color: var(--text-secondary);
+}
+
+.log-total {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.log-desc {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-top: 0.15rem;
+}
