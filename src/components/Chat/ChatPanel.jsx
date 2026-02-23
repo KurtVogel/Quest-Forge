@@ -144,6 +144,18 @@ export default function ChatPanel() {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSend();
+            // Reset height after send
+            if (inputRef.current) {
+                inputRef.current.style.height = 'auto';
+            }
+        }
+    };
+
+    const handleInput = (e) => {
+        setInput(e.target.value);
+        if (inputRef.current) {
+            inputRef.current.style.height = 'auto';
+            inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 150)}px`;
         }
     };
 
@@ -204,11 +216,11 @@ export default function ChatPanel() {
                     ref={inputRef}
                     className="chat-input"
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onInput={handleInput}
                     onKeyDown={handleKeyDown}
                     placeholder={hasApiKey ? "What do you do?" : "Set your API key in Settings first..."}
                     disabled={!hasApiKey || state.ui.isLoading}
-                    rows={2}
+                    rows={1}
                 />
                 {state.ui.isLoading ? (
                     <button className="chat-stop-btn" onClick={handleStop} title="Stop generating">

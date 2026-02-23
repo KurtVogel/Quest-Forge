@@ -77,6 +77,13 @@
     background: rgba(212, 175, 55, 0.08);
 }
 
+.settings-btn-expanded {
+    padding: 0 0.8rem;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
 .app-body {
     display: flex;
     flex: 1;
