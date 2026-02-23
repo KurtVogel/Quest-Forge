@@ -16,7 +16,29 @@ export default function SceneArt() {
 
         setIsLoading(true);
 
-        generateSceneImage(location, state.settings.apiKey)
+        // Build a rich description based on game state
+        let richDescription = `Location: ${location}. `;
+
+        if (state.character) {
+            const { name, race, level } = state.character;
+            const charClass = state.character.class || 'adventurer';
+            richDescription += `The scene features ${name}, a level ${level} ${race} ${charClass}. `;
+
+            const equippedItems = (state.inventory || []).filter(i => i.equipped).map(i => i.name || i.id);
+            if (equippedItems.length > 0) {
+                richDescription += `Equipped with: ${equippedItems.join(', ')}. `;
+            }
+        }
+
+        if (state.combat?.active && state.combat.enemies?.length > 0) {
+            const enemyNames = state.combat.enemies.map(e => e.name).join(', ');
+            richDescription += `Action shot! High-tension combat against: ${enemyNames}. `;
+        } else if (state.journal?.length > 0) {
+            const lastEntry = state.journal[state.journal.length - 1];
+            richDescription += `Current situation: ${lastEntry.summary || lastEntry.text || 'Exploring'}. `;
+        }
+
+        generateSceneImage(richDescription, state.settings.apiKey)
             .then(imageUrl => {
                 if (imageUrl) {
                     setCurrentImage(imageUrl);
