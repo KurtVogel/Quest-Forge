@@ -9,6 +9,7 @@ import QuestPanel from '../Quests/QuestPanel.jsx';
 import JournalPanel from '../Journal/JournalPanel.jsx';
 import SceneArt from '../SceneArt/SceneArt.jsx';
 import AmbientControls from '../AmbientAudio/AmbientControls.jsx';
+import CompanionsPanel from '../Companions/CompanionsPanel.jsx';
 import './Layout.css';
 
 export default function AppShell() {
@@ -54,6 +55,11 @@ export default function AppShell() {
                     <div className="sidebar-section sidebar-inventory">
                         <ErrorBoundary label="Inventory">
                             <InventoryPanel />
+                        </ErrorBoundary>
+                    </div>
+                    <div className="sidebar-section">
+                        <ErrorBoundary label="Companions">
+                            <CompanionsPanel />
                         </ErrorBoundary>
                     </div>
                 </aside>

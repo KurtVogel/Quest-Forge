@@ -1,0 +1,153 @@
+.companions-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.companions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: var(--spacing-xs);
+    margin-bottom: var(--spacing-sm);
+}
+
+.companions-header h3 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.companion-count {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+}
+
+.companions-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.companion-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.companion-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.companion-name {
+    font-weight: 600;
+    color: var(--text-main);
+    font-size: 0.95rem;
+}
+
+.companion-level {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.companion-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+}
+
+.companion-weapon {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-style: italic;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* HP Bar mini */
+.comp-hp-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.comp-hp-text {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    min-width: 35px;
+}
+
+.comp-hp-track {
+    flex: 1;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.comp-hp-fill {
+    height: 100%;
+    background: #e74c3c;
+    transition: width 0.3s ease;
+}
+
+/* Affinity Meter */
+.comp-affinity-wrap {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.comp-affinity-icon {
+    font-size: 0.85rem;
+}
+
+.comp-affinity-track {
+    flex: 1;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.comp-affinity-fill {
+    height: 100%;
+    background: #f1c40f;
+    /* Gold by default */
+    transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.affinity-high {
+    background: #2ecc71;
+}
+
+/* Green */
+.affinity-low {
+    background: #e74c3c;
+}
+
+/* Red */
+
+.empty-party {
+    text-align: center;
+    padding: var(--spacing-sm) 0;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    font-style: italic;
+}

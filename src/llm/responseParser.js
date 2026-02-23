@@ -109,6 +109,10 @@ function normalizeEvents(raw) {
         combatStart: raw.combat_start || null,
         combatEnd: !!raw.combat_end,
         enemyUpdates: Array.isArray(raw.enemy_updates) ? raw.enemy_updates : [],
+        // Companion events
+        addCompanions: Array.isArray(raw.add_companions) ? raw.add_companions : [],
+        updateCompanions: Array.isArray(raw.update_companions) ? raw.update_companions : [],
+        removeCompanions: Array.isArray(raw.remove_companions) ? raw.remove_companions : [],
     };
 }
 
@@ -216,6 +220,17 @@ export function applyEvents(events, dispatch) {
 
     for (const eu of events.enemyUpdates) {
         dispatch({ type: 'UPDATE_ENEMY', payload: eu });
+    }
+
+    // Process Companions
+    for (const comp of events.addCompanions) {
+        dispatch({ type: 'ADD_COMPANION', payload: comp });
+    }
+    for (const comp of events.updateCompanions) {
+        dispatch({ type: 'UPDATE_COMPANION', payload: comp });
+    }
+    for (const compName of events.removeCompanions) {
+        dispatch({ type: 'REMOVE_COMPANION', payload: { name: compName } });
     }
 }
 

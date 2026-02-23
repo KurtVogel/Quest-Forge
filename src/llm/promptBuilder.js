@@ -10,7 +10,7 @@ import { buildJournalContext } from '../engine/worldJournal.js';
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, currentLocation, combat }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat }) {
     const parts = [];
 
     // Core DM instructions
@@ -37,6 +37,11 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     // Character info
     if (character) {
         parts.push(buildCharacterBlock(character));
+    }
+
+    // Party / Companions
+    if (party && party.length > 0) {
+        parts.push(buildPartyBlock(party));
     }
 
     // Inventory
@@ -187,8 +192,13 @@ When game events occur, include a structured JSON block at the END of your respo
   },
   "combat_end": false,
   "enemy_updates": [
-    { "id": "enemy-id", "hp": 8 }
-  ]
+  "add_companions": [
+    { "name": "Garrick", "level": 2, "hp": 18, "maxHp": 18, "ac": 14, "weapon": "Longsword", "affinity": 70 }
+  ],
+  "update_companions": [
+    { "id": "companion-id", "name": "Garrick", "hp": 10, "affinity": 75 }
+  ],
+  "remove_companions": ["Garrick"],
 }
 \`\`\`
 
@@ -200,7 +210,8 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - For player checks: type is "skill_check", "saving_throw", or "attack_roll". dc is the target DC.
 - For player damage: type is "damage_roll". Provide the exact dice to roll in the "notation" field based on the player's equipped weapon (e.g. "1d8+3") or spell.
   - CRITICAL EXCEPTION: If the player scored a critical hit, DOUBLE the number of damage dice requested (e.g. if the weapon is "1d8+3", request "2d8+3").
-- For NPC/enemy attacks: type is "npc_attack". Set dc to the player's AC from the character sheet above. The system will enforce the correct AC regardless, but you should use the accurate value for consistency. Include attacker name.
+- For NPC/enemy/companion attacks: type is "npc_attack". Set dc to the TARGET's AC (either player AC, companion AC, or enemy AC). Include attacker name.
+- For companion damage or enemy damage that requires rolling: type is "damage_roll".
 - For NPC saves: type is "npc_save". dc is the spell/ability DC.
 - When requesting rolls, narrate only the SETUP (what's happening, what's at stake). Do NOT narrate the outcome.
 - When you receive "[ROLL RESULT: ...]" messages, narrate the OUTCOME based on those results. No further setup needed.
@@ -239,6 +250,12 @@ function buildCharacterBlock(character) {
 - **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}
 ${character.traits?.length ? `- **Traits:** ${character.traits.join(', ')}` : ''}
 ${character.features?.length ? `- **Features:** ${character.features.join(', ')}` : ''}`;
+}
+
+function buildPartyBlock(party) {
+    return `## COMPANIONS (PARTY)
+These characters are currently traveling with the player. They act in combat and can be conversed with.
+${party.map(c => `- **${c.name}** | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Weapon: ${c.weapon || 'Unarmed'} | Affinity: ${c.affinity}/100`).join('\n')}`;
 }
 
 function buildInventoryBlock(inventory) {

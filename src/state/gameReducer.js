@@ -10,6 +10,7 @@ export const initialGameState = {
     quests: [],
     journal: [],
     npcs: [],
+    party: [], // Companions currently traveling with the player
     currentLocation: null,
     combat: {
         active: false,
@@ -372,6 +373,41 @@ export function gameReducer(state, action) {
         case 'SET_LOCATION':
             return { ...state, currentLocation: action.payload };
 
+        // --- Party / Companions ---
+        case 'ADD_COMPANION':
+            // Check if already in party
+            if (state.party?.find(c => c.name === action.payload.name)) return state;
+            return {
+                ...state,
+                party: [...(state.party || []), {
+                    id: `companion-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+                    name: 'Companion',
+                    affinity: 50,
+                    level: 1,
+                    maxHp: 20,
+                    hp: 20,
+                    ac: 12,
+                    weapon: 'Dagger',
+                    ...action.payload,
+                }],
+            };
+
+        case 'UPDATE_COMPANION':
+            return {
+                ...state,
+                party: (state.party || []).map(companion =>
+                    (companion.id === action.payload.id || companion.name === action.payload.name)
+                        ? { ...companion, ...action.payload }
+                        : companion
+                ),
+            };
+
+        case 'REMOVE_COMPANION':
+            return {
+                ...state,
+                party: (state.party || []).filter(c => c.name !== action.payload.name && c.id !== action.payload.id),
+            };
+
         // --- Combat ---
         case 'START_COMBAT': {
             const enemies = (action.payload.enemies || []).map((e, i) => ({
@@ -388,6 +424,12 @@ export function gameReducer(state, action) {
             const playerInit = action.payload.playerInitiative || 10;
             const turnOrder = [
                 { type: 'player', name: state.character?.name || 'Player', initiative: playerInit },
+                ...(state.party || []).map(c => ({
+                    type: 'companion',
+                    id: c.id,
+                    name: c.name,
+                    initiative: Math.floor(Math.random() * 20) + 1, // Companions roll their own init
+                })),
                 ...enemies.map(e => ({ type: 'enemy', id: e.id, name: e.name, initiative: e.initiative })),
             ].sort((a, b) => b.initiative - a.initiative);
 
