@@ -20,40 +20,43 @@ export async function generateSceneImage(description, apiKey) {
         return IMAGE_CACHE.get(cacheKey);
     }
 
-    try {
-        // Use Gemini's image generation model (Imagen 3)
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    instances: [{
-                        prompt: `Fantasy RPG scene illustration, high quality digital art, atmospheric lighting: ${description}`,
-                    }],
-                    parameters: {
-                        sampleCount: 1,
-                        aspectRatio: '16:9',
-                        personGeneration: 'ALLOW_ALL',
-                    },
-                }),
-            }
-        );
+    if (apiKey) {
+        try {
+            // Use Gemini's image generation model (Imagen 4)
+            const response = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        instances: [{
+                            prompt: `Fantasy RPG scene illustration, high quality digital art, atmospheric lighting: ${description}`,
+                        }],
+                        parameters: {
+                            sampleCount: 1,
+                            aspectRatio: '16:9',
+                            personGeneration: 'ALLOW_ALL',
+                        },
+                    }),
+                }
+            );
 
-        if (response.ok) {
-            const data = await response.json();
-            const imageB64 = data?.predictions?.[0]?.bytesBase64Encoded;
-            if (imageB64) {
-                const dataUrl = `data:image/png;base64,${imageB64}`;
-                IMAGE_CACHE.set(cacheKey, dataUrl);
-                return dataUrl;
+            if (response.ok) {
+                const data = await response.json();
+                const imageB64 = data?.predictions?.[0]?.bytesBase64Encoded;
+                if (imageB64) {
+                    const dataUrl = `data:image/png;base64,${imageB64}`;
+                    IMAGE_CACHE.set(cacheKey, dataUrl);
+                    return dataUrl;
+                }
+            } else {
+                const errText = await response.text();
+                // Instead of console.warn, we can log it gracefully so it doesn't look like a crash
+                console.log(`[ImageGen] Gemini API fallback triggered (Status ${response.status})`);
             }
-        } else {
-            const errText = await response.text();
-            console.warn(`Gemini Imagen API returned ${response.status}:`, errText);
+        } catch (e) {
+            console.log('[ImageGen] Scene art generation with Gemini failed, falling back:', e.message);
         }
-    } catch (e) {
-        console.warn('Scene art generation error with Gemini, falling back:', e);
     }
 
     try {
@@ -62,20 +65,9 @@ export async function generateSceneImage(description, apiKey) {
         const safePrompt = encodeURIComponent(`Fantasy RPG scene illustration, high quality digital art, atmospheric lighting: ${description}`);
         const fallbackUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=800&height=450&nologo=true&seed=${seed}`;
 
-        // Fetch as blob to avoid ORB and CORS issues directly in the <img> tag
-        const fbResponse = await fetch(fallbackUrl);
-        if (fbResponse.ok) {
-            const blob = await fbResponse.blob();
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    const dataUrl = reader.result;
-                    IMAGE_CACHE.set(cacheKey, dataUrl);
-                    resolve(dataUrl);
-                };
-                reader.readAsDataURL(blob);
-            });
-        }
+        // Return the URL directly to be used as <img src="..."> to avoid CORS blocks on fetch
+        IMAGE_CACHE.set(cacheKey, fallbackUrl);
+        return fallbackUrl;
     } catch (e) {
         console.warn('Fallback failed:', e);
     }
