@@ -35,7 +35,7 @@ export async function generateSceneImage(description, apiKey) {
                         parameters: {
                             sampleCount: 1,
                             aspectRatio: '16:9',
-                            personGeneration: 'ALLOW_ALL',
+                            personGeneration: 'DONT_ALLOW',
                         },
                     }),
                 }
