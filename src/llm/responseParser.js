@@ -113,6 +113,17 @@ function normalizeEvents(raw) {
         addCompanions: Array.isArray(raw.add_companions) ? raw.add_companions : [],
         updateCompanions: Array.isArray(raw.update_companions) ? raw.update_companions : [],
         removeCompanions: Array.isArray(raw.remove_companions) ? raw.remove_companions : [],
+        // World memory
+        worldFacts: Array.isArray(raw.world_facts)
+            ? raw.world_facts.map(f =>
+                typeof f === 'string' ? { fact: f, category: 'general' } : f
+            )
+            : [],
+        npcUpdates: Array.isArray(raw.npc_updates) ? raw.npc_updates : [],
+        // Player death event (not game-over — triggers narrative transition)
+        playerDeath: raw.player_death
+            ? { description: raw.player_death.description || 'Your character has fallen.' }
+            : null,
     };
 }
 
@@ -231,6 +242,29 @@ export function applyEvents(events, dispatch) {
     }
     for (const compName of events.removeCompanions) {
         dispatch({ type: 'REMOVE_COMPANION', payload: { name: compName } });
+    }
+
+    // World facts from DM
+    if (events.worldFacts.length > 0) {
+        dispatch({ type: 'ADD_WORLD_FACTS', payload: events.worldFacts });
+    }
+
+    // NPC rich updates from DM or Scribe
+    for (const npc of events.npcUpdates) {
+        dispatch({ type: 'UPDATE_NPC', payload: npc });
+    }
+
+    // Player death — narrative transition, not game over
+    if (events.playerDeath) {
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+                role: 'system',
+                content: `💀 **${events.playerDeath.description}**\n\nYour story is not over. Describe what happens next — does your spirit linger, possess a body nearby, or does fate have other plans?`,
+                isDeathEvent: true,
+            },
+        });
+        dispatch({ type: 'UPDATE_CHARACTER', payload: { currentHP: 0, isDead: true } });
     }
 }
 

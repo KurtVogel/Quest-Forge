@@ -6,11 +6,12 @@ import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT } from '../engine/characterUtils.js';
 import { formatModifier, getModifier, getProficiencyBonus } from '../engine/rules.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
+import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
 
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, retrievedMemories }) {
     const parts = [];
 
     // Core DM instructions
@@ -62,10 +63,27 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         parts.push(buildRecentRollsBlock(rollHistory.slice(-5)));
     }
 
+    // Canonical world facts — these NEVER get compressed or forgotten
+    if (worldFacts && worldFacts.length > 0) {
+        parts.push(buildWorldFactsBlock(worldFacts));
+    }
+
     // Session memory — journal entries and NPC tracker
     const journalContext = buildJournalContext(journal || [], npcs || [], currentLocation);
     if (journalContext) {
         parts.push(journalContext);
+    }
+
+    // Active constraints — synthesized DM reminders from quests, world state, threats
+    const constraints = buildActiveConstraints(quests, worldFacts, character);
+    if (constraints) {
+        parts.push(constraints);
+    }
+
+    // RAG: retrieved memories most relevant to the current player action
+    const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories);
+    if (ragBlock) {
+        parts.push(ragBlock);
     }
 
     // Combat state
@@ -94,9 +112,11 @@ Your role is to create an immersive, reactive, and fair narrative experience.
 
 4. **MAINTAIN CONSISTENCY.** The player's character sheet and inventory are managed by the client. Reference them accurately.
 
-5. **CONSEQUENCES ARE REAL.** Failed checks have meaningful consequences. Combat is genuinely dangerous. No plot armor. Player death is possible.
+5. **CONSEQUENCES ARE REAL.** Failed checks have meaningful consequences. Combat is genuinely dangerous. No plot armor. Player death is possible — but if a player dies, narrate it and output player_death in the JSON. Their story may continue through other means.
 
 6. **BE THE WORLD, NOT THE PLAYER.** Describe the world, NPCs, and events. Never dictate what the player character thinks, feels, or does. Ask what they want to do.
+
+7. **HONOR THE WORLD FACTS.** The WORLD FACTS section contains canonical truths established during play. You MUST treat these as absolute — do not contradict them. If a character is listed as dead, they are dead. If a place burned down, it burned down.
 
 ## GAME LOOP — PACING (VERY IMPORTANT)
 
@@ -111,10 +131,11 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 ### Skill Checks / Saves (dice needed)
 1. Player declares an action that requires a check
 2. **YOU narrate the SETUP** — describe the tension, the attempt, what's at stake. Build drama. Do NOT describe the outcome of the action.
-3. **YOU request the roll** via JSON (e.g. Athletics check, DC 14)
-4. The system rolls the dice and returns the result to you as a system message
-5. **YOU narrate the OUTCOME** based on the dice result — describe what happened vividly. Success or failure, with concrete consequences.
-6. Then continue the scene or ask what the player does next.
+3. **DO NOT ASK THE PLAYER TO ROLL IN TEXT.** (e.g., never say "Please roll a Perception check" or "(DM Note: Roll...)").
+4. **YOU request the roll EXCLUSIVELY via the JSON \`requested_rolls\` array** at the end of your response.
+5. The system rolls the dice and returns the result to you as a system message.
+6. **YOU narrate the OUTCOME** based on the dice result — describe what happened vividly. Success or failure, with concrete consequences.
+7. Then continue the scene or ask what the player does next.
 
 ### Combat Rounds
 1. **YOU narrate the battle situation** — who is where, what's happening
@@ -184,6 +205,13 @@ When game events occur, include a structured JSON block at the END of your respo
   "healing": 0,
   "quest_updates": [{ "status": "new", "name": "Quest Name", "description": "Quest description" }],
   "location": "",
+  "world_facts": [
+    { "fact": "The bandit captain Rarg is dead, killed by the player at the crossroads.", "category": "event" },
+    { "fact": "The village of Thornhaven has been burned by the Iron Claw bandits.", "category": "location" }
+  ],
+  "npc_updates": [
+    { "name": "Mira the Innkeeper", "disposition": "friendly", "lastNotes": "Gave the player a room and hinted at a missing merchant", "lastLocation": "The Rusty Flagon, Millhaven" }
+  ],
   "combat_start": {
     "enemies": [
       { "name": "Goblin", "hp": 15, "ac": 13, "initiative": 14 }
@@ -191,21 +219,34 @@ When game events occur, include a structured JSON block at the END of your respo
     "player_initiative": 12
   },
   "combat_end": false,
-  "enemy_updates": [
+  "enemy_updates": [],
   "add_companions": [
     { "name": "Garrick", "level": 2, "hp": 18, "maxHp": 18, "ac": 14, "weapon": "Longsword", "affinity": 70 }
   ],
   "update_companions": [
     { "id": "companion-id", "name": "Garrick", "hp": 10, "affinity": 75 }
   ],
-  "remove_companions": ["Garrick"],
+  "remove_companions": [],
+  "player_death": null
 }
 \`\`\`
 
 Only include fields that are relevant. The JSON block is OPTIONAL — only include it when game state changes or rolls are needed.
 If no game events occurred, just provide the narrative text without any JSON block.
 
+## WORLD FACTS INSTRUCTIONS
+- Use \`world_facts\` to canonize important outcomes: deaths, alliances, discoveries, betrayals, destroyed places, established lore
+- Write facts as definitive statements: "X is dead", "The treaty between A and B is broken", "The artifact is sealed in the vault"
+- Do NOT record trivial actions — only durable truths
+- These facts persist forever and are shown to you at the start of every future response
+
+## NPC UPDATE INSTRUCTIONS
+- Use \`npc_updates\` whenever an NPC appears in the scene, especially if their disposition or status changes
+- Always include \`name\` and \`lastNotes\`; include other fields only when newly learned
+
 ## ROLL REQUEST RULES
+- **FATAL ERROR AVOIDANCE**: NEVER ask the player to roll in the narrative text (e.g. "(DM Note: roll stealth)"). The system CANNOT PARSE text.
+- **ONLY use the \`requested_rolls\` JSON array.** If you need a roll, you MUST output the JSON block.
 - ALL dice rolls go through requested_rolls — for the player AND for NPCs/enemies.
 - For player checks: type is "skill_check", "saving_throw", or "attack_roll". dc is the target DC.
 - For player damage: type is "damage_roll". Provide the exact dice to roll in the "notation" field based on the player's equipped weapon (e.g. "1d8+3") or spell.
@@ -222,6 +263,11 @@ COMBAT NOTES:
 - Use "enemy_updates" to report damage to enemies. Reference them by the id shown in the combat state.
 - Use "combat_end": true when all enemies are defeated or combat ends.
 
+PLAYER DEATH:
+- If the player's character dies, set "player_death": { "description": "Brief description of how they died" }
+- This does NOT end the game — the player will describe what happens next (their spirit may linger, possess another body, etc.)
+- Continue the world as normal. Death is a narrative event, not a game-over.
+
 ECONOMY & HEALING:
 - Provide "healing" as a positive integer when the player recovers HP (e.g. drinking potion, Second Wind).
 - Provide "X_found" and "X_lost" properties where X is "gold", "silver", or "copper" based on the economy action (e.g. looting coins gives X_found, buying a sword requires X_lost). Provide numbers (integers without labels).
@@ -236,8 +282,10 @@ function buildCharacterBlock(character) {
         .map(([ability, score]) => `${ABILITY_SHORT[ability]}: ${score} (${formatModifier(getModifier(score))})`)
         .join(', ');
 
+    const deathStatus = character.isDead ? '\n- **STATUS: DEAD** (spirit or successor active)' : '';
+
     return `## PLAYER CHARACTER
-- **Name:** ${character.name}
+- **Name:** ${character.name}${deathStatus}
 - **Race:** ${character.race}
 - **Class:** ${character.class} (Level ${character.level})
 - **HP:** ${character.currentHP}/${character.maxHP}
@@ -282,6 +330,53 @@ function buildRecentRollsBlock(rolls) {
     ).join('\n')}`;
 }
 
+function buildWorldFactsBlock(worldFacts) {
+    if (!worldFacts || worldFacts.length === 0) return '';
+    // Group by category for readability
+    const byCategory = {};
+    for (const f of worldFacts) {
+        const cat = f.category || 'general';
+        if (!byCategory[cat]) byCategory[cat] = [];
+        byCategory[cat].push(f.fact);
+    }
+    const lines = Object.entries(byCategory)
+        .map(([cat, facts]) => `**[${cat.toUpperCase()}]**\n${facts.map(f => `- ${f}`).join('\n')}`)
+        .join('\n');
+    return `## WORLD FACTS (canonical — never contradict these)\n${lines}`;
+}
+
+/**
+ * Synthesize a "DM reminders" block from active game state.
+ * Highlights active threats, deadlines, and relationship pressures
+ * so the DM can't forget them even in a long session.
+ */
+function buildActiveConstraints(quests, worldFacts, character) {
+    const reminders = [];
+
+    // Active quests as pressure reminders
+    const active = (quests || []).filter(q => q.status === 'active');
+    if (active.length > 0) {
+        reminders.push(`Active quests in progress: ${active.map(q => q.name).join(', ')}`);
+    }
+
+    // Scan world facts for active threats (simple keyword detection)
+    const threatKeywords = ['hunting', 'pursuing', 'wants the player dead', 'deadline', 'before the', 'bounty', 'wanted'];
+    const threatFacts = (worldFacts || []).filter(f =>
+        threatKeywords.some(kw => f.fact.toLowerCase().includes(kw))
+    );
+    if (threatFacts.length > 0) {
+        reminders.push(`Active threats/pressures:\n${threatFacts.map(f => `- ${f.fact}`).join('\n')}`);
+    }
+
+    // Character death reminder
+    if (character?.isDead) {
+        reminders.push(`The player's original character is dead. They are now playing as a spirit/successor. Acknowledge this reality in narration.`);
+    }
+
+    if (reminders.length === 0) return '';
+    return `## DM REMINDERS — MAINTAIN THESE PRESSURES\n${reminders.join('\n\n')}`;
+}
+
 function buildCombatBlock(combat) {
     const enemyList = combat.enemies.map(e =>
         `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac} | Condition: ${e.condition}`
@@ -301,4 +396,3 @@ ${turnList}
 
 Use enemy_updates with the enemy id to report HP changes. Use combat_end: true when combat resolves.`;
 }
-

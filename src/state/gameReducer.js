@@ -10,6 +10,7 @@ export const initialGameState = {
     quests: [],
     journal: [],
     npcs: [],
+    worldFacts: [], // Canonical world facts that never get compressed — [{id, fact, category, timestamp}]
     party: [], // Companions currently traveling with the player
     currentLocation: null,
     combat: {
@@ -21,9 +22,17 @@ export const initialGameState = {
     },
     session: {
         id: null,
-        name: 'New Adventure',
+        name: '',
         createdAt: null,
-        lastPlayedAt: null,
+        lastSaved: null,
+        prunedMessageCount: 0, // How many messages have been summarized and excluded from LLM history
+    },
+
+    user: {
+        uid: null,
+        email: null,
+        isGuest: false,
+        isAuthLoading: true, // Start true while Firebase checks token
     },
     settings: {
         llmProvider: 'gemini',
@@ -77,8 +86,6 @@ When combat happens, track enemy HP internally and narrate wounds realistically.
         isSettingsOpen: false,
         isCharacterCreationOpen: false,
         isSaveLoadOpen: false,
-        isLoading: false,
-        streamingMessage: '',
     },
 };
 
@@ -341,6 +348,51 @@ export function gameReducer(state, action) {
                 quests: state.quests.filter(q => q.id !== action.payload),
             };
 
+        // --- World Facts ---
+        case 'ADD_WORLD_FACT': {
+            const fact = {
+                id: `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                timestamp: Date.now(),
+                category: 'general',
+                ...action.payload,
+            };
+            // Deduplicate — skip if an identical fact string already exists
+            const alreadyExists = state.worldFacts.some(f => f.fact === fact.fact);
+            if (alreadyExists) return state;
+            return { ...state, worldFacts: [...state.worldFacts, fact] };
+        }
+
+        case 'ADD_WORLD_FACTS': {
+            // Bulk add, filtering duplicates
+            const existing = new Set(state.worldFacts.map(f => f.fact));
+            const newFacts = (action.payload || [])
+                .filter(f => f.fact && !existing.has(f.fact))
+                .map(f => ({
+                    id: `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                    timestamp: Date.now(),
+                    category: 'general',
+                    ...f,
+                }));
+            if (newFacts.length === 0) return state;
+            return { ...state, worldFacts: [...state.worldFacts, ...newFacts] };
+        }
+
+        case 'REMOVE_WORLD_FACT':
+            return { ...state, worldFacts: state.worldFacts.filter(f => f.id !== action.payload) };
+
+        // Mark a batch of messages as summarized (excluded from future LLM history)
+        case 'MARK_MESSAGES_SUMMARIZED': {
+            // action.payload = index up to which messages are now summarized
+            const upTo = action.payload;
+            return {
+                ...state,
+                messages: state.messages.map((msg, idx) =>
+                    idx < upTo ? { ...msg, summarized: true } : msg
+                ),
+                session: { ...state.session, prunedMessageCount: upTo },
+            };
+        }
+
         // --- Journal & NPCs ---
         case 'ADD_JOURNAL_ENTRY':
             return {
@@ -352,15 +404,34 @@ export function gameReducer(state, action) {
                 }],
             };
 
-        case 'ADD_NPC':
+        case 'ADD_NPC': {
+            // Don't add duplicates by name
+            const nameMatch = state.npcs.find(n => n.name?.toLowerCase() === action.payload.name?.toLowerCase());
+            if (nameMatch) {
+                // Merge into existing instead
+                return {
+                    ...state,
+                    npcs: state.npcs.map(n =>
+                        n.id === nameMatch.id ? { ...n, ...action.payload } : n
+                    ),
+                };
+            }
             return {
                 ...state,
                 npcs: [...state.npcs, {
                     id: `npc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
                     firstMet: Date.now(),
+                    // Richer NPC fields with defaults
+                    personality: '',
+                    goals: '',
+                    secrets: '',
+                    knownFacts: [],
+                    lastLocation: null,
+                    relationshipHistory: [],
                     ...action.payload,
                 }],
             };
+        }
 
         case 'UPDATE_NPC':
             return {
@@ -477,6 +548,27 @@ export function gameReducer(state, action) {
             };
         }
 
+        // --- Auth ---
+        case 'SET_USER':
+            return {
+                ...state,
+                user: {
+                    ...action.payload,
+                    isAuthLoading: false
+                }
+            };
+
+        case 'SIGNOUT_USER':
+            return {
+                ...state,
+                user: {
+                    uid: null,
+                    email: null,
+                    isGuest: false,
+                    isAuthLoading: false
+                }
+            };
+
         // --- Settings ---
         case 'UPDATE_SETTINGS':
             return {
@@ -500,7 +592,26 @@ export function gameReducer(state, action) {
 
         // --- Bulk Load ---
         case 'LOAD_GAME':
-            return { ...action.payload, ui: { ...initialGameState.ui } };
+            return {
+                ...action.payload,
+                // Backfill new fields for old saves that don't have them
+                worldFacts: action.payload.worldFacts || [],
+                session: {
+                    ...initialGameState.session,
+                    ...action.payload.session,
+                    prunedMessageCount: action.payload.session?.prunedMessageCount || 0,
+                },
+                npcs: (action.payload.npcs || []).map(npc => ({
+                    personality: '',
+                    goals: '',
+                    secrets: '',
+                    knownFacts: [],
+                    lastLocation: null,
+                    relationshipHistory: [],
+                    ...npc,
+                })),
+                ui: { ...initialGameState.ui },
+            };
 
         case 'NEW_GAME':
             return {

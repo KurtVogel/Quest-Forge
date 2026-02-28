@@ -1,29 +1,47 @@
 /**
  * World Journal — auto-summarization engine for long-term session memory.
- * Periodically summarizes recent messages into journal entries and tracks NPCs.
+ * Periodically summarizes recent messages into journal entries, updates the
+ * NPC tracker and world facts, then marks those messages as summarized so they
+ * are excluded from future LLM history (sliding window pruning).
+ *
+ * Uses Gemini 2.5 Flash for cost-efficiency — summarization is a simple
+ * extraction task that doesn't need the full DM model.
  */
 
 import { sendMessage } from '../llm/adapter.js';
 
 const SUMMARIZE_EVERY = 10; // Summarize every N new messages
+const SCRIBE_MODEL = 'gemini-2.5-flash'; // Cheap & fast — good enough for extraction
 
-const JOURNAL_SYSTEM_PROMPT = `You are a chronicler summarizing RPG game events. Given recent conversation between a player and DM, produce a JSON summary.
+const JOURNAL_SYSTEM_PROMPT = `You are a meticulous chronicler summarizing RPG game events. Given recent conversation between a player and DM, produce a JSON summary.
 
 Your output MUST be valid JSON with this exact structure:
 {
   "summary": "2-3 sentence summary of key events, decisions, and consequences",
   "npcs_encountered": [
-    { "name": "NPC Name", "disposition": "friendly|neutral|hostile|wary|unknown", "notes": "brief note about interaction" }
+    {
+      "name": "NPC Name",
+      "disposition": "friendly|neutral|hostile|wary|unknown",
+      "notes": "brief note about interaction",
+      "personality": "key personality trait(s) observed",
+      "goals": "what this NPC wants, if revealed",
+      "secrets": "any secrets or hidden info hinted at",
+      "lastLocation": "where they were last seen"
+    }
   ],
   "location": "Current location name or null if unchanged",
   "key_decisions": ["Brief description of significant player choices"],
-  "consequences": ["Any notable consequences that happened"]
+  "consequences": ["Any notable consequences that happened or were established"],
+  "world_facts": [
+    { "fact": "A canonical statement of something now true in the world", "category": "lore|character|location|event|relationship" }
+  ]
 }
 
 Rules:
 - Be concise but capture ALL important narrative beats
 - Track NPC names and how they feel about the player
 - Note location changes
+- World facts should be durable truths: deaths, alliances, betrayals, discoveries, established history
 - Focus on what HAPPENED, not what might happen
 - Output ONLY the JSON, no other text`;
 
@@ -43,12 +61,12 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         return lastSummarizedIndex;
     }
 
-    // Don't summarize if no API key
     if (!state.settings.apiKey) return lastSummarizedIndex;
 
     try {
         // Get the unsummarized messages
-        const recentMessages = state.messages.slice(lastSummarizedIndex)
+        const messagesToSummarize = state.messages.slice(lastSummarizedIndex, messageCount);
+        const recentMessages = messagesToSummarize
             .filter(m => !m.hidden)
             .map(m => `[${m.role.toUpperCase()}]: ${m.content}`)
             .join('\n\n');
@@ -56,16 +74,15 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         const response = await sendMessage({
             provider: state.settings.llmProvider,
             apiKey: state.settings.apiKey,
-            model: state.settings.model,
+            model: SCRIBE_MODEL,
             systemPrompt: JOURNAL_SYSTEM_PROMPT,
             messageHistory: [],
             userMessage: `Summarize these recent game events:\n\n${recentMessages}`,
         });
 
-        // Parse the JSON response
         const jsonMatch = response.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-            console.warn('Journal: Could not parse summary response');
+            console.warn('[Journal] Could not parse summary response');
             return messageCount;
         }
 
@@ -82,34 +99,33 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             },
         });
 
-        // Update NPCs
+        // Update NPCs with richer data
         if (Array.isArray(summary.npcs_encountered)) {
             for (const npc of summary.npcs_encountered) {
                 const existing = state.npcs.find(
                     n => n.name.toLowerCase() === npc.name.toLowerCase()
                 );
+                const npcPayload = {
+                    disposition: npc.disposition,
+                    lastNotes: npc.notes,
+                    lastSeen: Date.now(),
+                    ...(npc.personality && { personality: npc.personality }),
+                    ...(npc.goals && { goals: npc.goals }),
+                    ...(npc.secrets && { secrets: npc.secrets }),
+                    ...(npc.lastLocation && { lastLocation: npc.lastLocation }),
+                };
+
                 if (existing) {
-                    dispatch({
-                        type: 'UPDATE_NPC',
-                        payload: {
-                            id: existing.id,
-                            disposition: npc.disposition,
-                            lastNotes: npc.notes,
-                            lastSeen: Date.now(),
-                        },
-                    });
+                    dispatch({ type: 'UPDATE_NPC', payload: { id: existing.id, ...npcPayload } });
                 } else {
-                    dispatch({
-                        type: 'ADD_NPC',
-                        payload: {
-                            name: npc.name,
-                            disposition: npc.disposition,
-                            notes: npc.notes,
-                            lastSeen: Date.now(),
-                        },
-                    });
+                    dispatch({ type: 'ADD_NPC', payload: { name: npc.name, notes: npc.notes, ...npcPayload } });
                 }
             }
+        }
+
+        // Add world facts extracted from this batch
+        if (Array.isArray(summary.world_facts) && summary.world_facts.length > 0) {
+            dispatch({ type: 'ADD_WORLD_FACTS', payload: summary.world_facts });
         }
 
         // Update location
@@ -117,9 +133,13 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             dispatch({ type: 'SET_LOCATION', payload: summary.location });
         }
 
+        // Mark these messages as summarized — they will be excluded from future LLM history
+        dispatch({ type: 'MARK_MESSAGES_SUMMARIZED', payload: messageCount });
+
+        console.log(`[Journal] Summarized messages ${lastSummarizedIndex}–${messageCount}, extracted ${summary.world_facts?.length || 0} world facts`);
         return messageCount;
     } catch (e) {
-        console.warn('Journal auto-summarize failed:', e);
+        console.warn('[Journal] Auto-summarize failed:', e);
         return lastSummarizedIndex;
     }
 }
@@ -132,10 +152,10 @@ export function buildJournalContext(journal, npcs, currentLocation) {
     const parts = [];
 
     if (currentLocation) {
-        parts.push(`Current location: ${currentLocation}`);
+        parts.push(`**Current location:** ${currentLocation}`);
     }
 
-    // Last 3 journal entries for context
+    // Last 3 journal entries for narrative context
     if (journal.length > 0) {
         const recentEntries = journal.slice(-3);
         const entrySummaries = recentEntries.map((e, i) => {
@@ -148,12 +168,18 @@ export function buildJournalContext(journal, npcs, currentLocation) {
         parts.push(`\n## SESSION HISTORY (what has happened so far)\n${entrySummaries}`);
     }
 
-    // NPC tracker
+    // NPC tracker with richer data
     if (npcs.length > 0) {
         const npcList = npcs.map(n => {
             const disp = n.disposition ? ` (${n.disposition})` : '';
             const notes = n.lastNotes || n.notes || '';
-            return `- ${n.name}${disp}: ${notes}`;
+            const extras = [
+                n.personality && `personality: ${n.personality}`,
+                n.goals && `wants: ${n.goals}`,
+                n.secrets && `secret: ${n.secrets}`,
+                n.lastLocation && `last seen: ${n.lastLocation}`,
+            ].filter(Boolean).join(' | ');
+            return `- **${n.name}**${disp}: ${notes}${extras ? ` [${extras}]` : ''}`;
         }).join('\n');
         parts.push(`\n## KNOWN NPCs\n${npcList}`);
     }

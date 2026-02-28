@@ -4,6 +4,7 @@
  */
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1alpha/models';
+const GEMINI_EMBED_MODEL = 'text-embedding-004';
 
 /**
  * Convert our message format to Gemini's content format.
@@ -62,6 +63,32 @@ export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHi
         throw new Error('No response generated. The model may have been blocked or returned empty.');
     }
     return text;
+}
+
+/**
+ * Generate a text embedding vector using Gemini's embedding model.
+ * Returns a Float32Array (768 dimensions) or null on failure.
+ * @param {string} apiKey
+ * @param {string} text - Text to embed
+ * @returns {Promise<number[]|null>}
+ */
+export async function embedText(apiKey, text) {
+    const url = `${GEMINI_API_BASE}/${GEMINI_EMBED_MODEL}:embedContent?key=${apiKey}`;
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: `models/${GEMINI_EMBED_MODEL}`,
+                content: { parts: [{ text }] },
+            }),
+        });
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data.embedding?.values || null;
+    } catch {
+        return null;
+    }
 }
 
 /**
