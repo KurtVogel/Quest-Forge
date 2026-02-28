@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { streamMessage } from '../../llm/adapter.js';
 import { buildSystemPrompt } from '../../llm/promptBuilder.js';
-import { parseResponse, applyEvents } from '../../llm/responseParser.js';
+import { parseResponse, applyEvents, detectPreNarratedOutcome } from '../../llm/responseParser.js';
 import { handleRequestedRolls } from '../../engine/rollResolver.js';
 import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { runScribe } from '../../llm/scribe.js';
@@ -168,6 +168,12 @@ export default function ChatPanel() {
 
         const { narrative, events } = parseResponse(fullResponse);
 
+        // Detect pre-narrated outcome (DM wrote outcome before dice were rolled)
+        if (events?.requestedRolls?.length > 0 && detectPreNarratedOutcome(narrative)) {
+            events._preNarratedOutcome = true;
+            console.warn('[ChatPanel] ⚠️ DM pre-narrated outcome before roll — correction will be injected with roll results.');
+        }
+
         // Add DM message
         dispatch({
             type: 'ADD_MESSAGE',
@@ -234,6 +240,7 @@ export default function ChatPanel() {
                     getState: () => stateRef.current,
                     dispatch,
                     sendToLLM,
+                    preNarrated: events._preNarratedOutcome || false,
                 });
             }
 

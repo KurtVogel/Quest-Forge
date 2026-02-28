@@ -165,7 +165,8 @@ const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)
   - Which ability score it uses
   - The Difficulty Class (DC) — use standard DCs: Easy 10, Medium 15, Hard 20, Very Hard 25
 - Combat uses initiative (d20 + DEX modifier) to determine turn order
-- Track enemy HP mentally and describe their condition narratively (bloodied, barely standing, etc.)`;
+- Track enemy HP mentally and describe their condition narratively (bloodied, barely standing, etc.)
+- **Advantage:** roll 2d20 and take the higher result. **Disadvantage:** roll 2d20 and take the lower. Request via \`"advantage": true\` or \`"disadvantage": true\` in the requested_rolls entry.`;
 
 const NARRATIVE_RULES = `## GAME MECHANICS (Narrative Mode)
 
@@ -184,8 +185,8 @@ When game events occur, include a structured JSON block at the END of your respo
 \`\`\`json
 {
   "requested_rolls": [
-    { "type": "skill_check", "skill": "perception", "dc": 15, "description": "Spot the hidden trap" },
-    { "type": "npc_attack", "skill": "attack", "dc": 12, "description": "Goblin slashes with rusty sword", "attacker": "Goblin" },
+    { "type": "skill_check", "skill": "perception", "dc": 15, "description": "Spot the hidden trap", "advantage": false, "disadvantage": false },
+    { "type": "npc_attack", "skill": "attack", "dc": 12, "description": "Goblin slashes with rusty sword", "attacker": "Goblin", "advantage": false, "disadvantage": false },
     { "type": "damage_roll", "notation": "1d8+3", "description": "Longsword damage" }
   ],
   "damage_dealt": 0,
@@ -275,7 +276,27 @@ ECONOMY & HEALING:
 PROGRESSION & STATUS EFFECTS:
 - Provide "exp_awarded" as an integer when the player defeats enemies, completes quests, or overcomes major obstacles.
 - Provide "rest_taken" as exactly "short" or "long" when the party rests at a camp, inn, or safe zone.
-- Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.`;
+- Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.
+
+## ROLL REQUEST — EXAMPLES
+
+❌ **BAD — DM narrates outcome before the roll even happens:**
+> "You lunge at the guard and drive your blade into his throat. He crumples to the ground."
+> *(No JSON block, no requested_rolls — outcome invented without dice)*
+
+❌ **BAD — DM asks for roll in narrative text instead of JSON:**
+> "Roll a Stealth check DC 14 to slip past the guards."
+> *(The system cannot parse text requests — no dice will be rolled)*
+
+❌ **BAD — DM requests roll AND pre-narrates the result in the same response:**
+> "You creep forward carefully... and manage to slip past undetected."
+> \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":14}] }\`\`\`
+> *(The outcome must come AFTER the dice result is received, not before)*
+
+✅ **GOOD — DM sets up tension, requests roll via JSON, waits for result:**
+> "You press yourself against the cold stone wall as the patrol's torchlight sweeps closer. Every scuff of your boots could betray you. The moment to move is now."
+> \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":14,"description":"Slip past the patrol","advantage":false,"disadvantage":false}] }\`\`\`
+> *(Clean setup → JSON roll request → outcome narrated in the NEXT response after dice are returned)*`;
 
 function buildCharacterBlock(character) {
     const stats = Object.entries(character.abilityScores)

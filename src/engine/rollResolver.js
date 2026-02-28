@@ -69,7 +69,7 @@ export function formatRollSummary(rollResults) {
  * @param {number} [depth=0] - Current recursion depth (internal)
  * @returns {Promise<void>}
  */
-export async function handleRequestedRolls(requestedRolls, { getState, dispatch, sendToLLM }, depth = 0) {
+export async function handleRequestedRolls(requestedRolls, { getState, dispatch, sendToLLM, preNarrated = false }, depth = 0) {
     if (depth >= MAX_ROLL_DEPTH) {
         console.warn(`[RollResolver] ⚠️ Max roll depth (${MAX_ROLL_DEPTH}) reached — stopping recursive follow-ups.`);
         dispatch({
@@ -103,8 +103,12 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
         console.log(`[RollResolver] 🔄 Auto-triggering follow-up LLM call (depth ${depth}) with roll results`);
 
         try {
+            const correctionNote = (depth === 0 && preNarrated)
+                ? `\n\n[IMPORTANT: Your previous response pre-narrated an outcome before seeing these dice results. The roll result above is the authoritative truth. Narrate the TRUE outcome based solely on these dice — completely discard any outcome you wrote before seeing the roll.]`
+                : '';
+
             const followUpEvents = await sendToLLM(
-                `[SYSTEM: The following dice rolls were just made. Narrate what happens as a result. Do NOT request the same rolls again.]\n\n${summary}`
+                `[SYSTEM: Dice rolled. Results below. RULES: (1) Narrate the outcome based EXACTLY on these results — do not override, soften, or ignore them. A roll of 3 vs DC 15 is a failure, narrate it as such. (2) Do NOT re-request the same rolls. (3) If an attack hit, request a damage roll via JSON before narrating the damage amount. (4) If enemies or NPCs retaliate or act, request their attack/action rolls via JSON. (5) Never narrate NPC or enemy outcomes without rolling first.]${correctionNote}\n\n${summary}`
             );
 
             // Handle any follow-up rolls (e.g. DM requests damage rolls after a hit)
@@ -123,15 +127,34 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
 
 // --- Internal Resolution Functions ---
 
+/**
+ * Roll a d20 with advantage, disadvantage, or plain — returns a rollWithModifier result
+ * extended with an `advantageDetail` string for display.
+ */
+function rollWithAdvantage(count, sides, modifier, description, advantage, disadvantage) {
+    if ((advantage || disadvantage) && count === 1 && sides === 20) {
+        const r1 = rollWithModifier(1, 20, modifier, description);
+        const r2 = rollWithModifier(1, 20, modifier, description);
+        const useFirst = advantage ? r1.rolls[0] >= r2.rolls[0] : r1.rolls[0] <= r2.rolls[0];
+        const kept = useFirst ? r1 : r2;
+        kept.advantageDetail = ` (d20: ${r1.rolls[0]}, ${r2.rolls[0]} → kept ${kept.rolls[0]})`;
+        return kept;
+    }
+    const result = rollWithModifier(count, sides, modifier, description);
+    result.advantageDetail = '';
+    return result;
+}
+
 function resolveNpcRoll(roll, character, dispatch) {
     const npcMod = roll.modifier ?? Math.floor(Math.random() * 3) + 2;
-    const result = rollWithModifier(1, 20, npcMod, roll.description || `${roll.attacker || 'Enemy'} attack`);
+    const result = rollWithAdvantage(1, 20, npcMod, roll.description || `${roll.attacker || 'Enemy'} attack`, roll.advantage, roll.disadvantage);
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     const dc = character?.armorClass || roll.dc || 12;
     const success = result.total >= dc;
     const label = roll.attacker ? `${roll.attacker}'s attack` : 'NPC attack';
-    const rollMsg = `🎲 **${roll.description || label}** (vs AC ${dc}): Rolled **${result.total}** (d20: ${result.rolls[0]}, modifier: +${npcMod}) — ${success ? '💥 **Hit!**' : '🛡️ **Miss!**'}${result.isCritical ? ' 🌟 Natural 20!' : ''}${result.isCritFail ? ' 💀 Natural 1!' : ''}`;
+    const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
+    const rollMsg = `🎲 **${roll.description || label}**${advLabel} (vs AC ${dc}): Rolled **${result.total}**${result.advantageDetail} — ${success ? '💥 **Hit!**' : '🛡️ **Miss!**'}${result.isCritical ? ' 🌟 Natural 20!' : ''}${result.isCritFail ? ' 💀 Natural 1!' : ''}`;
 
     dispatch({
         type: 'ADD_MESSAGE',
@@ -204,11 +227,12 @@ function resolvePlayerRoll(roll, character, dispatch) {
         label = roll.description || `${skillName} check`;
     }
 
-    const result = rollWithModifier(1, 20, mod, label);
+    const result = rollWithAdvantage(1, 20, mod, label, roll.advantage, roll.disadvantage);
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     const success = result.total >= (roll.dc || 15);
-    const rollMsg = `🎲 **${label}** (DC ${roll.dc}): Rolled **${result.total}** (d20: ${result.rolls[0]}${result.modifier ? `, modifier: ${result.modifier >= 0 ? '+' : ''}${result.modifier}` : ''}) — ${success ? '✅ **Success!**' : '❌ **Failure!**'}${result.isCritical ? ' 🌟 Natural 20!' : ''}${result.isCritFail ? ' 💀 Natural 1!' : ''}`;
+    const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
+    const rollMsg = `🎲 **${label}**${advLabel} (DC ${roll.dc}): Rolled **${result.total}**${result.advantageDetail} — ${success ? '✅ **Success!**' : '❌ **Failure!**'}${result.isCritical ? ' 🌟 Natural 20!' : ''}${result.isCritFail ? ' 💀 Natural 1!' : ''}`;
 
     dispatch({
         type: 'ADD_MESSAGE',
