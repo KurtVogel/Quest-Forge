@@ -436,9 +436,12 @@ export function gameReducer(state, action) {
         case 'UPDATE_NPC':
             return {
                 ...state,
-                npcs: state.npcs.map(npc =>
-                    npc.id === action.payload.id ? { ...npc, ...action.payload } : npc
-                ),
+                npcs: state.npcs.map(npc => {
+                    const matchById = action.payload.id && npc.id === action.payload.id;
+                    const matchByName = !action.payload.id && action.payload.name &&
+                        npc.name?.toLowerCase() === action.payload.name?.toLowerCase();
+                    return (matchById || matchByName) ? { ...npc, ...action.payload } : npc;
+                }),
             };
 
         case 'SET_LOCATION':

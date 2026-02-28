@@ -22,7 +22,7 @@ export default function ChatPanel() {
     const messagesEndRef = useRef(null);
     const abortControllerRef = useRef(null);
     const inputRef = useRef(null);
-    const lastSummarizedRef = useRef(0);
+    const lastSummarizedRef = useRef(state.session?.prunedMessageCount || 0);
     const hasPrimedRef = useRef(false); // Ensure session priming only fires once per mount
     const memorySeededRef = useRef(false); // Ensure RAG seeding only fires once per mount
 
