@@ -3,23 +3,46 @@ import { useGame } from '../../state/GameContext.jsx';
 import { PROVIDERS, PROVIDER_LIST } from '../../llm/adapter.js';
 import { PRESETS, PRESET_LIST } from '../../data/presets.js';
 import { saveGame, loadGame, listSaves, deleteSave } from '../../state/persistence.js';
+import { saveGameToCloud, loadGameFromCloud, listCloudSaves } from '../../state/cloudSync.js';
+import { initializeFirebase } from '../../config/firebase.js';
+import { signInWithGoogle, logOut } from '../../state/auth.js';
 import './Settings.css';
 
 export default function SettingsModal() {
     const { state, dispatch } = useGame();
     const [activeTab, setActiveTab] = useState('llm');
     const [saves, setSaves] = useState([]);
+    const [cloudSaves, setCloudSaves] = useState([]);
     const [saveName, setSaveName] = useState('');
+    const [firebaseConfig, setFirebaseConfig] = useState(state.settings.firebaseConfig || {
+        apiKey: '',
+        authDomain: '',
+        projectId: ''
+    });
+    const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
+    const [authError, setAuthError] = useState('');
 
     useEffect(() => {
         if (activeTab === 'saves') {
             loadSavesList();
         }
-    }, [activeTab]);
+    }, [activeTab, state.user?.uid]);
+
+    useEffect(() => {
+        if (state.settings.firebaseConfig?.apiKey) {
+            initializeFirebase(state.settings.firebaseConfig).then(setIsFirebaseConnected);
+        }
+    }, [state.settings.firebaseConfig]);
 
     const loadSavesList = async () => {
         const list = await listSaves();
         setSaves(list);
+        if (state.user?.uid) {
+            const cList = await listCloudSaves(state.user.uid);
+            setCloudSaves(cList);
+        } else {
+            setCloudSaves([]);
+        }
     };
 
     const handleClose = () => {
@@ -29,13 +52,29 @@ export default function SettingsModal() {
     const handleSave = async () => {
         const slotId = `save-${Date.now()}`;
         const sessionName = saveName.trim() || state.session.name || 'Manual Save';
-        await saveGame(slotId, { ...state, session: { ...state.session, name: sessionName } });
+        const updatedState = {
+            ...state,
+            session: {
+                ...state.session,
+                name: sessionName,
+                updatedAt: new Date().toISOString()
+            }
+        };
+        await saveGame(slotId, updatedState);
+        if (state.user?.uid) {
+            await saveGameToCloud(state.user.uid, slotId, updatedState);
+        }
         setSaveName('');
         loadSavesList();
     };
 
-    const handleLoad = async (slotId) => {
-        const savedState = await loadGame(slotId);
+    const handleLoad = async (slotId, isCloud = false) => {
+        let savedState = null;
+        if (isCloud && state.user?.uid) {
+            savedState = await loadGameFromCloud(state.user.uid, slotId);
+        } else {
+            savedState = await loadGame(slotId);
+        }
         if (savedState) {
             dispatch({ type: 'LOAD_GAME', payload: savedState });
             handleClose();
@@ -58,6 +97,32 @@ export default function SettingsModal() {
         dispatch({ type: 'UPDATE_SETTINGS', payload: { [key]: value } });
     };
 
+    const handleConnectFirebase = async () => {
+        updateSetting('firebaseConfig', firebaseConfig);
+        const success = await initializeFirebase(firebaseConfig);
+        setIsFirebaseConnected(success);
+        if (!success) setAuthError('Failed to initialize Firebase with provided config');
+        else setAuthError('');
+    };
+
+    const handleGoogleLogin = async () => {
+        try {
+            setAuthError('');
+            const user = await signInWithGoogle();
+            dispatch({
+                type: 'SET_USER',
+                payload: { uid: user.uid, email: user.email, isGuest: false }
+            });
+        } catch (e) {
+            setAuthError('Google Sign-In failed: ' + e.message);
+        }
+    };
+
+    const handleLogout = async () => {
+        await logOut();
+        dispatch({ type: 'SIGNOUT_USER' });
+    };
+
     const selectedProvider = PROVIDERS[state.settings.llmProvider];
 
     return (
@@ -69,19 +134,30 @@ export default function SettingsModal() {
                 </div>
 
                 <div className="settings-tabs">
-                    {[
-                        { id: 'llm', label: '🤖 AI Provider' },
-                        { id: 'game', label: '🎮 Game' },
-                        { id: 'saves', label: '💾 Save / Load' },
-                    ].map(tab => (
-                        <button
-                            key={tab.id}
-                            className={`settings-tab ${activeTab === tab.id ? 'active' : ''}`}
-                            onClick={() => setActiveTab(tab.id)}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
+                    <button
+                        className={`tab-button ${activeTab === 'llm' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('llm')}
+                    >
+                        🤖 AI Provider
+                    </button>
+                    <button
+                        className={`tab-button ${activeTab === 'game' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('game')}
+                    >
+                        🎮 Game
+                    </button>
+                    <button
+                        className={`tab-button ${activeTab === 'saves' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('saves')}
+                    >
+                        💾 Saves
+                    </button>
+                    <button
+                        className={`tab-button ${activeTab === 'cloud' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('cloud')}
+                    >
+                        ☁️ Cloud Sync
+                    </button>
                 </div>
 
                 <div className="settings-content">
@@ -217,32 +293,134 @@ export default function SettingsModal() {
 
                             <div className="saves-list">
                                 <h4 className="saves-list-title">Saved Games</h4>
-                                {saves.length === 0 ? (
+                                {saves.length === 0 && cloudSaves.length === 0 ? (
                                     <div className="saves-empty">No saved games yet</div>
                                 ) : (
-                                    saves.map(save => (
-                                        <div key={save.slotId} className="save-slot">
-                                            <div className="save-info">
-                                                <div className="save-name">{save.name}</div>
-                                                <div className="save-meta">
-                                                    {save.characterName} · Lv.{save.characterLevel} {save.characterClass} · {save.messageCount} msgs
+                                    <>
+                                        {cloudSaves.length > 0 && <div className="saves-empty" style={{ textAlign: 'left', margin: '0 0 10px' }}>☁️ Cloud Saves</div>}
+                                        {cloudSaves.map(save => (
+                                            <div key={`cloud-${save.slotId}`} className="save-slot">
+                                                <div className="save-info">
+                                                    <div className="save-name">{save.name}</div>
+                                                    <div className="save-meta">
+                                                        {save.characterName} · Lv.{save.characterLevel} {save.characterClass} · {save.messageCount} msgs
+                                                    </div>
+                                                    <div className="save-date">
+                                                        {new Date(save.savedAt).toLocaleString()}
+                                                    </div>
                                                 </div>
-                                                <div className="save-date">
-                                                    {new Date(save.savedAt).toLocaleString()}
+                                                <div className="save-actions">
+                                                    <button className="btn btn-sm btn-primary" onClick={() => handleLoad(save.slotId, true)}>
+                                                        Load
+                                                    </button>
                                                 </div>
                                             </div>
-                                            <div className="save-actions">
-                                                <button className="btn btn-sm btn-primary" onClick={() => handleLoad(save.slotId)}>
-                                                    Load
-                                                </button>
-                                                <button className="btn btn-sm btn-danger" onClick={() => handleDelete(save.slotId)}>
-                                                    ✕
-                                                </button>
+                                        ))}
+
+                                        {saves.length > 0 && <div className="saves-empty" style={{ textAlign: 'left', margin: '15px 0 10px' }}>💾 Local Saves</div>}
+                                        {saves.map(save => (
+                                            <div key={save.slotId} className="save-slot">
+                                                <div className="save-info">
+                                                    <div className="save-name">{save.name}</div>
+                                                    <div className="save-meta">
+                                                        {save.characterName} · Lv.{save.characterLevel} {save.characterClass} · {save.messageCount} msgs
+                                                    </div>
+                                                    <div className="save-date">
+                                                        {new Date(save.savedAt).toLocaleString()}
+                                                    </div>
+                                                </div>
+                                                <div className="save-actions">
+                                                    <button className="btn btn-sm btn-primary" onClick={() => handleLoad(save.slotId)}>
+                                                        Load
+                                                    </button>
+                                                    <button className="btn btn-sm btn-danger" onClick={() => handleDelete(save.slotId)}>
+                                                        ✕
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))
+                                        ))}
+                                    </>
                                 )}
                             </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'cloud' && (
+                        <div className="settings-section">
+                            <h3 className="settings-section-title">☁️ Cross-Device Cloud Sync</h3>
+                            <p className="setting-hint" style={{ marginBottom: '1rem' }}>
+                                Connect your own Firebase Firestore database to seamlessly sync your saves across Desktop and Mobile.
+                                Find these keys in your Google Firebase Console (Project Settings &gt; General &gt; Your Apps).
+                            </p>
+
+                            <div className="setting-group">
+                                <label className="setting-label">apiKey</label>
+                                <input
+                                    type="password"
+                                    className="setting-input"
+                                    value={firebaseConfig.apiKey}
+                                    onChange={(e) => setFirebaseConfig({ ...firebaseConfig, apiKey: e.target.value })}
+                                    placeholder="AIzaSyA..."
+                                />
+                            </div>
+                            <div className="setting-group">
+                                <label className="setting-label">authDomain</label>
+                                <input
+                                    type="text"
+                                    className="setting-input"
+                                    value={firebaseConfig.authDomain}
+                                    onChange={(e) => setFirebaseConfig({ ...firebaseConfig, authDomain: e.target.value })}
+                                    placeholder="your-project.firebaseapp.com"
+                                />
+                            </div>
+                            <div className="setting-group">
+                                <label className="setting-label">projectId</label>
+                                <input
+                                    type="text"
+                                    className="setting-input"
+                                    value={firebaseConfig.projectId}
+                                    onChange={(e) => setFirebaseConfig({ ...firebaseConfig, projectId: e.target.value })}
+                                    placeholder="your-project-id"
+                                />
+                            </div>
+
+                            <button
+                                className={`btn ${isFirebaseConnected ? 'btn-success' : 'btn-primary'}`}
+                                onClick={handleConnectFirebase}
+                                style={{ marginBottom: '1.5rem', width: '100%' }}
+                            >
+                                {isFirebaseConnected ? '✅ Database Connected' : '🔌 Connect Database'}
+                            </button>
+
+                            {isFirebaseConnected && (
+                                <div className="cloud-auth-section">
+                                    <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Authentication</h4>
+
+                                    {state.user?.uid ? (
+                                        <div className="auth-status connected">
+                                            <div style={{ marginBottom: '0.5rem' }}>
+                                                <strong>Logged in as:</strong> {state.user.email || 'Guest'}
+                                            </div>
+                                            <button className="btn btn-sm btn-danger" onClick={handleLogout}>
+                                                Sign Out
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="auth-actions">
+                                            <p className="setting-hint" style={{ marginBottom: '0.5rem' }}>Sign in to sync your saves to the cloud.</p>
+                                            <button className="btn btn-primary" onClick={handleGoogleLogin}>
+                                                Sign In with Google
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {authError && (
+                                <div className="auth-error" style={{ color: 'var(--danger)', marginTop: '1rem', fontSize: '0.8rem' }}>
+                                    {authError}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

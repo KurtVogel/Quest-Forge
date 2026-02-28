@@ -101,7 +101,6 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
 
         // Auto-trigger follow-up: DM narrates the outcome
         console.log(`[RollResolver] 🔄 Auto-triggering follow-up LLM call (depth ${depth}) with roll results`);
-        dispatch({ type: 'SET_UI', payload: { streamingMessage: '' } });
 
         try {
             const followUpEvents = await sendToLLM(

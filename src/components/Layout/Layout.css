@@ -1,8 +1,10 @@
 .app-shell {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100%;
+    height: 100dvh;
     overflow: hidden;
+    padding-bottom: env(safe-area-inset-bottom);
 }
 
 .app-header {
@@ -98,23 +100,23 @@
     border-right: 1px solid var(--border-primary);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .sidebar-right {
     border-right: none;
     border-left: 1px solid var(--border-primary);
+    order: 2;
 }
 
 .sidebar-section {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
+    padding-bottom: 1rem;
 }
 
 .sidebar-inventory {
     border-top: 1px solid var(--border-primary);
-    max-height: 40%;
+    padding-top: 1rem;
 }
 
 .main-content {
@@ -122,6 +124,26 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
+    order: 1;
+}
+
+/* === Drawer Overlays & Menus (Base Desktop State) === */
+.mobile-hamburger-btn {
+    display: none;
+    font-size: 1.4rem;
+    padding: 0 0.5rem;
+    background: transparent;
+    border: none;
+    color: var(--gold);
+}
+
+.mobile-only-actions {
+    display: none;
+}
+
+.mobile-menu-drawer {
+    display: contents;
+    /* On Desktop, naturally pass sidebars up to the flex container */
 }
 
 /* === Responsive === */
@@ -135,22 +157,132 @@
 @media (max-width: 768px) {
     .app-body {
         flex-direction: column;
+        min-height: 0;
+        position: relative;
+        /* Context for the absolute drawer overlay */
+    }
+
+    .main-content {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        /* Central chat consumes entire display width */
+    }
+
+    .app-header {
+        padding: 0.4rem 0.5rem;
+        height: auto;
+        min-height: 52px;
+        flex-wrap: nowrap;
+        gap: 0.5rem;
+    }
+
+    .header-left {
+        gap: 0.5rem;
+        flex: 1;
+    }
+
+    .app-title {
+        font-size: 1rem;
+        white-space: nowrap;
+    }
+
+    .session-name {
+        display: none;
+    }
+
+    /* Toggles */
+    .mobile-hamburger-btn {
+        display: flex;
+    }
+
+    .desktop-only-btn {
+        display: none;
+    }
+
+    /* === Unified Mobile Hamburger Drawer === */
+    .mobile-menu-drawer {
+        display: flex;
+        flex-direction: column;
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 85%;
+        max-width: 340px;
+        background: var(--surface-secondary);
+        z-index: 1000;
+        transform: translateX(-100%);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow-y: auto;
+        border-right: 1px solid var(--border-primary);
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
+    }
+
+    .mobile-menu-drawer.drawer-open {
+        transform: translateX(0);
+    }
+
+    .drawer-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 999;
+        backdrop-filter: blur(2px);
+        animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
     }
 
     .sidebar {
         width: 100%;
-        max-height: 30vh;
+        max-height: none;
         border-right: none;
-        border-bottom: 1px solid var(--border-primary);
+        border-bottom: none;
+        flex: 0 0 auto;
     }
 
     .sidebar-right {
         border-left: none;
-        border-top: 1px solid var(--border-primary);
-        max-height: 25vh;
+        border-top: none;
     }
 
-    .sidebar-inventory {
-        max-height: 50%;
+    /* Menu Buttons inside Drawer */
+    .mobile-only-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding: 1.5rem 1rem;
+        border-top: 1px solid var(--border-primary);
+        margin-top: auto;
+        /* Push to bottom of drawer */
+    }
+
+    .mobile-drawer-btn {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 0.75rem 1rem;
+        background: var(--surface-primary);
+        border: 1px solid var(--border-primary);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-size: 1rem;
+        font-family: var(--font-heading);
+        cursor: pointer;
+    }
+
+    .mobile-drawer-btn:active {
+        background: var(--gold-dim);
     }
 }

@@ -4,6 +4,39 @@
     height: 100%;
 }
 
+.cs-dropdown-btn {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--surface-primary);
+    border: 1px solid var(--border-primary);
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    color: var(--gold);
+    font-family: var(--font-heading);
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 0.5rem;
+}
+
+.cs-dropdown-btn:hover {
+    border-color: var(--gold-dim);
+    background: rgba(212, 175, 55, 0.05);
+}
+
+.cs-dropdown-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.cs-dropdown-icon {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
 .cs-header {
     text-align: center;
     margin-bottom: 1rem;

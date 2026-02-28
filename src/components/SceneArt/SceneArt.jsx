@@ -35,7 +35,9 @@ export default function SceneArt() {
             richDescription += `Action shot! High-tension combat against: ${enemyNames}. `;
         } else if (state.journal?.length > 0) {
             const lastEntry = state.journal[state.journal.length - 1];
-            richDescription += `Current situation: ${lastEntry.summary || lastEntry.text || 'Exploring'}. `;
+            let summary = lastEntry.summary || lastEntry.text || 'Exploring';
+            if (summary.length > 150) summary = summary.substring(0, 150) + '...';
+            richDescription += `Current situation: ${summary}. `;
         }
 
         generateSceneImage(richDescription, state.settings.apiKey)

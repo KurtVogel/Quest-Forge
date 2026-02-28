@@ -7,14 +7,21 @@ export default function DicePanel() {
     const { state, dispatch } = useGame();
     const [modifier, setModifier] = useState(0);
     const [lastRoll, setLastRoll] = useState(null);
+    const [rollingDice, setRollingDice] = useState(null);
 
     const handleRoll = (sides) => {
-        const result = rollWithModifier(1, sides, modifier, `Manual d${sides} roll`);
-        dispatch({ type: 'ADD_ROLL', payload: result });
-        setLastRoll(result);
+        setRollingDice(sides);
 
-        // Auto-clear animation after a moment
-        setTimeout(() => setLastRoll(null), 2000);
+        // Brief delay for the animation
+        setTimeout(() => {
+            const result = rollWithModifier(1, sides, modifier, `Manual d${sides} roll`);
+            dispatch({ type: 'ADD_ROLL', payload: result });
+            setLastRoll(result);
+            setRollingDice(null);
+
+            // Auto-clear animation after a moment
+            setTimeout(() => setLastRoll(null), 2000);
+        }, 300);
     };
 
     return (
@@ -25,8 +32,9 @@ export default function DicePanel() {
                 {DIE_TYPES.map(sides => (
                     <button
                         key={sides}
-                        className={`dice-btn d${sides}`}
+                        className={`dice-btn d${sides} ${rollingDice === sides ? 'rolling' : ''}`}
                         onClick={() => handleRoll(sides)}
+                        disabled={rollingDice !== null}
                     >
                         d{sides}
                     </button>

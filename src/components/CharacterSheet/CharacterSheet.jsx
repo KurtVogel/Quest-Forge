@@ -9,6 +9,7 @@ import './CharacterSheet.css';
 export default function CharacterSheet() {
     const { state } = useGame();
     const { character } = state;
+    const [isExpanded, setIsExpanded] = useState(false);
 
     if (!character) return null;
 
@@ -26,101 +27,114 @@ export default function CharacterSheet() {
 
     return (
         <div className="character-sheet">
-            <div className="cs-header">
-                <h2 className="cs-name">{character.name}</h2>
-                <div className="cs-subtitle">
-                    {race?.name} {charClass?.name} · Level {character.level}
-                </div>
-            </div>
+            <button
+                className="cs-dropdown-btn"
+                onClick={() => setIsExpanded(!isExpanded)}
+            >
+                <span className="cs-dropdown-title">👤 Character Profile</span>
+                <span className="cs-dropdown-icon">{isExpanded ? '▲' : '▼'}</span>
+            </button>
 
-            <div className="cs-hp-section">
-                <div className="cs-hp-label">
-                    <span>HP</span>
-                    <span className="cs-hp-numbers">{character.currentHP} / {character.maxHP}</span>
-                </div>
-                <div className="cs-hp-bar">
-                    <div
-                        className="cs-hp-fill"
-                        style={{ width: `${hpPercent}%`, background: hpColor }}
-                    />
-                </div>
-            </div>
-
-            <div className="cs-exp-section">
-                <div className="cs-exp-label">
-                    <span>Experience</span>
-                    <span className="cs-exp-numbers">{exp} / {expThreshold} XP</span>
-                </div>
-                <div className="cs-exp-bar">
-                    <div
-                        className="cs-exp-fill"
-                        style={{ width: `${expPercent}%` }}
-                    />
-                </div>
-            </div>
-
-            {character.conditions?.length > 0 && (
-                <div className="cs-conditions">
-                    {character.conditions.map((c, i) => (
-                        <span key={i} className="cs-condition-badge">⚠️ {c}</span>
-                    ))}
-                </div>
-            )}
-
-            <div className="cs-combat-stats">
-                <div className="cs-combat-stat">
-                    <div className="cs-stat-value">{character.armorClass}</div>
-                    <div className="cs-stat-label">AC</div>
-                </div>
-                <div className="cs-combat-stat">
-                    <div className="cs-stat-value">{formatModifier(getModifier(character.abilityScores.dexterity))}</div>
-                    <div className="cs-stat-label">Initiative</div>
-                </div>
-                <div className="cs-combat-stat">
-                    <div className="cs-stat-value">{character.speed}</div>
-                    <div className="cs-stat-label">Speed</div>
-                </div>
-                <div className="cs-combat-stat">
-                    <div className="cs-stat-value">{formatModifier(getProficiencyBonus(character.level))}</div>
-                    <div className="cs-stat-label">Prof.</div>
-                </div>
-            </div>
-
-            <div className="cs-abilities">
-                {ABILITY_NAMES.map(ability => {
-                    const score = character.abilityScores[ability];
-                    const mod = getModifier(score);
-                    return (
-                        <div key={ability} className="cs-ability">
-                            <div className="cs-ability-name">{ABILITY_SHORT[ability]}</div>
-                            <div className="cs-ability-mod">{formatModifier(mod)}</div>
-                            <div className="cs-ability-score">{score}</div>
+            {isExpanded && (
+                <div className="cs-expanded-content">
+                    <div className="cs-header">
+                        <h2 className="cs-name">{character.name}</h2>
+                        <div className="cs-subtitle">
+                            {race?.name} {charClass?.name} · Level {character.level}
                         </div>
-                    );
-                })}
-            </div>
+                    </div>
 
-            {character.traits?.length > 0 && (
-                <div className="cs-section">
-                    <h4 className="cs-section-title">Traits</h4>
-                    <ul className="cs-list">
-                        {character.traits.map((trait, i) => (
-                            <li key={i}>{trait}</li>
-                        ))}
-                    </ul>
-                </div>
-            )}
+                    <div className="cs-hp-section">
+                        <div className="cs-hp-label">
+                            <span>HP</span>
+                            <span className="cs-hp-numbers">{character.currentHP} / {character.maxHP}</span>
+                        </div>
+                        <div className="cs-hp-bar">
+                            <div
+                                className="cs-hp-fill"
+                                style={{ width: `${hpPercent}%`, background: hpColor }}
+                            />
+                        </div>
+                    </div>
 
-            {character.features?.length > 0 && (
-                <div className="cs-section">
-                    <h4 className="cs-section-title">Features</h4>
-                    <ul className="cs-list">
-                        {character.features.map((feature, i) => (
-                            <li key={i}>{feature}</li>
-                        ))}
-                    </ul>
+                    <div className="cs-exp-section">
+                        <div className="cs-exp-label">
+                            <span>Experience</span>
+                            <span className="cs-exp-numbers">{exp} / {expThreshold} XP</span>
+                        </div>
+                        <div className="cs-exp-bar">
+                            <div
+                                className="cs-exp-fill"
+                                style={{ width: `${expPercent}%` }}
+                            />
+                        </div>
+                    </div>
+
+                    {character.conditions?.length > 0 && (
+                        <div className="cs-conditions">
+                            {character.conditions.map((c, i) => (
+                                <span key={i} className="cs-condition-badge">⚠️ {c}</span>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="cs-combat-stats">
+                        <div className="cs-combat-stat">
+                            <div className="cs-stat-value">{character.armorClass}</div>
+                            <div className="cs-stat-label">AC</div>
+                        </div>
+                        <div className="cs-combat-stat">
+                            <div className="cs-stat-value">{formatModifier(getModifier(character.abilityScores.dexterity))}</div>
+                            <div className="cs-stat-label">Initiative</div>
+                        </div>
+                        <div className="cs-combat-stat">
+                            <div className="cs-stat-value">{character.speed}</div>
+                            <div className="cs-stat-label">Speed</div>
+                        </div>
+                        <div className="cs-combat-stat">
+                            <div className="cs-stat-value">{formatModifier(getProficiencyBonus(character.level))}</div>
+                            <div className="cs-stat-label">Prof.</div>
+                        </div>
+                    </div>
+
+                    <div className="cs-abilities">
+                        {ABILITY_NAMES.map(ability => {
+                            const score = character.abilityScores[ability];
+                            const mod = getModifier(score);
+                            return (
+                                <div key={ability} className="cs-ability">
+                                    <div className="cs-ability-name">{ABILITY_SHORT[ability]}</div>
+                                    <div className="cs-ability-mod">{formatModifier(mod)}</div>
+                                    <div className="cs-ability-score">{score}</div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {character.traits?.length > 0 && (
+                        <div className="cs-section">
+                            <h4 className="cs-section-title">Traits</h4>
+                            <ul className="cs-list">
+                                {character.traits.map((trait, i) => (
+                                    <li key={i}>{trait}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {character.features?.length > 0 && (
+                        <div className="cs-section">
+                            <h4 className="cs-section-title">Features</h4>
+                            <ul className="cs-list">
+                                {character.features.map((feature, i) => (
+                                    <li key={i}>{feature}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
     );
 }
+

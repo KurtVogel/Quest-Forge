@@ -6,7 +6,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
+    min-height: 100%;
+    min-height: 100dvh;
     background: radial-gradient(ellipse at center, var(--surface-secondary) 0%, var(--bg-primary) 70%);
     padding: 2rem;
 }
