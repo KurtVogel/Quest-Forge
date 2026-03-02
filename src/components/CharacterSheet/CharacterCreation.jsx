@@ -48,10 +48,11 @@ export default function CharacterCreation() {
         const character = createCharacter(name, race, charClass, abilityScores);
         dispatch({ type: 'SET_CHARACTER', payload: character });
 
-        // Add starting equipment to inventory
+        // Add starting equipment to inventory (auto-equip armor, weapons, shields)
         const equipment = getStartingEquipment(charClass);
         for (const item of equipment) {
-            dispatch({ type: 'ADD_ITEM', payload: { ...item } });
+            const shouldEquip = item.type === 'armor' || item.type === 'weapon' || item.type === 'shield' || item.isShield;
+            dispatch({ type: 'ADD_ITEM', payload: { ...item, equipped: shouldEquip } });
         }
 
         // Create session

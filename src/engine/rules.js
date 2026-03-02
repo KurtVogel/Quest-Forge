@@ -54,6 +54,28 @@ export function getArmorClass(dexMod, armor = null, hasShield = false) {
 }
 
 /**
+ * Compute AC from the full inventory + character ability scores.
+ * Finds equipped armor and shield, then delegates to getArmorClass().
+ * @param {Array} inventory - Full inventory array
+ * @param {object} character - Character with abilityScores
+ * @returns {number} Computed Armor Class
+ */
+export function computeACFromInventory(inventory, character) {
+    if (!character?.abilityScores) return 10;
+    const dexMod = getModifier(character.abilityScores.dexterity);
+
+    const equippedArmor = inventory.find(i =>
+        i.equipped && i.baseAC && !i.isShield && (i.type === 'armor')
+    ) || null;
+
+    const hasShield = inventory.some(i =>
+        i.equipped && (i.type === 'shield' || i.isShield)
+    );
+
+    return getArmorClass(dexMod, equippedArmor, hasShield);
+}
+
+/**
  * Skill-to-ability mapping.
  */
 export const SKILL_ABILITIES = {

@@ -254,12 +254,25 @@ export function applyEvents(events, dispatch) {
     for (const item of events.itemsFound) {
         const itemData = typeof item === 'string'
             ? { name: item, type: 'gear', weight: 1 }
-            : item;
+            : {
+                name: item.name || 'Unknown item',
+                type: item.type || 'gear',
+                weight: item.weight || 1,
+                // Preserve armor / weapon / shield properties from LLM
+                ...(item.baseAC !== undefined && { baseAC: item.baseAC }),
+                ...(item.armorType && { armorType: item.armorType }),
+                ...(item.isShield && { isShield: true, type: 'shield' }),
+                ...(item.damage && { damage: item.damage }),
+                ...(item.damageType && { damageType: item.damageType }),
+                ...(item.quantity && { quantity: item.quantity }),
+            };
         dispatch({ type: 'ADD_ITEM', payload: itemData });
     }
 
     for (const itemName of events.itemsLost) {
-        console.log(`DM says item lost: ${itemName}`);
+        const lostName = typeof itemName === 'string' ? itemName : itemName.name || '';
+        if (!lostName) continue;
+        dispatch({ type: 'REMOVE_ITEM_BY_NAME', payload: lostName });
     }
 
     if (events.goldFound > 0) dispatch({ type: 'ADD_GOLD', payload: events.goldFound });

@@ -18,7 +18,7 @@ export const CLASSES = {
         startingEquipment: [
             { name: 'Chain Mail', type: 'armor', armorType: 'heavy', baseAC: 16, weight: 55 },
             { name: 'Longsword', type: 'weapon', damage: '1d8', damageType: 'slashing', weight: 3 },
-            { name: 'Shield', type: 'armor', isShield: true, weight: 6 },
+            { name: 'Shield', type: 'shield', isShield: true, weight: 6 },
             { name: "Explorer's Pack", type: 'gear', weight: 10 },
         ],
     },
@@ -76,7 +76,7 @@ export const CLASSES = {
         startingEquipment: [
             { name: 'Scale Mail', type: 'armor', armorType: 'medium', baseAC: 14, weight: 45 },
             { name: 'Mace', type: 'weapon', damage: '1d6', damageType: 'bludgeoning', weight: 4 },
-            { name: 'Shield', type: 'armor', isShield: true, weight: 6 },
+            { name: 'Shield', type: 'shield', isShield: true, weight: 6 },
             { name: "Priest's Pack", type: 'gear', weight: 10 },
             { name: 'Holy Symbol', type: 'gear', weight: 1 },
         ],

@@ -1,6 +1,7 @@
 /**
  * Game state reducer — all game state mutations happen through dispatched actions.
  */
+import { computeACFromInventory } from '../engine/rules.js';
 
 export const initialGameState = {
     character: null, // Should include gold: 0, silver: 0, copper: 0
@@ -255,22 +256,62 @@ export function gameReducer(state, action) {
         }
 
         // --- Inventory ---
-        case 'ADD_ITEM':
+        case 'ADD_ITEM': {
+            const newItem = {
+                id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                equipped: false,
+                quantity: 1,
+                ...action.payload,
+            };
+            const newInv = [...state.inventory, newItem];
+            const acAfterAdd = newItem.equipped
+                ? computeACFromInventory(newInv, state.character)
+                : state.character?.armorClass;
             return {
                 ...state,
-                inventory: [...state.inventory, {
-                    id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                    equipped: false,
-                    quantity: 1,
-                    ...action.payload,
-                }],
+                inventory: newInv,
+                character: state.character
+                    ? { ...state.character, armorClass: acAfterAdd }
+                    : state.character,
             };
+        }
 
-        case 'REMOVE_ITEM':
+        case 'REMOVE_ITEM': {
+            const removedItem = state.inventory.find(i => i.id === action.payload);
+            const filteredInv = state.inventory.filter(item => item.id !== action.payload);
+            const needsRecalc = removedItem?.equipped && (removedItem.type === 'armor' || removedItem.type === 'shield' || removedItem.isShield);
+            const acAfterRemove = needsRecalc
+                ? computeACFromInventory(filteredInv, state.character)
+                : state.character?.armorClass;
             return {
                 ...state,
-                inventory: state.inventory.filter(item => item.id !== action.payload),
+                inventory: filteredInv,
+                character: state.character
+                    ? { ...state.character, armorClass: acAfterRemove }
+                    : state.character,
             };
+        }
+
+        case 'REMOVE_ITEM_BY_NAME': {
+            const nameToRemove = (action.payload || '').toLowerCase();
+            const matchToRemove = state.inventory.find(i => i.name?.toLowerCase() === nameToRemove);
+            if (!matchToRemove) {
+                console.warn(`[Reducer] Could not find item to remove by name: "${action.payload}"`);
+                return state;
+            }
+            const invAfterNameRemove = state.inventory.filter(i => i.id !== matchToRemove.id);
+            const needsACRecalc = matchToRemove.equipped && (matchToRemove.type === 'armor' || matchToRemove.type === 'shield' || matchToRemove.isShield);
+            const acAfterNameRemove = needsACRecalc
+                ? computeACFromInventory(invAfterNameRemove, state.character)
+                : state.character?.armorClass;
+            return {
+                ...state,
+                inventory: invAfterNameRemove,
+                character: state.character
+                    ? { ...state.character, armorClass: acAfterNameRemove }
+                    : state.character,
+            };
+        }
 
         case 'UPDATE_ITEM':
             return {
@@ -280,21 +321,49 @@ export function gameReducer(state, action) {
                 ),
             };
 
-        case 'EQUIP_ITEM':
-            return {
-                ...state,
-                inventory: state.inventory.map(item =>
-                    item.id === action.payload ? { ...item, equipped: true } : item
-                ),
-            };
+        case 'EQUIP_ITEM': {
+            const itemToEquip = state.inventory.find(i => i.id === action.payload);
+            if (!itemToEquip) return state;
 
-        case 'UNEQUIP_ITEM':
+            // Mutual exclusion: unequip other armor (non-shield) or other shields
+            const isArmor = itemToEquip.type === 'armor' && !itemToEquip.isShield;
+            const isShield = itemToEquip.type === 'shield' || itemToEquip.isShield;
+
+            const updatedInv = state.inventory.map(item => {
+                if (item.id === action.payload) return { ...item, equipped: true };
+                // Unequip conflicting items
+                if (isArmor && item.type === 'armor' && !item.isShield && item.equipped) {
+                    return { ...item, equipped: false };
+                }
+                if (isShield && (item.type === 'shield' || item.isShield) && item.equipped) {
+                    return { ...item, equipped: false };
+                }
+                return item;
+            });
+
+            const acAfterEquip = computeACFromInventory(updatedInv, state.character);
             return {
                 ...state,
-                inventory: state.inventory.map(item =>
-                    item.id === action.payload ? { ...item, equipped: false } : item
-                ),
+                inventory: updatedInv,
+                character: state.character
+                    ? { ...state.character, armorClass: acAfterEquip }
+                    : state.character,
             };
+        }
+
+        case 'UNEQUIP_ITEM': {
+            const updatedInvUneq = state.inventory.map(item =>
+                item.id === action.payload ? { ...item, equipped: false } : item
+            );
+            const acAfterUnequip = computeACFromInventory(updatedInvUneq, state.character);
+            return {
+                ...state,
+                inventory: updatedInvUneq,
+                character: state.character
+                    ? { ...state.character, armorClass: acAfterUnequip }
+                    : state.character,
+            };
+        }
 
         // --- Messages ---
         case 'ADD_MESSAGE':
@@ -594,9 +663,18 @@ export function gameReducer(state, action) {
             };
 
         // --- Bulk Load ---
-        case 'LOAD_GAME':
+        case 'LOAD_GAME': {
+            const loadedInventory = action.payload.inventory || [];
+            const loadedCharacter = action.payload.character;
+            // Recalculate AC on load to fix stale saves
+            const recalcedAC = loadedCharacter
+                ? computeACFromInventory(loadedInventory, loadedCharacter)
+                : null;
             return {
                 ...action.payload,
+                character: loadedCharacter
+                    ? { ...loadedCharacter, armorClass: recalcedAC }
+                    : loadedCharacter,
                 // Backfill new fields for old saves that don't have them
                 worldFacts: action.payload.worldFacts || [],
                 session: {
@@ -615,6 +693,7 @@ export function gameReducer(state, action) {
                 })),
                 ui: { ...initialGameState.ui },
             };
+        }
 
         case 'NEW_GAME':
             return {

@@ -331,12 +331,21 @@ function buildInventoryBlock(inventory) {
     const equipped = inventory.filter(i => i.equipped);
     const carried = inventory.filter(i => !i.equipped);
 
+    const formatItem = (i) => {
+        let desc = i.name;
+        if (i.quantity > 1) desc += ` (x${i.quantity})`;
+        if (i.baseAC && !i.isShield) desc += ` [AC ${i.baseAC}, ${i.armorType || 'unknown'} armor]`;
+        if (i.isShield || i.type === 'shield') desc += ' [+2 AC shield]';
+        if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}]`;
+        return desc;
+    };
+
     let block = `## INVENTORY`;
     if (equipped.length) {
-        block += `\n**Equipped:** ${equipped.map(i => i.name).join(', ')}`;
+        block += `\n**Equipped:** ${equipped.map(formatItem).join(', ')}`;
     }
     if (carried.length) {
-        block += `\n**Carried:** ${carried.map(i => `${i.name}${i.quantity > 1 ? ` (x${i.quantity})` : ''}`).join(', ')}`;
+        block += `\n**Carried:** ${carried.map(formatItem).join(', ')}`;
     }
     return block;
 }
