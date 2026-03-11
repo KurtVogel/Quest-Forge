@@ -87,7 +87,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             dispatch({ type: 'SET_LOCATION', payload: extracted.location });
         }
     } catch (e) {
-        // Scribe failures are silent — they must never block the main game loop
-        console.warn('[Scribe] Extraction failed (non-critical):', e.message);
+        // Scribe failures must never block the main game loop, but log clearly
+        console.error('[Scribe] ❌ Extraction failed:', e.message || e);
     }
 }

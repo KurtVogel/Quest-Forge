@@ -45,7 +45,10 @@ export async function addMemory(apiKey, text, category = 'general') {
     if (memoryStore.some(m => m.text === text)) return;
 
     const vector = await embedText(apiKey, text);
-    if (!vector) return; // Silently skip if embedding failed
+    if (!vector) {
+        console.error('[VectorMemory] ❌ Embedding failed for:', text.slice(0, 80));
+        return;
+    }
 
     memoryStore.push({ text, vector, category, timestamp: Date.now() });
 }

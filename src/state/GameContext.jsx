@@ -105,7 +105,7 @@ export function GameProvider({ children }) {
  */
 export function useGameState() {
     const context = useContext(GameContext);
-    if (!context && context !== null) {
+    if (context === undefined) {
         throw new Error('useGameState must be used within a GameProvider');
     }
     return context;

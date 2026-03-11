@@ -78,7 +78,7 @@ export default function ChatPanel() {
         if (!s.settings.apiKey || memorySeededRef.current) return;
         if (s.settings.llmProvider !== 'gemini') return; // Embeddings only available for Gemini
 
-        memorySeededRef.current = true;
+        memorySeededRef.current = true; // Prevent concurrent attempts
         clearMemories();
 
         const items = [
@@ -91,7 +91,10 @@ export default function ChatPanel() {
         ];
 
         if (items.length > 0) {
-            seedMemories(s.settings.apiKey, items).catch(() => {});
+            seedMemories(s.settings.apiKey, items).catch((e) => {
+                console.error('[RAG] ❌ Memory seeding failed — will retry next mount:', e);
+                memorySeededRef.current = false; // Allow retry on next mount
+            });
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Only on mount

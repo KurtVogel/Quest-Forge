@@ -82,8 +82,8 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
 
         const jsonMatch = response.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-            console.warn('[Journal] Could not parse summary response');
-            return messageCount;
+            console.warn('[Journal] Could not parse summary response — messages NOT marked as summarized');
+            return lastSummarizedIndex; // Don't advance — retry next time
         }
 
         const summary = JSON.parse(jsonMatch[0]);

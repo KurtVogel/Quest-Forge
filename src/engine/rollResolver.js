@@ -103,7 +103,7 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
         console.log(`[RollResolver] 🔄 Auto-triggering follow-up LLM call (depth ${depth}) with roll results`);
 
         try {
-            const correctionNote = (depth === 0 && preNarrated)
+            const correctionNote = preNarrated
                 ? `\n\n[IMPORTANT: Your previous response pre-narrated an outcome before seeing these dice results. The roll result above is the authoritative truth. Narrate the TRUE outcome based solely on these dice — completely discard any outcome you wrote before seeing the roll.]`
                 : '';
 
@@ -115,7 +115,7 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
             if (followUpEvents?.requestedRolls?.length > 0) {
                 await handleRequestedRolls(
                     followUpEvents.requestedRolls,
-                    { getState, dispatch, sendToLLM },
+                    { getState, dispatch, sendToLLM, preNarrated: followUpEvents._preNarratedOutcome || false },
                     depth + 1
                 );
             }
@@ -146,7 +146,7 @@ function rollWithAdvantage(count, sides, modifier, description, advantage, disad
 }
 
 function resolveNpcRoll(roll, character, dispatch) {
-    const npcMod = roll.modifier ?? Math.floor(Math.random() * 3) + 2;
+    const npcMod = roll.modifier ?? 0;
     const result = rollWithAdvantage(1, 20, npcMod, roll.description || `${roll.attacker || 'Enemy'} attack`, roll.advantage, roll.disadvantage);
     dispatch({ type: 'ADD_ROLL', payload: result });
 

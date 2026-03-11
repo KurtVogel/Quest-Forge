@@ -252,7 +252,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - For player checks: type is "skill_check", "saving_throw", or "attack_roll". dc is the target DC.
 - For player damage: type is "damage_roll". Provide the exact dice to roll in the "notation" field based on the player's equipped weapon (e.g. "1d8+3") or spell.
   - CRITICAL EXCEPTION: If the player scored a critical hit, DOUBLE the number of damage dice requested (e.g. if the weapon is "1d8+3", request "2d8+3").
-- For NPC/enemy/companion attacks: type is "npc_attack". Set dc to the TARGET's AC (either player AC, companion AC, or enemy AC). Include attacker name.
+- For NPC/enemy/companion attacks: type is "npc_attack". Set dc to the TARGET's AC (either player AC, companion AC, or enemy AC). Include attacker name. **Always include "modifier"** — the NPC's attack bonus (e.g. +4 for a trained guard, +7 for a veteran). If unknown, estimate from the creature's challenge.
 - For companion damage or enemy damage that requires rolling: type is "damage_roll".
 - For NPC saves: type is "npc_save". dc is the spell/ability DC.
 - When requesting rolls, narrate only the SETUP (what's happening, what's at stake). Do NOT narrate the outcome.

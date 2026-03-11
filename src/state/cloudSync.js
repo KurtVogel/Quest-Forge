@@ -90,3 +90,18 @@ export async function listCloudSaves(uid) {
     }
 }
 
+export async function deleteGameFromCloud(uid, slotId) {
+    if (!db || !uid || !slotId) return false;
+
+    try {
+        const userSavesRef = collection(db, `users/${uid}/saves`);
+        const saveDocRef = doc(userSavesRef, slotId);
+        await deleteDoc(saveDocRef);
+        console.log(`☁️ Cloud delete successful: ${slotId}`);
+        return true;
+    } catch (e) {
+        console.error("☁️ Cloud delete failed:", e);
+        return false;
+    }
+}
+
