@@ -7,7 +7,7 @@
  */
 
 import { rollWithModifier, rollNotation } from './dice.js';
-import { getSkillModifier, getModifier, getProficiencyBonus, SKILL_ABILITIES } from './rules.js';
+import { getSkillModifier, getModifier, getProficiencyBonus, getLevelBonus, SKILL_ABILITIES } from './rules.js';
 
 /** Maximum depth for recursive follow-up roll handling. */
 const MAX_ROLL_DEPTH = 3;
@@ -31,7 +31,7 @@ export function resolveRolls(requestedRolls, character, dispatch) {
             const result = resolveNpcRoll(roll, character, dispatch);
             if (result) rollResults.push(result);
         } else if (roll.type === 'damage_roll') {
-            const result = resolveDamageRoll(roll, dispatch);
+            const result = resolveDamageRoll(roll, character, dispatch);
             if (result) rollResults.push(result);
         } else if (roll.skill && character) {
             const result = resolvePlayerRoll(roll, character, dispatch);
@@ -171,12 +171,21 @@ function resolveNpcRoll(roll, character, dispatch) {
     };
 }
 
-function resolveDamageRoll(roll, dispatch) {
+function resolveDamageRoll(roll, character, dispatch) {
     try {
         const result = rollNotation(roll.notation || '1d4', roll.description || 'Damage Roll');
+
+        // Apply class level bonus to damage (Fighter: +1 per level beyond 1st)
+        const lvlBonus = getLevelBonus(character);
+        if (lvlBonus > 0) {
+            result.total += lvlBonus;
+            result.modifier += lvlBonus;
+        }
+
         dispatch({ type: 'ADD_ROLL', payload: result });
 
-        const rollMsg = `🎲 **${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${result.modifier ? `, modifier: ${result.modifier >= 0 ? '+' : ''}${result.modifier}` : ''})`;
+        const lvlLabel = lvlBonus > 0 ? `, level bonus: +${lvlBonus}` : '';
+        const rollMsg = `🎲 **${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${result.modifier ? `, modifier: ${result.modifier >= 0 ? '+' : ''}${result.modifier}` : ''}${lvlLabel})`;
 
         dispatch({
             type: 'ADD_MESSAGE',
@@ -211,7 +220,7 @@ function resolvePlayerRoll(roll, character, dispatch) {
     } else if (isAbilityName) {
         const abilityMod = getModifier(character.abilityScores[skillName]);
         if (isAttackRoll) {
-            mod = abilityMod + getProficiencyBonus(character.level);
+            mod = abilityMod + getProficiencyBonus(character.level) + getLevelBonus(character);
             label = roll.description || `${skillName} attack`;
         } else {
             mod = abilityMod;
@@ -219,7 +228,7 @@ function resolvePlayerRoll(roll, character, dispatch) {
     } else if (skillName === 'attack') {
         const strMod = getModifier(character.abilityScores.strength);
         const dexMod = getModifier(character.abilityScores.dexterity);
-        mod = Math.max(strMod, dexMod) + getProficiencyBonus(character.level);
+        mod = Math.max(strMod, dexMod) + getProficiencyBonus(character.level) + getLevelBonus(character);
         label = roll.description || 'Attack roll';
     } else {
         console.warn('[RollResolver] Unknown skill/ability:', skillName, '— rolling plain d20');

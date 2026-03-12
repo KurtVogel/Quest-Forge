@@ -4,7 +4,7 @@
  */
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT } from '../engine/characterUtils.js';
-import { formatModifier, getModifier, getProficiencyBonus } from '../engine/rules.js';
+import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus } from '../engine/rules.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
 
@@ -313,7 +313,7 @@ function buildCharacterBlock(character) {
 - **EXP:** ${character.exp || 0}
 - **AC:** ${character.armorClass}
 - **Wealth:** ${character.gold || 0} gp | ${character.silver || 0} sp | ${character.copper || 0} cp
-- **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}
+- **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}${getLevelBonus(character) > 0 ? `\n- **Level Bonus (combat):** +${getLevelBonus(character)} to hit and damage (applied automatically by the system — do NOT add this yourself)` : ''}
 - **Stats:** ${stats}
 - **Speed:** ${character.speed} ft
 - **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}
