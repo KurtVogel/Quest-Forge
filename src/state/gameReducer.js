@@ -306,10 +306,31 @@ export function gameReducer(state, action) {
         }
 
         case 'LEVEL_UP': {
+            const classData = CLASSES[state.character.class];
+            const hitDie = classData?.hitDie || 8;
+            const conMod = getModifier(state.character.abilityScores?.constitution || 10);
+            const hpRoll = rollDie(hitDie);
+            const hpGain = Math.max(1, hpRoll + conMod);
             const newLevel = state.character.level + 1;
+            const newMaxHP = state.character.maxHP + hpGain;
+
+            const levelUpMsg = {
+                id: `msg-${Date.now()}-lvl`,
+                timestamp: Date.now(),
+                role: 'system',
+                content: `🎉 **Level Up!** You are now **Level ${newLevel}**! Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${state.character.maxHP} → ${newMaxHP}). Fully healed!`,
+            };
+
             return {
                 ...state,
-                character: { ...state.character, level: newLevel },
+                character: {
+                    ...state.character,
+                    level: newLevel,
+                    exp: action.payload?.bonusExp || 0,
+                    maxHP: newMaxHP,
+                    currentHP: newMaxHP,
+                },
+                messages: [...state.messages, levelUpMsg],
             };
         }
 

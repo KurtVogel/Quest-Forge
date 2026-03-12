@@ -232,6 +232,7 @@ function normalizeEvents(raw) {
         playerDeath: raw.player_death
             ? { description: raw.player_death.description || 'Your character has fallen.' }
             : null,
+        levelUp: !!raw.level_up,
     };
 }
 
@@ -282,7 +283,12 @@ export function applyEvents(events, dispatch) {
     if (events.copperFound > 0) dispatch({ type: 'ADD_COPPER', payload: events.copperFound });
     if (events.copperLost > 0) dispatch({ type: 'REMOVE_COPPER', payload: events.copperLost });
 
-    if (events.expAwarded > 0) {
+    if (events.levelUp) {
+        // Explicit level-up from the DM — skip ADD_EXP to avoid double-leveling
+        // if the awarded XP would also cross the threshold. Any bonus XP carries
+        // over as progress toward the next level.
+        dispatch({ type: 'LEVEL_UP', payload: { bonusExp: events.expAwarded || 0 } });
+    } else if (events.expAwarded > 0) {
         dispatch({ type: 'ADD_EXP', payload: events.expAwarded });
     }
 

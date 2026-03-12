@@ -228,7 +228,8 @@ When game events occur, include a structured JSON block at the END of your respo
     { "id": "companion-id", "name": "Garrick", "hp": 10, "affinity": 75 }
   ],
   "remove_companions": [],
-  "player_death": null
+  "player_death": null,
+  "level_up": false
 }
 \`\`\`
 
@@ -275,6 +276,7 @@ ECONOMY & HEALING:
 
 PROGRESSION & STATUS EFFECTS:
 - Provide "exp_awarded" as an integer when the player defeats enemies, completes quests, or overcomes major obstacles.
+- Set "level_up" to true when the player should level up (e.g. milestone achievement, quest completion, or when narratively appropriate). The system handles HP gain and stat updates automatically — just set the flag. You may also award exp_awarded alongside level_up.
 - Provide "rest_taken" as exactly "short" or "long" when the party rests at a camp, inn, or safe zone.
 - Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.
 
@@ -310,7 +312,7 @@ function buildCharacterBlock(character) {
 - **Race:** ${character.race}
 - **Class:** ${character.class} (Level ${character.level})
 - **HP:** ${character.currentHP}/${character.maxHP}
-- **EXP:** ${character.exp || 0}
+- **EXP:** ${character.exp || 0} / ${character.level * 1000} to next level
 - **AC:** ${character.armorClass}
 - **Wealth:** ${character.gold || 0} gp | ${character.silver || 0} sp | ${character.copper || 0} cp
 - **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}${getLevelBonus(character) > 0 ? `\n- **Level Bonus (combat):** +${getLevelBonus(character)} to hit and damage (applied automatically by the system — do NOT add this yourself)` : ''}
