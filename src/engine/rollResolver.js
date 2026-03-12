@@ -7,7 +7,7 @@
  */
 
 import { rollWithModifier, rollNotation } from './dice.js';
-import { getSkillModifier, getModifier, getProficiencyBonus, getLevelBonus, SKILL_ABILITIES } from './rules.js';
+import { getSkillModifier, getModifier, getProficiencyBonus, getLevelBonus, computeACFromInventory, SKILL_ABILITIES } from './rules.js';
 
 /** Maximum depth for recursive follow-up roll handling. */
 const MAX_ROLL_DEPTH = 3;
@@ -21,14 +21,14 @@ const ABILITY_NAMES = ['strength', 'dexterity', 'constitution', 'intelligence', 
  * @param {function} dispatch - Game state dispatch
  * @returns {Array} Roll result summaries
  */
-export function resolveRolls(requestedRolls, character, dispatch) {
+export function resolveRolls(requestedRolls, character, dispatch, inventory) {
     const rollResults = [];
 
     for (const roll of requestedRolls) {
         const isNpcRoll = roll.type === 'npc_attack' || roll.type === 'npc_save';
 
         if (isNpcRoll) {
-            const result = resolveNpcRoll(roll, character, dispatch);
+            const result = resolveNpcRoll(roll, character, dispatch, inventory);
             if (result) rollResults.push(result);
         } else if (roll.type === 'damage_roll') {
             const result = resolveDamageRoll(roll, character, dispatch);
@@ -84,10 +84,11 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
 
     const state = getState();
     const character = state.character;
+    const inventory = state.inventory || [];
 
     console.log(`[RollResolver] 🎲 Processing ${requestedRolls.length} roll(s) at depth ${depth}`);
 
-    const rollResults = resolveRolls(requestedRolls, character, dispatch);
+    const rollResults = resolveRolls(requestedRolls, character, dispatch, inventory);
 
     // Auto follow-up: send roll results back to DM and get outcome narration
     if (rollResults.length > 0) {
@@ -145,12 +146,17 @@ function rollWithAdvantage(count, sides, modifier, description, advantage, disad
     return result;
 }
 
-function resolveNpcRoll(roll, character, dispatch) {
+function resolveNpcRoll(roll, character, dispatch, inventory) {
     const npcMod = roll.modifier ?? 0;
     const result = rollWithAdvantage(1, 20, npcMod, roll.description || `${roll.attacker || 'Enemy'} attack`, roll.advantage, roll.disadvantage);
     dispatch({ type: 'ADD_ROLL', payload: result });
 
-    const dc = character?.armorClass || roll.dc || 12;
+    // ALWAYS compute AC live from inventory — never trust stored value or DM's dc
+    const liveAC = (character && inventory) ? computeACFromInventory(inventory, character) : null;
+    const dc = liveAC ?? character?.armorClass ?? roll.dc ?? 12;
+    if (roll.dc && roll.dc !== dc) {
+        console.warn(`[RollResolver] DM sent dc=${roll.dc} but real AC is ${dc} — using real AC`);
+    }
     const success = result.total >= dc;
     const label = roll.attacker ? `${roll.attacker}'s attack` : 'NPC attack';
     const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
