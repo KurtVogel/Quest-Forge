@@ -6,6 +6,9 @@ import { db } from "../config/firebase.js";
  * The structure mirroring allows us to easily drop this in alongside IndexedDB.
  */
 
+/** Max roll history entries to persist in cloud saves. */
+const MAX_SAVED_ROLLS = 50;
+
 export async function saveGameToCloud(uid, slotId, gameState) {
     if (!db) return false;
     if (!uid) return false;
@@ -13,6 +16,18 @@ export async function saveGameToCloud(uid, slotId, gameState) {
     try {
         const userSavesRef = collection(db, `users/${uid}/saves`);
         const saveDocRef = doc(userSavesRef, slotId);
+
+        // Trim: drop summarized messages (their content lives in journal entries)
+        const trimmedMessages = (gameState.messages || []).filter(m => !m.summarized);
+        // Cap: keep only the most recent rolls
+        const trimmedRolls = (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS);
+
+        // Build a trimmed copy of the state for the payload
+        const trimmedState = {
+            ...gameState,
+            messages: trimmedMessages,
+            rollHistory: trimmedRolls,
+        };
 
         // Extract metadata for the list view
         const metadata = {
@@ -32,7 +47,7 @@ export async function saveGameToCloud(uid, slotId, gameState) {
             location: gameState.currentLocation || null,
             questCount: gameState.quests?.filter(q => q.status === 'active')?.length || 0,
             partySize: gameState.party?.length || 0,
-            messageCount: gameState.messages?.length || 0,
+            messageCount: trimmedMessages.length,
             isAuto: slotId === '__autosave__'
         };
 
@@ -40,7 +55,7 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // and a separate metadata object for fast querying.
         await setDoc(saveDocRef, {
             ...metadata,
-            payload: JSON.stringify(gameState)
+            payload: JSON.stringify(trimmedState)
         });
 
         console.log(`☁️ Cloud save successful: ${slotId}`);

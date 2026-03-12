@@ -145,10 +145,16 @@ export default function ChatPanel() {
     const sendToLLM = async (userMessage, originalPlayerMessage) => {
         const s = stateRef.current;
 
-        // RAG: retrieve memories relevant to the current player message (Gemini only)
+        // RAG: retrieve memories relevant to the current scene (Gemini only)
+        // Include location and combat context for better retrieval relevance
         let retrievedMemories = [];
         if (originalPlayerMessage && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
-            retrievedMemories = await retrieveRelevant(s.settings.apiKey, originalPlayerMessage).catch(() => []);
+            const sceneContext = [
+                originalPlayerMessage,
+                s.currentLocation && `Location: ${s.currentLocation}`,
+                s.combat?.active && `In combat with: ${s.combat.enemies.map(e => e.name).join(', ')}`,
+            ].filter(Boolean).join('. ');
+            retrievedMemories = await retrieveRelevant(s.settings.apiKey, sceneContext).catch(() => []);
         }
 
         const systemPrompt = buildCurrentSystemPrompt(retrievedMemories);

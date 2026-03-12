@@ -46,14 +46,23 @@ function openDB() {
     });
 }
 
+/** Max roll history entries to persist. Only last 5 are ever shown in prompt. */
+const MAX_SAVED_ROLLS = 50;
+
 /**
  * Save game state to a named slot.
+ * Trims summarized messages (captured in journal) and caps rollHistory.
  */
 export async function saveGame(slotId, gameState) {
     const db = await openDB();
     return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         const store = tx.objectStore(STORE_NAME);
+
+        // Trim: drop summarized messages (their content lives in journal entries)
+        const trimmedMessages = (gameState.messages || []).filter(m => !m.summarized);
+        // Cap: keep only the most recent rolls
+        const trimmedRolls = (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS);
 
         const saveData = {
             slotId,
@@ -72,13 +81,13 @@ export async function saveGame(slotId, gameState) {
             questCount: gameState.quests?.filter(q => q.status === 'active')?.length || 0,
             partySize: gameState.party?.length || 0,
             savedAt: Date.now(),
-            messageCount: gameState.messages?.length || 0,
+            messageCount: trimmedMessages.length,
             // Store the full state minus UI and transient data
             state: {
                 character: gameState.character,
                 inventory: gameState.inventory,
-                messages: gameState.messages,
-                rollHistory: gameState.rollHistory,
+                messages: trimmedMessages,
+                rollHistory: trimmedRolls,
                 quests: gameState.quests,
                 journal: gameState.journal || [],
                 npcs: gameState.npcs || [],

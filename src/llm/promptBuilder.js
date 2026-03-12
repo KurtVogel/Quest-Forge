@@ -360,11 +360,20 @@ function buildRecentRollsBlock(rolls) {
     ).join('\n')}`;
 }
 
+/** Max world facts to inject directly into the prompt. Older facts are still in RAG. */
+const MAX_PROMPT_WORLD_FACTS = 15;
+
 function buildWorldFactsBlock(worldFacts) {
     if (!worldFacts || worldFacts.length === 0) return '';
+
+    // Sort by timestamp descending (most recent first), take the most recent N
+    const sorted = [...worldFacts].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    const shown = sorted.slice(0, MAX_PROMPT_WORLD_FACTS);
+    const hiddenCount = Math.max(0, worldFacts.length - MAX_PROMPT_WORLD_FACTS);
+
     // Group by category for readability
     const byCategory = {};
-    for (const f of worldFacts) {
+    for (const f of shown) {
         const cat = f.category || 'general';
         if (!byCategory[cat]) byCategory[cat] = [];
         byCategory[cat].push(f.fact);
@@ -372,7 +381,12 @@ function buildWorldFactsBlock(worldFacts) {
     const lines = Object.entries(byCategory)
         .map(([cat, facts]) => `**[${cat.toUpperCase()}]**\n${facts.map(f => `- ${f}`).join('\n')}`)
         .join('\n');
-    return `## WORLD FACTS (canonical — never contradict these)\n${lines}`;
+
+    const overflow = hiddenCount > 0
+        ? `\n*(${hiddenCount} older facts available via RETRIEVED MEMORIES when relevant)*`
+        : '';
+
+    return `## WORLD FACTS (canonical — never contradict these)\n${lines}${overflow}`;
 }
 
 /**

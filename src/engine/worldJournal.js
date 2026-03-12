@@ -168,9 +168,14 @@ export function buildJournalContext(journal, npcs, currentLocation) {
         parts.push(`\n## SESSION HISTORY (what has happened so far)\n${entrySummaries}`);
     }
 
-    // NPC tracker with richer data
+    // NPC tracker — show most recently active NPCs (cap at 8, rest handled by RAG)
     if (npcs.length > 0) {
-        const npcList = npcs.map(n => {
+        const MAX_PROMPT_NPCS = 8;
+        const sorted = [...npcs].sort((a, b) => (b.lastSeen || b.firstMet || 0) - (a.lastSeen || a.firstMet || 0));
+        const shown = sorted.slice(0, MAX_PROMPT_NPCS);
+        const hiddenCount = Math.max(0, npcs.length - MAX_PROMPT_NPCS);
+
+        const npcList = shown.map(n => {
             const disp = n.disposition ? ` (${n.disposition})` : '';
             const notes = n.lastNotes || n.notes || '';
             const extras = [
@@ -181,7 +186,12 @@ export function buildJournalContext(journal, npcs, currentLocation) {
             ].filter(Boolean).join(' | ');
             return `- **${n.name}**${disp}: ${notes}${extras ? ` [${extras}]` : ''}`;
         }).join('\n');
-        parts.push(`\n## KNOWN NPCs\n${npcList}`);
+
+        const overflow = hiddenCount > 0
+            ? `\n*(${hiddenCount} other NPCs available via RETRIEVED MEMORIES when relevant)*`
+            : '';
+
+        parts.push(`\n## KNOWN NPCs\n${npcList}${overflow}`);
     }
 
     return parts.join('\n');

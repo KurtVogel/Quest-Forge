@@ -4,7 +4,7 @@
  * How it works:
  * 1. Significant events (world facts, journal summaries, NPC interactions) are
  *    embedded as 768-dim vectors using Gemini's text-embedding-004 model.
- * 2. Embeddings are stored in memory (not persisted — they're cheap to regenerate).
+ * 2. Embeddings are persisted in IndexedDB so they survive page refreshes.
  * 3. Before each DM prompt, the current scene context is embedded and we retrieve
  *    the top-N most semantically relevant past memories.
  * 4. Retrieved memories are injected into the system prompt so the DM "remembers"
@@ -14,6 +14,58 @@
  */
 
 import { embedText } from '../llm/providers/gemini.js';
+
+// --- IndexedDB persistence for embeddings ---
+const EMBED_DB_NAME = 'rpg-vector-memory';
+const EMBED_DB_VERSION = 1;
+const EMBED_STORE = 'embeddings';
+
+function openEmbedDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(EMBED_DB_NAME, EMBED_DB_VERSION);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(EMBED_STORE)) {
+                db.createObjectStore(EMBED_STORE, { keyPath: 'text' });
+            }
+        };
+    });
+}
+
+function persistEmbedding(entry) {
+    openEmbedDB().then(db => {
+        const tx = db.transaction(EMBED_STORE, 'readwrite');
+        tx.objectStore(EMBED_STORE).put(entry);
+        tx.oncomplete = () => db.close();
+    }).catch(() => {}); // Non-critical — in-memory still works
+}
+
+function clearPersistedEmbeddings() {
+    openEmbedDB().then(db => {
+        const tx = db.transaction(EMBED_STORE, 'readwrite');
+        tx.objectStore(EMBED_STORE).clear();
+        tx.oncomplete = () => db.close();
+    }).catch(() => {});
+}
+
+async function loadPersistedEmbeddings() {
+    try {
+        const db = await openEmbedDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(EMBED_STORE, 'readonly');
+            const request = tx.objectStore(EMBED_STORE).getAll();
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = () => reject(request.error);
+            tx.oncomplete = () => db.close();
+        });
+    } catch (e) {
+        return [];
+    }
+}
+
+// --- In-memory store ---
 
 /** In-memory store: { text, vector, category, timestamp }[] */
 let memoryStore = [];
@@ -32,7 +84,7 @@ function cosineSimilarity(a, b) {
 }
 
 /**
- * Add a memory entry and embed it.
+ * Add a memory entry and embed it. Also persists to IndexedDB.
  * Silently skips if embedding fails.
  * @param {string} apiKey - Gemini API key
  * @param {string} text - The memory text
@@ -46,39 +98,62 @@ export async function addMemory(apiKey, text, category = 'general') {
 
     const vector = await embedText(apiKey, text);
     if (!vector) {
-        console.error('[VectorMemory] ❌ Embedding failed for:', text.slice(0, 80));
+        console.error('[VectorMemory] Embedding failed for:', text.slice(0, 80));
         return;
     }
 
-    memoryStore.push({ text, vector, category, timestamp: Date.now() });
+    const entry = { text, vector, category, timestamp: Date.now() };
+    memoryStore.push(entry);
+    persistEmbedding(entry); // fire-and-forget to IndexedDB
 }
 
 /**
- * Bulk-add memories. Used to seed the store from existing world facts and journal entries.
+ * Bulk-add memories. First tries to load cached embeddings from IndexedDB.
+ * Only re-embeds items that aren't already cached.
  * @param {string} apiKey
  * @param {Array<{text: string, category: string}>} items
  */
 export async function seedMemories(apiKey, items) {
     if (!apiKey || !items?.length) return;
 
-    // Embed in parallel (batches of 5 to avoid rate limits)
+    // Try loading persisted embeddings first
+    const persisted = await loadPersistedEmbeddings();
+    if (persisted.length > 0) {
+        memoryStore = persisted;
+        console.log(`[VectorMemory] Loaded ${persisted.length} cached embeddings from IndexedDB`);
+
+        // Only embed items not already in cache
+        const existingTexts = new Set(persisted.map(m => m.text));
+        const newItems = items.filter(item => !existingTexts.has(item.text));
+        if (newItems.length > 0) {
+            console.log(`[VectorMemory] Embedding ${newItems.length} new items not in cache`);
+            const BATCH = 5;
+            for (let i = 0; i < newItems.length; i += BATCH) {
+                const batch = newItems.slice(i, i + BATCH);
+                await Promise.all(batch.map(item => addMemory(apiKey, item.text, item.category)));
+            }
+        }
+        return;
+    }
+
+    // No cache — embed everything from scratch
     const BATCH = 5;
     for (let i = 0; i < items.length; i += BATCH) {
         const batch = items.slice(i, i + BATCH);
         await Promise.all(batch.map(item => addMemory(apiKey, item.text, item.category)));
     }
-    console.log(`[VectorMemory] Seeded ${memoryStore.length} memories`);
+    console.log(`[VectorMemory] Seeded ${memoryStore.length} memories (fresh embeddings)`);
 }
 
 /**
  * Retrieve the top-N most relevant memories for a given query.
  * @param {string} apiKey
  * @param {string} query - Current scene context / player action
- * @param {number} [topN=5] - How many memories to retrieve
- * @param {number} [minScore=0.6] - Minimum similarity threshold
+ * @param {number} [topN=8] - How many memories to retrieve
+ * @param {number} [minScore=0.55] - Minimum similarity threshold
  * @returns {Promise<Array<{text: string, category: string, score: number}>>}
  */
-export async function retrieveRelevant(apiKey, query, topN = 5, minScore = 0.6) {
+export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55) {
     if (!apiKey || !query || memoryStore.length === 0) return [];
 
     const queryVector = await embedText(apiKey, query);
@@ -94,10 +169,11 @@ export async function retrieveRelevant(apiKey, query, topN = 5, minScore = 0.6) 
 }
 
 /**
- * Clear the in-memory store (called on new game).
+ * Clear the in-memory store and persisted IndexedDB cache (called on new game).
  */
 export function clearMemories() {
     memoryStore = [];
+    clearPersistedEmbeddings();
 }
 
 /**
@@ -115,5 +191,5 @@ export function getMemoryCount() {
 export function buildRetrievedMemoriesBlock(memories) {
     if (!memories || memories.length === 0) return '';
     const lines = memories.map(m => `- [${m.category}] ${m.text}`).join('\n');
-    return `## RETRIEVED MEMORIES (most relevant to current scene)\nThese past events are relevant right now — factor them into your narration:\n${lines}`;
+    return `## RETRIEVED MEMORIES (most relevant to current scene)\nThese past events are relevant right now — factor them into your narration. They may include world facts, NPC details, or events from earlier in the adventure that aren't shown elsewhere in this prompt:\n${lines}`;
 }
