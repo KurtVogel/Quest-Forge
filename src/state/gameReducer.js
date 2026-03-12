@@ -1,7 +1,9 @@
 /**
  * Game state reducer — all game state mutations happen through dispatched actions.
  */
-import { computeACFromInventory } from '../engine/rules.js';
+import { computeACFromInventory, getModifier } from '../engine/rules.js';
+import { CLASSES } from '../data/classes.js';
+import { rollDie } from '../engine/dice.js';
 
 /**
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
@@ -246,20 +248,37 @@ export function gameReducer(state, action) {
 
         case 'ADD_EXP': {
             const currentExp = (state.character.exp || 0) + action.payload;
-            // Extremely simplified leveling: 1000 * level required to level up.
+            // Simplified leveling: 1000 * current level required to level up.
             const threshold = state.character.level * 1000;
 
             if (currentExp >= threshold) {
-                // Trigger auto level up!
+                // Class-based HP gain: hit die + CON modifier (minimum 1)
+                const classData = CLASSES[state.character.class];
+                const hitDie = classData?.hitDie || 8;
+                const conMod = getModifier(state.character.abilityScores?.constitution || 10);
+                const hpRoll = rollDie(hitDie);
+                const hpGain = Math.max(1, hpRoll + conMod);
+                const newLevel = state.character.level + 1;
+                const newMaxHP = state.character.maxHP + hpGain;
+
+                // Dispatch a level-up notification message
+                const levelUpMsg = {
+                    id: `msg-${Date.now()}-lvl`,
+                    timestamp: Date.now(),
+                    role: 'system',
+                    content: `🎉 **Level Up!** You are now **Level ${newLevel}**! Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${state.character.maxHP} → ${newMaxHP}). Fully healed!`,
+                };
+
                 return {
                     ...state,
                     character: {
                         ...state.character,
-                        level: state.character.level + 1,
-                        exp: currentExp - threshold, // Rollover
-                        maxHP: state.character.maxHP + 6, // Generic HP boost
-                        currentHP: state.character.maxHP + 6,
+                        level: newLevel,
+                        exp: currentExp - threshold,
+                        maxHP: newMaxHP,
+                        currentHP: newMaxHP, // Full heal on level up
                     },
+                    messages: [...state.messages, levelUpMsg],
                 };
             }
 
