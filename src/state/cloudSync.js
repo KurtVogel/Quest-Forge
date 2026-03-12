@@ -22,6 +22,16 @@ export async function saveGameToCloud(uid, slotId, gameState) {
             characterName: gameState.character?.name || 'Unknown Hero',
             characterLevel: gameState.character?.level || 1,
             characterClass: gameState.character?.class || 'Unknown Class',
+            characterHP: gameState.character?.currentHP || 0,
+            characterMaxHP: gameState.character?.maxHP || 0,
+            characterAC: gameState.character?.armorClass || 10,
+            gold: gameState.character?.gold || 0,
+            silver: gameState.character?.silver || 0,
+            copper: gameState.character?.copper || 0,
+            inventoryCount: gameState.inventory?.length || 0,
+            location: gameState.currentLocation || null,
+            questCount: gameState.quests?.filter(q => q.status === 'active')?.length || 0,
+            partySize: gameState.party?.length || 0,
             messageCount: gameState.messages?.length || 0,
             isAuto: slotId === '__autosave__'
         };

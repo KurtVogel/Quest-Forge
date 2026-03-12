@@ -303,8 +303,17 @@ export default function SettingsModal() {
                                                 <div className="save-info">
                                                     <div className="save-name">{save.name}</div>
                                                     <div className="save-meta">
-                                                        {save.characterName} · Lv.{save.characterLevel} {save.characterClass} · {save.messageCount} msgs
+                                                        {save.characterName} · Lv.{save.characterLevel} {save.characterClass}
+                                                        {save.characterHP != null ? ` · HP ${save.characterHP}/${save.characterMaxHP}` : ''}
+                                                        {save.characterAC ? ` · AC ${save.characterAC}` : ''}
                                                     </div>
+                                                    <div className="save-meta">
+                                                        {save.gold ? `${save.gold}gp ` : ''}{save.silver ? `${save.silver}sp ` : ''}{save.copper ? `${save.copper}cp ` : ''}
+                                                        {save.inventoryCount ? `· ${save.inventoryCount} items ` : ''}
+                                                        {save.questCount ? `· ${save.questCount} quests ` : ''}
+                                                        {save.partySize ? `· ${save.partySize} companions` : ''}
+                                                    </div>
+                                                    {save.location && <div className="save-meta">{save.location}</div>}
                                                     <div className="save-date">
                                                         {new Date(save.savedAt).toLocaleString()}
                                                     </div>
@@ -323,8 +332,17 @@ export default function SettingsModal() {
                                                 <div className="save-info">
                                                     <div className="save-name">{save.name}</div>
                                                     <div className="save-meta">
-                                                        {save.characterName} · Lv.{save.characterLevel} {save.characterClass} · {save.messageCount} msgs
+                                                        {save.characterName} · Lv.{save.characterLevel} {save.characterClass}
+                                                        {save.characterHP != null ? ` · HP ${save.characterHP}/${save.characterMaxHP}` : ''}
+                                                        {save.characterAC ? ` · AC ${save.characterAC}` : ''}
                                                     </div>
+                                                    <div className="save-meta">
+                                                        {save.gold ? `${save.gold}gp ` : ''}{save.silver ? `${save.silver}sp ` : ''}{save.copper ? `${save.copper}cp ` : ''}
+                                                        {save.inventoryCount ? `· ${save.inventoryCount} items ` : ''}
+                                                        {save.questCount ? `· ${save.questCount} quests ` : ''}
+                                                        {save.partySize ? `· ${save.partySize} companions` : ''}
+                                                    </div>
+                                                    {save.location && <div className="save-meta">{save.location}</div>}
                                                     <div className="save-date">
                                                         {new Date(save.savedAt).toLocaleString()}
                                                     </div>
