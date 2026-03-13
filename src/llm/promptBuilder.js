@@ -276,7 +276,7 @@ ECONOMY & HEALING:
 
 PROGRESSION & STATUS EFFECTS:
 - Provide "exp_awarded" as an integer for incremental XP gains (killing enemies, minor objectives).
-- **IMPORTANT — LEVELING UP:** To level the player up, set `"level_up": true` in the JSON block. Do NOT try to level the player by inflating exp_awarded — the system will ignore XP-based leveling if the threshold is not met. Use "level_up": true whenever the player earns a level (milestone, quest completion, narrative moment, or when the player asks to level up). The system automatically handles HP gain, hit dice, and stat updates. Do NOT narrate HP or stat changes yourself — the system displays them.
+- **IMPORTANT — LEVELING UP:** To level the player up, set "level_up": true in the JSON block. Do NOT try to level the player by inflating exp_awarded — the system will ignore XP-based leveling if the threshold is not met. Use "level_up": true whenever the player earns a level (milestone, quest completion, narrative moment, or when the player asks to level up). The system automatically handles HP gain, hit dice, and stat updates. Do NOT narrate HP or stat changes yourself — the system displays them.
 - Provide "rest_taken" as exactly "short" or "long" when the party rests at a camp, inn, or safe zone.
 - Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.
 
