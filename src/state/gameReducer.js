@@ -342,6 +342,17 @@ export function gameReducer(state, action) {
                 quantity: 1,
                 ...action.payload,
             };
+            // Auto-equip armor/shields if no other of that type is currently equipped
+            if (!newItem.equipped) {
+                const isArmor = newItem.type === 'armor' && !newItem.isShield;
+                const isShield = newItem.type === 'shield' || newItem.isShield;
+                if (isArmor && !state.inventory.some(i => i.equipped && i.type === 'armor' && !i.isShield)) {
+                    newItem.equipped = true;
+                }
+                if (isShield && !state.inventory.some(i => i.equipped && (i.type === 'shield' || i.isShield))) {
+                    newItem.equipped = true;
+                }
+            }
             return withInventoryAndAC(state, [...state.inventory, newItem]);
         }
 
@@ -696,6 +707,23 @@ export function gameReducer(state, action) {
         // --- Bulk Load ---
         case 'LOAD_GAME': {
             const loadedInventory = action.payload.inventory || [];
+            // Auto-equip armor/shield if nothing of that type is equipped (fixes old saves)
+            const hasEquippedArmor = loadedInventory.some(i => i.equipped && i.type === 'armor' && !i.isShield);
+            const hasEquippedShield = loadedInventory.some(i => i.equipped && (i.type === 'shield' || i.isShield));
+            if (!hasEquippedArmor || !hasEquippedShield) {
+                for (const item of loadedInventory) {
+                    if (!hasEquippedArmor && item.type === 'armor' && !item.isShield && item.baseAC) {
+                        item.equipped = true;
+                        break;
+                    }
+                }
+                for (const item of loadedInventory) {
+                    if (!hasEquippedShield && (item.type === 'shield' || item.isShield)) {
+                        item.equipped = true;
+                        break;
+                    }
+                }
+            }
             const loadedCharacter = action.payload.character;
             // Recalculate AC on load to fix stale saves
             const recalcedAC = loadedCharacter
