@@ -200,6 +200,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "copper_found": 0,
   "copper_lost": 0,
   "exp_awarded": 0,
+  "level_up": false,
   "rest_taken": null,
   "conditions_gained": [],
   "conditions_removed": [],
@@ -228,8 +229,7 @@ When game events occur, include a structured JSON block at the END of your respo
     { "id": "companion-id", "name": "Garrick", "hp": 10, "affinity": 75 }
   ],
   "remove_companions": [],
-  "player_death": null,
-  "level_up": false
+  "player_death": null
 }
 \`\`\`
 
@@ -275,8 +275,8 @@ ECONOMY & HEALING:
 - Provide "X_found" and "X_lost" properties where X is "gold", "silver", or "copper" based on the economy action (e.g. looting coins gives X_found, buying a sword requires X_lost). Provide numbers (integers without labels).
 
 PROGRESSION & STATUS EFFECTS:
-- Provide "exp_awarded" as an integer when the player defeats enemies, completes quests, or overcomes major obstacles.
-- Set "level_up" to true when the player should level up (e.g. milestone achievement, quest completion, or when narratively appropriate). The system handles HP gain and stat updates automatically — just set the flag. You may also award exp_awarded alongside level_up.
+- Provide "exp_awarded" as an integer for incremental XP gains (killing enemies, minor objectives).
+- **IMPORTANT — LEVELING UP:** To level the player up, set `"level_up": true` in the JSON block. Do NOT try to level the player by inflating exp_awarded — the system will ignore XP-based leveling if the threshold is not met. Use "level_up": true whenever the player earns a level (milestone, quest completion, narrative moment, or when the player asks to level up). The system automatically handles HP gain, hit dice, and stat updates. Do NOT narrate HP or stat changes yourself — the system displays them.
 - Provide "rest_taken" as exactly "short" or "long" when the party rests at a camp, inn, or safe zone.
 - Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.
 
