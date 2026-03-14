@@ -170,7 +170,9 @@ export default function ChatPanel() {
             messageHistory,
             userMessage,
             onChunk: (chunk) => {
-                setStreamingMessage(chunk);
+                // Strip ```json blocks from streaming display to prevent JSON leak
+                const cleaned = chunk.replace(/```json[\s\S]*$/i, '').trimEnd();
+                setStreamingMessage(cleaned);
             },
             signal: abortControllerRef.current.signal,
         });
@@ -255,6 +257,11 @@ export default function ChatPanel() {
                     sendToLLM,
                     preNarrated: events._preNarratedOutcome || false,
                 });
+
+                // Advance combat round after a full exchange (player + enemies acted)
+                if (stateRef.current.combat?.active) {
+                    dispatch({ type: 'ADVANCE_ROUND' });
+                }
             }
 
             // Auto-summarize for session memory (runs in background, uses Gemini 2.5 Flash)

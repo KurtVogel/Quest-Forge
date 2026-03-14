@@ -247,7 +247,12 @@ function resolvePlayerRoll(roll, character, dispatch) {
 
     const success = result.total >= (roll.dc || 15);
     const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
-    const rollMsg = `🎲 **${label}**${advLabel} (DC ${roll.dc}): Rolled **${result.total}**${result.advantageDetail} — ${success ? '✅ **Success!**' : '❌ **Failure!**'}${result.isCritical ? ' 🌟 Natural 20!' : ''}${result.isCritFail ? ' 💀 Natural 1!' : ''}`;
+    const isAttack = roll.type === 'attack_roll' || skillName === 'attack';
+    const dcLabel = isAttack ? `vs AC ${roll.dc}` : `DC ${roll.dc}`;
+    const hitMiss = isAttack
+        ? (success ? '💥 **Hit!**' : '🛡️ **Miss!**')
+        : (success ? '✅ **Success!**' : '❌ **Failure!**');
+    const rollMsg = `🎲 **${label}**${advLabel} (${dcLabel}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${result.isCritical ? ' 🌟 Natural 20!' : ''}${result.isCritFail ? ' 💀 Natural 1!' : ''}`;
 
     dispatch({
         type: 'ADD_MESSAGE',

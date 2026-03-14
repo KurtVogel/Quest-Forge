@@ -662,6 +662,20 @@ export function gameReducer(state, action) {
             };
         }
 
+        case 'ADVANCE_ROUND': {
+            // After a full combat exchange (player + all enemies acted), advance the round
+            // and reset turn to the player so the indicator says "Your turn".
+            const playerIdx = state.combat.turnOrder.findIndex(f => f.type === 'player');
+            return {
+                ...state,
+                combat: {
+                    ...state.combat,
+                    currentTurn: playerIdx >= 0 ? playerIdx : 0,
+                    round: state.combat.round + 1,
+                },
+            };
+        }
+
         // --- Auth ---
         case 'SET_USER':
             return {
