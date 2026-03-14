@@ -231,6 +231,10 @@ export default function ChatPanel() {
         if (!trimmed || isLoading) return;
 
         setInput('');
+        // Reset textarea height to single line
+        if (inputRef.current) {
+            inputRef.current.style.height = 'auto';
+        }
 
         dispatch({
             type: 'ADD_MESSAGE',

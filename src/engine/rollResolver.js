@@ -109,7 +109,7 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
                 : '';
 
             const followUpEvents = await sendToLLM(
-                `[SYSTEM: Dice rolled. Results below. RULES: (1) Narrate the outcome based EXACTLY on these results — do not override, soften, or ignore them. A roll of 3 vs DC 15 is a failure, narrate it as such. (2) Do NOT re-request the same rolls. (3) If an attack hit, request a damage roll via JSON before narrating the damage amount. (4) If enemies or NPCs retaliate or act, request their attack/action rolls via JSON. (5) Never narrate NPC or enemy outcomes without rolling first.]${correctionNote}\n\n${summary}`
+                `[SYSTEM: Dice rolled. Results below. RULES: (1) Narrate ONLY the outcomes of these specific rolls — do NOT repeat or re-describe the setup, actions, or scene you already narrated. The player already read your previous narration. (2) Keep it concise: a sentence or two per roll outcome, not full paragraphs retelling the scene. (3) Do NOT re-request the same rolls. (4) If an attack hit, request a damage roll via JSON before narrating the damage amount. (5) If enemies or NPCs still need to act this round, request their rolls via JSON. (6) Never narrate NPC or enemy outcomes without rolling first.]${correctionNote}\n\n${summary}`
             );
 
             // Handle any follow-up rolls (e.g. DM requests damage rolls after a hit)
