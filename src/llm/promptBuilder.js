@@ -275,7 +275,7 @@ ECONOMY & HEALING:
 - Provide "X_found" and "X_lost" properties where X is "gold", "silver", or "copper" based on the economy action (e.g. looting coins gives X_found, buying a sword requires X_lost). Provide numbers (integers without labels).
 
 PROGRESSION & STATUS EFFECTS:
-- Provide "exp_awarded" as an integer for incremental XP gains (killing enemies, minor objectives).
+- ALWAYS provide "exp_awarded" as an integer when the player defeats enemies, completes objectives, or overcomes challenges. Players expect to see XP after every combat. Typical values: weak enemy 25-50, standard enemy 50-100, tough enemy 100-200, boss 300+, quest completion 100-500.
 - **IMPORTANT — LEVELING UP:** To level the player up, set "level_up": true in the JSON block. Do NOT try to level the player by inflating exp_awarded — the system will ignore XP-based leveling if the threshold is not met. Use "level_up": true whenever the player earns a level (milestone, quest completion, narrative moment, or when the player asks to level up). The system automatically handles HP gain, hit dice, and stat updates. Do NOT narrate HP or stat changes yourself — the system displays them.
 - Provide "rest_taken" as exactly "short" or "long" when the party rests at a camp, inn, or safe zone.
 - Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.

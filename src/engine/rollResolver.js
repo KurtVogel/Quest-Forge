@@ -183,6 +183,7 @@ function resolveDamageRoll(roll, character, dispatch) {
 
         // Apply class level bonus to damage (Fighter: +1 per level beyond 1st)
         const lvlBonus = getLevelBonus(character);
+        const baseMod = result.modifier; // Original modifier from notation (before level bonus)
         if (lvlBonus > 0) {
             result.total += lvlBonus;
             result.modifier += lvlBonus;
@@ -191,7 +192,7 @@ function resolveDamageRoll(roll, character, dispatch) {
         dispatch({ type: 'ADD_ROLL', payload: result });
 
         const lvlLabel = lvlBonus > 0 ? `, level bonus: +${lvlBonus}` : '';
-        const rollMsg = `🎲 **${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${result.modifier ? `, modifier: ${result.modifier >= 0 ? '+' : ''}${result.modifier}` : ''}${lvlLabel})`;
+        const rollMsg = `🎲 **${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${baseMod ? `, modifier: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel})`;
 
         dispatch({
             type: 'ADD_MESSAGE',
