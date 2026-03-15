@@ -112,20 +112,44 @@ export function getSkillModifier(character, skill) {
     const abilityMod = getModifier(character.abilityScores[ability]);
     const profBonus = getProficiencyBonus(character.level);
     const isProficient = character.skillProficiencies?.includes(skill) || false;
+    const hasExpertise = character.expertiseSkills?.includes(skill) || false;
 
-    return abilityMod + (isProficient ? profBonus : 0);
+    const profMultiplier = hasExpertise ? 2 : (isProficient ? 1 : 0);
+    return abilityMod + (profBonus * profMultiplier);
+}
+
+/**
+ * Get full skill data for display: modifier, proficiency, expertise.
+ */
+export function getAllSkills(character) {
+    return Object.entries(SKILL_ABILITIES).map(([skill, ability]) => {
+        const abilityMod = getModifier(character.abilityScores[ability]);
+        const profBonus = getProficiencyBonus(character.level);
+        const isProficient = character.skillProficiencies?.includes(skill) || false;
+        const hasExpertise = character.expertiseSkills?.includes(skill) || false;
+        const profMultiplier = hasExpertise ? 2 : (isProficient ? 1 : 0);
+        const total = abilityMod + (profBonus * profMultiplier);
+
+        return {
+            skill,
+            ability,
+            total,
+            isProficient,
+            hasExpertise,
+        };
+    });
 }
 
 /**
  * Get the level-based combat bonus for a character.
- * Currently Fighter-only: +1 to hit and damage per level beyond 1st.
- * Simulates ASI, Extra Attack, Fighting Style, and feat progression.
+ * Currently Fighter-only: +1 to hit and damage per level beyond 1st, capped at +3.
+ * Abstracts ASI, Extra Attack, Fighting Style, and feat progression.
  * @param {object} character
- * @returns {number} Bonus (0 at level 1, +1 at level 2, etc.)
+ * @returns {number} Bonus (0 at level 1, +1 at level 2, max +3)
  */
 export function getLevelBonus(character) {
     if (!character || character.class !== 'fighter') return 0;
-    return Math.max(0, character.level - 1);
+    return Math.min(3, Math.max(0, character.level - 1));
 }
 
 /**

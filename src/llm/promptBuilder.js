@@ -156,13 +156,14 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)
 
 - Ability checks: d20 + ability modifier + proficiency (if proficient)
+- **Skill checks:** Request the specific skill name (e.g. "stealth", "perception", "athletics"). The system automatically applies the correct ability modifier + proficiency bonus if the player is proficient. The player's skill proficiencies are listed in their character block above.
 - Attack rolls: d20 + ability modifier + proficiency
 - Damage: weapon-specific dice + ability modifier
 - Saving throws: d20 + ability modifier + proficiency (if proficient)
 - Armor Class determines the DC for attack rolls
 - When you need the player to make a check, specify:
   - The type (ability check, saving throw, attack roll)
-  - Which ability score it uses
+  - Which skill or ability score it uses
   - The Difficulty Class (DC) — use standard DCs: Easy 10, Medium 15, Hard 20, Very Hard 25
 - Combat uses initiative (d20 + DEX modifier) to determine turn order
 - Track enemy HP mentally and describe their condition narratively (bloodied, barely standing, etc.)
@@ -274,6 +275,13 @@ ECONOMY & HEALING:
 - Provide "healing" as a positive integer when the player recovers HP (e.g. drinking potion, Second Wind).
 - Provide "X_found" and "X_lost" properties where X is "gold", "silver", or "copper" based on the economy action (e.g. looting coins gives X_found, buying a sword requires X_lost). Provide numbers (integers without labels).
 
+REST & RESOURCES:
+- When the party rests, provide "rest_taken": "short" or "long". The system automatically handles:
+  - **Short rest:** Spends hit dice to heal, resets short-rest abilities (Fighter's Second Wind, Action Surge, etc.)
+  - **Long rest:** Full HP restore, recovers half hit dice, resets ALL abilities, clears minor conditions
+- The character sheet shows current resources (Second Wind, Action Surge, Channel Divinity, etc.) with uses remaining. Reference these in narration — e.g., "You steel yourself and catch your breath" for Second Wind.
+- Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for in-combat healing (potions, spells).
+
 PROGRESSION & STATUS EFFECTS:
 - ALWAYS provide "exp_awarded" as an integer when the player defeats enemies, completes objectives, or overcomes challenges. Players expect to see XP after every combat. Typical values: weak enemy 25-50, standard enemy 50-100, tough enemy 100-200, boss 300+, quest completion 100-500.
 - **IMPORTANT — LEVELING UP:** To level the player up, set "level_up": true in the JSON block. Do NOT try to level the player by inflating exp_awarded — the system will ignore XP-based leveling if the threshold is not met. Use "level_up": true whenever the player earns a level (milestone, quest completion, narrative moment, or when the player asks to level up). The system automatically handles HP gain, hit dice, and stat updates. Do NOT narrate HP or stat changes yourself — the system displays them.
@@ -307,6 +315,28 @@ function buildCharacterBlock(character) {
 
     const deathStatus = character.isDead ? '\n- **STATUS: DEAD** (spirit or successor active)' : '';
 
+    // Skill proficiencies
+    const skillProfs = character.skillProficiencies?.length
+        ? character.skillProficiencies.join(', ')
+        : 'None';
+
+    // Class resources status
+    let resourceLines = '';
+    const classResources = character.classResources || {};
+    if (Object.keys(classResources).length > 0) {
+        const resList = Object.entries(classResources).map(([key, res]) => {
+            const available = res.max - res.used;
+            return `${key}: ${available}/${res.max}`;
+        });
+        resourceLines = `\n- **Resources:** ${resList.join(', ')}`;
+    }
+
+    // Hit dice
+    const hitDice = character.hitDice;
+    const hitDiceLine = hitDice
+        ? `\n- **Hit Dice:** ${hitDice.remaining}/${hitDice.total} d${hitDice.die} (spend on short rest to heal)`
+        : '';
+
     return `## PLAYER CHARACTER
 - **Name:** ${character.name}${deathStatus}
 - **Race:** ${character.race}
@@ -317,8 +347,9 @@ function buildCharacterBlock(character) {
 - **Wealth:** ${character.gold || 0} gp | ${character.silver || 0} sp | ${character.copper || 0} cp
 - **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}${getLevelBonus(character) > 0 ? `\n- **Level Bonus (combat):** +${getLevelBonus(character)} to hit and damage (applied automatically by the system — do NOT add this yourself)` : ''}
 - **Stats:** ${stats}
+- **Skill Proficiencies:** ${skillProfs}
 - **Speed:** ${character.speed} ft
-- **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}
+- **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}${resourceLines}${hitDiceLine}
 ${character.traits?.length ? `- **Traits:** ${character.traits.join(', ')}` : ''}
 ${character.features?.length ? `- **Features:** ${character.features.join(', ')}` : ''}`;
 }

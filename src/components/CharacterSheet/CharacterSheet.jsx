@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
-import { getModifier, formatModifier, getProficiencyBonus } from '../../engine/rules.js';
-import { ABILITY_NAMES, ABILITY_SHORT } from '../../engine/characterUtils.js';
+import { getModifier, formatModifier, getProficiencyBonus, getAllSkills, SKILL_ABILITIES } from '../../engine/rules.js';
+import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
 import './CharacterSheet.css';
@@ -10,6 +10,7 @@ export default function CharacterSheet() {
     const { state } = useGame();
     const { character } = state;
     const [isExpanded, setIsExpanded] = useState(false);
+    const [showSkills, setShowSkills] = useState(false);
 
     if (!character) return null;
 
@@ -24,6 +25,26 @@ export default function CharacterSheet() {
     let hpColor = 'var(--hp-high)';
     if (hpPercent <= 25) hpColor = 'var(--hp-critical)';
     else if (hpPercent <= 50) hpColor = 'var(--hp-low)';
+
+    // Skills data
+    const skills = getAllSkills(character);
+
+    // Group skills by ability for display
+    const skillsByAbility = {};
+    for (const s of skills) {
+        if (!skillsByAbility[s.ability]) skillsByAbility[s.ability] = [];
+        skillsByAbility[s.ability].push(s);
+    }
+
+    // Class resources
+    const classResources = character.classResources || {};
+    const resourceDefs = charClass?.resources || {};
+    const activeResources = Object.entries(resourceDefs).filter(
+        ([key, def]) => character.level >= (def.minLevel || 1) && classResources[key]
+    );
+
+    // Hit dice
+    const hitDice = character.hitDice || { total: character.level, remaining: character.level, die: charClass?.hitDie || 8 };
 
     return (
         <div className="character-sheet">
@@ -40,7 +61,7 @@ export default function CharacterSheet() {
                     <div className="cs-header">
                         <h2 className="cs-name">{character.name}</h2>
                         <div className="cs-subtitle">
-                            {race?.name} {charClass?.name} · Level {character.level}
+                            {race?.name || character.race} {charClass?.name || character.class} · Level {character.level}
                         </div>
                     </div>
 
@@ -111,6 +132,61 @@ export default function CharacterSheet() {
                         })}
                     </div>
 
+                    {/* Class Resources */}
+                    {activeResources.length > 0 && (
+                        <div className="cs-section">
+                            <h4 className="cs-section-title">Resources</h4>
+                            <div className="cs-resources">
+                                {activeResources.map(([key, def]) => {
+                                    const res = classResources[key];
+                                    const available = res.max - res.used;
+                                    return (
+                                        <div key={key} className="cs-resource-row">
+                                            <span className="cs-resource-name">{def.label}</span>
+                                            <span className="cs-resource-pips">
+                                                {Array.from({ length: res.max }, (_, i) => (
+                                                    <span key={i} className={`cs-pip ${i < available ? 'available' : 'spent'}`} />
+                                                ))}
+                                            </span>
+                                            <span className="cs-resource-reset">{def.resetOn} rest</span>
+                                        </div>
+                                    );
+                                })}
+                                <div className="cs-resource-row">
+                                    <span className="cs-resource-name">Hit Dice (d{hitDice.die})</span>
+                                    <span className="cs-resource-count">{hitDice.remaining}/{hitDice.total}</span>
+                                    <span className="cs-resource-reset">long rest</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Skills section */}
+                    <div className="cs-section">
+                        <button className="cs-skills-toggle" onClick={() => setShowSkills(!showSkills)}>
+                            <h4 className="cs-section-title" style={{ margin: 0 }}>Skills</h4>
+                            <span className="cs-dropdown-icon">{showSkills ? '▲' : '▼'}</span>
+                        </button>
+                        {showSkills && (
+                            <div className="cs-skills-list">
+                                {Object.entries(skillsByAbility).map(([ability, abilitySkills]) => (
+                                    <div key={ability} className="cs-skill-group">
+                                        <div className="cs-skill-group-label">{ABILITY_SHORT[ability]}</div>
+                                        {abilitySkills.map(s => (
+                                            <div key={s.skill} className={`cs-skill-row ${s.isProficient ? 'proficient' : ''}`}>
+                                                <span className="cs-skill-prof">
+                                                    {s.hasExpertise ? '◆◆' : s.isProficient ? '◆' : '○'}
+                                                </span>
+                                                <span className="cs-skill-name">{SKILL_LABELS[s.skill] || s.skill}</span>
+                                                <span className="cs-skill-mod">{formatModifier(s.total)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
                     {character.traits?.length > 0 && (
                         <div className="cs-section">
                             <h4 className="cs-section-title">Traits</h4>
@@ -137,4 +213,3 @@ export default function CharacterSheet() {
         </div>
     );
 }
-

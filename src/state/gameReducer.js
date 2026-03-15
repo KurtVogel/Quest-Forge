@@ -4,6 +4,7 @@
 import { computeACFromInventory, getModifier } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
 import { rollDie } from '../engine/dice.js';
+import { buildClassResources, getFeaturesForLevel } from '../engine/characterUtils.js';
 
 /**
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
@@ -222,17 +223,43 @@ export function gameReducer(state, action) {
         }
 
         case 'TAKE_REST': {
-            // "short" heals 25%, "long" heals 100%
             const isLong = action.payload === 'long';
-            const healAmount = isLong
-                ? state.character.maxHP
-                : Math.ceil(state.character.maxHP * 0.25);
-            const healed = Math.min(
-                state.character.maxHP,
-                state.character.currentHP + healAmount
-            );
+            const charClass = CLASSES[state.character.class];
+            const conMod = getModifier(state.character.abilityScores?.constitution || 10);
+            const hitDice = state.character.hitDice || { total: state.character.level, remaining: state.character.level, die: charClass?.hitDie || 8 };
 
-            // Long Rests naturally clear common minor conditions
+            let healAmount;
+            let newHitDice = { ...hitDice };
+
+            if (isLong) {
+                // Long rest: full HP restore, recover half hit dice (minimum 1)
+                healAmount = state.character.maxHP;
+                const recover = Math.max(1, Math.floor(hitDice.total / 2));
+                newHitDice.remaining = Math.min(hitDice.total, hitDice.remaining + recover);
+            } else {
+                // Short rest: spend available hit dice to heal (auto-spend up to full)
+                const canSpend = Math.min(newHitDice.remaining, Math.ceil((state.character.maxHP - state.character.currentHP) / ((hitDice.die / 2) + 1 + conMod || 1)));
+                let rolled = 0;
+                for (let i = 0; i < canSpend; i++) {
+                    rolled += Math.max(1, rollDie(hitDice.die) + conMod);
+                    newHitDice.remaining--;
+                }
+                healAmount = rolled || Math.ceil(state.character.maxHP * 0.25); // Fallback: 25% if no dice left
+            }
+
+            const healed = Math.min(state.character.maxHP, state.character.currentHP + healAmount);
+
+            // Reset class resources based on rest type
+            const currentResources = state.character.classResources || {};
+            const resourceDefs = charClass?.resources || {};
+            const newResources = { ...currentResources };
+            for (const [key, def] of Object.entries(resourceDefs)) {
+                if (currentResources[key] && (isLong || def.resetOn === 'short')) {
+                    newResources[key] = { ...currentResources[key], used: 0 };
+                }
+            }
+
+            // Long Rests clear common minor conditions
             let currentConditions = state.character.conditions || [];
             if (isLong) {
                 currentConditions = currentConditions.filter(c =>
@@ -240,9 +267,27 @@ export function gameReducer(state, action) {
                 );
             }
 
+            // Build rest message
+            const healedAmount = healed - state.character.currentHP;
+            const restMsg = {
+                id: `msg-${Date.now()}-rest`,
+                timestamp: Date.now(),
+                role: 'system',
+                content: isLong
+                    ? `🏕️ **Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}`
+                    : `⛺ **Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.`,
+            };
+
             return {
                 ...state,
-                character: { ...state.character, currentHP: healed, conditions: currentConditions },
+                character: {
+                    ...state.character,
+                    currentHP: healed,
+                    conditions: currentConditions,
+                    classResources: newResources,
+                    hitDice: newHitDice,
+                },
+                messages: [...state.messages, restMsg],
             };
         }
 
@@ -261,12 +306,26 @@ export function gameReducer(state, action) {
                 const newLevel = state.character.level + 1;
                 const newMaxHP = state.character.maxHP + hpGain;
 
-                // Dispatch a level-up notification message
+                // Grant new features for this level
+                const newFeatures = getFeaturesForLevel(state.character.class, newLevel);
+                const existingFeatures = state.character.features || [];
+                const updatedFeatures = [...existingFeatures, ...newFeatures.filter(f => !existingFeatures.includes(f))];
+
+                // Update class resources
+                const updatedResources = buildClassResources(state.character.class, newLevel);
+
+                // Update hit dice
+                const hitDice = state.character.hitDice || { total: state.character.level, remaining: state.character.level, die: hitDie };
+
+                const featureMsg = newFeatures.length > 0
+                    ? `\nNew features: **${newFeatures.join('**, **')}**`
+                    : '';
+
                 const levelUpMsg = {
                     id: `msg-${Date.now()}-lvl`,
                     timestamp: Date.now(),
                     role: 'system',
-                    content: `🎉 **Level Up!** You are now **Level ${newLevel}**! Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${state.character.maxHP} → ${newMaxHP}). Fully healed!`,
+                    content: `🎉 **Level Up!** You are now **Level ${newLevel}**! Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${state.character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`,
                 };
 
                 return {
@@ -276,7 +335,10 @@ export function gameReducer(state, action) {
                         level: newLevel,
                         exp: currentExp - threshold,
                         maxHP: newMaxHP,
-                        currentHP: newMaxHP, // Full heal on level up
+                        currentHP: newMaxHP,
+                        features: updatedFeatures,
+                        classResources: updatedResources,
+                        hitDice: { ...hitDice, total: newLevel, remaining: newLevel },
                     },
                     messages: [...state.messages, levelUpMsg],
                 };
@@ -305,6 +367,25 @@ export function gameReducer(state, action) {
             };
         }
 
+        case 'USE_RESOURCE': {
+            // action.payload = resource key (e.g. 'secondWind', 'actionSurge')
+            const resKey = action.payload;
+            const resources = state.character.classResources || {};
+            const res = resources[resKey];
+            if (!res || res.used >= res.max) return state; // Already spent
+
+            return {
+                ...state,
+                character: {
+                    ...state.character,
+                    classResources: {
+                        ...resources,
+                        [resKey]: { ...res, used: res.used + 1 },
+                    },
+                },
+            };
+        }
+
         case 'LEVEL_UP': {
             const classData = CLASSES[state.character.class];
             const hitDie = classData?.hitDie || 8;
@@ -314,11 +395,26 @@ export function gameReducer(state, action) {
             const newLevel = state.character.level + 1;
             const newMaxHP = state.character.maxHP + hpGain;
 
+            // Grant new features for this level
+            const newFeatures = getFeaturesForLevel(state.character.class, newLevel);
+            const existingFeatures = state.character.features || [];
+            const updatedFeatures = [...existingFeatures, ...newFeatures.filter(f => !existingFeatures.includes(f))];
+
+            // Update class resources (may unlock new abilities at this level)
+            const updatedResources = buildClassResources(state.character.class, newLevel);
+
+            // Update hit dice total
+            const hitDice = state.character.hitDice || { total: state.character.level, remaining: state.character.level, die: hitDie };
+
+            const featureMsg = newFeatures.length > 0
+                ? `\nNew features: **${newFeatures.join('**, **')}**`
+                : '';
+
             const levelUpMsg = {
                 id: `msg-${Date.now()}-lvl`,
                 timestamp: Date.now(),
                 role: 'system',
-                content: `🎉 **Level Up!** You are now **Level ${newLevel}**! Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${state.character.maxHP} → ${newMaxHP}). Fully healed!`,
+                content: `🎉 **Level Up!** You are now **Level ${newLevel}**! Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${state.character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`,
             };
 
             return {
@@ -329,6 +425,9 @@ export function gameReducer(state, action) {
                     exp: action.payload?.bonusExp || 0,
                     maxHP: newMaxHP,
                     currentHP: newMaxHP,
+                    features: updatedFeatures,
+                    classResources: updatedResources,
+                    hitDice: { ...hitDice, total: newLevel, remaining: newLevel },
                 },
                 messages: [...state.messages, levelUpMsg],
             };
@@ -743,13 +842,24 @@ export function gameReducer(state, action) {
             const recalcedAC = loadedCharacter
                 ? computeACFromInventory(loadedInventory, loadedCharacter)
                 : null;
+            // Backfill new character fields for old saves
+            const backfilledCharacter = loadedCharacter ? {
+                skillProficiencies: [],
+                expertiseSkills: [],
+                classResources: loadedCharacter.class ? buildClassResources(loadedCharacter.class, loadedCharacter.level || 1) : {},
+                hitDice: {
+                    total: loadedCharacter.level || 1,
+                    remaining: loadedCharacter.level || 1,
+                    die: CLASSES[loadedCharacter.class]?.hitDie || 8,
+                },
+                ...loadedCharacter,
+                armorClass: recalcedAC,
+            } : loadedCharacter;
             // Validate required state shape
             const validated = validateSaveState(action.payload);
             return {
                 ...validated,
-                character: loadedCharacter
-                    ? { ...loadedCharacter, armorClass: recalcedAC }
-                    : loadedCharacter,
+                character: backfilledCharacter,
                 // Backfill new fields for old saves that don't have them
                 worldFacts: action.payload.worldFacts || [],
                 session: {
