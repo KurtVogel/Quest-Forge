@@ -8,6 +8,8 @@
  * - Mode D: Malformed JSON → repair attempted before falling back to null
  */
 
+import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+
 // All recognized skill and ability names for text roll detection
 const KNOWN_SKILLS = [
     'perception', 'stealth', 'athletics', 'acrobatics', 'investigation',
@@ -25,46 +27,6 @@ const OUTCOME_KEYWORDS = [
     'falls dead', 'you spot', 'you notice', 'you find the', 'critical hit',
     'you successfully', 'your attack lands', 'your blow', 'you strike',
 ];
-
-/**
- * Extract a balanced JSON object from text that contains a given keyword.
- * Uses brace counting instead of greedy regex to avoid grabbing too much.
- * @param {string} text - Full response text
- * @param {string} keyword - Keyword the JSON must contain (e.g. 'requested_rolls')
- * @returns {{ json: string, startIndex: number } | null}
- */
-function extractBalancedJson(text, keyword) {
-    const keyIdx = text.indexOf(keyword);
-    if (keyIdx === -1) return null;
-
-    // Walk backwards to find the opening brace
-    let startIdx = -1;
-    for (let i = keyIdx; i >= 0; i--) {
-        if (text[i] === '{') { startIdx = i; break; }
-    }
-    if (startIdx === -1) return null;
-
-    // Walk forward counting braces to find the matching close
-    let depth = 0;
-    let inString = false;
-    let escape = false;
-    for (let i = startIdx; i < text.length; i++) {
-        const ch = text[i];
-        if (escape) { escape = false; continue; }
-        if (ch === '\\' && inString) { escape = true; continue; }
-        if (ch === '"') { inString = !inString; continue; }
-        if (inString) continue;
-        if (ch === '{') depth++;
-        if (ch === '}') {
-            depth--;
-            if (depth === 0) {
-                return { json: text.slice(startIdx, i + 1), startIndex: startIdx };
-            }
-        }
-    }
-    // Unbalanced — return what we have (repair may fix it)
-    return { json: text.slice(startIdx), startIndex: startIdx };
-}
 
 /**
  * Validate and sanitize combat_start data from the LLM.
@@ -93,24 +55,6 @@ function validateCombatStart(combatStart) {
             ? combatStart.player_initiative
             : Math.floor(Math.random() * 20) + 1,
     };
-}
-
-/**
- * Attempt to repair common JSON formatting issues before giving up.
- * @param {string} str - Raw JSON string
- * @returns {string} Repaired string (may still be invalid)
- */
-function repairJson(str) {
-    // Remove trailing commas before } or ]
-    let repaired = str.replace(/,\s*([\}\]])/g, '$1');
-    // Count open vs close braces/brackets and close unclosed ones
-    const openBraces = (repaired.match(/\{/g) || []).length;
-    const closeBraces = (repaired.match(/\}/g) || []).length;
-    const openBrackets = (repaired.match(/\[/g) || []).length;
-    const closeBrackets = (repaired.match(/\]/g) || []).length;
-    if (openBrackets > closeBrackets) repaired += ']'.repeat(openBrackets - closeBrackets);
-    if (openBraces > closeBraces) repaired += '}'.repeat(openBraces - closeBraces);
-    return repaired;
 }
 
 /**

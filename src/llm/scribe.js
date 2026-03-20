@@ -10,6 +10,7 @@
  */
 
 import { sendMessage } from './adapter.js';
+import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 
 const SCRIBE_MODEL = 'gemini-2.5-flash';
 
@@ -66,10 +67,21 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             userMessage: `Player action: ${playerMessage}\n\nDM narrative: ${dmNarrative}`,
         });
 
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        const jsonMatch = extractBalancedJson(response, 'world_facts');
         if (!jsonMatch) return;
 
-        const extracted = JSON.parse(jsonMatch[0]);
+        let extracted;
+        try {
+            extracted = JSON.parse(jsonMatch.json);
+        } catch (e) {
+            try {
+                extracted = JSON.parse(repairJson(jsonMatch.json));
+                console.warn('[Scribe] ⚠️ JSON repaired before parsing.');
+            } catch (e2) {
+                console.warn('[Scribe] ❌ JSON parse failed after repair:', e2.message);
+                return;
+            }
+        }
 
         if (Array.isArray(extracted.world_facts) && extracted.world_facts.length > 0) {
             dispatch({ type: 'ADD_WORLD_FACTS', payload: extracted.world_facts });
