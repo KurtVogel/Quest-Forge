@@ -27,6 +27,75 @@ const OUTCOME_KEYWORDS = [
 ];
 
 /**
+ * Extract a balanced JSON object from text that contains a given keyword.
+ * Uses brace counting instead of greedy regex to avoid grabbing too much.
+ * @param {string} text - Full response text
+ * @param {string} keyword - Keyword the JSON must contain (e.g. 'requested_rolls')
+ * @returns {{ json: string, startIndex: number } | null}
+ */
+function extractBalancedJson(text, keyword) {
+    const keyIdx = text.indexOf(keyword);
+    if (keyIdx === -1) return null;
+
+    // Walk backwards to find the opening brace
+    let startIdx = -1;
+    for (let i = keyIdx; i >= 0; i--) {
+        if (text[i] === '{') { startIdx = i; break; }
+    }
+    if (startIdx === -1) return null;
+
+    // Walk forward counting braces to find the matching close
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = startIdx; i < text.length; i++) {
+        const ch = text[i];
+        if (escape) { escape = false; continue; }
+        if (ch === '\\' && inString) { escape = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === '{') depth++;
+        if (ch === '}') {
+            depth--;
+            if (depth === 0) {
+                return { json: text.slice(startIdx, i + 1), startIndex: startIdx };
+            }
+        }
+    }
+    // Unbalanced — return what we have (repair may fix it)
+    return { json: text.slice(startIdx), startIndex: startIdx };
+}
+
+/**
+ * Validate and sanitize combat_start data from the LLM.
+ * Ensures every enemy has required fields with sensible defaults.
+ * @param {object|null} combatStart - Raw combat_start from LLM
+ * @returns {object|null} Sanitized combat_start or null if invalid
+ */
+function validateCombatStart(combatStart) {
+    if (!combatStart) return null;
+    if (!Array.isArray(combatStart.enemies) || combatStart.enemies.length === 0) return null;
+
+    const sanitizedEnemies = combatStart.enemies
+        .filter(e => e && typeof e.name === 'string' && e.name.trim())
+        .map(e => ({
+            name: e.name.trim(),
+            hp: (typeof e.hp === 'number' && e.hp > 0) ? e.hp : 20,
+            ac: (typeof e.ac === 'number' && e.ac > 0) ? e.ac : 12,
+            initiative: (typeof e.initiative === 'number') ? e.initiative : Math.floor(Math.random() * 20) + 1,
+        }));
+
+    if (sanitizedEnemies.length === 0) return null;
+
+    return {
+        enemies: sanitizedEnemies,
+        player_initiative: (typeof combatStart.player_initiative === 'number')
+            ? combatStart.player_initiative
+            : Math.floor(Math.random() * 20) + 1,
+    };
+}
+
+/**
  * Attempt to repair common JSON formatting issues before giving up.
  * @param {string} str - Raw JSON string
  * @returns {string} Repaired string (may still be invalid)
@@ -111,19 +180,27 @@ export function parseResponse(response) {
     console.log('[ResponseParser] JSON block found:', !!jsonMatch);
 
     if (!jsonMatch) {
-        // Fallback 1: unfenced JSON containing requested_rolls
-        const looseJsonMatch = response.match(/\{[\s\S]*"requested_rolls"[\s\S]*\}/);
-        if (looseJsonMatch) {
+        // Fallback 1: unfenced JSON containing requested_rolls — use balanced-brace extraction
+        const looseJson = extractBalancedJson(response, 'requested_rolls');
+        if (looseJson) {
             console.warn('[ResponseParser] ⚠️ Found unfenced JSON with requested_rolls — attempting parse.');
             try {
-                const parsed = JSON.parse(looseJsonMatch[0]);
-                const jsonStart = response.indexOf(looseJsonMatch[0]);
-                const narrative = response.slice(0, jsonStart).trim();
+                const parsed = JSON.parse(looseJson.json);
+                const narrative = response.slice(0, looseJson.startIndex).trim();
                 const events = normalizeEvents(parsed);
                 console.log('[ResponseParser] ✅ Parsed unfenced JSON.');
                 return { narrative, events };
             } catch (e) {
-                console.warn('[ResponseParser] Failed to parse unfenced JSON:', e.message);
+                // Try repair before giving up
+                try {
+                    const parsed = JSON.parse(repairJson(looseJson.json));
+                    const narrative = response.slice(0, looseJson.startIndex).trim();
+                    const events = normalizeEvents(parsed);
+                    console.log('[ResponseParser] ✅ Parsed unfenced JSON after repair.');
+                    return { narrative, events };
+                } catch (e2) {
+                    console.warn('[ResponseParser] Failed to parse unfenced JSON:', e2.message);
+                }
             }
         }
 
@@ -213,8 +290,8 @@ function normalizeEvents(raw) {
         questUpdates: Array.isArray(raw.quest_updates) ? raw.quest_updates : [],
         location: raw.location || null,
         healing: typeof raw.healing === 'number' ? raw.healing : 0,
-        // Combat events
-        combatStart: raw.combat_start || null,
+        // Combat events (validated to prevent state corruption)
+        combatStart: validateCombatStart(raw.combat_start),
         combatEnd: !!raw.combat_end,
         enemyUpdates: Array.isArray(raw.enemy_updates) ? raw.enemy_updates : [],
         // Companion events
