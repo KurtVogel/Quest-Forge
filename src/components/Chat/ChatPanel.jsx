@@ -25,6 +25,7 @@ export default function ChatPanel() {
     const lastSummarizedRef = useRef(state.session?.prunedMessageCount || 0);
     const hasPrimedRef = useRef(false); // Ensure session priming only fires once per mount
     const memorySeededRef = useRef(false); // Ensure RAG seeding only fires once per mount
+    const streamBufferRef = useRef(''); // Accumulated streaming text for JSON fence detection
 
     // Use a ref to always read the latest state inside async callbacks
     const stateRef = useRef(state);
@@ -161,6 +162,7 @@ export default function ChatPanel() {
         const messageHistory = buildMessageHistory();
 
         abortControllerRef.current = new AbortController();
+        streamBufferRef.current = '';
 
         const fullResponse = await streamMessage({
             provider: s.settings.llmProvider,
@@ -170,9 +172,16 @@ export default function ChatPanel() {
             messageHistory,
             userMessage,
             onChunk: (chunk) => {
-                // Strip ```json blocks from streaming display to prevent JSON leak
-                const cleaned = chunk.replace(/```json[\s\S]*$/i, '').trimEnd();
-                setStreamingMessage(cleaned);
+                streamBufferRef.current += chunk;
+                const buf = streamBufferRef.current;
+                // Once we hit a ```json fence, freeze the display — all remaining
+                // chunks are JSON data that parseResponse handles on the full text.
+                const fenceIdx = buf.search(/```json/i);
+                if (fenceIdx !== -1) {
+                    setStreamingMessage(buf.slice(0, fenceIdx).trimEnd());
+                } else {
+                    setStreamingMessage(buf);
+                }
             },
             signal: abortControllerRef.current.signal,
         });
