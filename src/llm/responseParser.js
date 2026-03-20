@@ -342,7 +342,10 @@ export function applyEvents(events, dispatch) {
         });
     }
 
-    if (events.combatEnd) dispatch({ type: 'END_COMBAT' });
+    if (events.combatEnd) {
+        // Pass whether the LLM awarded XP so the reducer can apply a fallback
+        dispatch({ type: 'END_COMBAT', payload: { llmAwardedXp: events.expAwarded > 0 } });
+    }
 
     for (const eu of events.enemyUpdates) {
         dispatch({ type: 'UPDATE_ENEMY', payload: eu });

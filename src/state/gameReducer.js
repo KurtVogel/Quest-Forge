@@ -3,7 +3,7 @@
  */
 import { computeACFromInventory, getModifier } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
-import { rollDie } from '../engine/dice.js';
+import { rollDie } from '../engine/dice.ts';
 import { buildClassResources, getFeaturesForLevel } from '../engine/characterUtils.js';
 
 /**
@@ -723,11 +723,43 @@ export function gameReducer(state, action) {
             };
         }
 
-        case 'END_COMBAT':
-            return {
+        case 'END_COMBAT': {
+            const llmAwardedXp = action.payload?.llmAwardedXp || false;
+            let newState = {
                 ...state,
                 combat: { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
             };
+
+            // Client-side XP fallback: if the LLM didn't award XP, estimate from defeated enemies
+            if (!llmAwardedXp && state.character) {
+                const defeatedEnemies = (state.combat.enemies || []).filter(e => e.hp <= 0);
+                const fallbackXp = defeatedEnemies.reduce((sum, e) => {
+                    // Estimate CR from HP and AC as a proxy: (hp + ac*5) / 5, clamped to [10, 300]
+                    const raw = ((e.maxHp || 20) + (e.ac || 12) * 5) / 5;
+                    return sum + Math.max(10, Math.min(300, Math.round(raw)));
+                }, 0);
+
+                if (fallbackXp > 0) {
+                    const enemyNames = defeatedEnemies.map(e => e.name).join(', ');
+                    const battleMsg = {
+                        id: `msg-${Date.now()}-xp`,
+                        timestamp: Date.now(),
+                        role: 'system',
+                        content: `⚔️ **Battle Complete!** Defeated: ${enemyNames || 'enemies'}. Earned **${fallbackXp} XP**.`,
+                    };
+                    newState = {
+                        ...newState,
+                        character: {
+                            ...newState.character,
+                            exp: (newState.character.exp || 0) + fallbackXp,
+                        },
+                        messages: [...newState.messages, battleMsg],
+                    };
+                }
+            }
+
+            return newState;
+        }
 
         case 'UPDATE_ENEMY':
             return {
