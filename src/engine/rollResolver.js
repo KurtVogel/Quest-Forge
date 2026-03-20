@@ -6,7 +6,7 @@
  * auto-triggers follow-up LLM calls so the DM narrates the outcome.
  */
 
-import { rollWithModifier, rollNotation } from './dice.js';
+import { rollWithModifier, rollNotation } from './dice.ts';
 import { getSkillModifier, getModifier, getProficiencyBonus, getLevelBonus, computeACFromInventory, SKILL_ABILITIES } from './rules.js';
 
 /** Maximum depth for recursive follow-up roll handling. */
@@ -54,6 +54,9 @@ export function formatRollSummary(rollResults) {
         }
         if (r.type === 'damage_roll') {
             return `[ROLL RESULT: ${r.description || 'Damage roll'}, ${r.notation}, total damage: ${r.rolled}]`;
+        }
+        if (r.type === 'initiative') {
+            return `[ROLL RESULT: ${r.description || 'Initiative'}, rolled ${r.rolled}]`;
         }
         return `[ROLL RESULT: ${r.description || r.skill + ' check'}, DC ${r.dc}, rolled ${r.rolled} — ${r.success ? 'SUCCESS' : 'FAILURE'}]`;
     }).join('\n');
@@ -245,6 +248,24 @@ function resolvePlayerRoll(roll, character, dispatch) {
 
     const result = rollWithAdvantage(1, 20, mod, label, roll.advantage, roll.disadvantage);
     dispatch({ type: 'ADD_ROLL', payload: result });
+
+    // Initiative is just a number for turn ordering — no DC or pass/fail
+    if (skillName === 'initiative') {
+        const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
+        const rollMsg = `🎲 **${label}**${advLabel}: Rolled **${result.total}**${result.advantageDetail}`;
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: { role: 'system', content: rollMsg },
+        });
+        return {
+            type: 'initiative',
+            skill: roll.skill,
+            dc: null,
+            rolled: result.total,
+            success: true,
+            description: roll.description,
+        };
+    }
 
     const success = result.total >= (roll.dc || 15);
     const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
