@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
-import { rollWithModifier, DIE_TYPES } from '../../engine/dice.js';
+import { rollWithModifier, DIE_TYPES } from '../../engine/dice.ts';
 import './DiceRoller.css';
 
 export default function DicePanel() {

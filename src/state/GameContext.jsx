@@ -1,7 +1,7 @@
 /**
  * React Context provider for game state.
  */
-import { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
+import { createContext, useContext, useReducer, useEffect, useCallback, useState, useRef } from 'react';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { loadSettings, saveSettings, autoSave } from './persistence.js';
 import { PROVIDERS } from '../llm/adapter.js';
@@ -11,8 +11,18 @@ import { saveGameToCloud } from './cloudSync.js';
 
 const GameContext = createContext(null);
 const GameDispatchContext = createContext(null);
+const SaveToastContext = createContext(false);
 
 export function GameProvider({ children }) {
+    const [saveToastVisible, setSaveToastVisible] = useState(false);
+    const saveToastTimer = useRef(null);
+
+    const showSaveToast = useCallback(() => {
+        setSaveToastVisible(true);
+        if (saveToastTimer.current) clearTimeout(saveToastTimer.current);
+        saveToastTimer.current = setTimeout(() => setSaveToastVisible(false), 2500);
+    }, []);
+
     const [state, dispatch] = useReducer(gameReducer, initialGameState, (initial) => {
         // Load persisted settings on init
         const savedSettings = loadSettings();
@@ -79,6 +89,7 @@ export function GameProvider({ children }) {
 
                 // Save locally first
                 autoSave(timestampedState);
+                showSaveToast();
 
                 // Push to cloud if user is logged in
                 if (state.user?.uid) {
@@ -94,10 +105,16 @@ export function GameProvider({ children }) {
     return (
         <GameContext.Provider value={state}>
             <GameDispatchContext.Provider value={dispatch}>
-                {children}
+                <SaveToastContext.Provider value={saveToastVisible}>
+                    {children}
+                </SaveToastContext.Provider>
             </GameDispatchContext.Provider>
         </GameContext.Provider>
     );
+}
+
+export function useSaveToast() {
+    return useContext(SaveToastContext);
 }
 
 /**

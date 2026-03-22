@@ -139,7 +139,7 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         race: raceName,
         class: className,
         level: 1,
-        experience: 0,
+        exp: 0,
         abilityScores: adjustedScores,
         maxHP,
         currentHP: maxHP,

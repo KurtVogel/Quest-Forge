@@ -3,14 +3,26 @@
  * Uses crypto.getRandomValues() so the LLM can never influence results.
  */
 
+export interface DiceRollResult {
+  id: string;
+  timestamp: number;
+  notation: string;
+  dice: { count: number; sides: number };
+  rolls: number[];
+  subtotal: number;
+  modifier: number;
+  total: number;
+  description: string;
+  isCritical: boolean;
+  isCritFail: boolean;
+}
+
 let rollIdCounter = 0;
 
 /**
  * Roll a single die with the given number of sides using crypto-random.
- * @param {number} sides - Number of sides (e.g., 20 for d20)
- * @returns {number} Result between 1 and sides (inclusive)
  */
-export function rollDie(sides) {
+export function rollDie(sides: number): number {
   const array = new Uint32Array(1);
   crypto.getRandomValues(array);
   return (array[0] % sides) + 1;
@@ -18,12 +30,9 @@ export function rollDie(sides) {
 
 /**
  * Roll multiple dice.
- * @param {number} count - Number of dice to roll
- * @param {number} sides - Number of sides per die
- * @returns {number[]} Array of individual roll results
  */
-export function rollDice(count, sides) {
-  const results = [];
+export function rollDice(count: number, sides: number): number[] {
+  const results: number[] = [];
   for (let i = 0; i < count; i++) {
     results.push(rollDie(sides));
   }
@@ -32,13 +41,13 @@ export function rollDice(count, sides) {
 
 /**
  * Roll dice with a modifier and return a detailed result object.
- * @param {number} count - Number of dice
- * @param {number} sides - Sides per die
- * @param {number} [modifier=0] - Flat modifier to add
- * @param {string} [description=''] - Description of what the roll is for
- * @returns {DiceRollResult}
  */
-export function rollWithModifier(count, sides, modifier = 0, description = '') {
+export function rollWithModifier(
+  count: number,
+  sides: number,
+  modifier: number = 0,
+  description: string = ''
+): DiceRollResult {
   const rolls = rollDice(count, sides);
   const subtotal = rolls.reduce((sum, r) => sum + r, 0);
   const total = subtotal + modifier;
@@ -61,7 +70,12 @@ export function rollWithModifier(count, sides, modifier = 0, description = '') {
 /**
  * Roll a skill check (d20 + ability modifier + proficiency if applicable).
  */
-export function rollSkillCheck(abilityModifier, proficiencyBonus = 0, isProficient = false, description = '') {
+export function rollSkillCheck(
+  abilityModifier: number,
+  proficiencyBonus: number = 0,
+  isProficient: boolean = false,
+  description: string = ''
+): DiceRollResult {
   const mod = abilityModifier + (isProficient ? proficiencyBonus : 0);
   return rollWithModifier(1, 20, mod, description || 'Skill Check');
 }
@@ -69,31 +83,34 @@ export function rollSkillCheck(abilityModifier, proficiencyBonus = 0, isProficie
 /**
  * Roll initiative (d20 + DEX modifier).
  */
-export function rollInitiative(dexModifier, description = '') {
+export function rollInitiative(dexModifier: number, description: string = ''): DiceRollResult {
   return rollWithModifier(1, 20, dexModifier, description || 'Initiative');
 }
 
 /**
  * Roll an ability check (d20 + ability modifier).
  */
-export function rollAbilityCheck(abilityModifier, description = '') {
+export function rollAbilityCheck(abilityModifier: number, description: string = ''): DiceRollResult {
   return rollWithModifier(1, 20, abilityModifier, description || 'Ability Check');
 }
 
 /**
  * Roll a saving throw (d20 + ability modifier + proficiency if proficient).
  */
-export function rollSavingThrow(abilityModifier, proficiencyBonus = 0, isProficient = false, description = '') {
+export function rollSavingThrow(
+  abilityModifier: number,
+  proficiencyBonus: number = 0,
+  isProficient: boolean = false,
+  description: string = ''
+): DiceRollResult {
   const mod = abilityModifier + (isProficient ? proficiencyBonus : 0);
   return rollWithModifier(1, 20, mod, description || 'Saving Throw');
 }
 
 /**
  * Parse dice notation string like "2d6+3", "1d20", "3d8-1".
- * @param {string} notation - Dice notation string
- * @returns {{ count: number, sides: number, modifier: number }}
  */
-export function parseNotation(notation) {
+export function parseNotation(notation: string): { count: number; sides: number; modifier: number } {
   const match = String(notation).replace(/\s+/g, '').toLowerCase().match(/^(\d+)d(\d+)([+-]\d+)?$/);
   if (!match) {
     throw new Error(`Invalid dice notation: "${notation}"`);
@@ -108,7 +125,7 @@ export function parseNotation(notation) {
 /**
  * Roll from a notation string like "2d6+3".
  */
-export function rollNotation(notation, description = '') {
+export function rollNotation(notation: string, description: string = ''): DiceRollResult {
   const { count, sides, modifier } = parseNotation(notation);
   return rollWithModifier(count, sides, modifier, description);
 }
@@ -116,19 +133,4 @@ export function rollNotation(notation, description = '') {
 /**
  * Standard die types available.
  */
-export const DIE_TYPES = [4, 6, 8, 10, 12, 20, 100];
-
-/**
- * @typedef {Object} DiceRollResult
- * @property {string} id - Unique roll identifier
- * @property {number} timestamp - Unix timestamp
- * @property {string} notation - Dice notation string
- * @property {{ count: number, sides: number }} dice - Dice configuration
- * @property {number[]} rolls - Individual die results
- * @property {number} subtotal - Sum of dice (before modifier)
- * @property {number} modifier - Flat modifier applied
- * @property {number} total - Final total (subtotal + modifier)
- * @property {string} description - What the roll was for
- * @property {boolean} isCritical - Natural 20 on a d20
- * @property {boolean} isCritFail - Natural 1 on a d20
- */
+export const DIE_TYPES: number[] = [4, 6, 8, 10, 12, 20, 100];

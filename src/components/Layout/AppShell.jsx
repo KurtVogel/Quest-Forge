@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGame } from '../../state/GameContext.jsx';
+import { useGame, useSaveToast } from '../../state/GameContext.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import ChatPanel from '../Chat/ChatPanel.jsx';
 import CharacterSheet from '../CharacterSheet/CharacterSheet.jsx';
@@ -14,6 +14,7 @@ import './Layout.css';
 
 export default function AppShell() {
     const { state, dispatch } = useGame();
+    const saveToastVisible = useSaveToast();
     const [isJournalOpen, setIsJournalOpen] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -117,6 +118,10 @@ export default function AppShell() {
             </div>
 
             <JournalPanel isOpen={isJournalOpen} onClose={() => setIsJournalOpen(false)} />
+
+            {saveToastVisible && (
+                <div className="save-toast">Game saved ✓</div>
+            )}
         </div>
     );
 }

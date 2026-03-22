@@ -712,7 +712,7 @@ export function gameReducer(state, action) {
                     type: 'companion',
                     id: c.id,
                     name: c.name,
-                    initiative: Math.floor(Math.random() * 20) + 1, // Companions roll their own init
+                    initiative: rollDie(20), // Companions roll their own init (crypto-random)
                 })),
                 ...enemies.map(e => ({ type: 'enemy', id: e.id, name: e.name, initiative: e.initiative })),
             ].sort((a, b) => b.initiative - a.initiative);

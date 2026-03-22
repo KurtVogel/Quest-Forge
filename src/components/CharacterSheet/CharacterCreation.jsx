@@ -6,7 +6,7 @@ import { CLASSES, CLASS_LIST } from '../../data/classes.js';
 import { SKILL_ABILITIES } from '../../engine/rules.js';
 import './CharacterSheet.css';
 
-const STEPS = ['name', 'race', 'class', 'stats', 'skills', 'confirm'];
+const STEPS = ['name', 'race', 'class', 'stats', 'skills', 'confirm', 'adventure'];
 
 export default function CharacterCreation() {
     const { dispatch } = useGame();
@@ -16,6 +16,7 @@ export default function CharacterCreation() {
     const [charClass, setCharClass] = useState('');
     const [statAssignment, setStatAssignment] = useState({});
     const [chosenSkills, setChosenSkills] = useState([]);
+    const [adventureName, setAdventureName] = useState('');
 
     const currentStep = STEPS[step];
 
@@ -81,11 +82,12 @@ export default function CharacterCreation() {
         }
 
         // Create session
+        const sessionName = adventureName.trim() || `${name}'s Adventure`;
         dispatch({
             type: 'UPDATE_SESSION',
             payload: {
                 id: `session-${Date.now()}`,
-                name: `${name}'s Adventure`,
+                name: sessionName,
                 createdAt: Date.now(),
                 lastPlayedAt: Date.now(),
             },
@@ -267,6 +269,22 @@ export default function CharacterCreation() {
                             </div>
                         </div>
                     )}
+
+                    {currentStep === 'adventure' && (
+                        <div className="creation-step">
+                            <h3>Name your adventure</h3>
+                            <p className="creation-hint">Give your tale a title — or leave it blank to use the default.</p>
+                            <input
+                                type="text"
+                                className="creation-input"
+                                value={adventureName}
+                                onChange={(e) => setAdventureName(e.target.value)}
+                                placeholder={`${name}'s Adventure`}
+                                autoFocus
+                                maxLength={60}
+                            />
+                        </div>
+                    )}
                 </div>
 
                 <div className="char-creation-actions">
@@ -276,7 +294,7 @@ export default function CharacterCreation() {
                         </button>
                     )}
                     <div style={{ flex: 1 }} />
-                    {currentStep === 'confirm' ? (
+                    {currentStep === 'adventure' ? (
                         <button className="btn btn-primary" onClick={handleCreate}>
                             ⚔️ Begin Adventure
                         </button>

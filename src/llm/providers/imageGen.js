@@ -4,6 +4,22 @@
  */
 
 const IMAGE_CACHE = new Map();
+const IMAGE_CACHE_MAX = 10;
+
+/**
+ * Insert or update a cache entry with LRU eviction (max IMAGE_CACHE_MAX entries).
+ * Deletes the oldest entry when the cache would exceed the limit.
+ */
+function cacheSet(key, value) {
+    // Re-insert to bump to "newest" position
+    if (IMAGE_CACHE.has(key)) {
+        IMAGE_CACHE.delete(key);
+    } else if (IMAGE_CACHE.size >= IMAGE_CACHE_MAX) {
+        // Map preserves insertion order; first key is oldest
+        IMAGE_CACHE.delete(IMAGE_CACHE.keys().next().value);
+    }
+    IMAGE_CACHE.set(key, value);
+}
 
 /**
  * Generate a scene image from a description using Gemini Imagen.
@@ -46,7 +62,7 @@ export async function generateSceneImage(description, apiKey) {
                 const imageB64 = data?.predictions?.[0]?.bytesBase64Encoded;
                 if (imageB64) {
                     const dataUrl = `data:image/png;base64,${imageB64}`;
-                    IMAGE_CACHE.set(cacheKey, dataUrl);
+                    cacheSet(cacheKey, dataUrl);
                     return dataUrl;
                 }
             } else {
@@ -66,7 +82,7 @@ export async function generateSceneImage(description, apiKey) {
         const fallbackUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=800&height=450&nologo=true&seed=${seed}`;
 
         // Return the URL directly to be used as <img src="..."> to avoid CORS blocks on fetch
-        IMAGE_CACHE.set(cacheKey, fallbackUrl);
+        cacheSet(cacheKey, fallbackUrl);
         return fallbackUrl;
     } catch (e) {
         console.warn('Fallback failed:', e);

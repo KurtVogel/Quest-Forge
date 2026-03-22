@@ -1,0 +1,40 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(where firebase:*)",
+      "Bash(npx firebase-tools:*)",
+      "WebFetch(domain:quest-forge-99ab1.web.app)",
+      "Bash(npx firebase:*)",
+      "Bash(firebase deploy:*)",
+      "Bash(./node_modules/.bin/firebase deploy:*)",
+      "Bash(cmd:*)",
+      "Bash(powershell:*)",
+      "Bash(npm install:*)",
+      "Bash(\"/mnt/c/Users/vestu/AppData/Roaming/npm/firebase\" deploy:*)",
+      "Bash(cd \"/c/RPG Game Antigravity\" && powershell -Command \"& 'C:\\\\Users\\\\vestu\\\\AppData\\\\Roaming\\\\npm\\\\firebase.cmd' deploy --only hosting\" 2>&1 | tail -10)",
+      "Bash(cd:*)",
+      "WebSearch",
+      "Bash(claude update:*)",
+      "Bash(claude mcp:*)",
+      "Bash(openclaw status:*)",
+      "Bash(openclaw gateway:*)",
+      "Bash(openclaw channels:*)",
+      "Bash(openclaw doctor:*)",
+      "Bash(openclaw pairing:*)",
+      "Bash(dir \"\\\\tmp\\\\openclaw\\\\\")",
+      "Bash(python3 -c \":*)",
+      "Bash(cat \"/c/users/vestu/.openclaw/credentials/\"*.json)",
+      "Read(//c/Users/vestu/.openclaw//**)",
+      "Read(//c/Users/vestu/.openclaw/**)",
+      "WebFetch(domain:docs.openclaw.ai)",
+      "WebFetch(domain:eastondev.com)",
+      "WebFetch(domain:hackernoon.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:elevenlabs.io)"
+    ]
+  }
+}
