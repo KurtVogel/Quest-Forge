@@ -9,7 +9,6 @@
 // that get replaced by the LLM-suggested ambience type.
 const AMBIENCE_PROFILES = {
     tavern: { label: 'Tavern', keywords: ['tavern', 'inn', 'bar', 'pub', 'alehouse'] },
-    forest: { label: 'Forest', keywords: ['forest', 'wood', 'grove', 'glen', 'trees'] },
     dungeon: { label: 'Dungeon', keywords: ['dungeon', 'cave', 'underground', 'crypt', 'tomb', 'catacomb'] },
     city: { label: 'Town', keywords: ['city', 'town', 'village', 'market', 'square', 'street'] },
     ocean: { label: 'Ocean', keywords: ['ocean', 'sea', 'coast', 'beach', 'harbor', 'port', 'dock', 'ship'] },
@@ -45,7 +44,7 @@ class AmbientAudioEngine {
      */
     detectProfile(location, isInCombat = false) {
         if (isInCombat) return 'combat';
-        if (!location || typeof location !== 'string') return 'forest';
+        if (!location || typeof location !== 'string') return null;
 
         const lower = location.toLowerCase();
         for (const [key, profile] of Object.entries(AMBIENCE_PROFILES)) {
@@ -53,7 +52,7 @@ class AmbientAudioEngine {
                 return key;
             }
         }
-        return 'forest'; // Default ambience
+        return null;
     }
 
     /**
@@ -73,39 +72,6 @@ class AmbientAudioEngine {
         const nodes = [];
 
         switch (profileKey) {
-            case 'forest': {
-                // Wind noise + occasional bird chirps
-                const noise = this._createNoise(ctx, 0.4);
-                const filter = ctx.createBiquadFilter();
-                filter.type = 'lowpass';
-                filter.frequency.value = 800;
-                noise.connect(filter);
-                filter.connect(this.gainNode);
-                nodes.push(noise);
-
-                // Modulate filter for wind gusts
-                const lfo = ctx.createOscillator();
-                lfo.type = 'sine';
-                lfo.frequency.value = 0.1;
-                const lfoGain = ctx.createGain();
-                lfoGain.gain.value = 400;
-                lfo.connect(lfoGain);
-                lfoGain.connect(filter.frequency);
-                lfo.start();
-                nodes.push(lfo);
-
-                // Bird chirps
-                const chirpOsc = ctx.createOscillator();
-                chirpOsc.type = 'sine';
-                const chirpGain = ctx.createGain();
-                chirpGain.gain.value = 0;
-                chirpOsc.connect(chirpGain);
-                chirpGain.connect(this.gainNode);
-                chirpOsc.start();
-                nodes.push(chirpOsc);
-                this._scheduleChirps(ctx, chirpOsc, chirpGain);
-                break;
-            }
             case 'dungeon': {
                 // Low drone + rumble
                 const drone1 = ctx.createOscillator();
@@ -225,23 +191,6 @@ class AmbientAudioEngine {
         };
     }
 
-    _scheduleChirps(ctx, osc, gain) {
-        const scheduleNext = () => {
-            if (!this.isPlaying || this.currentProfile !== 'forest') return;
-            const now = ctx.currentTime;
-            const freq = 3000 + Math.random() * 2000;
-            osc.frequency.setValueAtTime(freq, now);
-            osc.frequency.exponentialRampToValueAtTime(freq * 0.8, now + 0.1);
-
-            gain.gain.setValueAtTime(0, now);
-            gain.gain.linearRampToValueAtTime(0.1, now + 0.05);
-            gain.gain.linearRampToValueAtTime(0, now + 0.1);
-
-            setTimeout(scheduleNext, 2000 + Math.random() * 8000);
-        };
-        scheduleNext();
-    }
-
     _scheduleHeartbeat(ctx, osc, gain) {
         const scheduleNext = () => {
             if (!this.isPlaying || this.currentProfile !== 'combat') return;
@@ -266,7 +215,7 @@ class AmbientAudioEngine {
             try {
                 if (node.stop) node.stop();
                 node.disconnect();
-            } catch (e) { /* already stopped */ }
+            } catch { /* already stopped */ }
         }
         this.oscillators = [];
         this.isPlaying = false;
