@@ -76,7 +76,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Active constraints — synthesized DM reminders from quests, world state, threats
-    const constraints = buildActiveConstraints(quests, worldFacts, character);
+    const constraints = buildActiveConstraints(quests, worldFacts, character, party);
     if (constraints) {
         parts.push(constraints);
     }
@@ -429,7 +429,7 @@ function buildWorldFactsBlock(worldFacts) {
  * Highlights active threats, deadlines, and relationship pressures
  * so the DM can't forget them even in a long session.
  */
-function buildActiveConstraints(quests, worldFacts, character) {
+function buildActiveConstraints(quests, worldFacts, character, party) {
     const reminders = [];
 
     // Active quests as pressure reminders
@@ -450,6 +450,11 @@ function buildActiveConstraints(quests, worldFacts, character) {
     // Character death reminder
     if (character?.isDead) {
         reminders.push(`The player's original character is dead. They are now playing as a spirit/successor. Acknowledge this reality in narration.`);
+    }
+
+    const isSoloLevelOne = character?.level <= 1 && (!party || party.length === 0);
+    if (isSoloLevelOne) {
+        reminders.push(`Level 1 solo encounter safety: keep danger real, but do not force an unavoidable lethal opening battle. Use 0-1 active hostile enemy in combat_start. That enemy's HP should be lower than the player's max HP and AC should be modest. If the scene contains multiple threats, keep extras distant, distracted, negotiating, fleeing, or environmental until the player has an escape, cover, ally help, or tactical choice.`);
     }
 
     if (reminders.length === 0) return '';

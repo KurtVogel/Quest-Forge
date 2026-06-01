@@ -46,6 +46,46 @@ function withInventoryAndAC(state, newInventory) {
     };
 }
 
+function normalizeCombatEnemy(enemy, index) {
+    const hp = Number.isFinite(enemy?.hp) ? enemy.hp : 20;
+    const ac = Number.isFinite(enemy?.ac) ? enemy.ac : 12;
+    const initiative = Number.isFinite(enemy?.initiative)
+        ? enemy.initiative
+        : Math.floor(Math.random() * 20) + 1;
+
+    return {
+        ...enemy,
+        id: `enemy-${Date.now()}-${index}`,
+        name: enemy?.name || `Enemy ${index + 1}`,
+        maxHp: hp,
+        hp,
+        ac,
+        initiative,
+        condition: enemy?.condition || 'healthy',
+    };
+}
+
+function balanceSoloLevelOneEncounter(enemies, character, party) {
+    const isSoloLevelOne = character?.level <= 1 && (!party || party.length === 0);
+    if (!isSoloLevelOne || enemies.length <= 0) return enemies;
+
+    const playerMaxHp = Number.isFinite(character?.maxHP) ? character.maxHP : 10;
+    const maxEnemyHp = Math.max(
+        1,
+        Math.min(playerMaxHp - 1, Math.max(4, Math.ceil(playerMaxHp * 0.75)))
+    );
+
+    return enemies.slice(0, 1).map(enemy => {
+        const cappedHp = Math.max(1, Math.min(enemy.hp, maxEnemyHp));
+        return {
+            ...enemy,
+            hp: cappedHp,
+            maxHp: cappedHp,
+            ac: Math.min(enemy.ac, 13),
+        };
+    });
+}
+
 export const initialGameState = {
     character: null, // Should include gold: 0, silver: 0, copper: 0
     inventory: [],
@@ -632,18 +672,13 @@ export function gameReducer(state, action) {
 
         // --- Combat ---
         case 'START_COMBAT': {
-            const enemies = (action.payload.enemies || []).map((e, i) => ({
-                id: `enemy-${Date.now()}-${i}`,
-                name: e.name || `Enemy ${i + 1}`,
-                maxHp: e.hp || 20,
-                hp: e.hp || 20,
-                ac: e.ac || 12,
-                initiative: e.initiative || Math.floor(Math.random() * 20) + 1,
-                condition: 'healthy',
-                ...e,
-            }));
+            const enemies = balanceSoloLevelOneEncounter(
+                (action.payload?.enemies || []).map(normalizeCombatEnemy),
+                state.character,
+                state.party
+            );
             // Build turn order: player + enemies sorted by initiative
-            const playerInit = action.payload.playerInitiative || 10;
+            const playerInit = action.payload?.playerInitiative || 10;
             const turnOrder = [
                 { type: 'player', name: state.character?.name || 'Player', initiative: playerInit },
                 ...(state.party || []).map(c => ({
