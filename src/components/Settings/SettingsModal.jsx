@@ -10,7 +10,7 @@ import './Settings.css';
 
 export default function SettingsModal() {
     const { state, dispatch } = useGame();
-    const [activeTab, setActiveTab] = useState('llm');
+    const [activeTab, setActiveTab] = useState(state.ui.settingsTab || 'llm');
     const [saves, setSaves] = useState([]);
     const [cloudSaves, setCloudSaves] = useState([]);
     const [saveName, setSaveName] = useState('');
@@ -54,7 +54,7 @@ export default function SettingsModal() {
     }, [state.settings.firebaseConfig]);
 
     const handleClose = () => {
-        dispatch({ type: 'SET_UI', payload: { isSettingsOpen: false } });
+        dispatch({ type: 'SET_UI', payload: { isSettingsOpen: false, settingsTab: null } });
     };
 
     const loadSavesList = async () => {

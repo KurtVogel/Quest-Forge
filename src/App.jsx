@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { GameProvider, useGameState, useGameDispatch, useGame } from './state/GameContext.jsx';
+import { GameProvider, useGameState, useGame } from './state/GameContext.jsx';
 import AppShell from './components/Layout/AppShell.jsx';
 import CharacterCreation from './components/CharacterSheet/CharacterCreation.jsx';
 import SettingsModal from './components/Settings/SettingsModal.jsx';
@@ -82,8 +82,19 @@ function StartScreen() {
     dispatch({ type: 'SET_UI', payload: { isCharacterCreationOpen: true } });
   };
 
-  const hasAnySave = autoSaveData || saves.length > 0 || cloudAutoSave || cloudSaves.length > 0;
+  const handleCloudSync = () => {
+    dispatch({ type: 'SET_UI', payload: { isSettingsOpen: true, settingsTab: 'cloud' } });
+  };
+
   const bestAutoSave = cloudAutoSave || autoSaveData; // Simplified preference
+  const hasFirebaseConfig = !!state.settings.firebaseConfig?.apiKey;
+  const cloudStatus = state.user?.uid
+    ? `Signed in${state.user.email ? ` as ${state.user.email}` : ''}`
+    : hasFirebaseConfig && state.user?.isAuthLoading
+      ? 'Checking cloud sync...'
+      : hasFirebaseConfig
+        ? 'Cloud sync not signed in'
+        : 'Cloud sync not configured';
 
   if (loading) {
     return (
@@ -104,6 +115,12 @@ function StartScreen() {
             Firebase mapped. Checking auth state...
           </div>
         )}
+        <div className="start-cloud-status">
+          <span>{cloudStatus}</span>
+          <button className="start-cloud-btn" onClick={handleCloudSync}>
+            Cloud Sync
+          </button>
+        </div>
 
         <div className="start-buttons">
           {bestAutoSave && (

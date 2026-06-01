@@ -910,6 +910,12 @@ export function gameReducer(state, action) {
             return {
                 ...validated,
                 character: backfilledCharacter,
+                user: state.user,
+                settings: {
+                    ...initialGameState.settings,
+                    ...(action.payload.settings || {}),
+                    ...state.settings,
+                },
                 // Backfill new fields for old saves that don't have them
                 worldFacts: action.payload.worldFacts || [],
                 session: {
