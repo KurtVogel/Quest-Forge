@@ -32,8 +32,18 @@ export default function SettingsModal() {
             setSaves(list);
 
             if (state.user?.uid) {
-                const cList = await listCloudSaves(state.user.uid);
-                if (!isCancelled) setCloudSaves(cList);
+                try {
+                    const cList = await listCloudSaves(state.user.uid);
+                    if (!isCancelled) {
+                        setCloudSaves(cList);
+                        setAuthError('');
+                    }
+                } catch (e) {
+                    if (!isCancelled) {
+                        setCloudSaves([]);
+                        setAuthError('Cloud saves could not be loaded: ' + e.message);
+                    }
+                }
             } else {
                 setCloudSaves([]);
             }
@@ -62,8 +72,14 @@ export default function SettingsModal() {
         const list = await listSaves();
         setSaves(list);
         if (state.user?.uid) {
-            const cList = await listCloudSaves(state.user.uid);
-            setCloudSaves(cList);
+            try {
+                const cList = await listCloudSaves(state.user.uid);
+                setCloudSaves(cList);
+                setAuthError('');
+            } catch (e) {
+                setCloudSaves([]);
+                setAuthError('Cloud saves could not be loaded: ' + e.message);
+            }
         } else {
             setCloudSaves([]);
         }

@@ -13,6 +13,7 @@ function StartScreen() {
   const [saves, setSaves] = useState([]);
   const [cloudAutoSave, setCloudAutoSave] = useState(null);
   const [cloudSaves, setCloudSaves] = useState([]);
+  const [cloudLoadError, setCloudLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [showSaves, setShowSaves] = useState(false);
 
@@ -38,6 +39,7 @@ function StartScreen() {
     async function fetchCloudSaves() {
       if (state.user?.uid) {
         try {
+          setCloudLoadError('');
           const [cAutoSave, cList] = await Promise.all([
             loadGameFromCloud(state.user.uid, '__autosave__'),
             listCloudSaves(state.user.uid)
@@ -46,8 +48,12 @@ function StartScreen() {
           setCloudSaves(cList);
         } catch (e) {
           console.warn('Failed to load cloud saves', e);
+          setCloudLoadError(e.message || 'Failed to load cloud saves');
+          setCloudAutoSave(null);
+          setCloudSaves([]);
         }
       } else {
+        setCloudLoadError('');
         setCloudAutoSave(null);
         setCloudSaves([]);
       }
@@ -121,6 +127,11 @@ function StartScreen() {
             Cloud Sync
           </button>
         </div>
+        {cloudLoadError && (
+          <div className="start-cloud-error">
+            Cloud saves could not be loaded: {cloudLoadError}
+          </div>
+        )}
 
         <div className="start-buttons">
           {bestAutoSave && (

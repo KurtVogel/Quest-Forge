@@ -95,6 +95,18 @@
     background: rgba(212, 175, 55, 0.14);
 }
 
+.start-cloud-error {
+    width: 100%;
+    margin: -0.75rem 0 1rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid rgba(220, 53, 69, 0.35);
+    border-radius: 8px;
+    background: rgba(220, 53, 69, 0.08);
+    color: var(--danger);
+    font-size: 0.76rem;
+    line-height: 1.35;
+}
+
 .start-loading {
     color: var(--text-muted);
     font-size: 1.1rem;

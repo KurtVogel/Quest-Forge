@@ -1,4 +1,4 @@
-import { collection, doc, setDoc, getDoc, getDocs, query, orderBy, limit, deleteDoc } from "firebase/firestore";
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc } from "firebase/firestore";
 import { db } from "../config/firebase.js";
 
 /**
@@ -93,10 +93,7 @@ export async function listCloudSaves(uid) {
 
     try {
         const userSavesRef = collection(db, `users/${uid}/saves`);
-        // Get all saves except autosave, ordered by newest first
-        const q = query(userSavesRef, orderBy("savedAt", "desc"));
-
-        const snapshot = await getDocs(q);
+        const snapshot = await getDocs(userSavesRef);
         const saves = [];
 
         snapshot.forEach((doc) => {
@@ -108,10 +105,10 @@ export async function listCloudSaves(uid) {
             }
         });
 
-        return saves;
+        return saves.sort((a, b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0));
     } catch (e) {
         console.error("☁️ Cloud list failed:", e);
-        return [];
+        throw e;
     }
 }
 
