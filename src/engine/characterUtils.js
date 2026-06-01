@@ -1,7 +1,8 @@
 /**
  * Character creation utilities and helpers.
  */
-import { getModifier, getProficiencyBonus, getMaxHitPoints, getArmorClass } from './rules.js';
+import { getModifier, getProficiencyBonus, getMaxHitPoints, computeACFromInventory } from './rules.js';
+import { rollDice } from './dice.ts';
 import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 
@@ -9,6 +10,8 @@ import { CLASSES } from '../data/classes.js';
  * Standard array for ability score assignment.
  */
 export const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
+
+const STARTING_GOLD_DICE = { count: 2, sides: 20 };
 
 /**
  * Ability score names in standard order.
@@ -126,25 +129,29 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
 
     const adjustedScores = applyRacialBonuses(abilityScores, raceName);
     const conMod = getModifier(adjustedScores.constitution);
-    const dexMod = getModifier(adjustedScores.dexterity);
     const maxHP = getMaxHitPoints(className, 1, conMod, charClass);
+    const inventory = createStartingInventory(className);
+    const startingGoldRolls = rollDice(STARTING_GOLD_DICE.count, STARTING_GOLD_DICE.sides);
+    const startingGold = startingGoldRolls.reduce((sum, roll) => sum + roll, 0);
 
     // Merge racial skill proficiencies with player-chosen skills (deduplicated)
     const racialSkills = race.skillProficiencies || [];
     const allSkills = [...new Set([...racialSkills, ...chosenSkills])];
 
-    return {
+    const character = {
         id: `char-${Date.now()}`,
         name,
         race: raceName,
         class: className,
         level: 1,
         exp: 0,
+        gold: startingGold,
+        silver: 0,
+        copper: 0,
         abilityScores: adjustedScores,
         maxHP,
         currentHP: maxHP,
         tempHP: 0,
-        armorClass: getArmorClass(dexMod),
         proficiencyBonus: getProficiencyBonus(1),
         skillProficiencies: allSkills,
         expertiseSkills: [], // Rogues pick these at level 1 (future UI)
@@ -157,6 +164,12 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         conditions: [],
         notes: '',
         createdAt: Date.now(),
+        startingGoldRolls,
+    };
+
+    return {
+        ...character,
+        armorClass: computeACFromInventory(inventory, character),
     };
 }
 
@@ -184,4 +197,16 @@ export function getDerivedStats(character) {
 export function getStartingEquipment(className) {
     const charClass = CLASSES[className];
     return charClass?.startingEquipment || [];
+}
+
+/**
+ * Build equipped starting inventory for a new character.
+ */
+export function createStartingInventory(className) {
+    return getStartingEquipment(className).map((item, index) => ({
+        id: `item-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+        quantity: 1,
+        equipped: item.type === 'armor' || item.type === 'weapon' || item.type === 'shield' || item.isShield,
+        ...item,
+    }));
 }

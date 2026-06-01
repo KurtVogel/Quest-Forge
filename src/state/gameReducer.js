@@ -146,6 +146,24 @@ export function gameReducer(state, action) {
                 }
             };
 
+        case 'START_CHARACTER': {
+            const inventory = Array.isArray(action.payload.inventory) ? action.payload.inventory : [];
+            const character = {
+                gold: 0, silver: 0, copper: 0,
+                exp: 0,
+                conditions: [],
+                ...action.payload.character,
+            };
+            return {
+                ...state,
+                character: {
+                    ...character,
+                    armorClass: computeACFromInventory(inventory, character),
+                },
+                inventory,
+            };
+        }
+
         case 'UPDATE_CHARACTER':
             return { ...state, character: { ...state.character, ...action.payload } };
 
