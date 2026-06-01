@@ -21,6 +21,7 @@ export default function SettingsModal() {
     });
     const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
     const [authError, setAuthError] = useState('');
+    const [syncStatus, setSyncStatus] = useState('');
 
     useEffect(() => {
         let isCancelled = false;
@@ -161,6 +162,39 @@ export default function SettingsModal() {
     const handleLogout = async () => {
         await logOut();
         dispatch({ type: 'SIGNOUT_USER' });
+    };
+
+    const handleUploadLocalSaves = async () => {
+        if (!state.user?.uid) {
+            setAuthError('Sign in with Google before uploading local saves');
+            return;
+        }
+
+        setAuthError('');
+        setSyncStatus('Uploading local saves...');
+
+        try {
+            const localSaves = await listSaves();
+            if (localSaves.length === 0) {
+                setSyncStatus('No local saves to upload');
+                return;
+            }
+
+            let uploaded = 0;
+            for (const save of localSaves) {
+                const savedState = await loadGame(save.slotId);
+                if (savedState) {
+                    const ok = await saveGameToCloud(state.user.uid, save.slotId, savedState);
+                    if (ok) uploaded++;
+                }
+            }
+
+            await loadSavesList();
+            setSyncStatus(`Uploaded ${uploaded} of ${localSaves.length} local save${localSaves.length === 1 ? '' : 's'} to cloud`);
+        } catch (e) {
+            setSyncStatus('');
+            setAuthError('Cloud upload failed: ' + e.message);
+        }
     };
 
     const selectedProvider = PROVIDERS[state.settings.llmProvider];
@@ -459,6 +493,9 @@ export default function SettingsModal() {
                                             <div style={{ marginBottom: '0.5rem' }}>
                                                 <strong>Logged in as:</strong> {state.user.email || 'Guest'}
                                             </div>
+                                            <button className="btn btn-sm btn-primary" onClick={handleUploadLocalSaves}>
+                                                Upload Local Saves to Cloud
+                                            </button>
                                             <button className="btn btn-sm btn-danger" onClick={handleLogout}>
                                                 Sign Out
                                             </button>
@@ -477,6 +514,11 @@ export default function SettingsModal() {
                             {authError && (
                                 <div className="auth-error" style={{ color: 'var(--danger)', marginTop: '1rem', fontSize: '0.8rem' }}>
                                     {authError}
+                                </div>
+                            )}
+                            {syncStatus && (
+                                <div className="auth-status" style={{ marginTop: '1rem', fontSize: '0.8rem' }}>
+                                    {syncStatus}
                                 </div>
                             )}
                         </div>
