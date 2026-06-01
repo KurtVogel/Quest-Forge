@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getModifier, formatModifier, getProficiencyBonus, getAllSkills, SKILL_ABILITIES } from '../../engine/rules.js';
 import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
+import { getExperienceThreshold } from '../../engine/progression.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
 import './CharacterSheet.css';
@@ -19,7 +20,7 @@ export default function CharacterSheet() {
     const hpPercent = Math.round((character.currentHP / character.maxHP) * 100);
 
     const exp = character.exp || 0;
-    const expThreshold = character.level * 1000;
+    const expThreshold = getExperienceThreshold(character.level);
     const expPercent = Math.min(100, Math.round((exp / expThreshold) * 100));
 
     let hpColor = 'var(--hp-high)';

@@ -143,7 +143,7 @@ export function getAllSkills(character) {
 /**
  * Get the level-based combat bonus for a character.
  * Currently Fighter-only: +1 to hit and damage per level beyond 1st, capped at +3.
- * Abstracts ASI, Extra Attack, Fighting Style, and feat progression.
+ * Abstracts Fighting Style / martial scaling. Extra Attack is handled in rollResolver.js.
  * @param {object} character
  * @returns {number} Bonus (0 at level 1, +1 at level 2, max +3)
  */

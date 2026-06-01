@@ -5,6 +5,7 @@
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT } from '../engine/characterUtils.js';
 import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus } from '../engine/rules.js';
+import { getExperienceThreshold } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
 
@@ -284,7 +285,8 @@ REST & RESOURCES:
 
 PROGRESSION & STATUS EFFECTS:
 - ALWAYS provide "exp_awarded" as an integer when the player defeats enemies, completes objectives, or overcomes challenges. Players expect to see XP after every combat. Typical values: weak enemy 25-50, standard enemy 50-100, tough enemy 100-200, boss 300+, quest completion 100-500.
-- **IMPORTANT — LEVELING UP:** To level the player up, set "level_up": true in the JSON block. Do NOT try to level the player by inflating exp_awarded — the system will ignore XP-based leveling if the threshold is not met. Use "level_up": true whenever the player earns a level (milestone, quest completion, narrative moment, or when the player asks to level up). The system automatically handles HP gain, hit dice, and stat updates. Do NOT narrate HP or stat changes yourself — the system displays them.
+- **LEVELING:** The client owns XP thresholds, HP gain, hit dice, feature unlocks, and level-up messages. Do NOT narrate HP or stat changes yourself. Use "level_up": true only for a deliberate story milestone where the character should gain exactly one level regardless of current XP; otherwise award XP normally and let the system decide.
+- **FIGHTER EXTRA ATTACK:** Fighters of level 5+ make two attack rolls when they take the Attack action. Request one player "attack_roll"; the client will roll both attacks and report both results. If either hits, request separate damage rolls for each hit.
 - Provide "rest_taken" as exactly "short" or "long" when the party rests at a camp, inn, or safe zone.
 - Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.
 
@@ -342,7 +344,7 @@ function buildCharacterBlock(character) {
 - **Race:** ${character.race}
 - **Class:** ${character.class} (Level ${character.level})
 - **HP:** ${character.currentHP}/${character.maxHP}
-- **EXP:** ${character.exp || 0} / ${character.level * 1000} to next level
+- **EXP:** ${character.exp || 0} / ${getExperienceThreshold(character.level)} to next level
 - **AC:** ${character.armorClass}
 - **Wealth:** ${character.gold || 0} gp | ${character.silver || 0} sp | ${character.copper || 0} cp
 - **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}${getLevelBonus(character) > 0 ? `\n- **Level Bonus (combat):** +${getLevelBonus(character)} to hit and damage (applied automatically by the system — do NOT add this yourself)` : ''}

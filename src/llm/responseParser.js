@@ -134,7 +134,7 @@ export function parseResponse(response) {
                 const events = normalizeEvents(parsed);
                 console.log('[ResponseParser] ✅ Parsed unfenced JSON.');
                 return { narrative, events };
-            } catch (e) {
+            } catch {
                 // Try repair before giving up
                 try {
                     const parsed = JSON.parse(repairJson(looseJson.json));
@@ -172,7 +172,7 @@ export function parseResponse(response) {
     let events = null;
     try {
         events = JSON.parse(jsonMatch[1]);
-    } catch (e) {
+    } catch {
         console.warn('[ResponseParser] ❌ JSON parse failed, attempting repair...');
         try {
             events = JSON.parse(repairJson(jsonMatch[1]));
@@ -308,7 +308,7 @@ export function applyEvents(events, dispatch) {
         // Explicit level-up from the DM — skip ADD_EXP to avoid double-leveling
         // if the awarded XP would also cross the threshold. Any bonus XP carries
         // over as progress toward the next level.
-        dispatch({ type: 'LEVEL_UP', payload: { bonusExp: events.expAwarded || 0 } });
+        dispatch({ type: 'LEVEL_UP', payload: { bonusExp: events.expAwarded || 0, reason: 'milestone' } });
     } else if (events.expAwarded > 0) {
         dispatch({ type: 'ADD_EXP', payload: events.expAwarded });
     }

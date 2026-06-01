@@ -4,7 +4,8 @@
 import { computeACFromInventory, getModifier } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
 import { rollDie } from '../engine/dice.ts';
-import { buildClassResources, getFeaturesForLevel } from '../engine/characterUtils.js';
+import { buildClassResources } from '../engine/characterUtils.js';
+import { awardExperience, estimateCombatExperience } from '../engine/progression.js';
 
 /**
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
@@ -310,63 +311,16 @@ export function gameReducer(state, action) {
         }
 
         case 'ADD_EXP': {
-            const currentExp = (state.character.exp || 0) + action.payload;
-            // Simplified leveling: 1000 * current level required to level up.
-            const threshold = state.character.level * 1000;
-
-            if (currentExp >= threshold) {
-                // Class-based HP gain: hit die + CON modifier (minimum 1)
-                const classData = CLASSES[state.character.class];
-                const hitDie = classData?.hitDie || 8;
-                const conMod = getModifier(state.character.abilityScores?.constitution || 10);
-                const hpRoll = rollDie(hitDie);
-                const hpGain = Math.max(1, hpRoll + conMod);
-                const newLevel = state.character.level + 1;
-                const newMaxHP = state.character.maxHP + hpGain;
-
-                // Grant new features for this level
-                const newFeatures = getFeaturesForLevel(state.character.class, newLevel);
-                const existingFeatures = state.character.features || [];
-                const updatedFeatures = [...existingFeatures, ...newFeatures.filter(f => !existingFeatures.includes(f))];
-
-                // Update class resources
-                const updatedResources = buildClassResources(state.character.class, newLevel);
-
-                // Update hit dice
-                const hitDice = state.character.hitDice || { total: state.character.level, remaining: state.character.level, die: hitDie };
-
-                const featureMsg = newFeatures.length > 0
-                    ? `\nNew features: **${newFeatures.join('**, **')}**`
-                    : '';
-
-                const levelUpMsg = {
-                    id: `msg-${Date.now()}-lvl`,
-                    timestamp: Date.now(),
-                    role: 'system',
-                    content: `🎉 **Level Up!** You are now **Level ${newLevel}**! Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${state.character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`,
-                };
-
-                return {
-                    ...state,
-                    character: {
-                        ...state.character,
-                        level: newLevel,
-                        exp: currentExp - threshold,
-                        maxHP: newMaxHP,
-                        currentHP: newMaxHP,
-                        features: updatedFeatures,
-                        classResources: updatedResources,
-                        hitDice: { ...hitDice, total: newLevel, remaining: newLevel },
-                    },
-                    messages: [...state.messages, levelUpMsg],
-                };
-            }
-
+            const result = awardExperience(state.character, action.payload, {
+                reason: action.reason,
+            });
             return {
                 ...state,
-                character: { ...state.character, exp: currentExp },
+                character: result.character,
+                messages: [...state.messages, ...result.messages],
             };
         }
+
 
         case 'ADD_CONDITION': {
             const existing = state.character.conditions || [];
@@ -405,51 +359,17 @@ export function gameReducer(state, action) {
         }
 
         case 'LEVEL_UP': {
-            const classData = CLASSES[state.character.class];
-            const hitDie = classData?.hitDie || 8;
-            const conMod = getModifier(state.character.abilityScores?.constitution || 10);
-            const hpRoll = rollDie(hitDie);
-            const hpGain = Math.max(1, hpRoll + conMod);
-            const newLevel = state.character.level + 1;
-            const newMaxHP = state.character.maxHP + hpGain;
-
-            // Grant new features for this level
-            const newFeatures = getFeaturesForLevel(state.character.class, newLevel);
-            const existingFeatures = state.character.features || [];
-            const updatedFeatures = [...existingFeatures, ...newFeatures.filter(f => !existingFeatures.includes(f))];
-
-            // Update class resources (may unlock new abilities at this level)
-            const updatedResources = buildClassResources(state.character.class, newLevel);
-
-            // Update hit dice total
-            const hitDice = state.character.hitDice || { total: state.character.level, remaining: state.character.level, die: hitDie };
-
-            const featureMsg = newFeatures.length > 0
-                ? `\nNew features: **${newFeatures.join('**, **')}**`
-                : '';
-
-            const levelUpMsg = {
-                id: `msg-${Date.now()}-lvl`,
-                timestamp: Date.now(),
-                role: 'system',
-                content: `🎉 **Level Up!** You are now **Level ${newLevel}**! Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${state.character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`,
-            };
-
+            const result = awardExperience(state.character, action.payload?.bonusExp || 0, {
+                milestoneLevelUp: true,
+                reason: action.payload?.reason || 'milestone',
+            });
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    level: newLevel,
-                    exp: action.payload?.bonusExp || 0,
-                    maxHP: newMaxHP,
-                    currentHP: newMaxHP,
-                    features: updatedFeatures,
-                    classResources: updatedResources,
-                    hitDice: { ...hitDice, total: newLevel, remaining: newLevel },
-                },
-                messages: [...state.messages, levelUpMsg],
+                character: result.character,
+                messages: [...state.messages, ...result.messages],
             };
         }
+
 
         // --- Inventory ---
         case 'ADD_ITEM': {
@@ -751,28 +671,19 @@ export function gameReducer(state, action) {
             // Client-side XP fallback: if the LLM didn't award XP, estimate from defeated enemies
             if (!llmAwardedXp && state.character) {
                 const defeatedEnemies = (state.combat.enemies || []).filter(e => e.hp <= 0);
-                const fallbackXp = defeatedEnemies.reduce((sum, e) => {
-                    // Estimate CR from HP and AC as a proxy: (hp + ac*5) / 5, clamped to [10, 300]
-                    const raw = ((e.maxHp || 20) + (e.ac || 12) * 5) / 5;
-                    return sum + Math.max(10, Math.min(300, Math.round(raw)));
-                }, 0);
+                const fallbackXp = estimateCombatExperience(defeatedEnemies);
 
                 if (fallbackXp > 0) {
                     const enemyNames = defeatedEnemies.map(e => e.name).join(', ');
-                    const battleMsg = {
-                        id: `msg-${Date.now()}-xp`,
-                        timestamp: Date.now(),
-                        role: 'system',
-                        content: `⚔️ **Battle Complete!** Defeated: ${enemyNames || 'enemies'}. Earned **${fallbackXp} XP**.`,
-                    };
+                    const result = awardExperience(newState.character, fallbackXp, {
+                        reason: `battle complete: ${enemyNames || 'enemies'}`,
+                    });
                     newState = {
                         ...newState,
-                        character: {
-                            ...newState.character,
-                            exp: (newState.character.exp || 0) + fallbackXp,
-                        },
-                        messages: [...newState.messages, battleMsg],
+                        character: result.character,
+                        messages: [...newState.messages, ...result.messages],
                     };
+                    return newState;
                 }
             }
 

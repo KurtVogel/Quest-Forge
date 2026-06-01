@@ -35,7 +35,8 @@ export function resolveRolls(requestedRolls, character, dispatch, inventory) {
             if (result) rollResults.push(result);
         } else if (roll.skill && character) {
             const result = resolvePlayerRoll(roll, character, dispatch);
-            if (result) rollResults.push(result);
+            if (Array.isArray(result)) rollResults.push(...result);
+            else if (result) rollResults.push(result);
         }
     }
 
@@ -112,7 +113,7 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
                 : '';
 
             const followUpEvents = await sendToLLM(
-                `[SYSTEM: Dice rolled. Results below. RULES: (1) Narrate ONLY the outcomes of these specific rolls — do NOT repeat or re-describe the setup, actions, or scene you already narrated. The player already read your previous narration. (2) Keep it concise: a sentence or two per roll outcome, not full paragraphs retelling the scene. (3) Do NOT re-request the same rolls. (4) If an attack hit, request a damage roll via JSON before narrating the damage amount. (5) If enemies or NPCs still need to act this round, request their rolls via JSON. (6) Never narrate NPC or enemy outcomes without rolling first.]${correctionNote}\n\n${summary}`
+                `[SYSTEM: Dice rolled. Results below. RULES: (1) Narrate ONLY the outcomes of these specific rolls — do NOT repeat or re-describe the setup, actions, or scene you already narrated. The player already read your previous narration. (2) Keep it concise: a sentence or two per roll outcome, not full paragraphs retelling the scene. (3) Do NOT re-request the same rolls. (4) If one or more attacks hit, request one damage roll per hit via JSON before narrating damage amounts. (5) If enemies or NPCs still need to act this round, request their rolls via JSON. (6) Never narrate NPC or enemy outcomes without rolling first.]${correctionNote}\n\n${summary}`
             );
 
             // Handle any follow-up rolls (e.g. DM requests damage rolls after a hit)
@@ -215,6 +216,31 @@ function resolveDamageRoll(roll, character, dispatch) {
     }
 }
 
+function resolveSinglePlayerAttackRoll(roll, dispatch, mod, label) {
+    const result = rollWithAdvantage(1, 20, mod, label, roll.advantage, roll.disadvantage);
+    dispatch({ type: 'ADD_ROLL', payload: result });
+
+    const dc = roll.dc || 15;
+    const success = result.total >= dc;
+    const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
+    const hitMiss = success ? '💥 **Hit!**' : '🛡️ **Miss!**';
+    const rollMsg = `🎲 **${label}**${advLabel} (vs AC ${dc}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${result.isCritical ? ' 🌟 Natural 20!' : ''}${result.isCritFail ? ' 💀 Natural 1!' : ''}`;
+
+    dispatch({
+        type: 'ADD_MESSAGE',
+        payload: { role: 'system', content: rollMsg },
+    });
+
+    return {
+        type: roll.type || 'attack_roll',
+        skill: roll.skill,
+        dc,
+        rolled: result.total,
+        success,
+        description: label,
+    };
+}
+
 function resolvePlayerRoll(roll, character, dispatch) {
     const skillName = roll.skill.toLowerCase();
 
@@ -244,6 +270,14 @@ function resolvePlayerRoll(roll, character, dispatch) {
         console.warn('[RollResolver] Unknown skill/ability:', skillName, '— rolling plain d20');
         mod = 0;
         label = roll.description || `${skillName} check`;
+    }
+
+    const usesAttackResolution = roll.type === 'attack_roll' || skillName === 'attack';
+    if (usesAttackResolution && character.class === 'fighter' && character.level >= 5) {
+        return [
+            resolveSinglePlayerAttackRoll(roll, dispatch, mod, `${label} (Attack 1)`),
+            resolveSinglePlayerAttackRoll(roll, dispatch, mod, `${label} (Extra Attack)`),
+        ];
     }
 
     const result = rollWithAdvantage(1, 20, mod, label, roll.advantage, roll.disadvantage);
