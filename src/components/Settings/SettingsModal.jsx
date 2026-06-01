@@ -4,7 +4,7 @@ import { PROVIDERS, PROVIDER_LIST } from '../../llm/adapter.js';
 import { PRESETS, PRESET_LIST } from '../../data/presets.js';
 import { saveGame, loadGame, listSaves, deleteSave } from '../../state/persistence.js';
 import { saveGameToCloud, loadGameFromCloud, listCloudSaves } from '../../state/cloudSync.js';
-import { initializeFirebase } from '../../config/firebase.js';
+import { getFirebaseConfigError, initializeFirebase } from '../../config/firebase.js';
 import { signInWithGoogle, logOut } from '../../state/auth.js';
 import './Settings.css';
 
@@ -23,9 +23,28 @@ export default function SettingsModal() {
     const [authError, setAuthError] = useState('');
 
     useEffect(() => {
-        if (activeTab === 'saves') {
-            loadSavesList();
+        let isCancelled = false;
+
+        async function loadActiveSavesList() {
+            const list = await listSaves();
+            if (isCancelled) return;
+            setSaves(list);
+
+            if (state.user?.uid) {
+                const cList = await listCloudSaves(state.user.uid);
+                if (!isCancelled) setCloudSaves(cList);
+            } else {
+                setCloudSaves([]);
+            }
         }
+
+        if (activeTab === 'saves') {
+            loadActiveSavesList();
+        }
+
+        return () => {
+            isCancelled = true;
+        };
     }, [activeTab, state.user?.uid]);
 
     useEffect(() => {
@@ -33,6 +52,10 @@ export default function SettingsModal() {
             initializeFirebase(state.settings.firebaseConfig).then(setIsFirebaseConnected);
         }
     }, [state.settings.firebaseConfig]);
+
+    const handleClose = () => {
+        dispatch({ type: 'SET_UI', payload: { isSettingsOpen: false } });
+    };
 
     const loadSavesList = async () => {
         const list = await listSaves();
@@ -43,10 +66,6 @@ export default function SettingsModal() {
         } else {
             setCloudSaves([]);
         }
-    };
-
-    const handleClose = () => {
-        dispatch({ type: 'SET_UI', payload: { isSettingsOpen: false } });
     };
 
     const handleSave = async () => {
@@ -98,6 +117,13 @@ export default function SettingsModal() {
     };
 
     const handleConnectFirebase = async () => {
+        const configError = getFirebaseConfigError(firebaseConfig);
+        if (configError) {
+            setIsFirebaseConnected(false);
+            setAuthError(configError);
+            return;
+        }
+
         updateSetting('firebaseConfig', firebaseConfig);
         const success = await initializeFirebase(firebaseConfig);
         setIsFirebaseConnected(success);
@@ -108,13 +134,27 @@ export default function SettingsModal() {
     const handleGoogleLogin = async () => {
         try {
             setAuthError('');
+            const configError = getFirebaseConfigError(firebaseConfig);
+            if (configError) {
+                setAuthError(configError);
+                return;
+            }
+            if (!isFirebaseConnected) {
+                setAuthError('Connect Firebase before signing in with Google');
+                return;
+            }
             const user = await signInWithGoogle();
             dispatch({
                 type: 'SET_USER',
                 payload: { uid: user.uid, email: user.email, isGuest: false }
             });
         } catch (e) {
-            setAuthError('Google Sign-In failed: ' + e.message);
+            const message = e.code === 'auth/popup-blocked'
+                ? 'Google Sign-In popup was blocked by the browser. Allow popups for this site and try again.'
+                : e.code === 'auth/unauthorized-domain'
+                    ? 'This domain is not authorized in Firebase Authentication. Add this app domain in Firebase Console > Authentication > Settings > Authorized domains.'
+                    : e.message;
+            setAuthError('Google Sign-In failed: ' + message);
         }
     };
 

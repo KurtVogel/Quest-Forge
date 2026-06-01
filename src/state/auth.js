@@ -6,6 +6,7 @@ import { auth, googleProvider } from "../config/firebase.js";
  */
 export async function signInWithGoogle() {
     if (!auth) throw new Error("Firebase auth not initialized");
+    if (!googleProvider) throw new Error("Google auth provider not initialized");
     try {
         const result = await signInWithPopup(auth, googleProvider);
         return result.user;
