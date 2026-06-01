@@ -59,10 +59,15 @@ export async function saveGame(slotId, gameState) {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         const store = tx.objectStore(STORE_NAME);
 
-        // Trim: drop summarized messages (their content lives in journal entries)
-        const trimmedMessages = (gameState.messages || []).filter(m => !m.summarized);
+        // Local saves keep the FULL message history — IndexedDB has no practical size cap,
+        // so readable scrollback survives a reload. Only the cloud path trims summarized
+        // messages (to stay under Firestore's ~1MB doc limit) — see cloudSync.js.
+        const savedMessages = gameState.messages || [];
         // Cap: keep only the most recent rolls
         const trimmedRolls = (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS);
+        // prunedMessageCount indexes into the array we actually persist. Summarized messages
+        // are always a contiguous prefix, so their count IS the boundary index.
+        const prunedMessageCount = savedMessages.filter(m => m.summarized).length;
 
         const saveData = {
             slotId,
@@ -81,12 +86,12 @@ export async function saveGame(slotId, gameState) {
             questCount: gameState.quests?.filter(q => q.status === 'active')?.length || 0,
             partySize: gameState.party?.length || 0,
             savedAt: Date.now(),
-            messageCount: trimmedMessages.length,
+            messageCount: savedMessages.length,
             // Store the full state minus UI and transient data
             state: {
                 character: gameState.character,
                 inventory: gameState.inventory,
-                messages: trimmedMessages,
+                messages: savedMessages,
                 rollHistory: trimmedRolls,
                 quests: gameState.quests,
                 journal: gameState.journal || [],
@@ -95,7 +100,7 @@ export async function saveGame(slotId, gameState) {
                 party: gameState.party || [],
                 currentLocation: gameState.currentLocation || null,
                 combat: gameState.combat || { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
-                session: gameState.session,
+                session: { ...gameState.session, prunedMessageCount },
                 settings: gameState.settings,
             },
         };

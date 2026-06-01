@@ -867,7 +867,10 @@ export function gameReducer(state, action) {
                 session: {
                     ...initialGameState.session,
                     ...action.payload.session,
-                    prunedMessageCount: action.payload.session?.prunedMessageCount || 0,
+                    // Derive the summarization boundary from the messages actually present
+                    // (summarized messages are a contiguous prefix). This self-heals a stale
+                    // index from a trimmed cloud save or an older save format.
+                    prunedMessageCount: (validated.messages || []).filter(m => m.summarized).length,
                 },
                 npcs: (action.payload.npcs || []).map(npc => ({
                     personality: '',
