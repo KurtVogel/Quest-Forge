@@ -8,7 +8,7 @@ import { CLASSES } from '../../data/classes.js';
 import './CharacterSheet.css';
 
 export default function CharacterSheet() {
-    const { state } = useGame();
+    const { state, dispatch } = useGame();
     const { character } = state;
     const [isExpanded, setIsExpanded] = useState(false);
     const [showSkills, setShowSkills] = useState(false);
@@ -150,6 +150,14 @@ export default function CharacterSheet() {
                                                 ))}
                                             </span>
                                             <span className="cs-resource-reset">{def.resetOn} rest</span>
+                                            <button
+                                                className="cs-resource-use"
+                                                onClick={() => dispatch({ type: 'ACTIVATE_RESOURCE', payload: key })}
+                                                disabled={available <= 0}
+                                                title={available > 0 ? `Use ${def.label}` : `${def.label} spent — rest to recharge`}
+                                            >
+                                                Use
+                                            </button>
                                         </div>
                                     );
                                 })}

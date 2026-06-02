@@ -228,6 +228,9 @@ function normalizeEvents(raw) {
         purchases: Array.isArray(raw.purchases)
             ? raw.purchases
             : (raw.purchase ? [raw.purchase] : []),
+        sells: Array.isArray(raw.sells)
+            ? raw.sells
+            : (raw.sell ? [raw.sell] : []),
         goldFound: typeof raw.gold_found === 'number' ? raw.gold_found : 0,
         goldLost: typeof raw.gold_lost === 'number' ? raw.gold_lost : 0,
         silverFound: typeof raw.silver_found === 'number' ? raw.silver_found : 0,
@@ -271,8 +274,27 @@ function normalizeEvents(raw) {
  * @param {object} events - Normalized events from parseResponse
  * @param {function} dispatch - Game state dispatch function
  */
-export function applyEvents(events, dispatch, getState = null) {
+export function applyEvents(events, dispatch, getState = null, opts = {}) {
     if (!events) return;
+
+    // A roll-setup turn (the player's action that triggered dice) only declares the
+    // structural state the dice need — combat starting. Every *outcome* mutation is
+    // deferred to the post-roll narration. This stops the DM from double-applying state
+    // when it (mis)emits the same fields in both the withheld setup response and the
+    // outcome response — the root cause of duplicate resources_used, and the latent
+    // double-counting of gold, items, XP, and conditions.
+    if (opts.setupPhase) {
+        if (events.combatStart) {
+            dispatch({
+                type: 'START_COMBAT',
+                payload: {
+                    enemies: events.combatStart.enemies || [],
+                    playerInitiative: events.combatStart.player_initiative,
+                },
+            });
+        }
+        return;
+    }
 
     const state = getState?.();
     const resources = state?.character?.classResources || {};
@@ -282,7 +304,12 @@ export function applyEvents(events, dispatch, getState = null) {
     });
     const suppressResourceHealing = unavailableResources.length > 0 && events.healing > 0;
 
+    // Player abilities/consumables are activated through the game UI now, which marks
+    // them spent. If the DM also emits resources_used for one that's already spent, skip
+    // it silently — never fire a contradictory "unavailable" notice for a correct use.
     for (const resourceKey of events.resourcesUsed) {
+        const res = resources[resourceKey];
+        if (res && res.used >= res.max) continue;
         dispatch({ type: 'USE_RESOURCE', payload: resourceKey });
     }
 
@@ -298,9 +325,14 @@ export function applyEvents(events, dispatch, getState = null) {
         const itemData = typeof item === 'string'
             ? { name: item, type: 'gear', weight: 1 }
             : {
-                name: item.name || 'Unknown item',
-                type: item.type || 'gear',
-                weight: item.weight || 1,
+                // Let normalizeItem (in ADD_ITEM) fill name/type/weight from the catalog
+                // when an itemKey or recognizable name matches — only override when the DM
+                // actually specified them. Forcing type:'gear' here hid catalog consumables
+                // (e.g. a Potion of Healing granted by itemKey), so their Use button never
+                // appeared and they displayed as a generic "Unknown item".
+                ...(item.name && { name: item.name }),
+                ...(item.type && { type: item.type }),
+                ...(Number.isFinite(item.weight) && { weight: item.weight }),
                 // Preserve mechanical item properties from LLM/catalog references.
                 ...(item.itemKey && { itemKey: item.itemKey }),
                 ...(item.key && { itemKey: item.key }),
@@ -334,6 +366,10 @@ export function applyEvents(events, dispatch, getState = null) {
 
     for (const purchase of events.purchases) {
         dispatch({ type: 'PURCHASE_ITEM', payload: purchase });
+    }
+
+    for (const sale of events.sells) {
+        dispatch({ type: 'SELL_ITEM', payload: sale });
     }
 
     for (const itemName of events.itemsLost) {

@@ -4,7 +4,7 @@
  */
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT } from '../engine/characterUtils.js';
-import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus } from '../engine/rules.js';
+import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus, isProficientWithWeapon } from '../engine/rules.js';
 import { getExperienceThreshold } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
@@ -50,7 +50,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
 
     // Inventory
     if (inventory && inventory.length > 0) {
-        parts.push(buildInventoryBlock(inventory));
+        parts.push(buildInventoryBlock(inventory, character));
     }
 
     parts.push(buildItemCatalogBlock());
@@ -201,6 +201,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "items_found": [],
   "items_lost": [],
   "purchase": null,
+  "sell": null,
   "gold_found": 0,
   "gold_lost": 0,
   "silver_found": 0,
@@ -266,6 +267,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - Use a standalone "damage_roll" only for damage with NO attack roll (a trap, a fall, an auto-hit effect) — those are not auto-applied; report their HP effect via the JSON as usual.
 - For NPC saves: type is "npc_save". dc is the spell/ability DC.
 - When requesting rolls, send at most one short line of tension — the client withholds pre-roll text and you narrate the full scene after the dice. Do NOT narrate the outcome.
+- **A roll-request response carries ONLY \`requested_rolls\` (plus \`combat_start\` if a fight is just beginning).** Do NOT include outcome fields — \`damage_taken\`, \`healing\`, \`resources_used\`, \`*_found\`/\`*_lost\`, \`exp_awarded\`, \`conditions_gained\`/\`conditions_removed\`, \`quest_updates\`, \`items_found\`/\`items_lost\` — in the same response as a roll request. The client withholds that response and defers those fields; emit them only with the outcome narration after the dice resolve.
 - When you receive "[ROLL RESULT: ...]" messages, narrate the whole beat ONCE based on those results — set the action in a line and deliver the outcome in one cohesive pass. It is the first narration the player sees, so make it self-contained.
 - You CAN request multiple rolls in one response (e.g. two enemies both attacking).
 
@@ -281,9 +283,10 @@ PLAYER DEATH:
 - Continue the world as normal. Death is a narrative event, not a game-over.
 
 ECONOMY & HEALING:
-- Provide "healing" as a positive integer when the player recovers HP (e.g. drinking potion, Second Wind).
+- Provide "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC's healing spell on the player). Potions and class abilities are player-activated through the UI — never emit "healing" for those.
 - Provide "X_found" and "X_lost" properties where X is "gold", "silver", or "copper" based on the economy action (e.g. looting coins gives X_found, buying a sword requires X_lost). Provide numbers (integers without labels).
 - For purchases, prefer one atomic "purchase" event instead of separate money/item fields: { "itemKey": "longsword", "quantity": 1, "priceCp": 1500 }. The client validates funds, subtracts coin, and adds the item. Do NOT also emit gold_lost/silver_lost/copper_lost or items_found for the same purchase.
+- For sales (the player sells loot to a merchant), use one atomic "sell" event: { "itemKey": "longsword", "quantity": 1 } — or identify the item by "name" if it has no catalog key. The client values it (about half the catalog price), removes it, and adds the coin. Set "priceCp" (total) only to model haggling or a stingy/eager buyer. Do NOT also emit items_lost or gold_found/silver_found/copper_found for the same sale.
 - For ordinary equipment loot or shop goods, use catalog "itemKey" values when possible. For unusual story objects, use a plain item name/type.
 - Magic weapon/armor/shield bonuses are supported from +1 to +3 only. Use "magicBonus": 1, 2, or 3. Weapons apply this to both attack and damage; armor and shields apply it to AC. Do not create +4 or higher equipment unless the user explicitly asks for high-power homebrew.
 - The client owns equipped weapon attack/damage and armor/shield AC math. When requesting a player attack roll, identify the target and describe the strike; the client will use the equipped weapon's dice and magic bonus.
@@ -293,8 +296,8 @@ REST & RESOURCES:
   - **Short rest:** Spends hit dice to heal, resets short-rest abilities (Fighter's Second Wind, Action Surge, etc.)
   - **Long rest:** Full HP restore, recovers half hit dice, resets ALL abilities, clears minor conditions
 - The character sheet shows current resources (Second Wind, Action Surge, Channel Divinity, etc.) with uses remaining. Reference these in narration — e.g., "You steel yourself and catch your breath" for Second Wind.
-- When the player spends a limited resource, include its key in "resources_used" (e.g. ["secondWind"]). If a resource shows 0 remaining, it is unavailable: do NOT grant its healing/effect again until the required rest recharges it.
-- Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for in-combat healing (potions, spells).
+- **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "✨ Second Wind — you recover 8 HP" or "🧪 You drink a Potion of Healing"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent but gently note they can trigger it from their character sheet or inventory so the system applies it.
+- Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC casts a healing spell on the player).
 
 PROGRESSION & STATUS EFFECTS:
 - ALWAYS provide "exp_awarded" as an integer when the player defeats enemies, completes objectives, or overcomes challenges. Players expect to see XP after every combat. Typical values: weak enemy 25-50, standard enemy 50-100, tough enemy 100-200, boss 300+, quest completion 100-500.
@@ -375,7 +378,7 @@ These characters are currently traveling with the player. They act in combat and
 ${party.map(c => `- **${c.name}** | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Weapon: ${c.weapon || 'Unarmed'} | Affinity: ${c.affinity}/100`).join('\n')}`;
 }
 
-function buildInventoryBlock(inventory) {
+function buildInventoryBlock(inventory, character) {
     const equipped = inventory.filter(i => i.equipped);
     const carried = inventory.filter(i => !i.equipped);
 
@@ -386,6 +389,9 @@ function buildInventoryBlock(inventory) {
         if (i.isShield || i.type === 'shield') desc += ` [+${(i.shieldAC || 2) + (i.acBonus || 0)} AC shield]`;
         if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}${i.attackBonus ? `, +${i.attackBonus} hit` : ''}${i.damageBonus ? `, +${i.damageBonus} dmg` : ''}]`;
         if (Number.isFinite(i.valueCp)) desc += ` [value ${formatCurrency(i.valueCp)}]`;
+        if (i.type === 'weapon' && character && !isProficientWithWeapon(character, i)) {
+            desc += ` [NOT proficient — attacks lack the proficiency bonus; narrate the unfamiliarity]`;
+        }
         return desc;
     };
 

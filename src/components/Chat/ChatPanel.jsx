@@ -213,7 +213,9 @@ export default function ChatPanel() {
                 events.damageTaken = 0;
                 events.enemyUpdates = [];
             }
-            applyEvents(events, dispatch, () => stateRef.current);
+            // On a withheld roll-setup turn, defer outcome mutations to the post-roll
+            // narration (see applyEvents) so the DM can't double-apply state across the split.
+            applyEvents(events, dispatch, () => stateRef.current, { setupPhase: hideSetup });
             if (events.location) {
                 dispatch({ type: 'SET_LOCATION', payload: events.location });
             }
@@ -222,7 +224,8 @@ export default function ChatPanel() {
         // RAG: embed any new world facts the DM emitted this turn (per response).
         // The per-turn Scribe + narrative embedding run once in handleSend on the FINAL
         // narrated outcome, so they capture results rather than withheld setup text.
-        if (events?.worldFacts?.length > 0 && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
+        // Skip on a withheld setup turn — those facts ride on the outcome narration.
+        if (!hideSetup && events?.worldFacts?.length > 0 && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
             for (const f of events.worldFacts) {
                 addMemory(s.settings.apiKey, f.fact, f.category || 'world_fact').catch(() => {});
             }

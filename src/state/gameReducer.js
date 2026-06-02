@@ -4,7 +4,7 @@
 import { computeACFromInventory, getModifier } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
-import { rollDie } from '../engine/dice.ts';
+import { rollDie, rollNotation } from '../engine/dice.ts';
 import { buildClassResources } from '../engine/characterUtils.js';
 import { awardExperience, estimateCombatExperience } from '../engine/progression.js';
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
@@ -59,6 +59,15 @@ function systemMessage(content) {
 
 function normalizeInventory(inventory = []) {
     return inventory.map(item => normalizeItem(item));
+}
+
+/** Decrement a stackable item by `qty`, removing it entirely when the stack is exhausted. */
+function consumeItem(inventory, itemId, qty = 1) {
+    return inventory.flatMap(item => {
+        if (item.id !== itemId) return [item];
+        const remaining = (item.quantity || 1) - qty;
+        return remaining > 0 ? [{ ...item, quantity: remaining }] : [];
+    });
 }
 
 function normalizeCombatEnemy(enemy, index) {
@@ -417,6 +426,54 @@ export function gameReducer(state, action) {
             };
         }
 
+        case 'ACTIVATE_RESOURCE': {
+            // Player-initiated class ability. The engine marks it spent and applies any
+            // mechanical effect (rolling real dice). The system message informs the DM,
+            // which then narrates the moment without emitting resources_used itself.
+            const resKey = action.payload;
+            const charClass = CLASSES[state.character.class];
+            const def = charClass?.resources?.[resKey];
+            const resources = state.character.classResources || {};
+            const res = resources[resKey];
+            if (!def || !res) return state;
+
+            if (res.used >= res.max) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`⚠️ **${def.label}** is spent — recharge it on a ${def.resetOn} rest.`)],
+                };
+            }
+
+            const remaining = res.max - res.used - 1;
+            const spentResources = { ...resources, [resKey]: { ...res, used: res.used + 1 } };
+            const tail = `${remaining}/${res.max} left until ${def.resetOn} rest.`;
+
+            // Resource with a mechanical heal (Fighter's Second Wind): roll real dice and heal.
+            if (def.effect?.kind === 'heal') {
+                const roll = rollNotation(def.effect.dice || '1d10', def.label);
+                const bonus = def.effect.addLevel ? (state.character.level || 0) : 0;
+                const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total + bonus);
+                const gained = healed - state.character.currentHP;
+                return {
+                    ...state,
+                    character: { ...state.character, currentHP: healed, classResources: spentResources },
+                    rollHistory: [...state.rollHistory, roll],
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`✨ **${def.label}** — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${tail} 🎲 ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`),
+                    ],
+                };
+            }
+
+            // Narrative resource (Action Surge, Channel Divinity, Arcane Recovery): mark
+            // it spent, describe it, and let the DM narrate the effect.
+            return {
+                ...state,
+                character: { ...state.character, classResources: spentResources },
+                messages: [...state.messages, systemMessage(`✨ **${def.label}** — ${def.description}. ${tail}`)],
+            };
+        }
+
         case 'LEVEL_UP': {
             const result = awardExperience(state.character, action.payload?.bonusExp || 0, {
                 milestoneLevelUp: true,
@@ -493,6 +550,84 @@ export function gameReducer(state, action) {
                 ],
             };
             return withInventoryAndAC(nextState, [...state.inventory, newItem]);
+        }
+
+        case 'USE_ITEM': {
+            // Player-initiated consumable use. The engine owns the dice and HP; the
+            // resulting system message also informs the DM (it enters the LLM history),
+            // so the DM narrates the act on its next turn without re-applying anything.
+            const item = state.inventory.find(i => i.id === action.payload);
+            if (!item) return state;
+
+            // Healing consumables resolve fully client-side with real dice.
+            if (item.consumableType === 'healing' && item.healing) {
+                if (state.character.currentHP >= state.character.maxHP) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`❤️ You're already at full health — you keep the ${item.name}.`)],
+                    };
+                }
+                const roll = rollNotation(item.healing, item.name);
+                const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total);
+                const gained = healed - state.character.currentHP;
+                return {
+                    ...state,
+                    character: { ...state.character, currentHP: healed },
+                    inventory: consumeItem(state.inventory, item.id),
+                    rollHistory: [...state.rollHistory, roll],
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`🧪 You drink a **${item.name}** and recover **${gained} HP** (now ${healed}/${state.character.maxHP}). 🎲 ${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`),
+                    ],
+                };
+            }
+
+            // Other consumables have narrative effects — consume one and let the DM react.
+            if (item.type === 'consumable') {
+                return {
+                    ...state,
+                    inventory: consumeItem(state.inventory, item.id),
+                    messages: [...state.messages, systemMessage(`🧴 You use a **${item.name}**.`)],
+                };
+            }
+
+            return state;
+        }
+
+        case 'SELL_ITEM': {
+            // Atomic sale (DM-driven, at a merchant). Find the item, remove the sold
+            // quantity, and add the proceeds. Default proceeds are half the catalog value
+            // per unit; the DM may override priceCp (total) to model haggling, a stingy
+            // fence, or a motivated buyer.
+            const payload = action.payload || {};
+            const ref = payload.itemId || payload.itemKey || payload.name || '';
+            const lc = String(ref).toLowerCase();
+            const item = state.inventory.find(i =>
+                (payload.itemId && i.id === payload.itemId) ||
+                (payload.itemKey && i.itemKey === payload.itemKey) ||
+                (i.name && i.name.toLowerCase() === lc)
+            );
+            if (!item) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`⚠️ Can't sell "${ref}" — it's not in your inventory.`)],
+                };
+            }
+
+            const quantity = Math.max(1, Math.min(item.quantity || 1, payload.quantity || 1));
+            const proceedsCp = Number.isFinite(payload.priceCp)
+                ? Math.max(0, Math.trunc(payload.priceCp))
+                : Math.floor((item.valueCp || 0) / 2) * quantity;
+
+            const nextState = {
+                ...state,
+                character: addCurrency(state.character, { copper: proceedsCp }),
+                messages: [
+                    ...state.messages,
+                    systemMessage(`🪙 Sold ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(proceedsCp)}.`),
+                ],
+            };
+            return withInventoryAndAC(nextState, consumeItem(state.inventory, item.id, quantity));
         }
 
         case 'REMOVE_ITEM': {
