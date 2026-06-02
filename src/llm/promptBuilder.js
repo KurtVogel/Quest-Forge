@@ -188,8 +188,9 @@ When game events occur, include a structured JSON block at the END of your respo
 {
   "requested_rolls": [
     { "type": "skill_check", "skill": "perception", "dc": 15, "description": "Spot the hidden trap", "advantage": false, "disadvantage": false },
-    { "type": "npc_attack", "skill": "attack", "dc": 12, "description": "Goblin slashes with rusty sword", "attacker": "Goblin", "advantage": false, "disadvantage": false },
-    { "type": "damage_roll", "notation": "1d8+3", "description": "Longsword damage" }
+    { "type": "attack_roll", "skill": "attack", "target": "<enemy id from combat state>", "dc": 13, "damage": "1d8+3", "description": "You hew at the goblin" },
+    { "type": "npc_attack", "attacker": "Goblin", "attackerId": "<enemy id>", "target": "player", "dc": 16, "modifier": 4, "damage": "1d6+2", "description": "The goblin slashes back" },
+    { "type": "damage_roll", "notation": "1d8+3", "description": "Out-of-combat damage only — combat damage goes inline above" }
   ],
   "damage_dealt": 0,
   "damage_taken": 0,
@@ -253,10 +254,10 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - **ONLY use the \`requested_rolls\` JSON array.** If you need a roll, you MUST output the JSON block.
 - ALL dice rolls go through requested_rolls — for the player AND for NPCs/enemies.
 - For player checks: type is "skill_check", "saving_throw", or "attack_roll". dc is the target DC.
-- For player damage: type is "damage_roll". Provide the exact dice to roll in the "notation" field based on the player's equipped weapon (e.g. "1d8+3") or spell.
-  - CRITICAL EXCEPTION: If the player scored a critical hit, DOUBLE the number of damage dice requested (e.g. if the weapon is "1d8+3", request "2d8+3").
-- For NPC/enemy/companion attacks: type is "npc_attack". Set dc to the TARGET's AC (either player AC, companion AC, or enemy AC). Include attacker name. **Always include "modifier"** — the NPC's attack bonus (e.g. +4 for a trained guard, +7 for a veteran). If unknown, estimate from the creature's challenge.
-- For companion damage or enemy damage that requires rolling: type is "damage_roll".
+- **In combat, fold damage into the attack** so the system resolves the whole exchange in one pass. On an "attack_roll" (player) or "npc_attack" (foe/companion), add: "target" (who is hit — an enemy id from the combat state, or "player", or a companion id) and "damage" (the weapon/spell dice, e.g. "1d8+3"). The client rolls the attack, and on a hit rolls the damage and applies HP itself. Do NOT send a separate "damage_roll" for combat, and do NOT emit damage_taken/enemy_updates for it.
+  - The client AUTOMATICALLY doubles the damage dice on a natural-20 crit — never pre-double the notation yourself.
+- For NPC/enemy/companion attacks: type is "npc_attack". Set dc to the TARGET's AC. Include the attacker name and "attackerId" (the foe's enemy id) so a foe slain earlier in the round doesn't still swing. **Always include "modifier"** — the attack bonus (e.g. +4 for a trained guard, +7 for a veteran); estimate from the creature if unknown.
+- Use a standalone "damage_roll" only for damage with NO attack roll (a trap, a fall, an auto-hit effect) — those are not auto-applied; report their HP effect via the JSON as usual.
 - For NPC saves: type is "npc_save". dc is the spell/ability DC.
 - When requesting rolls, send at most one short line of tension — the client withholds pre-roll text and you narrate the full scene after the dice. Do NOT narrate the outcome.
 - When you receive "[ROLL RESULT: ...]" messages, narrate the whole beat ONCE based on those results — set the action in a line and deliver the outcome in one cohesive pass. It is the first narration the player sees, so make it self-contained.
@@ -264,7 +265,8 @@ If no game events occurred, just provide the narrative text without any JSON blo
 
 COMBAT NOTES:
 - Use "combat_start" when combat initiates. List all enemies with name, hp, ac, and initiative.
-- Use "enemy_updates" to report damage to enemies. Reference them by the id shown in the combat state.
+- **Resolve a whole round in ONE response.** When the player attacks, also request every still-living foe's response attack in the same requested_rolls block (each with attackerId, target, modifier, and inline damage). The client rolls them in order, skips any foe already slain that round, applies all HP, and you then narrate the exchange once.
+- HP is owned by the client. When a roll result says "HP applied by the system", do NOT also send enemy_updates or damage_taken for it. Use "enemy_updates" only for HP changes the dice did NOT cause (e.g. an enemy drinks a potion).
 - Use "combat_end": true when all enemies are defeated or combat ends.
 
 PLAYER DEATH:
@@ -286,7 +288,7 @@ REST & RESOURCES:
 PROGRESSION & STATUS EFFECTS:
 - ALWAYS provide "exp_awarded" as an integer when the player defeats enemies, completes objectives, or overcomes challenges. Players expect to see XP after every combat. Typical values: weak enemy 25-50, standard enemy 50-100, tough enemy 100-200, boss 300+, quest completion 100-500.
 - **LEVELING:** The client owns XP thresholds, HP gain, hit dice, feature unlocks, and level-up messages. Do NOT narrate HP or stat changes yourself. Use "level_up": true only for a deliberate story milestone where the character should gain exactly one level regardless of current XP; otherwise award XP normally and let the system decide.
-- **FIGHTER EXTRA ATTACK:** Fighters of level 5+ make two attack rolls when they take the Attack action. Request one player "attack_roll"; the client will roll both attacks and report both results. If either hits, request separate damage rolls for each hit.
+- **FIGHTER EXTRA ATTACK:** Fighters of level 5+ make two attack rolls when they take the Attack action. Request one player "attack_roll" with an inline "damage" notation; the client rolls BOTH attacks and rolls/applies damage for each that hits — no separate damage rolls needed.
 - Provide "rest_taken" as exactly "short" or "long" when the party rests at a camp, inn, or safe zone.
 - Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.
 

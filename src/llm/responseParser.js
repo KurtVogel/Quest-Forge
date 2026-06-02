@@ -209,9 +209,13 @@ function normalizeEvents(raw) {
                 description: r.description || '',
                 // NPC attack fields
                 attacker: r.attacker || null,
+                attackerId: r.attackerId || null,
                 modifier: typeof r.modifier === 'number' ? r.modifier : null,
                 // Damage roll field
                 notation: r.notation || null,
+                // Combat (batched-round) fields: who takes the hit + inline weapon damage
+                target: r.target || null,
+                damage: r.damage || null,
                 // Advantage / Disadvantage
                 advantage: !!r.advantage,
                 disadvantage: !!r.disadvantage,

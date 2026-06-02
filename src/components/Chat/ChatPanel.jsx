@@ -143,7 +143,7 @@ export default function ChatPanel() {
      * @param {string} userMessage
      * @param {string} [originalPlayerMessage] - The player's actual input (for Scribe)
      */
-    const sendToLLM = async (userMessage, originalPlayerMessage) => {
+    const sendToLLM = async (userMessage, originalPlayerMessage, opts = {}) => {
         const s = stateRef.current;
 
         // RAG: retrieve memories relevant to the current scene (Gemini only)
@@ -207,6 +207,12 @@ export default function ChatPanel() {
 
         // Apply game events (damage, items, etc.)
         if (events) {
+            // In a batched combat round the client already rolled AND applied HP from the
+            // inline damage, so ignore any HP deltas the DM narrated to avoid double-counting.
+            if (opts.suppressHpEvents) {
+                events.damageTaken = 0;
+                events.enemyUpdates = [];
+            }
             applyEvents(events, dispatch);
             if (events.location) {
                 dispatch({ type: 'SET_LOCATION', payload: events.location });
