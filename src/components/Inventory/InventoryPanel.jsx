@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
+import { formatCurrency } from '../../engine/currency.js';
 import './Inventory.css';
 
 export default function InventoryPanel() {
@@ -107,8 +108,11 @@ function InventoryItem({ item, onToggleEquip, onRemove }) {
                 <span className="inv-item-name">{item.name}</span>
                 {item.quantity > 1 && <span className="inv-item-qty">x{item.quantity}</span>}
                 {item.damage && <span className="inv-item-detail">{item.damage}</span>}
-                {item.baseAC && !item.isShield && <span className="inv-item-detail">AC {item.baseAC}</span>}
-                {(item.type === 'shield' || item.isShield) && <span className="inv-item-detail">+2 AC</span>}
+                {item.attackBonus > 0 && <span className="inv-item-detail">+{item.attackBonus} hit</span>}
+                {item.damageBonus > 0 && <span className="inv-item-detail">+{item.damageBonus} dmg</span>}
+                {item.baseAC && !item.isShield && <span className="inv-item-detail">AC {item.baseAC + (item.acBonus || 0)}</span>}
+                {(item.type === 'shield' || item.isShield) && <span className="inv-item-detail">+{(item.shieldAC || 2) + (item.acBonus || 0)} AC</span>}
+                {Number.isFinite(item.valueCp) && <span className="inv-item-detail">{formatCurrency(item.valueCp)}</span>}
             </div>
             <div className="inv-item-actions">
                 {(item.type === 'weapon' || item.type === 'armor' || item.type === 'shield') && (

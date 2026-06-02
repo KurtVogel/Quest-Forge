@@ -80,3 +80,22 @@ Defined in `classes.js` with `features` (by level), `resources` (tracked per-res
 2. Add a **skill/expertise pick UI** at character creation (`expertiseSkills` currently always empty).
 3. Give Wizard/Cleric **one concrete caster hook** (e.g. per-rest spell slots or spell points) so they aren't purely narrative.
 4. Apply **saving-throw proficiency** in `resolvePlayerRoll` for save-type rolls.
+
+## 2026-06-02 Addendum - Loot / Equipment Math Pass
+
+This audit's race/class roster remains useful, but equipment mechanics changed after the 2026-06-01 refresh:
+
+- `src/data/items.js` now defines a common D&D-style item catalog for weapons, armor, shields, consumables, and gear with copper prices (`valueCp`), weights, damage dice, armor AC, and magic bonus normalization.
+- `src/engine/currency.js` now owns copper-based gp/sp/cp conversion, exact spending, and formatting.
+- `gameReducer.js` now supports `PURCHASE_ITEM`, an atomic transaction that validates funds, subtracts exact currency, and adds the normalized item. If the player cannot afford the purchase, no item is added and no money is lost.
+- `responseParser.js` now parses `purchase` / `purchases` events and preserves richer item fields (`itemKey`, `magicBonus`, `attackBonus`, `damageBonus`, `acBonus`, `valueCp`, `rarity`, etc.).
+- `rules.js` now computes AC from equipped armor/shield objects including magic bonuses, and exposes equipped weapon helpers for attack bonus and damage notation.
+- `rollResolver.js` now uses equipped weapon math for player attacks instead of trusting the DM's damage math. Magic weapons apply to hit and damage; Fighter `getLevelBonus()` is still applied by the engine.
+- `promptBuilder.js` now injects the item catalog and tells the DM to use `itemKey` for ordinary loot/shop goods, `purchase` for buys, and `magicBonus` +1/+2/+3 only.
+
+Balance implications:
+
+1. Magic equipment is mechanically real but capped at +3 to preserve bounded accuracy.
+2. Equipment proficiency is still not enforced; any class can equip any weapon/armor/shield if it enters inventory.
+3. Consumables such as Potion of Healing still require DM-orchestrated events (`damage_roll`/`healing`/`items_lost`); there is no client-side Use Item button yet.
+4. See `loot_inventory_audit.md` for current shop/loot/economy gaps and next recommended work.

@@ -225,6 +225,9 @@ function normalizeEvents(raw) {
         damageTaken: typeof raw.damage_taken === 'number' ? raw.damage_taken : 0,
         itemsFound: Array.isArray(raw.items_found) ? raw.items_found : [],
         itemsLost: Array.isArray(raw.items_lost) ? raw.items_lost : [],
+        purchases: Array.isArray(raw.purchases)
+            ? raw.purchases
+            : (raw.purchase ? [raw.purchase] : []),
         goldFound: typeof raw.gold_found === 'number' ? raw.gold_found : 0,
         goldLost: typeof raw.gold_lost === 'number' ? raw.gold_lost : 0,
         silverFound: typeof raw.silver_found === 'number' ? raw.silver_found : 0,
@@ -298,15 +301,39 @@ export function applyEvents(events, dispatch, getState = null) {
                 name: item.name || 'Unknown item',
                 type: item.type || 'gear',
                 weight: item.weight || 1,
-                // Preserve armor / weapon / shield properties from LLM
+                // Preserve mechanical item properties from LLM/catalog references.
+                ...(item.itemKey && { itemKey: item.itemKey }),
+                ...(item.key && { itemKey: item.key }),
+                ...(item.category && { category: item.category }),
+                ...(item.valueCp !== undefined && { valueCp: item.valueCp }),
+                ...(item.priceCp !== undefined && { priceCp: item.priceCp }),
+                ...(item.rarity && { rarity: item.rarity }),
+                ...(item.description && { description: item.description }),
                 ...(item.baseAC !== undefined && { baseAC: item.baseAC }),
                 ...(item.armorType && { armorType: item.armorType }),
+                ...(item.acBonus !== undefined && { acBonus: item.acBonus }),
+                ...(item.magicBonus !== undefined && { magicBonus: item.magicBonus }),
                 ...(item.isShield && { isShield: true, type: 'shield' }),
+                ...(item.shieldAC !== undefined && { shieldAC: item.shieldAC }),
                 ...(item.damage && { damage: item.damage }),
+                ...(item.damageVersatile && { damageVersatile: item.damageVersatile }),
                 ...(item.damageType && { damageType: item.damageType }),
+                ...(item.attackBonus !== undefined && { attackBonus: item.attackBonus }),
+                ...(item.damageBonus !== undefined && { damageBonus: item.damageBonus }),
+                ...(item.ranged !== undefined && { ranged: !!item.ranged }),
+                ...(item.finesse !== undefined && { finesse: !!item.finesse }),
+                ...(item.thrown !== undefined && { thrown: !!item.thrown }),
+                ...(item.twoHanded !== undefined && { twoHanded: !!item.twoHanded }),
+                ...(item.versatile !== undefined && { versatile: !!item.versatile }),
+                ...(item.consumableType && { consumableType: item.consumableType }),
+                ...(item.healing && { healing: item.healing }),
                 ...(item.quantity && { quantity: item.quantity }),
             };
         dispatch({ type: 'ADD_ITEM', payload: itemData });
+    }
+
+    for (const purchase of events.purchases) {
+        dispatch({ type: 'PURCHASE_ITEM', payload: purchase });
     }
 
     for (const itemName of events.itemsLost) {

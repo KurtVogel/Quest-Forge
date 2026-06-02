@@ -14,7 +14,7 @@
  */
 
 import { rollWithModifier, rollNotation, parseNotation } from './dice.ts';
-import { getSkillModifier, getModifier, getProficiencyBonus, getLevelBonus, computeACFromInventory, SKILL_ABILITIES } from './rules.js';
+import { getSkillModifier, getModifier, getLevelBonus, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, SKILL_ABILITIES } from './rules.js';
 
 /** Maximum depth for recursive follow-up roll handling. */
 const MAX_ROLL_DEPTH = 3;
@@ -100,17 +100,20 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
             const result = resolveDamageRoll(roll, character, dispatch);
             if (result) results.push(result);
         } else if (roll.skill && character) {
-            const resolved = resolvePlayerRoll(roll, character, dispatch);
+            const resolved = resolvePlayerRoll(roll, character, dispatch, inventory);
             const list = Array.isArray(resolved) ? resolved : (resolved ? [resolved] : []);
             const isAttack = roll.type === 'attack_roll' || String(roll.skill).toLowerCase() === 'attack';
+            const damageNotation = isAttack
+                ? getWeaponDamageNotation(character, inventory, roll.damage || '1d4')
+                : roll.damage;
 
             for (const one of list) {
                 results.push(one);
                 // Inline damage for a player attack that hit and names an enemy target.
-                if (one.success && isAttack && roll.damage && roll.target) {
+                if (one.success && isAttack && damageNotation && roll.target) {
                     const enemy = findEnemy(roll.target);
                     if (enemy) {
-                        const dmg = rollAndShowDamage(roll.damage, `Damage to ${enemy.name}`, dispatch, { crit: one.critical, character });
+                        const dmg = rollAndShowDamage(damageNotation, `Damage to ${enemy.name}`, dispatch, { crit: one.critical, character });
                         enemy.hp = Math.max(0, (enemy.hp ?? 0) - dmg.total);
                         Object.assign(one, { damage: dmg.total, targetName: enemy.name, targetHp: enemy.hp, targetMaxHp: enemy.maxHp });
                         appliedHp = true;
@@ -431,7 +434,7 @@ function resolveSinglePlayerAttackRoll(roll, dispatch, mod, label) {
     };
 }
 
-function resolvePlayerRoll(roll, character, dispatch) {
+function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     const skillName = roll.skill.toLowerCase();
 
     const ability = SKILL_ABILITIES[skillName];
@@ -446,15 +449,13 @@ function resolvePlayerRoll(roll, character, dispatch) {
     } else if (isAbilityName) {
         const abilityMod = getModifier(character.abilityScores[skillName]);
         if (isAttackRoll) {
-            mod = abilityMod + getProficiencyBonus(character.level) + getLevelBonus(character);
+            mod = getWeaponAttackBonus(character, inventory);
             label = roll.description || `${skillName} attack`;
         } else {
             mod = abilityMod;
         }
     } else if (skillName === 'attack') {
-        const strMod = getModifier(character.abilityScores.strength);
-        const dexMod = getModifier(character.abilityScores.dexterity);
-        mod = Math.max(strMod, dexMod) + getProficiencyBonus(character.level) + getLevelBonus(character);
+        mod = getWeaponAttackBonus(character, inventory);
         label = roll.description || 'Attack roll';
     } else {
         console.warn('[RollResolver] Unknown skill/ability:', skillName, '— rolling plain d20');

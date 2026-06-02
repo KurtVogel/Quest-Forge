@@ -8,6 +8,8 @@ import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus } from 
 import { getExperienceThreshold } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
+import { describeCatalogForPrompt } from '../data/items.js';
+import { formatCurrency } from '../engine/currency.js';
 
 /**
  * Build the complete system prompt for the LLM.
@@ -50,6 +52,8 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     if (inventory && inventory.length > 0) {
         parts.push(buildInventoryBlock(inventory));
     }
+
+    parts.push(buildItemCatalogBlock());
 
     // Active quests
     if (quests && quests.length > 0) {
@@ -196,6 +200,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "damage_taken": 0,
   "items_found": [],
   "items_lost": [],
+  "purchase": null,
   "gold_found": 0,
   "gold_lost": 0,
   "silver_found": 0,
@@ -278,6 +283,10 @@ PLAYER DEATH:
 ECONOMY & HEALING:
 - Provide "healing" as a positive integer when the player recovers HP (e.g. drinking potion, Second Wind).
 - Provide "X_found" and "X_lost" properties where X is "gold", "silver", or "copper" based on the economy action (e.g. looting coins gives X_found, buying a sword requires X_lost). Provide numbers (integers without labels).
+- For purchases, prefer one atomic "purchase" event instead of separate money/item fields: { "itemKey": "longsword", "quantity": 1, "priceCp": 1500 }. The client validates funds, subtracts coin, and adds the item. Do NOT also emit gold_lost/silver_lost/copper_lost or items_found for the same purchase.
+- For ordinary equipment loot or shop goods, use catalog "itemKey" values when possible. For unusual story objects, use a plain item name/type.
+- Magic weapon/armor/shield bonuses are supported from +1 to +3 only. Use "magicBonus": 1, 2, or 3. Weapons apply this to both attack and damage; armor and shields apply it to AC. Do not create +4 or higher equipment unless the user explicitly asks for high-power homebrew.
+- The client owns equipped weapon attack/damage and armor/shield AC math. When requesting a player attack roll, identify the target and describe the strike; the client will use the equipped weapon's dice and magic bonus.
 
 REST & RESOURCES:
 - When the party rests, provide "rest_taken": "short" or "long". The system automatically handles:
@@ -373,9 +382,10 @@ function buildInventoryBlock(inventory) {
     const formatItem = (i) => {
         let desc = i.name;
         if (i.quantity > 1) desc += ` (x${i.quantity})`;
-        if (i.baseAC && !i.isShield) desc += ` [AC ${i.baseAC}, ${i.armorType || 'unknown'} armor]`;
-        if (i.isShield || i.type === 'shield') desc += ' [+2 AC shield]';
-        if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}]`;
+        if (i.baseAC && !i.isShield) desc += ` [AC ${i.baseAC + (i.acBonus || 0)}, ${i.armorType || 'unknown'} armor]`;
+        if (i.isShield || i.type === 'shield') desc += ` [+${(i.shieldAC || 2) + (i.acBonus || 0)} AC shield]`;
+        if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}${i.attackBonus ? `, +${i.attackBonus} hit` : ''}${i.damageBonus ? `, +${i.damageBonus} dmg` : ''}]`;
+        if (Number.isFinite(i.valueCp)) desc += ` [value ${formatCurrency(i.valueCp)}]`;
         return desc;
     };
 
@@ -387,6 +397,12 @@ function buildInventoryBlock(inventory) {
         block += `\n**Carried:** ${carried.map(formatItem).join(', ')}`;
     }
     return block;
+}
+
+function buildItemCatalogBlock() {
+    return `## ITEM CATALOG (common mechanical items)
+Use itemKey for shop purchases and ordinary loot when possible. Catalog: ${describeCatalogForPrompt()}
+Magic equipment: add "magicBonus": 1, 2, or 3 only.`;
 }
 
 function buildQuestBlock(quests) {

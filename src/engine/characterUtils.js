@@ -5,6 +5,7 @@ import { getModifier, getProficiencyBonus, getMaxHitPoints, computeACFromInvento
 import { rollDice } from './dice.ts';
 import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
+import { normalizeItem } from '../data/items.js';
 
 /**
  * Standard array for ability score assignment.
@@ -207,6 +208,6 @@ export function createStartingInventory(className) {
         id: `item-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
         quantity: 1,
         equipped: item.type === 'armor' || item.type === 'weapon' || item.type === 'shield' || item.isShield,
-        ...item,
+        ...normalizeItem(item),
     }));
 }

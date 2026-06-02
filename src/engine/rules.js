@@ -27,29 +27,36 @@ export function getProficiencyBonus(level) {
  * Calculate Armor Class.
  * @param {number} dexMod - Dexterity modifier
  * @param {object|null} armor - Equipped armor object
- * @param {boolean} hasShield - Whether a shield is equipped
+ * @param {object|boolean|null} shield - Equipped shield object, or true for a plain shield
  * @returns {number} Armor Class
  */
-export function getArmorClass(dexMod, armor = null, hasShield = false) {
+export function getArmorClass(dexMod, armor = null, shield = false) {
     let ac = 10 + dexMod; // Unarmored
 
     if (armor) {
+        const armorBonus = armor.acBonus || armor.magicBonus || 0;
         switch (armor.armorType) {
             case 'light':
-                ac = armor.baseAC + dexMod;
+                ac = armor.baseAC + dexMod + armorBonus;
                 break;
             case 'medium':
-                ac = armor.baseAC + Math.min(dexMod, 2);
+                ac = armor.baseAC + Math.min(dexMod, 2) + armorBonus;
                 break;
             case 'heavy':
-                ac = armor.baseAC;
+                ac = armor.baseAC + armorBonus;
                 break;
             default:
                 ac = 10 + dexMod;
         }
     }
 
-    if (hasShield) ac += 2;
+    if (shield) {
+        if (typeof shield === 'object') {
+            ac += (shield.shieldAC || 2) + (shield.acBonus || shield.magicBonus || 0);
+        } else {
+            ac += 2;
+        }
+    }
     return ac;
 }
 
@@ -68,11 +75,46 @@ export function computeACFromInventory(inventory, character) {
         i.equipped && i.baseAC && !i.isShield && (i.type === 'armor')
     ) || null;
 
-    const hasShield = inventory.some(i =>
+    const equippedShield = inventory.find(i =>
         i.equipped && (i.type === 'shield' || i.isShield)
-    );
+    ) || null;
 
-    return getArmorClass(dexMod, equippedArmor, hasShield);
+    return getArmorClass(dexMod, equippedArmor, equippedShield);
+}
+
+export function getEquippedWeapon(inventory = []) {
+    return inventory.find(i => i.equipped && i.type === 'weapon') || null;
+}
+
+export function getWeaponAbilityModifier(character, weapon = null) {
+    const strengthMod = getModifier(character.abilityScores.strength);
+    const dexMod = getModifier(character.abilityScores.dexterity);
+    if (weapon?.ranged && !weapon?.thrown) return dexMod;
+    if (weapon?.finesse) return Math.max(strengthMod, dexMod);
+    return strengthMod;
+}
+
+export function getWeaponAttackBonus(character, inventory = []) {
+    const weapon = getEquippedWeapon(inventory);
+    const abilityMod = getWeaponAbilityModifier(character, weapon);
+    return abilityMod
+        + getProficiencyBonus(character.level)
+        + getLevelBonus(character)
+        + (weapon?.attackBonus || weapon?.magicBonus || 0);
+}
+
+export function getWeaponDamageNotation(character, inventory = [], fallback = '1d4') {
+    const weapon = getEquippedWeapon(inventory);
+    const dice = weapon?.damage || fallback;
+    const abilityMod = getWeaponAbilityModifier(character, weapon);
+    const itemBonus = weapon?.damageBonus || weapon?.magicBonus || 0;
+    const modifier = abilityMod + itemBonus;
+
+    if (!/^\d+d\d+/i.test(String(dice))) {
+        return fallback;
+    }
+
+    return `${dice}${modifier >= 0 ? '+' : ''}${modifier}`;
 }
 
 /**

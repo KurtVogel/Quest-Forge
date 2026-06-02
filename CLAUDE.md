@@ -43,12 +43,12 @@ src/
   state/       gameReducer.js (~40 actions; source of truth), GameContext.jsx,
                persistence.js (localStorage + IndexedDB), cloudSync.js (Firestore), auth.js
   engine/      dice.ts (crypto dice), rules.js (5e math: modifiers, AC, skills, getLevelBonus),
-               progression.js (XP / leveling / HP), characterUtils.js (character creation),
+               currency.js, progression.js (XP / leveling / HP), characterUtils.js (character creation),
                rollResolver.js, worldJournal.js, vectorMemory.js (RAG), ambientAudio.js
   llm/         adapter.js (provider routing + model list), promptBuilder.js (system prompt),
                responseParser.js (event extraction), scribe.js (background extractor),
                providers/{gemini,openai,imageGen}.js, utils/jsonExtractor.js
-  data/        classes.js, races.js, presets.js
+  data/        classes.js, races.js, items.js, presets.js
   components/   Chat (orchestrator), Combat, CharacterSheet, Inventory, Quests, Journal,
                Companions, DiceRoller, SceneArt, Settings, Layout, AmbientAudio
   config/      firebase.js (user-supplied config)
@@ -64,6 +64,7 @@ src/
   Plus the **Scribe** (`scribe.js`): a silent Gemini-Flash pass after each turn that extracts world facts / NPC updates. The DM itself only ever sees a 20-message sliding window (`MESSAGE_WINDOW` in `ChatPanel.jsx`).
 - **Combat:** `START_COMBAT` builds the initiative order; enemy HP/condition are tracked client-side. Attacks carry inline `target`+`damage`, so `resolveRolls` (`rollResolver.js`) rolls to-hit **and** damage and applies HP for a whole round in one pass — a foe slain mid-round can't swing back, and the DM narrates once (any HP events it re-emits are suppressed to avoid double-counting). Attacks without inline fields fall back to the older two-step flow. `END_COMBAT` has a client-side XP fallback if the DM forgets `exp_awarded`. Encounter difficulty for low-level solo play is steered by the system prompt (no mechanical enemy trimming), so the tracked combatants always match the narration 1:1.
 - **Progression:** `progression.js` owns XP thresholds (`level × 1000`), rolled HP-on-level-up, and feature unlocks. Fighter is the only class with a coded combat bonus (`getLevelBonus`, capped at +3) and Extra Attack at L5.
+- **Loot/inventory:** `items.js` is the catalog for common weapons, armor, shields, consumables, and D&D-style prices. Purchases should use the `purchase` event so `gameReducer.js` validates funds and atomically subtracts coin/adds items. Magic equipment supports `magicBonus` +1 to +3; weapon bonuses affect engine-owned attack/damage rolls, armor/shield bonuses affect computed AC.
 - **Config & secrets:** no `.env`. The player enters their **LLM API key in-app** (Settings → AI Provider); it lives in `localStorage` via `persistence.js`. Cloud sync is **bring-your-own-Firebase** (Settings → Cloud Sync) — `quest-forge-99ab1` is only the hosting target, not the user-data backend. Cloud saves live at Firestore `users/{uid}/saves/{slotId}`.
 - **Providers:** Gemini (default, `gemini-3.1-pro-preview`) and OpenAI. Embeddings (RAG) and image generation (SceneArt) are **Gemini-only**.
 

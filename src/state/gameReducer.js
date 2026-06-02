@@ -3,9 +3,11 @@
  */
 import { computeACFromInventory, getModifier } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
+import { normalizeItem } from '../data/items.js';
 import { rollDie } from '../engine/dice.ts';
 import { buildClassResources } from '../engine/characterUtils.js';
 import { awardExperience, estimateCombatExperience } from '../engine/progression.js';
+import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 
 /**
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
@@ -44,6 +46,19 @@ function withInventoryAndAC(state, newInventory) {
             ? { ...state.character, armorClass: ac }
             : state.character,
     };
+}
+
+function systemMessage(content) {
+    return {
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: Date.now(),
+        role: 'system',
+        content,
+    };
+}
+
+function normalizeInventory(inventory = []) {
+    return inventory.map(item => normalizeItem(item));
 }
 
 function normalizeCombatEnemy(enemy, index) {
@@ -191,56 +206,53 @@ export function gameReducer(state, action) {
         case 'ADD_GOLD':
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    gold: (state.character.gold || 0) + action.payload,
-                },
+                character: addCurrency(state.character, { gold: action.payload }),
             };
 
-        case 'REMOVE_GOLD':
+        case 'REMOVE_GOLD': {
+            const result = spendCurrency(state.character, { gold: action.payload });
+            if (!result.paid) {
+                return { ...state, messages: [...state.messages, systemMessage(`⚠️ Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
+            }
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    gold: Math.max(0, (state.character.gold || 0) - action.payload),
-                },
+                character: result.character,
             };
+        }
 
         case 'ADD_SILVER':
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    silver: (state.character.silver || 0) + action.payload,
-                },
+                character: addCurrency(state.character, { silver: action.payload }),
             };
 
-        case 'REMOVE_SILVER':
+        case 'REMOVE_SILVER': {
+            const result = spendCurrency(state.character, { silver: action.payload });
+            if (!result.paid) {
+                return { ...state, messages: [...state.messages, systemMessage(`⚠️ Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
+            }
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    silver: Math.max(0, (state.character.silver || 0) - action.payload),
-                },
+                character: result.character,
             };
+        }
 
         case 'ADD_COPPER':
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    copper: (state.character.copper || 0) + action.payload,
-                },
+                character: addCurrency(state.character, { copper: action.payload }),
             };
 
-        case 'REMOVE_COPPER':
+        case 'REMOVE_COPPER': {
+            const result = spendCurrency(state.character, { copper: action.payload });
+            if (!result.paid) {
+                return { ...state, messages: [...state.messages, systemMessage(`⚠️ Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
+            }
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    copper: Math.max(0, (state.character.copper || 0) - action.payload),
-                },
+                character: result.character,
             };
+        }
 
         case 'TAKE_DAMAGE': {
             const newHP = Math.max(0, state.character.currentHP - action.payload);
@@ -425,7 +437,7 @@ export function gameReducer(state, action) {
                 id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                 equipped: false,
                 quantity: 1,
-                ...action.payload,
+                ...normalizeItem(action.payload),
             };
             // Auto-equip armor/shields if no other of that type is currently equipped
             if (!newItem.equipped) {
@@ -439,6 +451,48 @@ export function gameReducer(state, action) {
                 }
             }
             return withInventoryAndAC(state, [...state.inventory, newItem]);
+        }
+
+        case 'PURCHASE_ITEM': {
+            const raw = action.payload?.item || action.payload || {};
+            const item = normalizeItem({
+                ...raw,
+                itemKey: raw.itemKey || action.payload?.itemKey,
+                quantity: action.payload?.quantity || raw.quantity || 1,
+            });
+            const quantity = item.quantity || 1;
+            const priceCp = Number.isFinite(action.payload?.priceCp)
+                ? action.payload.priceCp
+                : Number.isFinite(item.valueCp)
+                    ? item.valueCp * quantity
+                    : 0;
+            const payment = spendCurrency(state.character, priceCp);
+            if (!payment.paid) {
+                return {
+                    ...state,
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`⚠️ Cannot buy ${item.name} — price is ${formatCurrency(priceCp)}, missing ${formatCurrency(payment.missingCp)}.`),
+                    ],
+                };
+            }
+
+            const newItem = {
+                id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                equipped: false,
+                ...item,
+                quantity,
+            };
+
+            const nextState = {
+                ...state,
+                character: payment.character,
+                messages: [
+                    ...state.messages,
+                    systemMessage(`🪙 Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)}.`),
+                ],
+            };
+            return withInventoryAndAC(nextState, [...state.inventory, newItem]);
         }
 
         case 'REMOVE_ITEM': {
@@ -824,7 +878,7 @@ export function gameReducer(state, action) {
 
         // --- Bulk Load ---
         case 'LOAD_GAME': {
-            const loadedInventory = action.payload.inventory || [];
+            const loadedInventory = normalizeInventory(action.payload.inventory || []);
             // Auto-equip armor/shield if nothing of that type is equipped (fixes old saves)
             const hasEquippedArmor = loadedInventory.some(i => i.equipped && i.type === 'armor' && !i.isShield);
             const hasEquippedShield = loadedInventory.some(i => i.equipped && (i.type === 'shield' || i.isShield));
