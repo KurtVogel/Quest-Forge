@@ -213,7 +213,7 @@ export default function ChatPanel() {
                 events.damageTaken = 0;
                 events.enemyUpdates = [];
             }
-            applyEvents(events, dispatch);
+            applyEvents(events, dispatch, () => stateRef.current);
             if (events.location) {
                 dispatch({ type: 'SET_LOCATION', payload: events.location });
             }

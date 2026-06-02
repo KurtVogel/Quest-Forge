@@ -65,27 +65,6 @@ function normalizeCombatEnemy(enemy, index) {
     };
 }
 
-function balanceSoloLevelOneEncounter(enemies, character, party) {
-    const isSoloLevelOne = character?.level <= 1 && (!party || party.length === 0);
-    if (!isSoloLevelOne || enemies.length <= 0) return enemies;
-
-    const playerMaxHp = Number.isFinite(character?.maxHP) ? character.maxHP : 10;
-    const maxEnemyHp = Math.max(
-        1,
-        Math.min(playerMaxHp - 1, Math.max(4, Math.ceil(playerMaxHp * 0.75)))
-    );
-
-    return enemies.slice(0, 1).map(enemy => {
-        const cappedHp = Math.max(1, Math.min(enemy.hp, maxEnemyHp));
-        return {
-            ...enemy,
-            hp: cappedHp,
-            maxHp: cappedHp,
-            ac: Math.min(enemy.ac, 13),
-        };
-    });
-}
-
 export const initialGameState = {
     character: null, // Should include gold: 0, silver: 0, copper: 0
     inventory: [],
@@ -103,6 +82,7 @@ export const initialGameState = {
         turnOrder: [],
         currentTurn: 0,
         round: 1,
+        xpAwarded: false, // true once any XP is earned during a fight (gates the End-Combat fallback)
     },
     session: {
         id: null,
@@ -358,6 +338,8 @@ export function gameReducer(state, action) {
                 ...state,
                 character: result.character,
                 messages: [...state.messages, ...result.messages],
+                // Remember XP was earned mid-fight so the manual End-Combat fallback won't re-award.
+                combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
             };
         }
 
@@ -384,7 +366,23 @@ export function gameReducer(state, action) {
             const resKey = action.payload;
             const resources = state.character.classResources || {};
             const res = resources[resKey];
-            if (!res || res.used >= res.max) return state; // Already spent
+            if (!res || res.used >= res.max) {
+                const label = res?.label || resKey;
+                return {
+                    ...state,
+                    messages: [
+                        ...state.messages,
+                        {
+                            id: `msg-${Date.now()}-resource-unavailable`,
+                            timestamp: Date.now(),
+                            role: 'system',
+                            content: `⚠️ **${label} unavailable** — it has already been used and must be recharged by rest.`,
+                        },
+                    ],
+                };
+            }
+
+            const label = res.label || resKey;
 
             return {
                 ...state,
@@ -395,6 +393,15 @@ export function gameReducer(state, action) {
                         [resKey]: { ...res, used: res.used + 1 },
                     },
                 },
+                messages: [
+                    ...state.messages,
+                    {
+                        id: `msg-${Date.now()}-resource-used`,
+                        timestamp: Date.now(),
+                        role: 'system',
+                        content: `✨ **${label} used** — ${res.max - res.used - 1}/${res.max} remaining until rest.`,
+                    },
+                ],
             };
         }
 
@@ -407,6 +414,7 @@ export function gameReducer(state, action) {
                 ...state,
                 character: result.character,
                 messages: [...state.messages, ...result.messages],
+                combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
             };
         }
 
@@ -672,11 +680,10 @@ export function gameReducer(state, action) {
 
         // --- Combat ---
         case 'START_COMBAT': {
-            const enemies = balanceSoloLevelOneEncounter(
-                (action.payload?.enemies || []).map(normalizeCombatEnemy),
-                state.character,
-                state.party
-            );
+            // Track exactly the enemies the DM declared — no count or HP trimming. Encounter
+            // difficulty for low-level solo play is steered by the system prompt instead, so
+            // the narrative and the tracked combatants always stay 1:1.
+            const enemies = (action.payload?.enemies || []).map(normalizeCombatEnemy);
             // Build turn order: player + enemies sorted by initiative
             const playerInit = action.payload?.playerInitiative || 10;
             const turnOrder = [
@@ -692,7 +699,7 @@ export function gameReducer(state, action) {
 
             return {
                 ...state,
-                combat: { active: true, enemies, turnOrder, currentTurn: 0, round: 1 },
+                combat: { active: true, enemies, turnOrder, currentTurn: 0, round: 1, xpAwarded: false },
             };
         }
 
@@ -700,11 +707,13 @@ export function gameReducer(state, action) {
             const llmAwardedXp = action.payload?.llmAwardedXp || false;
             let newState = {
                 ...state,
-                combat: { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
+                combat: { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1, xpAwarded: false },
             };
 
-            // Client-side XP fallback: if the LLM didn't award XP, estimate from defeated enemies
-            if (!llmAwardedXp && state.character) {
+            // Client-side XP fallback — only when NO XP was earned for this fight at all:
+            // neither by the DM this turn (llmAwardedXp) nor at any point during it
+            // (combat.xpAwarded). Prevents the manual "End Combat" button double-awarding.
+            if (!llmAwardedXp && !state.combat.xpAwarded && state.character) {
                 const defeatedEnemies = (state.combat.enemies || []).filter(e => e.hp <= 0);
                 const fallbackXp = estimateCombatExperience(defeatedEnemies);
 

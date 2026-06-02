@@ -207,6 +207,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "rest_taken": null,
   "conditions_gained": [],
   "conditions_removed": [],
+  "resources_used": [],
   "healing": 0,
   "quest_updates": [{ "status": "new", "name": "Quest Name", "description": "Quest description" }],
   "location": "",
@@ -264,7 +265,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - You CAN request multiple rolls in one response (e.g. two enemies both attacking).
 
 COMBAT NOTES:
-- Use "combat_start" when combat initiates. List all enemies with name, hp, ac, and initiative.
+- Use "combat_start" when combat initiates, and list EVERY foe that will act — each with name, hp, ac, and initiative. The client tracks exactly what you declare, so keep the narrative and the tracked enemies strictly 1:1: never describe an attacker that isn't in the combat state, and don't silently add or drop foes mid-fight.
 - **Resolve a whole round in ONE response.** When the player attacks, also request every still-living foe's response attack in the same requested_rolls block (each with attackerId, target, modifier, and inline damage). The client rolls them in order, skips any foe already slain that round, applies all HP, and you then narrate the exchange once.
 - HP is owned by the client. When a roll result says "HP applied by the system", do NOT also send enemy_updates or damage_taken for it. Use "enemy_updates" only for HP changes the dice did NOT cause (e.g. an enemy drinks a potion).
 - Use "combat_end": true when all enemies are defeated or combat ends.
@@ -283,6 +284,7 @@ REST & RESOURCES:
   - **Short rest:** Spends hit dice to heal, resets short-rest abilities (Fighter's Second Wind, Action Surge, etc.)
   - **Long rest:** Full HP restore, recovers half hit dice, resets ALL abilities, clears minor conditions
 - The character sheet shows current resources (Second Wind, Action Surge, Channel Divinity, etc.) with uses remaining. Reference these in narration — e.g., "You steel yourself and catch your breath" for Second Wind.
+- When the player spends a limited resource, include its key in "resources_used" (e.g. ["secondWind"]). If a resource shows 0 remaining, it is unavailable: do NOT grant its healing/effect again until the required rest recharges it.
 - Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for in-combat healing (potions, spells).
 
 PROGRESSION & STATUS EFFECTS:
@@ -454,9 +456,9 @@ function buildActiveConstraints(quests, worldFacts, character, party) {
         reminders.push(`The player's original character is dead. They are now playing as a spirit/successor. Acknowledge this reality in narration.`);
     }
 
-    const isSoloLevelOne = character?.level <= 1 && (!party || party.length === 0);
-    if (isSoloLevelOne) {
-        reminders.push(`Level 1 solo encounter safety: keep danger real, but do not force an unavoidable lethal opening battle. Use 0-1 active hostile enemy in combat_start. That enemy's HP should be lower than the player's max HP and AC should be modest. If the scene contains multiple threats, keep extras distant, distracted, negotiating, fleeing, or environmental until the player has an escape, cover, ally help, or tactical choice.`);
+    const isLowLevelSolo = (character?.level ?? 1) <= 2 && (!party || party.length === 0);
+    if (isLowLevelSolo) {
+        reminders.push(`Encounter pacing — the player is a novice (level ${character?.level ?? 1}) adventuring solo, so scale threats accordingly. A couple of weak foes (a few rats, a lone cutthroat, a pair of skittish goblins) is perfectly fine — but do NOT drop an overwhelming or unwinnable swarm on them out of nowhere. Favor weaker enemies (low HP, modest AC) over big numbers, and give a real fighting chance: cover, escape routes, terrain, or foes who hesitate, come one at a time, or can be talked down. Ramp difficulty up as they gain levels. Danger stays real and death is possible — just earned, not ambushed. Every foe you have act MUST be a tracked enemy in combat_start (keep it 1:1 with the narration).`);
     }
 
     if (reminders.length === 0) return '';

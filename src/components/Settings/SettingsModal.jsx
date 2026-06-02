@@ -14,6 +14,7 @@ export default function SettingsModal() {
     const [saves, setSaves] = useState([]);
     const [cloudSaves, setCloudSaves] = useState([]);
     const [saveName, setSaveName] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
     const [firebaseConfig, setFirebaseConfig] = useState(state.settings.firebaseConfig || {
         apiKey: '',
         authDomain: '',
@@ -86,22 +87,29 @@ export default function SettingsModal() {
     };
 
     const handleSave = async () => {
-        const slotId = `save-${Date.now()}`;
-        const sessionName = saveName.trim() || state.session.name || 'Manual Save';
-        const updatedState = {
-            ...state,
-            session: {
-                ...state.session,
-                name: sessionName,
-                updatedAt: new Date().toISOString()
+        if (isSaving) return; // Guard against rapid double-clicks creating phantom saves
+        setIsSaving(true);
+        try {
+            const slotId = `save-${Date.now()}`;
+            const sessionName = saveName.trim() || state.session.name || 'Manual Save';
+            const updatedState = {
+                ...state,
+                session: {
+                    ...state.session,
+                    name: sessionName,
+                    updatedAt: new Date().toISOString()
+                }
+            };
+            await saveGame(slotId, updatedState);
+            await loadSavesList(); // Local save is committed now — refresh immediately
+            if (state.user?.uid) {
+                await saveGameToCloud(state.user.uid, slotId, updatedState);
+                await loadSavesList(); // Reflect the cloud copy once it lands
             }
-        };
-        await saveGame(slotId, updatedState);
-        if (state.user?.uid) {
-            await saveGameToCloud(state.user.uid, slotId, updatedState);
+            setSaveName('');
+        } finally {
+            setIsSaving(false);
         }
-        setSaveName('');
-        loadSavesList();
     };
 
     const handleLoad = async (slotId, isCloud = false) => {
@@ -119,7 +127,7 @@ export default function SettingsModal() {
 
     const handleDelete = async (slotId) => {
         await deleteSave(slotId);
-        loadSavesList();
+        await loadSavesList();
     };
 
     const handleNewGame = () => {
@@ -375,8 +383,8 @@ export default function SettingsModal() {
                                         onChange={(e) => setSaveName(e.target.value)}
                                         placeholder="Save name (optional)..."
                                     />
-                                    <button className="btn btn-primary" onClick={handleSave}>
-                                        💾 Save Game
+                                    <button className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
+                                        {isSaving ? 'Saving…' : '💾 Save Game'}
                                     </button>
                                 </div>
                             )}

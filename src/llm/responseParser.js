@@ -235,6 +235,8 @@ function normalizeEvents(raw) {
         restTaken: typeof raw.rest_taken === 'string' ? raw.rest_taken : null,
         conditionsGained: Array.isArray(raw.conditions_gained) ? raw.conditions_gained : [],
         conditionsRemoved: Array.isArray(raw.conditions_removed) ? raw.conditions_removed : [],
+        // Limited class abilities the player spent this turn (e.g. ["secondWind"]).
+        resourcesUsed: Array.isArray(raw.resources_used) ? raw.resources_used : [],
         questUpdates: Array.isArray(raw.quest_updates) ? raw.quest_updates : [],
         location: raw.location || null,
         healing: typeof raw.healing === 'number' ? raw.healing : 0,
@@ -266,14 +268,26 @@ function normalizeEvents(raw) {
  * @param {object} events - Normalized events from parseResponse
  * @param {function} dispatch - Game state dispatch function
  */
-export function applyEvents(events, dispatch) {
+export function applyEvents(events, dispatch, getState = null) {
     if (!events) return;
+
+    const state = getState?.();
+    const resources = state?.character?.classResources || {};
+    const unavailableResources = events.resourcesUsed.filter(resourceKey => {
+        const res = resources[resourceKey];
+        return res && res.used >= res.max;
+    });
+    const suppressResourceHealing = unavailableResources.length > 0 && events.healing > 0;
+
+    for (const resourceKey of events.resourcesUsed) {
+        dispatch({ type: 'USE_RESOURCE', payload: resourceKey });
+    }
 
     if (events.damageTaken > 0) {
         dispatch({ type: 'TAKE_DAMAGE', payload: events.damageTaken });
     }
 
-    if (events.healing > 0) {
+    if (events.healing > 0 && !suppressResourceHealing) {
         dispatch({ type: 'HEAL', payload: events.healing });
     }
 

@@ -106,9 +106,13 @@ export async function saveGame(slotId, gameState) {
         };
 
         const request = store.put(saveData);
-        request.onsuccess = () => resolve();
+        // Resolve on COMMIT (tx.oncomplete), not on the put's onsuccess. Otherwise a read
+        // fired right after (e.g. the saves dialog refreshing itself) can race the
+        // not-yet-committed write and miss it — the list looks unchanged, so you click
+        // Save again... and again. (See SettingsModal handleSave.)
         request.onerror = () => reject(request.error);
-        tx.oncomplete = () => db.close();
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
     });
 }
 
@@ -177,9 +181,10 @@ export async function deleteSave(slotId) {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         const store = tx.objectStore(STORE_NAME);
         const request = store.delete(slotId);
-        request.onsuccess = () => resolve();
+        // Resolve on COMMIT (see saveGame) so a refresh read after a delete sees it gone.
         request.onerror = () => reject(request.error);
-        tx.oncomplete = () => db.close();
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
     });
 }
 
