@@ -321,7 +321,37 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         dispatch({ type: 'HEAL', payload: events.healing });
     }
 
-    for (const item of events.itemsFound) {
+    // A `purchase`/`sell` already adds/removes the traded item atomically. If the DM ALSO
+    // lists that same item in items_found/items_lost (the prompt forbids it), the item gets
+    // duplicated or removed twice. Drop found/lost entries that match a traded item by
+    // normalized key or name — the item-side twin of the coin guard below.
+    const normToken = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const itemKeyOf = (it) => (typeof it === 'string' ? '' : (it.itemKey || it.key || ''));
+    const itemNameOf = (it) => (typeof it === 'string' ? it : (it.name || ''));
+    const tradedTokenSet = (entries, getKey, getName) => {
+        const set = new Set();
+        for (const e of entries) {
+            if (getKey(e)) set.add(normToken(getKey(e)));
+            if (getName(e)) set.add(normToken(getName(e)));
+        }
+        return set;
+    };
+    const dropMatching = (entries, tokens, action) => {
+        if (tokens.size === 0) return entries;
+        return entries.filter((it) => {
+            const k = itemKeyOf(it);
+            const n = itemNameOf(it);
+            const dup = (k && tokens.has(normToken(k))) || (n && tokens.has(normToken(n)));
+            if (dup) console.warn(`[applyEvents] Ignored a found/lost "${n || k}" already handled by the atomic ${action}.`);
+            return !dup;
+        });
+    };
+    const purchasedTokens = tradedTokenSet(events.purchases, (p) => p.itemKey || p.item?.itemKey || p.key, (p) => p.name || p.item?.name);
+    const soldTokens = tradedTokenSet(events.sells, (s) => s.itemKey || s.key, (s) => s.name);
+    const itemsFound = dropMatching(events.itemsFound, purchasedTokens, 'purchase');
+    const itemsLost = dropMatching(events.itemsLost, soldTokens, 'sale');
+
+    for (const item of itemsFound) {
         const itemData = typeof item === 'string'
             ? { name: item, type: 'gear', weight: 1 }
             : {
@@ -372,18 +402,35 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         dispatch({ type: 'SELL_ITEM', payload: sale });
     }
 
-    for (const itemName of events.itemsLost) {
+    for (const itemName of itemsLost) {
         const lostName = typeof itemName === 'string' ? itemName : itemName.name || '';
         if (!lostName) continue;
         dispatch({ type: 'REMOVE_ITEM_BY_NAME', payload: lostName });
     }
 
-    if (events.goldFound > 0) dispatch({ type: 'ADD_GOLD', payload: events.goldFound });
-    if (events.goldLost > 0) dispatch({ type: 'REMOVE_GOLD', payload: events.goldLost });
-    if (events.silverFound > 0) dispatch({ type: 'ADD_SILVER', payload: events.silverFound });
-    if (events.silverLost > 0) dispatch({ type: 'REMOVE_SILVER', payload: events.silverLost });
-    if (events.copperFound > 0) dispatch({ type: 'ADD_COPPER', payload: events.copperFound });
-    if (events.copperLost > 0) dispatch({ type: 'REMOVE_COPPER', payload: events.copperLost });
+    // An atomic `purchase` already validates funds and deducts payment; a `sell` already
+    // credits the proceeds. The DM is told not to ALSO emit loose coin deltas for the same
+    // transaction, but it sometimes does — double-charging (or double-paying) the player.
+    // Enforce the contract: a purchase suppresses loose coin LOSSES this turn, a sale
+    // suppresses loose coin GAINS. This is the root of "the system reduced my coins after
+    // I already paid." (A genuinely separate gain/loss is far rarer than this LLM slip,
+    // and the prompt already forbids mixing the two.)
+    let { goldFound, goldLost, silverFound, silverLost, copperFound, copperLost } = events;
+    if (events.purchases.length > 0 && (goldLost > 0 || silverLost > 0 || copperLost > 0)) {
+        console.warn('[applyEvents] Ignored loose coin loss emitted alongside an atomic purchase — the purchase already paid.');
+        goldLost = silverLost = copperLost = 0;
+    }
+    if (events.sells.length > 0 && (goldFound > 0 || silverFound > 0 || copperFound > 0)) {
+        console.warn('[applyEvents] Ignored loose coin gain emitted alongside an atomic sale — the sale already paid out.');
+        goldFound = silverFound = copperFound = 0;
+    }
+
+    if (goldFound > 0) dispatch({ type: 'ADD_GOLD', payload: goldFound });
+    if (goldLost > 0) dispatch({ type: 'REMOVE_GOLD', payload: goldLost });
+    if (silverFound > 0) dispatch({ type: 'ADD_SILVER', payload: silverFound });
+    if (silverLost > 0) dispatch({ type: 'REMOVE_SILVER', payload: silverLost });
+    if (copperFound > 0) dispatch({ type: 'ADD_COPPER', payload: copperFound });
+    if (copperLost > 0) dispatch({ type: 'REMOVE_COPPER', payload: copperLost });
 
     if (events.levelUp) {
         // Explicit level-up from the DM — skip ADD_EXP to avoid double-leveling

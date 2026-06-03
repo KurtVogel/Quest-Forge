@@ -181,6 +181,78 @@ You are running the game under these rules.`,
     },
 };
 
+/** How many disposition shifts to keep per NPC — enough to show an arc, bounded for state size. */
+const MAX_NPC_HISTORY = 10;
+
+/**
+ * Strip blank fields ('', null, undefined) from an NPC payload so a thin update can
+ * never erase detail that's already known. Once an NPC's personality, goal, or secret
+ * is on record, a later turn that simply omits it leaves it intact — continuity wins
+ * over churn.
+ */
+function pruneBlankFields(payload) {
+    const out = {};
+    for (const [key, value] of Object.entries(payload)) {
+        if (value === '' || value === null || value === undefined) continue;
+        out[key] = value;
+    }
+    return out;
+}
+
+/**
+ * Upsert an NPC into the tracker — the single source of truth for NPC writes.
+ * - Match by id when one is supplied, otherwise (or as a fallback) by case-insensitive
+ *   name — the per-turn Scribe and the DM's inline npc_updates only ever know the name.
+ * - On a match, merge just the non-blank fields the caller supplied.
+ * - With no match and a name to track them by, create a fresh record with defaults.
+ * - Every touch stamps lastSeen, so the prompt's "recently active" ordering reflects the
+ *   turn the NPC actually appeared rather than the last 10-message journal pass.
+ * This is what lets a just-met NPC be created the moment they appear instead of waiting
+ * for a journal summary to happen to mention them.
+ */
+function upsertNpc(npcs, payload) {
+    if (!payload || (!payload.id && !payload.name)) return npcs;
+    const update = pruneBlankFields({ ...payload, lastSeen: Date.now() });
+
+    const idx = npcs.findIndex(n =>
+        (payload.id && n.id === payload.id) ||
+        (payload.name && n.name?.toLowerCase() === payload.name.toLowerCase())
+    );
+
+    if (idx !== -1) {
+        const existing = npcs[idx];
+        // Record a genuine disposition shift between known stances (skip the initial
+        // 'unknown' → X establishment) so the relationship's arc is preserved. A friend
+        // turning hostile — or an enemy won over — is exactly the beat the DM and player
+        // should remember.
+        if (update.disposition && existing.disposition &&
+            existing.disposition !== 'unknown' &&
+            update.disposition !== existing.disposition) {
+            const history = Array.isArray(existing.relationshipHistory) ? existing.relationshipHistory : [];
+            update.relationshipHistory = [
+                ...history,
+                { from: existing.disposition, to: update.disposition, at: Date.now(), note: update.lastNotes || '' },
+            ].slice(-MAX_NPC_HISTORY);
+        }
+        return npcs.map((npc, i) => (i === idx ? { ...npc, ...update } : npc));
+    }
+
+    // No match — only create when we can name them (an id-only miss is a stale update).
+    if (!payload.name) return npcs;
+    return [...npcs, {
+        id: `npc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        firstMet: Date.now(),
+        disposition: 'unknown',
+        personality: '',
+        goals: '',
+        secrets: '',
+        knownFacts: [],
+        lastLocation: null,
+        relationshipHistory: [],
+        ...update,
+    }];
+}
+
 export function gameReducer(state, action) {
     switch (action.type) {
         case 'SET_CHARACTER':
@@ -798,45 +870,13 @@ export function gameReducer(state, action) {
                 }],
             };
 
-        case 'ADD_NPC': {
-            // Don't add duplicates by name
-            const nameMatch = state.npcs.find(n => n.name?.toLowerCase() === action.payload.name?.toLowerCase());
-            if (nameMatch) {
-                // Merge into existing instead
-                return {
-                    ...state,
-                    npcs: state.npcs.map(n =>
-                        n.id === nameMatch.id ? { ...n, ...action.payload } : n
-                    ),
-                };
-            }
-            return {
-                ...state,
-                npcs: [...state.npcs, {
-                    id: `npc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-                    firstMet: Date.now(),
-                    // Richer NPC fields with defaults
-                    personality: '',
-                    goals: '',
-                    secrets: '',
-                    knownFacts: [],
-                    lastLocation: null,
-                    relationshipHistory: [],
-                    ...action.payload,
-                }],
-            };
-        }
-
+        // ADD_NPC and UPDATE_NPC are the same operation: upsert by id or name (see
+        // upsertNpc). Keeping one create/merge path means the per-turn Scribe and the
+        // DM's inline npc_updates can introduce a brand-new NPC the instant it appears,
+        // instead of being silently dropped until the next journal pass.
+        case 'ADD_NPC':
         case 'UPDATE_NPC':
-            return {
-                ...state,
-                npcs: state.npcs.map(npc => {
-                    const matchById = action.payload.id && npc.id === action.payload.id;
-                    const matchByName = !action.payload.id && action.payload.name &&
-                        npc.name?.toLowerCase() === action.payload.name?.toLowerCase();
-                    return (matchById || matchByName) ? { ...npc, ...action.payload } : npc;
-                }),
-            };
+            return { ...state, npcs: upsertNpc(state.npcs, action.payload) };
 
         case 'SET_LOCATION':
             return { ...state, currentLocation: action.payload };
