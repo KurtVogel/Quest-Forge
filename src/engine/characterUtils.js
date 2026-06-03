@@ -204,10 +204,15 @@ export function getStartingEquipment(className) {
  * Build equipped starting inventory for a new character.
  */
 export function createStartingInventory(className) {
-    return getStartingEquipment(className).map((item, index) => ({
-        id: `item-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
-        quantity: 1,
-        equipped: item.type === 'armor' || item.type === 'weapon' || item.type === 'shield' || item.isShield,
-        ...normalizeItem(item),
-    }));
+    let weaponEquipped = false; // Only the first weapon starts as the active weapon.
+    return getStartingEquipment(className).map((item, index) => {
+        const equipWeapon = item.type === 'weapon' && !weaponEquipped;
+        if (equipWeapon) weaponEquipped = true;
+        return {
+            id: `item-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+            quantity: 1,
+            equipped: item.type === 'armor' || item.type === 'shield' || item.isShield || equipWeapon,
+            ...normalizeItem(item),
+        };
+    });
 }

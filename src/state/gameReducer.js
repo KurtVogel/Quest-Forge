@@ -144,8 +144,6 @@ In fictional stories always prioritize maximum impact, even if it means skipping
 
 I (the player) am an adult male (over 40) with adult tastes.
 
-Don't be a yes-man. Challenge the player and don't just mold the narrative to pave an easy path. If a character dislikes the player, then she does. Etc. The world doesn't revolve around the player, but the player acts within a cohesive, dynamic, immersive fantasy world with its narratives and character relations.
-
 Even if the truth of a matter is not always nice and pretty, stick to the hard truth and don't sugar-coat it.
 
 In scenarios involving fictional characters, prioritize the narrative's effectiveness and impact over conventional social pleasantries or emotional comfort.
@@ -159,16 +157,14 @@ Give advantage or disadvantage to rolls based on narrative and as a reward for p
 Make it possible for my character to die. The game then just ends there. Blunt and brutal. The die is cast when the die is cast.
 
 DON'T present me with set options on what to do. Just ask me openly in every turn "What do you do?"
-
-DON'T narrate PLAYER character's words and actions unless it's absolutely necessary for the flow. And don't narrate too much at once where my input gets bypassed. I want to be in control of what I say and do.
+NEVER rush to the end of an intimate scene, but let the player decide when to end it with their input. And when narrating intimate scenes, be explicit and detailed, using all the dirty words, and focus on the raw physical and emotional sensations of the characters involved.
+DON'T dictate PLAYER character's words and actions unless it's absolutely necessary for the flow. And don't narrate too much at once where my input gets bypassed. I want to be in control of what I say and do.
 
 Describe things in vivid, gritty and not-beating-around-the-bush detail. Use mature themes and dark, realistic consequences. No hand-holding.
-
+Other characters can use extremely harsh language and be as cruel and brutal as the situation warrants. They can also be charming, seductive, manipulative, or any combination thereof.
 NPCs remember. If the player insults someone, betrays an ally, or earns a reputation — that follows them. Consequences compound across sessions, not just within a single encounter.
-
-Keep responses to 2-3 paragraphs max. Dense and punchy, not sprawling. Let the player act frequently rather than watching long cutscenes.
-
-When combat happens, track enemy HP internally and narrate wounds realistically. Don't let enemies survive absurd damage just because the fight needs to continue.`,
+They also remember the good.
+Keep responses to 2-3 paragraphs max. Dense and punchy, not sprawling. Let the player act frequently rather than watching long cutscenes.`,
     },
     ui: {
         isSettingsOpen: false,
@@ -656,9 +652,10 @@ export function gameReducer(state, action) {
             const itemToEquip = state.inventory.find(i => i.id === action.payload);
             if (!itemToEquip) return state;
 
-            // Mutual exclusion: unequip other armor (non-shield) or other shields
+            // Mutual exclusion: one armor, one shield, and one (active) weapon at a time.
             const isArmor = itemToEquip.type === 'armor' && !itemToEquip.isShield;
             const isShield = itemToEquip.type === 'shield' || itemToEquip.isShield;
+            const isWeapon = itemToEquip.type === 'weapon';
 
             const updatedInv = state.inventory.map(item => {
                 if (item.id === action.payload) return { ...item, equipped: true };
@@ -666,6 +663,10 @@ export function gameReducer(state, action) {
                     return { ...item, equipped: false };
                 }
                 if (isShield && (item.type === 'shield' || item.isShield) && item.equipped) {
+                    return { ...item, equipped: false };
+                }
+                // Equipping a weapon makes it the active weapon — sheathe any other.
+                if (isWeapon && item.type === 'weapon' && item.equipped) {
                     return { ...item, equipped: false };
                 }
                 return item;
@@ -1031,6 +1032,15 @@ export function gameReducer(state, action) {
                     }
                 }
             }
+            // Collapse multiple equipped weapons to a single active weapon (older saves
+            // equipped them all). Keep the first equipped weapon, sheathe the rest.
+            let activeWeaponSeen = false;
+            for (const item of loadedInventory) {
+                if (item.type === 'weapon' && item.equipped) {
+                    if (activeWeaponSeen) item.equipped = false;
+                    else activeWeaponSeen = true;
+                }
+            }
             const loadedCharacter = action.payload.character;
             // Recalculate AC on load to fix stale saves
             const recalcedAC = loadedCharacter
@@ -1053,6 +1063,10 @@ export function gameReducer(state, action) {
             const validated = validateSaveState(action.payload);
             return {
                 ...validated,
+                // Use the normalized + migrated inventory (auto-equipped armor/shield and the
+                // single-active-weapon collapse). Previously these were computed for AC only
+                // and discarded, leaving the raw saved inventory — so the migrations never applied.
+                inventory: loadedInventory,
                 character: backfilledCharacter,
                 user: state.user,
                 settings: {

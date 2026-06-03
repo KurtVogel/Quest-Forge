@@ -144,7 +144,9 @@ function InventoryItem({ item, nonProficient, onToggleEquip, onUse, onRemove }) 
                     <button
                         className={`inv-equip-btn ${item.equipped ? 'unequip' : ''}`}
                         onClick={() => onToggleEquip(item)}
-                        title={item.equipped ? 'Unequip' : 'Equip'}
+                        title={item.type === 'weapon'
+                            ? (item.equipped ? 'Active weapon (click to sheathe)' : 'Set as active weapon')
+                            : (item.equipped ? 'Unequip' : 'Equip')}
                     >
                         {item.equipped ? '✓' : '⬡'}
                     </button>
