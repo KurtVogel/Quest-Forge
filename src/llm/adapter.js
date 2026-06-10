@@ -43,10 +43,12 @@ export async function streamMessage({ provider, apiKey, model, systemPrompt, mes
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
 
     const result = await p.stream({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal });
-    console.log('[LLM Adapter] Full response received, length:', result.length);
-    console.log('[LLM Adapter] Contains ```json:', result.includes('```json'));
-    console.log('[LLM Adapter] Contains requested_rolls:', result.includes('requested_rolls'));
-    console.log('[LLM Adapter] Response tail (last 300 chars):', result.slice(-300));
+    if (import.meta.env.DEV) {
+        console.log('[LLM Adapter] Full response received, length:', result.length);
+        console.log('[LLM Adapter] Contains ```json:', result.includes('```json'));
+        console.log('[LLM Adapter] Contains requested_rolls:', result.includes('requested_rolls'));
+        console.log('[LLM Adapter] Response tail (last 300 chars):', result.slice(-300));
+    }
     return result;
 }
 

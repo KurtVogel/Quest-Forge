@@ -44,12 +44,12 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
  * Send a non-streaming message to Gemini.
  */
 export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage }) {
-    const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey}`;
+    const url = `${GEMINI_API_BASE}/${model}:generateContent`;
     const body = formatMessages(systemPrompt, messageHistory, userMessage);
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify(body),
     });
 
@@ -74,11 +74,11 @@ export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHi
  * @returns {Promise<number[]|null>}
  */
 export async function embedText(apiKey, text) {
-    const url = `${GEMINI_EMBED_BASE}/${GEMINI_EMBED_MODEL}:embedContent?key=${apiKey}`;
+    const url = `${GEMINI_EMBED_BASE}/${GEMINI_EMBED_MODEL}:embedContent`;
     try {
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
             body: JSON.stringify({
                 model: `models/${GEMINI_EMBED_MODEL}`,
                 content: { parts: [{ text }] },
@@ -96,12 +96,12 @@ export async function embedText(apiKey, text) {
  * Stream a message from Gemini.
  */
 export async function streamGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal }) {
-    const url = `${GEMINI_API_BASE}/${model}:streamGenerateContent?key=${apiKey}&alt=sse`;
+    const url = `${GEMINI_API_BASE}/${model}:streamGenerateContent?alt=sse`;
     const body = formatMessages(systemPrompt, messageHistory, userMessage);
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify(body),
         signal,
     });

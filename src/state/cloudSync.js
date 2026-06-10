@@ -22,11 +22,16 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // Cap: keep only the most recent rolls
         const trimmedRolls = (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS);
 
-        // Build a trimmed copy of the state for the payload
+        // Build a trimmed copy of the state for the payload, stripping secrets
         const trimmedState = {
             ...gameState,
             messages: trimmedMessages,
             rollHistory: trimmedRolls,
+            settings: {
+                ...gameState.settings,
+                apiKey: undefined,
+                firebaseConfig: undefined,
+            },
         };
 
         // Extract metadata for the list view

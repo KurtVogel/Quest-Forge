@@ -378,6 +378,7 @@ export default function ChatPanel() {
                     onKeyDown={handleKeyDown}
                     placeholder={hasApiKey ? "What do you do?" : "Set your API key in Settings first..."}
                     disabled={!hasApiKey || isLoading}
+                    maxLength={4000}
                     rows={1}
                 />
                 {isLoading ? (

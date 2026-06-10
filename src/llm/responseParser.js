@@ -10,6 +10,17 @@
 
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 
+/** Cryptographically random integer in [min, max] — replaces Math.random() fallbacks. */
+function cryptoRandInt(min, max) {
+    const range = max - min + 1;
+    return min + (crypto.getRandomValues(new Uint32Array(1))[0] % range);
+}
+
+/** Clamp a numeric LLM value to a sane range; non-numbers become the fallback. */
+function clamp(value, min, max, fallback = 0) {
+    return typeof value === 'number' ? Math.max(min, Math.min(max, value)) : fallback;
+}
+
 // All recognized skill and ability names for text roll detection
 const KNOWN_SKILLS = [
     'perception', 'stealth', 'athletics', 'acrobatics', 'investigation',
@@ -44,7 +55,7 @@ function validateCombatStart(combatStart) {
             name: e.name.trim(),
             hp: (typeof e.hp === 'number' && e.hp > 0) ? e.hp : 20,
             ac: (typeof e.ac === 'number' && e.ac > 0) ? e.ac : 12,
-            initiative: (typeof e.initiative === 'number') ? e.initiative : Math.floor(Math.random() * 20) + 1,
+            initiative: (typeof e.initiative === 'number') ? e.initiative : cryptoRandInt(1, 20),
         }));
 
     if (sanitizedEnemies.length === 0) return null;
@@ -53,7 +64,7 @@ function validateCombatStart(combatStart) {
         enemies: sanitizedEnemies,
         player_initiative: (typeof combatStart.player_initiative === 'number')
             ? combatStart.player_initiative
-            : Math.floor(Math.random() * 20) + 1,
+            : cryptoRandInt(1, 20),
     };
 }
 
@@ -217,23 +228,23 @@ function normalizeEvents(raw) {
                 disadvantage: !!r.disadvantage,
             }))
             : [],
-        damageDealt: typeof raw.damage_dealt === 'number' ? raw.damage_dealt : 0,
-        damageTaken: typeof raw.damage_taken === 'number' ? raw.damage_taken : 0,
-        itemsFound: Array.isArray(raw.items_found) ? raw.items_found : [],
-        itemsLost: Array.isArray(raw.items_lost) ? raw.items_lost : [],
-        goldFound: typeof raw.gold_found === 'number' ? raw.gold_found : 0,
-        goldLost: typeof raw.gold_lost === 'number' ? raw.gold_lost : 0,
-        silverFound: typeof raw.silver_found === 'number' ? raw.silver_found : 0,
-        silverLost: typeof raw.silver_lost === 'number' ? raw.silver_lost : 0,
-        copperFound: typeof raw.copper_found === 'number' ? raw.copper_found : 0,
-        copperLost: typeof raw.copper_lost === 'number' ? raw.copper_lost : 0,
-        expAwarded: typeof raw.exp_awarded === 'number' ? raw.exp_awarded : 0,
+        damageDealt: clamp(raw.damage_dealt, 0, 999),
+        damageTaken: clamp(raw.damage_taken, 0, 999),
+        itemsFound: Array.isArray(raw.items_found) ? raw.items_found.slice(0, 20) : [],
+        itemsLost: Array.isArray(raw.items_lost) ? raw.items_lost.slice(0, 20) : [],
+        goldFound: clamp(raw.gold_found, 0, 10000),
+        goldLost: clamp(raw.gold_lost, 0, 10000),
+        silverFound: clamp(raw.silver_found, 0, 10000),
+        silverLost: clamp(raw.silver_lost, 0, 10000),
+        copperFound: clamp(raw.copper_found, 0, 10000),
+        copperLost: clamp(raw.copper_lost, 0, 10000),
+        expAwarded: clamp(raw.exp_awarded, 0, 10000),
         restTaken: typeof raw.rest_taken === 'string' ? raw.rest_taken : null,
         conditionsGained: Array.isArray(raw.conditions_gained) ? raw.conditions_gained : [],
         conditionsRemoved: Array.isArray(raw.conditions_removed) ? raw.conditions_removed : [],
         questUpdates: Array.isArray(raw.quest_updates) ? raw.quest_updates : [],
         location: raw.location || null,
-        healing: typeof raw.healing === 'number' ? raw.healing : 0,
+        healing: clamp(raw.healing, 0, 999),
         // Combat events (validated to prevent state corruption)
         combatStart: validateCombatStart(raw.combat_start),
         combatEnd: !!raw.combat_end,

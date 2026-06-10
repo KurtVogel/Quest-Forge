@@ -700,7 +700,7 @@ export function gameReducer(state, action) {
                 maxHp: e.hp || 20,
                 hp: e.hp || 20,
                 ac: e.ac || 12,
-                initiative: e.initiative || Math.floor(Math.random() * 20) + 1,
+                initiative: e.initiative || Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296 * 20) + 1,
                 condition: 'healthy',
                 ...e,
             }));

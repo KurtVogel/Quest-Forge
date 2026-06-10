@@ -259,6 +259,7 @@ export default function SettingsModal() {
                                     value={state.settings.customSystemPrompt}
                                     onChange={(e) => updateSetting('customSystemPrompt', e.target.value)}
                                     placeholder="Add custom instructions for the DM... (e.g. 'Describe combat in vivid, gritty detail. Use mature themes and morally complex situations. The world is dark and dangerous.')"
+                                    maxLength={2000}
                                     rows={4}
                                 />
                                 <p className="setting-hint">

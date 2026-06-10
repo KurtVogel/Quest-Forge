@@ -40,10 +40,10 @@ export async function generateSceneImage(description, apiKey) {
         try {
             // Use Gemini's image generation model (Imagen 4)
             const response = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`,
+                `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict`,
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
                     body: JSON.stringify({
                         instances: [{
                             prompt: `Fantasy RPG scene illustration, high quality digital art, atmospheric lighting: ${description}`,
