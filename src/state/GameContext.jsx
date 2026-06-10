@@ -11,16 +11,19 @@ import { saveGameToCloud } from './cloudSync.js';
 
 const GameContext = createContext(null);
 const GameDispatchContext = createContext(null);
-const SaveToastContext = createContext(false);
+const SaveToastContext = createContext(null);
 
 export function GameProvider({ children }) {
-    const [saveToastVisible, setSaveToastVisible] = useState(false);
+    // null = hidden, otherwise { status: 'local' | 'cloud' | 'cloud-error' }
+    const [saveToast, setSaveToast] = useState(null);
     const saveToastTimer = useRef(null);
 
-    const showSaveToast = useCallback(() => {
-        setSaveToastVisible(true);
+    const showSaveToast = useCallback((status = 'local') => {
+        setSaveToast({ status });
         if (saveToastTimer.current) clearTimeout(saveToastTimer.current);
-        saveToastTimer.current = setTimeout(() => setSaveToastVisible(false), 2500);
+        // Leave failures up longer so they can actually be read
+        const duration = status === 'cloud-error' ? 5000 : 2500;
+        saveToastTimer.current = setTimeout(() => setSaveToast(null), duration);
     }, []);
 
     const [state, dispatch] = useReducer(gameReducer, initialGameState, (initial) => {
@@ -89,13 +92,17 @@ export function GameProvider({ children }) {
 
                 // Save locally first
                 autoSave(timestampedState);
-                showSaveToast();
 
-                // Push to cloud if user is logged in
+                // Push to cloud if user is logged in; the toast reports where the save landed
                 if (state.user?.uid) {
-                    saveGameToCloud(state.user.uid, '__autosave__', timestampedState).catch(e => {
-                        console.warn('Cloud auto-save failed:', e);
-                    });
+                    saveGameToCloud(state.user.uid, '__autosave__', timestampedState)
+                        .then(ok => showSaveToast(ok ? 'cloud' : 'cloud-error'))
+                        .catch(e => {
+                            console.warn('Cloud auto-save failed:', e);
+                            showSaveToast('cloud-error');
+                        });
+                } else {
+                    showSaveToast('local');
                 }
             }, 2000);
             return () => clearTimeout(timer);
@@ -105,7 +112,7 @@ export function GameProvider({ children }) {
     return (
         <GameContext.Provider value={state}>
             <GameDispatchContext.Provider value={dispatch}>
-                <SaveToastContext.Provider value={saveToastVisible}>
+                <SaveToastContext.Provider value={saveToast}>
                     {children}
                 </SaveToastContext.Provider>
             </GameDispatchContext.Provider>
@@ -113,6 +120,7 @@ export function GameProvider({ children }) {
     );
 }
 
+/** @returns {{status: 'local'|'cloud'|'cloud-error'}|null} current save toast, or null when hidden */
 export function useSaveToast() {
     return useContext(SaveToastContext);
 }

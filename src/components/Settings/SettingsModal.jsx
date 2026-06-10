@@ -103,8 +103,13 @@ export default function SettingsModal() {
             await saveGame(slotId, updatedState);
             await loadSavesList(); // Local save is committed now — refresh immediately
             if (state.user?.uid) {
-                await saveGameToCloud(state.user.uid, slotId, updatedState);
+                const cloudOk = await saveGameToCloud(state.user.uid, slotId, updatedState);
                 await loadSavesList(); // Reflect the cloud copy once it lands
+                setSyncStatus(cloudOk
+                    ? '✓ Saved locally and to cloud'
+                    : '⚠ Saved locally, but the cloud upload FAILED — this save will not appear on other devices (details in browser console)');
+            } else {
+                setSyncStatus('Saved locally only — sign in with Google for cloud sync');
             }
             setSaveName('');
         } finally {
@@ -387,6 +392,12 @@ export default function SettingsModal() {
                                     <button className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
                                         {isSaving ? 'Saving…' : '💾 Save Game'}
                                     </button>
+                                </div>
+                            )}
+
+                            {syncStatus && (
+                                <div className="auth-status" style={{ margin: '0.5rem 0', fontSize: '0.8rem' }}>
+                                    {syncStatus}
                                 </div>
                             )}
 

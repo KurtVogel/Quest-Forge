@@ -9,13 +9,26 @@ import { db } from "../config/firebase.js";
 /** Max roll history entries to persist in cloud saves. */
 const MAX_SAVED_ROLLS = 50;
 
+/**
+ * Firestore REJECTS document IDs that begin and end with double underscores
+ * ("Resource id is invalid because it is reserved"), so the app's local autosave
+ * slot name "__autosave__" can't be used as a cloud document ID. Callers keep
+ * passing "__autosave__"; we map it to a legal doc ID at this boundary.
+ */
+const AUTOSAVE_SLOT = '__autosave__';
+const CLOUD_AUTOSAVE_DOC_ID = 'autosave';
+
+function cloudDocId(slotId) {
+    return slotId === AUTOSAVE_SLOT ? CLOUD_AUTOSAVE_DOC_ID : slotId;
+}
+
 export async function saveGameToCloud(uid, slotId, gameState) {
     if (!db) return false;
     if (!uid) return false;
 
     try {
         const userSavesRef = collection(db, `users/${uid}/saves`);
-        const saveDocRef = doc(userSavesRef, slotId);
+        const saveDocRef = doc(userSavesRef, cloudDocId(slotId));
 
         // Cloud saves trim summarized messages to stay under Firestore's ~1MB doc limit
         // (their content lives on in journal entries + world facts). Local saves keep the
@@ -59,7 +72,7 @@ export async function saveGameToCloud(uid, slotId, gameState) {
             questCount: gameState.quests?.filter(q => q.status === 'active')?.length || 0,
             partySize: gameState.party?.length || 0,
             messageCount: trimmedMessages.length,
-            isAuto: slotId === '__autosave__'
+            isAuto: slotId === AUTOSAVE_SLOT
         };
 
         // We store the full state as a stringified JSON blob to avoid Firestore's nested object limits/index explosion
@@ -82,7 +95,7 @@ export async function loadGameFromCloud(uid, slotId) {
 
     try {
         const userSavesRef = collection(db, `users/${uid}/saves`);
-        const saveDocRef = doc(userSavesRef, slotId);
+        const saveDocRef = doc(userSavesRef, cloudDocId(slotId));
 
         const docSnap = await getDoc(saveDocRef);
         if (docSnap.exists()) {
@@ -111,7 +124,9 @@ export async function listCloudSaves(uid) {
             const data = doc.data();
             // Don't include the massive payload string in the list view
             delete data.payload;
-            if (data.slotId !== '__autosave__') {
+            // Exclude the autosave doc from the manual-saves list (match by doc ID too,
+            // since the stored slotId field is the legacy "__autosave__" name)
+            if (data.slotId !== AUTOSAVE_SLOT && doc.id !== CLOUD_AUTOSAVE_DOC_ID) {
                 saves.push(data);
             }
         });
@@ -128,7 +143,7 @@ export async function deleteGameFromCloud(uid, slotId) {
 
     try {
         const userSavesRef = collection(db, `users/${uid}/saves`);
-        const saveDocRef = doc(userSavesRef, slotId);
+        const saveDocRef = doc(userSavesRef, cloudDocId(slotId));
         await deleteDoc(saveDocRef);
         console.log(`☁️ Cloud delete successful: ${slotId}`);
         return true;

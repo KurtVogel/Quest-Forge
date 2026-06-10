@@ -14,7 +14,7 @@ import './Layout.css';
 
 export default function AppShell() {
     const { state, dispatch } = useGame();
-    const saveToastVisible = useSaveToast();
+    const saveToast = useSaveToast();
     const [isJournalOpen, setIsJournalOpen] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -119,8 +119,12 @@ export default function AppShell() {
 
             <JournalPanel isOpen={isJournalOpen} onClose={() => setIsJournalOpen(false)} />
 
-            {saveToastVisible && (
-                <div className="save-toast">Game saved ✓</div>
+            {saveToast && (
+                <div className={`save-toast ${saveToast.status === 'cloud-error' ? 'save-toast-error' : ''}`}>
+                    {saveToast.status === 'cloud' && 'Game saved ☁️✓'}
+                    {saveToast.status === 'local' && 'Game saved locally 💾'}
+                    {saveToast.status === 'cloud-error' && '⚠ Cloud sync failed — saved locally only'}
+                </div>
             )}
         </div>
     );

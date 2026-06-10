@@ -303,6 +303,13 @@
     animation: save-toast-fadein 0.2s ease, save-toast-fadeout 0.4s ease 2.1s forwards;
 }
 
+/* Error variant stays visible longer (5s timeout in GameContext) and reads as a warning */
+.save-toast-error {
+    color: #e08585;
+    border-color: #8a3a3a;
+    animation: save-toast-fadein 0.2s ease, save-toast-fadeout 0.4s ease 4.6s forwards;
+}
+
 @keyframes save-toast-fadein {
     from { opacity: 0; transform: translateY(6px); }
     to   { opacity: 1; transform: translateY(0); }
