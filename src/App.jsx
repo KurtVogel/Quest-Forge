@@ -11,7 +11,6 @@ function StartScreen() {
   const { state, dispatch } = useGame();
   const [autoSaveData, setAutoSaveData] = useState(null);
   const [saves, setSaves] = useState([]);
-  const [cloudAutoSave, setCloudAutoSave] = useState(null);
   const [cloudSaves, setCloudSaves] = useState([]);
   const [cloudLoadError, setCloudLoadError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -40,21 +39,14 @@ function StartScreen() {
       if (state.user?.uid) {
         try {
           setCloudLoadError('');
-          const [cAutoSave, cList] = await Promise.all([
-            loadGameFromCloud(state.user.uid, '__autosave__'),
-            listCloudSaves(state.user.uid)
-          ]);
-          setCloudAutoSave(cAutoSave);
-          setCloudSaves(cList);
+          setCloudSaves(await listCloudSaves(state.user.uid));
         } catch (e) {
           console.warn('Failed to load cloud saves', e);
           setCloudLoadError(e.message || 'Failed to load cloud saves');
-          setCloudAutoSave(null);
           setCloudSaves([]);
         }
       } else {
         setCloudLoadError('');
-        setCloudAutoSave(null);
         setCloudSaves([]);
       }
     }
@@ -62,12 +54,10 @@ function StartScreen() {
   }, [state.user?.uid]);
 
   const handleContinue = () => {
-    // Prefer cloud auto save if it exists and is newer, otherwise fallback to local
-    const useCloud = cloudAutoSave && (!autoSaveData || new Date(cloudAutoSave.session?.updatedAt || 0) > new Date(autoSaveData.session?.updatedAt || 0));
-    const dataToLoad = useCloud ? cloudAutoSave : autoSaveData;
-
-    if (dataToLoad) {
-      dispatch({ type: 'LOAD_GAME', payload: dataToLoad });
+    // Autosaves are deliberately per-device (local browser only); the cloud
+    // carries manual saves. Continue always resumes this device's session.
+    if (autoSaveData) {
+      dispatch({ type: 'LOAD_GAME', payload: autoSaveData });
     }
   };
 
@@ -92,7 +82,6 @@ function StartScreen() {
     dispatch({ type: 'SET_UI', payload: { isSettingsOpen: true, settingsTab: 'cloud' } });
   };
 
-  const bestAutoSave = cloudAutoSave || autoSaveData; // Simplified preference
   const hasFirebaseConfig = !!state.settings.firebaseConfig?.apiKey;
   const cloudStatus = state.user?.uid
     ? `Signed in${state.user.email ? ` as ${state.user.email}` : ''}`
@@ -134,13 +123,13 @@ function StartScreen() {
         )}
 
         <div className="start-buttons">
-          {bestAutoSave && (
+          {autoSaveData && (
             <button className="start-btn continue-btn" onClick={handleContinue}>
               <span className="start-btn-icon">▶</span>
               <span className="start-btn-text">
-                <span className="start-btn-label">Continue {cloudAutoSave ? '☁️' : '💾'}</span>
+                <span className="start-btn-label">Continue 💾</span>
                 <span className="start-btn-detail">
-                  {bestAutoSave.character?.name} · Lv.{bestAutoSave.character?.level} {bestAutoSave.character?.class}
+                  {autoSaveData.character?.name} · Lv.{autoSaveData.character?.level} {autoSaveData.character?.class}
                 </span>
               </span>
             </button>

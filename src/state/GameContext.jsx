@@ -7,7 +7,6 @@ import { loadSettings, saveSettings, autoSave } from './persistence.js';
 import { PROVIDERS } from '../llm/adapter.js';
 import { initializeFirebase } from '../config/firebase.js';
 import { subscribeToAuth } from './auth.js';
-import { saveGameToCloud } from './cloudSync.js';
 
 const GameContext = createContext(null);
 const GameDispatchContext = createContext(null);
@@ -90,20 +89,10 @@ export function GameProvider({ children }) {
                     }
                 };
 
-                // Save locally first
+                // Autosaves are deliberately local-per-device: each browser keeps its own
+                // "Continue" session. Only manual saves sync to the cloud (SettingsModal).
                 autoSave(timestampedState);
-
-                // Push to cloud if user is logged in; the toast reports where the save landed
-                if (state.user?.uid) {
-                    saveGameToCloud(state.user.uid, '__autosave__', timestampedState)
-                        .then(ok => showSaveToast(ok ? 'cloud' : 'cloud-error'))
-                        .catch(e => {
-                            console.warn('Cloud auto-save failed:', e);
-                            showSaveToast('cloud-error');
-                        });
-                } else {
-                    showSaveToast('local');
-                }
+                showSaveToast('local');
             }, 2000);
             return () => clearTimeout(timer);
         }
