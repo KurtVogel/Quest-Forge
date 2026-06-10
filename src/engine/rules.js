@@ -2,6 +2,7 @@
  * Simplified D&D 5e-inspired rules engine.
  * Handles stat calculations, skill checks, and combat math.
  */
+import { CLASSES } from '../data/classes.js';
 
 /**
  * Calculate ability modifier from ability score.
@@ -27,29 +28,36 @@ export function getProficiencyBonus(level) {
  * Calculate Armor Class.
  * @param {number} dexMod - Dexterity modifier
  * @param {object|null} armor - Equipped armor object
- * @param {boolean} hasShield - Whether a shield is equipped
+ * @param {object|boolean|null} shield - Equipped shield object, or true for a plain shield
  * @returns {number} Armor Class
  */
-export function getArmorClass(dexMod, armor = null, hasShield = false) {
+export function getArmorClass(dexMod, armor = null, shield = false) {
     let ac = 10 + dexMod; // Unarmored
 
     if (armor) {
+        const armorBonus = armor.acBonus || armor.magicBonus || 0;
         switch (armor.armorType) {
             case 'light':
-                ac = armor.baseAC + dexMod;
+                ac = armor.baseAC + dexMod + armorBonus;
                 break;
             case 'medium':
-                ac = armor.baseAC + Math.min(dexMod, 2);
+                ac = armor.baseAC + Math.min(dexMod, 2) + armorBonus;
                 break;
             case 'heavy':
-                ac = armor.baseAC;
+                ac = armor.baseAC + armorBonus;
                 break;
             default:
                 ac = 10 + dexMod;
         }
     }
 
-    if (hasShield) ac += 2;
+    if (shield) {
+        if (typeof shield === 'object') {
+            ac += (shield.shieldAC || 2) + (shield.acBonus || shield.magicBonus || 0);
+        } else {
+            ac += 2;
+        }
+    }
     return ac;
 }
 
@@ -68,11 +76,83 @@ export function computeACFromInventory(inventory, character) {
         i.equipped && i.baseAC && !i.isShield && (i.type === 'armor')
     ) || null;
 
-    const hasShield = inventory.some(i =>
+    const equippedShield = inventory.find(i =>
         i.equipped && (i.type === 'shield' || i.isShield)
-    );
+    ) || null;
 
-    return getArmorClass(dexMod, equippedArmor, hasShield);
+    return getArmorClass(dexMod, equippedArmor, equippedShield);
+}
+
+export function getEquippedWeapon(inventory = []) {
+    return inventory.find(i => i.equipped && i.type === 'weapon') || null;
+}
+
+export function getWeaponAbilityModifier(character, weapon = null) {
+    const strengthMod = getModifier(character.abilityScores.strength);
+    const dexMod = getModifier(character.abilityScores.dexterity);
+    if (weapon?.ranged && !weapon?.thrown) return dexMod;
+    if (weapon?.finesse) return Math.max(strengthMod, dexMod);
+    return strengthMod;
+}
+
+/**
+ * Whether the character's class is proficient with a given weapon.
+ *
+ * Class `weaponProficiencies` mix broad category tokens ("simple", "martial") with
+ * specific (pluralized) weapon names ("rapiers", "light crossbows"). Catalog weapons
+ * carry a `category` (simpleMelee/simpleRanged/martialMelee/martialRanged) and a name.
+ * We match either way. Weapons we can't positively place as simple/martial (free-form
+ * story weapons with no category) get the benefit of the doubt — no penalty.
+ *
+ * @param {object} character
+ * @param {object|null} weapon - Equipped weapon item, or null for unarmed
+ * @returns {boolean}
+ */
+export function isProficientWithWeapon(character, weapon) {
+    if (!weapon || !character) return true;
+    const profs = (CLASSES[character.class]?.weaponProficiencies || []).map(p => p.toLowerCase().trim());
+    const category = (weapon.category || '').toLowerCase();
+    const name = (weapon.name || '').toLowerCase().replace(/\s*\+\d+\b/g, '').trim();
+
+    // Specific-name proficiency (e.g. wizard "daggers", rogue "rapiers").
+    for (const t of profs) {
+        const singular = t.endsWith('s') ? t.slice(0, -1) : t;
+        if (name && (name === t || name === singular)) return true;
+    }
+
+    // Category proficiency.
+    const isSimple = category.startsWith('simple');
+    const isMartial = category.startsWith('martial');
+    if (isSimple && profs.includes('simple')) return true;
+    if (isMartial && profs.includes('martial')) return true;
+
+    // Only penalize weapons we can positively categorize as simple/martial.
+    if (!isSimple && !isMartial) return true;
+    return false;
+}
+
+export function getWeaponAttackBonus(character, inventory = []) {
+    const weapon = getEquippedWeapon(inventory);
+    const abilityMod = getWeaponAbilityModifier(character, weapon);
+    const proficient = isProficientWithWeapon(character, weapon);
+    return abilityMod
+        + (proficient ? getProficiencyBonus(character.level) : 0)
+        + getLevelBonus(character)
+        + (weapon?.attackBonus || weapon?.magicBonus || 0);
+}
+
+export function getWeaponDamageNotation(character, inventory = [], fallback = '1d4') {
+    const weapon = getEquippedWeapon(inventory);
+    const dice = weapon?.damage || fallback;
+    const abilityMod = getWeaponAbilityModifier(character, weapon);
+    const itemBonus = weapon?.damageBonus || weapon?.magicBonus || 0;
+    const modifier = abilityMod + itemBonus;
+
+    if (!/^\d+d\d+/i.test(String(dice))) {
+        return fallback;
+    }
+
+    return `${dice}${modifier >= 0 ? '+' : ''}${modifier}`;
 }
 
 /**
@@ -143,7 +223,7 @@ export function getAllSkills(character) {
 /**
  * Get the level-based combat bonus for a character.
  * Currently Fighter-only: +1 to hit and damage per level beyond 1st, capped at +3.
- * Abstracts ASI, Extra Attack, Fighting Style, and feat progression.
+ * Abstracts Fighting Style / martial scaling. Extra Attack is handled in rollResolver.js.
  * @param {object} character
  * @returns {number} Bonus (0 at level 1, +1 at level 2, max +3)
  */

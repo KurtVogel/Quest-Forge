@@ -4,16 +4,17 @@ import { PROVIDERS, PROVIDER_LIST } from '../../llm/adapter.js';
 import { PRESETS, PRESET_LIST } from '../../data/presets.js';
 import { saveGame, loadGame, listSaves, deleteSave } from '../../state/persistence.js';
 import { saveGameToCloud, loadGameFromCloud, listCloudSaves } from '../../state/cloudSync.js';
-import { initializeFirebase } from '../../config/firebase.js';
+import { getFirebaseConfigError, initializeFirebase } from '../../config/firebase.js';
 import { signInWithGoogle, logOut } from '../../state/auth.js';
 import './Settings.css';
 
 export default function SettingsModal() {
     const { state, dispatch } = useGame();
-    const [activeTab, setActiveTab] = useState('llm');
+    const [activeTab, setActiveTab] = useState(state.ui.settingsTab || 'llm');
     const [saves, setSaves] = useState([]);
     const [cloudSaves, setCloudSaves] = useState([]);
     const [saveName, setSaveName] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
     const [firebaseConfig, setFirebaseConfig] = useState(state.settings.firebaseConfig || {
         apiKey: '',
         authDomain: '',
@@ -21,11 +22,41 @@ export default function SettingsModal() {
     });
     const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
     const [authError, setAuthError] = useState('');
+    const [syncStatus, setSyncStatus] = useState('');
 
     useEffect(() => {
-        if (activeTab === 'saves') {
-            loadSavesList();
+        let isCancelled = false;
+
+        async function loadActiveSavesList() {
+            const list = await listSaves();
+            if (isCancelled) return;
+            setSaves(list);
+
+            if (state.user?.uid) {
+                try {
+                    const cList = await listCloudSaves(state.user.uid);
+                    if (!isCancelled) {
+                        setCloudSaves(cList);
+                        setAuthError('');
+                    }
+                } catch (e) {
+                    if (!isCancelled) {
+                        setCloudSaves([]);
+                        setAuthError('Cloud saves could not be loaded: ' + e.message);
+                    }
+                }
+            } else {
+                setCloudSaves([]);
+            }
         }
+
+        if (activeTab === 'saves') {
+            loadActiveSavesList();
+        }
+
+        return () => {
+            isCancelled = true;
+        };
     }, [activeTab, state.user?.uid]);
 
     useEffect(() => {
@@ -34,38 +65,51 @@ export default function SettingsModal() {
         }
     }, [state.settings.firebaseConfig]);
 
+    const handleClose = () => {
+        dispatch({ type: 'SET_UI', payload: { isSettingsOpen: false, settingsTab: null } });
+    };
+
     const loadSavesList = async () => {
         const list = await listSaves();
         setSaves(list);
         if (state.user?.uid) {
-            const cList = await listCloudSaves(state.user.uid);
-            setCloudSaves(cList);
+            try {
+                const cList = await listCloudSaves(state.user.uid);
+                setCloudSaves(cList);
+                setAuthError('');
+            } catch (e) {
+                setCloudSaves([]);
+                setAuthError('Cloud saves could not be loaded: ' + e.message);
+            }
         } else {
             setCloudSaves([]);
         }
     };
 
-    const handleClose = () => {
-        dispatch({ type: 'SET_UI', payload: { isSettingsOpen: false } });
-    };
-
     const handleSave = async () => {
-        const slotId = `save-${Date.now()}`;
-        const sessionName = saveName.trim() || state.session.name || 'Manual Save';
-        const updatedState = {
-            ...state,
-            session: {
-                ...state.session,
-                name: sessionName,
-                updatedAt: new Date().toISOString()
+        if (isSaving) return; // Guard against rapid double-clicks creating phantom saves
+        setIsSaving(true);
+        try {
+            const slotId = `save-${Date.now()}`;
+            const sessionName = saveName.trim() || state.session.name || 'Manual Save';
+            const updatedState = {
+                ...state,
+                session: {
+                    ...state.session,
+                    name: sessionName,
+                    updatedAt: new Date().toISOString()
+                }
+            };
+            await saveGame(slotId, updatedState);
+            await loadSavesList(); // Local save is committed now — refresh immediately
+            if (state.user?.uid) {
+                await saveGameToCloud(state.user.uid, slotId, updatedState);
+                await loadSavesList(); // Reflect the cloud copy once it lands
             }
-        };
-        await saveGame(slotId, updatedState);
-        if (state.user?.uid) {
-            await saveGameToCloud(state.user.uid, slotId, updatedState);
+            setSaveName('');
+        } finally {
+            setIsSaving(false);
         }
-        setSaveName('');
-        loadSavesList();
     };
 
     const handleLoad = async (slotId, isCloud = false) => {
@@ -83,7 +127,7 @@ export default function SettingsModal() {
 
     const handleDelete = async (slotId) => {
         await deleteSave(slotId);
-        loadSavesList();
+        await loadSavesList();
     };
 
     const handleNewGame = () => {
@@ -98,6 +142,13 @@ export default function SettingsModal() {
     };
 
     const handleConnectFirebase = async () => {
+        const configError = getFirebaseConfigError(firebaseConfig);
+        if (configError) {
+            setIsFirebaseConnected(false);
+            setAuthError(configError);
+            return;
+        }
+
         updateSetting('firebaseConfig', firebaseConfig);
         const success = await initializeFirebase(firebaseConfig);
         setIsFirebaseConnected(success);
@@ -108,19 +159,66 @@ export default function SettingsModal() {
     const handleGoogleLogin = async () => {
         try {
             setAuthError('');
+            const configError = getFirebaseConfigError(firebaseConfig);
+            if (configError) {
+                setAuthError(configError);
+                return;
+            }
+            if (!isFirebaseConnected) {
+                setAuthError('Connect Firebase before signing in with Google');
+                return;
+            }
             const user = await signInWithGoogle();
             dispatch({
                 type: 'SET_USER',
                 payload: { uid: user.uid, email: user.email, isGuest: false }
             });
         } catch (e) {
-            setAuthError('Google Sign-In failed: ' + e.message);
+            const message = e.code === 'auth/popup-blocked'
+                ? 'Google Sign-In popup was blocked by the browser. Allow popups for this site and try again.'
+                : e.code === 'auth/unauthorized-domain'
+                    ? 'This domain is not authorized in Firebase Authentication. Add this app domain in Firebase Console > Authentication > Settings > Authorized domains.'
+                    : e.message;
+            setAuthError('Google Sign-In failed: ' + message);
         }
     };
 
     const handleLogout = async () => {
         await logOut();
         dispatch({ type: 'SIGNOUT_USER' });
+    };
+
+    const handleUploadLocalSaves = async () => {
+        if (!state.user?.uid) {
+            setAuthError('Sign in with Google before uploading local saves');
+            return;
+        }
+
+        setAuthError('');
+        setSyncStatus('Uploading local saves...');
+
+        try {
+            const localSaves = await listSaves();
+            if (localSaves.length === 0) {
+                setSyncStatus('No local saves to upload');
+                return;
+            }
+
+            let uploaded = 0;
+            for (const save of localSaves) {
+                const savedState = await loadGame(save.slotId);
+                if (savedState) {
+                    const ok = await saveGameToCloud(state.user.uid, save.slotId, savedState);
+                    if (ok) uploaded++;
+                }
+            }
+
+            await loadSavesList();
+            setSyncStatus(`Uploaded ${uploaded} of ${localSaves.length} local save${localSaves.length === 1 ? '' : 's'} to cloud`);
+        } catch (e) {
+            setSyncStatus('');
+            setAuthError('Cloud upload failed: ' + e.message);
+        }
     };
 
     const selectedProvider = PROVIDERS[state.settings.llmProvider];
@@ -286,8 +384,8 @@ export default function SettingsModal() {
                                         onChange={(e) => setSaveName(e.target.value)}
                                         placeholder="Save name (optional)..."
                                     />
-                                    <button className="btn btn-primary" onClick={handleSave}>
-                                        💾 Save Game
+                                    <button className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
+                                        {isSaving ? 'Saving…' : '💾 Save Game'}
                                     </button>
                                 </div>
                             )}
@@ -420,6 +518,9 @@ export default function SettingsModal() {
                                             <div style={{ marginBottom: '0.5rem' }}>
                                                 <strong>Logged in as:</strong> {state.user.email || 'Guest'}
                                             </div>
+                                            <button className="btn btn-sm btn-primary" onClick={handleUploadLocalSaves}>
+                                                Upload Local Saves to Cloud
+                                            </button>
                                             <button className="btn btn-sm btn-danger" onClick={handleLogout}>
                                                 Sign Out
                                             </button>
@@ -438,6 +539,11 @@ export default function SettingsModal() {
                             {authError && (
                                 <div className="auth-error" style={{ color: 'var(--danger)', marginTop: '1rem', fontSize: '0.8rem' }}>
                                     {authError}
+                                </div>
+                            )}
+                            {syncStatus && (
+                                <div className="auth-status" style={{ marginTop: '1rem', fontSize: '0.8rem' }}>
+                                    {syncStatus}
                                 </div>
                             )}
                         </div>

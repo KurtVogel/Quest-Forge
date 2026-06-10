@@ -1,4 +1,4 @@
-import { collection, doc, setDoc, getDoc, getDocs, query, orderBy, limit, deleteDoc } from "firebase/firestore";
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc } from "firebase/firestore";
 import { db } from "../config/firebase.js";
 
 /**
@@ -17,16 +17,22 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         const userSavesRef = collection(db, `users/${uid}/saves`);
         const saveDocRef = doc(userSavesRef, slotId);
 
-        // Trim: drop summarized messages (their content lives in journal entries)
+        // Cloud saves trim summarized messages to stay under Firestore's ~1MB doc limit
+        // (their content lives on in journal entries + world facts). Local saves keep the
+        // full history — see persistence.js.
         const trimmedMessages = (gameState.messages || []).filter(m => !m.summarized);
         // Cap: keep only the most recent rolls
         const trimmedRolls = (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS);
+        // prunedMessageCount indexes into the array we actually persist. We just dropped
+        // every summarized message, so the boundary resets to what remains (0).
+        const prunedMessageCount = trimmedMessages.filter(m => m.summarized).length;
 
         // Build a trimmed copy of the state for the payload, stripping secrets
         const trimmedState = {
             ...gameState,
             messages: trimmedMessages,
             rollHistory: trimmedRolls,
+            session: { ...gameState.session, prunedMessageCount },
             settings: {
                 ...gameState.settings,
                 apiKey: undefined,
@@ -98,10 +104,7 @@ export async function listCloudSaves(uid) {
 
     try {
         const userSavesRef = collection(db, `users/${uid}/saves`);
-        // Get all saves except autosave, ordered by newest first
-        const q = query(userSavesRef, orderBy("savedAt", "desc"));
-
-        const snapshot = await getDocs(q);
+        const snapshot = await getDocs(userSavesRef);
         const saves = [];
 
         snapshot.forEach((doc) => {
@@ -113,10 +116,10 @@ export async function listCloudSaves(uid) {
             }
         });
 
-        return saves;
+        return saves.sort((a, b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0));
     } catch (e) {
         console.error("☁️ Cloud list failed:", e);
-        return [];
+        throw e;
     }
 }
 

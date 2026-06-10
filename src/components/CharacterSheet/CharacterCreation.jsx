@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
-import { createCharacter, STANDARD_ARRAY, ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS, getStartingEquipment } from '../../engine/characterUtils.js';
+import { createCharacter, createStartingInventory, STANDARD_ARRAY, ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
 import { RACES, RACE_LIST } from '../../data/races.js';
 import { CLASSES, CLASS_LIST } from '../../data/classes.js';
 import { SKILL_ABILITIES } from '../../engine/rules.js';
@@ -72,14 +72,8 @@ export default function CharacterCreation() {
         }
 
         const character = createCharacter(name, race, charClass, abilityScores, chosenSkills);
-        dispatch({ type: 'SET_CHARACTER', payload: character });
-
-        // Add starting equipment to inventory (auto-equip armor, weapons, shields)
-        const equipment = getStartingEquipment(charClass);
-        for (const item of equipment) {
-            const shouldEquip = item.type === 'armor' || item.type === 'weapon' || item.type === 'shield' || item.isShield;
-            dispatch({ type: 'ADD_ITEM', payload: { ...item, equipped: shouldEquip } });
-        }
+        const inventory = createStartingInventory(charClass);
+        dispatch({ type: 'START_CHARACTER', payload: { character, inventory } });
 
         // Create session
         const sessionName = adventureName.trim() || `${name}'s Adventure`;

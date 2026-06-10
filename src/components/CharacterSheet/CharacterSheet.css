@@ -650,3 +650,28 @@
     min-width: 4rem;
     text-align: right;
 }
+
+.cs-resource-use {
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--gold);
+    background: transparent;
+    color: var(--gold);
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cs-resource-use:hover:not(:disabled) {
+    background: rgba(212, 175, 55, 0.15);
+}
+
+.cs-resource-use:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    border-color: var(--text-muted);
+    color: var(--text-muted);
+}

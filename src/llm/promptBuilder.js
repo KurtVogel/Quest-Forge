@@ -4,9 +4,12 @@
  */
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT } from '../engine/characterUtils.js';
-import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus } from '../engine/rules.js';
+import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus, isProficientWithWeapon } from '../engine/rules.js';
+import { getExperienceThreshold } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
+import { describeCatalogForPrompt } from '../data/items.js';
+import { formatCurrency } from '../engine/currency.js';
 
 /**
  * Build the complete system prompt for the LLM.
@@ -47,8 +50,10 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
 
     // Inventory
     if (inventory && inventory.length > 0) {
-        parts.push(buildInventoryBlock(inventory));
+        parts.push(buildInventoryBlock(inventory, character));
     }
+
+    parts.push(buildItemCatalogBlock());
 
     // Active quests
     if (quests && quests.length > 0) {
@@ -75,7 +80,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Active constraints — synthesized DM reminders from quests, world state, threats
-    const constraints = buildActiveConstraints(quests, worldFacts, character);
+    const constraints = buildActiveConstraints(quests, worldFacts, character, party);
     if (constraints) {
         parts.push(constraints);
     }
@@ -130,7 +135,7 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 
 ### Skill Checks / Saves (dice needed)
 1. Player declares an action that requires a check
-2. **YOU narrate the SETUP** — describe the tension, the attempt, what's at stake. Build drama. Do NOT describe the outcome of the action.
+2. **Request the roll immediately — do NOT pre-narrate.** Respond with the requested_rolls JSON and at most ONE short line of tension. The client withholds this pre-roll text from the player, so don't spend description here, and don't describe the attempt's process or its outcome yet.
 3. **DO NOT ASK THE PLAYER TO ROLL IN TEXT.** (e.g., never say "Please roll a Perception check" or "(DM Note: Roll...)").
 4. **YOU request the roll EXCLUSIVELY via the JSON \`requested_rolls\` array** at the end of your response.
 5. The system rolls the dice and returns the result to you as a system message.
@@ -140,14 +145,14 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 ### Combat Rounds
 1. **YOU narrate the battle situation** — who is where, what's happening
 2. **The player declares their combat action** (attack, spell, dodge, etc.)
-3. You narrate the attempt and request the player's attack roll via JSON
+3. Request the player's attack roll via JSON right away — do NOT narrate the swing or its result first (the client withholds pre-roll text)
 4. System rolls → you narrate the hit or miss + damage effect
 5. **YOU then narrate enemy turns** and request NPC attack rolls via JSON
 6. System rolls → you narrate whether enemy attacks hit or miss
 7. Summarize the state of the battle and ask the player for their next action
 
 ### Key Pacing Rules
-- **NEVER narrate the result of an action BEFORE the dice are rolled.** If you request a roll, your response ends with the setup. The outcome comes in a separate response after you receive the roll result.
+- **NEVER narrate the result of an action BEFORE the dice are rolled.** A roll-request response should carry little or no prose — the client hides it from the player. You narrate the full scene (setup AND outcome, fused) in the next response, after the roll result arrives.
 - **NEVER request rolls and narrate their outcome in the same response.** These are always two separate responses.
 - When you receive roll results, narrate the outcome IMMEDIATELY. Don't re-request the same rolls.
 - You CAN request multiple rolls in one response (e.g. two enemies attacking simultaneously).
@@ -187,13 +192,16 @@ When game events occur, include a structured JSON block at the END of your respo
 {
   "requested_rolls": [
     { "type": "skill_check", "skill": "perception", "dc": 15, "description": "Spot the hidden trap", "advantage": false, "disadvantage": false },
-    { "type": "npc_attack", "skill": "attack", "dc": 12, "description": "Goblin slashes with rusty sword", "attacker": "Goblin", "advantage": false, "disadvantage": false },
-    { "type": "damage_roll", "notation": "1d8+3", "description": "Longsword damage" }
+    { "type": "attack_roll", "skill": "attack", "target": "<enemy id from combat state>", "dc": 13, "damage": "1d8+3", "description": "You hew at the goblin" },
+    { "type": "npc_attack", "attacker": "Goblin", "attackerId": "<enemy id>", "target": "player", "dc": 16, "modifier": 4, "damage": "1d6+2", "description": "The goblin slashes back" },
+    { "type": "damage_roll", "notation": "1d8+3", "description": "Out-of-combat damage only — combat damage goes inline above" }
   ],
   "damage_dealt": 0,
   "damage_taken": 0,
   "items_found": [],
   "items_lost": [],
+  "purchase": null,
+  "sell": null,
   "gold_found": 0,
   "gold_lost": 0,
   "silver_found": 0,
@@ -205,6 +213,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "rest_taken": null,
   "conditions_gained": [],
   "conditions_removed": [],
+  "resources_used": [],
   "healing": 0,
   "quest_updates": [{ "status": "new", "name": "Quest Name", "description": "Quest description" }],
   "location": "",
@@ -252,18 +261,20 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - **ONLY use the \`requested_rolls\` JSON array.** If you need a roll, you MUST output the JSON block.
 - ALL dice rolls go through requested_rolls — for the player AND for NPCs/enemies.
 - For player checks: type is "skill_check", "saving_throw", or "attack_roll". dc is the target DC.
-- For player damage: type is "damage_roll". Provide the exact dice to roll in the "notation" field based on the player's equipped weapon (e.g. "1d8+3") or spell.
-  - CRITICAL EXCEPTION: If the player scored a critical hit, DOUBLE the number of damage dice requested (e.g. if the weapon is "1d8+3", request "2d8+3").
-- For NPC/enemy/companion attacks: type is "npc_attack". Set dc to the TARGET's AC (either player AC, companion AC, or enemy AC). Include attacker name. **Always include "modifier"** — the NPC's attack bonus (e.g. +4 for a trained guard, +7 for a veteran). If unknown, estimate from the creature's challenge.
-- For companion damage or enemy damage that requires rolling: type is "damage_roll".
+- **In combat, fold damage into the attack** so the system resolves the whole exchange in one pass. On an "attack_roll" (player) or "npc_attack" (foe/companion), add: "target" (who is hit — an enemy id from the combat state, or "player", or a companion id) and "damage" (the weapon/spell dice, e.g. "1d8+3"). The client rolls the attack, and on a hit rolls the damage and applies HP itself. Do NOT send a separate "damage_roll" for combat, and do NOT emit damage_taken/enemy_updates for it.
+  - The client AUTOMATICALLY doubles the damage dice on a natural-20 crit — never pre-double the notation yourself.
+- For NPC/enemy/companion attacks: type is "npc_attack". Set dc to the TARGET's AC. Include the attacker name and "attackerId" (the foe's enemy id) so a foe slain earlier in the round doesn't still swing. **Always include "modifier"** — the attack bonus (e.g. +4 for a trained guard, +7 for a veteran); estimate from the creature if unknown.
+- Use a standalone "damage_roll" only for damage with NO attack roll (a trap, a fall, an auto-hit effect) — those are not auto-applied; report their HP effect via the JSON as usual.
 - For NPC saves: type is "npc_save". dc is the spell/ability DC.
-- When requesting rolls, narrate only the SETUP (what's happening, what's at stake). Do NOT narrate the outcome.
-- When you receive "[ROLL RESULT: ...]" messages, narrate the OUTCOME based on those results. No further setup needed.
+- When requesting rolls, send at most one short line of tension — the client withholds pre-roll text and you narrate the full scene after the dice. Do NOT narrate the outcome.
+- **A roll-request response carries ONLY \`requested_rolls\` (plus \`combat_start\` if a fight is just beginning).** Do NOT include outcome fields — \`damage_taken\`, \`healing\`, \`resources_used\`, \`*_found\`/\`*_lost\`, \`exp_awarded\`, \`conditions_gained\`/\`conditions_removed\`, \`quest_updates\`, \`items_found\`/\`items_lost\` — in the same response as a roll request. The client withholds that response and defers those fields; emit them only with the outcome narration after the dice resolve.
+- When you receive "[ROLL RESULT: ...]" messages, narrate the whole beat ONCE based on those results — set the action in a line and deliver the outcome in one cohesive pass. It is the first narration the player sees, so make it self-contained.
 - You CAN request multiple rolls in one response (e.g. two enemies both attacking).
 
 COMBAT NOTES:
-- Use "combat_start" when combat initiates. List all enemies with name, hp, ac, and initiative.
-- Use "enemy_updates" to report damage to enemies. Reference them by the id shown in the combat state.
+- Use "combat_start" when combat initiates, and list EVERY foe that will act — each with name, hp, ac, and initiative. The client tracks exactly what you declare, so keep the narrative and the tracked enemies strictly 1:1: never describe an attacker that isn't in the combat state, and don't silently add or drop foes mid-fight.
+- **Resolve a whole round in ONE response.** When the player attacks, also request every still-living foe's response attack in the same requested_rolls block (each with attackerId, target, modifier, and inline damage). The client rolls them in order, skips any foe already slain that round, applies all HP, and you then narrate the exchange once.
+- HP is owned by the client. When a roll result says "HP applied by the system", do NOT also send enemy_updates or damage_taken for it. Use "enemy_updates" only for HP changes the dice did NOT cause (e.g. an enemy drinks a potion).
 - Use "combat_end": true when all enemies are defeated or combat ends.
 
 PLAYER DEATH:
@@ -272,19 +283,26 @@ PLAYER DEATH:
 - Continue the world as normal. Death is a narrative event, not a game-over.
 
 ECONOMY & HEALING:
-- Provide "healing" as a positive integer when the player recovers HP (e.g. drinking potion, Second Wind).
+- Provide "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC's healing spell on the player). Potions and class abilities are player-activated through the UI — never emit "healing" for those.
 - Provide "X_found" and "X_lost" properties where X is "gold", "silver", or "copper" based on the economy action (e.g. looting coins gives X_found, buying a sword requires X_lost). Provide numbers (integers without labels).
+- For purchases, prefer one atomic "purchase" event instead of separate money/item fields: { "itemKey": "longsword", "quantity": 1, "priceCp": 1500 }. The client validates funds, subtracts coin, and adds the item. Do NOT also emit gold_lost/silver_lost/copper_lost or items_found for the same purchase.
+- For sales (the player sells loot to a merchant), use one atomic "sell" event: { "itemKey": "longsword", "quantity": 1 } — or identify the item by "name" if it has no catalog key. The client values it (about half the catalog price), removes it, and adds the coin. Set "priceCp" (total) only to model haggling or a stingy/eager buyer. Do NOT also emit items_lost or gold_found/silver_found/copper_found for the same sale.
+- For ordinary equipment loot or shop goods, use catalog "itemKey" values when possible. For unusual story objects, use a plain item name/type.
+- Magic weapon/armor/shield bonuses are supported from +1 to +3 only. Use "magicBonus": 1, 2, or 3. Weapons apply this to both attack and damage; armor and shields apply it to AC. Do not create +4 or higher equipment unless the user explicitly asks for high-power homebrew.
+- The client owns equipped weapon attack/damage and armor/shield AC math. When requesting a player attack roll, identify the target and describe the strike; the client will use the equipped weapon's dice and magic bonus.
 
 REST & RESOURCES:
 - When the party rests, provide "rest_taken": "short" or "long". The system automatically handles:
   - **Short rest:** Spends hit dice to heal, resets short-rest abilities (Fighter's Second Wind, Action Surge, etc.)
   - **Long rest:** Full HP restore, recovers half hit dice, resets ALL abilities, clears minor conditions
 - The character sheet shows current resources (Second Wind, Action Surge, Channel Divinity, etc.) with uses remaining. Reference these in narration — e.g., "You steel yourself and catch your breath" for Second Wind.
-- Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for in-combat healing (potions, spells).
+- **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "✨ Second Wind — you recover 8 HP" or "🧪 You drink a Potion of Healing"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent but gently note they can trigger it from their character sheet or inventory so the system applies it.
+- Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC casts a healing spell on the player).
 
 PROGRESSION & STATUS EFFECTS:
 - ALWAYS provide "exp_awarded" as an integer when the player defeats enemies, completes objectives, or overcomes challenges. Players expect to see XP after every combat. Typical values: weak enemy 25-50, standard enemy 50-100, tough enemy 100-200, boss 300+, quest completion 100-500.
-- **IMPORTANT — LEVELING UP:** To level the player up, set "level_up": true in the JSON block. Do NOT try to level the player by inflating exp_awarded — the system will ignore XP-based leveling if the threshold is not met. Use "level_up": true whenever the player earns a level (milestone, quest completion, narrative moment, or when the player asks to level up). The system automatically handles HP gain, hit dice, and stat updates. Do NOT narrate HP or stat changes yourself — the system displays them.
+- **LEVELING:** The client owns XP thresholds, HP gain, hit dice, feature unlocks, and level-up messages. Do NOT narrate HP or stat changes yourself. Use "level_up": true only for a deliberate story milestone where the character should gain exactly one level regardless of current XP; otherwise award XP normally and let the system decide.
+- **FIGHTER EXTRA ATTACK:** Fighters of level 5+ make two attack rolls when they take the Attack action. Request one player "attack_roll" with an inline "damage" notation; the client rolls BOTH attacks and rolls/applies damage for each that hits — no separate damage rolls needed.
 - Provide "rest_taken" as exactly "short" or "long" when the party rests at a camp, inn, or safe zone.
 - Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.
 
@@ -303,10 +321,10 @@ PROGRESSION & STATUS EFFECTS:
 > \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":14}] }\`\`\`
 > *(The outcome must come AFTER the dice result is received, not before)*
 
-✅ **GOOD — DM sets up tension, requests roll via JSON, waits for result:**
-> "You press yourself against the cold stone wall as the patrol's torchlight sweeps closer. Every scuff of your boots could betray you. The moment to move is now."
+✅ **GOOD — DM requests the roll with minimal prose; narrates the full scene AFTER the dice:**
+> "The patrol's torchlight sweeps toward you."
 > \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":14,"description":"Slip past the patrol","advantage":false,"disadvantage":false}] }\`\`\`
-> *(Clean setup → JSON roll request → outcome narrated in the NEXT response after dice are returned)*`;
+> *(The client withholds this pre-roll line. Once the dice return, narrate the whole beat in one vivid pass — the creep along the wall AND whether you're spotted — never split across two messages.)*`;
 
 function buildCharacterBlock(character) {
     const stats = Object.entries(character.abilityScores)
@@ -342,7 +360,7 @@ function buildCharacterBlock(character) {
 - **Race:** ${character.race}
 - **Class:** ${character.class} (Level ${character.level})
 - **HP:** ${character.currentHP}/${character.maxHP}
-- **EXP:** ${character.exp || 0} / ${character.level * 1000} to next level
+- **EXP:** ${character.exp || 0} / ${getExperienceThreshold(character.level)} to next level
 - **AC:** ${character.armorClass}
 - **Wealth:** ${character.gold || 0} gp | ${character.silver || 0} sp | ${character.copper || 0} cp
 - **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}${getLevelBonus(character) > 0 ? `\n- **Level Bonus (combat):** +${getLevelBonus(character)} to hit and damage (applied automatically by the system — do NOT add this yourself)` : ''}
@@ -360,16 +378,20 @@ These characters are currently traveling with the player. They act in combat and
 ${party.map(c => `- **${c.name}** | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Weapon: ${c.weapon || 'Unarmed'} | Affinity: ${c.affinity}/100`).join('\n')}`;
 }
 
-function buildInventoryBlock(inventory) {
+function buildInventoryBlock(inventory, character) {
     const equipped = inventory.filter(i => i.equipped);
     const carried = inventory.filter(i => !i.equipped);
 
     const formatItem = (i) => {
         let desc = i.name;
         if (i.quantity > 1) desc += ` (x${i.quantity})`;
-        if (i.baseAC && !i.isShield) desc += ` [AC ${i.baseAC}, ${i.armorType || 'unknown'} armor]`;
-        if (i.isShield || i.type === 'shield') desc += ' [+2 AC shield]';
-        if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}]`;
+        if (i.baseAC && !i.isShield) desc += ` [AC ${i.baseAC + (i.acBonus || 0)}, ${i.armorType || 'unknown'} armor]`;
+        if (i.isShield || i.type === 'shield') desc += ` [+${(i.shieldAC || 2) + (i.acBonus || 0)} AC shield]`;
+        if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}${i.attackBonus ? `, +${i.attackBonus} hit` : ''}${i.damageBonus ? `, +${i.damageBonus} dmg` : ''}]`;
+        if (Number.isFinite(i.valueCp)) desc += ` [value ${formatCurrency(i.valueCp)}]`;
+        if (i.type === 'weapon' && character && !isProficientWithWeapon(character, i)) {
+            desc += ` [NOT proficient — attacks lack the proficiency bonus; narrate the unfamiliarity]`;
+        }
         return desc;
     };
 
@@ -381,6 +403,12 @@ function buildInventoryBlock(inventory) {
         block += `\n**Carried:** ${carried.map(formatItem).join(', ')}`;
     }
     return block;
+}
+
+function buildItemCatalogBlock() {
+    return `## ITEM CATALOG (common mechanical items)
+Use itemKey for shop purchases and ordinary loot when possible. Catalog: ${describeCatalogForPrompt()}
+Magic equipment: add "magicBonus": 1, 2, or 3 only.`;
 }
 
 function buildQuestBlock(quests) {
@@ -427,7 +455,7 @@ function buildWorldFactsBlock(worldFacts) {
  * Highlights active threats, deadlines, and relationship pressures
  * so the DM can't forget them even in a long session.
  */
-function buildActiveConstraints(quests, worldFacts, character) {
+function buildActiveConstraints(quests, worldFacts, character, party) {
     const reminders = [];
 
     // Active quests as pressure reminders
@@ -448,6 +476,11 @@ function buildActiveConstraints(quests, worldFacts, character) {
     // Character death reminder
     if (character?.isDead) {
         reminders.push(`The player's original character is dead. They are now playing as a spirit/successor. Acknowledge this reality in narration.`);
+    }
+
+    const isLowLevelSolo = (character?.level ?? 1) <= 2 && (!party || party.length === 0);
+    if (isLowLevelSolo) {
+        reminders.push(`Encounter pacing — the player is a novice (level ${character?.level ?? 1}) adventuring solo, so scale threats accordingly. A couple of weak foes (a few rats, a lone cutthroat, a pair of skittish goblins) is perfectly fine — but do NOT drop an overwhelming or unwinnable swarm on them out of nowhere. Favor weaker enemies (low HP, modest AC) over big numbers, and give a real fighting chance: cover, escape routes, terrain, or foes who hesitate, come one at a time, or can be talked down. Ramp difficulty up as they gain levels. Danger stays real and death is possible — just earned, not ambushed. Every foe you have act MUST be a tracked enemy in combat_start (keep it 1:1 with the narration).`);
     }
 
     if (reminders.length === 0) return '';

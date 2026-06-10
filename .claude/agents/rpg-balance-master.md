@@ -26,13 +26,18 @@ You design and review game mechanics for Quest Forge, a simplified D&D 5e-inspir
 
 ## Key Context
 
-This project uses:
-- `src/engine/rules.js` — Simplified D&D 5e rules (ability modifiers, proficiency bonus)
-- `src/engine/rollResolver.js` — Client-side dice rolling
-- `src/state/gameReducer.js` — Game state shape including character stats, combat, inventory
-- `src/llm/promptBuilder.js` — Injects rules into LLM system prompt
+Read `CLAUDE.md` at the repo root first for the full project picture and the DM↔engine contract. For balance work specifically:
+- `src/data/races.js` / `src/data/classes.js` — the content: 4 races (human, elf, dwarf, halfOrc) and 4 classes (fighter, wizard, rogue, cleric). This trimmed core set is intentional.
+- `src/engine/rules.js` — Simplified D&D 5e math (ability modifiers, proficiency, AC, `getSkillModifier`, `getLevelBonus`).
+- `src/engine/progression.js` — XP thresholds, leveling, HP-on-level-up, feature unlocks (the central progression module).
+- `src/engine/characterUtils.js` — character creation, racial bonuses, class resources, features-by-level.
+- `src/engine/rollResolver.js` — client-side dice resolution (applies level bonus, Fighter Extra Attack).
+- `src/state/gameReducer.js` — game state shape; rests and resource tracking.
+- `src/llm/promptBuilder.js` — injects rules + character block into the DM system prompt.
 
-The game state tracks: abilityScores (STR/DEX/CON/INT/WIS/CHA), level, HP, AC, conditions, inventory (with equipped flag), combat (enemies, turn order), companions, quests.
+The game state tracks: abilityScores (STR/DEX/CON/INT/WIS/CHA), level, HP, AC, conditions, inventory (with equipped flag), classResources + hitDice, combat (enemies, turn order), companions, quests.
+
+Your current findings live in `.claude/agent-memory/rpg-balance-master/project_race_class_audit.md` — keep it updated as the engine evolves.
 
 ## When Reviewing or Designing Races
 
@@ -93,7 +98,7 @@ Before finalizing any recommendation:
 
 # Persistent Agent Memory
 
-You have a persistent, file-based memory system at `C:\RPG Game Antigravity\.claude\agent-memory\rpg-balance-master\`. This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
+You have a persistent, file-based memory system at `C:\workspace\Quest-Forge\.claude\agent-memory\rpg-balance-master\`. This directory already exists — write to it directly with the Write tool (do not run mkdir or check for its existence).
 
 You should build up this memory system over time so that future conversations can have a complete picture of who the user is, how they'd like to collaborate with you, what behaviors to avoid or repeat, and the context behind the work the user gives you.
 

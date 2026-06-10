@@ -145,7 +145,7 @@ export function parseResponse(response) {
                 const events = normalizeEvents(parsed);
                 console.log('[ResponseParser] ✅ Parsed unfenced JSON.');
                 return { narrative, events };
-            } catch (e) {
+            } catch {
                 // Try repair before giving up
                 try {
                     const parsed = JSON.parse(repairJson(looseJson.json));
@@ -183,7 +183,7 @@ export function parseResponse(response) {
     let events = null;
     try {
         events = JSON.parse(jsonMatch[1]);
-    } catch (e) {
+    } catch {
         console.warn('[ResponseParser] ❌ JSON parse failed, attempting repair...');
         try {
             events = JSON.parse(repairJson(jsonMatch[1]));
@@ -220,9 +220,13 @@ function normalizeEvents(raw) {
                 description: r.description || '',
                 // NPC attack fields
                 attacker: r.attacker || null,
+                attackerId: r.attackerId || null,
                 modifier: typeof r.modifier === 'number' ? r.modifier : null,
                 // Damage roll field
                 notation: r.notation || null,
+                // Combat (batched-round) fields: who takes the hit + inline weapon damage
+                target: r.target || null,
+                damage: r.damage || null,
                 // Advantage / Disadvantage
                 advantage: !!r.advantage,
                 disadvantage: !!r.disadvantage,
@@ -232,6 +236,12 @@ function normalizeEvents(raw) {
         damageTaken: clamp(raw.damage_taken, 0, 999),
         itemsFound: Array.isArray(raw.items_found) ? raw.items_found.slice(0, 20) : [],
         itemsLost: Array.isArray(raw.items_lost) ? raw.items_lost.slice(0, 20) : [],
+        purchases: Array.isArray(raw.purchases)
+            ? raw.purchases
+            : (raw.purchase ? [raw.purchase] : []),
+        sells: Array.isArray(raw.sells)
+            ? raw.sells
+            : (raw.sell ? [raw.sell] : []),
         goldFound: clamp(raw.gold_found, 0, 10000),
         goldLost: clamp(raw.gold_lost, 0, 10000),
         silverFound: clamp(raw.silver_found, 0, 10000),
@@ -242,6 +252,8 @@ function normalizeEvents(raw) {
         restTaken: typeof raw.rest_taken === 'string' ? raw.rest_taken : null,
         conditionsGained: Array.isArray(raw.conditions_gained) ? raw.conditions_gained : [],
         conditionsRemoved: Array.isArray(raw.conditions_removed) ? raw.conditions_removed : [],
+        // Limited class abilities the player spent this turn (e.g. ["secondWind"]).
+        resourcesUsed: Array.isArray(raw.resources_used) ? raw.resources_used : [],
         questUpdates: Array.isArray(raw.quest_updates) ? raw.quest_updates : [],
         location: raw.location || null,
         healing: clamp(raw.healing, 0, 999),
@@ -273,53 +285,169 @@ function normalizeEvents(raw) {
  * @param {object} events - Normalized events from parseResponse
  * @param {function} dispatch - Game state dispatch function
  */
-export function applyEvents(events, dispatch) {
+export function applyEvents(events, dispatch, getState = null, opts = {}) {
     if (!events) return;
+
+    // A roll-setup turn (the player's action that triggered dice) only declares the
+    // structural state the dice need — combat starting. Every *outcome* mutation is
+    // deferred to the post-roll narration. This stops the DM from double-applying state
+    // when it (mis)emits the same fields in both the withheld setup response and the
+    // outcome response — the root cause of duplicate resources_used, and the latent
+    // double-counting of gold, items, XP, and conditions.
+    if (opts.setupPhase) {
+        if (events.combatStart) {
+            dispatch({
+                type: 'START_COMBAT',
+                payload: {
+                    enemies: events.combatStart.enemies || [],
+                    playerInitiative: events.combatStart.player_initiative,
+                },
+            });
+        }
+        return;
+    }
+
+    const state = getState?.();
+    const resources = state?.character?.classResources || {};
+    const unavailableResources = events.resourcesUsed.filter(resourceKey => {
+        const res = resources[resourceKey];
+        return res && res.used >= res.max;
+    });
+    const suppressResourceHealing = unavailableResources.length > 0 && events.healing > 0;
+
+    // Player abilities/consumables are activated through the game UI now, which marks
+    // them spent. If the DM also emits resources_used for one that's already spent, skip
+    // it silently — never fire a contradictory "unavailable" notice for a correct use.
+    for (const resourceKey of events.resourcesUsed) {
+        const res = resources[resourceKey];
+        if (res && res.used >= res.max) continue;
+        dispatch({ type: 'USE_RESOURCE', payload: resourceKey });
+    }
 
     if (events.damageTaken > 0) {
         dispatch({ type: 'TAKE_DAMAGE', payload: events.damageTaken });
     }
 
-    if (events.healing > 0) {
+    if (events.healing > 0 && !suppressResourceHealing) {
         dispatch({ type: 'HEAL', payload: events.healing });
     }
 
-    for (const item of events.itemsFound) {
+    // A `purchase`/`sell` already adds/removes the traded item atomically. If the DM ALSO
+    // lists that same item in items_found/items_lost (the prompt forbids it), the item gets
+    // duplicated or removed twice. Drop found/lost entries that match a traded item by
+    // normalized key or name — the item-side twin of the coin guard below.
+    const normToken = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const itemKeyOf = (it) => (typeof it === 'string' ? '' : (it.itemKey || it.key || ''));
+    const itemNameOf = (it) => (typeof it === 'string' ? it : (it.name || ''));
+    const tradedTokenSet = (entries, getKey, getName) => {
+        const set = new Set();
+        for (const e of entries) {
+            if (getKey(e)) set.add(normToken(getKey(e)));
+            if (getName(e)) set.add(normToken(getName(e)));
+        }
+        return set;
+    };
+    const dropMatching = (entries, tokens, action) => {
+        if (tokens.size === 0) return entries;
+        return entries.filter((it) => {
+            const k = itemKeyOf(it);
+            const n = itemNameOf(it);
+            const dup = (k && tokens.has(normToken(k))) || (n && tokens.has(normToken(n)));
+            if (dup) console.warn(`[applyEvents] Ignored a found/lost "${n || k}" already handled by the atomic ${action}.`);
+            return !dup;
+        });
+    };
+    const purchasedTokens = tradedTokenSet(events.purchases, (p) => p.itemKey || p.item?.itemKey || p.key, (p) => p.name || p.item?.name);
+    const soldTokens = tradedTokenSet(events.sells, (s) => s.itemKey || s.key, (s) => s.name);
+    const itemsFound = dropMatching(events.itemsFound, purchasedTokens, 'purchase');
+    const itemsLost = dropMatching(events.itemsLost, soldTokens, 'sale');
+
+    for (const item of itemsFound) {
         const itemData = typeof item === 'string'
             ? { name: item, type: 'gear', weight: 1 }
             : {
-                name: item.name || 'Unknown item',
-                type: item.type || 'gear',
-                weight: item.weight || 1,
-                // Preserve armor / weapon / shield properties from LLM
+                // Let normalizeItem (in ADD_ITEM) fill name/type/weight from the catalog
+                // when an itemKey or recognizable name matches — only override when the DM
+                // actually specified them. Forcing type:'gear' here hid catalog consumables
+                // (e.g. a Potion of Healing granted by itemKey), so their Use button never
+                // appeared and they displayed as a generic "Unknown item".
+                ...(item.name && { name: item.name }),
+                ...(item.type && { type: item.type }),
+                ...(Number.isFinite(item.weight) && { weight: item.weight }),
+                // Preserve mechanical item properties from LLM/catalog references.
+                ...(item.itemKey && { itemKey: item.itemKey }),
+                ...(item.key && { itemKey: item.key }),
+                ...(item.category && { category: item.category }),
+                ...(item.valueCp !== undefined && { valueCp: item.valueCp }),
+                ...(item.priceCp !== undefined && { priceCp: item.priceCp }),
+                ...(item.rarity && { rarity: item.rarity }),
+                ...(item.description && { description: item.description }),
                 ...(item.baseAC !== undefined && { baseAC: item.baseAC }),
                 ...(item.armorType && { armorType: item.armorType }),
+                ...(item.acBonus !== undefined && { acBonus: item.acBonus }),
+                ...(item.magicBonus !== undefined && { magicBonus: item.magicBonus }),
                 ...(item.isShield && { isShield: true, type: 'shield' }),
+                ...(item.shieldAC !== undefined && { shieldAC: item.shieldAC }),
                 ...(item.damage && { damage: item.damage }),
+                ...(item.damageVersatile && { damageVersatile: item.damageVersatile }),
                 ...(item.damageType && { damageType: item.damageType }),
+                ...(item.attackBonus !== undefined && { attackBonus: item.attackBonus }),
+                ...(item.damageBonus !== undefined && { damageBonus: item.damageBonus }),
+                ...(item.ranged !== undefined && { ranged: !!item.ranged }),
+                ...(item.finesse !== undefined && { finesse: !!item.finesse }),
+                ...(item.thrown !== undefined && { thrown: !!item.thrown }),
+                ...(item.twoHanded !== undefined && { twoHanded: !!item.twoHanded }),
+                ...(item.versatile !== undefined && { versatile: !!item.versatile }),
+                ...(item.consumableType && { consumableType: item.consumableType }),
+                ...(item.healing && { healing: item.healing }),
                 ...(item.quantity && { quantity: item.quantity }),
             };
         dispatch({ type: 'ADD_ITEM', payload: itemData });
     }
 
-    for (const itemName of events.itemsLost) {
+    for (const purchase of events.purchases) {
+        dispatch({ type: 'PURCHASE_ITEM', payload: purchase });
+    }
+
+    for (const sale of events.sells) {
+        dispatch({ type: 'SELL_ITEM', payload: sale });
+    }
+
+    for (const itemName of itemsLost) {
         const lostName = typeof itemName === 'string' ? itemName : itemName.name || '';
         if (!lostName) continue;
         dispatch({ type: 'REMOVE_ITEM_BY_NAME', payload: lostName });
     }
 
-    if (events.goldFound > 0) dispatch({ type: 'ADD_GOLD', payload: events.goldFound });
-    if (events.goldLost > 0) dispatch({ type: 'REMOVE_GOLD', payload: events.goldLost });
-    if (events.silverFound > 0) dispatch({ type: 'ADD_SILVER', payload: events.silverFound });
-    if (events.silverLost > 0) dispatch({ type: 'REMOVE_SILVER', payload: events.silverLost });
-    if (events.copperFound > 0) dispatch({ type: 'ADD_COPPER', payload: events.copperFound });
-    if (events.copperLost > 0) dispatch({ type: 'REMOVE_COPPER', payload: events.copperLost });
+    // An atomic `purchase` already validates funds and deducts payment; a `sell` already
+    // credits the proceeds. The DM is told not to ALSO emit loose coin deltas for the same
+    // transaction, but it sometimes does — double-charging (or double-paying) the player.
+    // Enforce the contract: a purchase suppresses loose coin LOSSES this turn, a sale
+    // suppresses loose coin GAINS. This is the root of "the system reduced my coins after
+    // I already paid." (A genuinely separate gain/loss is far rarer than this LLM slip,
+    // and the prompt already forbids mixing the two.)
+    let { goldFound, goldLost, silverFound, silverLost, copperFound, copperLost } = events;
+    if (events.purchases.length > 0 && (goldLost > 0 || silverLost > 0 || copperLost > 0)) {
+        console.warn('[applyEvents] Ignored loose coin loss emitted alongside an atomic purchase — the purchase already paid.');
+        goldLost = silverLost = copperLost = 0;
+    }
+    if (events.sells.length > 0 && (goldFound > 0 || silverFound > 0 || copperFound > 0)) {
+        console.warn('[applyEvents] Ignored loose coin gain emitted alongside an atomic sale — the sale already paid out.');
+        goldFound = silverFound = copperFound = 0;
+    }
+
+    if (goldFound > 0) dispatch({ type: 'ADD_GOLD', payload: goldFound });
+    if (goldLost > 0) dispatch({ type: 'REMOVE_GOLD', payload: goldLost });
+    if (silverFound > 0) dispatch({ type: 'ADD_SILVER', payload: silverFound });
+    if (silverLost > 0) dispatch({ type: 'REMOVE_SILVER', payload: silverLost });
+    if (copperFound > 0) dispatch({ type: 'ADD_COPPER', payload: copperFound });
+    if (copperLost > 0) dispatch({ type: 'REMOVE_COPPER', payload: copperLost });
 
     if (events.levelUp) {
         // Explicit level-up from the DM — skip ADD_EXP to avoid double-leveling
         // if the awarded XP would also cross the threshold. Any bonus XP carries
         // over as progress toward the next level.
-        dispatch({ type: 'LEVEL_UP', payload: { bonusExp: events.expAwarded || 0 } });
+        dispatch({ type: 'LEVEL_UP', payload: { bonusExp: events.expAwarded || 0, reason: 'milestone' } });
     } else if (events.expAwarded > 0) {
         dispatch({ type: 'ADD_EXP', payload: events.expAwarded });
     }

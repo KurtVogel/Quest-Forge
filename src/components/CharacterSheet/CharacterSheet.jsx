@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getModifier, formatModifier, getProficiencyBonus, getAllSkills, SKILL_ABILITIES } from '../../engine/rules.js';
 import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
+import { getExperienceThreshold } from '../../engine/progression.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
 import './CharacterSheet.css';
 
 export default function CharacterSheet() {
-    const { state } = useGame();
+    const { state, dispatch } = useGame();
     const { character } = state;
     const [isExpanded, setIsExpanded] = useState(false);
     const [showSkills, setShowSkills] = useState(false);
@@ -19,7 +20,7 @@ export default function CharacterSheet() {
     const hpPercent = Math.round((character.currentHP / character.maxHP) * 100);
 
     const exp = character.exp || 0;
-    const expThreshold = character.level * 1000;
+    const expThreshold = getExperienceThreshold(character.level);
     const expPercent = Math.min(100, Math.round((exp / expThreshold) * 100));
 
     let hpColor = 'var(--hp-high)';
@@ -149,6 +150,14 @@ export default function CharacterSheet() {
                                                 ))}
                                             </span>
                                             <span className="cs-resource-reset">{def.resetOn} rest</span>
+                                            <button
+                                                className="cs-resource-use"
+                                                onClick={() => dispatch({ type: 'ACTIVATE_RESOURCE', payload: key })}
+                                                disabled={available <= 0}
+                                                title={available > 0 ? `Use ${def.label}` : `${def.label} spent — rest to recharge`}
+                                            >
+                                                Use
+                                            </button>
                                         </div>
                                     );
                                 })}

@@ -157,6 +157,15 @@
     border-radius: 3px;
 }
 
+.inv-item-warn {
+    font-size: 0.68rem;
+    color: var(--danger);
+    background: rgba(220, 53, 69, 0.12);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    cursor: help;
+}
+
 .inv-item-actions {
     display: flex;
     gap: 0.25rem;
@@ -191,4 +200,24 @@
 .inv-remove-btn:hover {
     color: var(--danger);
     background: rgba(220, 53, 69, 0.1);
+}
+
+.inv-use-btn {
+    height: 24px;
+    padding: 0 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--gold);
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: var(--gold);
+    transition: all 0.2s;
+}
+
+.inv-use-btn:hover {
+    background: rgba(212, 175, 55, 0.15);
 }

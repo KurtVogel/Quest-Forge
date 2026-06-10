@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
+import { formatCurrency } from '../../engine/currency.js';
+import { isProficientWithWeapon } from '../../engine/rules.js';
 import './Inventory.css';
 
 export default function InventoryPanel() {
@@ -14,8 +16,10 @@ export default function InventoryPanel() {
     const handleAddItem = () => {
         if (!newItemName.trim()) return;
         dispatch({
+            // Omit type/weight so normalizeItem can recognize catalog items by name
+            // (e.g. "Potion of Healing" → a usable consumable). Falls back to gear/1.
             type: 'ADD_ITEM',
-            payload: { name: newItemName.trim(), type: 'gear', weight: 1 },
+            payload: { name: newItemName.trim() },
         });
         setNewItemName('');
         setShowAddItem(false);
@@ -30,6 +34,10 @@ export default function InventoryPanel() {
             type: item.equipped ? 'UNEQUIP_ITEM' : 'EQUIP_ITEM',
             payload: item.id,
         });
+    };
+
+    const handleUse = (item) => {
+        dispatch({ type: 'USE_ITEM', payload: item.id });
     };
 
     return (
@@ -73,7 +81,9 @@ export default function InventoryPanel() {
                             <InventoryItem
                                 key={item.id}
                                 item={item}
+                                nonProficient={item.type === 'weapon' && !isProficientWithWeapon(state.character, item)}
                                 onToggleEquip={handleToggleEquip}
+                                onUse={handleUse}
                                 onRemove={handleRemove}
                             />
                         ))}
@@ -89,7 +99,9 @@ export default function InventoryPanel() {
                             <InventoryItem
                                 key={item.id}
                                 item={item}
+                                nonProficient={item.type === 'weapon' && !isProficientWithWeapon(state.character, item)}
                                 onToggleEquip={handleToggleEquip}
+                                onUse={handleUse}
                                 onRemove={handleRemove}
                             />
                         ))
@@ -100,22 +112,41 @@ export default function InventoryPanel() {
     );
 }
 
-function InventoryItem({ item, onToggleEquip, onRemove }) {
+function InventoryItem({ item, nonProficient, onToggleEquip, onUse, onRemove }) {
     return (
         <div className={`inv-item ${item.equipped ? 'equipped' : ''}`}>
             <div className="inv-item-info">
                 <span className="inv-item-name">{item.name}</span>
                 {item.quantity > 1 && <span className="inv-item-qty">x{item.quantity}</span>}
                 {item.damage && <span className="inv-item-detail">{item.damage}</span>}
-                {item.baseAC && !item.isShield && <span className="inv-item-detail">AC {item.baseAC}</span>}
-                {(item.type === 'shield' || item.isShield) && <span className="inv-item-detail">+2 AC</span>}
+                {item.attackBonus > 0 && <span className="inv-item-detail">+{item.attackBonus} hit</span>}
+                {item.damageBonus > 0 && <span className="inv-item-detail">+{item.damageBonus} dmg</span>}
+                {item.baseAC && !item.isShield && <span className="inv-item-detail">AC {item.baseAC + (item.acBonus || 0)}</span>}
+                {(item.type === 'shield' || item.isShield) && <span className="inv-item-detail">+{(item.shieldAC || 2) + (item.acBonus || 0)} AC</span>}
+                {Number.isFinite(item.valueCp) && <span className="inv-item-detail">{formatCurrency(item.valueCp)}</span>}
+                {nonProficient && (
+                    <span className="inv-item-warn" title="Your class is not proficient with this weapon — attacks don't gain your proficiency bonus.">
+                        ⚠ not proficient
+                    </span>
+                )}
             </div>
             <div className="inv-item-actions">
+                {item.type === 'consumable' && (
+                    <button
+                        className="inv-use-btn"
+                        onClick={() => onUse(item)}
+                        title={item.consumableType === 'healing' ? 'Drink / use' : 'Use'}
+                    >
+                        Use
+                    </button>
+                )}
                 {(item.type === 'weapon' || item.type === 'armor' || item.type === 'shield') && (
                     <button
                         className={`inv-equip-btn ${item.equipped ? 'unequip' : ''}`}
                         onClick={() => onToggleEquip(item)}
-                        title={item.equipped ? 'Unequip' : 'Equip'}
+                        title={item.type === 'weapon'
+                            ? (item.equipped ? 'Active weapon (click to sheathe)' : 'Set as active weapon')
+                            : (item.equipped ? 'Unequip' : 'Equip')}
                     >
                         {item.equipped ? '✓' : '⬡'}
                     </button>

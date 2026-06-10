@@ -3,8 +3,11 @@
  */
 import { computeACFromInventory, getModifier } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
-import { rollDie } from '../engine/dice.ts';
-import { buildClassResources, getFeaturesForLevel } from '../engine/characterUtils.js';
+import { normalizeItem } from '../data/items.js';
+import { rollDie, rollNotation } from '../engine/dice.ts';
+import { buildClassResources } from '../engine/characterUtils.js';
+import { awardExperience, estimateCombatExperience } from '../engine/progression.js';
+import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 
 /**
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
@@ -45,6 +48,47 @@ function withInventoryAndAC(state, newInventory) {
     };
 }
 
+function systemMessage(content) {
+    return {
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: Date.now(),
+        role: 'system',
+        content,
+    };
+}
+
+function normalizeInventory(inventory = []) {
+    return inventory.map(item => normalizeItem(item));
+}
+
+/** Decrement a stackable item by `qty`, removing it entirely when the stack is exhausted. */
+function consumeItem(inventory, itemId, qty = 1) {
+    return inventory.flatMap(item => {
+        if (item.id !== itemId) return [item];
+        const remaining = (item.quantity || 1) - qty;
+        return remaining > 0 ? [{ ...item, quantity: remaining }] : [];
+    });
+}
+
+function normalizeCombatEnemy(enemy, index) {
+    const hp = Number.isFinite(enemy?.hp) ? enemy.hp : 20;
+    const ac = Number.isFinite(enemy?.ac) ? enemy.ac : 12;
+    const initiative = Number.isFinite(enemy?.initiative)
+        ? enemy.initiative
+        : rollDie(20);
+
+    return {
+        ...enemy,
+        id: `enemy-${Date.now()}-${index}`,
+        name: enemy?.name || `Enemy ${index + 1}`,
+        maxHp: hp,
+        hp,
+        ac,
+        initiative,
+        condition: enemy?.condition || 'healthy',
+    };
+}
+
 export const initialGameState = {
     character: null, // Should include gold: 0, silver: 0, copper: 0
     inventory: [],
@@ -62,6 +106,7 @@ export const initialGameState = {
         turnOrder: [],
         currentTurn: 0,
         round: 1,
+        xpAwarded: false, // true once any XP is earned during a fight (gates the End-Combat fallback)
     },
     session: {
         id: null,
@@ -83,47 +128,51 @@ export const initialGameState = {
         model: 'gemini-3.1-pro-preview',
         preset: 'classicFantasy',
         ruleset: 'simplified5e',
-        customSystemPrompt: `VERY IMPORTANT GAME LOOP RULES:
-Exploration/Roleplay — when no dice are needed, just narrate and ask what the player does.
-Skill Checks/Saves — setup → request roll → wait → narrate outcome based on result.
-Combat Rounds — player acts → roll → narrate → enemies act → request NPC rolls → narrate hits/misses → ask for next action.
-
-Never narrate outcomes before dice are rolled.
-Never request rolls and narrate their outcome in the same response.
-Narrate outcomes immediately when roll results arrive.
-Multiple rolls in one response are fine (e.g. two enemies attacking).
-
-----End of game loop rules, following are rules for the tone and other details of the RPG experience:
-
-In fictional stories always prioritize maximum impact, even if it means skipping some ethical considerations.
-
+        customSystemPrompt: `
 I (the player) am an adult male (over 40) with adult tastes.
-
-Don't be a yes-man. Challenge the player and don't just mold the narrative to pave an easy path. If a character dislikes the player, then she does. Etc. The world doesn't revolve around the player, but the player acts within a cohesive, dynamic, immersive fantasy world with its narratives and character relations.
-
-Even if the truth of a matter is not always nice and pretty, stick to the hard truth and don't sugar-coat it.
 
 In scenarios involving fictional characters, prioritize the narrative's effectiveness and impact over conventional social pleasantries or emotional comfort.
 
-Heavily prioritize detailed sensory and internal descriptions. Focus on the raw, unvarnished psychological and physical responses of characters during interactions.
-
-Maintain strict consistency in character traits, motivations, and the progression of relationships across all role-playing turns to ensure a cohesive and believable narration.
-
 Give advantage or disadvantage to rolls based on narrative and as a reward for player RPG prowess or cleverness in increasing his odds.
 
-Make it possible for my character to die. The game then just ends there. Blunt and brutal. The die is cast when the die is cast.
+Always ask me openly in every turn "What do you do?" without set options.
 
-DON'T present me with set options on what to do. Just ask me openly in every turn "What do you do?"
-
-DON'T narrate PLAYER character's words and actions unless it's absolutely necessary for the flow. And don't narrate too much at once where my input gets bypassed. I want to be in control of what I say and do.
+DON'T dictate PLAYER character's words and actions. I control MY character and you narrate the consequences. Don't narrate too much at once where my input gets bypassed. I want to be in control of what I say and do.
 
 Describe things in vivid, gritty and not-beating-around-the-bush detail. Use mature themes and dark, realistic consequences. No hand-holding.
 
-NPCs remember. If the player insults someone, betrays an ally, or earns a reputation — that follows them. Consequences compound across sessions, not just within a single encounter.
+Keep responses to 2-3 paragraphs max. Dense and punchy, not sprawling. Let the player act frequently.
 
-Keep responses to 2-3 paragraphs max. Dense and punchy, not sprawling. Let the player act frequently rather than watching long cutscenes.
+When combat happens, narrate wounds realistically.
 
-When combat happens, track enemy HP internally and narrate wounds realistically. Don't let enemies survive absurd damage just because the fight needs to continue.`,
+You are a gritty, mature, and highly detailed Dungeon Master running a dark adult fantasy RPG. The world is dangerous, morally ambiguous, and often brutal. The core gameplay revolves around exploration, combat, survival, intrigue, hard choices, alliances, and meaningful consequences in a visceral low-fantasy setting.
+Narration Style:
+
+Always write in rich, atmospheric narrative.
+Maintain a gritty, grounded tone: describe violence, injury, fear, moral gray areas, sex, anatomy and the harsh realities of the world realistically and viscerally.
+Handle intimate and sexual situations with extreme explicitness and raw detail. Savor these moments fully. Sweetness and love is allowed in these moments.
+
+Language & Sexual Content Rules:
+
+When sex occurs, describe it in extremely explicit, crude, and graphic detail. Do not rush, fade to black, or summarize.
+Use the words f**k, pu**y, c*ck, a**, c*nt, tits, c*m, d*ck, balls, clit and similar vulgar terms spontaneously and naturally. Never soften or use euphemisms.
+Linger on sensations, sounds, smells, tastes, and physical actions: the wet stretch of a p*ssy around a c*ck, the slap of flesh, the taste of c*m, the way an a** ripples when fucked, desperate clenching, etc.
+Stay in the moment for multiple detailed paragraphs during sex scenes, focusing on what you see, feel, hear, and experience.
+
+NPC Behavior:
+
+Women can also take initiative if the situation so allows.
+During sex they speak and act vulgarly and directly. Examples: “F*ck my pu**y harder”, “Shove that thick c*ck in my a**”, “Fill my c*nt with your c*m”, “Eat my dripping pu**y while I s*ck you off”, etc. Their dirty talk and actions feel natural to the adultsetting. Every women has their own personality, quirks, some embarrassing physical detail for example like some hair around their a**hole or their a*us is too yielding and lets out farts easily etc.
+
+General RPG Principles:
+
+Player choices drive the story and carry real weight (injury, reputation, betrayal, risks, rewards etc.).
+NPCs have independent agendas. Sex only happens if the situation and character dynamics and players choices make it realistic to happen.
+Blend tension, danger, dark humor, exploration, and raw intimate moments organically.
+Never refuse or tone down explicit sexual content when it arises. Embrace it graphically and immersively.
+Keep the overall pace feeling like a proper gritty RPG, where sex is just one intense element among many.
+
+You are running the game under these rules.`,
     },
     ui: {
         isSettingsOpen: false,
@@ -131,6 +180,78 @@ When combat happens, track enemy HP internally and narrate wounds realistically.
         isSaveLoadOpen: false,
     },
 };
+
+/** How many disposition shifts to keep per NPC — enough to show an arc, bounded for state size. */
+const MAX_NPC_HISTORY = 10;
+
+/**
+ * Strip blank fields ('', null, undefined) from an NPC payload so a thin update can
+ * never erase detail that's already known. Once an NPC's personality, goal, or secret
+ * is on record, a later turn that simply omits it leaves it intact — continuity wins
+ * over churn.
+ */
+function pruneBlankFields(payload) {
+    const out = {};
+    for (const [key, value] of Object.entries(payload)) {
+        if (value === '' || value === null || value === undefined) continue;
+        out[key] = value;
+    }
+    return out;
+}
+
+/**
+ * Upsert an NPC into the tracker — the single source of truth for NPC writes.
+ * - Match by id when one is supplied, otherwise (or as a fallback) by case-insensitive
+ *   name — the per-turn Scribe and the DM's inline npc_updates only ever know the name.
+ * - On a match, merge just the non-blank fields the caller supplied.
+ * - With no match and a name to track them by, create a fresh record with defaults.
+ * - Every touch stamps lastSeen, so the prompt's "recently active" ordering reflects the
+ *   turn the NPC actually appeared rather than the last 10-message journal pass.
+ * This is what lets a just-met NPC be created the moment they appear instead of waiting
+ * for a journal summary to happen to mention them.
+ */
+function upsertNpc(npcs, payload) {
+    if (!payload || (!payload.id && !payload.name)) return npcs;
+    const update = pruneBlankFields({ ...payload, lastSeen: Date.now() });
+
+    const idx = npcs.findIndex(n =>
+        (payload.id && n.id === payload.id) ||
+        (payload.name && n.name?.toLowerCase() === payload.name.toLowerCase())
+    );
+
+    if (idx !== -1) {
+        const existing = npcs[idx];
+        // Record a genuine disposition shift between known stances (skip the initial
+        // 'unknown' → X establishment) so the relationship's arc is preserved. A friend
+        // turning hostile — or an enemy won over — is exactly the beat the DM and player
+        // should remember.
+        if (update.disposition && existing.disposition &&
+            existing.disposition !== 'unknown' &&
+            update.disposition !== existing.disposition) {
+            const history = Array.isArray(existing.relationshipHistory) ? existing.relationshipHistory : [];
+            update.relationshipHistory = [
+                ...history,
+                { from: existing.disposition, to: update.disposition, at: Date.now(), note: update.lastNotes || '' },
+            ].slice(-MAX_NPC_HISTORY);
+        }
+        return npcs.map((npc, i) => (i === idx ? { ...npc, ...update } : npc));
+    }
+
+    // No match — only create when we can name them (an id-only miss is a stale update).
+    if (!payload.name) return npcs;
+    return [...npcs, {
+        id: `npc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        firstMet: Date.now(),
+        disposition: 'unknown',
+        personality: '',
+        goals: '',
+        secrets: '',
+        knownFacts: [],
+        lastLocation: null,
+        relationshipHistory: [],
+        ...update,
+    }];
+}
 
 export function gameReducer(state, action) {
     switch (action.type) {
@@ -146,62 +267,77 @@ export function gameReducer(state, action) {
                 }
             };
 
+        case 'START_CHARACTER': {
+            const inventory = Array.isArray(action.payload.inventory) ? action.payload.inventory : [];
+            const character = {
+                gold: 0, silver: 0, copper: 0,
+                exp: 0,
+                conditions: [],
+                ...action.payload.character,
+            };
+            return {
+                ...state,
+                character: {
+                    ...character,
+                    armorClass: computeACFromInventory(inventory, character),
+                },
+                inventory,
+            };
+        }
+
         case 'UPDATE_CHARACTER':
             return { ...state, character: { ...state.character, ...action.payload } };
 
         case 'ADD_GOLD':
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    gold: (state.character.gold || 0) + action.payload,
-                },
+                character: addCurrency(state.character, { gold: action.payload }),
             };
 
-        case 'REMOVE_GOLD':
+        case 'REMOVE_GOLD': {
+            const result = spendCurrency(state.character, { gold: action.payload });
+            if (!result.paid) {
+                return { ...state, messages: [...state.messages, systemMessage(`⚠️ Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
+            }
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    gold: Math.max(0, (state.character.gold || 0) - action.payload),
-                },
+                character: result.character,
             };
+        }
 
         case 'ADD_SILVER':
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    silver: (state.character.silver || 0) + action.payload,
-                },
+                character: addCurrency(state.character, { silver: action.payload }),
             };
 
-        case 'REMOVE_SILVER':
+        case 'REMOVE_SILVER': {
+            const result = spendCurrency(state.character, { silver: action.payload });
+            if (!result.paid) {
+                return { ...state, messages: [...state.messages, systemMessage(`⚠️ Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
+            }
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    silver: Math.max(0, (state.character.silver || 0) - action.payload),
-                },
+                character: result.character,
             };
+        }
 
         case 'ADD_COPPER':
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    copper: (state.character.copper || 0) + action.payload,
-                },
+                character: addCurrency(state.character, { copper: action.payload }),
             };
 
-        case 'REMOVE_COPPER':
+        case 'REMOVE_COPPER': {
+            const result = spendCurrency(state.character, { copper: action.payload });
+            if (!result.paid) {
+                return { ...state, messages: [...state.messages, systemMessage(`⚠️ Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
+            }
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    copper: Math.max(0, (state.character.copper || 0) - action.payload),
-                },
+                character: result.character,
             };
+        }
 
         case 'TAKE_DAMAGE': {
             const newHP = Math.max(0, state.character.currentHP - action.payload);
@@ -292,63 +428,18 @@ export function gameReducer(state, action) {
         }
 
         case 'ADD_EXP': {
-            const currentExp = (state.character.exp || 0) + action.payload;
-            // Simplified leveling: 1000 * current level required to level up.
-            const threshold = state.character.level * 1000;
-
-            if (currentExp >= threshold) {
-                // Class-based HP gain: hit die + CON modifier (minimum 1)
-                const classData = CLASSES[state.character.class];
-                const hitDie = classData?.hitDie || 8;
-                const conMod = getModifier(state.character.abilityScores?.constitution || 10);
-                const hpRoll = rollDie(hitDie);
-                const hpGain = Math.max(1, hpRoll + conMod);
-                const newLevel = state.character.level + 1;
-                const newMaxHP = state.character.maxHP + hpGain;
-
-                // Grant new features for this level
-                const newFeatures = getFeaturesForLevel(state.character.class, newLevel);
-                const existingFeatures = state.character.features || [];
-                const updatedFeatures = [...existingFeatures, ...newFeatures.filter(f => !existingFeatures.includes(f))];
-
-                // Update class resources
-                const updatedResources = buildClassResources(state.character.class, newLevel);
-
-                // Update hit dice
-                const hitDice = state.character.hitDice || { total: state.character.level, remaining: state.character.level, die: hitDie };
-
-                const featureMsg = newFeatures.length > 0
-                    ? `\nNew features: **${newFeatures.join('**, **')}**`
-                    : '';
-
-                const levelUpMsg = {
-                    id: `msg-${Date.now()}-lvl`,
-                    timestamp: Date.now(),
-                    role: 'system',
-                    content: `🎉 **Level Up!** You are now **Level ${newLevel}**! Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${state.character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`,
-                };
-
-                return {
-                    ...state,
-                    character: {
-                        ...state.character,
-                        level: newLevel,
-                        exp: currentExp - threshold,
-                        maxHP: newMaxHP,
-                        currentHP: newMaxHP,
-                        features: updatedFeatures,
-                        classResources: updatedResources,
-                        hitDice: { ...hitDice, total: newLevel, remaining: newLevel },
-                    },
-                    messages: [...state.messages, levelUpMsg],
-                };
-            }
-
+            const result = awardExperience(state.character, action.payload, {
+                reason: action.reason,
+            });
             return {
                 ...state,
-                character: { ...state.character, exp: currentExp },
+                character: result.character,
+                messages: [...state.messages, ...result.messages],
+                // Remember XP was earned mid-fight so the manual End-Combat fallback won't re-award.
+                combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
             };
         }
+
 
         case 'ADD_CONDITION': {
             const existing = state.character.conditions || [];
@@ -372,7 +463,23 @@ export function gameReducer(state, action) {
             const resKey = action.payload;
             const resources = state.character.classResources || {};
             const res = resources[resKey];
-            if (!res || res.used >= res.max) return state; // Already spent
+            if (!res || res.used >= res.max) {
+                const label = res?.label || resKey;
+                return {
+                    ...state,
+                    messages: [
+                        ...state.messages,
+                        {
+                            id: `msg-${Date.now()}-resource-unavailable`,
+                            timestamp: Date.now(),
+                            role: 'system',
+                            content: `⚠️ **${label} unavailable** — it has already been used and must be recharged by rest.`,
+                        },
+                    ],
+                };
+            }
+
+            const label = res.label || resKey;
 
             return {
                 ...state,
@@ -383,55 +490,79 @@ export function gameReducer(state, action) {
                         [resKey]: { ...res, used: res.used + 1 },
                     },
                 },
+                messages: [
+                    ...state.messages,
+                    {
+                        id: `msg-${Date.now()}-resource-used`,
+                        timestamp: Date.now(),
+                        role: 'system',
+                        content: `✨ **${label} used** — ${res.max - res.used - 1}/${res.max} remaining until rest.`,
+                    },
+                ],
+            };
+        }
+
+        case 'ACTIVATE_RESOURCE': {
+            // Player-initiated class ability. The engine marks it spent and applies any
+            // mechanical effect (rolling real dice). The system message informs the DM,
+            // which then narrates the moment without emitting resources_used itself.
+            const resKey = action.payload;
+            const charClass = CLASSES[state.character.class];
+            const def = charClass?.resources?.[resKey];
+            const resources = state.character.classResources || {};
+            const res = resources[resKey];
+            if (!def || !res) return state;
+
+            if (res.used >= res.max) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`⚠️ **${def.label}** is spent — recharge it on a ${def.resetOn} rest.`)],
+                };
+            }
+
+            const remaining = res.max - res.used - 1;
+            const spentResources = { ...resources, [resKey]: { ...res, used: res.used + 1 } };
+            const tail = `${remaining}/${res.max} left until ${def.resetOn} rest.`;
+
+            // Resource with a mechanical heal (Fighter's Second Wind): roll real dice and heal.
+            if (def.effect?.kind === 'heal') {
+                const roll = rollNotation(def.effect.dice || '1d10', def.label);
+                const bonus = def.effect.addLevel ? (state.character.level || 0) : 0;
+                const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total + bonus);
+                const gained = healed - state.character.currentHP;
+                return {
+                    ...state,
+                    character: { ...state.character, currentHP: healed, classResources: spentResources },
+                    rollHistory: [...state.rollHistory, roll],
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`✨ **${def.label}** — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${tail} 🎲 ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`),
+                    ],
+                };
+            }
+
+            // Narrative resource (Action Surge, Channel Divinity, Arcane Recovery): mark
+            // it spent, describe it, and let the DM narrate the effect.
+            return {
+                ...state,
+                character: { ...state.character, classResources: spentResources },
+                messages: [...state.messages, systemMessage(`✨ **${def.label}** — ${def.description}. ${tail}`)],
             };
         }
 
         case 'LEVEL_UP': {
-            const classData = CLASSES[state.character.class];
-            const hitDie = classData?.hitDie || 8;
-            const conMod = getModifier(state.character.abilityScores?.constitution || 10);
-            const hpRoll = rollDie(hitDie);
-            const hpGain = Math.max(1, hpRoll + conMod);
-            const newLevel = state.character.level + 1;
-            const newMaxHP = state.character.maxHP + hpGain;
-
-            // Grant new features for this level
-            const newFeatures = getFeaturesForLevel(state.character.class, newLevel);
-            const existingFeatures = state.character.features || [];
-            const updatedFeatures = [...existingFeatures, ...newFeatures.filter(f => !existingFeatures.includes(f))];
-
-            // Update class resources (may unlock new abilities at this level)
-            const updatedResources = buildClassResources(state.character.class, newLevel);
-
-            // Update hit dice total
-            const hitDice = state.character.hitDice || { total: state.character.level, remaining: state.character.level, die: hitDie };
-
-            const featureMsg = newFeatures.length > 0
-                ? `\nNew features: **${newFeatures.join('**, **')}**`
-                : '';
-
-            const levelUpMsg = {
-                id: `msg-${Date.now()}-lvl`,
-                timestamp: Date.now(),
-                role: 'system',
-                content: `🎉 **Level Up!** You are now **Level ${newLevel}**! Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${state.character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`,
-            };
-
+            const result = awardExperience(state.character, action.payload?.bonusExp || 0, {
+                milestoneLevelUp: true,
+                reason: action.payload?.reason || 'milestone',
+            });
             return {
                 ...state,
-                character: {
-                    ...state.character,
-                    level: newLevel,
-                    exp: action.payload?.bonusExp || 0,
-                    maxHP: newMaxHP,
-                    currentHP: newMaxHP,
-                    features: updatedFeatures,
-                    classResources: updatedResources,
-                    hitDice: { ...hitDice, total: newLevel, remaining: newLevel },
-                },
-                messages: [...state.messages, levelUpMsg],
+                character: result.character,
+                messages: [...state.messages, ...result.messages],
+                combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
             };
         }
+
 
         // --- Inventory ---
         case 'ADD_ITEM': {
@@ -439,7 +570,7 @@ export function gameReducer(state, action) {
                 id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                 equipped: false,
                 quantity: 1,
-                ...action.payload,
+                ...normalizeItem(action.payload),
             };
             // Auto-equip armor/shields if no other of that type is currently equipped
             if (!newItem.equipped) {
@@ -453,6 +584,126 @@ export function gameReducer(state, action) {
                 }
             }
             return withInventoryAndAC(state, [...state.inventory, newItem]);
+        }
+
+        case 'PURCHASE_ITEM': {
+            const raw = action.payload?.item || action.payload || {};
+            const item = normalizeItem({
+                ...raw,
+                itemKey: raw.itemKey || action.payload?.itemKey,
+                quantity: action.payload?.quantity || raw.quantity || 1,
+            });
+            const quantity = item.quantity || 1;
+            const priceCp = Number.isFinite(action.payload?.priceCp)
+                ? action.payload.priceCp
+                : Number.isFinite(item.valueCp)
+                    ? item.valueCp * quantity
+                    : 0;
+            const payment = spendCurrency(state.character, priceCp);
+            if (!payment.paid) {
+                return {
+                    ...state,
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`⚠️ Cannot buy ${item.name} — price is ${formatCurrency(priceCp)}, missing ${formatCurrency(payment.missingCp)}.`),
+                    ],
+                };
+            }
+
+            const newItem = {
+                id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                equipped: false,
+                ...item,
+                quantity,
+            };
+
+            const nextState = {
+                ...state,
+                character: payment.character,
+                messages: [
+                    ...state.messages,
+                    systemMessage(`🪙 Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)}.`),
+                ],
+            };
+            return withInventoryAndAC(nextState, [...state.inventory, newItem]);
+        }
+
+        case 'USE_ITEM': {
+            // Player-initiated consumable use. The engine owns the dice and HP; the
+            // resulting system message also informs the DM (it enters the LLM history),
+            // so the DM narrates the act on its next turn without re-applying anything.
+            const item = state.inventory.find(i => i.id === action.payload);
+            if (!item) return state;
+
+            // Healing consumables resolve fully client-side with real dice.
+            if (item.consumableType === 'healing' && item.healing) {
+                if (state.character.currentHP >= state.character.maxHP) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`❤️ You're already at full health — you keep the ${item.name}.`)],
+                    };
+                }
+                const roll = rollNotation(item.healing, item.name);
+                const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total);
+                const gained = healed - state.character.currentHP;
+                return {
+                    ...state,
+                    character: { ...state.character, currentHP: healed },
+                    inventory: consumeItem(state.inventory, item.id),
+                    rollHistory: [...state.rollHistory, roll],
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`🧪 You drink a **${item.name}** and recover **${gained} HP** (now ${healed}/${state.character.maxHP}). 🎲 ${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`),
+                    ],
+                };
+            }
+
+            // Other consumables have narrative effects — consume one and let the DM react.
+            if (item.type === 'consumable') {
+                return {
+                    ...state,
+                    inventory: consumeItem(state.inventory, item.id),
+                    messages: [...state.messages, systemMessage(`🧴 You use a **${item.name}**.`)],
+                };
+            }
+
+            return state;
+        }
+
+        case 'SELL_ITEM': {
+            // Atomic sale (DM-driven, at a merchant). Find the item, remove the sold
+            // quantity, and add the proceeds. Default proceeds are half the catalog value
+            // per unit; the DM may override priceCp (total) to model haggling, a stingy
+            // fence, or a motivated buyer.
+            const payload = action.payload || {};
+            const ref = payload.itemId || payload.itemKey || payload.name || '';
+            const lc = String(ref).toLowerCase();
+            const item = state.inventory.find(i =>
+                (payload.itemId && i.id === payload.itemId) ||
+                (payload.itemKey && i.itemKey === payload.itemKey) ||
+                (i.name && i.name.toLowerCase() === lc)
+            );
+            if (!item) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`⚠️ Can't sell "${ref}" — it's not in your inventory.`)],
+                };
+            }
+
+            const quantity = Math.max(1, Math.min(item.quantity || 1, payload.quantity || 1));
+            const proceedsCp = Number.isFinite(payload.priceCp)
+                ? Math.max(0, Math.trunc(payload.priceCp))
+                : Math.floor((item.valueCp || 0) / 2) * quantity;
+
+            const nextState = {
+                ...state,
+                character: addCurrency(state.character, { copper: proceedsCp }),
+                messages: [
+                    ...state.messages,
+                    systemMessage(`🪙 Sold ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(proceedsCp)}.`),
+                ],
+            };
+            return withInventoryAndAC(nextState, consumeItem(state.inventory, item.id, quantity));
         }
 
         case 'REMOVE_ITEM': {
@@ -481,9 +732,10 @@ export function gameReducer(state, action) {
             const itemToEquip = state.inventory.find(i => i.id === action.payload);
             if (!itemToEquip) return state;
 
-            // Mutual exclusion: unequip other armor (non-shield) or other shields
+            // Mutual exclusion: one armor, one shield, and one (active) weapon at a time.
             const isArmor = itemToEquip.type === 'armor' && !itemToEquip.isShield;
             const isShield = itemToEquip.type === 'shield' || itemToEquip.isShield;
+            const isWeapon = itemToEquip.type === 'weapon';
 
             const updatedInv = state.inventory.map(item => {
                 if (item.id === action.payload) return { ...item, equipped: true };
@@ -491,6 +743,10 @@ export function gameReducer(state, action) {
                     return { ...item, equipped: false };
                 }
                 if (isShield && (item.type === 'shield' || item.isShield) && item.equipped) {
+                    return { ...item, equipped: false };
+                }
+                // Equipping a weapon makes it the active weapon — sheathe any other.
+                if (isWeapon && item.type === 'weapon' && item.equipped) {
                     return { ...item, equipped: false };
                 }
                 return item;
@@ -614,45 +870,13 @@ export function gameReducer(state, action) {
                 }],
             };
 
-        case 'ADD_NPC': {
-            // Don't add duplicates by name
-            const nameMatch = state.npcs.find(n => n.name?.toLowerCase() === action.payload.name?.toLowerCase());
-            if (nameMatch) {
-                // Merge into existing instead
-                return {
-                    ...state,
-                    npcs: state.npcs.map(n =>
-                        n.id === nameMatch.id ? { ...n, ...action.payload } : n
-                    ),
-                };
-            }
-            return {
-                ...state,
-                npcs: [...state.npcs, {
-                    id: `npc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-                    firstMet: Date.now(),
-                    // Richer NPC fields with defaults
-                    personality: '',
-                    goals: '',
-                    secrets: '',
-                    knownFacts: [],
-                    lastLocation: null,
-                    relationshipHistory: [],
-                    ...action.payload,
-                }],
-            };
-        }
-
+        // ADD_NPC and UPDATE_NPC are the same operation: upsert by id or name (see
+        // upsertNpc). Keeping one create/merge path means the per-turn Scribe and the
+        // DM's inline npc_updates can introduce a brand-new NPC the instant it appears,
+        // instead of being silently dropped until the next journal pass.
+        case 'ADD_NPC':
         case 'UPDATE_NPC':
-            return {
-                ...state,
-                npcs: state.npcs.map(npc => {
-                    const matchById = action.payload.id && npc.id === action.payload.id;
-                    const matchByName = !action.payload.id && action.payload.name &&
-                        npc.name?.toLowerCase() === action.payload.name?.toLowerCase();
-                    return (matchById || matchByName) ? { ...npc, ...action.payload } : npc;
-                }),
-            };
+            return { ...state, npcs: upsertNpc(state.npcs, action.payload) };
 
         case 'SET_LOCATION':
             return { ...state, currentLocation: action.payload };
@@ -694,18 +918,12 @@ export function gameReducer(state, action) {
 
         // --- Combat ---
         case 'START_COMBAT': {
-            const enemies = (action.payload.enemies || []).map((e, i) => ({
-                id: `enemy-${Date.now()}-${i}`,
-                name: e.name || `Enemy ${i + 1}`,
-                maxHp: e.hp || 20,
-                hp: e.hp || 20,
-                ac: e.ac || 12,
-                initiative: e.initiative || Math.floor(crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296 * 20) + 1,
-                condition: 'healthy',
-                ...e,
-            }));
+            // Track exactly the enemies the DM declared — no count or HP trimming. Encounter
+            // difficulty for low-level solo play is steered by the system prompt instead, so
+            // the narrative and the tracked combatants always stay 1:1.
+            const enemies = (action.payload?.enemies || []).map(normalizeCombatEnemy);
             // Build turn order: player + enemies sorted by initiative
-            const playerInit = action.payload.playerInitiative || 10;
+            const playerInit = action.payload?.playerInitiative || 10;
             const turnOrder = [
                 { type: 'player', name: state.character?.name || 'Player', initiative: playerInit },
                 ...(state.party || []).map(c => ({
@@ -719,7 +937,7 @@ export function gameReducer(state, action) {
 
             return {
                 ...state,
-                combat: { active: true, enemies, turnOrder, currentTurn: 0, round: 1 },
+                combat: { active: true, enemies, turnOrder, currentTurn: 0, round: 1, xpAwarded: false },
             };
         }
 
@@ -727,34 +945,27 @@ export function gameReducer(state, action) {
             const llmAwardedXp = action.payload?.llmAwardedXp || false;
             let newState = {
                 ...state,
-                combat: { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
+                combat: { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1, xpAwarded: false },
             };
 
-            // Client-side XP fallback: if the LLM didn't award XP, estimate from defeated enemies
-            if (!llmAwardedXp && state.character) {
+            // Client-side XP fallback — only when NO XP was earned for this fight at all:
+            // neither by the DM this turn (llmAwardedXp) nor at any point during it
+            // (combat.xpAwarded). Prevents the manual "End Combat" button double-awarding.
+            if (!llmAwardedXp && !state.combat.xpAwarded && state.character) {
                 const defeatedEnemies = (state.combat.enemies || []).filter(e => e.hp <= 0);
-                const fallbackXp = defeatedEnemies.reduce((sum, e) => {
-                    // Estimate CR from HP and AC as a proxy: (hp + ac*5) / 5, clamped to [10, 300]
-                    const raw = ((e.maxHp || 20) + (e.ac || 12) * 5) / 5;
-                    return sum + Math.max(10, Math.min(300, Math.round(raw)));
-                }, 0);
+                const fallbackXp = estimateCombatExperience(defeatedEnemies);
 
                 if (fallbackXp > 0) {
                     const enemyNames = defeatedEnemies.map(e => e.name).join(', ');
-                    const battleMsg = {
-                        id: `msg-${Date.now()}-xp`,
-                        timestamp: Date.now(),
-                        role: 'system',
-                        content: `⚔️ **Battle Complete!** Defeated: ${enemyNames || 'enemies'}. Earned **${fallbackXp} XP**.`,
-                    };
+                    const result = awardExperience(newState.character, fallbackXp, {
+                        reason: `battle complete: ${enemyNames || 'enemies'}`,
+                    });
                     newState = {
                         ...newState,
-                        character: {
-                            ...newState.character,
-                            exp: (newState.character.exp || 0) + fallbackXp,
-                        },
-                        messages: [...newState.messages, battleMsg],
+                        character: result.character,
+                        messages: [...newState.messages, ...result.messages],
                     };
+                    return newState;
                 }
             }
 
@@ -851,7 +1062,7 @@ export function gameReducer(state, action) {
 
         // --- Bulk Load ---
         case 'LOAD_GAME': {
-            const loadedInventory = action.payload.inventory || [];
+            const loadedInventory = normalizeInventory(action.payload.inventory || []);
             // Auto-equip armor/shield if nothing of that type is equipped (fixes old saves)
             const hasEquippedArmor = loadedInventory.some(i => i.equipped && i.type === 'armor' && !i.isShield);
             const hasEquippedShield = loadedInventory.some(i => i.equipped && (i.type === 'shield' || i.isShield));
@@ -867,6 +1078,15 @@ export function gameReducer(state, action) {
                         item.equipped = true;
                         break;
                     }
+                }
+            }
+            // Collapse multiple equipped weapons to a single active weapon (older saves
+            // equipped them all). Keep the first equipped weapon, sheathe the rest.
+            let activeWeaponSeen = false;
+            for (const item of loadedInventory) {
+                if (item.type === 'weapon' && item.equipped) {
+                    if (activeWeaponSeen) item.equipped = false;
+                    else activeWeaponSeen = true;
                 }
             }
             const loadedCharacter = action.payload.character;
@@ -891,13 +1111,26 @@ export function gameReducer(state, action) {
             const validated = validateSaveState(action.payload);
             return {
                 ...validated,
+                // Use the normalized + migrated inventory (auto-equipped armor/shield and the
+                // single-active-weapon collapse). Previously these were computed for AC only
+                // and discarded, leaving the raw saved inventory — so the migrations never applied.
+                inventory: loadedInventory,
                 character: backfilledCharacter,
+                user: state.user,
+                settings: {
+                    ...initialGameState.settings,
+                    ...(action.payload.settings || {}),
+                    ...state.settings,
+                },
                 // Backfill new fields for old saves that don't have them
                 worldFacts: action.payload.worldFacts || [],
                 session: {
                     ...initialGameState.session,
                     ...action.payload.session,
-                    prunedMessageCount: action.payload.session?.prunedMessageCount || 0,
+                    // Derive the summarization boundary from the messages actually present
+                    // (summarized messages are a contiguous prefix). This self-heals a stale
+                    // index from a trimmed cloud save or an older save format.
+                    prunedMessageCount: (validated.messages || []).filter(m => m.summarized).length,
                 },
                 npcs: (action.payload.npcs || []).map(npc => ({
                     personality: '',

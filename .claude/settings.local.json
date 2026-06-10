@@ -5,19 +5,11 @@
   "permissions": {
     "allow": [
       "Bash(npm run:*)",
-      "Bash(where firebase:*)",
-      "Bash(npx firebase-tools:*)",
-      "WebFetch(domain:quest-forge-99ab1.web.app)",
-      "Bash(npx firebase:*)",
-      "Bash(firebase deploy:*)",
-      "Bash(./node_modules/.bin/firebase deploy:*)",
-      "Bash(cmd:*)",
-      "Bash(powershell:*)",
       "Bash(npm install:*)",
-      "Bash(\"/mnt/c/Users/vestu/AppData/Roaming/npm/firebase\" deploy:*)",
-      "Bash(cd \"/c/RPG Game Antigravity\" && powershell -Command \"& 'C:\\\\Users\\\\vestu\\\\AppData\\\\Roaming\\\\npm\\\\firebase.cmd' deploy --only hosting\" 2>&1 | tail -10)",
-      "Bash(cd:*)",
-      "WebSearch",
+      "Bash(npx firebase:*)",
+      "Bash(npx firebase-tools:*)",
+      "Bash(firebase deploy:*)",
+      "Bash(where firebase:*)",
       "Bash(claude update:*)",
       "Bash(claude mcp:*)",
       "Bash(openclaw status:*)",
@@ -80,7 +72,10 @@
       "Bash(wc:*)",
       "Bash(python3:*)",
       "Bash(python:*)",
-      "Bash(npm list:*)"
+      "Bash(npm list:*)",
+      "WebFetch(domain:quest-forge-99ab1.web.app)",
+      "WebSearch",
+      "Bash(git add *)"
     ]
   }
 }

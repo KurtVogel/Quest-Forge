@@ -41,6 +41,7 @@ Rules:
 - DO record outcomes: "The goblin captain Rarg is dead", "The village of Millhaven burned to the ground"
 - Only include npc_updates for NPCs that appeared in this specific exchange
 - Only include fields you have actual information for — omit empty/unknown fields
+- DO NOT alter explicit words or details: copy names, proper nouns, numbers, and specific phrases exactly as the DM wrote them — never rename, paraphrase, translate, or invent. Refer to each NPC by the exact name used in the narrative so their record never forks.
 - If nothing notable happened (pure narration, no new facts), return { "world_facts": [], "npc_updates": [], "location": null }
 - Output ONLY the JSON, no other text`;
 

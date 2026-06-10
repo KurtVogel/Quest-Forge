@@ -143,7 +143,7 @@ export default function ChatPanel() {
      * @param {string} userMessage
      * @param {string} [originalPlayerMessage] - The player's actual input (for Scribe)
      */
-    const sendToLLM = async (userMessage, originalPlayerMessage) => {
+    const sendToLLM = async (userMessage, originalPlayerMessage, opts = {}) => {
         const s = stateRef.current;
 
         // RAG: retrieve memories relevant to the current scene (Gemini only)
@@ -194,38 +194,38 @@ export default function ChatPanel() {
             console.warn('[ChatPanel] ⚠️ DM pre-narrated outcome before roll — correction will be injected with roll results.');
         }
 
-        // Add DM message
+        // When the player's action needs dice, the client WITHHOLDS this pre-roll text:
+        // the DM narrates the whole beat once, AFTER the dice resolve (see rollResolver).
+        // We keep it in history (hidden) so the follow-up retains the DM's framing, but the
+        // player never sees a separate "setup" bubble that the outcome then repeats.
+        const hideSetup = !!originalPlayerMessage && events?.requestedRolls?.length > 0;
+        if (hideSetup) setStreamingMessage('');
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: { role: 'assistant', content: narrative, events },
+            payload: { role: 'assistant', content: narrative, events, hidden: hideSetup },
         });
 
         // Apply game events (damage, items, etc.)
         if (events) {
-            applyEvents(events, dispatch);
+            // In a batched combat round the client already rolled AND applied HP from the
+            // inline damage, so ignore any HP deltas the DM narrated to avoid double-counting.
+            if (opts.suppressHpEvents) {
+                events.damageTaken = 0;
+                events.enemyUpdates = [];
+            }
+            // On a withheld roll-setup turn, defer outcome mutations to the post-roll
+            // narration (see applyEvents) so the DM can't double-apply state across the split.
+            applyEvents(events, dispatch, () => stateRef.current, { setupPhase: hideSetup });
             if (events.location) {
                 dispatch({ type: 'SET_LOCATION', payload: events.location });
             }
         }
 
-        // Run the Scribe silently in the background — extract world facts & NPC updates
-        // Only for real player messages (not roll follow-ups) to avoid redundant extraction
-        if (originalPlayerMessage && narrative) {
-            runScribe({
-                playerMessage: originalPlayerMessage,
-                dmNarrative: narrative,
-                settings: stateRef.current.settings,
-                dispatch,
-            }).catch(() => {}); // Scribe failures are non-critical, silently ignored
-
-            // RAG: embed the current DM narrative as a new memory for future retrieval
-            if (s.settings.apiKey && s.settings.llmProvider === 'gemini') {
-                addMemory(s.settings.apiKey, narrative.slice(0, 500), 'narrative').catch(() => {});
-            }
-        }
-
-        // RAG: also embed any new world facts that came back from the DM this turn
-        if (events?.worldFacts?.length > 0 && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
+        // RAG: embed any new world facts the DM emitted this turn (per response).
+        // The per-turn Scribe + narrative embedding run once in handleSend on the FINAL
+        // narrated outcome, so they capture results rather than withheld setup text.
+        // Skip on a withheld setup turn — those facts ride on the outcome narration.
+        if (!hideSetup && events?.worldFacts?.length > 0 && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
             for (const f of events.worldFacts) {
                 addMemory(s.settings.apiKey, f.fact, f.category || 'world_fact').catch(() => {});
             }
@@ -270,6 +270,24 @@ export default function ChatPanel() {
                 // Advance combat round after a full exchange (player + enemies acted)
                 if (stateRef.current.combat?.active) {
                     dispatch({ type: 'ADVANCE_ROUND' });
+                }
+            }
+
+            // Extract world-state from the FINAL narrated outcome (where the real facts
+            // live), now that any roll chain has resolved. Covers no-roll turns too, and
+            // skips the withheld pre-roll setup (flagged hidden).
+            const latest = stateRef.current;
+            const finalNarration = [...latest.messages].reverse()
+                .find(m => m.role === 'assistant' && !m.hidden && m.content?.trim());
+            if (finalNarration) {
+                runScribe({
+                    playerMessage: trimmed,
+                    dmNarrative: finalNarration.content,
+                    settings: latest.settings,
+                    dispatch,
+                }).catch(() => {});
+                if (latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
+                    addMemory(latest.settings.apiKey, finalNarration.content.slice(0, 500), 'narrative').catch(() => {});
                 }
             }
 

@@ -120,6 +120,20 @@ function NPCTab({ npcs }) {
                         </span>
                     </div>
                     <p className="journal-npc-notes">{npc.lastNotes || npc.notes || 'No notes'}</p>
+                    {npc.relationshipHistory?.length > 0 && (
+                        <div className="journal-npc-arc" title="How this relationship has shifted">
+                            <span className="journal-npc-arc-label">Arc:</span>
+                            <span className={`journal-npc-arc-step ${npc.relationshipHistory[0].from}`}>
+                                {npc.relationshipHistory[0].from}
+                            </span>
+                            {npc.relationshipHistory.map((h, i) => (
+                                <span key={i} className="journal-npc-arc-seg">
+                                    <span className="journal-npc-arc-sep">→</span>
+                                    <span className={`journal-npc-arc-step ${h.to}`}>{h.to}</span>
+                                </span>
+                            ))}
+                        </div>
+                    )}
                     {npc.lastSeen && (
                         <span className="journal-npc-lastseen">
                             Last seen: {new Date(npc.lastSeen).toLocaleDateString()}

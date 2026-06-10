@@ -39,7 +39,8 @@ Your output MUST be valid JSON with this exact structure:
 
 Rules:
 - Be concise but capture ALL important narrative beats
-- Track NPC names and how they feel about the player
+- Track NPCs by their EXACT name as written (never rename or paraphrase it — their record forks if the name drifts) and how they feel about the player
+- Preserve proper nouns and numbers verbatim — never approximate or invent them
 - Note location changes
 - World facts should be durable truths: deaths, alliances, betrayals, discoveries, established history
 - Focus on what HAPPENED, not what might happen
@@ -99,27 +100,24 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             },
         });
 
-        // Update NPCs with richer data
+        // Update NPCs with richer data. The reducer upserts by name — creating any the
+        // per-turn Scribe hasn't recorded yet and stamping lastSeen — so we just hand it
+        // each NPC the summary surfaced; no manual existing-record lookup needed.
         if (Array.isArray(summary.npcs_encountered)) {
             for (const npc of summary.npcs_encountered) {
-                const existing = state.npcs.find(
-                    n => n.name.toLowerCase() === npc.name.toLowerCase()
-                );
-                const npcPayload = {
-                    disposition: npc.disposition,
-                    lastNotes: npc.notes,
-                    lastSeen: Date.now(),
-                    ...(npc.personality && { personality: npc.personality }),
-                    ...(npc.goals && { goals: npc.goals }),
-                    ...(npc.secrets && { secrets: npc.secrets }),
-                    ...(npc.lastLocation && { lastLocation: npc.lastLocation }),
-                };
-
-                if (existing) {
-                    dispatch({ type: 'UPDATE_NPC', payload: { id: existing.id, ...npcPayload } });
-                } else {
-                    dispatch({ type: 'ADD_NPC', payload: { name: npc.name, notes: npc.notes, ...npcPayload } });
-                }
+                if (!npc.name) continue;
+                dispatch({
+                    type: 'UPDATE_NPC',
+                    payload: {
+                        name: npc.name,
+                        disposition: npc.disposition,
+                        lastNotes: npc.notes,
+                        ...(npc.personality && { personality: npc.personality }),
+                        ...(npc.goals && { goals: npc.goals }),
+                        ...(npc.secrets && { secrets: npc.secrets }),
+                        ...(npc.lastLocation && { lastLocation: npc.lastLocation }),
+                    },
+                });
             }
         }
 
@@ -178,11 +176,17 @@ export function buildJournalContext(journal, npcs, currentLocation) {
         const npcList = shown.map(n => {
             const disp = n.disposition ? ` (${n.disposition})` : '';
             const notes = n.lastNotes || n.notes || '';
+            // Show the relationship arc so the DM keeps a shifted bond consistent — a
+            // friend who turned on the player should stay turned.
+            const arc = Array.isArray(n.relationshipHistory) && n.relationshipHistory.length > 0
+                ? `relationship: ${[...n.relationshipHistory.map(h => h.from), n.disposition].join(' → ')}`
+                : '';
             const extras = [
                 n.personality && `personality: ${n.personality}`,
                 n.goals && `wants: ${n.goals}`,
                 n.secrets && `secret: ${n.secrets}`,
                 n.lastLocation && `last seen: ${n.lastLocation}`,
+                arc,
             ].filter(Boolean).join(' | ');
             return `- **${n.name}**${disp}: ${notes}${extras ? ` [${extras}]` : ''}`;
         }).join('\n');

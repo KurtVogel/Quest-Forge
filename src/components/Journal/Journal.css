@@ -281,3 +281,43 @@
     margin-top: 0.25rem;
     display: block;
 }
+
+.journal-npc-arc {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.4rem;
+    font-size: 0.68rem;
+}
+
+.journal-npc-arc-label {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 0.1rem;
+}
+
+.journal-npc-arc-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.journal-npc-arc-sep {
+    color: var(--text-muted);
+}
+
+.journal-npc-arc-step {
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.6rem;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary);
+    text-transform: capitalize;
+}
+
+.journal-npc-arc-step.friendly { color: var(--success); }
+.journal-npc-arc-step.hostile { color: var(--danger); }
+.journal-npc-arc-step.wary { color: #e6a23c; }
+.journal-npc-arc-step.neutral { color: var(--text-secondary); }
+.journal-npc-arc-step.unknown { color: var(--text-muted); }

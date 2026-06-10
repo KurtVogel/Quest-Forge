@@ -32,6 +32,7 @@ export const CLASSES = {
                 max: 1,
                 resetOn: 'short',
                 minLevel: 1,
+                effect: { kind: 'heal', dice: '1d10', addLevel: true },
             },
             actionSurge: {
                 label: 'Action Surge',

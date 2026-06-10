@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { GameProvider, useGameState, useGameDispatch, useGame } from './state/GameContext.jsx';
+import { GameProvider, useGameState, useGame } from './state/GameContext.jsx';
 import AppShell from './components/Layout/AppShell.jsx';
 import CharacterCreation from './components/CharacterSheet/CharacterCreation.jsx';
 import SettingsModal from './components/Settings/SettingsModal.jsx';
@@ -13,6 +13,7 @@ function StartScreen() {
   const [saves, setSaves] = useState([]);
   const [cloudAutoSave, setCloudAutoSave] = useState(null);
   const [cloudSaves, setCloudSaves] = useState([]);
+  const [cloudLoadError, setCloudLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [showSaves, setShowSaves] = useState(false);
 
@@ -38,6 +39,7 @@ function StartScreen() {
     async function fetchCloudSaves() {
       if (state.user?.uid) {
         try {
+          setCloudLoadError('');
           const [cAutoSave, cList] = await Promise.all([
             loadGameFromCloud(state.user.uid, '__autosave__'),
             listCloudSaves(state.user.uid)
@@ -46,8 +48,12 @@ function StartScreen() {
           setCloudSaves(cList);
         } catch (e) {
           console.warn('Failed to load cloud saves', e);
+          setCloudLoadError(e.message || 'Failed to load cloud saves');
+          setCloudAutoSave(null);
+          setCloudSaves([]);
         }
       } else {
+        setCloudLoadError('');
         setCloudAutoSave(null);
         setCloudSaves([]);
       }
@@ -82,8 +88,19 @@ function StartScreen() {
     dispatch({ type: 'SET_UI', payload: { isCharacterCreationOpen: true } });
   };
 
-  const hasAnySave = autoSaveData || saves.length > 0 || cloudAutoSave || cloudSaves.length > 0;
+  const handleCloudSync = () => {
+    dispatch({ type: 'SET_UI', payload: { isSettingsOpen: true, settingsTab: 'cloud' } });
+  };
+
   const bestAutoSave = cloudAutoSave || autoSaveData; // Simplified preference
+  const hasFirebaseConfig = !!state.settings.firebaseConfig?.apiKey;
+  const cloudStatus = state.user?.uid
+    ? `Signed in${state.user.email ? ` as ${state.user.email}` : ''}`
+    : hasFirebaseConfig && state.user?.isAuthLoading
+      ? 'Checking cloud sync...'
+      : hasFirebaseConfig
+        ? 'Cloud sync not signed in'
+        : 'Cloud sync not configured';
 
   if (loading) {
     return (
@@ -102,6 +119,17 @@ function StartScreen() {
         {state.settings.firebaseConfig?.apiKey && state.user?.isAuthLoading && (
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem', textAlign: 'center' }}>
             Firebase mapped. Checking auth state...
+          </div>
+        )}
+        <div className="start-cloud-status">
+          <span>{cloudStatus}</span>
+          <button className="start-cloud-btn" onClick={handleCloudSync}>
+            Cloud Sync
+          </button>
+        </div>
+        {cloudLoadError && (
+          <div className="start-cloud-error">
+            Cloud saves could not be loaded: {cloudLoadError}
           </div>
         )}
 

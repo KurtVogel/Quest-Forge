@@ -1,117 +1,101 @@
 ---
-name: Race and Class Implementation Audit (March 2026)
-description: Full audit of which races and classes are implemented vs stubs, where mechanics live, and what is missing. Updated 2026-03-15 with deeper balance scoring and trimming recommendations.
+name: Race and Class Implementation Audit
+description: Current audit of the 4 races and 4 classes — what is mechanically real vs DM-interpreted flavor, where the code lives, and the open balance gaps. Reflects the post-"balance overhaul" core set.
 type: project
 ---
 
-Audit completed 2026-03-14, updated 2026-03-15. Summary of findings:
+Last updated 2026-06-01. Supersedes the March 2026 audit (which described an 8-race/6-class roster that has since been trimmed and re-implemented — see commit `b711cf9` "Balance overhaul" and `5d03130` "Centralize XP progression").
 
-**Why:** Baseline audit to understand what actually works before designing balance changes.
-**How to apply:** Use this as the ground truth when recommending which options to expand or trim.
+**Why:** Ground-truth of what actually runs in the engine before recommending balance changes.
+**How to apply:** Treat this as authoritative for what's coded vs flavor. Verify against `src/data/` + `src/engine/` before acting, since the engine keeps evolving.
 
-## Races (defined in src/data/races.js)
-8 races total: human, elf, dwarf, halfling, halfOrc, tiefling, dragonborn, gnome
+## Roster (trimmed core set)
 
-### What is actually wired up mechanically (code that runs):
-- Ability score bonuses: FULLY applied via `applyRacialBonuses()` in characterUtils.js (called from createCharacter)
-- Speed: FULLY applied — stored on character object, shown in prompt
-- Traits: Stored as string array on character object, shown in LLM prompt as flavor/guidance only
-- Languages: Stored in races.js but NOT copied to character object at creation — purely decorative
+Races (`src/data/races.js`) — 4: **human, elf, dwarf, halfOrc**
+Classes (`src/data/classes.js`) — 4: **fighter, wizard, rogue, cleric**
 
-### What is NOT mechanically implemented (flavor text only):
-- Lucky (halfling): No code intercepts nat-1 rolls to reroll. The LLM knows about it from the traits string but cannot reliably enforce it.
-- Brave (halfling): No advantage flag on fear saves
-- Halfling Nimbleness: No mechanical effect
-- Dwarven Resilience (poison resistance): No damage type tracking
-- Stonecunning: Flavor only
-- Fey Ancestry (elf): No charm/sleep immunity
-- Trance (elf): No mechanical rest difference
-- Relentless Endurance (half-orc): No "drop to 1 HP instead of 0" hook
-- Savage Attacks (half-orc): No crit die doubling beyond what the LLM might narratively do
-- Gnome Cunning: No advantage on magic saves (no save type tracking)
-- Infernal Legacy/Thaumaturgy (tiefling): No cantrip system exists
-- Breath Weapon (dragonborn): No resource or mechanic — pure LLM narration
-- Darkvision: No light/dark tracking — flavor only
-- Hellish Resistance (tiefling): No damage type tracking
-- Menacing (half-orc): Intimidation listed as proficiency — but skill proficiency list at creation only takes first 2 from skillChoices, and halfOrc race doesn't inject Intimidation into proficiencies
+Halfling, gnome, tiefling, dragonborn (races) and ranger, bard (classes) were intentionally cut to focus polish on a core set with distinct niches.
 
-## Classes (defined in src/data/classes.js)
-6 classes total: fighter, wizard, rogue, cleric, ranger, bard
+## Races — what is mechanically real
 
-### What is mechanically implemented per class:
-**Fighter** — MOST COMPLETE
-- Hit die (d10): Used in HP calc and level-up rolls
-- Heavy armor proficiency: Starting equipment gives Chain Mail (AC 16), auto-equipped
-- getLevelBonus(): Fighter-ONLY function — +1 to hit and damage per level beyond 1. Applied in rollResolver.js for attack rolls AND damage rolls.
-- Prompt explicitly notes "Level Bonus (combat): +X to hit and damage" for fighters
-- Second Wind: Listed as feature string. No short-rest healing hook in code — LLM can choose to apply healing via the healing field in JSON.
+- **Ability bonuses** — FULLY applied via `applyRacialBonuses()` in `characterUtils.js` (called from `createCharacter`):
+  - human +1 STR/+1 DEX/+1 CON (3 stats, +3 total — no longer the old strictly-dominant "+1 to all six")
+  - elf +2 DEX · dwarf +2 CON · halfOrc +2 STR/+1 CON
+- **Racial skill proficiencies** — NOW wired (fixed since March): `createCharacter` merges `race.skillProficiencies` with player-chosen skills. Elf → Perception, Half-Orc → Intimidation are real proficiency bonuses in `getSkillModifier()`.
+- **Speed** — applied and shown in the prompt (dwarf 25, others 30).
 
-**Wizard** — PARTIAL STUB
-- Hit die (d6): Used correctly
-- No armor proficiency (empty array): Starting equipment has no armor — AC = 10 + DEX mod
-- Spellcasting: Feature string only. No spell slot tracking, no spell list, no concentration.
-- Arcane Recovery: Feature string only. No short-rest slot recovery.
+### Still flavor-only (DM-interpreted, no engine enforcement)
+Darkvision, Fey Ancestry, Trance (elf); Dwarven Resilience (dwarf); Relentless Endurance, Savage Attacks (halfOrc). These live in the `traits` string array and are shown to the DM as guidance — no code intercepts rolls, damage types, or "drop to 1 HP" hooks. Advantage/disadvantage from traits is not auto-applied; the DM must request it via roll flags.
 
-**Rogue** — PARTIAL STUB
-- Hit die (d8): Used correctly
-- Light armor: Starts with Leather Armor (AC 11)
-- Sneak Attack: Feature string only. No code grants the extra die. LLM can award it narratively.
-- Expertise: Feature string only. No double-proficiency mechanic in rollResolver.
-- Thieves' Tools: In starting equipment but no lockpicking mechanic.
+## Classes — what is mechanically real
 
-**Cleric** — PARTIAL STUB
-- Hit die (d8): Used correctly
-- Medium armor + shield: Starts with Scale Mail (AC 14) + Shield — solid AC
-- Spellcasting: Feature string only. No spell system.
-- Divine Domain: Feature string only. No subclass differentiation.
+Defined in `classes.js` with `features` (by level), `resources` (tracked per-rest abilities), `numSkillChoices`, and `startingEquipment`.
 
-**Ranger** — PARTIAL STUB
-- Hit die (d10): Used correctly
-- Light armor: Starts with Leather Armor
-- Favoured Enemy / Natural Explorer: Feature strings only.
-- No spells, no Hunter's Mark tracking.
+**Fighter — most complete**
+- d10 hit die; heavy armor + shield (Chain Mail AC 16 + Shield, auto-equipped).
+- `getLevelBonus()` (`rules.js`): +1 to hit AND damage per level beyond 1st, **capped at +3** (was uncapped in March). Applied to attack and damage rolls in `rollResolver.js`.
+- **Extra Attack at L5**: `rollResolver.js` rolls two attacks for fighters L5+.
+- Resources: `secondWind` (short rest, L1), `actionSurge` (short rest, L2) — tracked with used/max.
+- Features L1–5 defined (Second Wind/Fighting Style → Action Surge → Martial Archetype → ASI → Extra Attack).
 
-**Bard** — PARTIAL STUB
-- Hit die (d8): Used correctly
-- Light armor: Starts with Leather Armor
-- Spellcasting: Feature string only.
-- Bardic Inspiration: Feature string only. No resource die tracking.
-- Most skill choices (all 18 skills offered) — but only first 2 are auto-assigned.
+**Rogue — skill specialist**
+- d8; light armor; **4 skill picks** (`numSkillChoices: 4`) — the deliberate skill-monkey niche.
+- Features L1–5 (Sneak Attack 1d6→3d6, Expertise, Cunning Action, Uncanny Dodge).
+- Sneak Attack / Expertise are still **feature strings** — no code adds the extra dice, and `expertiseSkills` is always `[]` (no creation-time pick UI yet). Thieves' Tools are inventory only.
 
-### Level Progression:
-- Only Level 1 features defined in CLASSES data (features object only has key "1")
-- No level 2-20 features exist anywhere
-- Level-up mechanic: rolls hit die + CON mod for HP only. No feature grants, no ASIs.
-- getLevelBonus (fighter only) scales continuously but is the only progression mechanic beyond HP.
+**Cleric — armored support**
+- d8; medium armor + shield (Scale Mail AC 14 + Shield).
+- Resource: `channelDivinity` (short rest, L2).
+- Spellcasting is a **feature string only** — no spell slots, list, or tracking.
 
-## Key Integration Points
-- `src/engine/rules.js` — getLevelBonus() is the only class-specific mechanical function
-- `src/engine/characterUtils.js` — applyRacialBonuses() is the only race-specific mechanical function
-- `src/engine/rollResolver.js` — Applies getLevelBonus to attack and damage rolls (fighter only)
-- `src/llm/promptBuilder.js` — Injects traits and features as strings into LLM prompt (all races/classes equal treatment)
-- `src/state/gameReducer.js` — LEVEL_UP and ADD_EXP use hitDie per class for HP gain — this IS class-aware
+**Wizard — squishy caster**
+- d6; no armor (AC = 10 + DEX).
+- Resource: `arcaneRecovery` (long rest, L1).
+- Spellcasting is a **feature string only** — no spell system.
 
-## Critical Balance Issues Found:
-1. Fighter is the ONLY class with mechanical differentiation beyond HP. All others are cosmetic at the engine level.
-2. Racial traits beyond ability score bonuses are 100% LLM-interpreted flavor — no code enforces them.
-3. Human's +1 to all stats (6 bonuses totaling +6) is mathematically superior to any other race's total bonus. Other races get +2/+1 (+3 total) or just +2.
-4. No spell system exists — wizard, cleric, bard all list "Spellcasting" as a feature string but nothing enforces or tracks it.
-5. Elf and Halfling have identical +2 DEX bonuses with no mechanical differentiation between them in code.
-6. Ranger and Fighter share d10 hit die and martial weapon proficiency but fighter gets all the mechanical love (getLevelBonus).
-7. Fighter's getLevelBonus has no cap — at level 10 it's +9 to hit AND damage on top of proficiency, completely dominating math.
-8. Skill proficiency at creation is silently auto-assigned (first 2 from skillChoices array) — player never chooses.
-9. Ranger starts with only Leather Armor (AC 11+DEX) despite d10 HP — weaker survivability profile than Cleric.
-10. All classes have only level 1 features defined — no advancement features at any higher level.
+### Cross-class systems that ARE coded
+- **Hit dice** (`{total, remaining, die}`): spent on short rest to heal; recovered on long rest (`TAKE_REST` in `gameReducer.js`).
+- **Class resources**: `buildClassResources()` builds from `classData.resources`; `TAKE_REST` resets short/long per `resetOn`; `USE_RESOURCE` decrements.
+- **Skill selection at creation**: player picks `numSkillChoices` skills (fixed from the old silent auto-assign).
+- **Level-up**: `progression.js` → `applySingleLevelUp()` rolls class hit die + CON for HP and grants `getFeaturesForLevel()`.
+- **XP**: centralized in `progression.js`. Threshold = `level × 1000`; `awardExperience()` handles XP gain, multi-level catch-up, and milestone level-ups. `estimateCombatExperience()` is the client-side fallback when the DM omits `exp_awarded`.
 
-## Recommended Core Set (for polishing focus)
-Races to keep: Human, Elf, Dwarf, Half-Orc — good spread across archetypes with meaningful stat profiles
-Races to defer: Halfling (too similar to Elf), Gnome (too niche), Tiefling, Dragonborn (interesting but traits are all flavor)
-Classes to keep: Fighter, Rogue, Cleric, Wizard — cover Tank, Striker, Healer/Support, Controller
-Classes to defer: Ranger (identity crisis, overlaps Fighter+Rogue), Bard (overlaps Rogue+Wizard, no mechanical hook)
+## Key integration points (current)
+- `src/engine/rules.js` — `getModifier`, `getProficiencyBonus`, AC math, `getSkillModifier`, `getLevelBonus` (Fighter, capped +3), `getMaxHitPoints`.
+- `src/engine/progression.js` — XP thresholds, `awardExperience`, `applySingleLevelUp`, `estimateCombatExperience`. **New central module — XP/leveling no longer lives in the reducer.**
+- `src/engine/characterUtils.js` — `createCharacter`, `applyRacialBonuses`, `buildClassResources`, `getFeaturesForLevel`.
+- `src/engine/rollResolver.js` — applies `getLevelBonus` to attack + damage; Fighter Extra Attack; recomputes AC live for NPC attacks (never trusts the DM's `dc`).
+- `src/state/gameReducer.js` — `TAKE_REST`, `ADD_EXP`/`LEVEL_UP` (delegate to `progression.js`), `START_COMBAT` (solo-L1 balancing).
+- `src/llm/promptBuilder.js` — injects the character block (resources, hit dice, level-bonus note), ruleset, and combat state.
 
-## Next Priority Mechanics Fixes
-1. Cap Fighter getLevelBonus at +5 (not unlimited scaling)
-2. Give each non-Fighter class ONE hard-coded mechanical hook (see recommendations in full audit report)
-3. Change Human to +2/+1 (two chosen stats) instead of +1 all — removes strict dominance
-4. Make Halfling truly distinct from Elf (change Halfling bonus to +2 DEX, +1 WIS OR implement Lucky in engine)
-5. Add skill proficiency selection UI (player picks 2 from class list, not auto-assigned)
+## Open balance gaps / asymmetries
+1. **Only Fighter has coded combat scaling.** Wizard/Cleric/Rogue identities still lean on DM narration.
+2. **No spell system.** Wizard & Cleric "Spellcasting" is narrative; `arcaneRecovery`/`channelDivinity` are bare counters with no mechanical payload.
+3. **Rogue's signature isn't coded.** Sneak Attack adds no dice; Expertise has the data shape (`expertiseSkills`) but no creation UI to populate it.
+4. **Saving-throw proficiencies** are stored (`savingThrowProficiencies`) but not applied as a bonus in `resolvePlayerRoll` for `saving_throw`/`npc_save`.
+5. **Features stop at L5.** No L6+ definitions (campaigns realistically cap around L5 content).
+
+## Suggested next mechanics fixes (carry-over, refreshed)
+1. Code **Sneak Attack**: when a rogue attack hits with advantage (or DM flags an ally adjacent), append `Xd6` to the damage notation, scaling with level via `features`.
+2. Add a **skill/expertise pick UI** at character creation (`expertiseSkills` currently always empty).
+3. Give Wizard/Cleric **one concrete caster hook** (e.g. per-rest spell slots or spell points) so they aren't purely narrative.
+4. Apply **saving-throw proficiency** in `resolvePlayerRoll` for save-type rolls.
+
+## 2026-06-02 Addendum - Loot / Equipment Math Pass
+
+This audit's race/class roster remains useful, but equipment mechanics changed after the 2026-06-01 refresh:
+
+- `src/data/items.js` now defines a common D&D-style item catalog for weapons, armor, shields, consumables, and gear with copper prices (`valueCp`), weights, damage dice, armor AC, and magic bonus normalization.
+- `src/engine/currency.js` now owns copper-based gp/sp/cp conversion, exact spending, and formatting.
+- `gameReducer.js` now supports `PURCHASE_ITEM`, an atomic transaction that validates funds, subtracts exact currency, and adds the normalized item. If the player cannot afford the purchase, no item is added and no money is lost.
+- `responseParser.js` now parses `purchase` / `purchases` events and preserves richer item fields (`itemKey`, `magicBonus`, `attackBonus`, `damageBonus`, `acBonus`, `valueCp`, `rarity`, etc.).
+- `rules.js` now computes AC from equipped armor/shield objects including magic bonuses, and exposes equipped weapon helpers for attack bonus and damage notation.
+- `rollResolver.js` now uses equipped weapon math for player attacks instead of trusting the DM's damage math. Magic weapons apply to hit and damage; Fighter `getLevelBonus()` is still applied by the engine.
+- `promptBuilder.js` now injects the item catalog and tells the DM to use `itemKey` for ordinary loot/shop goods, `purchase` for buys, and `magicBonus` +1/+2/+3 only.
+
+Balance implications:
+
+1. Magic equipment is mechanically real but capped at +3 to preserve bounded accuracy.
+2. Equipment proficiency is still not enforced; any class can equip any weapon/armor/shield if it enters inventory.
+3. Consumables such as Potion of Healing still require DM-orchestrated events (`damage_roll`/`healing`/`items_lost`); there is no client-side Use Item button yet.
+4. See `loot_inventory_audit.md` for current shop/loot/economy gaps and next recommended work.

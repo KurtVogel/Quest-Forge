@@ -30,7 +30,9 @@ export default function AmbientControls() {
                 state.currentLocation,
                 state.combat?.active
             );
-            ambientAudio.playProfile(profile || 'forest');
+            if (profile) {
+                ambientAudio.playProfile(profile);
+            }
         }
     };
 
