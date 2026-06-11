@@ -221,6 +221,81 @@ export function getAllSkills(character) {
 }
 
 /**
+ * Get the modifier for a saving throw: ability modifier + proficiency when the
+ * class grants proficiency in that save (e.g. Fighter: STR/CON).
+ * @param {object} character
+ * @param {string} ability - Ability name (e.g. 'dexterity')
+ * @returns {number}
+ */
+export function getSavingThrowModifier(character, ability) {
+    const score = character?.abilityScores?.[ability];
+    if (score == null) return 0;
+    const abilityMod = getModifier(score);
+    const proficient = character.savingThrowProficiencies?.includes(ability) || false;
+    return abilityMod + (proficient ? getProficiencyBonus(character.level) : 0);
+}
+
+/**
+ * Mechanical effects of conditions, applied automatically by the roll resolver.
+ * Keys are lowercase condition names (matched case-insensitively against
+ * character.conditions). Effect kinds:
+ *   attack          - the afflicted creature's attack rolls
+ *   check           - the afflicted creature's ability/skill checks
+ *   save            - the afflicted creature's saving throws
+ *   incomingAttack  - attack rolls made AGAINST the afflicted creature
+ * Values are 'advantage' | 'disadvantage'.
+ */
+export const CONDITION_EFFECTS = {
+    poisoned: { attack: 'disadvantage', check: 'disadvantage' },
+    blinded: { attack: 'disadvantage', incomingAttack: 'advantage' },
+    frightened: { attack: 'disadvantage', check: 'disadvantage' },
+    restrained: { attack: 'disadvantage', save: 'disadvantage', incomingAttack: 'advantage' },
+    prone: { attack: 'disadvantage', incomingAttack: 'advantage' },
+    invisible: { attack: 'advantage', incomingAttack: 'disadvantage' },
+    exhausted: { check: 'disadvantage' },
+    exhaustion: { check: 'disadvantage' },
+    stunned: { incomingAttack: 'advantage' },
+    paralyzed: { incomingAttack: 'advantage' },
+    unconscious: { incomingAttack: 'advantage' },
+};
+
+/**
+ * Collect condition-driven advantage/disadvantage for a roll kind.
+ * @param {string[]} conditions - Active condition names (any casing)
+ * @param {'attack'|'check'|'save'|'incomingAttack'} kind
+ * @returns {{ advantage: boolean, disadvantage: boolean, sources: string[] }}
+ */
+export function getConditionRollEffects(conditions, kind) {
+    const result = { advantage: false, disadvantage: false, sources: [] };
+    for (const raw of conditions || []) {
+        const effect = CONDITION_EFFECTS[String(raw).toLowerCase().trim()]?.[kind];
+        if (effect === 'advantage') {
+            result.advantage = true;
+            result.sources.push(raw);
+        } else if (effect === 'disadvantage') {
+            result.disadvantage = true;
+            result.sources.push(raw);
+        }
+    }
+    return result;
+}
+
+/**
+ * Combine explicit roll flags with condition effects. 5e rule: any advantage +
+ * any disadvantage cancel out to a straight roll, regardless of how many sources.
+ * @returns {{ advantage: boolean, disadvantage: boolean, note: string }}
+ */
+export function combineRollModifiers(rollAdvantage, rollDisadvantage, conditionEffects) {
+    const adv = !!rollAdvantage || conditionEffects.advantage;
+    const dis = !!rollDisadvantage || conditionEffects.disadvantage;
+    const note = conditionEffects.sources.length
+        ? ` [${conditionEffects.sources.join(', ').toLowerCase()}]`
+        : '';
+    if (adv && dis) return { advantage: false, disadvantage: false, note: note ? `${note} (cancelled out)` : '' };
+    return { advantage: adv, disadvantage: dis, note };
+}
+
+/**
  * Get the level-based combat bonus for a character.
  * Currently Fighter-only: +1 to hit and damage per level beyond 1st, capped at +3.
  * Abstracts Fighting Style / martial scaling. Extra Attack is handled in rollResolver.js.

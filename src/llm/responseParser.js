@@ -517,7 +517,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                 isDeathEvent: true,
             },
         });
-        dispatch({ type: 'UPDATE_CHARACTER', payload: { currentHP: 0, isDead: true } });
+        dispatch({ type: 'UPDATE_CHARACTER', payload: { currentHP: 0, isDead: true, dying: false } });
     }
 }
 

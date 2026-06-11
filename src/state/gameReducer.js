@@ -89,6 +89,21 @@ function normalizeCombatEnemy(enemy, index) {
     };
 }
 
+/** Mark a character as dead (3 failed death saves or a fatal narrative event). */
+function applyDeath(character) {
+    return { ...character, isDead: true, dying: false, deathSaves: { successes: 0, failures: 0 } };
+}
+
+/** Bring a dying/stable character back to consciousness (healing or a nat-20 death save). */
+function reviveCharacter(character) {
+    return {
+        ...character,
+        dying: false,
+        deathSaves: { successes: 0, failures: 0 },
+        conditions: (character.conditions || []).filter(c => c.toLowerCase() !== 'unconscious'),
+    };
+}
+
 export const initialGameState = {
     character: null, // Should include gold: 0, silver: 0, copper: 0
     inventory: [],
@@ -340,22 +355,76 @@ export function gameReducer(state, action) {
         }
 
         case 'TAKE_DAMAGE': {
-            const newHP = Math.max(0, state.character.currentHP - action.payload);
-            return {
-                ...state,
-                character: { ...state.character, currentHP: newHP },
-            };
+            const prevHP = state.character.currentHP;
+            const newHP = Math.max(0, prevHP - action.payload);
+            let character = { ...state.character, currentHP: newHP };
+            const messages = [...state.messages];
+
+            if (newHP === 0 && prevHP > 0 && !character.isDead) {
+                // Dropped to 0: the character falls unconscious and starts dying.
+                character.dying = true;
+                character.deathSaves = { successes: 0, failures: 0 };
+                const conditions = character.conditions || [];
+                if (!conditions.some(c => c.toLowerCase() === 'unconscious')) {
+                    character.conditions = [...conditions, 'Unconscious'];
+                }
+                messages.push(systemMessage(`💔 **${character.name} falls!** You are unconscious at 0 HP and DYING. Each round, a death saving throw decides your fate — three successes stabilize you, three failures end your story.`));
+            } else if (prevHP === 0 && character.dying && action.payload > 0) {
+                // Taking damage while dying counts as a death save failure.
+                const failures = (character.deathSaves?.failures || 0) + 1;
+                character.deathSaves = { ...(character.deathSaves || { successes: 0 }), failures };
+                if (failures >= 3) {
+                    character = applyDeath(character);
+                    messages.push(systemMessage('💀 **The blow proves fatal. Your character dies.**'));
+                } else {
+                    messages.push(systemMessage(`💔 **Struck while dying!** That counts as a death save failure (${failures}/3).`));
+                }
+            }
+
+            return { ...state, character, messages };
         }
 
         case 'HEAL': {
+            if (action.payload <= 0 || state.character.isDead) return state;
             const healed = Math.min(
                 state.character.maxHP,
-                state.character.currentHP + action.payload
+                Math.max(0, state.character.currentHP) + action.payload
             );
-            return {
-                ...state,
-                character: { ...state.character, currentHP: healed },
-            };
+            let character = { ...state.character, currentHP: healed };
+            const messages = [...state.messages];
+            if (character.dying) {
+                // Any healing brings a dying character back to consciousness.
+                character = reviveCharacter(character);
+                messages.push(systemMessage(`✨ **${character.name} regains consciousness!** Healing pulls you back from the brink (${healed} HP).`));
+            }
+            return { ...state, character, messages };
+        }
+
+        case 'DEATH_SAVE_RESULT': {
+            const character = state.character;
+            if (!character?.dying || character.isDead) return state;
+            const die = action.payload.die;
+            const prev = character.deathSaves || { successes: 0, failures: 0 };
+
+            if (die === 20) {
+                // Natural 20: back on your feet with 1 HP.
+                const revived = reviveCharacter({ ...character, currentHP: 1 });
+                return { ...state, character: revived };
+            }
+            if (die >= 10) {
+                const successes = prev.successes + 1;
+                if (successes >= 3) {
+                    // Stable: unconscious at 0 HP, but no longer dying.
+                    const stable = { ...character, dying: false, deathSaves: { successes: 0, failures: 0 } };
+                    return { ...state, character: stable };
+                }
+                return { ...state, character: { ...character, deathSaves: { ...prev, successes } } };
+            }
+            const failures = prev.failures + (die === 1 ? 2 : 1);
+            if (failures >= 3) {
+                return { ...state, character: applyDeath(character) };
+            }
+            return { ...state, character: { ...character, deathSaves: { ...prev, failures } } };
         }
 
         case 'TAKE_REST': {

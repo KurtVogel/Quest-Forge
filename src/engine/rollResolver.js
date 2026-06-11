@@ -14,7 +14,7 @@
  */
 
 import { rollWithModifier, rollNotation, parseNotation } from './dice.ts';
-import { getSkillModifier, getModifier, getLevelBonus, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, SKILL_ABILITIES } from './rules.js';
+import { getSkillModifier, getModifier, getLevelBonus, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES } from './rules.js';
 
 /** Maximum depth for recursive follow-up roll handling. */
 const MAX_ROLL_DEPTH = 3;
@@ -41,6 +41,7 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
     const companionWork = new Map(companions.map(c => [c.id, { ...c }]));
     const playerStartHp = character?.currentHP ?? 0;
     let playerHp = playerStartHp;
+    let playerDamageTaken = 0; // raw damage, so hits on an already-downed (0 HP) player still register
     const playerMaxHp = character?.maxHP ?? playerStartHp;
 
     const matchByIdOrName = (work, ref) => {
@@ -91,6 +92,7 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
                     Object.assign(result, { damage: dmg.total, targetName: comp.name, targetHp: comp.hp, targetMaxHp: comp.maxHp });
                 } else {
                     playerHp = Math.max(0, playerHp - dmg.total);
+                    playerDamageTaken += dmg.total;
                     Object.assign(result, { damage: dmg.total, targetName: character?.name || 'you', targetHp: playerHp, targetMaxHp: playerMaxHp, targetIsPlayer: true });
                 }
                 appliedHp = true;
@@ -98,6 +100,9 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
         } else if (roll.type === 'damage_roll') {
             // Standalone damage roll (legacy two-step flow) — rolled, not auto-applied.
             const result = resolveDamageRoll(roll, character, dispatch);
+            if (result) results.push(result);
+        } else if (roll.type === 'death_save' && character) {
+            const result = resolveDeathSave(character, dispatch);
             if (result) results.push(result);
         } else if (roll.skill && character) {
             const resolved = resolvePlayerRoll(roll, character, dispatch, inventory);
@@ -137,9 +142,10 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
                 dispatch({ type: 'UPDATE_COMPANION', payload: { id: c.id, hp: w.hp } });
             }
         }
-        const playerDelta = playerStartHp - playerHp;
-        if (playerDelta > 0) {
-            dispatch({ type: 'TAKE_DAMAGE', payload: playerDelta });
+        if (playerDamageTaken > 0) {
+            // Dispatch the raw damage (TAKE_DAMAGE clamps at 0) so damage dealt to a
+            // dying player at 0 HP still registers as a death save failure.
+            dispatch({ type: 'TAKE_DAMAGE', payload: playerDamageTaken });
         }
     }
 
@@ -171,6 +177,16 @@ export function formatRollSummary(rollResults) {
         }
         if (r.type === 'damage_roll') {
             return `[ROLL RESULT: ${r.description || 'Damage roll'}, ${r.notation}, total damage: ${r.rolled}]`;
+        }
+        if (r.type === 'death_save') {
+            const status = {
+                revived: 'NATURAL 20 — the player regains consciousness at 1 HP and can act again',
+                stable: 'third success — the player is STABLE: unconscious at 0 HP, no longer dying',
+                success: `success (${r.successes}/3) — the player is still dying and unconscious`,
+                failure: `failure (${r.failures}/3) — the player is still dying and unconscious`,
+                dead: 'third failure — THE PLAYER CHARACTER IS DEAD (the system has recorded it; narrate the death, do not emit player_death)',
+            }[r.outcome] || `${r.successes}/3 successes, ${r.failures}/3 failures`;
+            return `[ROLL RESULT: Death saving throw, rolled ${r.rolled} — ${status}]`;
         }
         if (r.type === 'initiative') {
             return `[ROLL RESULT: ${r.description || 'Initiative'}, rolled ${r.rolled}]`;
@@ -330,7 +346,22 @@ function rollAndShowDamage(notation, label, dispatch, { crit = false, character 
 
 function resolveNpcRoll(roll, character, dispatch, inventory, targetAC) {
     const npcMod = roll.modifier ?? 0;
-    const result = rollWithAdvantage(1, 20, npcMod, roll.description || `${roll.attacker || 'Enemy'} attack`, roll.advantage, roll.disadvantage);
+
+    // Attacks against the player (targetAC == null means the player is the target)
+    // respect the player's conditions: prone/restrained/blinded etc. grant the
+    // attacker advantage; an invisible player imposes disadvantage.
+    let effAdvantage = roll.advantage;
+    let effDisadvantage = roll.disadvantage;
+    let condNote = '';
+    if (roll.type === 'npc_attack' && targetAC == null && character) {
+        const condEffects = getConditionRollEffects(character.conditions, 'incomingAttack');
+        const eff = combineRollModifiers(roll.advantage, roll.disadvantage, condEffects);
+        effAdvantage = eff.advantage;
+        effDisadvantage = eff.disadvantage;
+        condNote = eff.note ? ` (target${eff.note})` : '';
+    }
+
+    const result = rollWithAdvantage(1, 20, npcMod, roll.description || `${roll.attacker || 'Enemy'} attack`, effAdvantage, effDisadvantage);
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     // Determine the DC to beat. Saves use the spell/ability DC; attacks use the target's AC.
@@ -351,7 +382,7 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC) {
     const success = result.total >= dc;
     const isSave = roll.type === 'npc_save';
     const label = roll.attacker ? `${roll.attacker}${isSave ? ' save' : "'s attack"}` : (isSave ? 'NPC save' : 'NPC attack');
-    const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
+    const advLabel = (effAdvantage ? ' *(advantage)*' : effDisadvantage ? ' *(disadvantage)*' : '') + condNote;
     const outcome = isSave
         ? (success ? '✅ **Success!**' : '❌ **Failure!**')
         : (success ? '💥 **Hit!**' : '🛡️ **Miss!**');
@@ -408,6 +439,50 @@ function resolveDamageRoll(roll, character, dispatch) {
     }
 }
 
+/**
+ * Death saving throw — a flat d20, no modifiers, rolled while the player is dying.
+ * 10+ = success (3 = stable), 9- = failure (nat 1 = two failures, 3 = dead),
+ * nat 20 = back on your feet at 1 HP. State transitions live in the reducer
+ * (DEATH_SAVE_RESULT); this mirrors them for the chat line and DM summary.
+ */
+function resolveDeathSave(character, dispatch) {
+    const result = rollWithModifier(1, 20, 0, 'Death Saving Throw');
+    dispatch({ type: 'ADD_ROLL', payload: result });
+
+    const die = result.rolls[0];
+    const prev = character.deathSaves || { successes: 0, failures: 0 };
+    let successes = prev.successes;
+    let failures = prev.failures;
+    let outcome;
+    if (die === 20) {
+        outcome = 'revived';
+    } else if (die >= 10) {
+        successes += 1;
+        outcome = successes >= 3 ? 'stable' : 'success';
+    } else {
+        failures += die === 1 ? 2 : 1;
+        outcome = failures >= 3 ? 'dead' : 'failure';
+    }
+
+    dispatch({ type: 'DEATH_SAVE_RESULT', payload: { die } });
+
+    const tally = `(successes ${Math.min(successes, 3)}/3, failures ${Math.min(failures, 3)}/3)`;
+    const outcomeText = {
+        revived: '🌟 **Natural 20!** You surge back to consciousness with 1 HP!',
+        stable: '✅ **Stabilized.** You are unconscious but no longer dying.',
+        success: `✅ **Success.** ${tally}`,
+        failure: `${die === 1 ? '💀 **Natural 1 — two failures!**' : '❌ **Failure.**'} ${tally}`,
+        dead: '💀 **Third failure. Your character dies.**',
+    }[outcome];
+
+    dispatch({
+        type: 'ADD_MESSAGE',
+        payload: { role: 'system', content: `🎲 **Death Saving Throw**: Rolled **${die}** — ${outcomeText}`, isDeathEvent: outcome === 'dead' },
+    });
+
+    return { type: 'death_save', rolled: die, outcome, successes: Math.min(successes, 3), failures: Math.min(failures, 3) };
+}
+
 function resolveSinglePlayerAttackRoll(roll, dispatch, mod, label) {
     const result = rollWithAdvantage(1, 20, mod, label, roll.advantage, roll.disadvantage);
     dispatch({ type: 'ADD_ROLL', payload: result });
@@ -440,11 +515,16 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     const ability = SKILL_ABILITIES[skillName];
     const isAbilityName = ABILITY_NAMES.includes(skillName);
     const isAttackRoll = roll.type === 'attack_roll';
+    const isSavingThrow = roll.type === 'saving_throw';
 
     let mod = 0;
     let label = roll.description || `${skillName} check`;
 
-    if (ability) {
+    if (isAbilityName && isSavingThrow) {
+        // Saving throw: ability modifier + proficiency when the class grants it.
+        mod = getSavingThrowModifier(character, skillName);
+        label = roll.description || `${skillName} saving throw`;
+    } else if (ability) {
         mod = getSkillModifier(character, skillName);
     } else if (isAbilityName) {
         const abilityMod = getModifier(character.abilityScores[skillName]);
@@ -464,19 +544,27 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     }
 
     const usesAttackResolution = roll.type === 'attack_roll' || skillName === 'attack';
+
+    // Active conditions impose advantage/disadvantage automatically (engine-owned).
+    const rollKind = usesAttackResolution ? 'attack' : (isSavingThrow ? 'save' : 'check');
+    const condEffects = getConditionRollEffects(character.conditions, rollKind);
+    const eff = combineRollModifiers(roll.advantage, roll.disadvantage, condEffects);
+    if (eff.note) label += eff.note;
+    const effRoll = { ...roll, advantage: eff.advantage, disadvantage: eff.disadvantage };
+
     if (usesAttackResolution && character.class === 'fighter' && character.level >= 5) {
         return [
-            resolveSinglePlayerAttackRoll(roll, dispatch, mod, `${label} (Attack 1)`),
-            resolveSinglePlayerAttackRoll(roll, dispatch, mod, `${label} (Extra Attack)`),
+            resolveSinglePlayerAttackRoll(effRoll, dispatch, mod, `${label} (Attack 1)`),
+            resolveSinglePlayerAttackRoll(effRoll, dispatch, mod, `${label} (Extra Attack)`),
         ];
     }
 
-    const result = rollWithAdvantage(1, 20, mod, label, roll.advantage, roll.disadvantage);
+    const result = rollWithAdvantage(1, 20, mod, label, effRoll.advantage, effRoll.disadvantage);
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     // Initiative is just a number for turn ordering — no DC or pass/fail
     if (skillName === 'initiative') {
-        const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
+        const advLabel = effRoll.advantage ? ' *(advantage)*' : effRoll.disadvantage ? ' *(disadvantage)*' : '';
         const rollMsg = `🎲 **${label}**${advLabel}: Rolled **${result.total}**${result.advantageDetail}`;
         dispatch({
             type: 'ADD_MESSAGE',
@@ -493,7 +581,7 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     }
 
     const success = result.total >= (roll.dc || 15);
-    const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
+    const advLabel = effRoll.advantage ? ' *(advantage)*' : effRoll.disadvantage ? ' *(disadvantage)*' : '';
     const isAttack = roll.type === 'attack_roll' || skillName === 'attack';
     const dcLabel = isAttack ? `vs AC ${roll.dc}` : `DC ${roll.dc}`;
     const hitMiss = isAttack

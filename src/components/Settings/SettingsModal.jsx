@@ -3,7 +3,7 @@ import { useGame } from '../../state/GameContext.jsx';
 import { PROVIDERS, PROVIDER_LIST } from '../../llm/adapter.js';
 import { PRESETS, PRESET_LIST } from '../../data/presets.js';
 import { saveGame, loadGame, listSaves, deleteSave } from '../../state/persistence.js';
-import { saveGameToCloud, loadGameFromCloud, listCloudSaves } from '../../state/cloudSync.js';
+import { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud } from '../../state/cloudSync.js';
 import { getFirebaseConfigError, initializeFirebase } from '../../config/firebase.js';
 import { signInWithGoogle, logOut } from '../../state/auth.js';
 import './Settings.css';
@@ -133,6 +133,43 @@ export default function SettingsModal() {
     const handleDelete = async (slotId) => {
         await deleteSave(slotId);
         await loadSavesList();
+    };
+
+    const handleDeleteCloud = async (slotId, name) => {
+        if (!state.user?.uid) return;
+        if (!confirm(`Delete the cloud save "${name}"? It will disappear from all your devices.`)) return;
+        const ok = await deleteGameFromCloud(state.user.uid, slotId);
+        setSyncStatus(ok ? `Deleted "${name}" from the cloud` : `⚠ Failed to delete "${name}" from the cloud`);
+        await loadSavesList();
+    };
+
+    // Overwrite an existing slot (local + cloud when signed in) with the current game.
+    const handleOverwrite = async (slotId, name) => {
+        if (isSaving || !state.character) return;
+        if (!confirm(`Overwrite "${name}" with your current game?`)) return;
+        setIsSaving(true);
+        try {
+            const updatedState = {
+                ...state,
+                session: {
+                    ...state.session,
+                    name,
+                    updatedAt: new Date().toISOString()
+                }
+            };
+            await saveGame(slotId, updatedState);
+            if (state.user?.uid) {
+                const cloudOk = await saveGameToCloud(state.user.uid, slotId, updatedState);
+                setSyncStatus(cloudOk
+                    ? `✓ Overwrote "${name}" locally and in the cloud`
+                    : `⚠ Overwrote "${name}" locally, but the cloud upload FAILED`);
+            } else {
+                setSyncStatus(`Overwrote "${name}" locally (sign in for cloud sync)`);
+            }
+            await loadSavesList();
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const handleNewGame = () => {
@@ -432,6 +469,14 @@ export default function SettingsModal() {
                                                     <button className="btn btn-sm btn-primary" onClick={() => handleLoad(save.slotId, true)}>
                                                         Load
                                                     </button>
+                                                    {state.character && (
+                                                        <button className="btn btn-sm" title="Overwrite this save with your current game" disabled={isSaving} onClick={() => handleOverwrite(save.slotId, save.name)}>
+                                                            Overwrite
+                                                        </button>
+                                                    )}
+                                                    <button className="btn btn-sm btn-danger" title="Delete this cloud save" onClick={() => handleDeleteCloud(save.slotId, save.name)}>
+                                                        ✕
+                                                    </button>
                                                 </div>
                                             </div>
                                         ))}
@@ -461,6 +506,11 @@ export default function SettingsModal() {
                                                     <button className="btn btn-sm btn-primary" onClick={() => handleLoad(save.slotId)}>
                                                         Load
                                                     </button>
+                                                    {state.character && (
+                                                        <button className="btn btn-sm" title="Overwrite this save with your current game" disabled={isSaving} onClick={() => handleOverwrite(save.slotId, save.name)}>
+                                                            Overwrite
+                                                        </button>
+                                                    )}
                                                     <button className="btn btn-sm btn-danger" onClick={() => handleDelete(save.slotId)}>
                                                         ✕
                                                     </button>

@@ -4,7 +4,7 @@
  */
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT } from '../engine/characterUtils.js';
-import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus, isProficientWithWeapon } from '../engine/rules.js';
+import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus, getSavingThrowModifier, isProficientWithWeapon } from '../engine/rules.js';
 import { getExperienceThreshold } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
@@ -164,7 +164,9 @@ const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)
 - **Skill checks:** Request the specific skill name (e.g. "stealth", "perception", "athletics"). The system automatically applies the correct ability modifier + proficiency bonus if the player is proficient. The player's skill proficiencies are listed in their character block above.
 - Attack rolls: d20 + ability modifier + proficiency
 - Damage: weapon-specific dice + ability modifier
-- Saving throws: d20 + ability modifier + proficiency (if proficient)
+- **Saving throws — USE THEM.** A skill check is for what the player *attempts*; a saving throw is for what the world *does to them*. Whenever the player must resist or endure something — a trap springs, poison or disease takes hold, a spell or shove or grapple lands on them, the floor collapses, fear grips them, flames wash over them — request a "saving_throw" with "skill" set to the ability name: "strength" (resist force/grapples), "dexterity" (dodge area effects/traps), "constitution" (endure poison/disease/exhaustion), "intelligence" (resist illusions), "wisdom" (resist fear/charm), "charisma" (resist possession). The system adds the player's save proficiencies automatically (shown in the character block).
+- **Conditions are mechanically enforced.** When you emit conditions like Poisoned, Blinded, Frightened, Restrained, Prone, Invisible, Stunned, Paralyzed via conditions_gained, the system AUTOMATICALLY applies advantage/disadvantage to every affected roll (including enemies gaining advantage against a prone/blinded/restrained player). Narrate the effect, emit the condition — do NOT also set advantage/disadvantage flags for it.
+- **Dying & death saves:** When the player drops to 0 HP they fall unconscious and start DYING (the system announces it). While dying, their only roll each round is { "type": "death_save" } — request exactly that, nothing else, until they stabilize, die, or someone intervenes. Three successes = stable; three failures = dead; natural 20 = back up at 1 HP. Damage dealt to a dying player automatically counts as a failure. Allies can stabilize with a Medicine check (DC 10) or any healing.
 - Armor Class determines the DC for attack rolls
 - When you need the player to make a check, specify:
   - The type (ability check, saving throw, attack roll)
@@ -192,8 +194,10 @@ When game events occur, include a structured JSON block at the END of your respo
 {
   "requested_rolls": [
     { "type": "skill_check", "skill": "perception", "dc": 15, "description": "Spot the hidden trap", "advantage": false, "disadvantage": false },
+    { "type": "saving_throw", "skill": "dexterity", "dc": 14, "description": "Leap clear of the collapsing scaffold" },
     { "type": "attack_roll", "skill": "attack", "target": "<enemy id from combat state>", "dc": 13, "damage": "1d8+3", "description": "You hew at the goblin" },
     { "type": "npc_attack", "attacker": "Goblin", "attackerId": "<enemy id>", "target": "player", "dc": 16, "modifier": 4, "damage": "1d6+2", "description": "The goblin slashes back" },
+    { "type": "death_save", "description": "Only while the player is DYING at 0 HP" },
     { "type": "damage_roll", "notation": "1d8+3", "description": "Out-of-combat damage only — combat damage goes inline above" }
   ],
   "damage_dealt": 0,
@@ -261,6 +265,8 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - **ONLY use the \`requested_rolls\` JSON array.** If you need a roll, you MUST output the JSON block.
 - ALL dice rolls go through requested_rolls — for the player AND for NPCs/enemies.
 - For player checks: type is "skill_check", "saving_throw", or "attack_roll". dc is the target DC.
+- For saving throws: set "skill" to the ABILITY name ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"). The system applies the player's saving-throw proficiencies automatically. Use saves whenever the world acts ON the player (traps, poison, spells, fear, shoves) — don't convert everything into skill checks.
+- While the player is DYING at 0 HP: request { "type": "death_save" } as their roll each round — no skill, no dc. Do not request any other player rolls until they are stable, revived, or dead.
 - **In combat, fold damage into the attack** so the system resolves the whole exchange in one pass. On an "attack_roll" (player) or "npc_attack" (foe/companion), add: "target" (who is hit — an enemy id from the combat state, or "player", or a companion id) and "damage" (the weapon/spell dice, e.g. "1d8+3"). The client rolls the attack, and on a hit rolls the damage and applies HP itself. Do NOT send a separate "damage_roll" for combat, and do NOT emit damage_taken/enemy_updates for it.
   - The client AUTOMATICALLY doubles the damage dice on a natural-20 crit — never pre-double the notation yourself.
 - For NPC/enemy/companion attacks: type is "npc_attack". Set dc to the TARGET's AC. Include the attacker name and "attackerId" (the foe's enemy id) so a foe slain earlier in the round doesn't still swing. **Always include "modifier"** — the attack bonus (e.g. +4 for a trained guard, +7 for a veteran); estimate from the creature if unknown.
@@ -277,9 +283,10 @@ COMBAT NOTES:
 - HP is owned by the client. When a roll result says "HP applied by the system", do NOT also send enemy_updates or damage_taken for it. Use "enemy_updates" only for HP changes the dice did NOT cause (e.g. an enemy drinks a potion).
 - Use "combat_end": true when all enemies are defeated or combat ends.
 
-PLAYER DEATH:
-- If the player's character dies, set "player_death": { "description": "Brief description of how they died" }
-- This does NOT end the game — the player will describe what happens next (their spirit may linger, possess another body, etc.)
+PLAYER DEATH & DYING:
+- **Combat deaths are owned by the system.** At 0 HP the player falls unconscious and starts dying; the system tracks death saves and declares death at three failures. You narrate the dying state and request { "type": "death_save" } each round — do NOT emit player_death for this; the system records the death itself.
+- Use "player_death": { "description": "..." } ONLY for unavoidable narrative deaths with no dying state — an execution, disintegration, a fall from a mile up.
+- Death does NOT end the game — the player will describe what happens next (their spirit may linger, possess another body, etc.)
 - Continue the world as normal. Death is a narrative event, not a game-over.
 
 ECONOMY & HEALING:
@@ -331,7 +338,21 @@ function buildCharacterBlock(character) {
         .map(([ability, score]) => `${ABILITY_SHORT[ability]}: ${score} (${formatModifier(getModifier(score))})`)
         .join(', ');
 
-    const deathStatus = character.isDead ? '\n- **STATUS: DEAD** (spirit or successor active)' : '';
+    // Saving throws with proficiency markers (applied automatically by the system)
+    const saves = Object.keys(character.abilityScores)
+        .map(ability => {
+            const prof = character.savingThrowProficiencies?.includes(ability);
+            return `${ABILITY_SHORT[ability]} ${formatModifier(getSavingThrowModifier(character, ability))}${prof ? '*' : ''}`;
+        })
+        .join(', ');
+
+    let deathStatus = '';
+    if (character.isDead) {
+        deathStatus = '\n- **STATUS: DEAD** (spirit or successor active)';
+    } else if (character.dying) {
+        const ds = character.deathSaves || { successes: 0, failures: 0 };
+        deathStatus = `\n- **STATUS: DYING** — unconscious at 0 HP. Death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures. Request { "type": "death_save" } as their roll each round.`;
+    }
 
     // Skill proficiencies
     const skillProfs = character.skillProficiencies?.length
@@ -365,6 +386,7 @@ function buildCharacterBlock(character) {
 - **Wealth:** ${character.gold || 0} gp | ${character.silver || 0} sp | ${character.copper || 0} cp
 - **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}${getLevelBonus(character) > 0 ? `\n- **Level Bonus (combat):** +${getLevelBonus(character)} to hit and damage (applied automatically by the system — do NOT add this yourself)` : ''}
 - **Stats:** ${stats}
+- **Saving Throws:** ${saves} (* = proficient; applied automatically by the system)
 - **Skill Proficiencies:** ${skillProfs}
 - **Speed:** ${character.speed} ft
 - **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}${resourceLines}${hitDiceLine}
@@ -476,6 +498,9 @@ function buildActiveConstraints(quests, worldFacts, character, party) {
     // Character death reminder
     if (character?.isDead) {
         reminders.push(`The player's original character is dead. They are now playing as a spirit/successor. Acknowledge this reality in narration.`);
+    } else if (character?.dying) {
+        const ds = character.deathSaves || { successes: 0, failures: 0 };
+        reminders.push(`⚠️ THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures). They cannot act, speak, or perceive. Their only roll each round is { "type": "death_save" } — request it now via requested_rolls. Enemies may flee, loot, or finish them; allies may stabilize (Medicine, DC 10) or heal them. Keep the tension high.`);
     }
 
     const isLowLevelSolo = (character?.level ?? 1) <= 2 && (!party || party.length === 0);
