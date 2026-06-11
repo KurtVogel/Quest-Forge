@@ -84,7 +84,7 @@ src/
 
 ## Session start & session end
 
-- **Start here:** read `docs/STATUS.md` — current focus, what shipped recently, agreed next steps. Then `git log --oneline -10` for the trail.
+- **The handshake is three cheap reads, not an expedition:** this file (already loaded) + `docs/STATUS.md` (current focus, recently shipped, next steps) + `git status` / `git log --oneline -10` (working-tree state and trail — and `git fetch` first: Vesa works on multiple machines, the repo may be ahead on origin). That's full orientation; report it in a few sentences. Do NOT crawl the codebase to "get familiar" — explore only what the actual task needs.
 - **Before ending a session** that shipped or decided anything: update `docs/STATUS.md` (replace stale entries), append new ideas to `docs/IDEAS.md`, record settled choices in `docs/DECISIONS.md`, and mirror any project-fact changes in BOTH `CLAUDE.md` and `AGENTS.md` (they are twins).
 
 ## Idea backlog & decision log
