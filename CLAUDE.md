@@ -8,7 +8,7 @@ A single-player, browser-based tabletop RPG where an **LLM plays the Dungeon Mas
 
 - **Stack:** React 19 + Vite 7, mostly plain `.js`/`.jsx` (one `.ts`: the dice engine). Package name is `rpg-client`.
 - **Deploy target:** Firebase Hosting, project `quest-forge-99ab1` → https://quest-forge-99ab1.web.app
-- **No test suite.** ESLint is the only automated gate.
+- **Tests:** vitest (`npm test`) covers the rules math, the death-save state machine in the reducer, roll resolution with mocked dice, and golden-fixture cases for `responseParser` LLM quirks. Run it before committing engine/parser changes; add a fixture whenever a new LLM failure mode is discovered.
 
 ## Commands
 
@@ -17,6 +17,7 @@ npm run dev       # Vite dev server with HMR
 npm run build     # production build → dist/
 npm run preview   # serve the built dist/ locally
 npm run lint      # ESLint (flat config in eslint.config.js)
+npm test          # vitest (engine math, reducer death saves, parser fixtures)
 ```
 
 Deploy hosting (build first): `npx firebase deploy --only hosting --project quest-forge-99ab1`

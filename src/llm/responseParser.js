@@ -89,7 +89,8 @@ function detectTextRollRequests(narrative) {
         const skillRaw = match[1].trim().toLowerCase();
         if (KNOWN_SKILLS.some(s => skillRaw.includes(s) || s.includes(skillRaw))) {
             const skill = KNOWN_SKILLS.find(s => skillRaw.includes(s) || s.includes(skillRaw)) || skillRaw;
-            const type = match[0].toLowerCase().includes('save') ? 'saving_throw' : 'skill_check';
+            // Note: "saving" does NOT contain the substring "save" — match both forms.
+            const type = /sav(e|ing)/i.test(match[0]) ? 'saving_throw' : 'skill_check';
             rolls.push({ type, skill, dc, description: match[0].trim() });
         }
     }
