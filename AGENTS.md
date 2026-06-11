@@ -82,6 +82,11 @@ src/
 - `npm run lint` currently reports ~14 **pre-existing** errors (unused `e` in catch blocks, fast-refresh export warnings). Don't let a change *add* new ones; fixing the old ones is optional cleanup, not required.
 - Windows-first repo (paths, `install.cmd`).
 
+## Idea backlog & decision log
+
+- **`docs/IDEAS.md`** — categorized idea backlog with design notes. Read it before proposing features (the idea may exist with thinking attached); append new ideas from any session there, with the *why*. Rejected ideas stay listed with reasons.
+- **`docs/DECISIONS.md`** — settled design decisions and their rationale. Check it before redesigning anything; don't silently contradict an entry — revisit it explicitly with the human first.
+
 ## Claude parallel
 
 This file has a twin, `CLAUDE.md`, with the same content for Claude Code sessions — **update both when you change project facts here.** Claude-specific config (agents, agent-memory, settings) lives in `.claude/`.
