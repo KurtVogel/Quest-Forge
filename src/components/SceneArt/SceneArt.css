@@ -7,16 +7,20 @@
     flex-shrink: 0;
     display: flex;
     justify-content: center;
-    background: var(--surface-secondary);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+        var(--surface-secondary);
 }
 
 .scene-art-generate-btn {
     margin: 1rem;
     padding: 0.5rem 1rem;
-    background: var(--surface-primary);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent),
+        var(--surface-primary);
     border: 1px solid var(--border-primary);
     color: var(--gold);
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
     font-family: var(--font-body);
     transition: all 0.2s;
@@ -39,6 +43,10 @@
 }
 
 .scene-loading-icon {
+    width: 0.8rem;
+    height: 0.8rem;
+    border: 1px solid var(--gold-dim);
+    transform: rotate(45deg);
     animation: pulse 1.5s ease-in-out infinite;
 }
 
@@ -93,7 +101,7 @@
     left: 0;
     right: 0;
     padding: 0.5rem 0.75rem;
-    background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.82));
     color: var(--text-primary);
     font-size: 0.78rem;
     font-weight: 600;
@@ -103,7 +111,10 @@
 }
 
 .scene-location-icon {
-    font-size: 0.85rem;
+    width: 0.55rem;
+    height: 0.55rem;
+    border: 1px solid currentColor;
+    transform: rotate(45deg);
 }
 
 /* Lightbox */

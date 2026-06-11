@@ -303,7 +303,7 @@ REST & RESOURCES:
   - **Short rest:** Spends hit dice to heal, resets short-rest abilities (Fighter's Second Wind, Action Surge, etc.)
   - **Long rest:** Full HP restore, recovers half hit dice, resets ALL abilities, clears minor conditions
 - The character sheet shows current resources (Second Wind, Action Surge, Channel Divinity, etc.) with uses remaining. Reference these in narration — e.g., "You steel yourself and catch your breath" for Second Wind.
-- **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "✨ Second Wind — you recover 8 HP" or "🧪 You drink a Potion of Healing"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent but gently note they can trigger it from their character sheet or inventory so the system applies it.
+- **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "Second Wind — you recover 8 HP" or "You drink a Potion of Healing"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent but gently note they can trigger it from their character sheet or inventory so the system applies it.
 - Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC casts a healing spell on the player).
 
 PROGRESSION & STATUS EFFECTS:
@@ -315,20 +315,20 @@ PROGRESSION & STATUS EFFECTS:
 
 ## ROLL REQUEST — EXAMPLES
 
-❌ **BAD — DM narrates outcome before the roll even happens:**
+BAD — DM narrates outcome before the roll even happens:
 > "You lunge at the guard and drive your blade into his throat. He crumples to the ground."
 > *(No JSON block, no requested_rolls — outcome invented without dice)*
 
-❌ **BAD — DM asks for roll in narrative text instead of JSON:**
+BAD — DM asks for roll in narrative text instead of JSON:
 > "Roll a Stealth check DC 14 to slip past the guards."
 > *(The system cannot parse text requests — no dice will be rolled)*
 
-❌ **BAD — DM requests roll AND pre-narrates the result in the same response:**
+BAD — DM requests roll AND pre-narrates the result in the same response:
 > "You creep forward carefully... and manage to slip past undetected."
 > \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":14}] }\`\`\`
 > *(The outcome must come AFTER the dice result is received, not before)*
 
-✅ **GOOD — DM requests the roll with minimal prose; narrates the full scene AFTER the dice:**
+GOOD — DM requests the roll with minimal prose; narrates the full scene AFTER the dice:
 > "The patrol's torchlight sweeps toward you."
 > \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":14,"description":"Slip past the patrol","advantage":false,"disadvantage":false}] }\`\`\`
 > *(The client withholds this pre-roll line. Once the dice return, narrate the whole beat in one vivid pass — the creep along the wall AND whether you're spotted — never split across two messages.)*`;
@@ -500,7 +500,7 @@ function buildActiveConstraints(quests, worldFacts, character, party) {
         reminders.push(`The player's original character is dead. They are now playing as a spirit/successor. Acknowledge this reality in narration.`);
     } else if (character?.dying) {
         const ds = character.deathSaves || { successes: 0, failures: 0 };
-        reminders.push(`⚠️ THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures). They cannot act, speak, or perceive. Their only roll each round is { "type": "death_save" } — request it now via requested_rolls. Enemies may flee, loot, or finish them; allies may stabilize (Medicine, DC 10) or heal them. Keep the tension high.`);
+        reminders.push(`THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures). They cannot act, speak, or perceive. Their only roll each round is { "type": "death_save" } — request it now via requested_rolls. Enemies may flee, loot, or finish them; allies may stabilize (Medicine, DC 10) or heal them. Keep the tension high.`);
     }
 
     const isLowLevelSolo = (character?.level ?? 1) <= 2 && (!party || party.length === 0);

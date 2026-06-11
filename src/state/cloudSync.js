@@ -82,10 +82,10 @@ export async function saveGameToCloud(uid, slotId, gameState) {
             payload: JSON.stringify(trimmedState)
         });
 
-        console.log(`☁️ Cloud save successful: ${slotId}`);
+        console.log(`Cloud save successful: ${slotId}`);
         return true;
     } catch (e) {
-        console.error("☁️ Cloud save failed:", e);
+        console.error("Cloud save failed:", e);
         return false;
     }
 }
@@ -101,13 +101,13 @@ export async function loadGameFromCloud(uid, slotId) {
         if (docSnap.exists()) {
             const data = docSnap.data();
             if (data.payload) {
-                console.log(`☁️ Cloud load successful: ${slotId}`);
+                console.log(`Cloud load successful: ${slotId}`);
                 return JSON.parse(data.payload);
             }
         }
         return null;
     } catch (e) {
-        console.error("☁️ Cloud load failed:", e);
+        console.error("Cloud load failed:", e);
         return null;
     }
 }
@@ -133,7 +133,7 @@ export async function listCloudSaves(uid) {
 
         return saves.sort((a, b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0));
     } catch (e) {
-        console.error("☁️ Cloud list failed:", e);
+        console.error("Cloud list failed:", e);
         throw e;
     }
 }
@@ -145,10 +145,10 @@ export async function deleteGameFromCloud(uid, slotId) {
         const userSavesRef = collection(db, `users/${uid}/saves`);
         const saveDocRef = doc(userSavesRef, cloudDocId(slotId));
         await deleteDoc(saveDocRef);
-        console.log(`☁️ Cloud delete successful: ${slotId}`);
+        console.log(`Cloud delete successful: ${slotId}`);
         return true;
     } catch (e) {
-        console.error("☁️ Cloud delete failed:", e);
+        console.error("Cloud delete failed:", e);
         return false;
     }
 }

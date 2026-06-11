@@ -11,9 +11,12 @@
 }
 
 .settings-modal {
-    background: var(--surface-secondary);
+    background:
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 9px),
+        linear-gradient(180deg, rgba(215, 180, 90, 0.06), transparent 30%),
+        var(--surface-secondary);
     border: 1px solid var(--border-primary);
-    border-radius: 16px;
+    border-radius: 10px;
     width: 100%;
     max-width: 560px;
     max-height: 80vh;
@@ -60,7 +63,8 @@
     padding: 0 1rem;
 }
 
-.settings-tab {
+.settings-tab,
+.tab-button {
     padding: 0.75rem 1rem;
     border: none;
     background: transparent;
@@ -72,11 +76,13 @@
     font-family: var(--font-body);
 }
 
-.settings-tab:hover {
+.settings-tab:hover,
+.tab-button:hover {
     color: var(--text-primary);
 }
 
-.settings-tab.active {
+.settings-tab.active,
+.tab-button.active {
     color: var(--gold);
     border-bottom-color: var(--gold);
 }
@@ -154,9 +160,11 @@
     flex-direction: column;
     align-items: flex-start;
     padding: 0.75rem;
-    background: var(--surface-primary);
-    border: 2px solid var(--border-primary);
-    border-radius: 10px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+        var(--surface-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s;
     text-align: left;
@@ -173,8 +181,18 @@
     background: rgba(212, 175, 55, 0.08);
 }
 
-.preset-emoji {
-    font-size: 1.2rem;
+.preset-code {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2rem;
+    height: 1.4rem;
+    border: 1px solid var(--border-primary);
+    border-radius: 4px;
+    color: var(--gold);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
     margin-bottom: 0.25rem;
 }
 
@@ -224,8 +242,10 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.75rem;
-    background: var(--surface-primary);
-    border-radius: 8px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+        var(--surface-primary);
+    border-radius: 6px;
     border: 1px solid var(--border-primary);
 }
 

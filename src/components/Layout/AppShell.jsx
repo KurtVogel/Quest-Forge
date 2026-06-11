@@ -33,23 +33,26 @@ export default function AppShell() {
                     >
                         ☰
                     </button>
-                    <h1 className="app-title">⚔️ Quest Forge</h1>
+                    <h1 className="app-title">
+                        <span className="app-title-mark" aria-hidden="true" />
+                        Quest Forge
+                    </h1>
                     <span className="session-name">{state.session.name || 'New Adventure'}</span>
                 </div>
                 <div className="header-right">
                     {!state.settings.apiKey && (
-                        <span className="api-warning" onClick={handleOpenSettings}>⚠️ Set API Key</span>
+                        <span className="api-warning" onClick={handleOpenSettings}>Set API Key</span>
                     )}
                     <button
                         className="header-btn desktop-only-btn"
                         onClick={() => setIsJournalOpen(true)}
                         title="World Journal"
                     >
-                        📜
+                        Journal
                     </button>
                     <AmbientControls />
                     <button className="header-btn settings-btn-expanded desktop-only-btn" onClick={handleOpenSettings} title="Settings">
-                        ⚙️ Settings
+                        Settings
                     </button>
                 </div>
             </header>
@@ -89,13 +92,13 @@ export default function AppShell() {
                                 className="mobile-drawer-btn"
                                 onClick={() => { setIsJournalOpen(true); setIsMobileMenuOpen(false); }}
                             >
-                                📜 World Journal
+                                World Journal
                             </button>
                             <button
                                 className="mobile-drawer-btn"
                                 onClick={() => { handleOpenSettings(); setIsMobileMenuOpen(false); }}
                             >
-                                ⚙️ Settings
+                                Settings
                             </button>
                         </div>
                     </aside>
@@ -121,9 +124,9 @@ export default function AppShell() {
 
             {saveToast && (
                 <div className={`save-toast ${saveToast.status === 'cloud-error' ? 'save-toast-error' : ''}`}>
-                    {saveToast.status === 'cloud' && 'Game saved ☁️✓'}
-                    {saveToast.status === 'local' && 'Game saved locally 💾'}
-                    {saveToast.status === 'cloud-error' && '⚠ Cloud sync failed — saved locally only'}
+                    {saveToast.status === 'cloud' && 'Game saved to cloud'}
+                    {saveToast.status === 'local' && 'Game saved locally'}
+                    {saveToast.status === 'cloud-error' && 'Cloud sync failed — saved locally only'}
                 </div>
             )}
         </div>

@@ -138,12 +138,12 @@ export function parseResponse(response) {
         // Fallback 1: unfenced JSON containing requested_rolls — use balanced-brace extraction
         const looseJson = extractBalancedJson(response, 'requested_rolls');
         if (looseJson) {
-            console.warn('[ResponseParser] ⚠️ Found unfenced JSON with requested_rolls — attempting parse.');
+            console.warn('[ResponseParser] Found unfenced JSON with requested_rolls — attempting parse.');
             try {
                 const parsed = JSON.parse(looseJson.json);
                 const narrative = response.slice(0, looseJson.startIndex).trim();
                 const events = normalizeEvents(parsed);
-                console.log('[ResponseParser] ✅ Parsed unfenced JSON.');
+                console.log('[ResponseParser] Parsed unfenced JSON.');
                 return { narrative, events };
             } catch {
                 // Try repair before giving up
@@ -151,7 +151,7 @@ export function parseResponse(response) {
                     const parsed = JSON.parse(repairJson(looseJson.json));
                     const narrative = response.slice(0, looseJson.startIndex).trim();
                     const events = normalizeEvents(parsed);
-                    console.log('[ResponseParser] ✅ Parsed unfenced JSON after repair.');
+                    console.log('[ResponseParser] Parsed unfenced JSON after repair.');
                     return { narrative, events };
                 } catch (e2) {
                     console.warn('[ResponseParser] Failed to parse unfenced JSON:', e2.message);
@@ -165,7 +165,7 @@ export function parseResponse(response) {
 
         const detectedRolls = detectTextRollRequests(response);
         if (detectedRolls.length > 0) {
-            console.warn(`[ResponseParser] 🎲 Detected ${detectedRolls.length} text-based roll request(s) — converting to JSON events.`);
+            console.warn(`[ResponseParser] Detected ${detectedRolls.length} text-based roll request(s) — converting to JSON events.`);
             const events = normalizeEvents({ requested_rolls: detectedRolls });
             events._textRollDetected = true; // Flag for ChatPanel to show a notice
             return { narrative: response.trim(), events };
@@ -184,12 +184,12 @@ export function parseResponse(response) {
     try {
         events = JSON.parse(jsonMatch[1]);
     } catch {
-        console.warn('[ResponseParser] ❌ JSON parse failed, attempting repair...');
+        console.warn('[ResponseParser] JSON parse failed, attempting repair...');
         try {
             events = JSON.parse(repairJson(jsonMatch[1]));
-            console.warn('[ResponseParser] ✅ JSON repaired successfully.');
+            console.warn('[ResponseParser] JSON repaired successfully.');
         } catch (e2) {
-            console.warn('[ResponseParser] ❌ JSON repair failed too:', e2.message);
+            console.warn('[ResponseParser] JSON repair failed too:', e2.message);
             console.warn('[ResponseParser] Raw JSON string:', jsonMatch[1]);
             return { narrative: response.trim(), events: null };
         }
@@ -198,7 +198,7 @@ export function parseResponse(response) {
     events = normalizeEvents(events);
 
     if (events.requestedRolls.length > 0) {
-        console.log(`[ResponseParser] 🎲 ${events.requestedRolls.length} roll(s) requested:`,
+        console.log(`[ResponseParser] ${events.requestedRolls.length} roll(s) requested:`,
             events.requestedRolls.map(r => `${r.type}: ${r.description} (DC ${r.dc})`).join(', ')
         );
     }
@@ -513,7 +513,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             type: 'ADD_MESSAGE',
             payload: {
                 role: 'system',
-                content: `💀 **${events.playerDeath.description}**\n\nYour story is not over. Describe what happens next — does your spirit linger, possess a body nearby, or does fate have other plans?`,
+                content: `**${events.playerDeath.description}**\n\nYour story is not over. Describe what happens next — does your spirit linger, possess a body nearby, or does fate have other plans?`,
                 isDeathEvent: true,
             },
         });

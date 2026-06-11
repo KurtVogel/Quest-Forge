@@ -28,7 +28,7 @@ export default class ErrorBoundary extends Component {
             return (
                 <div className="error-boundary">
                     <div className="error-boundary-content">
-                        <span className="error-boundary-icon">⚠️</span>
+                        <span className="error-boundary-icon">!</span>
                         <h4 className="error-boundary-title">{label} Error</h4>
                         <p className="error-boundary-message">
                             {this.state.error?.message || 'Something went wrong.'}

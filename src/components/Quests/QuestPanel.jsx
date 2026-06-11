@@ -32,7 +32,7 @@ export default function QuestPanel() {
     return (
         <div className="quest-panel">
             <div className="quest-header">
-                <h3 className="quest-title">📜 Quests</h3>
+                <h3 className="quest-title">Quests</h3>
                 <button
                     className="quest-add-btn"
                     onClick={() => setShowAddQuest(!showAddQuest)}

@@ -7,11 +7,13 @@
 }
 
 .ambient-toggle {
-    background: none;
+    background: var(--surface-primary);
     border: 1px solid var(--border-subtle);
     border-radius: 6px;
-    padding: 0.25rem 0.4rem;
-    font-size: 0.9rem;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.72rem;
+    font-family: var(--font-body);
+    font-weight: 700;
     cursor: pointer;
     transition: all 0.2s;
     color: var(--text-muted);

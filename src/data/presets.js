@@ -6,7 +6,7 @@ export const PRESETS = {
     classicFantasy: {
         name: 'Classic High Fantasy',
         description: 'Epic quests, noble heroes, mighty dragons. Standard D&D fare.',
-        emoji: '⚔️',
+        code: 'HF',
         systemPromptAddition: `
 Setting: Classic high fantasy world with kingdoms, dungeons, dragons, and ancient magic.
 Tone: Heroic and adventurous. Mix serious dramatic moments with lighthearted banter.
@@ -17,7 +17,7 @@ The world has a mix of civilized regions, wilderness, and dangerous dungeons.`,
     grimdark: {
         name: 'Grimdark Survival',
         description: 'Harsh and deadly. Resources are scarce, death is real, and nothing is easy.',
-        emoji: '💀',
+        code: 'GD',
         systemPromptAddition: `
 Setting: A bleak, war-torn world where danger lurks everywhere and trust is scarce.
 Tone: Dark, gritty, and tense. Consequences are harsh and permanent.
@@ -30,7 +30,7 @@ Wounds fester, supplies run low, and moral choices have no easy answers.`,
     comedy: {
         name: 'Comedy Adventure',
         description: 'Lighthearted, silly, and full of puns. Nothing is too serious.',
-        emoji: '🎭',
+        code: 'CA',
         systemPromptAddition: `
 Setting: A whimsical fantasy world where the absurd is normal and comedy is king.
 Tone: Lighthearted, funny, and full of wordplay. Break the fourth wall occasionally.
@@ -43,7 +43,7 @@ The world itself is slightly ridiculous — taverns with unlikely names, quests 
     horror: {
         name: 'Horror Mystery',
         description: 'Unsettling, atmospheric, and investigation-focused. What lurks in the dark?',
-        emoji: '🕯️',
+        code: 'HM',
         systemPromptAddition: `
 Setting: A shadowy world where something is deeply wrong. Ancient evils stir beneath the surface.
 Tone: Tense, unsettling, and mysterious. Build dread slowly. Use sensory descriptions.
@@ -57,7 +57,7 @@ Darkness, isolation, and the uncanny are your primary tools.`,
     narrative: {
         name: 'Narrative Mode',
         description: 'Story-first with simplified mechanics. Focus on roleplay and choices.',
-        emoji: '📖',
+        code: 'NM',
         systemPromptAddition: `
 Setting: Any setting the player desires — adapt to their preferences.
 Tone: Story-driven and character-focused. Emphasize narrative over mechanics.

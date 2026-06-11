@@ -102,7 +102,10 @@ function StartScreen() {
   return (
     <div className="start-screen">
       <div className="start-content">
-        <div className="start-logo">⚔️</div>
+        <div className="start-logo" aria-hidden="true">
+          <span className="start-logo-blade start-logo-blade-left" />
+          <span className="start-logo-blade start-logo-blade-right" />
+        </div>
         <h1 className="start-title">Quest Forge</h1>
         <p className="start-subtitle">AI-Powered Tabletop RPG</p>
         {state.settings.firebaseConfig?.apiKey && state.user?.isAuthLoading && (
@@ -125,9 +128,9 @@ function StartScreen() {
         <div className="start-buttons">
           {autoSaveData && (
             <button className="start-btn continue-btn" onClick={handleContinue}>
-              <span className="start-btn-icon">▶</span>
+              <span className="start-btn-icon start-btn-icon-continue" aria-hidden="true" />
               <span className="start-btn-text">
-                <span className="start-btn-label">Continue 💾</span>
+                <span className="start-btn-label">Continue</span>
                 <span className="start-btn-detail">
                   {autoSaveData.character?.name} · Lv.{autoSaveData.character?.level} {autoSaveData.character?.class}
                 </span>
@@ -137,7 +140,7 @@ function StartScreen() {
 
           {(saves.length > 0 || cloudSaves.length > 0) && (
             <button className="start-btn load-btn" onClick={() => setShowSaves(!showSaves)}>
-              <span className="start-btn-icon">📂</span>
+              <span className="start-btn-icon start-btn-icon-load" aria-hidden="true" />
               <span className="start-btn-text">
                 <span className="start-btn-label">Load Game</span>
                 <span className="start-btn-detail">{saves.length + cloudSaves.length} saved games</span>
@@ -146,7 +149,7 @@ function StartScreen() {
           )}
 
           <button className="start-btn new-btn" onClick={handleNewGame}>
-            <span className="start-btn-icon">✨</span>
+            <span className="start-btn-icon start-btn-icon-new" aria-hidden="true" />
             <span className="start-btn-text">
               <span className="start-btn-label">New Game</span>
               <span className="start-btn-detail">Create a new character</span>
@@ -156,7 +159,7 @@ function StartScreen() {
 
         {showSaves && (
           <div className="start-saves-list">
-            {cloudSaves.length > 0 && <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)' }}>☁️ Cloud Saves</h4>}
+            {cloudSaves.length > 0 && <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)' }}>Cloud Saves</h4>}
             {cloudSaves.map(save => (
               <button key={`cloud-${save.slotId}`} className="start-save-slot" onClick={() => handleLoadSave(save.slotId, true)}>
                 <div className="start-save-info">
@@ -169,7 +172,7 @@ function StartScreen() {
               </button>
             ))}
 
-            {saves.length > 0 && <h4 style={{ margin: '1rem 0 0.5rem 0', color: 'var(--text-muted)' }}>💾 Local Saves</h4>}
+            {saves.length > 0 && <h4 style={{ margin: '1rem 0 0.5rem 0', color: 'var(--text-muted)' }}>Local Saves</h4>}
             {saves.map(save => (
               <button key={`local-${save.slotId}`} className="start-save-slot" onClick={() => handleLoadSave(save.slotId, false)}>
                 <div className="start-save-info">

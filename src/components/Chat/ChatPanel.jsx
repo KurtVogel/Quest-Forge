@@ -6,13 +6,18 @@ import { parseResponse, applyEvents, detectPreNarratedOutcome } from '../../llm/
 import { handleRequestedRolls } from '../../engine/rollResolver.js';
 import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { runScribe } from '../../llm/scribe.js';
-import { addMemory, seedMemories, retrieveRelevant, buildRetrievedMemoriesBlock, clearMemories } from '../../engine/vectorMemory.js';
+import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../engine/vectorMemory.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
 import './Chat.css';
 
 /** How many recent (un-summarized) messages to send as LLM history. */
 const MESSAGE_WINDOW = 20;
+const DECORATIVE_SYMBOL_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?/gu;
+
+function cleanDisplayText(text) {
+    return String(text || '').replace(DECORATIVE_SYMBOL_RE, '').replace(/[ \t]{2,}/g, ' ').trimStart();
+}
 
 export default function ChatPanel() {
     const { state, dispatch } = useGame();
@@ -93,11 +98,10 @@ export default function ChatPanel() {
 
         if (items.length > 0) {
             seedMemories(s.settings.apiKey, items).catch((e) => {
-                console.error('[RAG] ❌ Memory seeding failed — will retry next mount:', e);
+                console.error('[RAG] Memory seeding failed — will retry next mount:', e);
                 memorySeededRef.current = false; // Allow retry on next mount
             });
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Only on mount
 
     /**
@@ -191,7 +195,7 @@ export default function ChatPanel() {
         // Detect pre-narrated outcome (DM wrote outcome before dice were rolled)
         if (events?.requestedRolls?.length > 0 && detectPreNarratedOutcome(narrative)) {
             events._preNarratedOutcome = true;
-            console.warn('[ChatPanel] ⚠️ DM pre-narrated outcome before roll — correction will be injected with roll results.');
+            console.warn('[ChatPanel] DM pre-narrated outcome before roll — correction will be injected with roll results.');
         }
 
         // When the player's action needs dice, the client WITHHOLDS this pre-roll text:
@@ -301,7 +305,7 @@ export default function ChatPanel() {
                     type: 'ADD_MESSAGE',
                     payload: {
                         role: 'system',
-                        content: `⚠️ Error: ${error.message}`,
+                        content: `Error: ${error.message}`,
                     },
                 });
             }
@@ -346,7 +350,7 @@ export default function ChatPanel() {
             <div className="chat-messages">
                 {state.messages.length === 0 && (
                     <div className="chat-empty">
-                        <div className="chat-empty-icon">⚔️</div>
+                        <div className="chat-empty-icon" aria-hidden="true" />
                         <h3>Your Adventure Awaits</h3>
                         <p>
                             {hasApiKey
@@ -361,18 +365,18 @@ export default function ChatPanel() {
                 ))}
 
                 {isLoading && streamingMessage && (
-                    <div className="chat-message dm streaming">
-                        <div className="message-avatar">🐉</div>
+                    <div className="chat-message assistant streaming">
+                        <div className="message-avatar">DM</div>
                         <div className="message-content">
                             <div className="message-role">Dungeon Master</div>
-                            <div className="message-text">{streamingMessage}</div>
+                            <div className="message-text">{cleanDisplayText(streamingMessage)}</div>
                         </div>
                     </div>
                 )}
 
                 {isLoading && !streamingMessage && (
-                    <div className="chat-message dm streaming">
-                        <div className="message-avatar">🐉</div>
+                    <div className="chat-message assistant streaming">
+                        <div className="message-avatar">DM</div>
                         <div className="message-content">
                             <div className="message-role">Dungeon Master</div>
                             <div className="message-text typing-indicator">
@@ -401,7 +405,7 @@ export default function ChatPanel() {
                 />
                 {isLoading ? (
                     <button className="chat-stop-btn" onClick={handleStop} title="Stop generating">
-                        ⬛
+                        Stop
                     </button>
                 ) : (
                     <button
@@ -410,7 +414,7 @@ export default function ChatPanel() {
                         disabled={!input.trim() || !hasApiKey}
                         title="Send message"
                     >
-                        ➤
+                        Send
                     </button>
                 )}
             </div>
@@ -426,9 +430,9 @@ function ChatMessage({ message }) {
     };
 
     const avatars = {
-        user: '🧙',
-        assistant: '🐉',
-        system: '⚙️',
+        user: 'You',
+        assistant: 'DM',
+        system: 'Sys',
     };
 
     if (message.hidden) return null;
@@ -439,7 +443,7 @@ function ChatMessage({ message }) {
             <div className="message-content">
                 <div className="message-role">{roleLabels[message.role]}</div>
                 <div className="message-text">
-                    <MarkdownText text={message.content} />
+                    <MarkdownText text={cleanDisplayText(message.content)} />
                 </div>
             </div>
         </div>

@@ -11,37 +11,45 @@
 }
 
 :root {
-  /* Colors — Dark RPG Theme */
-  --bg-primary: #0d0f14;
-  --bg-secondary: #131620;
-  --surface-primary: #181c27;
-  --surface-secondary: #1e2233;
-  --surface-elevated: #252a3a;
+  /* Colors — forged table theme */
+  --bg-primary: #0f100d;
+  --bg-secondary: #151711;
+  --surface-primary: #1b1b15;
+  --surface-secondary: #232218;
+  --surface-elevated: #2d2a1d;
+  --surface-warm: #342719;
+  --surface-green: #17221d;
 
-  /* Gold accent palette */
-  --gold: #d4af37;
-  --gold-light: #e8c84a;
-  --gold-dim: #a68a2a;
-  --gold-bg: rgba(212, 175, 55, 0.08);
+  /* Metal, vellum, and danger accents */
+  --gold: #d7b45a;
+  --gold-light: #f0d483;
+  --gold-dim: #967536;
+  --gold-bg: rgba(215, 180, 90, 0.1);
+  --copper: #b77845;
+  --blood: #9b3f3f;
+  --moss: #5d7a55;
+  --arcane: #6f7d9c;
 
   /* Text */
-  --text-primary: #e8e6e1;
-  --text-secondary: #b0a99a;
-  --text-muted: #6b6560;
+  --text-primary: #eee8dc;
+  --text-secondary: #c7bba8;
+  --text-muted: #8b806f;
+  --text-dim: #665e51;
 
   /* Borders */
-  --border-primary: #2a2f3e;
-  --border-subtle: #1f2435;
+  --border-primary: #463f2d;
+  --border-subtle: #2d2a20;
+  --border-bright: rgba(215, 180, 90, 0.35);
 
   /* Status */
-  --danger: #dc3545;
-  --warning: #ffc107;
-  --success: #28a745;
+  --danger: #d45858;
+  --warning: #d9a23a;
+  --success: #6fa66a;
 
   /* HP Bar */
-  --hp-high: #28a745;
-  --hp-low: #e8a317;
-  --hp-critical: #dc3545;
+  --hp-high: #6fa66a;
+  --hp-low: #d9a23a;
+  --hp-critical: #d45858;
 
   /* Typography */
   --font-heading: 'Cinzel', 'Georgia', serif;
@@ -52,6 +60,8 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+  --shadow-panel: 0 18px 42px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 244, 214, 0.04);
+  --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.26);
 
   color-scheme: dark;
 }
@@ -64,7 +74,11 @@ body {
 
 body {
   font-family: var(--font-body);
-  background: var(--bg-primary);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px),
+    linear-gradient(135deg, #10110d 0%, #19160f 44%, #101411 100%);
+  background-size: 34px 34px, 34px 34px, 100% 100%;
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -105,7 +119,7 @@ body {
 .btn {
   padding: 0.55rem 1.1rem;
   border-radius: var(--radius-md);
-  border: none;
+  border: 1px solid transparent;
   font-family: var(--font-body);
   font-size: 0.85rem;
   font-weight: 600;
@@ -122,8 +136,10 @@ body {
 }
 
 .btn-primary {
-  background: var(--gold);
-  color: var(--bg-primary);
+  background: linear-gradient(180deg, var(--gold-light), var(--gold));
+  border-color: rgba(255, 238, 176, 0.38);
+  color: #17130a;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -132,7 +148,7 @@ body {
 }
 
 .btn-secondary {
-  background: var(--surface-primary);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent), var(--surface-primary);
   color: var(--text-primary);
   border: 1px solid var(--border-primary);
 }

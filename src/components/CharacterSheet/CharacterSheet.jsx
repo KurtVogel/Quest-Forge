@@ -53,7 +53,7 @@ export default function CharacterSheet() {
                 className="cs-dropdown-btn"
                 onClick={() => setIsExpanded(!isExpanded)}
             >
-                <span className="cs-dropdown-title">👤 Character Profile</span>
+                <span className="cs-dropdown-title">Character Profile</span>
                 <span className="cs-dropdown-icon">{isExpanded ? '▲' : '▼'}</span>
             </button>
 
@@ -95,7 +95,7 @@ export default function CharacterSheet() {
                     {character.conditions?.length > 0 && (
                         <div className="cs-conditions">
                             {character.conditions.map((c, i) => (
-                                <span key={i} className="cs-condition-badge">⚠️ {c}</span>
+                                <span key={i} className="cs-condition-badge">{c}</span>
                             ))}
                         </div>
                     )}

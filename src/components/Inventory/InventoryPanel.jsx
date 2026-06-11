@@ -43,7 +43,7 @@ export default function InventoryPanel() {
     return (
         <div className="inventory-panel">
             <div className="inv-header">
-                <h3 className="inv-title">🎒 Inventory</h3>
+                <h3 className="inv-title">Inventory</h3>
                 <button className="inv-add-btn" onClick={() => setShowAddItem(!showAddItem)} title="Add item">
                     +
                 </button>
@@ -51,11 +51,11 @@ export default function InventoryPanel() {
 
             <div className="inv-stats-row">
                 <span className="inv-wealth">
-                    <span className="inv-gold" title="Gold Pieces">🪙 {state.character?.gold || 0} gp</span>
-                    <span className="inv-silver" title="Silver Pieces">⚪ {state.character?.silver || 0} sp</span>
-                    <span className="inv-copper" title="Copper Pieces">🟤 {state.character?.copper || 0} cp</span>
+                    <span className="inv-gold" title="Gold Pieces">{state.character?.gold || 0} gp</span>
+                    <span className="inv-silver" title="Silver Pieces">{state.character?.silver || 0} sp</span>
+                    <span className="inv-copper" title="Copper Pieces">{state.character?.copper || 0} cp</span>
                 </span>
-                <span className="inv-weight">⚖️ {totalWeight.toFixed(1)} lbs</span>
+                <span className="inv-weight">{totalWeight.toFixed(1)} lbs</span>
             </div>
 
             {showAddItem && (
@@ -126,7 +126,7 @@ function InventoryItem({ item, nonProficient, onToggleEquip, onUse, onRemove }) 
                 {Number.isFinite(item.valueCp) && <span className="inv-item-detail">{formatCurrency(item.valueCp)}</span>}
                 {nonProficient && (
                     <span className="inv-item-warn" title="Your class is not proficient with this weapon — attacks don't gain your proficiency bonus.">
-                        ⚠ not proficient
+                        not proficient
                     </span>
                 )}
             </div>
@@ -148,7 +148,7 @@ function InventoryItem({ item, nonProficient, onToggleEquip, onUse, onRemove }) 
                             ? (item.equipped ? 'Active weapon (click to sheathe)' : 'Set as active weapon')
                             : (item.equipped ? 'Unequip' : 'Equip')}
                     >
-                        {item.equipped ? '✓' : '⬡'}
+                        {item.equipped ? 'On' : 'Set'}
                     </button>
                 )}
                 <button
@@ -156,7 +156,7 @@ function InventoryItem({ item, nonProficient, onToggleEquip, onUse, onRemove }) 
                     onClick={() => onRemove(item.id)}
                     title="Remove"
                 >
-                    ✕
+                    Remove
                 </button>
             </div>
         </div>

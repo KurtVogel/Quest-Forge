@@ -107,7 +107,7 @@ export default function SettingsModal() {
                 await loadSavesList(); // Reflect the cloud copy once it lands
                 setSyncStatus(cloudOk
                     ? '✓ Saved locally and to cloud'
-                    : '⚠ Saved locally, but the cloud upload FAILED — this save will not appear on other devices (details in browser console)');
+                    : 'Saved locally, but the cloud upload failed — this save will not appear on other devices (details in browser console)');
             } else {
                 setSyncStatus('Saved locally only — sign in with Google for cloud sync');
             }
@@ -139,7 +139,7 @@ export default function SettingsModal() {
         if (!state.user?.uid) return;
         if (!confirm(`Delete the cloud save "${name}"? It will disappear from all your devices.`)) return;
         const ok = await deleteGameFromCloud(state.user.uid, slotId);
-        setSyncStatus(ok ? `Deleted "${name}" from the cloud` : `⚠ Failed to delete "${name}" from the cloud`);
+        setSyncStatus(ok ? `Deleted "${name}" from the cloud` : `Failed to delete "${name}" from the cloud`);
         await loadSavesList();
     };
 
@@ -162,7 +162,7 @@ export default function SettingsModal() {
                 const cloudOk = await saveGameToCloud(state.user.uid, slotId, updatedState);
                 setSyncStatus(cloudOk
                     ? `✓ Overwrote "${name}" locally and in the cloud`
-                    : `⚠ Overwrote "${name}" locally, but the cloud upload FAILED`);
+                    : `Overwrote "${name}" locally, but the cloud upload failed`);
             } else {
                 setSyncStatus(`Overwrote "${name}" locally (sign in for cloud sync)`);
             }
@@ -278,25 +278,25 @@ export default function SettingsModal() {
                         className={`tab-button ${activeTab === 'llm' ? 'active' : ''}`}
                         onClick={() => setActiveTab('llm')}
                     >
-                        🤖 AI Provider
+                        AI Provider
                     </button>
                     <button
                         className={`tab-button ${activeTab === 'game' ? 'active' : ''}`}
                         onClick={() => setActiveTab('game')}
                     >
-                        🎮 Game
+                        Game
                     </button>
                     <button
                         className={`tab-button ${activeTab === 'saves' ? 'active' : ''}`}
                         onClick={() => setActiveTab('saves')}
                     >
-                        💾 Saves
+                        Saves
                     </button>
                     <button
                         className={`tab-button ${activeTab === 'cloud' ? 'active' : ''}`}
                         onClick={() => setActiveTab('cloud')}
                     >
-                        ☁️ Cloud Sync
+                        Cloud Sync
                     </button>
                 </div>
 
@@ -372,7 +372,7 @@ export default function SettingsModal() {
                                             className={`preset-card ${state.settings.preset === p ? 'selected' : ''}`}
                                             onClick={() => updateSetting('preset', p)}
                                         >
-                                            <span className="preset-emoji">{PRESETS[p].emoji}</span>
+                                            <span className="preset-code">{PRESETS[p].code}</span>
                                             <span className="preset-name">{PRESETS[p].name}</span>
                                             <span className="preset-desc">{PRESETS[p].description}</span>
                                         </button>
@@ -409,7 +409,7 @@ export default function SettingsModal() {
 
                             <div className="setting-group">
                                 <button className="btn btn-danger" onClick={handleNewGame}>
-                                    🆕 New Game
+                                    New Game
                                 </button>
                             </div>
                         </div>
@@ -427,7 +427,7 @@ export default function SettingsModal() {
                                         placeholder="Save name (optional)..."
                                     />
                                     <button className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
-                                        {isSaving ? 'Saving…' : '💾 Save Game'}
+                                        {isSaving ? 'Saving…' : 'Save Game'}
                                     </button>
                                 </div>
                             )}
@@ -444,7 +444,7 @@ export default function SettingsModal() {
                                     <div className="saves-empty">No saved games yet</div>
                                 ) : (
                                     <>
-                                        {cloudSaves.length > 0 && <div className="saves-empty" style={{ textAlign: 'left', margin: '0 0 10px' }}>☁️ Cloud Saves</div>}
+                                        {cloudSaves.length > 0 && <div className="saves-empty" style={{ textAlign: 'left', margin: '0 0 10px' }}>Cloud Saves</div>}
                                         {cloudSaves.map(save => (
                                             <div key={`cloud-${save.slotId}`} className="save-slot">
                                                 <div className="save-info">
@@ -481,7 +481,7 @@ export default function SettingsModal() {
                                             </div>
                                         ))}
 
-                                        {saves.length > 0 && <div className="saves-empty" style={{ textAlign: 'left', margin: '15px 0 10px' }}>💾 Local Saves</div>}
+                                        {saves.length > 0 && <div className="saves-empty" style={{ textAlign: 'left', margin: '15px 0 10px' }}>Local Saves</div>}
                                         {saves.map(save => (
                                             <div key={save.slotId} className="save-slot">
                                                 <div className="save-info">
@@ -525,7 +525,7 @@ export default function SettingsModal() {
 
                     {activeTab === 'cloud' && (
                         <div className="settings-section">
-                            <h3 className="settings-section-title">☁️ Cross-Device Cloud Sync</h3>
+                            <h3 className="settings-section-title">Cross-Device Cloud Sync</h3>
                             <p className="setting-hint" style={{ marginBottom: '1rem' }}>
                                 Connect your own Firebase Firestore database to seamlessly sync your saves across Desktop and Mobile.
                                 Find these keys in your Google Firebase Console (Project Settings &gt; General &gt; Your Apps).
@@ -567,7 +567,7 @@ export default function SettingsModal() {
                                 onClick={handleConnectFirebase}
                                 style={{ marginBottom: '1.5rem', width: '100%' }}
                             >
-                                {isFirebaseConnected ? '✅ Database Connected' : '🔌 Connect Database'}
+                                {isFirebaseConnected ? 'Database Connected' : 'Connect Database'}
                             </button>
 
                             {isFirebaseConnected && (

@@ -312,7 +312,7 @@ export function gameReducer(state, action) {
         case 'REMOVE_GOLD': {
             const result = spendCurrency(state.character, { gold: action.payload });
             if (!result.paid) {
-                return { ...state, messages: [...state.messages, systemMessage(`⚠️ Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
+                return { ...state, messages: [...state.messages, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
             }
             return {
                 ...state,
@@ -329,7 +329,7 @@ export function gameReducer(state, action) {
         case 'REMOVE_SILVER': {
             const result = spendCurrency(state.character, { silver: action.payload });
             if (!result.paid) {
-                return { ...state, messages: [...state.messages, systemMessage(`⚠️ Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
+                return { ...state, messages: [...state.messages, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
             }
             return {
                 ...state,
@@ -346,7 +346,7 @@ export function gameReducer(state, action) {
         case 'REMOVE_COPPER': {
             const result = spendCurrency(state.character, { copper: action.payload });
             if (!result.paid) {
-                return { ...state, messages: [...state.messages, systemMessage(`⚠️ Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
+                return { ...state, messages: [...state.messages, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
             }
             return {
                 ...state,
@@ -375,7 +375,7 @@ export function gameReducer(state, action) {
                 character.deathSaves = { ...(character.deathSaves || { successes: 0 }), failures };
                 if (failures >= 3) {
                     character = applyDeath(character);
-                    messages.push(systemMessage('💀 **The blow proves fatal. Your character dies.**'));
+                    messages.push(systemMessage('**The blow proves fatal. Your character dies.**'));
                 } else {
                     messages.push(systemMessage(`💔 **Struck while dying!** That counts as a death save failure (${failures}/3).`));
                 }
@@ -395,7 +395,7 @@ export function gameReducer(state, action) {
             if (character.dying) {
                 // Any healing brings a dying character back to consciousness.
                 character = reviveCharacter(character);
-                messages.push(systemMessage(`✨ **${character.name} regains consciousness!** Healing pulls you back from the brink (${healed} HP).`));
+                messages.push(systemMessage(`**${character.name} regains consciousness!** Healing pulls you back from the brink (${healed} HP).`));
             }
             return { ...state, character, messages };
         }
@@ -479,7 +479,7 @@ export function gameReducer(state, action) {
                 timestamp: Date.now(),
                 role: 'system',
                 content: isLong
-                    ? `🏕️ **Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}`
+                    ? `**Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}`
                     : `⛺ **Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.`,
             };
 
@@ -542,7 +542,7 @@ export function gameReducer(state, action) {
                             id: `msg-${Date.now()}-resource-unavailable`,
                             timestamp: Date.now(),
                             role: 'system',
-                            content: `⚠️ **${label} unavailable** — it has already been used and must be recharged by rest.`,
+                            content: `**${label} unavailable** — it has already been used and must be recharged by rest.`,
                         },
                     ],
                 };
@@ -565,7 +565,7 @@ export function gameReducer(state, action) {
                         id: `msg-${Date.now()}-resource-used`,
                         timestamp: Date.now(),
                         role: 'system',
-                        content: `✨ **${label} used** — ${res.max - res.used - 1}/${res.max} remaining until rest.`,
+                        content: `**${label} used** — ${res.max - res.used - 1}/${res.max} remaining until rest.`,
                     },
                 ],
             };
@@ -585,7 +585,7 @@ export function gameReducer(state, action) {
             if (res.used >= res.max) {
                 return {
                     ...state,
-                    messages: [...state.messages, systemMessage(`⚠️ **${def.label}** is spent — recharge it on a ${def.resetOn} rest.`)],
+                    messages: [...state.messages, systemMessage(`**${def.label}** is spent — recharge it on a ${def.resetOn} rest.`)],
                 };
             }
 
@@ -605,7 +605,7 @@ export function gameReducer(state, action) {
                     rollHistory: [...state.rollHistory, roll],
                     messages: [
                         ...state.messages,
-                        systemMessage(`✨ **${def.label}** — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${tail} 🎲 ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`),
+                        systemMessage(`**${def.label}** — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${tail} ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`),
                     ],
                 };
             }
@@ -615,7 +615,7 @@ export function gameReducer(state, action) {
             return {
                 ...state,
                 character: { ...state.character, classResources: spentResources },
-                messages: [...state.messages, systemMessage(`✨ **${def.label}** — ${def.description}. ${tail}`)],
+                messages: [...state.messages, systemMessage(`**${def.label}** — ${def.description}. ${tail}`)],
             };
         }
 
@@ -674,7 +674,7 @@ export function gameReducer(state, action) {
                     ...state,
                     messages: [
                         ...state.messages,
-                        systemMessage(`⚠️ Cannot buy ${item.name} — price is ${formatCurrency(priceCp)}, missing ${formatCurrency(payment.missingCp)}.`),
+                        systemMessage(`Cannot buy ${item.name} — price is ${formatCurrency(priceCp)}, missing ${formatCurrency(payment.missingCp)}.`),
                     ],
                 };
             }
@@ -691,7 +691,7 @@ export function gameReducer(state, action) {
                 character: payment.character,
                 messages: [
                     ...state.messages,
-                    systemMessage(`🪙 Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)}.`),
+                    systemMessage(`Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)}.`),
                 ],
             };
             return withInventoryAndAC(nextState, [...state.inventory, newItem]);
@@ -709,7 +709,7 @@ export function gameReducer(state, action) {
                 if (state.character.currentHP >= state.character.maxHP) {
                     return {
                         ...state,
-                        messages: [...state.messages, systemMessage(`❤️ You're already at full health — you keep the ${item.name}.`)],
+                        messages: [...state.messages, systemMessage(`You're already at full health — you keep the ${item.name}.`)],
                     };
                 }
                 const roll = rollNotation(item.healing, item.name);
@@ -722,7 +722,7 @@ export function gameReducer(state, action) {
                     rollHistory: [...state.rollHistory, roll],
                     messages: [
                         ...state.messages,
-                        systemMessage(`🧪 You drink a **${item.name}** and recover **${gained} HP** (now ${healed}/${state.character.maxHP}). 🎲 ${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`),
+                        systemMessage(`You drink a **${item.name}** and recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`),
                     ],
                 };
             }
@@ -755,7 +755,7 @@ export function gameReducer(state, action) {
             if (!item) {
                 return {
                     ...state,
-                    messages: [...state.messages, systemMessage(`⚠️ Can't sell "${ref}" — it's not in your inventory.`)],
+                    messages: [...state.messages, systemMessage(`Can't sell "${ref}" — it's not in your inventory.`)],
                 };
             }
 
@@ -769,7 +769,7 @@ export function gameReducer(state, action) {
                 character: addCurrency(state.character, { copper: proceedsCp }),
                 messages: [
                     ...state.messages,
-                    systemMessage(`🪙 Sold ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(proceedsCp)}.`),
+                    systemMessage(`Sold ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(proceedsCp)}.`),
                 ],
             };
             return withInventoryAndAC(nextState, consumeItem(state.inventory, item.id, quantity));

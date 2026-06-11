@@ -12,6 +12,19 @@
     font-size: 1rem;
     margin: 0 0 0.75rem 0;
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+}
+
+.dice-title::before,
+.dice-title::after {
+    content: "";
+    width: 0.42rem;
+    height: 0.42rem;
+    border: 1px solid var(--gold-dim);
+    transform: rotate(45deg);
 }
 
 .dice-buttons {
@@ -24,8 +37,10 @@
 .dice-btn {
     padding: 0.5rem;
     border: 1px solid var(--border-primary);
-    border-radius: 8px;
-    background: var(--surface-primary);
+    border-radius: 6px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent),
+        var(--surface-primary);
     color: var(--text-primary);
     font-weight: 700;
     font-size: 0.85rem;
@@ -37,7 +52,7 @@
 .dice-btn:hover {
     border-color: var(--gold);
     background: rgba(212, 175, 55, 0.1);
-    transform: scale(1.05);
+    transform: translateY(-1px);
 }
 
 .dice-btn:active {
@@ -137,9 +152,11 @@
 .dice-result-display {
     text-align: center;
     padding: 1rem;
-    background: var(--surface-primary);
-    border: 2px solid var(--border-primary);
-    border-radius: 12px;
+    background:
+        linear-gradient(180deg, rgba(215, 180, 90, 0.06), transparent),
+        var(--surface-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
     margin-bottom: 0.75rem;
     animation: rollIn 0.3s ease;
 }

@@ -45,10 +45,10 @@ export async function initializeFirebase(config) {
 
         setFirebaseServices(initializeApp(config));
 
-        console.log("🔥 Firebase initialized successfully.");
+        console.log("Firebase initialized successfully.");
         return true;
     } catch (e) {
-        console.error("🔥 Firebase initialization failed:", e);
+        console.error("Firebase initialization failed:", e);
         return false;
     }
 }

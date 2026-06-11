@@ -14,6 +14,17 @@
     color: var(--gold);
     font-size: 0.95rem;
     margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.quest-title::before {
+    content: "";
+    width: 0.68rem;
+    height: 0.68rem;
+    border: 1px solid var(--gold-dim);
+    transform: rotate(45deg);
 }
 
 .quest-add-btn {
@@ -78,8 +89,10 @@
     align-items: flex-start;
     gap: 0.4rem;
     padding: 0.45rem 0.5rem;
-    background: var(--surface-primary);
-    border-radius: 8px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+        var(--surface-primary);
+    border-radius: 6px;
     border: 1px solid var(--border-subtle);
     transition: all 0.2s;
 }

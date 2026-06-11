@@ -92,7 +92,7 @@ export default function CharacterCreation() {
             type: 'ADD_MESSAGE',
             payload: {
                 role: 'system',
-                content: `🎭 **${name}** the **${RACES[race]?.name} ${CLASSES[charClass]?.name}** has entered the world. Send a message to begin your adventure!`,
+                content: `**${name}** the **${RACES[race]?.name} ${CLASSES[charClass]?.name}** has entered the world. Send a message to begin your adventure!`,
             },
         });
 
@@ -290,7 +290,7 @@ export default function CharacterCreation() {
                     <div style={{ flex: 1 }} />
                     {currentStep === 'adventure' ? (
                         <button className="btn btn-primary" onClick={handleCreate}>
-                            ⚔️ Begin Adventure
+                            Begin Adventure
                         </button>
                     ) : (
                         <button

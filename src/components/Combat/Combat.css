@@ -6,9 +6,12 @@
 }
 
 .combat-panel {
-    background: var(--surface-secondary);
-    border-top: 1px solid var(--danger);
-    border-bottom: 1px solid var(--danger);
+    background:
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 8px),
+        linear-gradient(90deg, rgba(155, 63, 63, 0.14), transparent 42%),
+        var(--surface-secondary);
+    border-top: 1px solid rgba(212, 88, 88, 0.6);
+    border-bottom: 1px solid rgba(212, 88, 88, 0.4);
     padding: 0.75rem 1rem;
     box-shadow: 0 -4px 16px rgba(244, 67, 54, 0.1), 0 4px 16px rgba(244, 67, 54, 0.1);
     animation: combatSlideUp 0.4s ease-out;
@@ -39,6 +42,17 @@
     color: var(--danger);
     font-size: 1rem;
     margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.combat-title::before {
+    content: "";
+    width: 0.68rem;
+    height: 0.68rem;
+    border: 1px solid currentColor;
+    transform: rotate(45deg);
 }
 
 .combat-end-btn {
@@ -93,7 +107,10 @@
 }
 
 .initiative-icon {
-    font-size: 0.85rem;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
 
 .initiative-name {
@@ -123,9 +140,11 @@
     min-width: 140px;
     max-width: 200px;
     padding: 0.5rem 0.6rem;
-    background: var(--surface-primary);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+        var(--surface-primary);
     border: 1px solid var(--border-primary);
-    border-radius: 10px;
+    border-radius: 6px;
     transition: all 0.2s;
 }
 

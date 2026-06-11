@@ -15,7 +15,7 @@ export default function CombatPanel() {
         <div className="combat-overlay">
             <div className="combat-panel">
                 <div className="combat-header">
-                    <h3 className="combat-title">⚔️ Combat — Round {combat.round}</h3>
+                    <h3 className="combat-title">Combat — Round {combat.round}</h3>
                     {aliveEnemies.length === 0 && (
                         <button
                             className="combat-end-btn"
@@ -38,7 +38,7 @@ export default function CombatPanel() {
                                 key={fighter.id || fighter.name}
                                 className={`initiative-slot ${isCurrent ? 'current' : ''} ${isDead ? 'dead' : ''} ${fighter.type}`}
                             >
-                                <span className="initiative-icon">{fighter.type === 'player' ? '🛡️' : '💀'}</span>
+                                <span className="initiative-icon">{fighter.type === 'player' ? 'PC' : 'Foe'}</span>
                                 <span className="initiative-name">{fighter.name}</span>
                                 <span className="initiative-roll">{fighter.initiative}</span>
                             </div>
@@ -56,8 +56,8 @@ export default function CombatPanel() {
                 {/* Current Turn Indicator */}
                 <div className={`combat-turn ${isPlayerTurn ? 'player-turn' : 'enemy-turn'}`}>
                     {isPlayerTurn
-                        ? '⚔️ Your turn — describe your action in chat!'
-                        : `🎲 ${currentFighter?.name}'s turn...`
+                        ? 'Your turn — describe your action in chat.'
+                        : `${currentFighter?.name}'s turn...`
                     }
                 </div>
             </div>
@@ -94,7 +94,7 @@ function EnemyCard({ enemy }) {
             </div>
             <div className="enemy-stats">
                 <span className="enemy-hp-text">
-                    {enemy.condition === 'dead' ? '☠️ Dead' : `${enemy.hp}/${enemy.maxHp} HP`}
+                    {enemy.condition === 'dead' ? 'Dead' : `${enemy.hp}/${enemy.maxHp} HP`}
                 </span>
                 <span className="enemy-ac">AC {enemy.ac}</span>
             </div>

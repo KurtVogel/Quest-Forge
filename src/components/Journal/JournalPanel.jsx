@@ -2,12 +2,12 @@ import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import './Journal.css';
 
-const DISPOSITION_EMOJI = {
-    friendly: '😊',
-    neutral: '😐',
-    hostile: '😠',
-    wary: '🤨',
-    unknown: '❓',
+const DISPOSITION_MARK = {
+    friendly: 'Ally',
+    neutral: 'Neutral',
+    hostile: 'Hostile',
+    wary: 'Wary',
+    unknown: 'Unknown',
 };
 
 export default function JournalPanel({ isOpen, onClose }) {
@@ -20,7 +20,7 @@ export default function JournalPanel({ isOpen, onClose }) {
         <div className="journal-overlay" onClick={onClose}>
             <div className="journal-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="journal-header">
-                    <h2 className="journal-modal-title">📜 World Journal</h2>
+                    <h2 className="journal-modal-title">World Journal</h2>
                     <button className="journal-close" onClick={onClose}>✕</button>
                 </div>
 
@@ -62,7 +62,7 @@ function JournalTab({ journal, location }) {
         <div className="journal-entries">
             {location && (
                 <div className="journal-location">
-                    <span className="journal-location-icon">📍</span>
+                    <span className="journal-location-icon" aria-hidden="true" />
                     <span>Current location: <strong>{location}</strong></span>
                 </div>
             )}
@@ -113,7 +113,7 @@ function NPCTab({ npcs }) {
             {npcs.map(npc => (
                 <div key={npc.id} className={`journal-npc ${npc.disposition || 'unknown'}`}>
                     <div className="journal-npc-header">
-                        <span className="journal-npc-emoji">{DISPOSITION_EMOJI[npc.disposition] || '❓'}</span>
+                        <span className="journal-npc-mark">{DISPOSITION_MARK[npc.disposition] || 'Unknown'}</span>
                         <span className="journal-npc-name">{npc.name}</span>
                         <span className={`journal-npc-disposition ${npc.disposition}`}>
                             {npc.disposition || 'unknown'}

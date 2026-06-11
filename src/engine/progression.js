@@ -57,7 +57,7 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
         character: updatedCharacter,
         message: createSystemMessage(
             'lvl',
-            `🎉 **Level Up!** You are now **Level ${newLevel}**!${milestoneMsg} Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`
+            `**Level Up!** You are now **Level ${newLevel}**!${milestoneMsg} Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`
         ),
     };
 }

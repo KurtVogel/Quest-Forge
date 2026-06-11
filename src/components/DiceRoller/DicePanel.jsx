@@ -26,7 +26,7 @@ export default function DicePanel() {
 
     return (
         <div className="dice-panel">
-            <h3 className="dice-title">🎲 Dice Roller</h3>
+            <h3 className="dice-title">Dice Roller</h3>
 
             <div className="dice-buttons">
                 {DIE_TYPES.map(sides => (

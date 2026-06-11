@@ -43,7 +43,7 @@ export default function AmbientControls() {
                 onClick={handleToggle}
                 title={audioState.isPlaying ? `♪ ${audioState.profileLabel || 'Ambient'}` : 'Enable ambient audio'}
             >
-                {audioState.isPlaying ? '🔊' : '🔇'}
+                {audioState.isPlaying ? 'Audio On' : 'Audio Off'}
             </button>
 
             {audioState.isPlaying && (

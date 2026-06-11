@@ -2,7 +2,7 @@ import { useGame } from '../../state/GameContext.jsx';
 import './Companions.css';
 
 export default function CompanionsPanel() {
-    const { state, dispatch } = useGame();
+    const { state } = useGame();
 
     // Fall back to empty array if undefined
     const party = state.party || [];
@@ -11,7 +11,7 @@ export default function CompanionsPanel() {
         return (
             <div className="companions-panel">
                 <div className="companions-header">
-                    <h3>🤝 Companions</h3>
+                    <h3>Companions</h3>
                     <span className="companion-count">0 / 4</span>
                 </div>
                 <div className="empty-party">You travel alone.</div>
@@ -22,7 +22,7 @@ export default function CompanionsPanel() {
     return (
         <div className="companions-panel">
             <div className="companions-header">
-                <h3>🤝 Companions</h3>
+                <h3>Companions</h3>
                 <span className="companion-count">{party.length} / 4</span>
             </div>
 
@@ -43,8 +43,8 @@ export default function CompanionsPanel() {
                             </div>
 
                             <div className="companion-stats">
-                                <span title="Armor Class">🛡️ AC {companion.ac}</span>
-                                <span className="companion-weapon" title="Equipped Weapon">🗡️ {companion.weapon || 'Unarmed'}</span>
+                                <span title="Armor Class">AC {companion.ac}</span>
+                                <span className="companion-weapon" title="Equipped Weapon">{companion.weapon || 'Unarmed'}</span>
                             </div>
 
                             <div className="comp-hp-wrap" title={`Health: ${companion.hp} / ${companion.maxHp}`}>
@@ -55,9 +55,9 @@ export default function CompanionsPanel() {
                             </div>
 
                             <div className="comp-affinity-wrap" title={`Affinity: ${affinityPercent}%`}>
-                                <span className="comp-affinity-icon">{affinityPercent >= 75 ? '❤️' : affinityPercent <= 25 ? '💔' : '🤝'}</span>
+                                <span className="comp-affinity-icon">Bond</span>
                                 <div className="comp-affinity-track">
-                                    <div className="comp-affinity-fill ${affinityClass}" style={{ width: `${affinityPercent}%` }}></div>
+                                    <div className={`comp-affinity-fill ${affinityClass}`} style={{ width: `${affinityPercent}%` }}></div>
                                 </div>
                             </div>
                         </div>

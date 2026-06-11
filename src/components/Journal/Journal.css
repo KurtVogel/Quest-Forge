@@ -12,9 +12,12 @@
 }
 
 .journal-modal {
-    background: var(--surface-secondary);
+    background:
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 9px),
+        linear-gradient(180deg, rgba(215, 180, 90, 0.06), transparent 32%),
+        var(--surface-secondary);
     border: 1px solid var(--border-primary);
-    border-radius: 16px;
+    border-radius: 10px;
     width: 90%;
     max-width: 600px;
     max-height: 80vh;
@@ -111,15 +114,20 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem 0.75rem;
-    background: rgba(212, 175, 55, 0.08);
-    border-radius: 8px;
+    background: rgba(215, 180, 90, 0.08);
+    border: 1px solid rgba(215, 180, 90, 0.16);
+    border-radius: 6px;
     margin-bottom: 0.75rem;
     font-size: 0.85rem;
     color: var(--text-secondary);
 }
 
 .journal-location-icon {
-    font-size: 1rem;
+    width: 0.6rem;
+    height: 0.6rem;
+    border: 1px solid var(--gold-dim);
+    transform: rotate(45deg);
+    flex-shrink: 0;
 }
 
 /* Journal Entries */
@@ -131,9 +139,11 @@
 
 .journal-entry {
     padding: 0.75rem;
-    background: var(--surface-primary);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+        var(--surface-primary);
     border: 1px solid var(--border-subtle);
-    border-radius: 10px;
+    border-radius: 6px;
     border-left: 3px solid var(--gold-dim);
 }
 
@@ -196,9 +206,11 @@
 
 .journal-npc {
     padding: 0.65rem 0.75rem;
-    background: var(--surface-primary);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+        var(--surface-primary);
     border: 1px solid var(--border-subtle);
-    border-radius: 10px;
+    border-radius: 6px;
 }
 
 .journal-npc.hostile {
@@ -224,8 +236,14 @@
     margin-bottom: 0.25rem;
 }
 
-.journal-npc-emoji {
-    font-size: 1rem;
+.journal-npc-mark {
+    font-size: 0.64rem;
+    color: var(--text-muted);
+    border: 1px solid var(--border-primary);
+    border-radius: 4px;
+    padding: 0.08rem 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
 }
 
 .journal-npc-name {

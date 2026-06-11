@@ -216,12 +216,12 @@ export function formatRollSummary(rollResults) {
  */
 export async function handleRequestedRolls(requestedRolls, { getState, dispatch, sendToLLM, preNarrated = false }, depth = 0) {
     if (depth >= MAX_ROLL_DEPTH) {
-        console.warn(`[RollResolver] ⚠️ Max roll depth (${MAX_ROLL_DEPTH}) reached — stopping recursive follow-ups.`);
+        console.warn(`[RollResolver] Max roll depth (${MAX_ROLL_DEPTH}) reached — stopping recursive follow-ups.`);
         dispatch({
             type: 'ADD_MESSAGE',
             payload: {
                 role: 'system',
-                content: `⚠️ Roll chain limit reached (${MAX_ROLL_DEPTH} levels). The DM will continue from here on your next message.`,
+                content: `Roll chain limit reached (${MAX_ROLL_DEPTH} levels). The DM will continue from here on your next message.`,
             },
         });
         return;
@@ -231,7 +231,7 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
     const character = state.character;
     const inventory = state.inventory || [];
 
-    console.log(`[RollResolver] 🎲 Processing ${requestedRolls.length} roll(s) at depth ${depth}`);
+    console.log(`[RollResolver] Processing ${requestedRolls.length} roll(s) at depth ${depth}`);
 
     const { results: rollResults, appliedHp } = resolveRolls(requestedRolls, {
         character,
@@ -331,13 +331,13 @@ function rollAndShowDamage(notation, label, dispatch, { crit = false, character 
 
     dispatch({ type: 'ADD_ROLL', payload: result });
 
-    const critLabel = crit ? ' 🌟 *(crit — dice doubled)*' : '';
+    const critLabel = crit ? ' *(crit — dice doubled)*' : '';
     const lvlLabel = lvlBonus > 0 ? `, level bonus: +${lvlBonus}` : '';
     dispatch({
         type: 'ADD_MESSAGE',
         payload: {
             role: 'system',
-            content: `🎲 **${label}**${critLabel} (${notation}): **${result.total}** damage (dice: ${result.rolls.join(', ')}${baseMod ? `, mod: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel})`,
+            content: `**${label}**${critLabel} (${notation}): **${result.total}** damage (dice: ${result.rolls.join(', ')}${baseMod ? `, mod: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel})`,
         },
     });
 
@@ -384,9 +384,9 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC) {
     const label = roll.attacker ? `${roll.attacker}${isSave ? ' save' : "'s attack"}` : (isSave ? 'NPC save' : 'NPC attack');
     const advLabel = (effAdvantage ? ' *(advantage)*' : effDisadvantage ? ' *(disadvantage)*' : '') + condNote;
     const outcome = isSave
-        ? (success ? '✅ **Success!**' : '❌ **Failure!**')
-        : (success ? '💥 **Hit!**' : '🛡️ **Miss!**');
-    const rollMsg = `🎲 **${roll.description || label}**${advLabel} (vs ${isSave ? 'DC' : 'AC'} ${dc}): Rolled **${result.total}**${result.advantageDetail} — ${outcome}${result.isCritical ? ' 🌟 Natural 20!' : ''}${result.isCritFail ? ' 💀 Natural 1!' : ''}`;
+        ? (success ? '**Success!**' : '**Failure!**')
+        : (success ? '**Hit!**' : '**Miss!**');
+    const rollMsg = `**${roll.description || label}**${advLabel} (vs ${isSave ? 'DC' : 'AC'} ${dc}): Rolled **${result.total}**${result.advantageDetail} — ${outcome}${result.isCritical ? ' Natural 20!' : ''}${result.isCritFail ? ' Natural 1!' : ''}`;
 
     dispatch({
         type: 'ADD_MESSAGE',
@@ -419,7 +419,7 @@ function resolveDamageRoll(roll, character, dispatch) {
         dispatch({ type: 'ADD_ROLL', payload: result });
 
         const lvlLabel = lvlBonus > 0 ? `, level bonus: +${lvlBonus}` : '';
-        const rollMsg = `🎲 **${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${baseMod ? `, modifier: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel})`;
+        const rollMsg = `**${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${baseMod ? `, modifier: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel})`;
 
         dispatch({
             type: 'ADD_MESSAGE',
@@ -468,16 +468,16 @@ function resolveDeathSave(character, dispatch) {
 
     const tally = `(successes ${Math.min(successes, 3)}/3, failures ${Math.min(failures, 3)}/3)`;
     const outcomeText = {
-        revived: '🌟 **Natural 20!** You surge back to consciousness with 1 HP!',
-        stable: '✅ **Stabilized.** You are unconscious but no longer dying.',
-        success: `✅ **Success.** ${tally}`,
-        failure: `${die === 1 ? '💀 **Natural 1 — two failures!**' : '❌ **Failure.**'} ${tally}`,
-        dead: '💀 **Third failure. Your character dies.**',
+        revived: '**Natural 20!** You surge back to consciousness with 1 HP!',
+        stable: '**Stabilized.** You are unconscious but no longer dying.',
+        success: `**Success.** ${tally}`,
+        failure: `${die === 1 ? '**Natural 1 — two failures!**' : '**Failure.**'} ${tally}`,
+        dead: '**Third failure. Your character dies.**',
     }[outcome];
 
     dispatch({
         type: 'ADD_MESSAGE',
-        payload: { role: 'system', content: `🎲 **Death Saving Throw**: Rolled **${die}** — ${outcomeText}`, isDeathEvent: outcome === 'dead' },
+        payload: { role: 'system', content: `**Death Saving Throw**: Rolled **${die}** — ${outcomeText}`, isDeathEvent: outcome === 'dead' },
     });
 
     return { type: 'death_save', rolled: die, outcome, successes: Math.min(successes, 3), failures: Math.min(failures, 3) };
@@ -490,8 +490,8 @@ function resolveSinglePlayerAttackRoll(roll, dispatch, mod, label) {
     const dc = roll.dc || 15;
     const success = result.total >= dc;
     const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
-    const hitMiss = success ? '💥 **Hit!**' : '🛡️ **Miss!**';
-    const rollMsg = `🎲 **${label}**${advLabel} (vs AC ${dc}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${result.isCritical ? ' 🌟 Natural 20!' : ''}${result.isCritFail ? ' 💀 Natural 1!' : ''}`;
+    const hitMiss = success ? '**Hit!**' : '**Miss!**';
+    const rollMsg = `**${label}**${advLabel} (vs AC ${dc}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${result.isCritical ? ' Natural 20!' : ''}${result.isCritFail ? ' Natural 1!' : ''}`;
 
     dispatch({
         type: 'ADD_MESSAGE',
@@ -565,7 +565,7 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     // Initiative is just a number for turn ordering — no DC or pass/fail
     if (skillName === 'initiative') {
         const advLabel = effRoll.advantage ? ' *(advantage)*' : effRoll.disadvantage ? ' *(disadvantage)*' : '';
-        const rollMsg = `🎲 **${label}**${advLabel}: Rolled **${result.total}**${result.advantageDetail}`;
+        const rollMsg = `**${label}**${advLabel}: Rolled **${result.total}**${result.advantageDetail}`;
         dispatch({
             type: 'ADD_MESSAGE',
             payload: { role: 'system', content: rollMsg },
@@ -585,9 +585,9 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     const isAttack = roll.type === 'attack_roll' || skillName === 'attack';
     const dcLabel = isAttack ? `vs AC ${roll.dc}` : `DC ${roll.dc}`;
     const hitMiss = isAttack
-        ? (success ? '💥 **Hit!**' : '🛡️ **Miss!**')
-        : (success ? '✅ **Success!**' : '❌ **Failure!**');
-    const rollMsg = `🎲 **${label}**${advLabel} (${dcLabel}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${result.isCritical ? ' 🌟 Natural 20!' : ''}${result.isCritFail ? ' 💀 Natural 1!' : ''}`;
+        ? (success ? '**Hit!**' : '**Miss!**')
+        : (success ? '**Success!**' : '**Failure!**');
+    const rollMsg = `**${label}**${advLabel} (${dcLabel}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${result.isCritical ? ' Natural 20!' : ''}${result.isCritFail ? ' Natural 1!' : ''}`;
 
     dispatch({
         type: 'ADD_MESSAGE',

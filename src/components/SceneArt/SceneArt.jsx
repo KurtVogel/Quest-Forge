@@ -64,14 +64,14 @@ export default function SceneArt() {
             <div className="scene-art-container">
                 {isLoading && (
                     <div className="scene-art-loading">
-                        <span className="scene-loading-icon">🎨</span>
+                        <span className="scene-loading-icon" aria-hidden="true" />
                         <span>Painting the scene...</span>
                     </div>
                 )}
 
                 {!currentImage && !isLoading && state.currentLocation && (
                     <button className="scene-art-generate-btn" onClick={handleGenerateArt}>
-                        🎨 Visualize {state.currentLocation}
+                        Visualize {state.currentLocation}
                     </button>
                 )}
 
@@ -83,7 +83,7 @@ export default function SceneArt() {
                             className="scene-art-image"
                         />
                         <div className="scene-art-caption">
-                            <span className="scene-location-icon">📍</span>
+                            <span className="scene-location-icon" aria-hidden="true" />
                             {state.currentLocation}
                         </div>
                     </div>

@@ -77,9 +77,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         } catch (e) {
             try {
                 extracted = JSON.parse(repairJson(jsonMatch.json));
-                console.warn('[Scribe] ⚠️ JSON repaired before parsing.');
+                console.warn('[Scribe] JSON repaired before parsing.');
             } catch (e2) {
-                console.warn('[Scribe] ❌ JSON parse failed after repair:', e2.message);
+                console.warn('[Scribe] JSON parse failed after repair:', e2.message);
                 return;
             }
         }
@@ -101,6 +101,6 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         }
     } catch (e) {
         // Scribe failures must never block the main game loop, but log clearly
-        console.error('[Scribe] ❌ Extraction failed:', e.message || e);
+        console.error('[Scribe] Extraction failed:', e.message || e);
     }
 }
