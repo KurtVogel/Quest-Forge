@@ -82,6 +82,11 @@ src/
 - `npm run lint` currently reports ~14 **pre-existing** errors (unused `e` in catch blocks, fast-refresh export warnings). Don't let a change *add* new ones; fixing the old ones is optional cleanup, not required.
 - Windows-first repo (paths, `install.cmd`).
 
+## Session start & session end
+
+- **Start here:** read `docs/STATUS.md` — current focus, what shipped recently, agreed next steps. Then `git log --oneline -10` for the trail.
+- **Before ending a session** that shipped or decided anything: update `docs/STATUS.md` (replace stale entries), append new ideas to `docs/IDEAS.md`, record settled choices in `docs/DECISIONS.md`, and mirror any project-fact changes in BOTH `CLAUDE.md` and `AGENTS.md` (they are twins).
+
 ## Idea backlog & decision log
 
 - **`docs/IDEAS.md`** — categorized idea backlog with design notes. Read it before proposing features (the idea may exist with thinking attached); append new ideas from any session there, with the *why*. Rejected ideas stay listed with reasons.
