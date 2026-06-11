@@ -10,10 +10,14 @@
     min-height: 100%;
     min-height: 100dvh;
     background:
-        linear-gradient(180deg, rgba(15, 16, 13, 0.2), rgba(15, 16, 13, 0.92)),
-        repeating-linear-gradient(90deg, rgba(215, 180, 90, 0.035) 0 1px, transparent 1px 120px),
-        repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 80px),
+        var(--texture-noise),
+        radial-gradient(ellipse at 50% 30%, rgba(215, 180, 90, 0.17), transparent 28%),
+        radial-gradient(circle at 24% 68%, rgba(93, 122, 85, 0.14), transparent 24%),
+        linear-gradient(180deg, rgba(15, 16, 13, 0.1), rgba(15, 16, 13, 0.92)),
+        var(--texture-map),
         linear-gradient(135deg, #17130f 0%, #101410 48%, #22190f 100%);
+    background-size: 180px 180px, 100% 100%, 100% 100%, 100% 100%, auto, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal, normal, normal;
     padding: 2rem;
     overflow: hidden;
 }
@@ -23,9 +27,10 @@
     position: absolute;
     inset: 0;
     background:
+        var(--texture-scratches),
         linear-gradient(115deg, transparent 0 42%, rgba(215, 180, 90, 0.08) 42.2% 42.6%, transparent 43%),
         linear-gradient(245deg, transparent 0 53%, rgba(111, 166, 106, 0.08) 53.2% 53.6%, transparent 54%),
-        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 9px);
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.032) 0 1px, transparent 1px 9px);
     opacity: 0.9;
     pointer-events: none;
 }
@@ -46,6 +51,21 @@
     align-items: center;
     max-width: 420px;
     width: 100%;
+}
+
+.start-content::before {
+    content: "";
+    position: absolute;
+    inset: -5rem -4rem;
+    z-index: -1;
+    background:
+        var(--texture-noise),
+        radial-gradient(ellipse at center, rgba(15, 16, 13, 0.5), rgba(15, 16, 13, 0.12) 50%, transparent 76%);
+    background-size: 180px 180px, 100% 100%;
+    opacity: 0.58;
+    filter: blur(0.1px);
+    -webkit-mask-image: radial-gradient(ellipse at center, black 0 48%, transparent 76%);
+    mask-image: radial-gradient(ellipse at center, black 0 48%, transparent 76%);
 }
 
 .start-logo {
@@ -137,8 +157,12 @@
     margin-bottom: 1.25rem;
     padding: 0.65rem 0.75rem;
     background:
+        var(--texture-noise),
+        var(--texture-grain),
         linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent),
         rgba(27, 27, 21, 0.82);
+    background-size: 180px 180px, auto, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal;
     border: 1px solid var(--border-primary);
     border-radius: 8px;
     color: var(--text-muted);
@@ -202,9 +226,13 @@
     border-radius: 8px;
     border: 1px solid var(--border-primary);
     background:
+        var(--texture-noise),
+        var(--texture-grain),
         linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent),
         linear-gradient(90deg, rgba(215, 180, 90, 0.05), transparent 34%),
         var(--surface-secondary);
+    background-size: 180px 180px, auto, 100% 100%, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal, normal;
     cursor: pointer;
     transition: all 0.25s ease;
     text-align: left;
@@ -261,8 +289,10 @@
 .continue-btn {
     border-color: var(--gold-dim);
     background:
+        var(--texture-noise),
         linear-gradient(135deg, rgba(215, 180, 90, 0.14), rgba(215, 180, 90, 0.03)),
         var(--surface-secondary);
+    background-size: 180px 180px, 100% 100%, 100% 100%;
 }
 
 .continue-btn:hover {
@@ -299,8 +329,10 @@
     overflow-y: auto;
     padding: 0.75rem;
     background:
+        var(--texture-noise),
         repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 8px),
         var(--surface-primary);
+    background-size: 180px 180px, auto, 100% 100%;
     border-radius: 8px;
     border: 1px solid var(--border-primary);
 }

@@ -62,6 +62,11 @@
   --radius-xl: 16px;
   --shadow-panel: 0 18px 42px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 244, 214, 0.04);
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.26);
+  --texture-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.34'/%3E%3C/svg%3E");
+  --texture-grain: repeating-linear-gradient(8deg, rgba(255, 238, 190, 0.028) 0 1px, transparent 1px 7px);
+  --texture-scratches: repeating-linear-gradient(112deg, transparent 0 22px, rgba(255, 241, 203, 0.035) 22px 23px, transparent 23px 48px);
+  --texture-map: repeating-linear-gradient(90deg, rgba(215, 180, 90, 0.055) 0 1px, transparent 1px 96px),
+    repeating-linear-gradient(0deg, rgba(215, 180, 90, 0.035) 0 1px, transparent 1px 72px);
 
   color-scheme: dark;
 }
@@ -75,13 +80,32 @@ body {
 body {
   font-family: var(--font-body);
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px),
+    var(--texture-noise),
+    var(--texture-map),
+    radial-gradient(circle at 18% 24%, rgba(215, 180, 90, 0.08), transparent 24%),
+    radial-gradient(circle at 82% 72%, rgba(93, 122, 85, 0.08), transparent 28%),
     linear-gradient(135deg, #10110d 0%, #19160f 44%, #101411 100%);
-  background-size: 34px 34px, 34px 34px, 100% 100%;
+  background-size: 180px 180px, auto, 100% 100%, 100% 100%, 100% 100%;
+  background-blend-mode: overlay, normal, normal, normal, normal;
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  position: relative;
+}
+
+#root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    linear-gradient(90deg, rgba(255, 244, 214, 0.035), transparent 16% 84%, rgba(0, 0, 0, 0.18)),
+    repeating-linear-gradient(135deg, transparent 0 28px, rgba(0, 0, 0, 0.08) 28px 29px, transparent 29px 56px);
+  opacity: 0.45;
 }
 
 #root {

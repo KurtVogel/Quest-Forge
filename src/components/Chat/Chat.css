@@ -4,8 +4,11 @@
   flex: 1;
   min-height: 0;
   background:
+    var(--texture-noise),
     linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 180px),
     var(--bg-secondary);
+  background-size: 180px 180px, 100% 100%, 100% 100%;
+  background-blend-mode: overlay, normal, normal;
 }
 
 .chat-messages {
@@ -92,16 +95,24 @@
 
 .chat-message.user {
   background:
+    var(--texture-noise),
+    var(--texture-grain),
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent),
     var(--surface-secondary);
+  background-size: 180px 180px, auto, 100% 100%, 100% 100%;
+  background-blend-mode: overlay, normal, normal, normal;
   border: 1px solid var(--border-subtle);
 }
 
 .chat-message.assistant {
   background:
+    var(--texture-noise),
+    var(--texture-grain),
     linear-gradient(90deg, rgba(215, 180, 90, 0.08), transparent 32%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
     var(--surface-primary);
+  background-size: 180px 180px, auto, 100% 100%, 100% 100%, 100% 100%;
+  background-blend-mode: overlay, normal, normal, normal, normal;
   border: 1px solid rgba(215, 180, 90, 0.22);
 }
 
@@ -225,8 +236,11 @@
   padding: 1rem;
   border-top: 1px solid var(--border-primary);
   background:
+    var(--texture-noise),
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent),
     var(--surface-secondary);
+  background-size: 180px 180px, 100% 100%, 100% 100%;
+  background-blend-mode: overlay, normal, normal;
 }
 
 .chat-input {

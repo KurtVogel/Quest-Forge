@@ -1,4 +1,6 @@
 .app-shell {
+    position: relative;
+    z-index: 1;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -6,8 +8,12 @@
     overflow: hidden;
     padding-bottom: env(safe-area-inset-bottom);
     background:
+        var(--texture-noise),
         linear-gradient(90deg, rgba(0, 0, 0, 0.34), transparent 18% 82%, rgba(0, 0, 0, 0.34)),
+        radial-gradient(circle at 12% 82%, rgba(93, 122, 85, 0.1), transparent 30%),
         var(--bg-primary);
+    background-size: 180px 180px, 100% 100%, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal;
 }
 
 .app-header {
@@ -16,9 +22,13 @@
     justify-content: space-between;
     padding: 0.5rem 1rem;
     background:
+        var(--texture-noise),
+        var(--texture-scratches),
         linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent),
         linear-gradient(90deg, rgba(215, 180, 90, 0.08), transparent 36%),
         var(--surface-secondary);
+    background-size: 180px 180px, auto, 100% 100%, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal, normal;
     border-bottom: 1px solid var(--border-primary);
     flex-shrink: 0;
     height: 52px;
@@ -123,9 +133,13 @@
     width: 280px;
     flex-shrink: 0;
     background:
+        var(--texture-noise),
+        var(--texture-grain),
         repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 8px),
         linear-gradient(180deg, rgba(215, 180, 90, 0.035), transparent 24%),
         var(--surface-secondary);
+    background-size: 180px 180px, auto, auto, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal, normal;
     border-right: 1px solid var(--border-primary);
     display: flex;
     flex-direction: column;
@@ -155,8 +169,12 @@
     flex-direction: column;
     order: 1;
     background:
+        var(--texture-noise),
+        radial-gradient(circle at 52% 12%, rgba(215, 180, 90, 0.05), transparent 24%),
         linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 120px),
         var(--bg-secondary);
+    background-size: 180px 180px, 100% 100%, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal;
 }
 
 /* === Drawer Overlays & Menus (Base Desktop State) === */
@@ -245,8 +263,11 @@
         width: 85%;
         max-width: 340px;
         background:
+            var(--texture-noise),
+            var(--texture-grain),
             repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 8px),
             var(--surface-secondary);
+        background-size: 180px 180px, auto, auto, 100% 100%;
         z-index: 1000;
         transform: translateX(-100%);
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);

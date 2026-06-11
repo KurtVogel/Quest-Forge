@@ -90,8 +90,12 @@
     gap: 0.4rem;
     padding: 0.45rem 0.5rem;
     background:
+        var(--texture-noise),
+        var(--texture-grain),
         linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
         var(--surface-primary);
+    background-size: 180px 180px, auto, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal;
     border-radius: 6px;
     border: 1px solid var(--border-subtle);
     transition: all 0.2s;

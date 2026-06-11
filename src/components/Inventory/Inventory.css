@@ -56,7 +56,11 @@
     margin-bottom: 1rem;
     color: var(--text-muted);
     font-size: 0.82rem;
-    background: rgba(15, 16, 13, 0.28);
+    background:
+        var(--texture-noise),
+        rgba(15, 16, 13, 0.28);
+    background-size: 180px 180px, 100% 100%;
+    background-blend-mode: overlay, normal;
     border: 1px solid var(--border-subtle);
     border-radius: 6px;
 }
@@ -131,8 +135,12 @@
     justify-content: space-between;
     padding: 0.48rem 0.55rem;
     background:
+        var(--texture-noise),
+        var(--texture-grain),
         linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
         var(--surface-primary);
+    background-size: 180px 180px, auto, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal;
     border-radius: 6px;
     margin-bottom: 0.3rem;
     border: 1px solid transparent;
@@ -142,8 +150,10 @@
 .inv-item.equipped {
     border-color: rgba(215, 180, 90, 0.32);
     background:
+        var(--texture-noise),
         linear-gradient(90deg, rgba(215, 180, 90, 0.09), transparent 38%),
         var(--surface-primary);
+    background-size: 180px 180px, 100% 100%, 100% 100%;
 }
 
 .inv-item-info {

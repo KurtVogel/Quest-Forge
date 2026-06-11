@@ -10,8 +10,12 @@
     justify-content: space-between;
     align-items: center;
     background:
+        var(--texture-noise),
+        var(--texture-grain),
         linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent),
         var(--surface-primary);
+    background-size: 180px 180px, auto, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal;
     border: 1px solid var(--border-primary);
     padding: 0.75rem 1rem;
     border-radius: 6px;
@@ -161,8 +165,11 @@
 .cs-combat-stat {
     text-align: center;
     background:
+        var(--texture-noise),
         linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent),
         var(--surface-primary);
+    background-size: 180px 180px, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal;
     border: 1px solid var(--border-primary);
     border-radius: 6px;
     padding: 0.5rem 0.25rem;
@@ -191,8 +198,11 @@
 .cs-ability {
     text-align: center;
     background:
+        var(--texture-noise),
         linear-gradient(180deg, rgba(215, 180, 90, 0.04), transparent),
         var(--surface-primary);
+    background-size: 180px 180px, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal;
     border: 1px solid var(--border-primary);
     border-radius: 6px;
     padding: 0.5rem;
@@ -264,9 +274,13 @@
 
 .char-creation-modal {
     background:
+        var(--texture-noise),
+        var(--texture-scratches),
         repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 9px),
         linear-gradient(180deg, rgba(215, 180, 90, 0.08), transparent 34%),
         var(--surface-secondary);
+    background-size: 180px 180px, auto, auto, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal, normal;
     border: 1px solid var(--border-primary);
     border-radius: 10px;
     padding: 2rem;
@@ -354,8 +368,12 @@
 
 .creation-card {
     background:
+        var(--texture-noise),
+        var(--texture-grain),
         linear-gradient(180deg, rgba(255, 255, 255, 0.028), transparent),
         var(--surface-primary);
+    background-size: 180px 180px, auto, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal;
     border: 1px solid var(--border-primary);
     border-radius: 8px;
     padding: 0.75rem;
@@ -369,15 +387,19 @@
 .creation-card:hover {
     border-color: var(--gold-dim);
     background:
+        var(--texture-noise),
         linear-gradient(180deg, rgba(215, 180, 90, 0.06), transparent),
         var(--surface-primary);
+    background-size: 180px 180px, 100% 100%, 100% 100%;
 }
 
 .creation-card.selected {
     border-color: var(--gold);
     background:
+        var(--texture-noise),
         linear-gradient(180deg, rgba(215, 180, 90, 0.12), transparent),
         var(--surface-primary);
+    background-size: 180px 180px, 100% 100%, 100% 100%;
     box-shadow: 0 0 0 1px rgba(215, 180, 90, 0.12), var(--shadow-soft);
 }
 
@@ -464,8 +486,11 @@
 
 .creation-summary {
     background:
+        var(--texture-noise),
         linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
         var(--surface-primary);
+    background-size: 180px 180px, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal;
     border: 1px solid var(--border-primary);
     border-radius: 8px;
     padding: 1.25rem;
