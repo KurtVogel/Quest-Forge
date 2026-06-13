@@ -65,6 +65,26 @@ Shipped: overwrite button, cloud delete, honest cloud-status toast/messages.
 Remaining ideas: name-collision overwrite prompt on manual save, save thumbnails (scene art),
 journal snippet preview per save.
 
+### Character roster + export/import — status: `shipped` (2026-06-12, same day as proposed)
+A local list of saved heroes, plus JSON file export/import operated from it.
+- A roster entry is a **hero, not a campaign**: `character` + `inventory` snapshot (saves
+  already own campaigns). New IndexedDB store beside `saves` (DB_VERSION bump to 2).
+- Entry sources: "Save hero to roster" on the character sheet (snapshot mid-campaign),
+  auto-offer at character creation, and file import.
+- Uses: start a new adventure from a roster hero — the creation wizard gets a
+  "Use an existing hero" path that skips straight to the adventure-name step; export any
+  entry as a versioned JSON file (`{ format: "quest-forge-character", version: 1,
+  character, inventory }`); delete entries.
+- **Import is untrusted input**: validate race/class against the current core set (older
+  exports may reference cut classes — reject with a clear message), clamp numeric fields
+  (magicBonus 0–3), and rebuild `classResources`/`hitDice` from class+level via
+  `buildClassResources` rather than trusting the file.
+- Why: survives browser-data wipes; moves heroes across devices/machines **without
+  Firebase** (fits BYO-everything — this is the only share path that needs zero setup);
+  lets friends trade characters at the going-public threshold; replay a beloved hero in
+  a fresh campaign.
+- Effort: ~half a day. Orthogonal to combat tuning, so it can slot in anytime, like portraits.
+
 ### Onboarding / demo mode — status: `idea`
 BYO API key + BYO Firebase is a wall for new users. Ideas: guided setup wizard, key-validation
 test button, possibly a limited demo mode. Matters at "going public" threshold.

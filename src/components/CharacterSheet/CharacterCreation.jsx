@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { createCharacter, createStartingInventory, STANDARD_ARRAY, ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
+import { sanitizeCharacter, sanitizeInventory, parseCharacterExport, downloadCharacterExport } from '../../engine/characterVault.js';
+import { listRosterCharacters, saveRosterCharacter, deleteRosterCharacter } from '../../state/persistence.js';
 import { RACES, RACE_LIST } from '../../data/races.js';
 import { CLASSES, CLASS_LIST } from '../../data/classes.js';
 import { SKILL_ABILITIES } from '../../engine/rules.js';
@@ -10,6 +12,7 @@ const STEPS = ['name', 'race', 'class', 'stats', 'skills', 'confirm', 'adventure
 
 export default function CharacterCreation() {
     const { dispatch } = useGame();
+    const [phase, setPhase] = useState('start'); // 'start' | 'wizard' | 'roster'
     const [step, setStep] = useState(0);
     const [name, setName] = useState('');
     const [race, setRace] = useState('');
@@ -17,6 +20,14 @@ export default function CharacterCreation() {
     const [statAssignment, setStatAssignment] = useState({});
     const [chosenSkills, setChosenSkills] = useState([]);
     const [adventureName, setAdventureName] = useState('');
+    const [roster, setRoster] = useState([]);
+    const [selectedHeroId, setSelectedHeroId] = useState(null);
+    const [rosterError, setRosterError] = useState(null);
+    const importInputRef = useRef(null);
+
+    useEffect(() => {
+        listRosterCharacters().then(setRoster).catch(() => setRoster([]));
+    }, []);
 
     const currentStep = STEPS[step];
 
@@ -65,18 +76,11 @@ export default function CharacterCreation() {
         setChosenSkills([]);
     };
 
-    const handleCreate = () => {
-        const abilityScores = {};
-        for (const ability of ABILITY_NAMES) {
-            abilityScores[ability] = statAssignment[ability];
-        }
-
-        const character = createCharacter(name, race, charClass, abilityScores, chosenSkills);
-        const inventory = createStartingInventory(charClass);
+    const beginAdventure = (character, inventory, welcomeContent) => {
         dispatch({ type: 'START_CHARACTER', payload: { character, inventory } });
 
         // Create session
-        const sessionName = adventureName.trim() || `${name}'s Adventure`;
+        const sessionName = adventureName.trim() || `${character.name}'s Adventure`;
         dispatch({
             type: 'UPDATE_SESSION',
             payload: {
@@ -90,17 +94,171 @@ export default function CharacterCreation() {
         // Welcome message
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: {
-                role: 'system',
-                content: `**${name}** the **${RACES[race]?.name} ${CLASSES[charClass]?.name}** has entered the world. Send a message to begin your adventure!`,
-            },
+            payload: { role: 'system', content: welcomeContent },
         });
 
         dispatch({ type: 'SET_UI', payload: { isCharacterCreationOpen: false } });
     };
 
+    const handleCreate = () => {
+        const abilityScores = {};
+        for (const ability of ABILITY_NAMES) {
+            abilityScores[ability] = statAssignment[ability];
+        }
+
+        const character = createCharacter(name, race, charClass, abilityScores, chosenSkills);
+        const inventory = createStartingInventory(charClass);
+        beginAdventure(
+            character,
+            inventory,
+            `**${name}** the **${RACES[race]?.name} ${CLASSES[charClass]?.name}** has entered the world. Send a message to begin your adventure!`
+        );
+    };
+
+    // === Roster (use an existing hero) ===
+
+    const selectedHero = roster.find(entry => entry.id === selectedHeroId) || null;
+
+    const handleBeginFromRoster = () => {
+        if (!selectedHero) return;
+        try {
+            // Re-sanitize on the way out of the roster: rests the hero (full HP,
+            // fresh resources) and refreshes derived fields against current data.
+            // Keep the roster id (sanitize mints a fresh one for imports) so a later
+            // "Save to Roster" updates this hero's entry instead of duplicating it.
+            const character = { ...sanitizeCharacter(selectedHero.character), id: selectedHero.id };
+            const inventory = sanitizeInventory(selectedHero.inventory);
+            beginAdventure(
+                character,
+                inventory,
+                `**${character.name}** the **${RACES[character.race]?.name} ${CLASSES[character.class]?.name}** (Level ${character.level}) returns to the world. Send a message to begin your adventure!`
+            );
+        } catch (err) {
+            setRosterError(err.message);
+        }
+    };
+
+    const handleImportFile = async (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = ''; // allow re-importing the same file
+        if (!file) return;
+        setRosterError(null);
+        try {
+            const { character, inventory } = parseCharacterExport(await file.text());
+            await saveRosterCharacter(character, inventory);
+            setRoster(await listRosterCharacters());
+            setSelectedHeroId(character.id);
+        } catch (err) {
+            setRosterError(err.message || 'Could not import this file.');
+        }
+    };
+
+    const handleExportHero = (entry) => {
+        downloadCharacterExport(entry.character, entry.inventory);
+    };
+
+    const handleDeleteHero = async (entry) => {
+        if (!confirm(`Remove ${entry.name} from the roster? An exported file is the only way to get them back.`)) return;
+        await deleteRosterCharacter(entry.id);
+        if (selectedHeroId === entry.id) setSelectedHeroId(null);
+        setRoster(await listRosterCharacters());
+    };
+
     // Combine racial + chosen skills for the confirm screen
     const allSkillProficiencies = [...new Set([...racialSkills, ...chosenSkills])];
+
+    if (phase === 'start') {
+        return (
+            <div className="char-creation-overlay">
+                <div className="char-creation-modal">
+                    <h2 className="char-creation-title">Your Hero</h2>
+                    <div className="creation-grid">
+                        <button className="creation-card" onClick={() => setPhase('wizard')}>
+                            <div className="card-name">Forge a New Hero</div>
+                            <div className="card-desc">Create a character from scratch — race, class, stats, and skills.</div>
+                        </button>
+                        <button className="creation-card" onClick={() => setPhase('roster')}>
+                            <div className="card-name">Use an Existing Hero</div>
+                            <div className="card-desc">Pick a hero from your roster, or import a character file.</div>
+                            <div className="card-bonus">{roster.length} in roster</div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (phase === 'roster') {
+        return (
+            <div className="char-creation-overlay">
+                <div className="char-creation-modal">
+                    <h2 className="char-creation-title">Choose Your Hero</h2>
+
+                    {roster.length === 0 && (
+                        <p className="creation-hint">
+                            Your roster is empty. Import a character file below, or save a hero
+                            to the roster from the character sheet during play.
+                        </p>
+                    )}
+
+                    <div className="roster-list">
+                        {roster.map(entry => (
+                            <div key={entry.id} className={`roster-entry ${selectedHeroId === entry.id ? 'selected' : ''}`}>
+                                <button className="roster-entry-main" onClick={() => setSelectedHeroId(entry.id)}>
+                                    <span className="roster-entry-name">{entry.name}</span>
+                                    <span className="roster-entry-meta">
+                                        Lv.{entry.level} {RACES[entry.race]?.name || entry.race} {CLASSES[entry.class]?.name || entry.class}
+                                        {' · saved '}{new Date(entry.savedAt).toLocaleDateString()}
+                                    </span>
+                                </button>
+                                <div className="roster-entry-actions">
+                                    <button className="btn btn-secondary btn-sm" onClick={() => handleExportHero(entry)}>Export</button>
+                                    <button className="btn btn-danger btn-sm" onClick={() => handleDeleteHero(entry)}>Delete</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {rosterError && <div className="roster-error">{rosterError}</div>}
+
+                    {selectedHero && (
+                        <div className="creation-step roster-adventure">
+                            <h3>Name your adventure</h3>
+                            <input
+                                type="text"
+                                className="creation-input"
+                                value={adventureName}
+                                onChange={(e) => setAdventureName(e.target.value)}
+                                placeholder={`${selectedHero.name}'s Adventure`}
+                                maxLength={60}
+                            />
+                        </div>
+                    )}
+
+                    <input
+                        ref={importInputRef}
+                        type="file"
+                        accept=".json,application/json"
+                        style={{ display: 'none' }}
+                        onChange={handleImportFile}
+                    />
+
+                    <div className="char-creation-actions">
+                        <button className="btn btn-secondary" onClick={() => { setRosterError(null); setPhase('start'); }}>
+                            ← Back
+                        </button>
+                        <button className="btn btn-secondary" onClick={() => importInputRef.current?.click()}>
+                            Import File
+                        </button>
+                        <div style={{ flex: 1 }} />
+                        <button className="btn btn-primary" onClick={handleBeginFromRoster} disabled={!selectedHero}>
+                            Begin Adventure
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="char-creation-overlay">
@@ -282,11 +440,12 @@ export default function CharacterCreation() {
                 </div>
 
                 <div className="char-creation-actions">
-                    {step > 0 && (
-                        <button className="btn btn-secondary" onClick={() => setStep(step - 1)}>
-                            ← Back
-                        </button>
-                    )}
+                    <button
+                        className="btn btn-secondary"
+                        onClick={() => (step > 0 ? setStep(step - 1) : setPhase('start'))}
+                    >
+                        ← Back
+                    </button>
                     <div style={{ flex: 1 }} />
                     {currentStep === 'adventure' ? (
                         <button className="btn btn-primary" onClick={handleCreate}>

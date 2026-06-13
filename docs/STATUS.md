@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-12_
 
 ## Current focus
 - **Fighter-only test-play phase**: Vesa is play-testing the new combat-stakes mechanics
@@ -14,7 +14,11 @@ _Last updated: 2026-06-11_
 - **Next major feature: campaign "fronts"** (hidden world clocks) — design doc first, then
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
-## Recently shipped (June 10–11, 2026)
+## Recently shipped (June 10–12, 2026)
+- Character roster + export/import (2026-06-12): local hero list (IndexedDB `characters`
+  store), versioned JSON hero files, "Use an Existing Hero" fork in the creation wizard,
+  Save to Roster / Export File on the character sheet. Imports are sanitized — derived
+  fields rebuilt from race/class data, not trusted. 13 new vitest cases.
 - Cloud sync root-cause fix: `__autosave__` is a reserved Firestore doc ID; cloud autosave
   had never worked. Also: autosaves are now local-per-device BY DESIGN (see DECISIONS.md).
 - Combat stakes: saving throws w/ proficiencies, engine-owned death saves at 0 HP,

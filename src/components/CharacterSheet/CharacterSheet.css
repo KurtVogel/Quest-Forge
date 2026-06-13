@@ -727,3 +727,74 @@
     border-color: var(--text-muted);
     color: var(--text-muted);
 }
+
+/* === Character roster (export/import + use-existing-hero) === */
+
+.roster-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.roster-entry {
+    display: flex;
+    align-items: stretch;
+    gap: 0.5rem;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
+    padding: 0.5rem;
+    background: var(--surface-primary);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.roster-entry.selected {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 1px rgba(215, 180, 90, 0.12), var(--shadow-soft);
+}
+
+.roster-entry-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    background: transparent;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    padding: 0.25rem 0.4rem;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+}
+
+.roster-entry-name {
+    font-family: var(--font-heading);
+    color: var(--gold);
+    font-size: 1rem;
+}
+
+.roster-entry-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.roster-entry-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.roster-error {
+    color: var(--hp-critical, #d9534f);
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+}
+
+.roster-adventure {
+    margin-bottom: 1rem;
+}
+
+.cs-hero-actions {
+    display: flex;
+    gap: 0.5rem;
+}

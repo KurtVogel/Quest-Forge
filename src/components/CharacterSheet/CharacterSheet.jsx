@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getModifier, formatModifier, getProficiencyBonus, getAllSkills, SKILL_ABILITIES } from '../../engine/rules.js';
 import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
+import { downloadCharacterExport } from '../../engine/characterVault.js';
+import { saveRosterCharacter } from '../../state/persistence.js';
 import { getExperienceThreshold } from '../../engine/progression.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
@@ -46,6 +48,25 @@ export default function CharacterSheet() {
 
     // Hit dice
     const hitDice = character.hitDice || { total: character.level, remaining: character.level, die: charClass?.hitDie || 8 };
+
+    const handleSaveToRoster = async () => {
+        try {
+            await saveRosterCharacter(character, state.inventory);
+            dispatch({
+                type: 'ADD_MESSAGE',
+                payload: {
+                    role: 'system',
+                    content: `**${character.name}** (Level ${character.level}) saved to the character roster.`,
+                },
+            });
+        } catch (e) {
+            console.warn('Failed to save hero to roster:', e);
+        }
+    };
+
+    const handleExportHero = () => {
+        downloadCharacterExport(character, state.inventory);
+    };
 
     return (
         <div className="character-sheet">
@@ -217,6 +238,23 @@ export default function CharacterSheet() {
                             </ul>
                         </div>
                     )}
+
+                    <div className="cs-section cs-hero-actions">
+                        <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={handleSaveToRoster}
+                            title="Snapshot this hero (with gear) to the local roster for reuse in future adventures"
+                        >
+                            Save to Roster
+                        </button>
+                        <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={handleExportHero}
+                            title="Download this hero as a JSON file — share it or move it to another device"
+                        >
+                            Export File
+                        </button>
+                    </div>
                 </div>
             )}
         </div>

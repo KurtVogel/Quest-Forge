@@ -4,8 +4,9 @@
 
 const SETTINGS_KEY = 'rpg-client-settings';
 const DB_NAME = 'rpg-client-saves';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'saves';
+const ROSTER_STORE = 'characters';
 const AUTOSAVE_SLOT = '__autosave__';
 
 // === LocalStorage (Settings) ===
@@ -41,6 +42,9 @@ function openDB() {
             const db = event.target.result;
             if (!db.objectStoreNames.contains(STORE_NAME)) {
                 db.createObjectStore(STORE_NAME, { keyPath: 'slotId' });
+            }
+            if (!db.objectStoreNames.contains(ROSTER_STORE)) {
+                db.createObjectStore(ROSTER_STORE, { keyPath: 'id' });
             }
         };
     });
@@ -183,6 +187,69 @@ export async function deleteSave(slotId) {
         const store = tx.objectStore(STORE_NAME);
         const request = store.delete(slotId);
         // Resolve on COMMIT (see saveGame) so a refresh read after a delete sees it gone.
+        request.onerror = () => reject(request.error);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+    });
+}
+
+// === Character roster (heroes, not campaigns — see engine/characterVault.js) ===
+
+/**
+ * Save a hero snapshot (character + inventory) to the roster.
+ * Keyed by character.id, so re-saving the same hero updates its entry;
+ * imports get a fresh id and create a new entry.
+ */
+export async function saveRosterCharacter(character, inventory) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(ROSTER_STORE, 'readwrite');
+        const store = tx.objectStore(ROSTER_STORE);
+        const entry = {
+            id: character.id || `char-${Date.now()}`,
+            name: character.name,
+            race: character.race,
+            class: character.class,
+            level: character.level,
+            savedAt: Date.now(),
+            character,
+            inventory: inventory || [],
+        };
+        const request = store.put(entry);
+        // Resolve on COMMIT (see saveGame) so a list refresh right after sees the entry.
+        request.onerror = () => reject(request.error);
+        tx.oncomplete = () => { db.close(); resolve(entry); };
+        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+    });
+}
+
+/**
+ * List all roster heroes, newest first. Entries are small (no messages),
+ * so this returns them whole — character and inventory included.
+ */
+export async function listRosterCharacters() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(ROSTER_STORE, 'readonly');
+        const store = tx.objectStore(ROSTER_STORE);
+        const request = store.getAll();
+        request.onsuccess = () => {
+            resolve(request.result.sort((a, b) => b.savedAt - a.savedAt));
+        };
+        request.onerror = () => reject(request.error);
+        tx.oncomplete = () => db.close();
+    });
+}
+
+/**
+ * Delete a roster hero.
+ */
+export async function deleteRosterCharacter(id) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(ROSTER_STORE, 'readwrite');
+        const store = tx.objectStore(ROSTER_STORE);
+        const request = store.delete(id);
         request.onerror = () => reject(request.error);
         tx.oncomplete = () => { db.close(); resolve(); };
         tx.onabort = () => { db.close(); reject(tx.error || request.error); };

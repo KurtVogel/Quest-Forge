@@ -8,6 +8,15 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-12 · Roster entries are heroes, not campaigns — and imports are rebuilt, not
+trusted.** The character roster (`characterVault.js` + IndexedDB `characters` store)
+snapshots `character` + `inventory` only; campaigns stay the save system's job. Import
+files are hand-editable JSON, so identity fields are validated/clamped and every derived
+field (proficiency, saves, traits, features, resources, hit dice) is rebuilt from
+race/class data — the DM↔engine trust rule applied to files. Heroes start roster
+adventures rested (full HP, fresh resources); importing into an *ongoing* campaign was
+deliberately excluded (tangles combat state, DM context, and XP coherence).
+
 **2026-06-11 · Test-play with Fighter only for now.** Magic classes need real design work
 (spell slots, curated lists, theater-of-mind area handling) — see IDEAS.md "Spellcasting".
 Rogue is the agreed next class when the fighter phase ends. Don't build caster mechanics ad hoc.
