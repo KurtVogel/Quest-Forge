@@ -209,11 +209,17 @@ export default function ChatPanel() {
             console.warn('[ChatPanel] DM pre-narrated outcome before roll — correction will be injected with roll results.');
         }
 
-        // When the player's action needs dice, the client WITHHOLDS this pre-roll text:
-        // the DM narrates the whole beat once, AFTER the dice resolve (see rollResolver).
-        // We keep it in history (hidden) so the follow-up retains the DM's framing, but the
-        // player never sees a separate "setup" bubble that the outcome then repeats.
-        const hideSetup = !!originalPlayerMessage && events?.requestedRolls?.length > 0;
+        // Any narration that still has PENDING ROLLS is a "setup" the post-roll narration
+        // will supersede, so withhold it: the DM narrates the whole beat once, AFTER the
+        // dice resolve (see rollResolver). Only the final, roll-free narration is shown.
+        // This must hold for CHAINED rolls too — a failed check that provokes an enemy
+        // attack, a multi-enemy round, a triggered save — not just the player's first
+        // action. Keying on pending rolls alone is the fix; the previous condition also
+        // required the first-turn `originalPlayerMessage`, so every chained setup stayed
+        // visible and the player saw the beat twice (setup, then outcome). The flag also
+        // drives applyEvents' setupPhase, so deferring outcome mutations to the final
+        // narration likewise extends correctly to chained rolls (no double-application).
+        const hideSetup = events?.requestedRolls?.length > 0;
         if (hideSetup) setStreamingMessage('');
         dispatch({
             type: 'ADD_MESSAGE',
