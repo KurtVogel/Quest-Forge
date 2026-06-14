@@ -94,11 +94,33 @@ function applyDeath(character) {
     return { ...character, isDead: true, dying: false, deathSaves: { successes: 0, failures: 0 } };
 }
 
+function isLowLevelSolo(character, party = []) {
+    return !!character && (character.level ?? 1) <= 2 && (!party || party.length === 0);
+}
+
+function withCondition(character, condition) {
+    const conditions = character.conditions || [];
+    if (conditions.some(c => c.toLowerCase() === condition.toLowerCase())) return character;
+    return { ...character, conditions: [...conditions, condition] };
+}
+
+/** Convert an early low-level knockout into a setback instead of campaign-ending death. */
+function applyEarlyDefeat(character) {
+    return withCondition({
+        ...character,
+        currentHP: 0,
+        dying: false,
+        lowLevelDefeat: true,
+        deathSaves: { successes: 0, failures: 0 },
+    }, 'Unconscious');
+}
+
 /** Bring a dying/stable character back to consciousness (healing or a nat-20 death save). */
 function reviveCharacter(character) {
     return {
         ...character,
         dying: false,
+        lowLevelDefeat: false,
         deathSaves: { successes: 0, failures: 0 },
         conditions: (character.conditions || []).filter(c => c.toLowerCase() !== 'unconscious'),
     };
@@ -360,17 +382,25 @@ export function gameReducer(state, action) {
             const newHP = Math.max(0, prevHP - action.payload);
             let character = { ...state.character, currentHP: newHP };
             const messages = [...state.messages];
+            const earlyDefeatProtected = isLowLevelSolo(state.character, state.party);
 
             if (newHP === 0 && prevHP > 0 && !character.isDead) {
-                // Dropped to 0: the character falls unconscious and starts dying.
-                character.dying = true;
-                character.deathSaves = { successes: 0, failures: 0 };
-                const conditions = character.conditions || [];
-                if (!conditions.some(c => c.toLowerCase() === 'unconscious')) {
-                    character.conditions = [...conditions, 'Unconscious'];
+                if (earlyDefeatProtected) {
+                    character = applyEarlyDefeat(character);
+                    messages.push(systemMessage(`**${character.name} is defeated.** At level ${character.level}, this is a severe setback, not a campaign-ending death: the enemy may capture, rob, spare, bind, abandon, or bargain with you, but the story continues.`));
+                } else {
+                    // Dropped to 0: the character falls unconscious and starts dying.
+                    character.dying = true;
+                    character.deathSaves = { successes: 0, failures: 0 };
+                    character = withCondition(character, 'Unconscious');
+                    messages.push(systemMessage(`💔 **${character.name} falls!** You are unconscious at 0 HP and DYING. Each round, a death saving throw decides your fate — three successes stabilize you, three failures end your story.`));
                 }
-                messages.push(systemMessage(`💔 **${character.name} falls!** You are unconscious at 0 HP and DYING. Each round, a death saving throw decides your fate — three successes stabilize you, three failures end your story.`));
             } else if (prevHP === 0 && character.dying && action.payload > 0) {
+                if (earlyDefeatProtected) {
+                    character = applyEarlyDefeat(character);
+                    messages.push(systemMessage('**Defeat deepens.** The hit worsens the setback, but low-level solo protection prevents a death-save spiral. The DM should turn this into capture, loss, leverage, or a narrow escape.'));
+                    return { ...state, character, messages };
+                }
                 // Taking damage while dying counts as a death save failure.
                 const failures = (character.deathSaves?.failures || 0) + 1;
                 character.deathSaves = { ...(character.deathSaves || { successes: 0 }), failures };
@@ -397,6 +427,9 @@ export function gameReducer(state, action) {
                 // Any healing brings a dying character back to consciousness.
                 character = reviveCharacter(character);
                 messages.push(systemMessage(`**${character.name} regains consciousness!** Healing pulls you back from the brink (${healed} HP).`));
+            } else if (character.lowLevelDefeat && healed > 0) {
+                character = reviveCharacter(character);
+                messages.push(systemMessage(`**${character.name} comes around.** You are hurt, but the early defeat setback is over (${healed} HP).`));
             }
             return { ...state, character, messages };
         }
@@ -404,6 +437,16 @@ export function gameReducer(state, action) {
         case 'DEATH_SAVE_RESULT': {
             const character = state.character;
             if (!character?.dying || character.isDead) return state;
+            if (isLowLevelSolo(character, state.party)) {
+                return {
+                    ...state,
+                    character: applyEarlyDefeat(character),
+                    messages: [
+                        ...state.messages,
+                        systemMessage('**Death save skipped.** Low-level solo protection converts this into a defeat setback instead of permanent death.'),
+                    ],
+                };
+            }
             const die = action.payload.die;
             const prev = character.deathSaves || { successes: 0, failures: 0 };
 
@@ -426,6 +469,22 @@ export function gameReducer(state, action) {
                 return { ...state, character: applyDeath(character) };
             }
             return { ...state, character: { ...character, deathSaves: { ...prev, failures } } };
+        }
+
+        case 'PLAYER_DEFEAT': {
+            if (!state.character || state.character.isDead) return state;
+            if (!isLowLevelSolo(state.character, state.party)) return state;
+            const character = applyEarlyDefeat(state.character);
+            const description = action.payload?.description
+                || `${character.name} is defeated, but the story continues.`;
+            return {
+                ...state,
+                character,
+                messages: [
+                    ...state.messages,
+                    systemMessage(`**${description}**\n\nAt level ${character.level}, defeat becomes a story setback instead of permanent death. Expect capture, loss, bargaining, rescue, or a grim escape route.`),
+                ],
+            };
         }
 
         case 'TAKE_REST': {
@@ -472,6 +531,10 @@ export function gameReducer(state, action) {
                     !['exhausted', 'poisoned', 'blinded', 'deafened'].includes(c.toLowerCase())
                 );
             }
+            const clearsEarlyDefeat = state.character.lowLevelDefeat && healed > 0;
+            if (clearsEarlyDefeat) {
+                currentConditions = currentConditions.filter(c => c.toLowerCase() !== 'unconscious');
+            }
 
             // Build rest message
             const healedAmount = healed - state.character.currentHP;
@@ -489,6 +552,8 @@ export function gameReducer(state, action) {
                 character: {
                     ...state.character,
                     currentHP: healed,
+                    lowLevelDefeat: clearsEarlyDefeat ? false : state.character.lowLevelDefeat,
+                    deathSaves: clearsEarlyDefeat ? { successes: 0, failures: 0 } : state.character.deathSaves,
                     conditions: currentConditions,
                     classResources: newResources,
                     hitDice: newHitDice,

@@ -101,6 +101,19 @@ describe('death saves', () => {
         rollQueue.push(2);
         expect(run([{ type: 'death_save' }], { ...dyingChar, deathSaves: { successes: 0, failures: 2 } }).results[0].outcome).toBe('dead');
     });
+
+    it('does not roll death saves for protected low-level defeat', () => {
+        rollQueue.push(1);
+        const { results, dispatch } = run(
+            [{ type: 'death_save' }],
+            { currentHP: 0, dying: false, lowLevelDefeat: true, conditions: ['Unconscious'] }
+        );
+        expect(results[0]).toMatchObject({
+            type: 'note',
+            text: expect.stringContaining('No death saving throw is rolled'),
+        });
+        expect(dispatch).not.toHaveBeenCalledWith({ type: 'DEATH_SAVE_RESULT', payload: { die: 1 } });
+    });
 });
 
 describe('saving throws', () => {

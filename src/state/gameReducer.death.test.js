@@ -25,7 +25,15 @@ function makeState(characterOverrides = {}) {
     };
 }
 
+const levelOneSolo = (overrides = {}) => makeState({
+    level: 1,
+    currentHP: 8,
+    maxHP: 12,
+    ...overrides,
+});
+
 const dying = (overrides = {}) => makeState({
+    level: 3,
     currentHP: 0,
     dying: true,
     deathSaves: { successes: 0, failures: 0 },
@@ -34,14 +42,25 @@ const dying = (overrides = {}) => makeState({
 });
 
 describe('dropping to 0 HP', () => {
-    it('starts the dying state with fresh death saves and Unconscious', () => {
-        const next = gameReducer(makeState(), { type: 'TAKE_DAMAGE', payload: 15 });
+    it('starts the dying state with fresh death saves and Unconscious above the protected levels', () => {
+        const next = gameReducer(makeState({ level: 3 }), { type: 'TAKE_DAMAGE', payload: 15 });
         expect(next.character.currentHP).toBe(0);
         expect(next.character.dying).toBe(true);
         expect(next.character.deathSaves).toEqual({ successes: 0, failures: 0 });
         expect(next.character.conditions).toContain('Unconscious');
         expect(next.character.isDead).toBe(false);
         expect(next.messages.some(m => m.content.includes('DYING'))).toBe(true);
+    });
+
+    it('turns level-1 solo defeat into a non-lethal setback', () => {
+        const next = gameReducer(levelOneSolo(), { type: 'TAKE_DAMAGE', payload: 99 });
+        expect(next.character.currentHP).toBe(0);
+        expect(next.character.dying).toBe(false);
+        expect(next.character.lowLevelDefeat).toBe(true);
+        expect(next.character.isDead).toBe(false);
+        expect(next.character.deathSaves).toEqual({ successes: 0, failures: 0 });
+        expect(next.character.conditions).toContain('Unconscious');
+        expect(next.messages.some(m => m.content.includes('severe setback'))).toBe(true);
     });
 
     it('ordinary damage does not start dying', () => {
@@ -59,10 +78,18 @@ describe('damage while dying', () => {
     });
 
     it('a third failure kills the character', () => {
-        const start = dying({ deathSaves: { successes: 1, failures: 2 } });
+        const start = dying({ level: 3, deathSaves: { successes: 1, failures: 2 } });
         const next = gameReducer(start, { type: 'TAKE_DAMAGE', payload: 4 });
         expect(next.character.isDead).toBe(true);
         expect(next.character.dying).toBe(false);
+    });
+
+    it('prevents a level-1 solo death-save spiral from killing the character', () => {
+        const start = dying({ level: 1, deathSaves: { successes: 0, failures: 2 } });
+        const next = gameReducer(start, { type: 'TAKE_DAMAGE', payload: 4 });
+        expect(next.character.isDead).toBe(false);
+        expect(next.character.dying).toBe(false);
+        expect(next.character.lowLevelDefeat).toBe(true);
     });
 });
 
@@ -96,6 +123,15 @@ describe('DEATH_SAVE_RESULT', () => {
         const next = gameReducer(start, { type: 'DEATH_SAVE_RESULT', payload: { die: 3 } });
         expect(next.character.isDead).toBe(true);
         expect(next.character.dying).toBe(false);
+    });
+
+    it('converts level-1 solo death saves into defeat instead of death', () => {
+        const start = dying({ level: 1, deathSaves: { successes: 0, failures: 2 } });
+        const next = gameReducer(start, { type: 'DEATH_SAVE_RESULT', payload: { die: 1 } });
+        expect(next.character.isDead).toBe(false);
+        expect(next.character.dying).toBe(false);
+        expect(next.character.lowLevelDefeat).toBe(true);
+        expect(next.messages.some(m => m.content.includes('Death save skipped'))).toBe(true);
     });
 
     it('natural 20 revives at 1 HP, clearing Unconscious', () => {
@@ -132,5 +168,45 @@ describe('healing while dying', () => {
     it('still respects max HP for the living', () => {
         const next = gameReducer(makeState({ currentHP: 18 }), { type: 'HEAL', payload: 10 });
         expect(next.character.currentHP).toBe(20);
+    });
+
+    it('clears low-level defeat when healing restores HP', () => {
+        const start = levelOneSolo({
+            currentHP: 0,
+            lowLevelDefeat: true,
+            conditions: ['Unconscious'],
+        });
+        const next = gameReducer(start, { type: 'HEAL', payload: 5 });
+        expect(next.character.currentHP).toBe(5);
+        expect(next.character.lowLevelDefeat).toBe(false);
+        expect(next.character.conditions).not.toContain('Unconscious');
+    });
+
+    it('clears low-level defeat after a rest restores HP', () => {
+        const start = levelOneSolo({
+            currentHP: 0,
+            lowLevelDefeat: true,
+            conditions: ['Unconscious'],
+            hitDice: { total: 1, remaining: 1, die: 10 },
+            classResources: {},
+        });
+        const next = gameReducer(start, { type: 'TAKE_REST', payload: 'long' });
+        expect(next.character.currentHP).toBe(next.character.maxHP);
+        expect(next.character.lowLevelDefeat).toBe(false);
+        expect(next.character.conditions).not.toContain('Unconscious');
+    });
+});
+
+describe('PLAYER_DEFEAT', () => {
+    it('records a non-lethal defeat without marking the character dead', () => {
+        const next = gameReducer(levelOneSolo(), {
+            type: 'PLAYER_DEFEAT',
+            payload: { description: 'The captain has you dragged away.' },
+        });
+        expect(next.character.currentHP).toBe(0);
+        expect(next.character.isDead).toBe(false);
+        expect(next.character.dying).toBe(false);
+        expect(next.character.lowLevelDefeat).toBe(true);
+        expect(next.messages.some(m => m.content.includes('story setback'))).toBe(true);
     });
 });

@@ -7,13 +7,6 @@ replace stale entries, don't let it grow. For deeper context run `git log --onel
 _Last updated: 2026-06-14_
 
 ## Current focus
-- **HANDOFF TO CODEX (2026-06-14): low-level encounter difficulty.** A lone level-1 PC keeps
-  getting dropped into unwinnable fights (and killed) even when hiding/avoiding. Difficulty is
-  prompt-only with no mechanical floor, and the player's custom "no hand-holding/brutal" prompt
-  (#4 in assembly) out-prioritizes the hedged difficulty steer (#14). Full diagnosis + proposed
-  design (engine non-lethal floor + prompt reframe + encounter budget + roll-stakes guidance) is
-  in IDEAS.md → Gameplay & Mechanics → "Low-level encounter difficulty". Use the
-  `rpg-balance-master` subagent.
 - **Fighter-only test-play phase**: Vesa is play-testing the new combat-stakes mechanics
   (saving throws, death saves, condition effects — shipped 2026-06-10/11) in real sessions.
   Expect prompt-tuning fixes to come out of this (DM over/under-requesting saves, death-save
@@ -22,6 +15,12 @@ _Last updated: 2026-06-14_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–14, 2026)
+- Low-level solo safety floor (2026-06-14): level 1-2 solo characters no longer spiral from
+  first knockout into permanent death. `TAKE_DAMAGE`, stale `DEATH_SAVE_RESULT`, and direct
+  `player_death` events now convert to a `lowLevelDefeat` setback (capture, subdual, loss,
+  leverage, rescue, escape route) instead of dead/dying. Prompt now injects a hard
+  LOW-LEVEL SOLO SAFETY block immediately after custom DM instructions, with encounter
+  budgets and roll-stakes guidance. Tests: `npm test` 79 passing; `npm run build` passing.
 - Game-loop fix: chained-roll duplicate narration (2026-06-14). The "withhold the setup,
   narrate once after the dice" mechanism only worked on the player's FIRST roll — `hideSetup`
   in ChatPanel keyed off `originalPlayerMessage`, which is undefined on every roll follow-up.
@@ -61,7 +60,7 @@ _Last updated: 2026-06-14_
 - Combat stakes: saving throws w/ proficiencies, engine-owned death saves at 0 HP,
   conditions auto-apply advantage/disadvantage.
 - Save UI: overwrite buttons, cloud-save delete, honest cloud-status feedback.
-- Vitest harness (`npm test`, 58 tests) — engine math, death-save state machine, parser
+- Vitest harness (`npm test`, 79 tests) — engine math, death-save state machine, parser
   golden fixtures. First run caught a real bug ("saving" doesn't contain "save").
 - Visual polish pass (Codex): textures, panel styling, emoji cleanup in system messages.
 - This docs system (IDEAS.md / DECISIONS.md / STATUS.md).

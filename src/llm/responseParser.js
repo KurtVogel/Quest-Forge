@@ -510,6 +510,16 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     }
 
     if (events.playerDeath) {
+        const character = state?.character;
+        const lowLevelSolo = character && (character.level ?? 1) <= 2 && (!state?.party || state.party.length === 0);
+        if (lowLevelSolo) {
+            dispatch({
+                type: 'PLAYER_DEFEAT',
+                payload: { description: events.playerDeath.description },
+            });
+            return;
+        }
+
         dispatch({
             type: 'ADD_MESSAGE',
             payload: {

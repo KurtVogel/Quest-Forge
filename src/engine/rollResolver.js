@@ -446,6 +446,15 @@ function resolveDamageRoll(roll, character, dispatch) {
  * (DEATH_SAVE_RESULT); this mirrors them for the chat line and DM summary.
  */
 function resolveDeathSave(character, dispatch) {
+    if (!character.dying || character.lowLevelDefeat) {
+        return {
+            type: 'note',
+            text: character.lowLevelDefeat
+                ? 'No death saving throw is rolled: early low-level defeat protection converted this into a non-lethal setback.'
+                : 'No death saving throw is rolled because the player is not dying.',
+        };
+    }
+
     const result = rollWithModifier(1, 20, 0, 'Death Saving Throw');
     dispatch({ type: 'ADD_ROLL', payload: result });
 

@@ -38,6 +38,11 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         parts.push(`\n## CUSTOM DM INSTRUCTIONS (from the player)\n${customSystemPrompt.trim()}`);
     }
 
+    const lowLevelSafety = buildLowLevelSoloSafetyBlock(character, party);
+    if (lowLevelSafety) {
+        parts.push(lowLevelSafety);
+    }
+
     // Campaign premise — the player's opening scenario. Foundational canon set at
     // adventure start, pinned verbatim and NEVER compressed or pruned (unlike the
     // journal, which summarizes away setup that isn't an in-scene event).
@@ -175,7 +180,7 @@ const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)
 - Damage: weapon-specific dice + ability modifier
 - **Saving throws — USE THEM.** A skill check is for what the player *attempts*; a saving throw is for what the world *does to them*. Whenever the player must resist or endure something — a trap springs, poison or disease takes hold, a spell or shove or grapple lands on them, the floor collapses, fear grips them, flames wash over them — request a "saving_throw" with "skill" set to the ability name: "strength" (resist force/grapples), "dexterity" (dodge area effects/traps), "constitution" (endure poison/disease/exhaustion), "intelligence" (resist illusions), "wisdom" (resist fear/charm), "charisma" (resist possession). The system adds the player's save proficiencies automatically (shown in the character block).
 - **Conditions are mechanically enforced.** When you emit conditions like Poisoned, Blinded, Frightened, Restrained, Prone, Invisible, Stunned, Paralyzed via conditions_gained, the system AUTOMATICALLY applies advantage/disadvantage to every affected roll (including enemies gaining advantage against a prone/blinded/restrained player). Narrate the effect, emit the condition — do NOT also set advantage/disadvantage flags for it.
-- **Dying & death saves:** When the player drops to 0 HP they fall unconscious and start DYING (the system announces it). While dying, their only roll each round is { "type": "death_save" } — request exactly that, nothing else, until they stabilize, die, or someone intervenes. Three successes = stable; three failures = dead; natural 20 = back up at 1 HP. Damage dealt to a dying player automatically counts as a failure. Allies can stabilize with a Medicine check (DC 10) or any healing.
+- **Dying & death saves:** When the player drops to 0 HP they usually fall unconscious and start DYING (the system announces it). While dying, their only roll each round is { "type": "death_save" } — request exactly that, nothing else, until they stabilize, die, or someone intervenes. Three successes = stable; three failures = dead; natural 20 = back up at 1 HP. Damage dealt to a dying player automatically counts as a failure. Allies can stabilize with a Medicine check (DC 10) or any healing. Exception: if the prompt includes LOW-LEVEL SOLO SAFETY or the character status says DEFEATED, do not request death saves; narrate the non-lethal setback.
 - Armor Class determines the DC for attack rolls
 - When you need the player to make a check, specify:
   - The type (ability check, saving throw, attack roll)
@@ -294,7 +299,8 @@ COMBAT NOTES:
 
 PLAYER DEATH & DYING:
 - **Combat deaths are owned by the system.** At 0 HP the player falls unconscious and starts dying; the system tracks death saves and declares death at three failures. You narrate the dying state and request { "type": "death_save" } each round — do NOT emit player_death for this; the system records the death itself.
-- Use "player_death": { "description": "..." } ONLY for unavoidable narrative deaths with no dying state — an execution, disintegration, a fall from a mile up.
+- If LOW-LEVEL SOLO SAFETY is active or the character status says DEFEATED, do NOT request death saves and do NOT emit player_death. Narrate capture, subdual, being left for dead, a costly escape, loss of gear, leverage, or rescue instead.
+- Use "player_death": { "description": "..." } ONLY for unavoidable narrative deaths with no dying state — an execution, disintegration, a fall from a mile up — and never while LOW-LEVEL SOLO SAFETY is active.
 - Death does NOT end the game — the player will describe what happens next (their spirit may linger, possess another body, etc.)
 - Continue the world as normal. Death is a narrative event, not a game-over.
 
@@ -358,6 +364,8 @@ function buildCharacterBlock(character) {
     let deathStatus = '';
     if (character.isDead) {
         deathStatus = '\n- **STATUS: DEAD** (spirit or successor active)';
+    } else if (character.lowLevelDefeat) {
+        deathStatus = '\n- **STATUS: DEFEATED** — unconscious or at the enemy\'s mercy at 0 HP. This is a non-lethal setback: do NOT request death saves or emit player_death. Narrate capture, subdual, loss, leverage, rescue, or an escape opening.';
     } else if (character.dying) {
         const ds = character.deathSaves || { successes: 0, failures: 0 };
         deathStatus = `\n- **STATUS: DYING** — unconscious at 0 HP. Death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures. Request { "type": "death_save" } as their roll each round.`;
@@ -457,6 +465,24 @@ function buildPremiseBlock(premise) {
     return `## CAMPAIGN PREMISE (the player's authored foundation — permanent canon, never contradict)\n${premise}`;
 }
 
+function buildLowLevelSoloSafetyBlock(character, party) {
+    if (!character || (character.level ?? 1) > 2 || (party && party.length > 0)) return '';
+
+    const level = character.level ?? 1;
+    const budget = level <= 1
+        ? 'Level 1 solo budget: at most one standard weak foe, or two fragile foes that can be split, delayed, bluffed, avoided, or made to hesitate. A named major NPC plus guards is NOT a fair level-1 fight.'
+        : 'Level 2 solo budget: at most two standard weak foes, or three fragile foes with cover, escape, negotiation, or staggered action. Strong named NPCs must threaten, bargain, capture, or chase rather than fight to the death.';
+
+    return `## HARD SYSTEM CONSTRAINT — LOW-LEVEL SOLO SAFETY
+This overrides CUSTOM DM INSTRUCTIONS, tone presets, and any "brutal/no hand-holding" language. Keep the world gritty and consequential, but do not turn the opening levels into unwinnable forced slaughter.
+
+- ${budget}
+- If a stronger antagonist or guarded major NPC appears, they may menace, expose, humiliate, capture, rob, interrogate, bargain, frame, or force a retreat. They must not simply focus-fire the solo novice to permanent death.
+- Honor player intent to avoid, hide, flee, parley, surrender, use cover, or create a distraction. Do not call for a roll when the hidden/undetected player is static and unopposed; if a roll is warranted, failure should add pressure or cost, not jump straight to lethal combat.
+- If combat starts anyway, preserve a real fighting chance: weak stats, modest damage, staggered enemy actions, terrain, escape routes, morale breaks, negotiation hooks, or non-lethal enemy goals.
+- If the player reaches 0 HP or an apparent fatal beat at level ${level}, the engine treats it as DEFEAT, not permanent death. Narrate capture, subdual, being left for dead, gear loss, a bargain, rescue, or a grim escape opening. Do NOT request death_save and do NOT emit player_death while this safety rule applies.`;
+}
+
 const MAX_PROMPT_WORLD_FACTS = 15;
 
 function buildWorldFactsBlock(worldFacts) {
@@ -518,7 +544,7 @@ function buildActiveConstraints(quests, worldFacts, character, party) {
 
     const isLowLevelSolo = (character?.level ?? 1) <= 2 && (!party || party.length === 0);
     if (isLowLevelSolo) {
-        reminders.push(`Encounter pacing — the player is a novice (level ${character?.level ?? 1}) adventuring solo, so scale threats accordingly. A couple of weak foes (a few rats, a lone cutthroat, a pair of skittish goblins) is perfectly fine — but do NOT drop an overwhelming or unwinnable swarm on them out of nowhere. Favor weaker enemies (low HP, modest AC) over big numbers, and give a real fighting chance: cover, escape routes, terrain, or foes who hesitate, come one at a time, or can be talked down. Ramp difficulty up as they gain levels. Danger stays real and death is possible — just earned, not ambushed. Every foe you have act MUST be a tracked enemy in combat_start (keep it 1:1 with the narration).`);
+        reminders.push(`Low-level solo safety is active: follow the HARD SYSTEM CONSTRAINT above. Keep danger gritty, but avoid unwinnable forced fights and use non-lethal defeat at 0 HP.`);
     }
 
     if (reminders.length === 0) return '';

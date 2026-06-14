@@ -9,6 +9,10 @@
   `../../../.claude/agent-memory/rpg-balance-master/loot_inventory_audit.md` - item catalog,
   copper-based prices, atomic purchases, +1/+2/+3 magic equipment, and the remaining inventory
   gaps. Read it before shop, loot, equipment, or economy work.
+- Low-level solo safety shipped 2026-06-14 and is recorded in
+  `low_level_solo_safety.md` - level <= 2 solo knockouts/direct death events become
+  `lowLevelDefeat` setbacks instead of death-save spirals, with a hard prompt constraint and
+  no enemy trimming.
 
 Record new Codex-side balance findings as their own files in this directory and link them above.
 See `AGENTS.md` / `CLAUDE.md` at the repo root for the full project picture.

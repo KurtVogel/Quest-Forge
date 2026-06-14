@@ -46,7 +46,7 @@ embedded into RAG, so it fell through every durable tier once the 20-message win
 
 ## Gameplay & Mechanics
 
-### Low-level encounter difficulty / unwinnable fights — status: `designed`, priority: HIGH (Codex handoff 2026-06-14)
+### Low-level encounter difficulty / unwinnable fights — status: `shipped` (2026-06-14)
 Recurring, confirmed in play (2026-06-14): a **lone level-1 character** gets dropped into an
 unwinnable fight (a major NPC + two guards) and dies — even when actively hiding/avoiding. Vesa
 thought this was already handled; it wasn't, because difficulty is **prompt-only with no
@@ -71,23 +71,25 @@ mechanical floor**, and the prompt rule loses.
    disadvantage) and a single failure cascaded straight into the deadly fight — ignoring the
    player's intent to avoid it.
 
-**Proposed design (do both prompt + engine; "gritty tone" and "winnable at low level" are
-separate axes — keep the tone, bound the lethality):**
-- **Engine-side non-lethal floor (the robust fix, can't be out-prompted).** At level ≤ 2,
-  dropping to 0 HP resolves as *captured / subdued / spared / left for dead* — a narrative beat —
-  instead of death-saves-to-death. Lives in the dying/death path (`gameReducer.js`
-  DEATH_SAVE_RESULT / TAKE_DAMAGE) + a prompt note so the DM narrates the capture. Preserves
-  enemy count and narration; Malkov still "wins" the scene, just no permanent game-over.
-- **Prompt-side reframe.** Move the pacing rule to a **hard, non-overridable SYSTEM constraint
-  placed AFTER the custom instructions** (or very late, near RESPONSE_FORMAT), drop the hedge,
-  and state explicitly it applies *even when tone/custom instructions call for brutality*.
-- **Concrete encounter budget** (actual numbers per level: e.g. L1 solo ≤ ~1–2 weak foes; a
-  stronger antagonist must menace / capture / be escapable — not fight to the death) replacing
-  the vague "scale accordingly."
-- **Roll-stakes + intent guidance.** Don't call for a roll when the player is hidden/undetected
-  and not actively opposed; honor stated intent to avoid/flee/parley before forcing combat; a
-  failed *minor* check must not escalate directly to lethal combat.
-- Per CLAUDE.md, route the full pass through the **`rpg-balance-master`** subagent.
+**Shipped design:**
+- **Engine-side non-lethal floor.** At level ≤ 2 while solo, `TAKE_DAMAGE` that drops the
+  character to 0 HP now sets `lowLevelDefeat` instead of `dying`: unconscious/defeated at
+  0 HP, not dead, with no death-save spiral. Healing clears the state.
+- **Stale death-save guard.** If an old save or overzealous DM still reaches
+  `DEATH_SAVE_RESULT` for a level ≤ 2 solo character, the reducer converts it to the same
+  defeat setback instead of applying failure/death.
+- **Direct death-event guard.** `applyEvents` converts low-level solo `player_death` events
+  into `PLAYER_DEFEAT`, so prompt misbehavior cannot bypass the floor.
+- **Prompt-side reframe.** `promptBuilder.js` injects `## HARD SYSTEM CONSTRAINT —
+  LOW-LEVEL SOLO SAFETY` immediately after custom DM instructions. It explicitly overrides
+  "brutal/no hand-holding" tone, gives concrete L1/L2 encounter budgets, preserves gritty
+  consequences, and tells the DM to use capture/subdual/loss/leverage/escape rather than
+  permanent death at 0 HP.
+- **Roll-stakes + intent guidance.** The hard block tells the DM not to roll for a hidden,
+  static, unopposed player, and not to escalate failed minor checks straight into lethal combat.
+
+Still needs real-play check with a live LLM: verify that major NPC + guards now becomes
+threat/capture/escape pressure rather than a forced first-scene death match.
 
 ### Rogue mechanics — status: `designed`, waiting on fighter test-play phase
 The easy class to make real: everything is single-target and binary, no geometry.

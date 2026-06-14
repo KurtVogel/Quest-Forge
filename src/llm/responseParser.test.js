@@ -3,8 +3,8 @@
  * failure mode this codebase has had to survive: unfenced JSON, malformed
  * JSON, prose roll requests, pre-narrated outcomes, insane numeric values.
  */
-import { describe, it, expect } from 'vitest';
-import { parseResponse, detectPreNarratedOutcome } from './responseParser.js';
+import { describe, it, expect, vi } from 'vitest';
+import { parseResponse, detectPreNarratedOutcome, applyEvents } from './responseParser.js';
 
 const fence = (obj) => '```json\n' + JSON.stringify(obj, null, 2) + '\n```';
 
@@ -119,5 +119,24 @@ describe('detectPreNarratedOutcome', () => {
 
     it('does not flag neutral narration', () => {
         expect(detectPreNarratedOutcome('The goblin eyes you warily, blade half-raised.')).toBe(false);
+    });
+});
+
+describe('applyEvents low-level safety', () => {
+    it('converts direct player_death into PLAYER_DEFEAT for a level-1 solo character', () => {
+        const { events } = parseResponse(fence({
+            player_death: { description: 'The captain orders the execution.' },
+        }));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({
+            character: { level: 1 },
+            party: [],
+        }));
+
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'PLAYER_DEFEAT',
+            payload: { description: 'The captain orders the execution.' },
+        });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'UPDATE_CHARACTER' }));
     });
 });

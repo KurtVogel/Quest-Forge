@@ -8,6 +8,16 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-14 · Level 1-2 solo defeat is non-lethal by engine rule.** A fresh solo hero should
+face danger and consequences, not routine campaign deletion in the first impossible fight.
+For level ≤ 2 with no companions, dropping to 0 HP or receiving a direct `player_death`
+event becomes `lowLevelDefeat`: capture, subdual, being left for dead, gear loss, leverage,
+rescue, or an escape opening. The DM prompt also gets a hard LOW-LEVEL SOLO SAFETY block
+immediately after custom instructions, with concrete encounter budgets and roll-stakes
+guidance. This deliberately does **not** trim enemies after `combat_start`; tracked foes still
+match narration 1:1. At higher levels, or once companions are present, normal death saves and
+death stakes remain.
+
 **2026-06-14 · Withhold ANY DM narration that still has pending rolls — not just the first.**
 The roll loop's invariant: a narration that requests dice is a "setup" the post-roll narration
 supersedes, so it's hidden (and its outcome mutations deferred via applyEvents `setupPhase`);
