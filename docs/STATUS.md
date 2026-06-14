@@ -15,6 +15,11 @@ _Last updated: 2026-06-14_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–14, 2026)
+- Removed procedural ambient audio (2026-06-14): the old `ambientAudio.js` Web Audio engine
+  auto-started a synthetic "wind" drone on location/combat changes (universally disliked).
+  Deleted the engine; `AmbientControls.jsx` is now a user-supplied **MP3 player** (pick your
+  own files, play/pause/next, volume) that NEVER plays without an explicit action. Tracks are
+  session-only (object URLs, not persisted across reload — see IDEAS for the optional fix).
 - Campaign premise as pinned canon (2026-06-14): a "Set the stage" field at adventure
   start (both new-hero and roster paths) captures the opening scenario. It's stored in
   `session.premise`, injected into the prompt as a never-pruned `## CAMPAIGN PREMISE`

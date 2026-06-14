@@ -70,6 +70,13 @@ attacks (they have weapon/ac/hp fields already) would make party play real.
 
 ## UX & Platform
 
+### Persist user music across reloads — status: `idea`, small
+The MP3 player (`AmbientControls.jsx`, shipped 2026-06-14) holds tracks as in-memory object
+URLs, so a reload clears them and the player must re-pick files. Optional fix: store the
+chosen audio blobs in IndexedDB (a `music` store via `persistence.js`) and rehydrate on
+mount. Weigh against state size — audio files are multi-MB. Only worth it if re-picking each
+session proves annoying in real use.
+
 ### PWA + mobile pass — status: `idea`, do before going public
 Manifest + service worker + Add-to-Home-Screen → fullscreen app icon on phone, instant cache
 loads. Pairs naturally with local-per-device autosaves. ~1 day. Do once, just before showing

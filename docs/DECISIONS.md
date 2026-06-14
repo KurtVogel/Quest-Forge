@@ -8,6 +8,13 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-14 · No procedural/auto audio — music is user-supplied MP3s only.** The original
+`ambientAudio.js` synthesized ambience with Web Audio oscillators and auto-started it on
+location/combat changes; the result (a "wind" drone) was unwanted and intrusive. Engine
+deleted; `AmbientControls.jsx` is now a plain player for the player's own audio files that
+only plays on explicit action. Don't reintroduce generated ambience or any autoplay. (Real
+sound-file ambience tied to scenes could be revisited later, but must be opt-in, never auto.)
+
 **2026-06-14 · The campaign premise is pinned canon, and the game opens with a DM scene —
 not a blank box.** The opening scenario the player authors at adventure start is stored in
 `session.premise` and injected as a never-pruned `## CAMPAIGN PREMISE` block (DM rule 8

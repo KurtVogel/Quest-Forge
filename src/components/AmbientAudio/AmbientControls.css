@@ -64,4 +64,19 @@
     letter-spacing: 0.04em;
     font-weight: 600;
     white-space: nowrap;
+    max-width: 9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ambient-label-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font-family: var(--font-body);
+}
+
+.ambient-label-btn:hover {
+    color: var(--text-secondary);
 }

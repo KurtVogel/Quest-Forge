@@ -46,13 +46,14 @@ src/
   engine/      dice.ts (crypto dice), rules.js (5e math: modifiers, AC, skills, getLevelBonus),
                currency.js, progression.js (XP / leveling / HP), characterUtils.js (character creation),
                characterVault.js (hero export/import + roster sanitizer), rollResolver.js,
-               worldJournal.js, vectorMemory.js (RAG), ambientAudio.js
+               worldJournal.js, vectorMemory.js (RAG)
   llm/         adapter.js (provider routing + model list), promptBuilder.js (system prompt),
                responseParser.js (event extraction), scribe.js (background extractor),
                providers/{gemini,openai,imageGen}.js, utils/jsonExtractor.js
   data/        classes.js, races.js, items.js, presets.js
   components/   Chat (orchestrator), Combat, CharacterSheet, Inventory, Quests, Journal,
-               Companions, DiceRoller, SceneArt, Settings, Layout, AmbientAudio
+               Companions, DiceRoller, SceneArt, Settings, Layout,
+               AmbientAudio (user-supplied MP3 player — no procedural/auto audio)
   config/      firebase.js (user-supplied config)
 ```
 
