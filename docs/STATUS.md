@@ -15,6 +15,11 @@ _Last updated: 2026-06-14_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–14, 2026)
+- XP curve now matches D&D 5e (2026-06-14): `progression.js` `getExperienceThreshold`
+  replaced the flat `level × 1000` curve (1000 XP, ~18-20 solo low-level kills, to reach
+  level 2) with the real 5e per-level increments derived from the PHB cumulative table
+  (300 for L1→2, 600 for L2→3, 1800 for L3→4, ... 50000 for L19→20, reused for 20+).
+  Tests: `npm test` 84 passing; `npm run build` passing.
 - Scene art gallery + lightbox close (2026-06-14): every generated scene image is now saved
   to a new IndexedDB `sceneGallery` store (capped at 30, oldest evicted) via
   `persistence.js` (`addGalleryImage` / `listGalleryImages` / `deleteGalleryImage`, DB
