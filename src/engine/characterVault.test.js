@@ -106,8 +106,8 @@ describe('sanitizeCharacter clamps and rebuilds', () => {
         expect(cheated.level).toBe(20);
         expect(cheated.gold).toBe(0);
         expect(cheated.silver).toBe(1_000_000);
-        // exp stays below the next-level threshold (level × 1000)
-        expect(cheated.exp).toBe(20 * 1000 - 1);
+        // exp stays below the next-level threshold (level 20+ reuses the final D&D 5e increment, 50000)
+        expect(cheated.exp).toBe(50000 - 1);
     });
 
     it('clamps maxHP to what the class could actually have rolled', () => {

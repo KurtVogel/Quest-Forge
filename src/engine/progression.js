@@ -3,8 +3,20 @@ import { rollDie } from './dice.ts';
 import { getModifier } from './rules.js';
 import { buildClassResources, getFeaturesForLevel } from './characterUtils.js';
 
+// XP needed to advance from each level to the next, derived from the D&D 5e
+// (PHB) cumulative XP-to-level table: 0, 300, 900, 2700, 6500, 14000, 23000,
+// 34000, 48000, 64000, 85000, 100000, 120000, 140000, 165000, 195000, 225000,
+// 265000, 305000, 355000 — each entry here is the difference between
+// consecutive cumulative values (index 0 = level 1 -> 2, ... index 18 =
+// level 19 -> 20). Level 20 is 5e's cap; level 20+ reuses the final value.
+const XP_THRESHOLDS = [
+    300, 600, 1800, 3800, 7500, 9000, 11000, 14000, 16000,
+    21000, 15000, 20000, 20000, 25000, 30000, 30000, 40000, 40000, 50000,
+];
+
 export function getExperienceThreshold(level) {
-    return Math.max(1, level) * 1000;
+    const idx = Math.max(1, level) - 1;
+    return XP_THRESHOLDS[idx] ?? XP_THRESHOLDS[XP_THRESHOLDS.length - 1];
 }
 
 function createSystemMessage(kind, content) {
