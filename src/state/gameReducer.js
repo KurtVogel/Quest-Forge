@@ -140,6 +140,7 @@ export const initialGameState = {
     settings: {
         llmProvider: 'gemini',
         apiKey: '',
+        imageApiKey: '', // xAI (Grok) key for scene-art image generation — separate from the chat key
         model: 'gemini-3.1-pro-preview',
         preset: 'classicFantasy',
         ruleset: 'simplified5e',

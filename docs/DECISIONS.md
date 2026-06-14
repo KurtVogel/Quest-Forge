@@ -8,6 +8,26 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-14 · Withhold ANY DM narration that still has pending rolls — not just the first.**
+The roll loop's invariant: a narration that requests dice is a "setup" the post-roll narration
+supersedes, so it's hidden (and its outcome mutations deferred via applyEvents `setupPhase`);
+only the final, roll-free narration is shown. `hideSetup` must therefore key on
+`requestedRolls > 0` alone. It previously also required the first-turn `originalPlayerMessage`,
+so chained rolls (failed check → enemy attack, multi-enemy rounds, triggered saves) left the
+intermediate setup visible and the player saw the beat twice. Do not re-couple this to "is it
+the player's first action" — chained follow-ups are setups too.
+
+**2026-06-14 · Scene art = xAI Grok Imagine, prompt composed by the Scribe.** Imagen via the
+Gemini API now requires billing (free-tier image gen disabled Dec 2025) and is less permissive
+than this game's adult/gritty tone needs, so image generation moved to **xAI** (`imageGen.js`,
+`grok-imagine-image-quality`) with its own `settings.imageApiKey` — separate from the DM/chat
+key, stripped from saves. The old prompt was built from RPG stat metadata (`level 1`, inventory
+packs) and the compressed journal summary; now the **Scribe composes the prompt on demand**
+(`composeScenePrompt`) from the DM's latest narrative + accumulated per-character/NPC `appearance`
+(captured by the Scribe each turn), so scenes are visual and characters stay consistent. Two
+keys by design: chat provider composes the prompt, xAI renders it. Pollinations stays as a free
+no-key fallback. Don't reintroduce metadata-built image prompts or route image gen back through Gemini.
+
 **2026-06-14 · No procedural/auto audio — music is user-supplied MP3s only.** The original
 `ambientAudio.js` synthesized ambience with Web Audio oscillators and auto-started it on
 location/combat changes; the result (a "wind" drone) was unwanted and intrusive. Engine

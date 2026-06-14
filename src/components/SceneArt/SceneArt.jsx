@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { generateSceneImage } from '../../llm/providers/imageGen.js';
+import { composeScenePrompt } from '../../llm/scribe.js';
 import './SceneArt.css';
 
 export default function SceneArt() {
@@ -10,43 +11,49 @@ export default function SceneArt() {
     const [isExpanded, setIsExpanded] = useState(false);
     const lastLocationRef = useRef(null);
 
-    const handleGenerateArt = () => {
+    const handleGenerateArt = async () => {
         const location = state.currentLocation;
         if (!location) return;
 
         setIsLoading(true);
+        try {
+            // The "current situation" is the DM's latest narrated moment — the richest
+            // visual text in the app. Fall back to the newest journal summary, then location.
+            const lastNarration = [...(state.messages || [])].reverse()
+                .find(m => m.role === 'assistant' && !m.hidden && m.content?.trim())?.content;
+            const lastJournal = state.journal?.length ? state.journal[state.journal.length - 1].summary : '';
+            let situation = (lastNarration || lastJournal || `The scene at ${location}.`).trim();
+            if (situation.length > 700) situation = situation.slice(0, 700) + '…';
 
-        // Build a rich description based on game state
-        let richDescription = `Location: ${location}. `;
+            const equippedSummary = (state.inventory || [])
+                .filter(i => i.equipped)
+                .map(i => i.name)
+                .filter(Boolean)
+                .join(', ');
 
-        if (state.character) {
-            const { name, race, level } = state.character;
-            const charClass = state.character.class || 'adventurer';
-            richDescription += `The scene features ${name}, a level ${level} ${race} ${charClass}. `;
+            // Scribe composes the prompt from the situation + known visual details.
+            const composed = await composeScenePrompt({
+                situation,
+                character: state.character ? { ...state.character, equippedSummary } : null,
+                npcs: state.npcs || [],
+                combat: state.combat,
+                currentLocation: location,
+                settings: state.settings,
+            });
 
-            const equippedItems = (state.inventory || []).filter(i => i.equipped).map(i => i.name || i.id);
-            if (equippedItems.length > 0) {
-                richDescription += `Equipped with: ${equippedItems.join(', ')}. `;
-            }
+            // Fallback prompt if the composer is unavailable (no chat key / call failed).
+            const prompt = composed || [
+                `Dark fantasy RPG scene at ${location}.`,
+                state.character && `Featuring ${state.character.name}, a ${state.character.race} ${state.character.class}${state.character.appearance ? `: ${state.character.appearance}` : ''}.`,
+                situation,
+                'dark fantasy digital painting, cinematic lighting, highly detailed',
+            ].filter(Boolean).join(' ');
+
+            const imageUrl = await generateSceneImage(prompt, state.settings.imageApiKey);
+            if (imageUrl) setCurrentImage(imageUrl);
+        } finally {
+            setIsLoading(false);
         }
-
-        if (state.combat?.active && state.combat.enemies?.length > 0) {
-            const enemyNames = state.combat.enemies.map(e => e.name).join(', ');
-            richDescription += `Action shot! High-tension combat against: ${enemyNames}. `;
-        } else if (state.journal?.length > 0) {
-            const lastEntry = state.journal[state.journal.length - 1];
-            let summary = lastEntry.summary || lastEntry.text || 'Exploring';
-            if (summary.length > 150) summary = summary.substring(0, 150) + '...';
-            richDescription += `Current situation: ${summary}. `;
-        }
-
-        generateSceneImage(richDescription, state.settings.apiKey)
-            .then(imageUrl => {
-                if (imageUrl) {
-                    setCurrentImage(imageUrl);
-                }
-            })
-            .finally(() => setIsLoading(false));
     };
 
     // Clear art if we move to a new vastly different area

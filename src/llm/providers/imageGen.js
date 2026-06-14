@@ -1,91 +1,101 @@
 /**
- * Image generation using Gemini's Imagen API for scene art.
- * Falls back gracefully if image generation is not available.
+ * Scene-art image generation via xAI (Grok Imagine).
+ *
+ * The prompt is composed upstream by the Scribe (see scribe.js `composeScenePrompt`),
+ * which assembles the current situation plus the known visual details of the
+ * characters/things in frame. This module just renders that finished prompt and
+ * caches the result. If no xAI key is set or the request fails, it falls back to a
+ * free, no-auth provider (lower quality) so scene art still appears.
  */
 
 const IMAGE_CACHE = new Map();
 const IMAGE_CACHE_MAX = 10;
 
+const XAI_IMAGE_ENDPOINT = 'https://api.x.ai/v1/images/generations';
+// Recommended model as of 2026 (grok-imagine-image-pro is deprecated May 2026).
+const XAI_IMAGE_MODEL = 'grok-imagine-image-quality';
+
 /**
  * Insert or update a cache entry with LRU eviction (max IMAGE_CACHE_MAX entries).
- * Deletes the oldest entry when the cache would exceed the limit.
  */
 function cacheSet(key, value) {
-    // Re-insert to bump to "newest" position
     if (IMAGE_CACHE.has(key)) {
         IMAGE_CACHE.delete(key);
     } else if (IMAGE_CACHE.size >= IMAGE_CACHE_MAX) {
-        // Map preserves insertion order; first key is oldest
         IMAGE_CACHE.delete(IMAGE_CACHE.keys().next().value);
     }
     IMAGE_CACHE.set(key, value);
 }
 
-/**
- * Generate a scene image from a description using Gemini Imagen.
- * @param {string} description - Scene description to visualize
- * @param {string} apiKey - Gemini API key
- * @returns {Promise<string|null>} Data URL of generated image, or null on failure
- */
-export async function generateSceneImage(description, apiKey) {
-    if (!description) return null;
+/** Guess the image MIME from the leading bytes of a base64 payload. */
+function mimeFromBase64(b64) {
+    if (b64.startsWith('iVBOR')) return 'image/png';
+    if (b64.startsWith('R0lGOD')) return 'image/gif';
+    if (b64.startsWith('UklGR')) return 'image/webp';
+    return 'image/jpeg'; // xAI returns JPEG by default
+}
 
-    // Check cache
-    const cacheKey = description.toLowerCase().trim();
+/**
+ * Render a finished image prompt to a displayable image URL.
+ * @param {string} prompt - The fully-composed visual prompt
+ * @param {string} imageApiKey - xAI (Grok) API key
+ * @returns {Promise<string|null>} Data URL (xAI) or image URL (fallback), or null
+ */
+export async function generateSceneImage(prompt, imageApiKey) {
+    if (!prompt) return null;
+
+    const cacheKey = prompt.toLowerCase().trim();
     if (IMAGE_CACHE.has(cacheKey)) {
         return IMAGE_CACHE.get(cacheKey);
     }
 
-    if (apiKey) {
+    if (imageApiKey) {
         try {
-            // Use Gemini's image generation model (Imagen 4)
-            const response = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-                    body: JSON.stringify({
-                        instances: [{
-                            prompt: `Fantasy RPG scene illustration, high quality digital art, atmospheric lighting: ${description}`,
-                        }],
-                        parameters: {
-                            sampleCount: 1,
-                            aspectRatio: '16:9',
-                            personGeneration: 'ALLOW_ADULT', // Permits character generation which was previously blocked
-                        },
-                    }),
-                }
-            );
+            const response = await fetch(XAI_IMAGE_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${imageApiKey}`,
+                },
+                body: JSON.stringify({
+                    model: XAI_IMAGE_MODEL,
+                    prompt,
+                    n: 1,
+                    aspect_ratio: '16:9',
+                    resolution: '1k',
+                    response_format: 'b64_json',
+                }),
+            });
 
             if (response.ok) {
                 const data = await response.json();
-                const imageB64 = data?.predictions?.[0]?.bytesBase64Encoded;
-                if (imageB64) {
-                    const dataUrl = `data:image/png;base64,${imageB64}`;
+                const b64 = data?.data?.[0]?.b64_json;
+                if (b64) {
+                    const dataUrl = `data:${mimeFromBase64(b64)};base64,${b64}`;
                     cacheSet(cacheKey, dataUrl);
                     return dataUrl;
                 }
+                // OK status but no image — most likely filtered by content moderation.
+                console.log('[ImageGen] xAI returned no image (possibly filtered by moderation).');
             } else {
-                const errText = await response.text();
-                // Instead of console.warn, we can log it gracefully so it doesn't look like a crash
-                console.log(`[ImageGen] Gemini API fallback triggered (Status ${response.status})`);
+                const errText = await response.text().catch(() => '');
+                console.log(`[ImageGen] xAI image request failed (Status ${response.status}). ${errText.slice(0, 200)}`);
             }
         } catch (e) {
-            console.log('[ImageGen] Scene art generation with Gemini failed, falling back:', e.message);
+            console.log('[ImageGen] xAI image generation failed, falling back:', e.message);
         }
     }
 
+    // Free fallback (no key required). Lower quality — used only when xAI is unavailable.
     try {
-        console.log('Attempting fallback to Pollinations AI...');
         const seed = Math.floor(Math.random() * 100000);
-        const safePrompt = encodeURIComponent(`Fantasy RPG scene illustration, high quality digital art, atmospheric lighting: ${description}`);
-        const fallbackUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=800&height=450&nologo=true&seed=${seed}`;
-
-        // Return the URL directly to be used as <img src="..."> to avoid CORS blocks on fetch
+        const safePrompt = encodeURIComponent(prompt);
+        const fallbackUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=1280&height=720&nologo=true&seed=${seed}`;
+        // Returned as an <img src> URL directly to avoid CORS issues on fetch.
         cacheSet(cacheKey, fallbackUrl);
         return fallbackUrl;
     } catch (e) {
-        console.warn('Fallback failed:', e);
+        console.warn('[ImageGen] Fallback failed:', e);
     }
 
     return null;

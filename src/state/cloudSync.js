@@ -49,6 +49,7 @@ export async function saveGameToCloud(uid, slotId, gameState) {
             settings: {
                 ...gameState.settings,
                 apiKey: undefined,
+                imageApiKey: undefined,
                 firebaseConfig: undefined,
             },
         };

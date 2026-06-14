@@ -15,6 +15,22 @@ _Last updated: 2026-06-14_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–14, 2026)
+- Game-loop fix: chained-roll duplicate narration (2026-06-14). The "withhold the setup,
+  narrate once after the dice" mechanism only worked on the player's FIRST roll — `hideSetup`
+  in ChatPanel keyed off `originalPlayerMessage`, which is undefined on every roll follow-up.
+  So any CHAINED roll (failed check → enemy attacks, multi-enemy rounds, triggered saves)
+  showed the beat twice: the intermediate narration that requested the next roll, then the
+  outcome narration retelling it. Fixed by withholding ANY narration with pending rolls
+  (`hideSetup = requestedRolls > 0`). Also corrects applyEvents `setupPhase` deferral for
+  chained rolls (no double-applied state). NEEDS REAL-PLAY CHECK: confirm in a live combat
+  chain (no LLM in preview).
+- Scene art switched to xAI Grok Imagine + Scribe-composed prompts (2026-06-14): image gen
+  now uses xAI (`grok-imagine-image-quality`) via a separate `settings.imageApiKey` (Settings
+  → AI Provider; stripped from saves), chosen for quality + permissive adult/gritty content.
+  The Scribe now captures character/NPC `appearance` each turn and, on "Visualize", composes
+  the image prompt from the current situation + accumulated visual details (`composeScenePrompt`)
+  rather than stat metadata. Pollinations remains a free fallback (now 720p). NEEDS REAL-PLAY
+  CHECK: couldn't exercise live xAI/Gemini calls in preview (no keys) — verify with real keys.
 - Removed procedural ambient audio (2026-06-14): the old `ambientAudio.js` Web Audio engine
   auto-started a synthetic "wind" drone on location/combat changes (universally disliked).
   Deleted the engine; `AmbientControls.jsx` is now a user-supplied **MP3 player** (pick your

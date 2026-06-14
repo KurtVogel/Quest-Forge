@@ -61,8 +61,15 @@ The real work is slots + curated spell lists (~15 spells per caster in `src/data
 tracked like `classResources`. DM emits `spell_cast`; engine validates and decrements.
 
 ### Character portraits — status: `idea`, easy win
-`imageGen.js` already does scene art. One portrait at creation + per major NPC.
-Vesa liked this. Slot in as a palate cleanser between bigger slices.
+`imageGen.js` already does scene art (xAI Grok Imagine). One portrait at creation + per major
+NPC — and now that the Scribe captures per-character `appearance`, a portrait can reuse that
+visual record for consistency. Vesa liked this. Slot in as a palate cleanser between bigger slices.
+
+### Scene-art polish follow-ups — status: `idea`, small
+Now that scene art runs on xAI + Scribe-composed prompts (shipped 2026-06-14): a 1k/2k
+resolution toggle in Settings; a "regenerate" button (new seed) on a scene; optionally persist
+generated scene images to a gallery/journal. Also consider surfacing the moderation-filtered
+case to the player (currently it just silently falls back).
 
 ### Companion combat depth — status: `idea`
 Companions roll initiative but their actions are mostly DM-narrated. Engine-owned companion
