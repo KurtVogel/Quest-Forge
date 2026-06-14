@@ -14,7 +14,7 @@ import { formatCurrency } from '../engine/currency.js';
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, retrievedMemories }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, retrievedMemories, premise }) {
     const parts = [];
 
     // Core DM instructions
@@ -36,6 +36,13 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     // User's custom DM instructions
     if (customSystemPrompt && customSystemPrompt.trim()) {
         parts.push(`\n## CUSTOM DM INSTRUCTIONS (from the player)\n${customSystemPrompt.trim()}`);
+    }
+
+    // Campaign premise — the player's opening scenario. Foundational canon set at
+    // adventure start, pinned verbatim and NEVER compressed or pruned (unlike the
+    // journal, which summarizes away setup that isn't an in-scene event).
+    if (premise && premise.trim()) {
+        parts.push(buildPremiseBlock(premise.trim()));
     }
 
     // Character info
@@ -122,6 +129,8 @@ Your role is to create an immersive, reactive, and fair narrative experience.
 6. **BE THE WORLD, NOT THE PLAYER.** Describe the world, NPCs, and events. Never dictate what the player character thinks, feels, or does. Ask what they want to do.
 
 7. **HONOR THE WORLD FACTS.** The WORLD FACTS section contains canonical truths established during play. You MUST treat these as absolute — do not contradict them. If a character is listed as dead, they are dead. If a place burned down, it burned down.
+
+8. **HONOR THE CAMPAIGN PREMISE.** If a CAMPAIGN PREMISE section is present, it is the player's authored foundation for this story — the setting, the character's situation, and the proper nouns (places, names, factions) they brought to the table. Treat every detail in it as permanent canon, exactly as binding as the WORLD FACTS. Never forget, rename, or contradict a place or name the premise establishes (e.g. a home city the character was exiled from remains real for the whole campaign). Weave it into the world as the story unfolds.
 
 ## GAME LOOP — PACING (VERY IMPORTANT)
 
@@ -444,6 +453,10 @@ function buildRecentRollsBlock(rolls) {
 }
 
 /** Max world facts to inject directly into the prompt. Older facts are still in RAG. */
+function buildPremiseBlock(premise) {
+    return `## CAMPAIGN PREMISE (the player's authored foundation — permanent canon, never contradict)\n${premise}`;
+}
+
 const MAX_PROMPT_WORLD_FACTS = 15;
 
 function buildWorldFactsBlock(worldFacts) {

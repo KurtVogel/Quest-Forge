@@ -29,6 +29,21 @@ with escalation steps and a "grim portent" (what happens if nobody interferes).
 ### Campaign milestone XP tied to front/act completion — status: `idea`
 Milestone XP on resolving a front beat, complementing per-combat XP.
 
+### Durable player-authored canon — status: premise `shipped` (2026-06-14), backstop `idea`
+The memory pipeline faithfully chronicles *what the DM establishes during play* but had no
+guaranteed path for *what the player asserts as canon* (premise, backstory, the proper nouns
+they bring). Real bug (Vesa, 2026-06-13): a starting city "Tanelorn" named only in the
+opening player message was forgotten — the journal summarizer *saw* it but compressed it out
+under "Focus on what HAPPENED, not what might happen", and the player's raw message is never
+embedded into RAG, so it fell through every durable tier once the 20-message window slid past.
+- **Shipped:** `session.premise` captured at adventure start, pinned as a never-pruned
+  `## CAMPAIGN PREMISE` block, DM auto-opens the scene from it. See DECISIONS.md.
+- **Backstop still open (`idea`):** also embed the *player's* message into RAG, not just the
+  DM narrative (one line near [ChatPanel.jsx] addMemory call ~L294). Cheap; makes any proper
+  noun the player introduces mid-campaign retrievable even if no extractor promotes it to a fact.
+- **Further (`idea`):** widen Scribe/journal extraction to capture player-introduced lore
+  (places/names/factions the player names), not only DM-established outcomes.
+
 ## Gameplay & Mechanics
 
 ### Rogue mechanics — status: `designed`, waiting on fighter test-play phase

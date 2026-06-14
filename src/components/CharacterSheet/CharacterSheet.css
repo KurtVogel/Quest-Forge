@@ -360,6 +360,15 @@
     border-color: var(--gold);
 }
 
+.creation-premise {
+    margin-top: 0.75rem;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    resize: vertical;
+    min-height: 6rem;
+    font-family: var(--font-body);
+}
+
 .creation-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

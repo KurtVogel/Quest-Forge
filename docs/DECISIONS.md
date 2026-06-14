@@ -8,6 +8,19 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-14 · The campaign premise is pinned canon, and the game opens with a DM scene —
+not a blank box.** The opening scenario the player authors at adventure start is stored in
+`session.premise` and injected as a never-pruned `## CAMPAIGN PREMISE` block (DM rule 8
+treats it as binding as world facts). This closes a real gap: the journal summarizer keeps
+*what happened in-scene* and compresses away player-asserted setup, and the player's raw
+message is never embedded into RAG — so player-authored canon (a home city, a backstory)
+could be forgotten once the message window slid past. Pinning the premise also fixes the
+weakest UX moment: instead of an empty "type something to begin" box, the DM auto-opens the
+first scene from the premise (ChatPanel priming, extended to fresh games). Premise is
+optional — leave it blank and the classic manual-start flow remains. Capture is a dedicated
+field (not auto-grabbing the first chat message): explicit, and the player knows exactly
+what's permanent. Importing player canon into RAG is a separate, still-open backstop (IDEAS.md).
+
 **2026-06-12 · Roster entries are heroes, not campaigns — and imports are rebuilt, not
 trusted.** The character roster (`characterVault.js` + IndexedDB `characters` store)
 snapshots `character` + `inventory` only; campaigns stay the save system's job. Import

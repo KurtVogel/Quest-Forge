@@ -41,27 +41,37 @@ export default function ChatPanel() {
     }, [state.messages, streamingMessage]);
 
     /**
-     * Session-start priming: when a game is loaded (has a character + journal/world facts
-     * but zero visible messages), auto-trigger the DM to set the scene.
-     * This fires once per component mount.
+     * Session-start priming: auto-trigger the DM to set the opening scene, so play never
+     * begins on a blank "type something to start" box. Fires once per mount, when the DM
+     * hasn't spoken yet, in two cases:
+     *   - Fresh campaign: the player authored a premise at creation → open the scene from it.
+     *   - Resumed campaign: there's prior history (journal/world facts/NPCs) → recap + set scene.
      */
     useEffect(() => {
         const s = stateRef.current;
         const hasCharacter = !!s.character;
-        const hasNoMessages = s.messages.filter(m => !m.hidden).length === 0;
+        // Prime while the DM has yet to narrate — a premise intro is a system message, so we
+        // key off the absence of an assistant message rather than an empty transcript.
+        const dmHasNotSpoken = s.messages.filter(m => !m.hidden && m.role === 'assistant').length === 0;
         const hasHistory = (s.journal?.length > 0) || (s.worldFacts?.length > 0) || (s.npcs?.length > 0);
+        const hasPremise = !!s.session?.premise?.trim();
         const hasApiKey = !!s.settings.apiKey;
 
-        if (hasCharacter && hasNoMessages && hasHistory && hasApiKey && !hasPrimedRef.current) {
+        if (hasCharacter && dmHasNotSpoken && hasApiKey && (hasHistory || hasPremise) && !hasPrimedRef.current) {
             hasPrimedRef.current = true;
             setIsLoading(true);
 
-            // Build a context-aware priming message for the DM
-            const lastJournal = s.journal?.slice(-1)[0];
-            const lastSummary = lastJournal?.summary || '';
-            const location = s.currentLocation || 'your last known location';
-
-            const primingMessage = `[SYSTEM: The player has just resumed this campaign. Do NOT mention loading or saving. Instead, briefly recap what happened last session in 1-2 sentences, then set the scene for where the player finds themselves now in ${location}. Reference specific established facts, NPCs, and threats from the world state. End with "What do you do?" as usual.]${lastSummary ? ` Last session summary for reference: "${lastSummary}"` : ''}`;
+            let primingMessage;
+            if (hasHistory) {
+                // Resumed campaign — recap last session and set the current scene.
+                const lastSummary = s.journal?.slice(-1)[0]?.summary || '';
+                const location = s.currentLocation || 'your last known location';
+                primingMessage = `[SYSTEM: The player has just resumed this campaign. Do NOT mention loading or saving. Instead, briefly recap what happened last session in 1-2 sentences, then set the scene for where the player finds themselves now in ${location}. Reference specific established facts, NPCs, and threats from the world state. End with "What do you do?" as usual.]${lastSummary ? ` Last session summary for reference: "${lastSummary}"` : ''}`;
+            } else {
+                // Brand-new campaign — open the very first scene from the authored premise
+                // (already pinned in the system prompt as CAMPAIGN PREMISE).
+                primingMessage = `[SYSTEM: This is the opening of a brand-new campaign. Open the very first scene, drawing on the CAMPAIGN PREMISE in your context. Establish the setting and the character's immediate situation vividly, honoring every place, name, and detail in the premise as canon. Do NOT mention game mechanics, saving, or that a game is starting. End with "What do you do?" as usual.]`;
+            }
 
             sendToLLM(primingMessage, null)
                 .catch(e => {
@@ -123,6 +133,7 @@ export default function ChatPanel() {
             combat: s.combat,
             worldFacts: s.worldFacts || [],
             retrievedMemories,
+            premise: s.session?.premise,
         });
     };
 

@@ -20,6 +20,7 @@ export default function CharacterCreation() {
     const [statAssignment, setStatAssignment] = useState({});
     const [chosenSkills, setChosenSkills] = useState([]);
     const [adventureName, setAdventureName] = useState('');
+    const [premise, setPremise] = useState('');
     const [roster, setRoster] = useState([]);
     const [selectedHeroId, setSelectedHeroId] = useState(null);
     const [rosterError, setRosterError] = useState(null);
@@ -76,25 +77,32 @@ export default function CharacterCreation() {
         setChosenSkills([]);
     };
 
-    const beginAdventure = (character, inventory, welcomeContent) => {
+    const beginAdventure = (character, inventory) => {
         dispatch({ type: 'START_CHARACTER', payload: { character, inventory } });
 
-        // Create session
+        // Create session — the premise is pinned here as permanent campaign canon.
         const sessionName = adventureName.trim() || `${character.name}'s Adventure`;
+        const trimmedPremise = premise.trim();
         dispatch({
             type: 'UPDATE_SESSION',
             payload: {
                 id: `session-${Date.now()}`,
                 name: sessionName,
+                premise: trimmedPremise || undefined,
                 createdAt: Date.now(),
                 lastPlayedAt: Date.now(),
             },
         });
 
-        // Welcome message
+        // Opening message. With a premise, show it as the campaign's first entry — the DM
+        // then auto-opens the scene from it (see ChatPanel priming). Without one, fall back
+        // to the classic "send a message to begin" prompt.
+        const openingContent = trimmedPremise
+            ? `**Your tale begins.**\n\n${trimmedPremise}`
+            : `**${character.name}** the **${RACES[character.race]?.name} ${CLASSES[character.class]?.name}** has entered the world. Send a message to begin your adventure!`;
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: { role: 'system', content: welcomeContent },
+            payload: { role: 'system', content: openingContent },
         });
 
         dispatch({ type: 'SET_UI', payload: { isCharacterCreationOpen: false } });
@@ -108,11 +116,7 @@ export default function CharacterCreation() {
 
         const character = createCharacter(name, race, charClass, abilityScores, chosenSkills);
         const inventory = createStartingInventory(charClass);
-        beginAdventure(
-            character,
-            inventory,
-            `**${name}** the **${RACES[race]?.name} ${CLASSES[charClass]?.name}** has entered the world. Send a message to begin your adventure!`
-        );
+        beginAdventure(character, inventory);
     };
 
     // === Roster (use an existing hero) ===
@@ -128,11 +132,7 @@ export default function CharacterCreation() {
             // "Save to Roster" updates this hero's entry instead of duplicating it.
             const character = { ...sanitizeCharacter(selectedHero.character), id: selectedHero.id };
             const inventory = sanitizeInventory(selectedHero.inventory);
-            beginAdventure(
-                character,
-                inventory,
-                `**${character.name}** the **${RACES[character.race]?.name} ${CLASSES[character.class]?.name}** (Level ${character.level}) returns to the world. Send a message to begin your adventure!`
-            );
+            beginAdventure(character, inventory);
         } catch (err) {
             setRosterError(err.message);
         }
@@ -223,7 +223,7 @@ export default function CharacterCreation() {
 
                     {selectedHero && (
                         <div className="creation-step roster-adventure">
-                            <h3>Name your adventure</h3>
+                            <h3>Set the stage</h3>
                             <input
                                 type="text"
                                 className="creation-input"
@@ -231,6 +231,14 @@ export default function CharacterCreation() {
                                 onChange={(e) => setAdventureName(e.target.value)}
                                 placeholder={`${selectedHero.name}'s Adventure`}
                                 maxLength={60}
+                            />
+                            <textarea
+                                className="creation-input creation-premise"
+                                value={premise}
+                                onChange={(e) => setPremise(e.target.value)}
+                                placeholder={`Where does ${selectedHero.name}'s new tale open, and what's at stake? Name the places and people that matter — the DM opens the scene from this, and it stays canon for the whole campaign.`}
+                                rows={5}
+                                maxLength={2000}
                             />
                         </div>
                     )}
@@ -424,8 +432,12 @@ export default function CharacterCreation() {
 
                     {currentStep === 'adventure' && (
                         <div className="creation-step">
-                            <h3>Name your adventure</h3>
-                            <p className="creation-hint">Give your tale a title — or leave it blank to use the default.</p>
+                            <h3>Set the stage</h3>
+                            <p className="creation-hint">
+                                Name your tale, then describe the opening situation — where {name || 'your hero'} is,
+                                what's happening, and any places, people, or history that matter. The DM opens the
+                                very first scene from this, and it stays permanent canon for the whole campaign.
+                            </p>
                             <input
                                 type="text"
                                 className="creation-input"
@@ -434,6 +446,14 @@ export default function CharacterCreation() {
                                 placeholder={`${name}'s Adventure`}
                                 autoFocus
                                 maxLength={60}
+                            />
+                            <textarea
+                                className="creation-input creation-premise"
+                                value={premise}
+                                onChange={(e) => setPremise(e.target.value)}
+                                placeholder={`Exiled from the city of Tanelorn, ${name || 'your hero'} arrives at the rain-soaked frontier town of Jewelglade with a borrowed sword and a grudge. The town has been losing people to the woods...`}
+                                rows={5}
+                                maxLength={2000}
                             />
                         </div>
                     )}

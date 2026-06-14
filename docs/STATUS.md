@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-14_
 
 ## Current focus
 - **Fighter-only test-play phase**: Vesa is play-testing the new combat-stakes mechanics
@@ -14,7 +14,16 @@ _Last updated: 2026-06-12_
 - **Next major feature: campaign "fronts"** (hidden world clocks) — design doc first, then
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
-## Recently shipped (June 10–12, 2026)
+## Recently shipped (June 10–14, 2026)
+- Campaign premise as pinned canon (2026-06-14): a "Set the stage" field at adventure
+  start (both new-hero and roster paths) captures the opening scenario. It's stored in
+  `session.premise`, injected into the prompt as a never-pruned `## CAMPAIGN PREMISE`
+  block (DM rule 8 honors it like world facts), and the DM now **auto-opens the first
+  scene from it** instead of the player facing a blank "type something" box. Fixes the
+  class of bug where player-authored canon (e.g. the exile city Tanelorn) was forgotten
+  because the journal summarizer compresses away setup that isn't an in-scene event.
+  NOT YET DONE / needs real-play check: confirm the DM auto-open fires well with a live
+  Gemini key (couldn't test the actual LLM call in preview).
 - Character roster + export/import (2026-06-12): local hero list (IndexedDB `characters`
   store), versioned JSON hero files, "Use an Existing Hero" fork in the creation wizard,
   Save to Roster / Export File on the character sheet. Imports are sanitized — derived
