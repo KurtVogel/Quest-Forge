@@ -4,10 +4,14 @@
 
 const SETTINGS_KEY = 'rpg-client-settings';
 const DB_NAME = 'rpg-client-saves';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'saves';
 const ROSTER_STORE = 'characters';
+const GALLERY_STORE = 'sceneGallery';
 const AUTOSAVE_SLOT = '__autosave__';
+
+/** Max scene images kept in the gallery (data URLs are ~0.5-2MB each). */
+const GALLERY_MAX = 30;
 
 // === LocalStorage (Settings) ===
 
@@ -45,6 +49,9 @@ function openDB() {
             }
             if (!db.objectStoreNames.contains(ROSTER_STORE)) {
                 db.createObjectStore(ROSTER_STORE, { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains(GALLERY_STORE)) {
+                db.createObjectStore(GALLERY_STORE, { keyPath: 'id', autoIncrement: true });
             }
         };
     });
@@ -277,4 +284,68 @@ export async function loadAutoSave() {
         console.warn('Failed to load auto-save:', e);
         return null;
     }
+}
+
+// === Scene gallery (generated images, across all campaigns) ===
+
+/**
+ * Save a generated scene image to the gallery. Evicts the oldest entries
+ * beyond GALLERY_MAX (ids auto-increment, so the lowest ids are the oldest)
+ * so storage doesn't grow unbounded with image data URLs.
+ */
+export async function addGalleryImage({ dataUrl, location, prompt, sessionName }) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(GALLERY_STORE, 'readwrite');
+        const store = tx.objectStore(GALLERY_STORE);
+        store.add({
+            dataUrl,
+            location: location || null,
+            prompt: prompt || '',
+            sessionName: sessionName || '',
+            createdAt: Date.now(),
+        });
+
+        const keysRequest = store.getAllKeys();
+        keysRequest.onsuccess = () => {
+            const keys = keysRequest.result.sort((a, b) => a - b);
+            const excess = keys.length - GALLERY_MAX;
+            for (let i = 0; i < excess; i++) store.delete(keys[i]);
+        };
+
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onabort = () => { db.close(); reject(tx.error); };
+    });
+}
+
+/**
+ * List all saved gallery images, newest first.
+ */
+export async function listGalleryImages() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(GALLERY_STORE, 'readonly');
+        const store = tx.objectStore(GALLERY_STORE);
+        const request = store.getAll();
+        request.onsuccess = () => {
+            resolve(request.result.sort((a, b) => b.createdAt - a.createdAt));
+        };
+        request.onerror = () => reject(request.error);
+        tx.oncomplete = () => db.close();
+    });
+}
+
+/**
+ * Delete a single gallery image by id.
+ */
+export async function deleteGalleryImage(id) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(GALLERY_STORE, 'readwrite');
+        const store = tx.objectStore(GALLERY_STORE);
+        const request = store.delete(id);
+        request.onerror = () => reject(request.error);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+    });
 }

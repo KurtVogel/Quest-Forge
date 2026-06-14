@@ -15,6 +15,14 @@ _Last updated: 2026-06-14_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–14, 2026)
+- Scene art gallery + lightbox close (2026-06-14): every generated scene image is now saved
+  to a new IndexedDB `sceneGallery` store (capped at 30, oldest evicted) via
+  `persistence.js` (`addGalleryImage` / `listGalleryImages` / `deleteGalleryImage`, DB
+  bumped to v3). Browsable from a new "Gallery" tab in the World Journal — grid of
+  thumbnails, click to open a lightbox with location/timestamp/delete. The SceneArt
+  lightbox also gained an explicit close (✕) button and Escape-to-close (mobile
+  discoverability fix). Gallery is global, not yet per-campaign. Tests: `npm test` 84
+  passing; `npm run build` passing; verified live in dev server (Playwright).
 - Default custom DM prompt refocused (2026-06-14): replaced the old sex-forward default
   with Vesa's RPG-first adult low-fantasy prompt. It now leads with gritty tone, strict
   player agency, roll discipline, and "sexualize only when appropriate, not by default";

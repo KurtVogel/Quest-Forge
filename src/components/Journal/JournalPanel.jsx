@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
+import { listGalleryImages, deleteGalleryImage } from '../../state/persistence.js';
 import './Journal.css';
 
 const DISPOSITION_MARK = {
@@ -37,11 +38,18 @@ export default function JournalPanel({ isOpen, onClose }) {
                     >
                         NPCs ({state.npcs?.length || 0})
                     </button>
+                    <button
+                        className={`journal-tab ${tab === 'gallery' ? 'active' : ''}`}
+                        onClick={() => setTab('gallery')}
+                    >
+                        Gallery
+                    </button>
                 </div>
 
                 <div className="journal-body">
                     {tab === 'journal' && <JournalTab journal={state.journal || []} location={state.currentLocation} />}
                     {tab === 'npcs' && <NPCTab npcs={state.npcs || []} />}
+                    {tab === 'gallery' && <GalleryTab />}
                 </div>
             </div>
         </div>
@@ -95,6 +103,90 @@ function JournalTab({ journal, location }) {
                 </div>
             ))}
         </div>
+    );
+}
+
+function GalleryTab() {
+    const [images, setImages] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [selected, setSelected] = useState(null);
+
+    useEffect(() => {
+        listGalleryImages()
+            .then(setImages)
+            .finally(() => setLoading(false));
+    }, []);
+
+    useEffect(() => {
+        if (!selected) return;
+        const handleKey = (e) => { if (e.key === 'Escape') setSelected(null); };
+        window.addEventListener('keydown', handleKey);
+        return () => window.removeEventListener('keydown', handleKey);
+    }, [selected]);
+
+    const handleDelete = async (id, e) => {
+        e.stopPropagation();
+        await deleteGalleryImage(id);
+        setImages(imgs => imgs.filter(img => img.id !== id));
+        setSelected(sel => (sel?.id === id ? null : sel));
+    };
+
+    if (loading) {
+        return <div className="journal-empty"><p>Loading gallery…</p></div>;
+    }
+
+    if (images.length === 0) {
+        return (
+            <div className="journal-empty">
+                <p>No scenes saved yet.</p>
+                <p className="journal-hint">Generate scene art with "Visualize" above the chat — it's saved here automatically.</p>
+            </div>
+        );
+    }
+
+    return (
+        <>
+            <div className="gallery-grid">
+                {images.map(img => (
+                    <div key={img.id} className="gallery-thumb" onClick={() => setSelected(img)}>
+                        <img src={img.dataUrl} alt={img.location || 'Scene'} loading="lazy" />
+                        <div className="gallery-thumb-caption">{img.location || 'Unknown'}</div>
+                        <button
+                            className="gallery-thumb-delete"
+                            onClick={(e) => handleDelete(img.id, e)}
+                            aria-label="Delete image"
+                        >
+                            ✕
+                        </button>
+                    </div>
+                ))}
+            </div>
+
+            {selected && (
+                <div className="gallery-lightbox" onClick={() => setSelected(null)}>
+                    <button
+                        className="gallery-lightbox-close"
+                        onClick={(e) => { e.stopPropagation(); setSelected(null); }}
+                        aria-label="Close"
+                    >
+                        ✕
+                    </button>
+                    <img
+                        src={selected.dataUrl}
+                        alt={selected.location || 'Scene'}
+                        className="gallery-lightbox-img"
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                    <div className="gallery-lightbox-caption">
+                        <span>{selected.location || 'Unknown location'}</span>
+                        <span className="gallery-lightbox-date">{new Date(selected.createdAt).toLocaleString()}</span>
+                        <button className="gallery-lightbox-delete" onClick={(e) => handleDelete(selected.id, e)}>
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            )}
+        </>
     );
 }
 

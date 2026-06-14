@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { generateSceneImage } from '../../llm/providers/imageGen.js';
 import { composeScenePrompt } from '../../llm/scribe.js';
+import { addGalleryImage } from '../../state/persistence.js';
 import './SceneArt.css';
 
 export default function SceneArt() {
@@ -50,7 +51,10 @@ export default function SceneArt() {
             ].filter(Boolean).join(' ');
 
             const imageUrl = await generateSceneImage(prompt, state.settings.imageApiKey);
-            if (imageUrl) setCurrentImage(imageUrl);
+            if (imageUrl) {
+                setCurrentImage(imageUrl);
+                addGalleryImage({ dataUrl: imageUrl, location, prompt, sessionName: state.session?.name }).catch(() => {});
+            }
         } finally {
             setIsLoading(false);
         }
@@ -63,6 +67,14 @@ export default function SceneArt() {
             lastLocationRef.current = state.currentLocation;
         }
     }, [state.currentLocation]);
+
+    // Close the lightbox on Escape (in addition to backdrop click / close button)
+    useEffect(() => {
+        if (!isExpanded) return;
+        const handleKey = (e) => { if (e.key === 'Escape') setIsExpanded(false); };
+        window.addEventListener('keydown', handleKey);
+        return () => window.removeEventListener('keydown', handleKey);
+    }, [isExpanded]);
 
     if (!state.currentLocation) return null;
 
@@ -99,6 +111,13 @@ export default function SceneArt() {
 
             {isExpanded && currentImage && (
                 <div className="scene-art-lightbox" onClick={() => setIsExpanded(false)}>
+                    <button
+                        className="scene-art-lightbox-close"
+                        onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }}
+                        aria-label="Close"
+                    >
+                        ✕
+                    </button>
                     <img
                         src={currentImage}
                         alt={state.currentLocation || 'Scene'}

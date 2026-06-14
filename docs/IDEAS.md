@@ -112,9 +112,14 @@ visual record for consistency. Vesa liked this. Slot in as a palate cleanser bet
 
 ### Scene-art polish follow-ups — status: `idea`, small
 Now that scene art runs on xAI + Scribe-composed prompts (shipped 2026-06-14): a 1k/2k
-resolution toggle in Settings; a "regenerate" button (new seed) on a scene; optionally persist
-generated scene images to a gallery/journal. Also consider surfacing the moderation-filtered
-case to the player (currently it just silently falls back).
+resolution toggle in Settings; a "regenerate" button (new seed) on a scene. Also consider
+surfacing the moderation-filtered case to the player (currently it just silently falls back).
+
+Shipped 2026-06-14: scene gallery — every generated image (xAI or Pollinations fallback) is
+saved to an IndexedDB `sceneGallery` store (capped at 30, oldest evicted), browsable from a
+new "Gallery" tab in the World Journal (grid + lightbox + delete). The SceneArt lightbox also
+got an explicit close (✕) button + Escape-to-close for mobile. The gallery is global (not yet
+scoped per-campaign) — revisit if players run multiple long campaigns and want separation.
 
 ### Companion combat depth — status: `idea`
 Companions roll initiative but their actions are mostly DM-narrated. Engine-owned companion
