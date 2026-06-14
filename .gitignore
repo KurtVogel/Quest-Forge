@@ -13,6 +13,10 @@ dist-ssr
 *.local
 .codex/firebase-users.json
 
+# Firebase CLI deploy cache — a generated incremental-deploy manifest, not source.
+# Churns on every deploy and has zero effect on the live site, so don't track it.
+.firebase/
+
 # Environment files
 .env*
 
