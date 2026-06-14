@@ -7,6 +7,13 @@ replace stale entries, don't let it grow. For deeper context run `git log --onel
 _Last updated: 2026-06-14_
 
 ## Current focus
+- **HANDOFF TO CODEX (2026-06-14): low-level encounter difficulty.** A lone level-1 PC keeps
+  getting dropped into unwinnable fights (and killed) even when hiding/avoiding. Difficulty is
+  prompt-only with no mechanical floor, and the player's custom "no hand-holding/brutal" prompt
+  (#4 in assembly) out-prioritizes the hedged difficulty steer (#14). Full diagnosis + proposed
+  design (engine non-lethal floor + prompt reframe + encounter budget + roll-stakes guidance) is
+  in IDEAS.md → Gameplay & Mechanics → "Low-level encounter difficulty". Use the
+  `rpg-balance-master` subagent.
 - **Fighter-only test-play phase**: Vesa is play-testing the new combat-stakes mechanics
   (saving throws, death saves, condition effects — shipped 2026-06-10/11) in real sessions.
   Expect prompt-tuning fixes to come out of this (DM over/under-requesting saves, death-save

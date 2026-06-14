@@ -46,6 +46,49 @@ embedded into RAG, so it fell through every durable tier once the 20-message win
 
 ## Gameplay & Mechanics
 
+### Low-level encounter difficulty / unwinnable fights — status: `designed`, priority: HIGH (Codex handoff 2026-06-14)
+Recurring, confirmed in play (2026-06-14): a **lone level-1 character** gets dropped into an
+unwinnable fight (a major NPC + two guards) and dies — even when actively hiding/avoiding. Vesa
+thought this was already handled; it wasn't, because difficulty is **prompt-only with no
+mechanical floor**, and the prompt rule loses.
+
+**Root causes (all verified in code):**
+1. **No mechanical difficulty system.** The only safeguard is a soft reminder in
+   `buildActiveConstraints` ([promptBuilder.js:519], the `isLowLevelSolo` block) for level ≤ 2
+   solo. It's a suggestion; nothing enforces it. By deliberate decision there is **no enemy
+   trimming** (keeps tracked combatants 1:1 with narration — see DECISIONS.md / CLAUDE.md), so
+   the fix must NOT just delete enemies.
+2. **The custom system prompt out-prioritizes it.** Prompt assembly order
+   ([promptBuilder.js:17-109], 17 sections): the player's **`## CUSTOM DM INSTRUCTIONS`** sit at
+   **#4** (early, high-salience, stamped "from the player") and say *"No hand-holding… often
+   brutal"* (default at [gameReducer.js:147]). The difficulty steer is **#14**, buried mid-back
+   among context blocks, and **hedged** ("death stays possible — just earned"). #17
+   RESPONSE_FORMAT is always last. So the difficulty rule is neither early-authoritative nor
+   last-recent, and is the softer-worded of two contradictory instructions → the model resolves
+   the conflict toward the player-stamped "brutal" tone, especially for a scripted antagonist.
+3. **Unwarranted/over-stakes rolls.** The DM (not the engine) decides when to roll. It
+   coin-flipped a *static, hidden, ambushing* player ("ready weapons quietly in chainmail",
+   disadvantage) and a single failure cascaded straight into the deadly fight — ignoring the
+   player's intent to avoid it.
+
+**Proposed design (do both prompt + engine; "gritty tone" and "winnable at low level" are
+separate axes — keep the tone, bound the lethality):**
+- **Engine-side non-lethal floor (the robust fix, can't be out-prompted).** At level ≤ 2,
+  dropping to 0 HP resolves as *captured / subdued / spared / left for dead* — a narrative beat —
+  instead of death-saves-to-death. Lives in the dying/death path (`gameReducer.js`
+  DEATH_SAVE_RESULT / TAKE_DAMAGE) + a prompt note so the DM narrates the capture. Preserves
+  enemy count and narration; Malkov still "wins" the scene, just no permanent game-over.
+- **Prompt-side reframe.** Move the pacing rule to a **hard, non-overridable SYSTEM constraint
+  placed AFTER the custom instructions** (or very late, near RESPONSE_FORMAT), drop the hedge,
+  and state explicitly it applies *even when tone/custom instructions call for brutality*.
+- **Concrete encounter budget** (actual numbers per level: e.g. L1 solo ≤ ~1–2 weak foes; a
+  stronger antagonist must menace / capture / be escapable — not fight to the death) replacing
+  the vague "scale accordingly."
+- **Roll-stakes + intent guidance.** Don't call for a roll when the player is hidden/undetected
+  and not actively opposed; honor stated intent to avoid/flee/parley before forcing combat; a
+  failed *minor* check must not escalate directly to lethal combat.
+- Per CLAUDE.md, route the full pass through the **`rpg-balance-master`** subagent.
+
 ### Rogue mechanics — status: `designed`, waiting on fighter test-play phase
 The easy class to make real: everything is single-target and binary, no geometry.
 - Sneak Attack: append Xd6 (scaling by level) to damage in `rollResolver.js` when the
