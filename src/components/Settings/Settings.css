@@ -117,6 +117,29 @@
     letter-spacing: 0.04em;
 }
 
+.setting-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.setting-inline-btn {
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    background: var(--surface-primary);
+    color: var(--text-secondary);
+    padding: 0.3rem 0.55rem;
+    font: inherit;
+    font-size: 0.72rem;
+    cursor: pointer;
+}
+
+.setting-inline-btn:hover {
+    border-color: var(--gold-dim);
+    color: var(--gold);
+}
+
 .setting-input,
 .setting-select,
 .setting-textarea {
@@ -141,6 +164,11 @@
     resize: vertical;
     min-height: 80px;
     line-height: 1.5;
+}
+
+.custom-prompt-textarea {
+    min-height: 260px;
+    max-height: 45vh;
 }
 
 .setting-select {

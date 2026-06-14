@@ -211,6 +211,10 @@ export function parseResponse(response) {
  * Normalize and validate event data from the LLM.
  */
 function normalizeEvents(raw) {
+    const equipmentChanges = Array.isArray(raw.equipment_changes)
+        ? raw.equipment_changes
+        : (raw.equipment_change ? [raw.equipment_change] : []);
+
     return {
         requestedRolls: Array.isArray(raw.requested_rolls)
             ? raw.requested_rolls.map(r => ({
@@ -237,6 +241,16 @@ function normalizeEvents(raw) {
         damageTaken: clamp(raw.damage_taken, 0, 999),
         itemsFound: Array.isArray(raw.items_found) ? raw.items_found.slice(0, 20) : [],
         itemsLost: Array.isArray(raw.items_lost) ? raw.items_lost.slice(0, 20) : [],
+        equipmentChanges: equipmentChanges
+            .map(c => ({
+                action: String(c?.action || '').toLowerCase(),
+                itemId: c?.itemId || c?.id || null,
+                itemKey: c?.itemKey || c?.key || null,
+                name: c?.name || c?.item || null,
+                type: c?.type || c?.slot || null,
+            }))
+            .filter(c => c.action === 'equip' || c.action === 'unequip')
+            .slice(0, 10),
         purchases: Array.isArray(raw.purchases)
             ? raw.purchases
             : (raw.purchase ? [raw.purchase] : []),
@@ -418,6 +432,13 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         const lostName = typeof itemName === 'string' ? itemName : itemName.name || '';
         if (!lostName) continue;
         dispatch({ type: 'REMOVE_ITEM_BY_NAME', payload: lostName });
+    }
+
+    for (const change of events.equipmentChanges) {
+        dispatch({
+            type: change.action === 'equip' ? 'EQUIP_ITEM_BY_REF' : 'UNEQUIP_ITEM_BY_REF',
+            payload: change,
+        });
     }
 
     // An atomic `purchase` already validates funds and deducts payment; a `sell` already

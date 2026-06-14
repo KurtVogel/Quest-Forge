@@ -8,6 +8,20 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-14 · The default custom DM prompt is RPG-first adult, not sex-forward by default.**
+Quest Forge remains a gritty adult RPG, and explicit adult content can exist in play, but the
+default prompt must not push every premise toward sex. It now foregrounds low-fantasy danger,
+strict player agency, and roll discipline, then allows adult sensuality/sexuality only when it
+emerges naturally from scene logic, character dynamics, tension, privacy, opportunity, and
+player choice. Settings → Custom DM Instructions → "Reset to default" restores this prompt.
+
+**2026-06-14 · Worn/wielded equipment changes are structured events, not narration.** The
+DM may describe a player removing armor, strapping on a shield, drawing a sword, or sheathing
+a bow, but the client owns `equipped` flags and AC/weapon math. Such changes must flow through
+`equipment_changes` (`equip` / `unequip`) and reducer actions that resolve item refs by
+id/key/name/type, then recalculate AC from inventory. Do not use `items_lost` unless the item
+actually leaves the player's possession.
+
 **2026-06-14 · Level 1-2 solo defeat is non-lethal by engine rule.** A fresh solo hero should
 face danger and consequences, not routine campaign deletion in the first impossible fight.
 For level ≤ 2 with no companions, dropping to 0 HP or receiving a direct `player_death`

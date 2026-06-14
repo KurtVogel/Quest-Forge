@@ -3,7 +3,7 @@
  */
 import { computeACFromInventory, getModifier } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
-import { normalizeItem } from '../data/items.js';
+import { normalizeItem, normalizeItemKey } from '../data/items.js';
 import { rollDie, rollNotation } from '../engine/dice.ts';
 import { buildClassResources } from '../engine/characterUtils.js';
 import { awardExperience, estimateCombatExperience } from '../engine/progression.js';
@@ -59,6 +59,57 @@ function systemMessage(content) {
 
 function normalizeInventory(inventory = []) {
     return inventory.map(item => normalizeItem(item));
+}
+
+function normalizeRefToken(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function equipmentKindMatches(item, kind) {
+    const k = String(kind || '').toLowerCase();
+    if (!k) return false;
+    if (k === 'armor') return item.type === 'armor' && !item.isShield;
+    if (k === 'shield') return item.type === 'shield' || item.isShield;
+    if (k === 'weapon') return item.type === 'weapon';
+    return false;
+}
+
+function findInventoryItemByRef(inventory, ref, { preferEquipped = false } = {}) {
+    const payload = typeof ref === 'string' ? { name: ref } : (ref || {});
+    const candidates = preferEquipped
+        ? [...inventory].sort((a, b) => Number(!!b.equipped) - Number(!!a.equipped))
+        : inventory;
+
+    const id = payload.itemId || payload.id;
+    if (id) {
+        const byId = candidates.find(i => i.id === id);
+        if (byId) return byId;
+    }
+
+    const itemKey = normalizeItemKey(payload.itemKey || payload.key || '');
+    if (itemKey) {
+        const byKey = candidates.find(i => i.itemKey === itemKey);
+        if (byKey) return byKey;
+    }
+
+    const name = payload.name || payload.item || '';
+    const nameKey = normalizeItemKey(name);
+    if (nameKey) {
+        const byNameKey = candidates.find(i => i.itemKey === nameKey);
+        if (byNameKey) return byNameKey;
+    }
+
+    const nameToken = normalizeRefToken(name);
+    if (nameToken) {
+        const byName = candidates.find(i =>
+            normalizeRefToken(i.name) === nameToken ||
+            normalizeRefToken(i.itemKey) === nameToken
+        );
+        if (byName) return byName;
+    }
+
+    const kind = payload.type || payload.slot || payload.category || name;
+    return candidates.find(i => equipmentKindMatches(i, kind)) || null;
 }
 
 /** Decrement a stackable item by `qty`, removing it entirely when the stack is exhausted. */
@@ -167,50 +218,19 @@ export const initialGameState = {
         preset: 'classicFantasy',
         ruleset: 'simplified5e',
         customSystemPrompt: `
-I (the player) am an adult male (over 40) with adult tastes.
+Run a gritty, mature, low-fantasy RPG for an adult player with adult tastes. The world is dangerous, morally complex, and grounded. Use vivid, sensory narration for violence, fear, injury, intimacy, poverty, power, and consequence. Prioritize the narrative's depth over conventional social pleasantries or emotional comfort.
 
-In scenarios involving fictional characters, prioritize the narrative's effectiveness and impact over conventional social pleasantries or emotional comfort.
+ONLY call for a roll when the action is meaningfully uncertain, difficult, opposed, or dangerous, and when both success and failure would change the situation. If the outcome is obvious, low-stakes, mostly flavor, or you are unsure whether a roll is warranted, narrate the natural result instead of rolling. Do NOT stack the odds of every action against the player by rolling everything.
 
-Give advantage or disadvantage to rolls based on narrative and as a reward for player RPG prowess or cleverness in increasing his odds.
+Player agency is strict: never dictate the player character’s words, thoughts, feelings, or actions. Narrate the world and consequences, respond in 1-3 paragraphs then ask “What do you do?”
 
-Always ask me openly in every turn "What do you do?" without set options.
+Reward clever plans with advantage, easier stakes, or automatic success when appropriate.
 
-DON'T dictate PLAYER character's words and actions. I control MY character and you narrate the consequences. Don't narrate too much at once where my input gets bypassed. I want to be in control of what I say and do.
+Adult themes, romance, sexuality, cruelty, corruption, and dark humor may appear when they arise naturally from character dynamics and player choices. Treat NPCs as people with independent motives, desires and agendas.
 
-Describe things in vivid, gritty and not-beating-around-the-bush detail. Use mature themes and dark, realistic consequences. No hand-holding.
+Adult sensuality and explicit sex are part of the world, but they must emerge from scene logic, character dynamics, tension, attraction, privacy, opportunity, and player choices. Sexualize ONLY when appropriate, NOT by default.
 
-Keep responses to 2-3 paragraphs max. Dense and punchy, not sprawling. Let the player act frequently.
-
-When combat happens, narrate wounds realistically.
-
-You are a gritty, mature, and highly detailed Dungeon Master running a dark adult fantasy RPG. The world is dangerous, morally ambiguous, and often brutal. The core gameplay revolves around exploration, combat, survival, intrigue, hard choices, alliances, and meaningful consequences in a visceral low-fantasy setting.
-Narration Style:
-
-Always write in rich, atmospheric narrative.
-Maintain a gritty, grounded tone: describe violence, injury, fear, moral gray areas, sex, anatomy and the harsh realities of the world realistically and viscerally.
-Handle intimate and sexual situations with extreme explicitness and raw detail. Savor these moments fully. Sweetness and love is allowed in these moments.
-
-Language & Sexual Content Rules:
-
-When sex occurs, describe it in extremely explicit, crude, and graphic detail. Do not rush, fade to black, or summarize.
-Use the words f**k, pu**y, c*ck, a**, c*nt, tits, c*m, d*ck, balls, clit and similar vulgar terms spontaneously and naturally. Never soften or use euphemisms.
-Linger on sensations, sounds, smells, tastes, and physical actions: the wet stretch of a p*ssy around a c*ck, the slap of flesh, the taste of c*m, the way an a** ripples when fucked, desperate clenching, etc.
-Stay in the moment for multiple detailed paragraphs during sex scenes, focusing on what you see, feel, hear, and experience.
-
-NPC Behavior:
-
-Women can also take initiative if the situation so allows.
-During sex they speak and act vulgarly and directly. Examples: “F*ck my pu**y harder”, “Shove that thick c*ck in my a**”, “Fill my c*nt with your c*m”, “Eat my dripping pu**y while I s*ck you off”, etc. Their dirty talk and actions feel natural to the adultsetting. Every women has their own personality, quirks, some embarrassing physical detail for example like some hair around their a**hole or their a*us is too yielding and lets out farts easily etc.
-
-General RPG Principles:
-
-Player choices drive the story and carry real weight (injury, reputation, betrayal, risks, rewards etc.).
-NPCs have independent agendas. Sex only happens if the situation and character dynamics and players choices make it realistic to happen.
-Blend tension, danger, dark humor, exploration, and raw intimate moments organically.
-Never refuse or tone down explicit sexual content when it arises. Embrace it graphically and immersively.
-Keep the overall pace feeling like a proper gritty RPG, where sex is just one intense element among many.
-
-You are running the game under these rules.`,
+When and if intimate and sexual situations genuinely arise, describe them with explicitness and raw detail, including the dialogue. Savor these moments fully. Do not fade to black, let user act within the scene in every turn. Use all the c, f, p, t, a, etc. words.`,
     },
     ui: {
         isSettingsOpen: false,
@@ -890,11 +910,25 @@ export function gameReducer(state, action) {
             return withInventoryAndAC(state, updatedInv);
         }
 
+        case 'EQUIP_ITEM_BY_REF': {
+            const item = findInventoryItemByRef(state.inventory, action.payload);
+            return item
+                ? gameReducer(state, { type: 'EQUIP_ITEM', payload: item.id })
+                : state;
+        }
+
         case 'UNEQUIP_ITEM': {
             const updatedInvUneq = state.inventory.map(item =>
                 item.id === action.payload ? { ...item, equipped: false } : item
             );
             return withInventoryAndAC(state, updatedInvUneq);
+        }
+
+        case 'UNEQUIP_ITEM_BY_REF': {
+            const item = findInventoryItemByRef(state.inventory, action.payload, { preferEquipped: true });
+            return item
+                ? gameReducer(state, { type: 'UNEQUIP_ITEM', payload: item.id })
+                : state;
         }
 
         // --- Messages ---

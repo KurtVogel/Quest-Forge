@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
+import { initialGameState } from '../../state/gameReducer.js';
 import { PROVIDERS, PROVIDER_LIST } from '../../llm/adapter.js';
 import { PRESETS, PRESET_LIST } from '../../data/presets.js';
 import { saveGame, loadGame, listSaves, deleteSave } from '../../state/persistence.js';
@@ -408,17 +409,25 @@ export default function SettingsModal() {
                             </div>
 
                             <div className="setting-group">
-                                <label className="setting-label">Custom DM Instructions</label>
+                                <div className="setting-label-row">
+                                    <label className="setting-label">Custom DM Instructions</label>
+                                    <button
+                                        type="button"
+                                        className="setting-inline-btn"
+                                        onClick={() => updateSetting('customSystemPrompt', initialGameState.settings.customSystemPrompt)}
+                                    >
+                                        Reset to default
+                                    </button>
+                                </div>
                                 <textarea
-                                    className="setting-textarea"
+                                    className="setting-textarea custom-prompt-textarea"
                                     value={state.settings.customSystemPrompt}
                                     onChange={(e) => updateSetting('customSystemPrompt', e.target.value)}
                                     placeholder="Add custom instructions for the DM... (e.g. 'Describe combat in vivid, gritty detail. Use mature themes and morally complex situations. The world is dark and dangerous.')"
-                                    maxLength={2000}
-                                    rows={4}
+                                    rows={12}
                                 />
                                 <p className="setting-hint">
-                                    These instructions are injected into the DM's system prompt. Use this to control tone, content, and style.
+                                    These instructions are injected into the DM's system prompt. Use this to control tone, content, and style. {state.settings.customSystemPrompt?.length || 0} characters.
                                 </p>
                             </div>
 

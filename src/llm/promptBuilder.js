@@ -218,6 +218,10 @@ When game events occur, include a structured JSON block at the END of your respo
   "damage_taken": 0,
   "items_found": [],
   "items_lost": [],
+  "equipment_changes": [
+    { "action": "unequip", "type": "armor", "name": "Chain Mail" },
+    { "action": "equip", "type": "weapon", "name": "Longsword" }
+  ],
   "purchase": null,
   "sell": null,
   "gold_found": 0,
@@ -312,6 +316,7 @@ ECONOMY & HEALING:
 - For ordinary equipment loot or shop goods, use catalog "itemKey" values when possible. For unusual story objects, use a plain item name/type.
 - Magic weapon/armor/shield bonuses are supported from +1 to +3 only. Use "magicBonus": 1, 2, or 3. Weapons apply this to both attack and damage; armor and shields apply it to AC. Do not create +4 or higher equipment unless the user explicitly asks for high-power homebrew.
 - The client owns equipped weapon attack/damage and armor/shield AC math. When requesting a player attack roll, identify the target and describe the strike; the client will use the equipped weapon's dice and magic bonus.
+- When the player puts on, removes, draws, sheathes, swaps, drops from hand, or otherwise changes worn/wielded equipment they still own, emit "equipment_changes": [{ "action": "equip"|"unequip", "type": "armor"|"shield"|"weapon", "name": "<item name if known>" }]. Use this for removing armor so AC updates. Do NOT use items_lost unless the item leaves the player's possession.
 
 REST & RESOURCES:
 - When the party rests, provide "rest_taken": "short" or "long". The system automatically handles:

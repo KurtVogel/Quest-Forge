@@ -15,6 +15,18 @@ _Last updated: 2026-06-14_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–14, 2026)
+- Default custom DM prompt refocused (2026-06-14): replaced the old sex-forward default
+  with Vesa's RPG-first adult low-fantasy prompt. It now leads with gritty tone, strict
+  player agency, roll discipline, and "sexualize only when appropriate, not by default";
+  the Settings reset button restores this new default.
+- Equipment state sync from narration (2026-06-14): when the DM narrates the player putting
+  on/removing armor or shields, or drawing/sheathing/switching weapons, it can now emit
+  `equipment_changes` events. The reducer resolves item refs by id/key/name/type, updates
+  `equipped`, and recalculates AC, so "I remove my armor" no longer leaves Chain Mail on in
+  the sidebar. Tests: `npm test` 84 passing; `npm run build` passing.
+- Settings prompt editor fix (2026-06-14): removed the 2,000-character cap from Custom DM
+  Instructions (the default prompt is ~3.5k chars), expanded the textarea, added a character
+  count, and added "Reset to default" so a locally truncated prompt can be restored.
 - Low-level solo safety floor (2026-06-14): level 1-2 solo characters no longer spiral from
   first knockout into permanent death. `TAKE_DAMAGE`, stale `DEATH_SAVE_RESULT`, and direct
   `player_death` events now convert to a `lowLevelDefeat` setback (capture, subdual, loss,
@@ -60,7 +72,7 @@ _Last updated: 2026-06-14_
 - Combat stakes: saving throws w/ proficiencies, engine-owned death saves at 0 HP,
   conditions auto-apply advantage/disadvantage.
 - Save UI: overwrite buttons, cloud-save delete, honest cloud-status feedback.
-- Vitest harness (`npm test`, 79 tests) — engine math, death-save state machine, parser
+- Vitest harness (`npm test`, 84 tests) — engine math, death-save state machine, parser
   golden fixtures. First run caught a real bug ("saving" doesn't contain "save").
 - Visual polish pass (Codex): textures, panel styling, emoji cleanup in system messages.
 - This docs system (IDEAS.md / DECISIONS.md / STATUS.md).

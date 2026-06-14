@@ -41,6 +41,21 @@ describe('well-formed responses', () => {
         const multi = parseResponse(fence({ purchases: [{ itemKey: 'dagger' }, { itemKey: 'rope' }] })).events;
         expect(multi.purchases).toHaveLength(2);
     });
+
+    it('normalizes equipment changes', () => {
+        const { events } = parseResponse(fence({
+            equipment_changes: [
+                { action: 'unequip', type: 'armor', name: 'Chain Mail' },
+                { action: 'equip', itemKey: 'longsword' },
+                { action: 'polish', name: 'Shield' },
+            ],
+        }));
+
+        expect(events.equipmentChanges).toEqual([
+            { action: 'unequip', itemId: null, itemKey: null, name: 'Chain Mail', type: 'armor' },
+            { action: 'equip', itemId: null, itemKey: 'longsword', name: null, type: null },
+        ]);
+    });
 });
 
 describe('defenses against LLM misbehavior', () => {
@@ -138,5 +153,28 @@ describe('applyEvents low-level safety', () => {
             payload: { description: 'The captain orders the execution.' },
         });
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'UPDATE_CHARACTER' }));
+    });
+});
+
+describe('applyEvents equipment changes', () => {
+    it('dispatches equip and unequip item refs', () => {
+        const { events } = parseResponse(fence({
+            equipment_changes: [
+                { action: 'unequip', type: 'armor' },
+                { action: 'equip', name: 'Longsword' },
+            ],
+        }));
+        const dispatch = vi.fn();
+
+        applyEvents(events, dispatch, () => ({ character: {}, party: [] }));
+
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'UNEQUIP_ITEM_BY_REF',
+            payload: { action: 'unequip', itemId: null, itemKey: null, name: null, type: 'armor' },
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'EQUIP_ITEM_BY_REF',
+            payload: { action: 'equip', itemId: null, itemKey: null, name: 'Longsword', type: null },
+        });
     });
 });
