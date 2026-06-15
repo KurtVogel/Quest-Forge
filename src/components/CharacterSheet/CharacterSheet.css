@@ -114,6 +114,24 @@
     transition: width 0.5s ease, background 0.5s ease;
 }
 
+.cs-fix-hp-btn {
+    width: 100%;
+    margin-top: 0.45rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--gold-dim);
+    border-radius: 6px;
+    background: rgba(212, 175, 55, 0.1);
+    color: var(--gold);
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    cursor: pointer;
+}
+
+.cs-fix-hp-btn:hover {
+    border-color: var(--gold);
+    background: rgba(212, 175, 55, 0.16);
+}
+
 .cs-exp-section {
     margin-bottom: 1.5rem;
 }

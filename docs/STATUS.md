@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-15_
+_Last updated: 2026-06-16_
 
 ## Current focus
 - **Fighter-only test-play phase**: Vesa is play-testing the new combat-stakes mechanics
@@ -15,6 +15,10 @@ _Last updated: 2026-06-15_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–15, 2026)
+- Temporary max-HP repair button (2026-06-16): Character Profile shows "Fix Max HP"
+  only when the current hero's max HP is below the fixed-average value for their
+  class/level/CON. It updates `maxHP` and carries the missing HP delta into current
+  HP. Remove after Vesa confirms the affected save is fixed.
 - Fixed HP on level-up (2026-06-15): level-ups now use D&D-style average HP
   instead of rolling the hit die (`floor(hitDie / 2) + 1 + CON`, minimum 1), so
   a fighter with +2 CON gains 8 HP rather than risking a 3 HP level. Tests:

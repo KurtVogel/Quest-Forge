@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
-import { getModifier, formatModifier, getProficiencyBonus, getAllSkills, SKILL_ABILITIES } from '../../engine/rules.js';
+import { getModifier, formatModifier, getProficiencyBonus, getAllSkills, SKILL_ABILITIES, getMaxHitPoints } from '../../engine/rules.js';
 import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
 import { downloadCharacterExport } from '../../engine/characterVault.js';
 import { saveRosterCharacter } from '../../state/persistence.js';
@@ -46,6 +46,10 @@ export default function CharacterSheet() {
     const race = RACES[character.race];
     const charClass = CLASSES[character.class];
     const hpPercent = Math.round((character.currentHP / character.maxHP) * 100);
+    const expectedMaxHP = charClass
+        ? getMaxHitPoints(character.class, character.level, getModifier(character.abilityScores.constitution), charClass)
+        : character.maxHP;
+    const maxHPDelta = Math.max(0, expectedMaxHP - character.maxHP);
 
     const exp = character.exp || 0;
     const maxLevel = isMaxLevel(character.level);
@@ -94,6 +98,25 @@ export default function CharacterSheet() {
 
     const handleExportHero = () => {
         downloadCharacterExport(character, state.inventory);
+    };
+
+    const handleFixMaxHP = () => {
+        if (maxHPDelta <= 0) return;
+        const currentHP = Math.min(expectedMaxHP, (character.currentHP || 0) + maxHPDelta);
+        dispatch({
+            type: 'UPDATE_CHARACTER',
+            payload: {
+                maxHP: expectedMaxHP,
+                currentHP,
+            },
+        });
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+                role: 'system',
+                content: `**Max HP fixed.** ${character.name}'s max HP is now **${expectedMaxHP}** using fixed average level-up HP (${character.maxHP} → ${expectedMaxHP}).`,
+            },
+        });
     };
 
     const handleConfirmLook = () => {
@@ -172,6 +195,15 @@ export default function CharacterSheet() {
                                 style={{ width: `${hpPercent}%`, background: hpColor }}
                             />
                         </div>
+                        {maxHPDelta > 0 && (
+                            <button
+                                className="cs-fix-hp-btn"
+                                onClick={handleFixMaxHP}
+                                title="Temporary migration button: set max HP to the fixed average value for this level"
+                            >
+                                Fix Max HP to {expectedMaxHP}
+                            </button>
+                        )}
                     </div>
 
                     <div className="cs-exp-section">

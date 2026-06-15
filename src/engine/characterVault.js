@@ -100,8 +100,8 @@ export function sanitizeCharacter(raw) {
     const level = clampInt(raw.level, 1, MAX_CHARACTER_LEVEL, 1);
     const exp = clampInt(raw.exp, 0, getExperienceThreshold(level) - 1, 0);
 
-    // maxHP is rolled on level-up and can't be recomputed — clamp to the range
-    // actually reachable: L1 is fixed at hitDie+CON, later levels gain 1..(hitDie+CON).
+    // Old exports may have random rolled HP. Preserve plausible values, but clamp
+    // to the broad range historically reachable by this class/CON/level.
     const conMod = getModifier(abilityScores.constitution);
     const perLevelMax = Math.max(1, charClass.hitDie + conMod);
     const minPossibleHP = perLevelMax + (level - 1);
