@@ -50,7 +50,9 @@ export default function AppShell() {
                     >
                         Journal
                     </button>
-                    <AmbientControls />
+                    <div className="desktop-audio-controls">
+                        <AmbientControls />
+                    </div>
                     <button className="header-btn settings-btn-expanded desktop-only-btn" onClick={handleOpenSettings} title="Settings">
                         Settings
                     </button>
@@ -88,6 +90,9 @@ export default function AppShell() {
 
                         {/* Mobile-only Action Buttons at the bottom of the drawer */}
                         <div className="mobile-only-actions">
+                            <div className="mobile-audio-controls">
+                                <AmbientControls />
+                            </div>
                             <button
                                 className="mobile-drawer-btn"
                                 onClick={() => { setIsJournalOpen(true); setIsMobileMenuOpen(false); }}

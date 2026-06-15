@@ -191,6 +191,10 @@
     display: none;
 }
 
+.mobile-audio-controls {
+    display: none;
+}
+
 .mobile-menu-drawer {
     display: contents;
     /* On Desktop, naturally pass sidebars up to the flex container */
@@ -249,6 +253,10 @@
     }
 
     .desktop-only-btn {
+        display: none;
+    }
+
+    .desktop-audio-controls {
         display: none;
     }
 
@@ -321,6 +329,21 @@
         border-top: 1px solid var(--border-primary);
         margin-top: auto;
         /* Push to bottom of drawer */
+    }
+
+    .mobile-audio-controls {
+        display: block;
+    }
+
+    .mobile-audio-controls .ambient-controls {
+        width: 100%;
+        flex-wrap: wrap;
+        padding-bottom: 0.25rem;
+    }
+
+    .mobile-audio-controls .ambient-toggle,
+    .mobile-audio-controls .ambient-label-btn {
+        min-height: 44px;
     }
 
     .mobile-drawer-btn {
