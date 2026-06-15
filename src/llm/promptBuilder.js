@@ -53,6 +53,9 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     // Character info
     if (character) {
         parts.push(buildCharacterBlock(character));
+        if (character.pendingActionSurge) {
+            parts.push(buildActionSurgeBlock(character));
+        }
     }
 
     // Party / Companions
@@ -326,6 +329,7 @@ REST & RESOURCES:
   - **Long rest:** Full HP restore, recovers half hit dice, resets ALL abilities, clears minor conditions
 - The character sheet shows current resources (Second Wind, Action Surge, Channel Divinity, etc.) with uses remaining. Reference these in narration — e.g., "You steel yourself and catch your breath" for Second Wind.
 - **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "Second Wind — you recover 8 HP" or "You drink a Potion of Healing"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent but gently note they can trigger it from their character sheet or inventory so the system applies it.
+- If ACTION SURGE ACTIVE is present, the player has already spent Action Surge in the UI. Honor it on their next declared action; do NOT emit "resources_used" for it.
 - Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC casts a healing spell on the player).
 
 PROGRESSION & STATUS EFFECTS:
@@ -420,6 +424,19 @@ function buildCharacterBlock(character) {
 - **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}${resourceLines}${hitDiceLine}
 ${character.traits?.length ? `- **Traits:** ${character.traits.join(', ')}` : ''}
 ${character.features?.length ? `- **Features:** ${character.features.join(', ')}` : ''}`;
+}
+
+function buildActionSurgeBlock(character) {
+    const extraAttack = character.level >= 5
+        ? 'If they use the extra action to take another Attack action, request another full Attack action. For a level 5+ Fighter this means two more attacks, because Extra Attack applies to each Attack action.'
+        : 'If they use the extra action to attack, request one additional attack roll for the extra Attack action.';
+
+    return `## ACTION SURGE ACTIVE
+The player has already spent Action Surge. Their next declared action gets one additional action beyond the normal turn.
+- Let them combine two reasonable actions in this turn: attack plus attack, attack plus dash, shove plus attack, interact plus attack, etc.
+- ${extraAttack}
+- Do NOT spend Action Surge again and do NOT emit resources_used for it.
+- The client will clear this active state after this player action resolves.`;
 }
 
 function buildPartyBlock(party) {

@@ -8,6 +8,17 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-16 · Action Surge is a pending next-action state, not a full action economy.**
+Pressing Action Surge spends the Fighter's short-rest resource and sets
+`character.pendingActionSurge`. While that flag is active, the system prompt injects an
+`ACTION SURGE ACTIVE` block telling the DM that the next declared player action gets one
+additional action and that it must not emit `resources_used` for Action Surge. ChatPanel
+clears the flag after the next successful player action resolves; errors leave it pending so
+the player can retry. This keeps the app narrative-first without building a full D&D action
+economy. Existing Extra Attack support remains engine-owned in `rollResolver.js`: a level 5+
+Fighter's `attack_roll` resolves as two attacks, so Action Surge can produce four attacks if
+the DM requests two full Attack actions.
+
 **2026-06-15 · Level-up HP uses the fixed average, not a die roll.**
 Random HP gains feel punishing in this solo, high-risk campaign loop: surviving to level 2
 and rolling a 1 on the hit die is technically tabletop-authentic but bad for the app's

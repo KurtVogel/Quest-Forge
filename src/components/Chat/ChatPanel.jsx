@@ -129,6 +129,7 @@ export default function ChatPanel() {
             customSystemPrompt: s.settings.customSystemPrompt,
             journal: s.journal,
             npcs: s.npcs,
+            party: s.party,
             currentLocation: s.currentLocation,
             combat: s.combat,
             worldFacts: s.worldFacts || [],
@@ -273,6 +274,8 @@ export default function ChatPanel() {
             payload: { role: 'user', content: trimmed },
         });
 
+        const clearActionSurgeAfterTurn = !!stateRef.current.character?.pendingActionSurge;
+
         setIsLoading(true);
         setStreamingMessage('');
 
@@ -316,6 +319,10 @@ export default function ChatPanel() {
             maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current).then(idx => {
                 lastSummarizedRef.current = idx;
             });
+
+            if (clearActionSurgeAfterTurn) {
+                dispatch({ type: 'CLEAR_ACTION_SURGE' });
+            }
         } catch (error) {
             if (error.name !== 'AbortError') {
                 dispatch({

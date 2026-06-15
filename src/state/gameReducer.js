@@ -647,6 +647,7 @@ export function gameReducer(state, action) {
                     conditions: currentConditions,
                     classResources: newResources,
                     hitDice: newHitDice,
+                    pendingActionSurge: false,
                 },
                 party: (state.party || []).map(companion => {
                     if (companion.status === 'dead') return companion;
@@ -780,12 +781,18 @@ export function gameReducer(state, action) {
 
             // Narrative resource (Action Surge, Channel Divinity, Arcane Recovery): mark
             // it spent, describe it, and let the DM narrate the effect.
+            const pendingPayload = resKey === 'actionSurge' ? { pendingActionSurge: true } : {};
             return {
                 ...state,
-                character: { ...state.character, classResources: spentResources },
+                character: { ...state.character, classResources: spentResources, ...pendingPayload },
                 messages: [...state.messages, systemMessage(`**${def.label}** — ${def.description}. ${tail}`)],
             };
         }
+
+        case 'CLEAR_ACTION_SURGE':
+            return state.character?.pendingActionSurge
+                ? { ...state, character: { ...state.character, pendingActionSurge: false } }
+                : state;
 
         case 'LEVEL_UP': {
             const result = awardExperience(state.character, action.payload?.bonusExp || 0, {

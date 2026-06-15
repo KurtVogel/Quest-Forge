@@ -14,7 +14,13 @@ _Last updated: 2026-06-16_
 - **Next major feature: campaign "fronts"** (hidden world clocks) — design doc first, then
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
-## Recently shipped (June 10–15, 2026)
+## Recently shipped (June 10–16, 2026)
+- Action Surge pending state (2026-06-16): pressing Action Surge now spends the
+  short-rest resource and sets `character.pendingActionSurge`. The prompt gets a
+  hard `ACTION SURGE ACTIVE` block for the next player action, then ChatPanel clears
+  the flag after that action resolves. Level 5+ Extra Attack is already engine-owned:
+  each player `attack_roll` becomes two attacks, so an Action Surge double-Attack can
+  resolve as four attacks when the DM requests two full Attack actions.
 - Fixed HP on level-up (2026-06-15): level-ups now use D&D-style average HP
   instead of rolling the hit die (`floor(hitDie / 2) + 1 + CON`, minimum 1), so
   a fighter with +2 CON gains 8 HP rather than risking a 3 HP level. Tests:
