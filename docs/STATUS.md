@@ -15,10 +15,6 @@ _Last updated: 2026-06-16_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–15, 2026)
-- Temporary max-HP repair button (2026-06-16): Character Profile shows "Fix Max HP"
-  only when the current hero's max HP is below the fixed-average value for their
-  class/level/CON. It updates `maxHP` and carries the missing HP delta into current
-  HP. Remove after Vesa confirms the affected save is fixed.
 - Fixed HP on level-up (2026-06-15): level-ups now use D&D-style average HP
   instead of rolling the hit die (`floor(hitDie / 2) + 1 + CON`, minimum 1), so
   a fighter with +2 CON gains 8 HP rather than risking a 3 HP level. Tests:
