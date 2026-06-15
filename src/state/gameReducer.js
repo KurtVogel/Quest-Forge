@@ -112,6 +112,15 @@ function findInventoryItemByRef(inventory, ref, { preferEquipped = false } = {})
     return candidates.find(i => equipmentKindMatches(i, kind)) || null;
 }
 
+function applyPendingLevelUpsOnLoad(character) {
+    if (!character) return { character, messages: [] };
+
+    // Old saves may have banked enough XP under a previous threshold curve.
+    // Run the same engine-owned progression pass used by ADD_EXP, but only
+    // on load and without adding any new XP.
+    return awardExperience(character, 0);
+}
+
 /** Decrement a stackable item by `qty`, removing it entirely when the stack is exhausted. */
 function consumeItem(inventory, itemId, qty = 1) {
     return inventory.flatMap(item => {
@@ -1264,7 +1273,7 @@ export function gameReducer(state, action) {
                 ? computeACFromInventory(loadedInventory, loadedCharacter)
                 : null;
             // Backfill new character fields for old saves
-            const backfilledCharacter = loadedCharacter ? {
+            const rawBackfilledCharacter = loadedCharacter ? {
                 skillProficiencies: [],
                 expertiseSkills: [],
                 classResources: loadedCharacter.class ? buildClassResources(loadedCharacter.class, loadedCharacter.level || 1) : {},
@@ -1276,6 +1285,8 @@ export function gameReducer(state, action) {
                 ...loadedCharacter,
                 armorClass: recalcedAC,
             } : loadedCharacter;
+            const pendingProgression = applyPendingLevelUpsOnLoad(rawBackfilledCharacter);
+            const backfilledCharacter = pendingProgression.character;
             // Validate required state shape
             const validated = validateSaveState(action.payload);
             return {
@@ -1285,6 +1296,7 @@ export function gameReducer(state, action) {
                 // and discarded, leaving the raw saved inventory — so the migrations never applied.
                 inventory: loadedInventory,
                 character: backfilledCharacter,
+                messages: [...validated.messages, ...pendingProgression.messages],
                 user: state.user,
                 settings: {
                     ...initialGameState.settings,

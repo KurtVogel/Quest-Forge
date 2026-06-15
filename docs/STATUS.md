@@ -19,7 +19,9 @@ _Last updated: 2026-06-15_
   per-level XP increments (300 XP to reach level 2, then 600 XP to level 3,
   etc.) instead of `level × 1000`. This makes solo level-1 play less grindy
   and gets fragile fresh heroes to level 2 after a reasonable handful of
-  encounters. Tests: `npm test` 84 passing.
+  encounters. Existing saves with banked XP now apply any pending level-ups on
+  load, so a level-1 hero with 350 XP becomes level 2 with 50 XP carried over.
+  Tests: `npm test` 85 passing.
 - Default custom DM prompt refocused (2026-06-14): replaced the old sex-forward default
   with Vesa's RPG-first adult low-fantasy prompt. It now leads with gritty tone, strict
   player agency, roll discipline, and "sexualize only when appropriate, not by default";
