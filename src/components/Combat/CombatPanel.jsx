@@ -9,6 +9,7 @@ export default function CombatPanel() {
 
     const currentFighter = combat.turnOrder[combat.currentTurn];
     const isPlayerTurn = currentFighter?.type === 'player';
+    const isCompanionTurn = currentFighter?.type === 'companion';
     const aliveEnemies = combat.enemies.filter(e => e.condition !== 'dead');
 
     return (
@@ -30,15 +31,21 @@ export default function CombatPanel() {
                 <div className="combat-initiative">
                     {combat.turnOrder.map((fighter, idx) => {
                         const isCurrent = idx === combat.currentTurn;
-                        const isDead = fighter.type === 'enemy' &&
-                            combat.enemies.find(e => e.id === fighter.id)?.condition === 'dead';
+                        const isDead = fighter.type === 'enemy'
+                            ? combat.enemies.find(e => e.id === fighter.id)?.condition === 'dead'
+                            : fighter.type === 'companion' && (state.party || []).find(c => c.id === fighter.id)?.status === 'downed';
+                        const icon = fighter.type === 'player'
+                            ? 'PC'
+                            : fighter.type === 'companion'
+                                ? 'Ally'
+                                : 'Foe';
 
                         return (
                             <div
                                 key={fighter.id || fighter.name}
                                 className={`initiative-slot ${isCurrent ? 'current' : ''} ${isDead ? 'dead' : ''} ${fighter.type}`}
                             >
-                                <span className="initiative-icon">{fighter.type === 'player' ? 'PC' : 'Foe'}</span>
+                                <span className="initiative-icon">{icon}</span>
                                 <span className="initiative-name">{fighter.name}</span>
                                 <span className="initiative-roll">{fighter.initiative}</span>
                             </div>
@@ -57,7 +64,9 @@ export default function CombatPanel() {
                 <div className={`combat-turn ${isPlayerTurn ? 'player-turn' : 'enemy-turn'}`}>
                     {isPlayerTurn
                         ? 'Your turn — describe your action in chat.'
-                        : `${currentFighter?.name}'s turn...`
+                        : isCompanionTurn
+                            ? `${currentFighter?.name} is ready — direct them in chat or let the DM choose their move.`
+                            : `${currentFighter?.name}'s turn...`
                     }
                 </div>
             </div>

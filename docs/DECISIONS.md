@@ -8,6 +8,15 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-15 · Companions are lightweight allies, not full alternate character sheets.**
+Companions should make party play feel real without turning the game into tactical
+multi-character management. They have compact engine-owned combat stats (`hp`, `maxHp`,
+`ac`, `attackBonus`, `damage`, `status`, conditions) and can attack via `companion_attack`,
+which the client rolls and applies to enemy HP. The DM controls when an ally acts and how
+they behave, but may not invent companion hit/miss/damage outcomes without a roll. Companions
+recover on rests and are capped at four. Future work can add loyalty/death arcs or richer
+roles, but avoid full inventories/class sheets unless explicitly redesigned.
+
 **2026-06-15 · XP thresholds use D&D 5e per-level increments, not `level × 1000`.**
 The flat curve made level 1 solo advancement feel punishing: a fresh hero needed roughly
 twenty peer-ish monster victories to reach level 2, while still being at the frailest and

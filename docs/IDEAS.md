@@ -116,9 +116,16 @@ resolution toggle in Settings; a "regenerate" button (new seed) on a scene; opti
 generated scene images to a gallery/journal. Also consider surfacing the moderation-filtered
 case to the player (currently it just silently falls back).
 
-### Companion combat depth — status: `idea`
-Companions roll initiative but their actions are mostly DM-narrated. Engine-owned companion
-attacks (they have weapon/ac/hp fields already) would make party play real.
+### Companion combat depth — status: combat v1 `shipped` (2026-06-15), relationship depth `idea`
+Shipped v1: companions are lightweight allies with normalized combat stats, a 4-companion
+cap, rest recovery, proper initiative labels, and `companion_attack` rolls that the engine
+resolves against enemy AC with client-owned damage/HP application.
+
+Still open:
+- Loyalty/affinity consequences: high affinity risks, low affinity refusals, betrayal,
+  morale, leaving the party.
+- Downed/dead story arcs: rescue, injury, permanent death, memorial notes.
+- Companion roles/traits that affect narration and simple mechanics without full class sheets.
 
 ## UX & Platform
 

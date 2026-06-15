@@ -15,6 +15,13 @@ _Last updated: 2026-06-15_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–15, 2026)
+- Companion combat v1 (2026-06-15): companions are now lightweight engine-owned
+  allies rather than just prompt/UI flavor. They have normalized combat fields
+  (`attackBonus`, `damage`, `status`, conditions), a hard 4-companion cap, rest
+  recovery, ally initiative labels, and `companion_attack` roll support that rolls
+  to-hit/damage and applies enemy HP client-side. The DM still controls narrative
+  intent; the engine owns the dice and HP. Tests: `npm test` 94 passing; `npm run
+  build` passing.
 - XP progression curve adjusted (2026-06-15): leveling now uses D&D 5e-style
   per-level XP increments (300 XP to reach level 2, then 600 XP to level 3,
   etc.) instead of `level × 1000`. This makes solo level-1 play less grindy

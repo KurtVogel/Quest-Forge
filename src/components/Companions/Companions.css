@@ -71,14 +71,37 @@
     font-size: 0.95rem;
 }
 
-.companion-level {
+.companion-level,
+.companion-status {
     font-size: 0.75rem;
     color: var(--text-muted);
+}
+
+.companion-status {
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    padding: 1px 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.companion-status.healthy {
+    color: var(--success);
+}
+
+.companion-status.bloodied {
+    color: #e6a23c;
+}
+
+.companion-status.critical,
+.companion-status.downed {
+    color: var(--danger);
 }
 
 .companion-stats {
     display: flex;
     justify-content: space-between;
+    gap: 0.45rem;
     font-size: 0.8rem;
     color: var(--text-muted);
     margin-top: 4px;

@@ -30,6 +30,7 @@ export default function CompanionsPanel() {
                 {party.map(companion => {
                     const hpPercent = Math.max(0, Math.min(100, (companion.hp / companion.maxHp) * 100));
                     const affinityPercent = Math.max(0, Math.min(100, companion.affinity || 50));
+                    const status = companion.status || (companion.hp <= 0 ? 'downed' : 'healthy');
 
                     let affinityClass = '';
                     if (affinityPercent >= 75) affinityClass = 'affinity-high';
@@ -39,12 +40,13 @@ export default function CompanionsPanel() {
                         <div key={companion.id} className="companion-card">
                             <div className="companion-top">
                                 <span className="companion-name">{companion.name}</span>
-                                <span className="companion-level">Lvl {companion.level}</span>
+                                <span className={`companion-status ${status}`}>{status}</span>
                             </div>
 
                             <div className="companion-stats">
+                                <span title="Level">Lvl {companion.level}</span>
                                 <span title="Armor Class">AC {companion.ac}</span>
-                                <span className="companion-weapon" title="Equipped Weapon">{companion.weapon || 'Unarmed'}</span>
+                                <span className="companion-weapon" title="Attack">{companion.weapon || 'Unarmed'} {companion.attackBonus >= 0 ? '+' : ''}{companion.attackBonus ?? 0} · {companion.damage || '1d4+1'}</span>
                             </div>
 
                             <div className="comp-hp-wrap" title={`Health: ${companion.hp} / ${companion.maxHp}`}>

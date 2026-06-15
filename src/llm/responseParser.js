@@ -225,7 +225,7 @@ function normalizeEvents(raw) {
                 description: r.description || '',
                 // NPC attack fields
                 attacker: r.attacker || null,
-                attackerId: r.attackerId || null,
+                attackerId: r.attackerId || r.companionId || r.companion_id || null,
                 modifier: typeof r.modifier === 'number' ? r.modifier : null,
                 // Damage roll field
                 notation: r.notation || null,

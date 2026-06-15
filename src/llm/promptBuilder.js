@@ -210,6 +210,7 @@ When game events occur, include a structured JSON block at the END of your respo
     { "type": "skill_check", "skill": "perception", "dc": 15, "description": "Spot the hidden trap", "advantage": false, "disadvantage": false },
     { "type": "saving_throw", "skill": "dexterity", "dc": 14, "description": "Leap clear of the collapsing scaffold" },
     { "type": "attack_roll", "skill": "attack", "target": "<enemy id from combat state>", "dc": 13, "damage": "1d8+3", "description": "You hew at the goblin" },
+    { "type": "companion_attack", "attacker": "Garrick", "attackerId": "<companion id>", "target": "<enemy id>", "modifier": 4, "damage": "1d8+2", "description": "Garrick cuts at the goblin" },
     { "type": "npc_attack", "attacker": "Goblin", "attackerId": "<enemy id>", "target": "player", "dc": 16, "modifier": 4, "damage": "1d6+2", "description": "The goblin slashes back" },
     { "type": "death_save", "description": "Only while the player is DYING at 0 HP" },
     { "type": "damage_roll", "notation": "1d8+3", "description": "Out-of-combat damage only — combat damage goes inline above" }
@@ -255,7 +256,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "combat_end": false,
   "enemy_updates": [],
   "add_companions": [
-    { "name": "Garrick", "level": 2, "hp": 18, "maxHp": 18, "ac": 14, "weapon": "Longsword", "affinity": 70 }
+    { "name": "Garrick", "role": "guard", "level": 2, "hp": 18, "maxHp": 18, "ac": 14, "weapon": "Longsword", "attackBonus": 4, "damage": "1d8+2", "affinity": 70 }
   ],
   "update_companions": [
     { "id": "companion-id", "name": "Garrick", "hp": 10, "affinity": 75 }
@@ -285,9 +286,10 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - For player checks: type is "skill_check", "saving_throw", or "attack_roll". dc is the target DC.
 - For saving throws: set "skill" to the ABILITY name ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"). The system applies the player's saving-throw proficiencies automatically. Use saves whenever the world acts ON the player (traps, poison, spells, fear, shoves) — don't convert everything into skill checks.
 - While the player is DYING at 0 HP: request { "type": "death_save" } as their roll each round — no skill, no dc. Do not request any other player rolls until they are stable, revived, or dead.
-- **In combat, fold damage into the attack** so the system resolves the whole exchange in one pass. On an "attack_roll" (player) or "npc_attack" (foe/companion), add: "target" (who is hit — an enemy id from the combat state, or "player", or a companion id) and "damage" (the weapon/spell dice, e.g. "1d8+3"). The client rolls the attack, and on a hit rolls the damage and applies HP itself. Do NOT send a separate "damage_roll" for combat, and do NOT emit damage_taken/enemy_updates for it.
+- **In combat, fold damage into the attack** so the system resolves the whole exchange in one pass. On an "attack_roll" (player), "companion_attack" (ally), or "npc_attack" (foe/NPC), add: "target" (who is hit — an enemy id from the combat state, or "player", or a companion id) and "damage" (the weapon/spell dice, e.g. "1d8+3"). The client rolls the attack, and on a hit rolls the damage and applies HP itself. Do NOT send a separate "damage_roll" for combat, and do NOT emit damage_taken/enemy_updates for it.
   - The client AUTOMATICALLY doubles the damage dice on a natural-20 crit — never pre-double the notation yourself.
-- For NPC/enemy/companion attacks: type is "npc_attack". Set dc to the TARGET's AC. Include the attacker name and "attackerId" (the foe's enemy id) so a foe slain earlier in the round doesn't still swing. **Always include "modifier"** — the attack bonus (e.g. +4 for a trained guard, +7 for a veteran); estimate from the creature if unknown.
+- For COMPANION attacks against enemies: type is "companion_attack". Include the companion's "attackerId", the enemy "target" id, "modifier" (use the companion attackBonus from the party block if known), and inline "damage". The client rolls and applies enemy HP. Do NOT narrate the hit/miss before the roll.
+- For enemy/NPC attacks against the player or companions: type is "npc_attack". Set dc to the TARGET's AC. Include the attacker name and "attackerId" (the foe's enemy id) so a foe slain earlier in the round doesn't still swing. **Always include "modifier"** — the attack bonus (e.g. +4 for a trained guard, +7 for a veteran); estimate from the creature if unknown.
 - Use a standalone "damage_roll" only for damage with NO attack roll (a trap, a fall, an auto-hit effect) — those are not auto-applied; report their HP effect via the JSON as usual.
 - For NPC saves: type is "npc_save". dc is the spell/ability DC.
 - When requesting rolls, send at most one short line of tension — the client withholds pre-roll text and you narrate the full scene after the dice. Do NOT narrate the outcome.
@@ -297,7 +299,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 
 COMBAT NOTES:
 - Use "combat_start" when combat initiates, and list EVERY foe that will act — each with name, hp, ac, and initiative. The client tracks exactly what you declare, so keep the narrative and the tracked enemies strictly 1:1: never describe an attacker that isn't in the combat state, and don't silently add or drop foes mid-fight.
-- **Resolve a whole round in ONE response.** When the player attacks, also request every still-living foe's response attack in the same requested_rolls block (each with attackerId, target, modifier, and inline damage). The client rolls them in order, skips any foe already slain that round, applies all HP, and you then narrate the exchange once.
+- **Resolve a whole round in ONE response.** When the player attacks, also request any participating companions' attacks and every still-living foe's response attack in the same requested_rolls block (each with attackerId, target, modifier, and inline damage). The client rolls them in order, skips any combatant whose target/attacker is already down, applies all HP, and you then narrate the exchange once.
 - HP is owned by the client. When a roll result says "HP applied by the system", do NOT also send enemy_updates or damage_taken for it. Use "enemy_updates" only for HP changes the dice did NOT cause (e.g. an enemy drinks a potion).
 - Use "combat_end": true when all enemies are defeated or combat ends.
 
@@ -423,7 +425,11 @@ ${character.features?.length ? `- **Features:** ${character.features.join(', ')}
 function buildPartyBlock(party) {
     return `## COMPANIONS (PARTY)
 These characters are currently traveling with the player. They act in combat and can be conversed with.
-${party.map(c => `- **${c.name}** | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Weapon: ${c.weapon || 'Unarmed'} | Affinity: ${c.affinity}/100`).join('\n')}`;
+${party.map(c => {
+        const status = c.status || (c.hp <= 0 ? 'downed' : 'healthy');
+        const conditions = c.conditions?.length ? ` | Conditions: ${c.conditions.join(', ')}` : '';
+        return `- **${c.name}** (id: ${c.id}) | Role: ${c.role || 'ally'} | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Attack: ${c.weapon || 'Unarmed'} ${formatModifier(c.attackBonus ?? 0)} (${c.damage || '1d4+1'}) | Status: ${status} | Affinity: ${c.affinity}/100${conditions}`;
+    }).join('\n')}`;
 }
 
 function buildInventoryBlock(inventory, character) {

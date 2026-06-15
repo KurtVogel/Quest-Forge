@@ -61,8 +61,42 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
 
     for (const roll of requestedRolls) {
         const isNpcRoll = roll.type === 'npc_attack' || roll.type === 'npc_save';
+        const isCompanionRoll = roll.type === 'companion_attack';
 
-        if (isNpcRoll) {
+        if (isCompanionRoll) {
+            const companion = findCompanion(roll.attackerId || roll.attacker);
+            if (!companion) {
+                results.push({ type: 'note', text: `${roll.attacker || 'A companion'} is not in the active party and does not act.` });
+                continue;
+            }
+            if ((companion.hp ?? 0) <= 0 || companion.status === 'downed' || companion.status === 'dead') {
+                results.push({ type: 'note', text: `${companion.name} is down and cannot act.` });
+                continue;
+            }
+
+            const enemy = findEnemy(roll.target);
+            if (enemy && enemy.hp <= 0) {
+                results.push({ type: 'note', text: `${companion.name}'s target, ${enemy.name}, has already fallen.` });
+                continue;
+            }
+
+            const attackRoll = {
+                ...roll,
+                attacker: companion.name,
+                modifier: roll.modifier ?? companion.attackBonus ?? 0,
+                damage: roll.damage || companion.damage,
+            };
+            const result = resolveNpcRoll(attackRoll, character, dispatch, inventory, enemy?.ac ?? roll.dc);
+            if (!result) continue;
+            results.push(result);
+
+            if (result.success && attackRoll.damage && enemy) {
+                const dmg = rollAndShowDamage(attackRoll.damage, `${companion.name} damage`, dispatch, { crit: result.critical });
+                enemy.hp = Math.max(0, (enemy.hp ?? 0) - dmg.total);
+                Object.assign(result, { damage: dmg.total, targetName: enemy.name, targetHp: enemy.hp, targetMaxHp: enemy.maxHp });
+                appliedHp = true;
+            }
+        } else if (isNpcRoll) {
             // A foe slain earlier in this same round does not get to act.
             const attacker = findEnemy(roll.attackerId || roll.attacker);
             if (attacker && attacker.hp <= 0) {
@@ -166,6 +200,15 @@ export function formatRollSummary(rollResults) {
         if (r.type === 'npc_save') {
             return `[ROLL RESULT: ${r.description || (r.attacker || 'NPC') + ' save'} vs DC ${r.dc}, rolled ${r.rolled} — ${r.success ? 'SUCCESS' : 'FAILURE'}]`;
         }
+        if (r.type === 'companion_attack') {
+            const head = `${r.description || (r.attacker || 'Companion') + ' attack'} vs AC ${r.dc}, rolled ${r.rolled}`;
+            if (!r.success) return `[ROLL RESULT: ${head} — MISS]`;
+            if (r.damage != null) {
+                const downed = r.targetHp <= 0 ? ` — ${r.targetName} is DOWNED` : '';
+                return `[ROLL RESULT: ${head} — HIT for ${r.damage} damage. ${r.targetName} now ${r.targetHp}/${r.targetMaxHp} HP${downed}. ${hpApplied}]`;
+            }
+            return `[ROLL RESULT: ${head} — HIT]`;
+        }
         if (r.type === 'npc_attack') {
             const head = `${r.description || (r.attacker || 'Enemy') + ' attack'} vs AC ${r.dc}, rolled ${r.rolled}`;
             if (!r.success) return `[ROLL RESULT: ${head} — MISS]`;
@@ -264,7 +307,7 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
                 : '';
 
             const followUpEvents = await sendToLLM(
-                `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) If other enemies or NPCs still must act this round, request their rolls now via JSON — for each, include "attackerId", "target", "modifier", and an inline "damage" notation so the system resolves them in one pass. (5) Never narrate an NPC or enemy result without rolling first.]${correctionNote}\n\n${summary}`,
+                `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) If other enemies, companions, or NPCs still must act this round, request their rolls now via JSON — for each, include "attackerId", "target", "modifier", and an inline "damage" notation so the system resolves them in one pass. (5) Never narrate an NPC, companion, or enemy result without rolling first.]${correctionNote}\n\n${summary}`,
                 undefined,
                 { suppressHpEvents: appliedHp }
             );

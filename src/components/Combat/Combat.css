@@ -126,6 +126,10 @@
     color: var(--gold);
 }
 
+.initiative-slot.companion .initiative-name {
+    color: var(--success);
+}
+
 .initiative-roll {
     color: var(--text-muted);
     font-size: 0.65rem;

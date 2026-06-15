@@ -66,6 +66,19 @@ function run(rolls, characterOverrides = {}) {
     return { results, dispatch, character };
 }
 
+function runWithContext(rolls, ctx = {}) {
+    const dispatch = vi.fn();
+    const character = makeCharacter(ctx.character || {});
+    const { results } = resolveRolls(rolls, {
+        character,
+        inventory: ctx.inventory || [],
+        combat: ctx.combat || { enemies: [] },
+        party: ctx.party || [],
+        dispatch,
+    });
+    return { results, dispatch, character };
+}
+
 const messagesFrom = (dispatch) => dispatch.mock.calls
     .filter(([a]) => a.type === 'ADD_MESSAGE')
     .map(([a]) => a.payload.content)
@@ -178,5 +191,52 @@ describe('condition effects on rolls', () => {
             { conditions: ['Invisible'] }
         );
         expect(results[0]).toMatchObject({ rolled: 6, success: false });
+    });
+});
+
+describe('companion attacks', () => {
+    it('rolls companion attacks and applies enemy HP on a hit', () => {
+        rollQueue.push(14, 5); // attack 14 + 4 = 18; damage 1d8+2 = 7
+        const enemy = { id: 'enemy-1', name: 'Goblin', hp: 12, maxHp: 12, ac: 13, condition: 'healthy' };
+        const companion = {
+            id: 'companion-1',
+            name: 'Garrick',
+            hp: 18,
+            maxHp: 18,
+            ac: 14,
+            attackBonus: 4,
+            damage: '1d8+2',
+            status: 'healthy',
+        };
+
+        const { results, dispatch } = runWithContext(
+            [{ type: 'companion_attack', attackerId: companion.id, target: enemy.id, description: 'Garrick cuts at the goblin' }],
+            { combat: { enemies: [enemy] }, party: [companion] }
+        );
+
+        expect(results[0]).toMatchObject({
+            type: 'companion_attack',
+            rolled: 18,
+            success: true,
+            damage: 7,
+            targetHp: 5,
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'UPDATE_ENEMY',
+            payload: { id: enemy.id, hp: 5 },
+        });
+    });
+
+    it('does not let a downed companion act', () => {
+        const { results, dispatch } = runWithContext(
+            [{ type: 'companion_attack', attackerId: 'companion-1', target: 'enemy-1' }],
+            {
+                combat: { enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 12, maxHp: 12, ac: 13 }] },
+                party: [{ id: 'companion-1', name: 'Garrick', hp: 0, maxHp: 18, status: 'downed' }],
+            }
+        );
+
+        expect(results[0]).toMatchObject({ type: 'note', text: expect.stringContaining('cannot act') });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'UPDATE_ENEMY' }));
     });
 });

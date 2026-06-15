@@ -6,7 +6,7 @@ import { CLASSES } from '../data/classes.js';
 import { normalizeItem, normalizeItemKey } from '../data/items.js';
 import { rollDie, rollNotation } from '../engine/dice.ts';
 import { buildClassResources } from '../engine/characterUtils.js';
-import { awardExperience, estimateCombatExperience } from '../engine/progression.js';
+import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 
 /**
@@ -250,6 +250,67 @@ When and if intimate and sexual situations genuinely arise, describe them with e
 
 /** How many disposition shifts to keep per NPC — enough to show an arc, bounded for state size. */
 const MAX_NPC_HISTORY = 10;
+const MAX_PARTY_SIZE = 4;
+
+function clampNumber(value, min, max, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function defaultCompanionDamage(weapon = '') {
+    const w = String(weapon || '').toLowerCase();
+    if (w.includes('great') || w.includes('maul')) return '2d6+2';
+    if (w.includes('longsword') || w.includes('battleaxe') || w.includes('warhammer')) return '1d8+2';
+    if (w.includes('shortsword') || w.includes('scimitar') || w.includes('mace')) return '1d6+2';
+    if (w.includes('dagger')) return '1d4+2';
+    if (w.includes('bow') || w.includes('crossbow')) return '1d6+2';
+    return '1d4+1';
+}
+
+function companionStatus(hp, maxHp) {
+    if (hp <= 0) return 'downed';
+    const pct = maxHp > 0 ? hp / maxHp : 1;
+    if (pct <= 0.25) return 'critical';
+    if (pct <= 0.5) return 'bloodied';
+    return 'healthy';
+}
+
+function normalizeCompanion(payload = {}, existing = {}) {
+    const merged = { ...existing, ...payload };
+    const hasExplicitStatus = Object.prototype.hasOwnProperty.call(payload, 'status');
+    const level = clampNumber(merged.level, 1, MAX_CHARACTER_LEVEL, existing.level || 1);
+    const maxHp = clampNumber(merged.maxHp ?? merged.maxHP, 1, 999, existing.maxHp || 20);
+    const hp = clampNumber(merged.hp, 0, maxHp, existing.hp ?? maxHp);
+    const weapon = merged.weapon || existing.weapon || 'Dagger';
+    const attackBonus = clampNumber(
+        merged.attackBonus ?? merged.modifier,
+        -5,
+        15,
+        existing.attackBonus ?? Math.min(8, 2 + Math.ceil(level / 3))
+    );
+    const damage = merged.damage || existing.damage || defaultCompanionDamage(weapon);
+
+    return {
+        id: merged.id || `companion-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        name: String(merged.name || existing.name || 'Companion').trim().slice(0, 40),
+        role: merged.role || existing.role || 'ally',
+        affinity: clampNumber(merged.affinity, 0, 100, existing.affinity ?? 50),
+        level,
+        maxHp,
+        hp,
+        ac: clampNumber(merged.ac, 1, 30, existing.ac || 12),
+        weapon,
+        attackBonus,
+        damage,
+        status: hasExplicitStatus
+            ? (merged.status || companionStatus(hp, maxHp))
+            : (existing.status === 'dead' ? 'dead' : companionStatus(hp, maxHp)),
+        conditions: Array.isArray(merged.conditions) ? merged.conditions : (existing.conditions || []),
+        notes: merged.notes || existing.notes || '',
+        appearance: merged.appearance || existing.appearance || '',
+    };
+}
 
 /**
  * Strip blank fields ('', null, undefined) from an NPC payload so a thin update can
@@ -587,6 +648,18 @@ export function gameReducer(state, action) {
                     classResources: newResources,
                     hitDice: newHitDice,
                 },
+                party: (state.party || []).map(companion => {
+                    if (companion.status === 'dead') return companion;
+                    const maxHp = companion.maxHp || companion.hp || 1;
+                    const companionHp = isLong
+                        ? maxHp
+                        : Math.min(maxHp, (companion.hp || 0) + Math.max(1, Math.ceil(maxHp * 0.25)));
+                    return normalizeCompanion({
+                        hp: companionHp,
+                        conditions: isLong ? [] : companion.conditions,
+                        status: companionStatus(companionHp, maxHp),
+                    }, companion);
+                }),
                 messages: [...state.messages, restMsg],
             };
         }
@@ -1060,30 +1133,29 @@ export function gameReducer(state, action) {
             return { ...state, currentLocation: action.payload };
 
         // --- Party / Companions ---
-        case 'ADD_COMPANION':
+        case 'ADD_COMPANION': {
             // Check if already in party
-            if (state.party?.find(c => c.name === action.payload.name)) return state;
+            const party = state.party || [];
+            const name = String(action.payload?.name || '').toLowerCase();
+            if (party.find(c => c.id === action.payload?.id || c.name?.toLowerCase() === name)) return state;
+            if (party.length >= MAX_PARTY_SIZE) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`The party is full (${MAX_PARTY_SIZE}/${MAX_PARTY_SIZE}). Someone must leave before another companion can join.`)],
+                };
+            }
             return {
                 ...state,
-                party: [...(state.party || []), {
-                    id: `companion-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-                    name: 'Companion',
-                    affinity: 50,
-                    level: 1,
-                    maxHp: 20,
-                    hp: 20,
-                    ac: 12,
-                    weapon: 'Dagger',
-                    ...action.payload,
-                }],
+                party: [...party, normalizeCompanion(action.payload)],
             };
+        }
 
         case 'UPDATE_COMPANION':
             return {
                 ...state,
                 party: (state.party || []).map(companion =>
                     (companion.id === action.payload.id || companion.name === action.payload.name)
-                        ? { ...companion, ...action.payload }
+                        ? normalizeCompanion(action.payload, companion)
                         : companion
                 ),
             };
