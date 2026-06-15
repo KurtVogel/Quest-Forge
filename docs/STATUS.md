@@ -21,7 +21,9 @@ _Last updated: 2026-06-15_
   and gets fragile fresh heroes to level 2 after a reasonable handful of
   encounters. Existing saves with banked XP now apply any pending level-ups on
   load, so a level-1 hero with 350 XP becomes level 2 with 50 XP carried over.
-  Tests: `npm test` 85 passing.
+  Advancement is capped at D&D's level 20; excess XP stays banked and the UI/DM
+  prompt show max-level status instead of a level-21 progress bar. Tests:
+  `npm test` 88 passing.
 - Default custom DM prompt refocused (2026-06-14): replaced the old sex-forward default
   with Vesa's RPG-first adult low-fantasy prompt. It now leads with gritty tone, strict
   player agency, roll discipline, and "sexualize only when appropriate, not by default";

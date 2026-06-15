@@ -4,7 +4,7 @@ import { getModifier, formatModifier, getProficiencyBonus, getAllSkills, SKILL_A
 import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
 import { downloadCharacterExport } from '../../engine/characterVault.js';
 import { saveRosterCharacter } from '../../state/persistence.js';
-import { getExperienceThreshold } from '../../engine/progression.js';
+import { getExperienceThreshold, isMaxLevel } from '../../engine/progression.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
 import './CharacterSheet.css';
@@ -22,8 +22,9 @@ export default function CharacterSheet() {
     const hpPercent = Math.round((character.currentHP / character.maxHP) * 100);
 
     const exp = character.exp || 0;
+    const maxLevel = isMaxLevel(character.level);
     const expThreshold = getExperienceThreshold(character.level);
-    const expPercent = Math.min(100, Math.round((exp / expThreshold) * 100));
+    const expPercent = maxLevel ? 100 : Math.min(100, Math.round((exp / expThreshold) * 100));
 
     let hpColor = 'var(--hp-high)';
     if (hpPercent <= 25) hpColor = 'var(--hp-critical)';
@@ -103,7 +104,7 @@ export default function CharacterSheet() {
                     <div className="cs-exp-section">
                         <div className="cs-exp-label">
                             <span>Experience</span>
-                            <span className="cs-exp-numbers">{exp} / {expThreshold} XP</span>
+                            <span className="cs-exp-numbers">{maxLevel ? `${exp} XP · Max level` : `${exp} / ${expThreshold} XP`}</span>
                         </div>
                         <div className="cs-exp-bar">
                             <div

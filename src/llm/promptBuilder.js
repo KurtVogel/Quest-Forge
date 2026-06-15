@@ -5,7 +5,7 @@
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT } from '../engine/characterUtils.js';
 import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus, getSavingThrowModifier, isProficientWithWeapon } from '../engine/rules.js';
-import { getExperienceThreshold } from '../engine/progression.js';
+import { getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
@@ -398,12 +398,16 @@ function buildCharacterBlock(character) {
         ? `\n- **Hit Dice:** ${hitDice.remaining}/${hitDice.total} d${hitDice.die} (spend on short rest to heal)`
         : '';
 
+    const expLine = isMaxLevel(character.level)
+        ? `${character.exp || 0} XP (max level reached)`
+        : `${character.exp || 0} / ${getExperienceThreshold(character.level)} to next level`;
+
     return `## PLAYER CHARACTER
 - **Name:** ${character.name}${deathStatus}
 - **Race:** ${character.race}
 - **Class:** ${character.class} (Level ${character.level})
 - **HP:** ${character.currentHP}/${character.maxHP}
-- **EXP:** ${character.exp || 0} / ${getExperienceThreshold(character.level)} to next level
+- **EXP:** ${expLine}
 - **AC:** ${character.armorClass}
 - **Wealth:** ${character.gold || 0} gp | ${character.silver || 0} sp | ${character.copper || 0} cp
 - **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}${getLevelBonus(character) > 0 ? `\n- **Level Bonus (combat):** +${getLevelBonus(character)} to hit and damage (applied automatically by the system — do NOT add this yourself)` : ''}

@@ -12,12 +12,11 @@ import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
 import { getModifier, getProficiencyBonus } from './rules.js';
 import { ABILITY_NAMES, SKILL_LABELS, buildClassResources, getAllFeaturesUpToLevel } from './characterUtils.js';
-import { getExperienceThreshold } from './progression.js';
+import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 
 export const EXPORT_FORMAT = 'quest-forge-character';
 export const EXPORT_VERSION = 1;
 
-const MAX_LEVEL = 20;
 const MAX_COIN = 1_000_000;
 const MAX_INVENTORY_ITEMS = 200;
 
@@ -88,7 +87,7 @@ export function sanitizeCharacter(raw) {
         abilityScores[ability] = score;
     }
 
-    const level = clampInt(raw.level, 1, MAX_LEVEL, 1);
+    const level = clampInt(raw.level, 1, MAX_CHARACTER_LEVEL, 1);
     const exp = clampInt(raw.exp, 0, getExperienceThreshold(level) - 1, 0);
 
     // maxHP is rolled on level-up and can't be recomputed — clamp to the range
