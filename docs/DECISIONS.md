@@ -8,6 +8,14 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-15 · Scene art can be targeted without turning into a chat prompt.**
+The top Scene Art strip should remain a fast visual tool, but it now supports three explicit
+targets: Scene (the latest narrated situation at the current location, Scribe-composed),
+Character (player, companion, known NPC, or active enemy, rendered portrait-shaped), and
+Custom (a short player-specified subject in the current location). Keep image targeting in
+this small control rather than asking the player to phrase special chat commands like
+"Visualize X" and hoping the DM interprets it.
+
 **2026-06-15 · Character portraits require a confirmed look and are stored small.**
 Player portraits are generated from explicit, player-confirmed `character.appearance` text
 plus equipped gear, not from loose stat metadata alone. The Generate button stays disabled

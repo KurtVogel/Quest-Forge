@@ -115,10 +115,11 @@ Still open: one portrait at creation and portraits for major NPCs, reusing Scrib
 `appearance` records for consistency.
 
 ### Scene-art polish follow-ups — status: `idea`, small
-Now that scene art runs on xAI + Scribe-composed prompts (shipped 2026-06-14): a 1k/2k
-resolution toggle in Settings; a "regenerate" button (new seed) on a scene; optionally persist
-generated scene images to a gallery/journal. Also consider surfacing the moderation-filtered
-case to the player (currently it just silently falls back).
+Now that scene art runs on xAI + Scribe-composed prompts (shipped 2026-06-14) and has
+target modes for Scene / Character / Custom (shipped 2026-06-15): a 1k/2k resolution toggle
+in Settings; a "regenerate" button (new seed) on a scene; optionally persist generated scene
+images to a gallery/journal. Also consider surfacing the moderation-filtered case to the
+player (currently it just silently falls back).
 
 ### Companion combat depth — status: combat v1 `shipped` (2026-06-15), relationship depth `idea`
 Shipped v1: companions are lightweight allies with normalized combat stats, a 4-companion

@@ -15,6 +15,11 @@ _Last updated: 2026-06-15_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–15, 2026)
+- Targeted scene art controls (2026-06-15): the Scene Art strip is no longer just
+  "Visualize current location." It now supports Scene, Character, and Custom targets.
+  Character mode can aim at the player, companions, known NPCs, or active enemies and uses
+  portrait-shaped xAI/Pollinations generation; Custom mode renders a player-specified
+  subject in the current location. Tests: `npm test` 96 passing; `npm run build` passing.
 - Character portraits v1 (2026-06-15): the Character Profile now has a Portrait section
   where the player writes and confirms the hero's appearance before image generation is
   enabled. Portraits use the same xAI Grok Imagine provider as scene art, request a 3:4
