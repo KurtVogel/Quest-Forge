@@ -8,6 +8,16 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-15 · Character portraits require a confirmed look and are stored small.**
+Player portraits are generated from explicit, player-confirmed `character.appearance` text
+plus equipped gear, not from loose stat metadata alone. The Generate button stays disabled
+until the current draft matches the confirmed appearance, so the player gets a moment to
+lock the look before spending an image call. Portraits use the existing xAI Grok Imagine
+image provider (`grok-imagine-image-quality`) at 3:4 / `1k`; xAI only offers `1k` and `2k`,
+so the client downscales returned data URLs to a compact 480x640-ish JPEG before storing
+them on the character. Pollinations remains the no-key fallback. Do not store high-res
+portraits in saves/hero files by default.
+
 **2026-06-15 · Companions are lightweight allies, not full alternate character sheets.**
 Companions should make party play feel real without turning the game into tactical
 multi-character management. They have compact engine-owned combat stats (`hp`, `maxHp`,

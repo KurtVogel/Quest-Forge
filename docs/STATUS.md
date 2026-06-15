@@ -15,6 +15,13 @@ _Last updated: 2026-06-15_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–15, 2026)
+- Character portraits v1 (2026-06-15): the Character Profile now has a Portrait section
+  where the player writes and confirms the hero's appearance before image generation is
+  enabled. Portraits use the same xAI Grok Imagine provider as scene art, request a 3:4
+  1k image, then downscale xAI data URLs to a compact 480x640-ish JPEG before storing them
+  on the character; Pollinations remains the no-key fallback. Hero exports/imports preserve
+  confirmed appearance and safe portrait URLs. Tests: `npm test` 96 passing; `npm run build`
+  passing. NEEDS REAL-PLAY CHECK: live xAI call not exercised in preview (no key).
 - Companion combat v1 (2026-06-15): companions are now lightweight engine-owned
   allies rather than just prompt/UI flavor. They have normalized combat fields
   (`attackBonus`, `damage`, `status`, conditions), a hard 4-companion cap, rest
@@ -96,6 +103,5 @@ _Last updated: 2026-06-15_
 ## Up next (agreed order)
 1. Test-play feedback → prompt tuning
 2. Fronts design doc → implementation in slices
-3. Character portraits (filler-sized, anytime)
-4. PWA + mobile pass (before going public)
-5. Rogue mechanics (after fighter phase)
+3. PWA + mobile pass (before going public)
+4. Rogue mechanics (after fighter phase)

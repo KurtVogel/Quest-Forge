@@ -105,10 +105,14 @@ Hard part is NOT geometry — solve theater-of-mind areas by **modeling targets,
 The real work is slots + curated spell lists (~15 spells per caster in `src/data/spells.js`),
 tracked like `classResources`. DM emits `spell_cast`; engine validates and decrements.
 
-### Character portraits — status: `idea`, easy win
-`imageGen.js` already does scene art (xAI Grok Imagine). One portrait at creation + per major
-NPC — and now that the Scribe captures per-character `appearance`, a portrait can reuse that
-visual record for consistency. Vesa liked this. Slot in as a palate cleanser between bigger slices.
+### Character portraits — status: player portrait v1 `shipped` (2026-06-15), NPC portraits `idea`
+Shipped v1: the Character Profile has a Portrait section where the player confirms the hero's
+appearance before Generate unlocks. `imageGen.js` uses xAI Grok Imagine at 3:4 / 1k and then
+downscales stored xAI data URLs so portraits stay compact; Pollinations remains the no-key
+fallback. Hero exports/imports preserve confirmed appearance and safe portrait URLs.
+
+Still open: one portrait at creation and portraits for major NPCs, reusing Scribe-captured
+`appearance` records for consistency.
 
 ### Scene-art polish follow-ups — status: `idea`, small
 Now that scene art runs on xAI + Scribe-composed prompts (shipped 2026-06-14): a 1k/2k

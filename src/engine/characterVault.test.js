@@ -66,6 +66,24 @@ describe('export round-trip', () => {
         const b = parseCharacterExport(file);
         expect(a.character.id).not.toBe(b.character.id);
     });
+
+    it('preserves confirmed appearance and safe portrait fields', () => {
+        const { character, inventory } = makeFighter();
+        const portraitUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+        const file = JSON.stringify(buildCharacterExport({
+            ...character,
+            appearance: 'Broad dwarf with a black braided beard and a broken nose.',
+            portraitUrl,
+            portraitPrompt: 'Waist-up dwarf fighter portrait.',
+            portraitUpdatedAt: 12345,
+        }, inventory));
+        const imported = parseCharacterExport(file);
+
+        expect(imported.character.appearance).toContain('black braided beard');
+        expect(imported.character.portraitUrl).toBe(portraitUrl);
+        expect(imported.character.portraitPrompt).toBe('Waist-up dwarf fighter portrait.');
+        expect(imported.character.portraitUpdatedAt).toBe(12345);
+    });
 });
 
 describe('parseCharacterExport rejections', () => {
@@ -146,6 +164,16 @@ describe('sanitizeCharacter clamps and rebuilds', () => {
         expect(clean.skillProficiencies).toEqual(expect.arrayContaining(['athletics', 'perception']));
         expect(clean.skillProficiencies).not.toContain('lockpicking');
         expect(clean.expertiseSkills).toEqual(['athletics']);
+    });
+
+    it('strips unsafe portrait URLs from imported files', () => {
+        const { character } = makeFighter();
+        const clean = sanitizeCharacter({
+            ...character,
+            portraitUrl: 'javascript:alert(1)',
+        });
+
+        expect(clean.portraitUrl).toBe('');
     });
 });
 

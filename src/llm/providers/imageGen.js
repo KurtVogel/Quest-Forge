@@ -35,16 +35,52 @@ function mimeFromBase64(b64) {
     return 'image/jpeg'; // xAI returns JPEG by default
 }
 
+async function downscaleDataUrl(dataUrl, { maxWidth, maxHeight, quality = 0.82 } = {}) {
+    if (!dataUrl?.startsWith('data:image/') || (!maxWidth && !maxHeight)) return dataUrl;
+
+    try {
+        const img = new Image();
+        img.decoding = 'async';
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = dataUrl;
+        });
+
+        const scale = Math.min(
+            1,
+            maxWidth ? maxWidth / img.naturalWidth : 1,
+            maxHeight ? maxHeight / img.naturalHeight : 1
+        );
+        if (scale >= 1) return dataUrl;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/jpeg', quality);
+    } catch (e) {
+        console.warn('[ImageGen] Portrait downscale failed:', e);
+        return dataUrl;
+    }
+}
+
 /**
  * Render a finished image prompt to a displayable image URL.
  * @param {string} prompt - The fully-composed visual prompt
  * @param {string} imageApiKey - xAI (Grok) API key
+ * @param {object} options - Generation options
  * @returns {Promise<string|null>} Data URL (xAI) or image URL (fallback), or null
  */
-export async function generateSceneImage(prompt, imageApiKey) {
+export async function generateImage(prompt, imageApiKey, options = {}) {
     if (!prompt) return null;
 
-    const cacheKey = prompt.toLowerCase().trim();
+    const aspectRatio = options.aspectRatio || '16:9';
+    const resolution = options.resolution || '1k';
+    const fallbackWidth = options.fallbackWidth || 1280;
+    const fallbackHeight = options.fallbackHeight || 720;
+    const cacheKey = `${aspectRatio}|${resolution}|${prompt.toLowerCase().trim()}`;
     if (IMAGE_CACHE.has(cacheKey)) {
         return IMAGE_CACHE.get(cacheKey);
     }
@@ -61,8 +97,8 @@ export async function generateSceneImage(prompt, imageApiKey) {
                     model: XAI_IMAGE_MODEL,
                     prompt,
                     n: 1,
-                    aspect_ratio: '16:9',
-                    resolution: '1k',
+                    aspect_ratio: aspectRatio,
+                    resolution,
                     response_format: 'b64_json',
                 }),
             });
@@ -72,8 +108,13 @@ export async function generateSceneImage(prompt, imageApiKey) {
                 const b64 = data?.data?.[0]?.b64_json;
                 if (b64) {
                     const dataUrl = `data:${mimeFromBase64(b64)};base64,${b64}`;
-                    cacheSet(cacheKey, dataUrl);
-                    return dataUrl;
+                    const finalUrl = await downscaleDataUrl(dataUrl, {
+                        maxWidth: options.maxWidth,
+                        maxHeight: options.maxHeight,
+                        quality: options.quality,
+                    });
+                    cacheSet(cacheKey, finalUrl);
+                    return finalUrl;
                 }
                 // OK status but no image — most likely filtered by content moderation.
                 console.log('[ImageGen] xAI returned no image (possibly filtered by moderation).');
@@ -90,7 +131,7 @@ export async function generateSceneImage(prompt, imageApiKey) {
     try {
         const seed = Math.floor(Math.random() * 100000);
         const safePrompt = encodeURIComponent(prompt);
-        const fallbackUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=1280&height=720&nologo=true&seed=${seed}`;
+        const fallbackUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=${fallbackWidth}&height=${fallbackHeight}&nologo=true&seed=${seed}`;
         // Returned as an <img src> URL directly to avoid CORS issues on fetch.
         cacheSet(cacheKey, fallbackUrl);
         return fallbackUrl;
@@ -99,6 +140,27 @@ export async function generateSceneImage(prompt, imageApiKey) {
     }
 
     return null;
+}
+
+export async function generateSceneImage(prompt, imageApiKey) {
+    return generateImage(prompt, imageApiKey, {
+        aspectRatio: '16:9',
+        resolution: '1k',
+        fallbackWidth: 1280,
+        fallbackHeight: 720,
+    });
+}
+
+export async function generatePortraitImage(prompt, imageApiKey) {
+    return generateImage(prompt, imageApiKey, {
+        aspectRatio: '3:4',
+        resolution: '1k',
+        fallbackWidth: 768,
+        fallbackHeight: 1024,
+        maxWidth: 480,
+        maxHeight: 640,
+        quality: 0.82,
+    });
 }
 
 /**

@@ -19,12 +19,22 @@ export const EXPORT_VERSION = 1;
 
 const MAX_COIN = 1_000_000;
 const MAX_INVENTORY_ITEMS = 200;
+const MAX_APPEARANCE_LENGTH = 2000;
+const MAX_PORTRAIT_URL_LENGTH = 2_500_000;
 
 /** Clamp to an integer in [min, max]; non-numeric input yields `fallback`. */
 function clampInt(value, min, max, fallback) {
     const n = Number(value);
     if (!Number.isFinite(n)) return fallback;
     return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function sanitizeImageUrl(value) {
+    const s = String(value || '').trim();
+    if (!s || s.length > MAX_PORTRAIT_URL_LENGTH) return '';
+    if (/^https:\/\/image\.pollinations\.ai\/prompt\//i.test(s)) return s;
+    if (/^data:image\/(png|jpe?g|webp|gif);base64,[a-z0-9+/=]+$/i.test(s)) return s;
+    return '';
 }
 
 export function buildCharacterExport(character, inventory) {
@@ -130,6 +140,10 @@ export function sanitizeCharacter(raw) {
         classResources: buildClassResources(raw.class, level),
         hitDice: { total: level, remaining: level, die: charClass.hitDie },
         conditions: [],
+        appearance: String(raw.appearance || '').trim().slice(0, MAX_APPEARANCE_LENGTH),
+        portraitUrl: sanitizeImageUrl(raw.portraitUrl),
+        portraitPrompt: String(raw.portraitPrompt || '').trim().slice(0, MAX_APPEARANCE_LENGTH),
+        portraitUpdatedAt: Number.isFinite(raw.portraitUpdatedAt) ? raw.portraitUpdatedAt : null,
         notes: String(raw.notes || '').slice(0, 2000),
         createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
     };

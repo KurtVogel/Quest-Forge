@@ -58,6 +58,18 @@
     border-bottom: 1px solid var(--border-primary);
 }
 
+.cs-portrait {
+    width: min(100%, 180px);
+    aspect-ratio: 3 / 4;
+    object-fit: cover;
+    display: block;
+    margin: 0 auto 0.75rem auto;
+    border-radius: 6px;
+    border: 1px solid var(--border-primary);
+    background: var(--surface-primary);
+    box-shadow: var(--shadow-soft);
+}
+
 .cs-name {
     font-family: var(--font-heading);
     color: var(--gold);
@@ -193,6 +205,44 @@
     grid-template-columns: repeat(3, 1fr);
     gap: 0.5rem;
     margin-bottom: 1rem;
+}
+
+.cs-portrait-section {
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.cs-portrait-appearance {
+    width: 100%;
+    min-height: 5.5rem;
+    resize: vertical;
+    box-sizing: border-box;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    background: var(--surface-primary);
+    color: var(--text-primary);
+    padding: 0.65rem 0.75rem;
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    line-height: 1.45;
+    outline: none;
+}
+
+.cs-portrait-appearance:focus {
+    border-color: var(--gold);
+}
+
+.cs-portrait-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.cs-portrait-error {
+    color: var(--hp-critical, #d9534f);
+    font-size: 0.75rem;
+    margin-top: 0.45rem;
 }
 
 .cs-ability {

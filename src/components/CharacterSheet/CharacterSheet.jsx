@@ -1,19 +1,45 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getModifier, formatModifier, getProficiencyBonus, getAllSkills, SKILL_ABILITIES } from '../../engine/rules.js';
 import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
 import { downloadCharacterExport } from '../../engine/characterVault.js';
 import { saveRosterCharacter } from '../../state/persistence.js';
 import { getExperienceThreshold, isMaxLevel } from '../../engine/progression.js';
+import { generatePortraitImage } from '../../llm/providers/imageGen.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
 import './CharacterSheet.css';
+
+function buildPortraitPrompt(character, appearance, equippedItems = []) {
+    const gear = equippedItems.length > 0 ? ` Wearing/carrying: ${equippedItems.join(', ')}.` : '';
+    return [
+        `Waist-up character portrait of ${character.name}, a ${character.race} ${character.class}.`,
+        appearance,
+        gear,
+        'Adult low-fantasy tabletop RPG portrait, grounded and believable, expressive face, sharp eyes, practical clothing and gear, moody painterly realism, dark neutral background, soft rim light, no text, no frame.',
+    ].filter(Boolean).join(' ');
+}
 
 export default function CharacterSheet() {
     const { state, dispatch } = useGame();
     const { character } = state;
     const [isExpanded, setIsExpanded] = useState(false);
     const [showSkills, setShowSkills] = useState(false);
+    const [portraitDraft, setPortraitDraft] = useState('');
+    const [isGeneratingPortrait, setIsGeneratingPortrait] = useState(false);
+    const [portraitError, setPortraitError] = useState('');
+    const characterId = character?.id;
+    const characterAppearance = character?.appearance || '';
+
+    useEffect(() => {
+        if (characterId) setPortraitDraft(characterAppearance);
+    }, [characterId, characterAppearance]);
+
+    const equippedItems = useMemo(() => (state.inventory || [])
+        .filter(i => i.equipped && i.name)
+        .map(i => i.name), [state.inventory]);
+    const confirmedAppearance = characterAppearance.trim();
+    const hasConfirmedLook = !!portraitDraft.trim() && portraitDraft.trim() === confirmedAppearance;
 
     if (!character) return null;
 
@@ -49,6 +75,7 @@ export default function CharacterSheet() {
 
     // Hit dice
     const hitDice = character.hitDice || { total: character.level, remaining: character.level, die: charClass?.hitDie || 8 };
+    const portraitPrompt = buildPortraitPrompt(character, portraitDraft.trim(), equippedItems);
 
     const handleSaveToRoster = async () => {
         try {
@@ -69,6 +96,45 @@ export default function CharacterSheet() {
         downloadCharacterExport(character, state.inventory);
     };
 
+    const handleConfirmLook = () => {
+        const appearance = portraitDraft.trim();
+        if (!appearance) return;
+        setPortraitError('');
+        dispatch({ type: 'UPDATE_CHARACTER', payload: { appearance } });
+    };
+
+    const handleGeneratePortrait = async () => {
+        const appearance = portraitDraft.trim();
+        if (!appearance) {
+            setPortraitError('Appearance is required.');
+            return;
+        }
+        if (appearance !== (character.appearance || '').trim()) {
+            setPortraitError('Confirm the look first.');
+            return;
+        }
+
+        setIsGeneratingPortrait(true);
+        setPortraitError('');
+        try {
+            const portraitUrl = await generatePortraitImage(portraitPrompt, state.settings.imageApiKey);
+            if (!portraitUrl) throw new Error('No portrait returned.');
+            dispatch({
+                type: 'UPDATE_CHARACTER',
+                payload: {
+                    appearance,
+                    portraitUrl,
+                    portraitPrompt,
+                    portraitUpdatedAt: Date.now(),
+                },
+            });
+        } catch (e) {
+            setPortraitError(e.message || 'Portrait failed.');
+        } finally {
+            setIsGeneratingPortrait(false);
+        }
+    };
+
     return (
         <div className="character-sheet">
             <button
@@ -82,6 +148,13 @@ export default function CharacterSheet() {
             {isExpanded && (
                 <div className="cs-expanded-content">
                     <div className="cs-header">
+                        {character.portraitUrl && (
+                            <img
+                                className="cs-portrait"
+                                src={character.portraitUrl}
+                                alt={`${character.name} portrait`}
+                            />
+                        )}
                         <h2 className="cs-name">{character.name}</h2>
                         <div className="cs-subtitle">
                             {race?.name || character.race} {charClass?.name || character.class} · Level {character.level}
@@ -153,6 +226,34 @@ export default function CharacterSheet() {
                                 </div>
                             );
                         })}
+                    </div>
+
+                    <div className="cs-section cs-portrait-section">
+                        <h4 className="cs-section-title">Portrait</h4>
+                        <textarea
+                            className="cs-portrait-appearance"
+                            value={portraitDraft}
+                            onChange={(e) => setPortraitDraft(e.target.value)}
+                            placeholder="Face, hair, build, skin tone, clothing, scars, symbols, mood..."
+                            rows={4}
+                        />
+                        <div className="cs-portrait-actions">
+                            <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={handleConfirmLook}
+                                disabled={!portraitDraft.trim() || isGeneratingPortrait}
+                            >
+                                {hasConfirmedLook ? 'Look Confirmed' : 'Confirm Look'}
+                            </button>
+                            <button
+                                className="btn btn-secondary btn-sm"
+                                onClick={handleGeneratePortrait}
+                                disabled={!hasConfirmedLook || isGeneratingPortrait}
+                            >
+                                {isGeneratingPortrait ? 'Painting...' : (character.portraitUrl ? 'Regenerate' : 'Generate')}
+                            </button>
+                        </div>
+                        {portraitError && <div className="cs-portrait-error">{portraitError}</div>}
                     </div>
 
                     {/* Class Resources */}
