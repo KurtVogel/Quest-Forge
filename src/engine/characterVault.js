@@ -73,8 +73,8 @@ export function downloadCharacterExport(character, inventory) {
  * adventure. Throws an Error with a player-readable message when the data
  * can't be salvaged.
  *
- * Trusted-with-clamps: name, level, exp, ability scores, coin, maxHP (rolled
- * per level, so it can only be range-checked). Rebuilt outright: proficiency,
+ * Trusted-with-clamps: name, level, exp, ability scores, coin, maxHP (old
+ * exports may include rolled HP, so it is range-checked). Rebuilt outright: proficiency,
  * saves, speed, traits, features, class resources, hit dice.
  */
 export function sanitizeCharacter(raw) {

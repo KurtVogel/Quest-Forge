@@ -38,6 +38,22 @@ describe('D&D 5e XP progression', () => {
         expect(result.messages.filter(m => m.content.includes('Level Up'))).toHaveLength(1);
     });
 
+    it('uses fixed average HP plus CON on level-up', () => {
+        const result = awardExperience({
+            ...character,
+            level: 1,
+            exp: 0,
+            maxHP: 12,
+            currentHP: 3,
+            hitDice: { total: 1, remaining: 1, die: 10 },
+        }, 300);
+
+        expect(result.character.level).toBe(2);
+        expect(result.character.maxHP).toBe(20);
+        expect(result.character.currentHP).toBe(20);
+        expect(result.messages.some(m => m.content.includes('Average HP **6** from d10 + 2 CON = **+8 HP**'))).toBe(true);
+    });
+
     it('does not let milestone level-ups exceed level 20', () => {
         const result = awardExperience({ ...character, level: 20, exp: 0 }, 0, {
             milestoneLevelUp: true,

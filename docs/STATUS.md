@@ -15,6 +15,10 @@ _Last updated: 2026-06-15_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–15, 2026)
+- Fixed HP on level-up (2026-06-15): level-ups now use D&D-style average HP
+  instead of rolling the hit die (`floor(hitDie / 2) + 1 + CON`, minimum 1), so
+  a fighter with +2 CON gains 8 HP rather than risking a 3 HP level. Tests:
+  `npm test` 97 passing; `npm run build` passing.
 - Targeted scene art controls (2026-06-15): the Scene Art strip is no longer just
   "Visualize current location." It now supports Scene, Character, and Custom targets.
   Character mode can aim at the player, companions, known NPCs, or active enemies and uses

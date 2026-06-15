@@ -1,5 +1,4 @@
 import { CLASSES } from '../data/classes.js';
-import { rollDie } from './dice.ts';
 import { getModifier } from './rules.js';
 import { buildClassResources, getFeaturesForLevel } from './characterUtils.js';
 
@@ -39,8 +38,8 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
     const classData = CLASSES[character.class];
     const hitDie = classData?.hitDie || 8;
     const conMod = getModifier(character.abilityScores?.constitution || 10);
-    const hpRoll = rollDie(hitDie);
-    const hpGain = Math.max(1, hpRoll + conMod);
+    const averageHp = Math.floor(hitDie / 2) + 1;
+    const hpGain = Math.max(1, averageHp + conMod);
     const newLevel = character.level + 1;
     const newMaxHP = character.maxHP + hpGain;
 
@@ -76,7 +75,7 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
         character: updatedCharacter,
         message: createSystemMessage(
             'lvl',
-            `**Level Up!** You are now **Level ${newLevel}**!${milestoneMsg} Rolled **${hpRoll}** on d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`
+            `**Level Up!** You are now **Level ${newLevel}**!${milestoneMsg} Average HP **${averageHp}** from d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`
         ),
     };
 }

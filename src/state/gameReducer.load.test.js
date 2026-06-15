@@ -33,7 +33,7 @@ describe('LOAD_GAME progression migrations', () => {
 
         expect(next.character.level).toBe(2);
         expect(next.character.exp).toBe(50);
-        expect(next.character.maxHP).toBeGreaterThan(12);
+        expect(next.character.maxHP).toBe(20);
         expect(next.character.currentHP).toBe(next.character.maxHP);
         expect(next.character.hitDice).toEqual({ total: 2, remaining: 2, die: 10 });
         expect(next.messages.some(m => m.content.includes('Level Up'))).toBe(true);

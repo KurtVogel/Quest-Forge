@@ -8,6 +8,14 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-15 · Level-up HP uses the fixed average, not a die roll.**
+Random HP gains feel punishing in this solo, high-risk campaign loop: surviving to level 2
+and rolling a 1 on the hit die is technically tabletop-authentic but bad for the app's
+pacing. `progression.js` now grants `floor(hitDie / 2) + 1 + CON modifier` HP on every
+level-up, minimum 1, fully heals as before, and states the fixed average in the system
+message. Keep character creation's level-1 max hit die, but do not restore random HP gains
+on later levels without revisiting this decision.
+
 **2026-06-15 · Scene art can be targeted without turning into a chat prompt.**
 The top Scene Art strip should remain a fast visual tool, but it now supports three explicit
 targets: Scene (the latest narrated situation at the current location, Scribe-composed),
