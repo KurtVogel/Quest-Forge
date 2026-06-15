@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-15_
 
 ## Current focus
 - **Fighter-only test-play phase**: Vesa is play-testing the new combat-stakes mechanics
@@ -14,7 +14,12 @@ _Last updated: 2026-06-14_
 - **Next major feature: campaign "fronts"** (hidden world clocks) — design doc first, then
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
-## Recently shipped (June 10–14, 2026)
+## Recently shipped (June 10–15, 2026)
+- XP progression curve adjusted (2026-06-15): leveling now uses D&D 5e-style
+  per-level XP increments (300 XP to reach level 2, then 600 XP to level 3,
+  etc.) instead of `level × 1000`. This makes solo level-1 play less grindy
+  and gets fragile fresh heroes to level 2 after a reasonable handful of
+  encounters. Tests: `npm test` 84 passing.
 - Default custom DM prompt refocused (2026-06-14): replaced the old sex-forward default
   with Vesa's RPG-first adult low-fantasy prompt. It now leads with gritty tone, strict
   player agency, roll discipline, and "sexualize only when appropriate, not by default";

@@ -8,6 +8,14 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-15 · XP thresholds use D&D 5e per-level increments, not `level × 1000`.**
+The flat curve made level 1 solo advancement feel punishing: a fresh hero needed roughly
+twenty peer-ish monster victories to reach level 2, while still being at the frailest and
+most swingy point of play. `progression.js` now uses per-level increments derived from the
+5e cumulative XP table (300 XP for level 1 → 2, 600 for 2 → 3, then scaling upward), while
+the engine still owns leveling and HP/resource unlocks. Do not restore the flat curve
+without explicitly revisiting solo early-game pacing.
+
 **2026-06-14 · The default custom DM prompt is RPG-first adult, not sex-forward by default.**
 Quest Forge remains a gritty adult RPG, and explicit adult content can exist in play, but the
 default prompt must not push every premise toward sex. It now foregrounds low-fantasy danger,
