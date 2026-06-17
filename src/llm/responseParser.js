@@ -288,6 +288,7 @@ function normalizeEvents(raw) {
             )
             : [],
         npcUpdates: Array.isArray(raw.npc_updates) ? raw.npc_updates : [],
+        frontUpdates: Array.isArray(raw.front_updates) ? raw.front_updates : [],
         // Player death event (not game-over — triggers narrative transition)
         playerDeath: raw.player_death
             ? { description: raw.player_death.description || 'Your character has fallen.' }
@@ -534,6 +535,10 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
 
     for (const npc of events.npcUpdates) {
         dispatch({ type: 'UPDATE_NPC', payload: npc });
+    }
+
+    for (const front of events.frontUpdates) {
+        dispatch({ type: 'UPDATE_FRONT', payload: front });
     }
 
     if (events.playerDeath) {

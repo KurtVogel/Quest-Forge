@@ -8,6 +8,16 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-17 · Hidden fronts are private state that leaks symptoms, not UI quests.**
+Fronts v1 seeds one hidden local-pressure clock for new campaigns and stores it in `fronts`.
+The DM prompt receives a private HIDDEN CAMPAIGN FRONTS block and may emit `front_updates`
+for clock/stage, public hints, and private notes. The player should not see front titles,
+clock numbers, stages, or grim-portent lists directly; they experience fronts through
+fictional symptoms such as rumors, shortages, missing people, frightened witnesses, patrols,
+or changed prices. When the player is alone, fronts should also create organic opportunities
+to meet potential companions, but no NPC joins automatically: recruitment remains a player
+choice and uses the existing `add_companions` event only after the fiction supports it.
+
 **2026-06-17 · Combat pacing is one whole exchange per player action.**
 The DM prompt and roll follow-up now describe combat as a batched exchange: when dice are
 needed, the DM requests the player's roll, participating companion rolls, and logical enemy

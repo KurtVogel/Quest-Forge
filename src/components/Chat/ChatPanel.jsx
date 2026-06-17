@@ -133,6 +133,7 @@ export default function ChatPanel() {
             currentLocation: s.currentLocation,
             combat: s.combat,
             worldFacts: s.worldFacts || [],
+            fronts: s.fronts || [],
             retrievedMemories,
             premise: s.session?.premise,
         });

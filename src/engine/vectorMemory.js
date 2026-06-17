@@ -60,7 +60,7 @@ async function loadPersistedEmbeddings() {
             request.onerror = () => reject(request.error);
             tx.oncomplete = () => db.close();
         });
-    } catch (e) {
+    } catch {
         return [];
     }
 }

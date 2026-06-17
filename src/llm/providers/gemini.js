@@ -138,7 +138,7 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
                         fullText += text;
                         onChunk(text);
                     }
-                } catch (e) {
+                } catch {
                     // Ignore malformed JSON lines
                 }
             }

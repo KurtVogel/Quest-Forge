@@ -9,6 +9,7 @@ import { ABILITY_NAMES, buildClassResources, normalizeAbilityScoreImprovementSta
 import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 import { normalizeEquippedSlots } from '../engine/equipment.js';
+import { createInitialFronts, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 
 /**
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
@@ -25,6 +26,7 @@ function validateSaveState(payload) {
         journal: Array.isArray(payload.journal) ? payload.journal : [],
         npcs: Array.isArray(payload.npcs) ? payload.npcs : [],
         worldFacts: Array.isArray(payload.worldFacts) ? payload.worldFacts : [],
+        fronts: Array.isArray(payload.fronts) ? payload.fronts.map(f => normalizeFront(f)) : [],
         party: Array.isArray(payload.party) ? payload.party : [],
         currentLocation: payload.currentLocation || null,
         combat: { ...initialGameState.combat, ...(payload.combat || {}) },
@@ -199,6 +201,7 @@ export const initialGameState = {
     journal: [],
     npcs: [],
     worldFacts: [], // Canonical world facts that never get compressed — [{id, fact, category, timestamp}]
+    fronts: [], // Hidden campaign clocks/threats — injected into the DM prompt, never shown directly to the player
     party: [], // Companions currently traveling with the player
     currentLocation: null,
         combat: {
@@ -1193,6 +1196,31 @@ export function gameReducer(state, action) {
         case 'REMOVE_WORLD_FACT':
             return { ...state, worldFacts: state.worldFacts.filter(f => f.id !== action.payload) };
 
+        // --- Hidden campaign fronts ---
+        case 'INITIALIZE_FRONTS': {
+            if ((state.fronts || []).length > 0) return state;
+            const fronts = createInitialFronts({
+                premise: action.payload?.premise || state.session?.premise || '',
+                character: state.character,
+                location: state.currentLocation,
+            });
+            return { ...state, fronts };
+        }
+
+        case 'UPDATE_FRONT': {
+            const update = normalizeFrontUpdate(action.payload);
+            if (!update) return state;
+            const fronts = state.fronts || [];
+            const idx = fronts.findIndex(f => f.id === update.id || f.title?.toLowerCase() === update.title?.toLowerCase());
+            if (idx === -1) {
+                return { ...state, fronts: [...fronts, normalizeFront(update)] };
+            }
+            return {
+                ...state,
+                fronts: fronts.map((front, i) => i === idx ? normalizeFront(update, front) : front),
+            };
+        }
+
         // Mark a batch of messages as summarized (excluded from future LLM history)
         case 'MARK_MESSAGES_SUMMARIZED': {
             // action.payload = index up to which messages are now summarized
@@ -1432,10 +1460,20 @@ export function gameReducer(state, action) {
 
         // --- Session ---
         case 'UPDATE_SESSION':
-            return {
+            {
+                const session = { ...state.session, ...action.payload };
+                const shouldSeedFronts = action.payload?.id
+                    && action.payload.id !== state.session?.id
+                    && state.character
+                    && (state.fronts || []).length === 0;
+                return {
                 ...state,
-                session: { ...state.session, ...action.payload },
-            };
+                    session,
+                    fronts: shouldSeedFronts
+                        ? createInitialFronts({ premise: session.premise, character: state.character, location: state.currentLocation })
+                        : state.fronts,
+                };
+            }
 
         // --- Bulk Load ---
         case 'LOAD_GAME': {
@@ -1500,6 +1538,9 @@ export function gameReducer(state, action) {
                 },
                 // Backfill new fields for old saves that don't have them
                 worldFacts: action.payload.worldFacts || [],
+                fronts: Array.isArray(action.payload.fronts)
+                    ? action.payload.fronts.map(f => normalizeFront(f))
+                    : [],
                 session: {
                     ...initialGameState.session,
                     ...action.payload.session,

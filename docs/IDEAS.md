@@ -11,18 +11,24 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
-### Fronts / hidden world clocks — status: `idea`, priority: HIGH
+### Fronts / hidden world clocks — status: v1 `shipped` (2026-06-17), priority: HIGH
 The flagship feature. Instead of generic LLM "three acts": 2–3 **fronts** (threats that
 *want* something — à la Dungeon World fronts / Blades in the Dark faction clocks), each
 with escalation steps and a "grim portent" (what happens if nobody interferes).
-- Fronts live in a hidden state block: injected into the DM prompt, **never shown to the player**.
+- **Shipped v1:** new campaigns seed one hidden local-pressure front from the opening
+  premise/location; fronts live in save state and are injected into a private prompt block,
+  **never shown directly to the player**. The DM can emit `front_updates` to change clock,
+  stage, public hints, or private notes. Public hints are symptoms only.
+- **Shipped v1 solo hook:** when the player has no companions, the private fronts block tells
+  the DM to introduce recruitable potential companions organically through front symptoms
+  (prisoners, deserters, guides, witnesses, rivals, locals with aligned motives). It must not
+  force a companion; actual joining still uses `add_companions`.
 - They advance **off-screen** via a background pass (same cadence hook as the journal
   summarizer): "the player did X for a week — how did each front advance?"
 - The DM is instructed to leak **symptoms** (refugees, price spikes, a missing NPC) every
   few scenes. Investigation is rewarded; ignoring has real consequences; nothing rails the player.
 - Campaign creation generates fronts + factions with goals and opinions of each other.
-- Build order: state + hand-written front first (feel it in play) → automated advance pass →
-  generation at creation.
+- Remaining build order: real-play v1 → automated advance pass → generation at creation.
 - Why: player agency stays absolute, but the world is *up to something* — the "behind the
   scenes goings-on" feel. Vesa considers this the killer feature for going public.
 

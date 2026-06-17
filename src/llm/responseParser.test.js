@@ -199,3 +199,28 @@ describe('applyEvents equipment changes', () => {
         });
     });
 });
+
+describe('hidden front events', () => {
+    it('parses and dispatches front updates', () => {
+        const { events } = parseResponse(fence({
+            front_updates: [{
+                id: 'front-local-pressure',
+                clock: 2,
+                publicHints: ['A burned wagon blocks the north road.'],
+            }],
+        }));
+        const dispatch = vi.fn();
+
+        applyEvents(events, dispatch, () => ({ character: {}, party: [] }));
+
+        expect(events.frontUpdates).toHaveLength(1);
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'UPDATE_FRONT',
+            payload: {
+                id: 'front-local-pressure',
+                clock: 2,
+                publicHints: ['A burned wagon blocks the north road.'],
+            },
+        });
+    });
+});

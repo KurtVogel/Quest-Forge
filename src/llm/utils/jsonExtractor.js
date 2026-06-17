@@ -55,7 +55,7 @@ export function extractBalancedJson(text, keyword) {
  */
 export function repairJson(str) {
     // Remove trailing commas before } or ]
-    let repaired = str.replace(/,\s*([\}\]])/g, '$1');
+    let repaired = str.replace(/,\s*([}\]])/g, '$1');
     // Count open vs close braces/brackets and close unclosed ones
     const openBraces = (repaired.match(/\{/g) || []).length;
     const closeBraces = (repaired.match(/\}/g) || []).length;

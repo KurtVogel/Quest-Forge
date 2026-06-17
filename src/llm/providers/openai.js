@@ -101,7 +101,7 @@ export async function streamOpenAIMessage({ apiKey, model, systemPrompt, message
                         fullText += text;
                         onChunk(text);
                     }
-                } catch (e) {
+                } catch {
                     // Ignore malformed lines
                 }
             }

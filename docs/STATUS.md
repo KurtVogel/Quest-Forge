@@ -7,14 +7,24 @@ replace stale entries, don't let it grow. For deeper context run `git log --onel
 _Last updated: 2026-06-17_
 
 ## Current focus
-- **Fighter-only test-play phase**: Vesa is play-testing the new combat-stakes mechanics
-  (saving throws, death saves, condition effects — shipped 2026-06-10/11) in real sessions.
-  Expect prompt-tuning fixes to come out of this (DM over/under-requesting saves, death-save
-  pacing, condition spam).
-- **Next major feature: campaign "fronts"** (hidden world clocks) — design doc first, then
-  slices. See IDEAS.md → Campaign & Narrative. Not started.
+- **Fighter-only test-play phase with hidden fronts now started**: fighter mechanics are
+  stable enough for real sessions; use play feedback to tune combat prompt pacing,
+  survivability, and whether solo companion opportunities appear naturally.
+- **Campaign fronts v1 slice is in code**: new campaigns seed one hidden local-pressure
+  front, the prompt injects hidden front clocks privately, and the DM can update them with
+  `front_updates`. Next fronts step is real-play feedback, then automated/background
+  advancement and richer generated fronts.
 
 ## Recently shipped (June 10–17, 2026)
+- Hidden campaign fronts v1 + solo companion hooks (2026-06-17): new campaigns now
+  seed a hidden front from the opening premise/location, saves carry `fronts`, and the
+  DM prompt receives a private HIDDEN CAMPAIGN FRONTS block that must leak only in-world
+  symptoms to the player. The response contract accepts `front_updates` for clock/stage,
+  public hints, and notes. If the fighter is alone, the fronts prompt asks the DM to
+  introduce recruitable potential companions organically through front symptoms without
+  forcing anyone into the party; joining still uses the existing `add_companions` event
+  with compact combat stats. Also cleaned the lint baseline: `npm run lint` now passes.
+  Tests: `npm test` 155 passing.
 - Real-LLM combat pacing contract pass (2026-06-17): the DM prompt now gives
   one unambiguous combat loop: request the whole player/companion/enemy exchange
   in one `requested_rolls` block, then narrate the complete outcome once after
@@ -196,7 +206,7 @@ _Last updated: 2026-06-17_
 - This docs system (IDEAS.md / DECISIONS.md / STATUS.md).
 
 ## Up next (agreed order)
-1. Test-play feedback → prompt tuning
-2. Fronts design doc → implementation in slices
+1. Real-play fronts/solo-companion feedback → prompt tuning
+2. Fronts v2: automated/background advancement and generated multi-front campaigns
 3. PWA + mobile pass (before going public)
 4. Rogue mechanics (after fighter phase)

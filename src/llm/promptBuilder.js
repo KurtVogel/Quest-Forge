@@ -15,7 +15,7 @@ import { CLASSES } from '../data/classes.js';
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, retrievedMemories, premise }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, retrievedMemories, premise }) {
     const parts = [];
 
     // Core DM instructions
@@ -49,6 +49,10 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     // journal, which summarizes away setup that isn't an in-scene event).
     if (premise && premise.trim()) {
         parts.push(buildPremiseBlock(premise.trim()));
+    }
+
+    if (fronts && fronts.length > 0) {
+        parts.push(buildFrontsBlock(fronts, character, party));
     }
 
     // Character info
@@ -250,6 +254,9 @@ When game events occur, include a structured JSON block at the END of your respo
   "npc_updates": [
     { "name": "Mira the Innkeeper", "disposition": "friendly", "lastNotes": "Gave the player a room and hinted at a missing merchant", "lastLocation": "The Rusty Flagon, Millhaven" }
   ],
+  "front_updates": [
+    { "id": "front-local-pressure", "clock": 1, "stage": 1, "publicHints": ["Refugees whisper that the north road is watched."], "notes": "Advanced because the party spent a night away from the road." }
+  ],
   "combat_start": {
     "enemies": [
       { "name": "Goblin", "hp": 15, "ac": 13 }
@@ -280,6 +287,11 @@ If no game events occurred, just provide the narrative text without any JSON blo
 ## NPC UPDATE INSTRUCTIONS
 - Use \`npc_updates\` whenever an NPC appears in the scene, especially if their disposition or status changes
 - Always include \`name\` and \`lastNotes\`; include other fields only when newly learned
+
+## HIDDEN FRONT UPDATE INSTRUCTIONS
+- If the HIDDEN CAMPAIGN FRONTS section is present, it is private DM state. Never reveal the front title, clock, stage, or grim portent list directly to the player.
+- Use \`front_updates\` when time passes, the player ignores a threat, the player meaningfully interferes, or a front leaks a visible symptom. Keep updates small: usually +1 clock/stage at most.
+- Put only in-world symptoms in \`publicHints\` (rumors, refugees, price spikes, missing NPCs, strange patrols). These are safe to echo in narration. Keep hidden planning details in \`notes\`.
 
 ## ROLL REQUEST RULES
 - **FATAL ERROR AVOIDANCE**: NEVER ask the player to roll in the narrative text (e.g. "(DM Note: roll stealth)"). The system CANNOT PARSE text.
@@ -517,6 +529,29 @@ function buildRecentRollsBlock(rolls) {
 /** Max world facts to inject directly into the prompt. Older facts are still in RAG. */
 function buildPremiseBlock(premise) {
     return `## CAMPAIGN PREMISE (the player's authored foundation — permanent canon, never contradict)\n${premise}`;
+}
+
+function buildFrontsBlock(fronts, character, party) {
+    const active = (fronts || []).filter(f => (f.status || 'active') === 'active');
+    if (active.length === 0) return '';
+    const solo = character && (!party || party.length === 0);
+    const companionGuidance = solo
+        ? '\n- The player is currently alone. Introduce potential companions organically through front symptoms: prisoners, rivals, guides, deserters, witnesses, hired blades, or locals with aligned motives. Do not force them into the party; if the player earns or accepts their help, emit add_companions with compact combat stats.'
+        : '';
+
+    const lines = active.map(front => {
+        const portents = (front.grimPortents || []).map((p, i) => `    ${i + 1}. ${p}`).join('\n') || '    1. No grim portents recorded yet.';
+        const hints = (front.publicHints || []).slice(-3).map(h => `    - ${h}`).join('\n') || '    - No public hints leaked yet.';
+        return `- **${front.title}** (id: ${front.id})\n  Goal: ${front.goal}\n  Stakes: ${front.stakes}\n  Clock: ${front.clock || 0}/${front.maxClock || 6}; stage ${front.stage || 0}\n  Grim portents:\n${portents}\n  Recent public hints:\n${hints}`;
+    }).join('\n');
+
+    return `## HIDDEN CAMPAIGN FRONTS — PRIVATE DM STATE
+These are off-screen threats and world clocks. Use them to make the world feel active, but never expose this section as mechanics or labels.
+- Leak symptoms into scenes every few turns when natural: rumors, changed prices, frightened NPCs, missing people, patrols, omens, closed roads, or faction moves.
+- Advance or soften a front with front_updates when meaningful time passes or the player helps/hinders it. Do not railroad; offer clues, choices, and consequences.
+- If a front reaches its final portent, change the world with a concrete public consequence and record it as a world_fact.${companionGuidance}
+
+${lines}`;
 }
 
 function buildLowLevelSoloSafetyBlock(character, party) {

@@ -1,6 +1,7 @@
 /**
  * React Context provider for game state.
  */
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useReducer, useEffect, useCallback, useState, useRef } from 'react';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { loadSettings, saveSettings, autoSave } from './persistence.js';
@@ -96,7 +97,9 @@ export function GameProvider({ children }) {
             }, 2000);
             return () => clearTimeout(timer);
         }
-    }, [state.character, state.inventory, state.messages, state.quests, state.session.id, state.user?.uid]);
+    // Autosave is intentionally keyed to gameplay state, not every state object field.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.character, state.inventory, state.messages, state.quests, state.session.id, state.user?.uid, showSaveToast]);
 
     return (
         <GameContext.Provider value={state}>
