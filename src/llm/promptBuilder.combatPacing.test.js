@@ -94,4 +94,13 @@ describe('combat pacing prompt contract', () => {
         expect(text).toContain('Second Wind was used as a bonus action');
         expect(text).toContain('fighter still has their main action');
     });
+
+    it('keeps ordinary DM turns short and leaves space for player input', () => {
+        const text = prompt();
+
+        expect(text).toContain('Default to 1-2 short paragraphs');
+        expect(text).toContain('Never use 4+ paragraphs unless the player explicitly asks');
+        expect(text).toContain('Leave space for the player');
+        expect(text).not.toContain('aim for 2-4 paragraphs');
+    });
 });

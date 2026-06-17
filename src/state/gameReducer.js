@@ -51,18 +51,23 @@ function withInventoryAndAC(state, newInventory) {
     };
 }
 
-function systemMessage(content) {
+function systemMessage(content, extra = {}) {
     return {
         id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         timestamp: Date.now(),
         role: 'system',
         content,
+        ...extra,
     };
 }
 
 function isPlayerCombatTurn(combat) {
     if (!combat?.active) return false;
     return combat.turnOrder?.[combat.currentTurn]?.type === 'player';
+}
+
+function isBonusActionConsumable(item) {
+    return item?.actionType === 'bonus' || item?.consumableType === 'healing';
 }
 
 function normalizeInventory(inventory = []) {
@@ -239,7 +244,7 @@ Run a gritty, mature, low-fantasy RPG for an adult player with adult tastes. The
 
 ONLY call for a roll when the action is meaningfully uncertain, difficult, opposed, or dangerous, and when both success and failure would change the situation. If the outcome is obvious, low-stakes, mostly flavor, or you are unsure whether a roll is warranted, narrate the natural result instead of rolling. Do NOT stack the odds of every action against the player by rolling everything.
 
-Player agency is strict: never dictate the player character’s words, thoughts, feelings, or actions. Narrate the world and consequences, respond in 1-3 paragraphs then ask “What do you do?”
+Player agency is strict: never dictate the player character’s words, thoughts, feelings, or actions. Narrate the world and consequences, usually in 1-2 short paragraphs. Use 3 only for major openings, big consequences, intimate/important NPC moments, or climactic outcomes. Then ask “What do you do?” when the scene needs the player’s next move.
 
 Reward clever plans with advantage, easier stakes, or automatic success when appropriate.
 
@@ -868,7 +873,17 @@ export function gameReducer(state, action) {
                     rollHistory: [...state.rollHistory, roll],
                     messages: [
                         ...state.messages,
-                        systemMessage(`**${def.label}**${usesBonusAction ? ' *(bonus action)*' : ''} — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${usesBonusAction && state.combat.active ? 'Your main action is still available. ' : ''}${tail} ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`),
+                        systemMessage(
+                            `**${def.label}**${usesBonusAction ? ' *(bonus action)*' : ''} — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${usesBonusAction && state.combat.active ? 'Your main action is still available. ' : ''}${tail} ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`,
+                            {
+                                narrationCue: {
+                                    type: 'player_mechanic',
+                                    mechanic: def.label,
+                                    effect: `recovered ${gained} HP`,
+                                    actionType: usesBonusAction ? 'bonus action' : 'action',
+                                },
+                            }
+                        ),
                     ],
                 };
             }
@@ -976,6 +991,7 @@ export function gameReducer(state, action) {
             // so the DM narrates the act on its next turn without re-applying anything.
             const item = state.inventory.find(i => i.id === action.payload);
             if (!item) return state;
+            const usesBonusAction = isBonusActionConsumable(item);
 
             // Healing consumables resolve fully client-side with real dice.
             if (item.consumableType === 'healing' && item.healing) {
@@ -991,6 +1007,18 @@ export function gameReducer(state, action) {
                         messages: [...state.messages, systemMessage(`You're already at full health — you keep the ${item.name}.`)],
                     };
                 }
+                if (usesBonusAction && state.combat.active && !isPlayerCombatTurn(state.combat)) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`**${item.name}** is a bonus action — drink it on your turn.`)],
+                    };
+                }
+                if (usesBonusAction && state.combat.active && state.combat.bonusActionUsed) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`**Bonus action already used** — ${item.name} can wait until your next turn.`)],
+                    };
+                }
                 const roll = rollNotation(item.healing, item.name);
                 const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total);
                 const gained = healed - state.character.currentHP;
@@ -1000,11 +1028,24 @@ export function gameReducer(state, action) {
                 return {
                     ...state,
                     character: healedCharacter,
+                    combat: usesBonusAction && state.combat.active
+                        ? { ...state.combat, bonusActionUsed: true }
+                        : state.combat,
                     inventory: consumeItem(state.inventory, item.id),
                     rollHistory: [...state.rollHistory, roll],
                     messages: [
                         ...state.messages,
-                        systemMessage(`You drink a **${item.name}** and recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`),
+                        systemMessage(
+                            `You drink a **${item.name}**${usesBonusAction ? ' *(bonus action)*' : ''} and recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${usesBonusAction && state.combat.active ? 'Your main action is still available. ' : ''}${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`,
+                            {
+                                narrationCue: {
+                                    type: 'player_mechanic',
+                                    mechanic: item.name,
+                                    effect: `recovered ${gained} HP`,
+                                    actionType: usesBonusAction ? 'bonus action' : 'action',
+                                },
+                            }
+                        ),
                     ],
                 };
             }

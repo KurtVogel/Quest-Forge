@@ -54,6 +54,36 @@ function makeState() {
     };
 }
 
+function makePotion(overrides = {}) {
+    return {
+        id: 'potion-1',
+        itemKey: 'potionHealing',
+        name: 'Potion of Healing',
+        type: 'consumable',
+        consumableType: 'healing',
+        healing: '2d4+2',
+        actionType: 'bonus',
+        quantity: 1,
+        ...overrides,
+    };
+}
+
+function withCombat(state, overrides = {}) {
+    return {
+        ...state,
+        combat: {
+            active: true,
+            enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 7, maxHp: 7, ac: 13, condition: 'healthy' }],
+            turnOrder: [{ type: 'player', name: 'Testo', initiative: 12 }],
+            currentTurn: 0,
+            round: 1,
+            xpAwarded: false,
+            bonusActionUsed: false,
+            ...overrides,
+        },
+    };
+}
+
 describe('equipment changes', () => {
     it('unequips worn armor by generic type and recalculates AC', () => {
         const next = gameReducer(makeState(), {
@@ -197,15 +227,7 @@ describe('consumable use', () => {
             },
             inventory: [
                 ...makeState().inventory,
-                {
-                    id: 'potion-1',
-                    itemKey: 'potionHealing',
-                    name: 'Potion of Healing',
-                    type: 'consumable',
-                    consumableType: 'healing',
-                    healing: '2d4+2',
-                    quantity: 1,
-                },
+                makePotion(),
             ],
         };
 
@@ -224,14 +246,7 @@ describe('consumable use', () => {
             ...makeState(),
             inventory: [
                 ...makeState().inventory,
-                {
-                    id: 'potion-1',
-                    name: 'Potion of Healing',
-                    type: 'consumable',
-                    consumableType: 'healing',
-                    healing: '2d4+2',
-                    quantity: 1,
-                },
+                makePotion(),
             ],
         };
 
@@ -240,5 +255,62 @@ describe('consumable use', () => {
         expect(next.inventory.some(i => i.id === 'potion-1')).toBe(true);
         expect(next.rollHistory).toHaveLength(0);
         expect(next.messages.at(-1).content).toContain('full health');
+    });
+
+    it('healing potions spend the combat bonus action and leave the main action available', () => {
+        const state = withCombat({
+            ...makeState(),
+            character: { ...makeState().character, currentHP: 4, maxHP: 12 },
+            inventory: [...makeState().inventory, makePotion({ quantity: 2 })],
+        });
+
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: 'potion-1' });
+
+        expect(next.character.currentHP).toBeGreaterThan(4);
+        expect(next.combat.bonusActionUsed).toBe(true);
+        expect(next.inventory.find(i => i.id === 'potion-1').quantity).toBe(1);
+        expect(next.messages.at(-1).content).toContain('bonus action');
+        expect(next.messages.at(-1).content).toContain('main action is still available');
+        expect(next.messages.at(-1).narrationCue).toMatchObject({
+            type: 'player_mechanic',
+            mechanic: 'Potion of Healing',
+            actionType: 'bonus action',
+        });
+    });
+
+    it('does not drink a healing potion after the combat bonus action is spent', () => {
+        const state = withCombat({
+            ...makeState(),
+            character: { ...makeState().character, currentHP: 4, maxHP: 12 },
+            inventory: [...makeState().inventory, makePotion()],
+        }, { bonusActionUsed: true });
+
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: 'potion-1' });
+
+        expect(next.character.currentHP).toBe(4);
+        expect(next.inventory.some(i => i.id === 'potion-1')).toBe(true);
+        expect(next.rollHistory).toHaveLength(0);
+        expect(next.messages.at(-1).content).toContain('Bonus action already used');
+    });
+
+    it('does not drink a healing potion off-turn in combat', () => {
+        const state = withCombat({
+            ...makeState(),
+            character: { ...makeState().character, currentHP: 4, maxHP: 12 },
+            inventory: [...makeState().inventory, makePotion()],
+        }, {
+            turnOrder: [
+                { type: 'enemy', id: 'enemy-1', name: 'Goblin', initiative: 14 },
+                { type: 'player', name: 'Testo', initiative: 12 },
+            ],
+            currentTurn: 0,
+        });
+
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: 'potion-1' });
+
+        expect(next.character.currentHP).toBe(4);
+        expect(next.inventory.some(i => i.id === 'potion-1')).toBe(true);
+        expect(next.combat.bonusActionUsed).toBe(false);
+        expect(next.messages.at(-1).content).toContain('drink it on your turn');
     });
 });

@@ -16,6 +16,29 @@ _Last updated: 2026-06-17_
   advancement and richer generated fronts.
 
 ## Recently shipped (June 10–17, 2026)
+- Shorter default DM cadence (2026-06-17): tightened the prompt from the old "2-4
+  paragraphs" target to 1-2 short paragraphs for ordinary turns, 3 only for major openings,
+  big consequences, intimate/important NPC moments, or climactic outcomes, and never 4+
+  unless the player explicitly asks. The pacing rules now tell the DM to answer the immediate
+  consequence and stop at the next meaningful choice. Tests: `npm test` 159 passing;
+  `npm run lint` and `npm run build` passing.
+- LLM flavor beats for player-owned healing (2026-06-17): successful Second Wind and
+  healing potion use now attach a `narrationCue` to the engine-owned system result. ChatPanel
+  consumes each cue once and asks the DM for one short sensory paragraph that interprets the
+  mechanic in fiction, without advancing combat, requesting rolls, changing state, or applying
+  duplicate healing. Narration-only calls ignore any accidental JSON events from the model.
+  This follows the new documented north star in `AGENTS.md`/`CLAUDE.md`: the engine enables
+  reliable mechanics, but the LLM should make those mechanics feel alive. Tests: `npm test`
+  158 passing; `npm run lint` and `npm run build` passing.
+- Healing potions as bonus actions (2026-06-17): Potion of Healing now declares
+  `actionType: bonus`, the reducer treats healing consumables as player-owned bonus
+  actions in active combat, and the Inventory panel shows healing dice/bonus tags while
+  disabling the button at full health, after death, off-turn, or after another bonus
+  action was spent. Drinking one still rolls real dice, consumes one stack item, revives
+  living/dying characters through the shared cleanup path, and leaves the main action
+  available. The DM prompt now treats healing potions like Second Wind: weave in the
+  system message, but never emit duplicate `healing`. Tests: `npm test` 158 passing;
+  `npm run lint` and `npm run build` passing. Browser smoke checked the local app.
 - Hidden campaign fronts v1 + solo companion hooks (2026-06-17): new campaigns now
   seed a hidden front from the opening premise/location, saves carry `fronts`, and the
   DM prompt receives a private HIDDEN CAMPAIGN FRONTS block that must leak only in-world

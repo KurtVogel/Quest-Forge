@@ -83,7 +83,7 @@ export const ITEM_CATALOG = {
     shield: { name: 'Shield', type: 'shield', isShield: true, shieldAC: 2, valueCp: 10 * GP, weight: 6 },
 
     // Common gear and consumables
-    potionHealing: { name: 'Potion of Healing', type: 'consumable', consumableType: 'healing', healing: '2d4+2', valueCp: 50 * GP, weight: 1 },
+    potionHealing: { name: 'Potion of Healing', type: 'consumable', consumableType: 'healing', healing: '2d4+2', actionType: 'bonus', valueCp: 50 * GP, weight: 1 },
     antitoxin: { name: 'Antitoxin', type: 'consumable', consumableType: 'antitoxin', valueCp: 50 * GP, weight: 0 },
     healerKit: { name: "Healer's Kit", type: 'gear', valueCp: 5 * GP, weight: 3, quantity: 1 },
     rations: { name: 'Rations (1 day)', type: 'gear', valueCp: 5 * SP, weight: 2, quantity: 1 },

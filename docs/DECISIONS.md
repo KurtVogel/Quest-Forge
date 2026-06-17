@@ -8,6 +8,31 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-17 · DM narration is short by default: vivid beat, consequence, next choice.**
+Making the most out of the LLM does not mean letting it monologue over player input. The
+default prompt now asks for 1-2 short paragraphs for ordinary turns, 3 only for major scene
+openings, big consequences, intimate/important NPC moments, or climactic outcomes, and never
+4+ paragraphs unless the player explicitly asks for a longer passage. The DM should answer
+the immediate consequence and stop at the next meaningful choice, leaving room for the player
+to drive play.
+
+**2026-06-17 · Engine mechanics should trigger LLM feeling when the moment deserves it.**
+The most important product goal is to make the most out of the LLM: the engine enables the
+magic, but the LLM creates the felt RPG experience. Successful player-owned healing now
+models that split. Second Wind and healing potions resolve mechanically in the reducer first,
+then the chat layer sends a narration-only cue asking the DM for one short sensory beat. The
+DM may describe how the recovery feels, but may not advance turns, request rolls, emit state
+JSON, or duplicate healing; narration-only calls ignore accidental JSON. Use this pattern for
+future UI-owned mechanics that would otherwise feel like numbers moving in a spreadsheet.
+
+**2026-06-17 · Healing potions use the lightweight bonus-action slot.**
+Potion of Healing is a player-owned Inventory action, not a DM-authored healing event. The
+client rolls `2d4+2`, consumes exactly one item from the stack, applies HP/revival cleanup,
+and in active combat marks `combat.bonusActionUsed` while leaving the main action available.
+The same one-bonus-action limit used by Second Wind blocks drinking a potion off-turn or after
+another bonus action has been spent. The DM prompt should only narrate the resulting system
+message and must not emit duplicate `healing` for player-triggered potions.
+
 **2026-06-17 · Hidden fronts are private state that leaks symptoms, not UI quests.**
 Fronts v1 seeds one hidden local-pressure clock for new campaigns and stores it in `fronts`.
 The DM prompt receives a private HIDDEN CAMPAIGN FRONTS block and may emit `front_updates`

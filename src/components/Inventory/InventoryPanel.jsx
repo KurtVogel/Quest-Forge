@@ -12,6 +12,9 @@ export default function InventoryPanel() {
     const equippedItems = state.inventory.filter(i => i.equipped);
     const carriedItems = state.inventory.filter(i => !i.equipped);
     const totalWeight = state.inventory.reduce((sum, i) => sum + (i.weight || 0) * (i.quantity || 1), 0);
+    const currentTurn = state.combat?.turnOrder?.[state.combat?.currentTurn];
+    const isPlayerCombatTurn = !!state.combat?.active && currentTurn?.type === 'player';
+    const bonusActionUsed = !!state.combat?.active && !!state.combat?.bonusActionUsed;
 
     const handleAddItem = () => {
         if (!newItemName.trim()) return;
@@ -82,6 +85,10 @@ export default function InventoryPanel() {
                                 key={item.id}
                                 item={item}
                                 nonProficient={item.type === 'weapon' && !isProficientWithWeapon(state.character, item)}
+                                character={state.character}
+                                combatActive={!!state.combat?.active}
+                                isPlayerCombatTurn={isPlayerCombatTurn}
+                                bonusActionUsed={bonusActionUsed}
                                 onToggleEquip={handleToggleEquip}
                                 onUse={handleUse}
                                 onRemove={handleRemove}
@@ -100,6 +107,10 @@ export default function InventoryPanel() {
                                 key={item.id}
                                 item={item}
                                 nonProficient={item.type === 'weapon' && !isProficientWithWeapon(state.character, item)}
+                                character={state.character}
+                                combatActive={!!state.combat?.active}
+                                isPlayerCombatTurn={isPlayerCombatTurn}
+                                bonusActionUsed={bonusActionUsed}
                                 onToggleEquip={handleToggleEquip}
                                 onUse={handleUse}
                                 onRemove={handleRemove}
@@ -112,12 +123,30 @@ export default function InventoryPanel() {
     );
 }
 
-function InventoryItem({ item, nonProficient, onToggleEquip, onUse, onRemove }) {
+function InventoryItem({ item, nonProficient, character, combatActive, isPlayerCombatTurn, bonusActionUsed, onToggleEquip, onUse, onRemove }) {
+    const isHealingPotion = item.consumableType === 'healing' && item.healing;
+    const usesBonusAction = item.actionType === 'bonus' || isHealingPotion;
+    const atFullHealth = isHealingPotion && character?.currentHP >= character?.maxHP;
+    const isDead = isHealingPotion && character?.isDead;
+    const bonusBlocked = usesBonusAction && combatActive && (!isPlayerCombatTurn || bonusActionUsed);
+    const useDisabled = !!(isDead || atFullHealth || bonusBlocked);
+    const useTitle = isDead
+        ? 'Cannot heal the dead'
+        : atFullHealth
+            ? 'Already at full health'
+            : bonusBlocked
+                ? (!isPlayerCombatTurn ? 'Bonus action consumables are used on your turn' : 'Bonus action already used this turn')
+                : isHealingPotion
+                    ? `Drink as a bonus action and heal ${item.healing}`
+                    : 'Use';
+
     return (
         <div className={`inv-item ${item.equipped ? 'equipped' : ''}`}>
             <div className="inv-item-info">
                 <span className="inv-item-name">{item.name}</span>
                 {item.quantity > 1 && <span className="inv-item-qty">x{item.quantity}</span>}
+                {isHealingPotion && <span className="inv-item-detail">{item.healing} heal</span>}
+                {usesBonusAction && <span className="inv-item-detail">bonus</span>}
                 {item.damage && <span className="inv-item-detail">{item.damage}</span>}
                 {item.attackBonus > 0 && <span className="inv-item-detail">+{item.attackBonus} hit</span>}
                 {item.damageBonus > 0 && <span className="inv-item-detail">+{item.damageBonus} dmg</span>}
@@ -135,9 +164,10 @@ function InventoryItem({ item, nonProficient, onToggleEquip, onUse, onRemove }) 
                     <button
                         className="inv-use-btn"
                         onClick={() => onUse(item)}
-                        title={item.consumableType === 'healing' ? 'Drink / use' : 'Use'}
+                        disabled={useDisabled}
+                        title={useTitle}
                     >
-                        Use
+                        {isHealingPotion ? 'Drink' : 'Use'}
                     </button>
                 )}
                 {(item.type === 'weapon' || item.type === 'armor' || item.type === 'shield') && (

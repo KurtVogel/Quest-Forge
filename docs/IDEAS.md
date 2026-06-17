@@ -138,6 +138,22 @@ post-roll victory/XP follow-up, surviving-enemy follow-up, and low-level solo do
 It requires an explicit shell API key; user-run live eval completed with "Combat pacing eval
 passed."
 
+Shipped v10: healing potions are also lightweight bonus actions. Potion of Healing is
+player-activated from Inventory, rolls real dice client-side, consumes one stack item, revives
+living/dying characters through the shared cleanup path, and in active combat spends the same
+`bonusActionUsed` slot as Second Wind while leaving the main action available. The Inventory UI
+shows healing dice/bonus tags and disables the button when it would fail.
+
+Shipped v11: successful UI-owned healing gets an immediate LLM flavor beat. Second Wind and
+healing potions still resolve entirely in the engine first, then ChatPanel asks the DM for one
+short sensory paragraph that makes the recovery feel real without advancing combat or changing
+state. Narration-only calls ignore model-emitted JSON.
+
+Shipped v12: shorter ordinary DM cadence. The LLM should still be vivid, but most turns should
+be 1-2 short paragraphs and stop at the next meaningful player choice. Three paragraphs are
+reserved for major openings, big consequences, intimate/important NPC moments, or climactic
+outcomes; four or more requires an explicit player request.
+
 Still open:
 - Optional later: style retraining during downtime, if players regret the creation choice.
 

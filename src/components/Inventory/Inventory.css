@@ -254,6 +254,18 @@
     background: rgba(212, 175, 55, 0.15);
 }
 
+.inv-use-btn:disabled {
+    cursor: not-allowed;
+    border-color: var(--border-primary);
+    color: var(--text-muted);
+    opacity: 0.55;
+    background: transparent;
+}
+
+.inv-use-btn:disabled:hover {
+    background: transparent;
+}
+
 .inv-remove-btn {
     width: auto;
 }

@@ -177,7 +177,8 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 - **NEVER request rolls and narrate their outcome in the same response.** These are always two separate responses.
 - When you receive roll results, narrate the outcome IMMEDIATELY. Don't re-request the same rolls.
 - You CAN request multiple rolls in one response (e.g. two enemies attacking simultaneously).
-- In combat, prefer one complete exchange per player action. Only chain further rolls when genuinely new information creates a new immediate hazard; do not split ordinary enemy counterattacks into a second avoidable roll request.`;
+- In combat, prefer one complete exchange per player action. Only chain further rolls when genuinely new information creates a new immediate hazard; do not split ordinary enemy counterattacks into a second avoidable roll request.
+- **Leave space for the player.** After ordinary player input, answer the immediate consequence and stop. Do not keep writing past the next meaningful choice.`;
 
 const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)
 
@@ -207,7 +208,7 @@ const NARRATIVE_RULES = `## GAME MECHANICS (Narrative Mode)
 
 const RESPONSE_FORMAT = `## RESPONSE FORMAT
 
-Respond with immersive narrative text. Be descriptive but concise — aim for 2-4 paragraphs per response.
+Respond with immersive narrative text, but keep turn cadence playable. Default to 1-2 short paragraphs per response. Use 3 paragraphs only for major scene openings, big consequences, intimate/important NPC moments, or climactic combat outcomes. Never use 4+ paragraphs unless the player explicitly asks for a longer passage.
 
 When game events occur, include a structured JSON block at the END of your response:
 
@@ -339,7 +340,7 @@ REST & RESOURCES:
   - **Short rest:** Spends hit dice to heal, resets short-rest abilities (Fighter's Second Wind, Action Surge, etc.)
   - **Long rest:** Full HP restore, recovers half hit dice, resets ALL abilities, clears minor conditions
 - The character sheet shows current resources (Second Wind, Action Surge, Channel Divinity, etc.) with uses remaining. Reference these in narration — e.g., "You steel yourself and catch your breath" for Second Wind.
-- **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "Second Wind — you recover 8 HP" or "You drink a Potion of Healing"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent but gently note they can trigger it from their character sheet or inventory so the system applies it.
+- **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Healing potions are bonus actions in this game, use the same Bonus Action This Turn limit as Second Wind, and do not consume the main action. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "Second Wind — you recover 8 HP" or "You drink a Potion of Healing *(bonus action)*"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent but gently note they can trigger it from their character sheet or inventory so the system applies it.
 - **Bonus actions are lightweight but real.** If the prompt says Bonus Action This Turn is used, do not suggest another bonus-action resource this turn. Fighter's Second Wind is a bonus action; the UI tracks and spends it.
 - If a system message says Second Wind was used as a bonus action, weave that recovery into the scene and remember the fighter still has their main action unless the player already declared it.
 - If ACTION SURGE ACTIVE is present, the player has already spent Action Surge in the UI. Honor it on their next declared action; do NOT emit "resources_used" for it.
@@ -413,7 +414,7 @@ function buildCharacterBlock(character, combat = null) {
         resourceLines = `\n- **Resources:** ${resList.join(', ')}`;
     }
     const bonusActionLine = combat?.active
-        ? `\n- **Bonus Action This Turn:** ${combat.bonusActionUsed ? 'used' : 'available'} (the system tracks UI-owned bonus actions like Second Wind)`
+        ? `\n- **Bonus Action This Turn:** ${combat.bonusActionUsed ? 'used' : 'available'} (the system tracks UI-owned bonus actions like Second Wind and healing potions)`
         : '';
 
     // Hit dice

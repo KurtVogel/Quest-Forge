@@ -77,5 +77,6 @@ describe('Action Surge prompt state', () => {
         expect(prompt).toContain('secondWind: 1/1, bonus action');
         expect(prompt).toContain('Bonus Action This Turn:** used');
         expect(prompt).toContain('Second Wind is a bonus action');
+        expect(prompt).toContain('healing potions');
     });
 });

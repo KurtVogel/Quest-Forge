@@ -31,6 +31,7 @@ export default function ChatPanel() {
     const hasPrimedRef = useRef(false); // Ensure session priming only fires once per mount
     const memorySeededRef = useRef(false); // Ensure RAG seeding only fires once per mount
     const streamBufferRef = useRef(''); // Accumulated streaming text for JSON fence detection
+    const narratedCueIdsRef = useRef(new Set()); // Mechanic system messages already given an LLM flavor beat
 
     // Use a ref to always read the latest state inside async callbacks
     const stateRef = useRef(state);
@@ -203,7 +204,9 @@ export default function ChatPanel() {
             signal: abortControllerRef.current.signal,
         });
 
-        const { narrative, events } = parseResponse(fullResponse);
+        const parsed = parseResponse(fullResponse);
+        const narrative = parsed.narrative;
+        const events = opts.narrationOnly ? null : parsed.events;
 
         // Detect pre-narrated outcome (DM wrote outcome before dice were rolled)
         if (events?.requestedRolls?.length > 0 && detectPreNarratedOutcome(narrative)) {
@@ -256,6 +259,50 @@ export default function ChatPanel() {
 
         return events;
     };
+
+    useEffect(() => {
+        const s = stateRef.current;
+        if (!s.settings.apiKey || isLoading) return;
+        const cueMessage = [...(s.messages || [])].reverse()
+            .find(m => m.role === 'system' && m.narrationCue && !narratedCueIdsRef.current.has(m.id));
+        if (!cueMessage) return;
+
+        narratedCueIdsRef.current.add(cueMessage.id);
+        const cue = cueMessage.narrationCue;
+        const combatLine = s.combat?.active
+            ? 'Combat is active; do not advance enemy turns, request rolls, or resolve any enemy actions.'
+            : 'Do not advance time or introduce a new challenge.';
+        const narrationRequest = [
+            '[SYSTEM: The engine just resolved a player-triggered mechanic. Narrate only the felt fictional beat.',
+            'Write one short paragraph maximum, usually one or two sentences.',
+            'Do not mention JSON, UI, numbers, dice, HP totals, resources, or system messages.',
+            'Do not apply healing, spend resources, request rolls, add items, alter combat, or emit JSON.',
+            combatLine,
+            'Do not end with "What do you do?" unless the scene genuinely needs a prompt.',
+            `Mechanic: ${cue.mechanic}. Action type: ${cue.actionType || 'action'}. Effect: ${cue.effect}.`,
+            `System result to interpret fictionally: ${cueMessage.content}]`,
+        ].join(' ');
+
+        setIsLoading(true);
+        setStreamingMessage('');
+        sendToLLM(narrationRequest, null, { narrationOnly: true })
+            .catch(error => {
+                if (error.name !== 'AbortError') {
+                    dispatch({
+                        type: 'ADD_MESSAGE',
+                        payload: {
+                            role: 'system',
+                            content: `Error: ${error.message}`,
+                        },
+                    });
+                }
+            })
+            .finally(() => {
+                setIsLoading(false);
+                setStreamingMessage('');
+            });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.messages, isLoading]);
 
     /**
      * Handle the full send flow: user message → LLM → dice rolls → auto follow-up.
