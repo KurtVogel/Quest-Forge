@@ -129,7 +129,8 @@ roll damage, pairs victory with `combat_end` + XP, and tells the DM to batch Act
 instead of splitting the extra action into another response. Added `npm run eval:combat` as a
 real-provider scripted eval for attack pacing, Action Surge, Second Wind/main-action UX,
 post-roll victory/XP follow-up, surviving-enemy follow-up, and low-level solo dogpile checks.
-It requires an explicit shell API key and was not run live in the no-key dev environment.
+It requires an explicit shell API key; user-run live eval completed with "Combat pacing eval
+passed."
 
 Still open:
 - Optional later: style retraining during downtime, if players regret the creation choice.

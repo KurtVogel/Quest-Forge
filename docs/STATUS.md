@@ -27,8 +27,8 @@ _Last updated: 2026-06-17_
   explicit env API key is provided. The eval now covers both initial roll
   requests and post-roll follow-up cases for victory XP and engine-applied HP
   duplication. Tests: `npm test` 149 passing; `npm run
-  build` passing. Real-provider eval was not run in this session because no
-  eval API key was present in the shell.
+  build` passing. Real-provider eval: user-run `npm run eval:combat` completed
+  with "Combat pacing eval passed."
 - Lightweight bonus actions for Fighter resources (2026-06-17): Second Wind is
   now marked as a bonus action instead of competing with the fighter's main
   action. Combat state tracks `bonusActionUsed`, resets it on the next player
