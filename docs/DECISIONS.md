@@ -8,6 +8,71 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-17 · Bonus actions are lightweight resource tags, not a full action economy.**
+Quest Forge now supports bonus-action resource use where it matters for the fighter loop:
+Second Wind is a bonus action, `combat.bonusActionUsed` tracks whether the player has spent
+that slot this turn, and the UI/prompt expose the state. This deliberately does not model
+every D&D action type, object interaction, reaction trigger, or tactical bonus-action option.
+The app stays narrative-first while preserving the important feel: the fighter can recover
+with Second Wind and still take their main action on the same turn.
+
+**2026-06-17 · Equipped slots enforce the weapon/shield hand conflict.**
+Equipped item normalization is shared through `equipment.js`: one active weapon, one worn
+armor, one shield, and no shield while a two-handed weapon is active. UI equip actions,
+loaded saves, and imported hero files all use the same rule. Equipping a two-handed weapon
+sheathes the shield; equipping a shield sheathes an active two-handed weapon. Found shields
+do not auto-equip over a two-handed weapon. This keeps AC, Great Weapon Fighting, Archery,
+and visible inventory state from describing an impossible fighter loadout.
+
+**2026-06-17 · Combat status hints are derived from engine state, not prompt text.**
+The Combat panel now renders a compact status strip from `combatStatus.js`, with a tested
+priority order: victory and survival states (dead, defeated, dying, stable) override ordinary
+turn prompts; Action Surge overrides the normal player-turn hint; then player/companion/enemy
+turns are shown. This keeps the fighter loop readable without asking the DM to explain UI
+state or relying on narration to remember death-save counts and pending resources.
+
+**2026-06-17 · Short rests spend hit dice; they do not grant free fallback healing.**
+The fighter resource loop is player-facing: the Character Profile exposes Short Rest and
+Long Rest buttons beside resources and hit dice. A short rest automatically spends available
+hit dice to heal and recharges short-rest resources, but if no hit dice remain it restores no
+HP. Rest healing uses the same revival cleanup as other healing, while dead characters cannot
+recover by resting. DM-emitted `resources_used` for known class resources is ignored so Second
+Wind and Action Surge cannot be spent, healed, or activated behind the UI's back. This keeps
+rest recovery useful without becoming infinite healing.
+
+**2026-06-17 · Victory finalization happens after the DM's roll follow-up.**
+When engine-applied combat damage defeats every tracked enemy, the app does not end combat
+inside `rollResolver.js`; it waits until the post-roll DM follow-up has been processed, then
+the reducer resolves the exchange by either advancing the round or finalizing victory. This
+keeps victory cleanup engine-owned while giving the DM exactly one chance to emit
+`exp_awarded`, so the existing `END_COMBAT` fallback only fires when rewards were actually
+forgotten.
+
+**2026-06-17 · Ability Score Improvement is a pending sheet choice.**
+Level 4 grants one pending Ability Score Improvement rather than silently mutating stats
+or asking the DM to adjudicate it. The player spends exactly two ability points from the
+Character Profile, capped at 20 per ability. The reducer owns the mutation and recalculates
+derived state, including CON-based max/current HP and AC. Old/imported level 4+ characters
+receive one pending ASI unless the hero file records that the ASI was already applied.
+This keeps progression player-owned, inspectable, and independent of LLM narration.
+
+**2026-06-16 · Fighter Martial Archetype is Champion-only for now.**
+To keep Quest Forge D&D-lite, Fighter's level-3 `Martial Archetype` does not open a
+subclass picker or Battle Master-style maneuver system. Level 3+ Fighters default to
+Champion, a passive engine-owned rule: player weapon attacks score a critical hit on a
+natural 19 or 20, then reuse the existing critical damage path. Old saves and imported
+level 3+ Fighters become Champion automatically. Revisit only if Fighter still feels too
+flat after ASI and real play, and prefer passive/simple hooks over tactical currencies.
+
+**2026-06-16 · Fighter Fighting Style is a real character choice; old Fighters become Defense.**
+Fighter's level-1 `Fighting Style` feature now resolves to one of four compact, engine-owned
+styles: Defense (+1 AC while armored), Dueling (+2 one-handed melee damage), Great Weapon
+Fighting (reroll 1s/2s on two-handed melee damage dice), and Archery (+2 ranged attacks).
+New Fighters choose during creation; old saves and imported/roster Fighters default to
+Defense so existing characters gain a conservative survivability boost without needing a
+migration prompt. The DM prompt shows the chosen style but states that the system already
+applies it, preserving the DM↔engine contract.
+
 **2026-06-16 · Action Surge is a pending next-action state, not a full action economy.**
 Pressing Action Surge spends the Fighter's short-rest resource and sets
 `character.pendingActionSurge`. While that flag is active, the system prompt injects an

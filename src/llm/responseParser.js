@@ -9,6 +9,7 @@
  */
 
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { CLASSES } from '../data/classes.js';
 
 /** Cryptographically random integer in [min, max] — replaces Math.random() fallbacks. */
 function cryptoRandInt(min, max) {
@@ -324,16 +325,21 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
 
     const state = getState?.();
     const resources = state?.character?.classResources || {};
+    const classResourceDefs = CLASSES[state?.character?.class]?.resources || {};
+    const uiOwnedResources = events.resourcesUsed.filter(resourceKey => classResourceDefs[resourceKey]);
     const unavailableResources = events.resourcesUsed.filter(resourceKey => {
         const res = resources[resourceKey];
         return res && res.used >= res.max;
     });
-    const suppressResourceHealing = unavailableResources.length > 0 && events.healing > 0;
+    const suppressResourceHealing = (unavailableResources.length > 0 || uiOwnedResources.length > 0) && events.healing > 0;
 
     // Player abilities/consumables are activated through the game UI now, which marks
-    // them spent. If the DM also emits resources_used for one that's already spent, skip
-    // it silently — never fire a contradictory "unavailable" notice for a correct use.
+    // them spent and applies any dice-backed effect. If the DM emits a known player
+    // resource anyway, skip the spend and any paired healing so it cannot bypass the UI.
+    // If it emits a resource already spent, skip it silently — never fire a contradictory
+    // "unavailable" notice for a correct use.
     for (const resourceKey of events.resourcesUsed) {
+        if (uiOwnedResources.includes(resourceKey)) continue;
         const res = resources[resourceKey];
         if (res && res.used >= res.max) continue;
         dispatch({ type: 'USE_RESOURCE', payload: resourceKey });

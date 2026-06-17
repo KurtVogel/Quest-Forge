@@ -102,4 +102,143 @@ describe('equipment changes', () => {
         expect(next.inventory.find(i => i.id === 'shield-1').equipped).toBe(false);
         expect(next.character.armorClass).toBe(16);
     });
+
+    it('equipping a two-handed weapon sheaths the shield and updates AC', () => {
+        const start = {
+            ...makeState(),
+            inventory: [
+                ...makeState().inventory,
+                {
+                    id: 'weapon-2',
+                    itemKey: 'greatsword',
+                    name: 'Greatsword',
+                    type: 'weapon',
+                    damage: '2d6',
+                    twoHanded: true,
+                    equipped: false,
+                },
+            ],
+        };
+
+        const next = gameReducer(start, { type: 'EQUIP_ITEM', payload: 'weapon-2' });
+
+        expect(next.inventory.find(i => i.id === 'weapon-2').equipped).toBe(true);
+        expect(next.inventory.find(i => i.id === 'weapon-1').equipped).toBe(false);
+        expect(next.inventory.find(i => i.id === 'shield-1').equipped).toBe(false);
+        expect(next.character.armorClass).toBe(16);
+    });
+
+    it('equipping a shield sheaths an active two-handed weapon and updates AC', () => {
+        const start = {
+            ...makeState(),
+            inventory: [
+                makeState().inventory[0],
+                { ...makeState().inventory[1], equipped: false },
+                {
+                    id: 'weapon-2',
+                    itemKey: 'greatsword',
+                    name: 'Greatsword',
+                    type: 'weapon',
+                    damage: '2d6',
+                    twoHanded: true,
+                    equipped: true,
+                },
+            ],
+        };
+
+        const next = gameReducer(start, { type: 'EQUIP_ITEM', payload: 'shield-1' });
+
+        expect(next.inventory.find(i => i.id === 'shield-1').equipped).toBe(true);
+        expect(next.inventory.find(i => i.id === 'weapon-2').equipped).toBe(false);
+        expect(next.character.armorClass).toBe(18);
+    });
+
+    it('does not auto-equip a found shield while a two-handed weapon is active', () => {
+        const start = {
+            ...makeState(),
+            inventory: [
+                makeState().inventory[0],
+                {
+                    id: 'weapon-2',
+                    itemKey: 'greatsword',
+                    name: 'Greatsword',
+                    type: 'weapon',
+                    damage: '2d6',
+                    twoHanded: true,
+                    equipped: true,
+                },
+            ],
+        };
+
+        const next = gameReducer(start, {
+            type: 'ADD_ITEM',
+            payload: { itemKey: 'shield' },
+        });
+
+        const shield = next.inventory.find(i => i.itemKey === 'shield');
+        expect(shield.equipped).toBe(false);
+        expect(next.inventory.find(i => i.id === 'weapon-2').equipped).toBe(true);
+        expect(next.character.armorClass).toBe(16);
+    });
+});
+
+describe('consumable use', () => {
+    it('healing potions revive a dying character and are consumed', () => {
+        const state = {
+            ...makeState(),
+            character: {
+                ...makeState().character,
+                level: 3,
+                currentHP: 0,
+                maxHP: 20,
+                dying: true,
+                deathSaves: { successes: 1, failures: 1 },
+                conditions: ['Unconscious'],
+            },
+            inventory: [
+                ...makeState().inventory,
+                {
+                    id: 'potion-1',
+                    itemKey: 'potionHealing',
+                    name: 'Potion of Healing',
+                    type: 'consumable',
+                    consumableType: 'healing',
+                    healing: '2d4+2',
+                    quantity: 1,
+                },
+            ],
+        };
+
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: 'potion-1' });
+
+        expect(next.character.currentHP).toBeGreaterThan(0);
+        expect(next.character.dying).toBe(false);
+        expect(next.character.deathSaves).toEqual({ successes: 0, failures: 0 });
+        expect(next.character.conditions).not.toContain('Unconscious');
+        expect(next.inventory.some(i => i.id === 'potion-1')).toBe(false);
+        expect(next.rollHistory).toHaveLength(1);
+    });
+
+    it('does not consume a healing potion at full health', () => {
+        const state = {
+            ...makeState(),
+            inventory: [
+                ...makeState().inventory,
+                {
+                    id: 'potion-1',
+                    name: 'Potion of Healing',
+                    type: 'consumable',
+                    consumableType: 'healing',
+                    healing: '2d4+2',
+                    quantity: 1,
+                },
+            ],
+        };
+
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: 'potion-1' });
+
+        expect(next.inventory.some(i => i.id === 'potion-1')).toBe(true);
+        expect(next.rollHistory).toHaveLength(0);
+        expect(next.messages.at(-1).content).toContain('full health');
+    });
 });

@@ -240,3 +240,79 @@ describe('companion attacks', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'UPDATE_ENEMY' }));
     });
 });
+
+describe('fighter fighting styles in roll resolution', () => {
+    it('rerolls 1s and 2s on two-handed melee damage for Great Weapon Fighting', () => {
+        rollQueue.push(10, 1, 2, 5, 6); // attack, two damage dice, then two rerolls
+        const enemy = { id: 'enemy-1', name: 'Ogre', hp: 30, maxHp: 30, ac: 10, condition: 'healthy' };
+        const inventory = [{
+            type: 'weapon',
+            category: 'martialMelee',
+            name: 'Greatsword',
+            damage: '2d6',
+            twoHanded: true,
+            equipped: true,
+        }];
+
+        const { results, dispatch } = runWithContext(
+            [{ type: 'attack_roll', skill: 'attack', target: enemy.id, dc: enemy.ac }],
+            {
+                character: { fightingStyle: 'greatWeaponFighting' },
+                combat: { enemies: [enemy] },
+                inventory,
+            }
+        );
+
+        expect(results[0]).toMatchObject({ type: 'attack_roll', success: true, damage: 15, targetHp: 15 });
+        expect(messagesFrom(dispatch)).toContain('Great Weapon Fighting rerolls: 1->5, 2->6');
+    });
+});
+
+describe('fighter Champion archetype', () => {
+    it('makes a level 3 Champion crit on a natural 19 and doubles damage dice', () => {
+        rollQueue.push(19, 4, 5); // attack, crit damage dice
+        const enemy = { id: 'enemy-1', name: 'Ogre', hp: 20, maxHp: 20, ac: 30, condition: 'healthy' };
+        const inventory = [{
+            type: 'weapon',
+            category: 'martialMelee',
+            name: 'Longsword',
+            damage: '1d8',
+            equipped: true,
+        }];
+
+        const { results, dispatch } = runWithContext(
+            [{ type: 'attack_roll', skill: 'attack', target: enemy.id, dc: enemy.ac }],
+            {
+                character: { level: 3, martialArchetype: 'champion' },
+                combat: { enemies: [enemy] },
+                inventory,
+            }
+        );
+
+        expect(results[0]).toMatchObject({
+            success: true,
+            critical: true,
+            damage: 14, // (4 + 5) crit dice + STR 3 + Fighter level bonus 2
+            targetHp: 6,
+        });
+        expect(messagesFrom(dispatch)).toContain('Champion critical on natural 19');
+        expect(messagesFrom(dispatch)).toContain('crit — dice doubled');
+    });
+
+    it('does not make a non-Champion natural 19 auto-hit', () => {
+        rollQueue.push(19);
+        const enemy = { id: 'enemy-1', name: 'Ogre', hp: 20, maxHp: 20, ac: 30, condition: 'healthy' };
+
+        const { results, dispatch } = runWithContext(
+            [{ type: 'attack_roll', skill: 'attack', target: enemy.id, dc: enemy.ac }],
+            {
+                character: { level: 3, martialArchetype: null },
+                combat: { enemies: [enemy] },
+                inventory: [{ type: 'weapon', category: 'martialMelee', damage: '1d8', equipped: true }],
+            }
+        );
+
+        expect(results[0]).toMatchObject({ success: false, critical: false });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'UPDATE_ENEMY' }));
+    });
+});

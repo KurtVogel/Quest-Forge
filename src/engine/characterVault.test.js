@@ -33,6 +33,7 @@ describe('export round-trip', () => {
         expect(imported.character.name).toBe('Borin');
         expect(imported.character.race).toBe('dwarf');
         expect(imported.character.class).toBe('fighter');
+        expect(imported.character.fightingStyle).toBe('defense');
         expect(imported.character.level).toBe(1);
         expect(imported.character.maxHP).toBe(character.maxHP);
         expect(imported.character.abilityScores).toEqual(character.abilityScores);
@@ -147,10 +148,27 @@ describe('sanitizeCharacter clamps and rebuilds', () => {
         });
         expect(tampered.proficiencyBonus).toBe(getProficiencyBonus(5));
         expect(tampered.savingThrowProficiencies).toEqual(['strength', 'constitution']);
+        expect(tampered.fightingStyle).toBe('defense');
+        expect(tampered.martialArchetype).toBe('champion');
+        expect(tampered.pendingAbilityScoreImprovements).toBe(1);
         expect(tampered.features).toContain('Extra Attack');
         expect(tampered.features).not.toContain('Wish');
         expect(tampered.speed).toBe(25); // dwarf speed comes from race data
         expect(tampered.classResources.actionSurge).toBeDefined(); // L2+ resource present at L5
+    });
+
+    it('preserves already-applied Ability Score Improvements on import', () => {
+        const { character } = makeFighter();
+        const clean = sanitizeCharacter({
+            ...character,
+            level: 4,
+            abilityScoreImprovementsApplied: 1,
+            pendingAbilityScoreImprovements: 0,
+            features: ['Second Wind', 'Fighting Style', 'Action Surge', 'Martial Archetype', 'Ability Score Improvement'],
+        });
+
+        expect(clean.abilityScoreImprovementsApplied).toBe(1);
+        expect(clean.pendingAbilityScoreImprovements).toBe(0);
     });
 
     it('filters unknown skills and re-grants racial ones', () => {
@@ -198,6 +216,16 @@ describe('sanitizeInventory', () => {
         expect(equippedWeapons[0].name).toBe('Longsword');
         expect(equippedArmor).toHaveLength(1);
         expect(equippedArmor[0].name).toBe('Chain Mail');
+    });
+
+    it('does not import a shield equipped with a two-handed weapon', () => {
+        const items = sanitizeInventory([
+            { name: 'Greatsword', type: 'weapon', twoHanded: true, equipped: true },
+            { name: 'Shield', type: 'shield', isShield: true, equipped: true },
+        ]);
+
+        expect(items.find(i => i.name === 'Greatsword').equipped).toBe(true);
+        expect(items.find(i => i.name === 'Shield').equipped).toBe(false);
     });
 });
 

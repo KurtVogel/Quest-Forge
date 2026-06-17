@@ -13,8 +13,8 @@
  * `target`/`damage` fall back to the original two-step flow (DM applies HP).
  */
 
-import { rollWithModifier, rollNotation, parseNotation } from './dice.ts';
-import { getSkillModifier, getModifier, getLevelBonus, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES } from './rules.js';
+import { rollWithModifier, parseNotation } from './dice.ts';
+import { getSkillModifier, getModifier, getLevelBonus, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getEquippedWeapon, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES } from './rules.js';
 
 /** Maximum depth for recursive follow-up roll handling. */
 const MAX_ROLL_DEPTH = 3;
@@ -133,7 +133,7 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
             }
         } else if (roll.type === 'damage_roll') {
             // Standalone damage roll (legacy two-step flow) — rolled, not auto-applied.
-            const result = resolveDamageRoll(roll, character, dispatch);
+            const result = resolveDamageRoll(roll, character, dispatch, inventory);
             if (result) results.push(result);
         } else if (roll.type === 'death_save' && character) {
             const result = resolveDeathSave(character, dispatch);
@@ -152,7 +152,7 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
                 if (one.success && isAttack && damageNotation && roll.target) {
                     const enemy = findEnemy(roll.target);
                     if (enemy) {
-                        const dmg = rollAndShowDamage(damageNotation, `Damage to ${enemy.name}`, dispatch, { crit: one.critical, character });
+                        const dmg = rollAndShowDamage(damageNotation, `Damage to ${enemy.name}`, dispatch, { crit: one.critical, character, inventory });
                         enemy.hp = Math.max(0, (enemy.hp ?? 0) - dmg.total);
                         Object.assign(one, { damage: dmg.total, targetName: enemy.name, targetHp: enemy.hp, targetMaxHp: enemy.maxHp });
                         appliedHp = true;
@@ -346,20 +346,61 @@ function rollWithAdvantage(count, sides, modifier, description, advantage, disad
     return result;
 }
 
+function shouldUseGreatWeaponFighting(character, inventory = []) {
+    if (character?.class !== 'fighter' || character.fightingStyle !== 'greatWeaponFighting') return false;
+    const weapon = getEquippedWeapon(inventory);
+    return !!weapon && !weapon.ranged && weapon.twoHanded;
+}
+
+function isChampionCritical(character, die) {
+    return character?.class === 'fighter'
+        && character.level >= 3
+        && character.martialArchetype === 'champion'
+        && die >= 19;
+}
+
+function applyPlayerAttackCritical(character, result) {
+    const die = result.rolls?.[0];
+    if (isChampionCritical(character, die)) {
+        result.isCritical = true;
+        result.criticalThreshold = die === 19 ? 'Champion 19-20' : undefined;
+    }
+    return !!result.isCritical;
+}
+
+function rollDamageWithStyle(notation, label, { crit = false, character = null, inventory = [] } = {}) {
+    const { count, sides, modifier } = parseNotation(notation);
+    const diceCount = crit ? count * 2 : count;
+    const result = rollWithModifier(diceCount, sides, modifier, label);
+
+    if (shouldUseGreatWeaponFighting(character, inventory) && sides > 2) {
+        const rerolls = [];
+        result.rolls = result.rolls.map((roll) => {
+            if (roll > 2) return roll;
+            const rerolled = rollWithModifier(1, sides, 0, `${label} reroll`);
+            const kept = rerolled.rolls[0];
+            rerolls.push(`${roll}->${kept}`);
+            return kept;
+        });
+        if (rerolls.length > 0) {
+            result.subtotal = result.rolls.reduce((sum, roll) => sum + roll, 0);
+            result.total = result.subtotal + result.modifier;
+            result.fightingStyleDetail = `; Great Weapon Fighting rerolls: ${rerolls.join(', ')}`;
+        }
+    }
+
+    return result;
+}
+
 /**
  * Roll a damage notation and surface it (ADD_ROLL + chat line). Doubles the dice on a
  * crit and adds the player's Fighter level bonus when a player `character` is supplied.
  * @returns {{ total: number }}
  */
-function rollAndShowDamage(notation, label, dispatch, { crit = false, character = null } = {}) {
+function rollAndShowDamage(notation, label, dispatch, { crit = false, character = null, inventory = [] } = {}) {
     let result;
     try {
-        if (crit) {
-            const { count, sides, modifier } = parseNotation(notation);
-            result = rollWithModifier(count * 2, sides, modifier, label);
-        } else {
-            result = rollNotation(notation, label);
-        }
+        result = rollDamageWithStyle(notation, label, { crit, character, inventory });
     } catch (e) {
         console.error('[RollResolver] Bad damage notation:', notation, e);
         result = rollWithModifier(1, 4, 0, label); // safe fallback
@@ -380,7 +421,7 @@ function rollAndShowDamage(notation, label, dispatch, { crit = false, character 
         type: 'ADD_MESSAGE',
         payload: {
             role: 'system',
-            content: `**${label}**${critLabel} (${notation}): **${result.total}** damage (dice: ${result.rolls.join(', ')}${baseMod ? `, mod: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel})`,
+            content: `**${label}**${critLabel} (${notation}): **${result.total}** damage (dice: ${result.rolls.join(', ')}${baseMod ? `, mod: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel}${result.fightingStyleDetail || ''})`,
         },
     });
 
@@ -447,9 +488,9 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC) {
     };
 }
 
-function resolveDamageRoll(roll, character, dispatch) {
+function resolveDamageRoll(roll, character, dispatch, inventory = []) {
     try {
-        const result = rollNotation(roll.notation || '1d4', roll.description || 'Damage Roll');
+        const result = rollDamageWithStyle(roll.notation || '1d4', roll.description || 'Damage Roll', { character, inventory });
 
         // Apply class level bonus to damage (Fighter: +1 per level beyond 1st)
         const lvlBonus = getLevelBonus(character);
@@ -462,7 +503,7 @@ function resolveDamageRoll(roll, character, dispatch) {
         dispatch({ type: 'ADD_ROLL', payload: result });
 
         const lvlLabel = lvlBonus > 0 ? `, level bonus: +${lvlBonus}` : '';
-        const rollMsg = `**${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${baseMod ? `, modifier: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel})`;
+        const rollMsg = `**${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${baseMod ? `, modifier: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel}${result.fightingStyleDetail || ''})`;
 
         dispatch({
             type: 'ADD_MESSAGE',
@@ -535,15 +576,19 @@ function resolveDeathSave(character, dispatch) {
     return { type: 'death_save', rolled: die, outcome, successes: Math.min(successes, 3), failures: Math.min(failures, 3) };
 }
 
-function resolveSinglePlayerAttackRoll(roll, dispatch, mod, label) {
+function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
     const result = rollWithAdvantage(1, 20, mod, label, roll.advantage, roll.disadvantage);
+    const critical = applyPlayerAttackCritical(character, result);
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     const dc = roll.dc || 15;
-    const success = result.total >= dc;
+    const success = critical || result.total >= dc;
     const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
     const hitMiss = success ? '**Hit!**' : '**Miss!**';
-    const rollMsg = `**${label}**${advLabel} (vs AC ${dc}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${result.isCritical ? ' Natural 20!' : ''}${result.isCritFail ? ' Natural 1!' : ''}`;
+    const critLabel = critical
+        ? (result.rolls?.[0] === 19 ? ' Champion critical on natural 19!' : ' Natural 20!')
+        : '';
+    const rollMsg = `**${label}**${advLabel} (vs AC ${dc}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${critLabel}${result.isCritFail ? ' Natural 1!' : ''}`;
 
     dispatch({
         type: 'ADD_MESSAGE',
@@ -556,7 +601,7 @@ function resolveSinglePlayerAttackRoll(roll, dispatch, mod, label) {
         dc,
         rolled: result.total,
         success,
-        critical: result.isCritical,
+        critical,
         description: label,
     };
 }
@@ -606,12 +651,14 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
 
     if (usesAttackResolution && character.class === 'fighter' && character.level >= 5) {
         return [
-            resolveSinglePlayerAttackRoll(effRoll, dispatch, mod, `${label} (Attack 1)`),
-            resolveSinglePlayerAttackRoll(effRoll, dispatch, mod, `${label} (Extra Attack)`),
+            resolveSinglePlayerAttackRoll(effRoll, character, dispatch, mod, `${label} (Attack 1)`),
+            resolveSinglePlayerAttackRoll(effRoll, character, dispatch, mod, `${label} (Extra Attack)`),
         ];
     }
 
+    const isAttack = roll.type === 'attack_roll' || skillName === 'attack';
     const result = rollWithAdvantage(1, 20, mod, label, effRoll.advantage, effRoll.disadvantage);
+    const critical = isAttack ? applyPlayerAttackCritical(character, result) : result.isCritical;
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     // Initiative is just a number for turn ordering — no DC or pass/fail
@@ -632,14 +679,16 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
         };
     }
 
-    const success = result.total >= (roll.dc || 15);
+    const success = (isAttack && critical) || result.total >= (roll.dc || 15);
     const advLabel = effRoll.advantage ? ' *(advantage)*' : effRoll.disadvantage ? ' *(disadvantage)*' : '';
-    const isAttack = roll.type === 'attack_roll' || skillName === 'attack';
     const dcLabel = isAttack ? `vs AC ${roll.dc}` : `DC ${roll.dc}`;
     const hitMiss = isAttack
         ? (success ? '**Hit!**' : '**Miss!**')
         : (success ? '**Success!**' : '**Failure!**');
-    const rollMsg = `**${label}**${advLabel} (${dcLabel}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${result.isCritical ? ' Natural 20!' : ''}${result.isCritFail ? ' Natural 1!' : ''}`;
+    const critLabel = isAttack && critical
+        ? (result.rolls?.[0] === 19 ? ' Champion critical on natural 19!' : ' Natural 20!')
+        : (result.isCritical ? ' Natural 20!' : '');
+    const rollMsg = `**${label}**${advLabel} (${dcLabel}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${critLabel}${result.isCritFail ? ' Natural 1!' : ''}`;
 
     dispatch({
         type: 'ADD_MESSAGE',
@@ -652,7 +701,7 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
         dc: roll.dc,
         rolled: result.total,
         success,
-        critical: result.isCritical,
+        critical,
         description: roll.description,
     };
 }

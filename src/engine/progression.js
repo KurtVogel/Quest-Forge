@@ -1,6 +1,6 @@
 import { CLASSES } from '../data/classes.js';
 import { getModifier } from './rules.js';
-import { buildClassResources, getFeaturesForLevel } from './characterUtils.js';
+import { buildClassResources, getFeaturesForLevel, normalizeAbilityScoreImprovementState, normalizeMartialArchetype } from './characterUtils.js';
 
 export const MAX_CHARACTER_LEVEL = 20;
 
@@ -56,14 +56,19 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
         die: hitDie,
     };
 
-    const updatedCharacter = {
+    const updatedCharacterBase = {
         ...character,
         level: newLevel,
         maxHP: newMaxHP,
         currentHP: newMaxHP,
         features: updatedFeatures,
         classResources: buildClassResources(character.class, newLevel),
+        martialArchetype: normalizeMartialArchetype(character.class, newLevel, character.martialArchetype),
         hitDice: { ...hitDice, total: newLevel, remaining: newLevel },
+    };
+    const updatedCharacter = {
+        ...updatedCharacterBase,
+        ...normalizeAbilityScoreImprovementState(updatedCharacterBase),
     };
 
     const featureMsg = newFeatures.length > 0

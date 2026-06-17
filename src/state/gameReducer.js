@@ -4,10 +4,11 @@
 import { computeACFromInventory, getModifier } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem, normalizeItemKey } from '../data/items.js';
-import { rollDie, rollNotation } from '../engine/dice.ts';
-import { buildClassResources } from '../engine/characterUtils.js';
+import { rollDie, rollNotation, rollWithModifier } from '../engine/dice.ts';
+import { ABILITY_NAMES, buildClassResources, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../engine/characterUtils.js';
 import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
+import { normalizeEquippedSlots } from '../engine/equipment.js';
 
 /**
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
@@ -26,7 +27,7 @@ function validateSaveState(payload) {
         worldFacts: Array.isArray(payload.worldFacts) ? payload.worldFacts : [],
         party: Array.isArray(payload.party) ? payload.party : [],
         currentLocation: payload.currentLocation || null,
-        combat: payload.combat || initialGameState.combat,
+        combat: { ...initialGameState.combat, ...(payload.combat || {}) },
         session: payload.session || initialGameState.session,
     };
 }
@@ -55,6 +56,11 @@ function systemMessage(content) {
         role: 'system',
         content,
     };
+}
+
+function isPlayerCombatTurn(combat) {
+    if (!combat?.active) return false;
+    return combat.turnOrder?.[combat.currentTurn]?.type === 'player';
 }
 
 function normalizeInventory(inventory = []) {
@@ -133,9 +139,7 @@ function consumeItem(inventory, itemId, qty = 1) {
 function normalizeCombatEnemy(enemy, index) {
     const hp = Number.isFinite(enemy?.hp) ? enemy.hp : 20;
     const ac = Number.isFinite(enemy?.ac) ? enemy.ac : 12;
-    const initiative = Number.isFinite(enemy?.initiative)
-        ? enemy.initiative
-        : rollDie(20);
+    const initiative = rollDie(20);
 
     return {
         ...enemy,
@@ -197,14 +201,15 @@ export const initialGameState = {
     worldFacts: [], // Canonical world facts that never get compressed — [{id, fact, category, timestamp}]
     party: [], // Companions currently traveling with the player
     currentLocation: null,
-    combat: {
-        active: false,
-        enemies: [],
-        turnOrder: [],
-        currentTurn: 0,
-        round: 1,
-        xpAwarded: false, // true once any XP is earned during a fight (gates the End-Combat fallback)
-    },
+        combat: {
+            active: false,
+            enemies: [],
+            turnOrder: [],
+            currentTurn: 0,
+            round: 1,
+            xpAwarded: false, // true once any XP is earned during a fight (gates the End-Combat fallback)
+            bonusActionUsed: false,
+        },
     session: {
         id: null,
         name: '',
@@ -392,6 +397,9 @@ export function gameReducer(state, action) {
                     exp: 0,
                     conditions: [],
                     ...action.payload,
+                    fightingStyle: normalizeFightingStyle(action.payload?.class, action.payload?.fightingStyle),
+                    martialArchetype: normalizeMartialArchetype(action.payload?.class, action.payload?.level, action.payload?.martialArchetype),
+                    ...normalizeAbilityScoreImprovementState(action.payload),
                 }
             };
 
@@ -402,6 +410,9 @@ export function gameReducer(state, action) {
                 exp: 0,
                 conditions: [],
                 ...action.payload.character,
+                fightingStyle: normalizeFightingStyle(action.payload.character?.class, action.payload.character?.fightingStyle),
+                martialArchetype: normalizeMartialArchetype(action.payload.character?.class, action.payload.character?.level, action.payload.character?.martialArchetype),
+                ...normalizeAbilityScoreImprovementState(action.payload.character),
             };
             return {
                 ...state,
@@ -415,6 +426,52 @@ export function gameReducer(state, action) {
 
         case 'UPDATE_CHARACTER':
             return { ...state, character: { ...state.character, ...action.payload } };
+
+        case 'APPLY_ABILITY_SCORE_IMPROVEMENT': {
+            if (!state.character?.pendingAbilityScoreImprovements) return state;
+            const increases = action.payload?.increases || {};
+            const entries = Object.entries(increases)
+                .filter(([ability, value]) => ABILITY_NAMES.includes(ability) && Number.isInteger(value) && value > 0);
+            const total = entries.reduce((sum, [, value]) => sum + value, 0);
+            if (total !== 2 || entries.some(([, value]) => value > 2)) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage('Ability Score Improvement must assign exactly two ability points.')],
+                };
+            }
+
+            const abilityScores = { ...state.character.abilityScores };
+            for (const [ability, value] of entries) {
+                if ((abilityScores[ability] || 0) + value > 20) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage('Ability scores cannot be raised above 20 with this improvement.')],
+                    };
+                }
+                abilityScores[ability] += value;
+            }
+
+            const oldConMod = getModifier(state.character.abilityScores.constitution || 10);
+            const newConMod = getModifier(abilityScores.constitution || 10);
+            const hpGain = Math.max(0, newConMod - oldConMod) * (state.character.level || 1);
+            const improvedCharacter = {
+                ...state.character,
+                abilityScores,
+                maxHP: state.character.maxHP + hpGain,
+                currentHP: Math.min(state.character.maxHP + hpGain, state.character.currentHP + hpGain),
+                abilityScoreImprovementsApplied: (state.character.abilityScoreImprovementsApplied || 0) + 1,
+                pendingAbilityScoreImprovements: Math.max(0, (state.character.pendingAbilityScoreImprovements || 0) - 1),
+            };
+            const improvedState = withInventoryAndAC({ ...state, character: improvedCharacter }, state.inventory);
+            const summary = entries.map(([ability, value]) => `${ability.slice(0, 3).toUpperCase()} +${value}`).join(', ');
+            return {
+                ...improvedState,
+                messages: [
+                    ...improvedState.messages,
+                    systemMessage(`**Ability Score Improvement applied:** ${summary}.${hpGain > 0 ? ` Constitution increased maximum HP by ${hpGain}.` : ''}`),
+                ],
+            };
+        }
 
         case 'ADD_GOLD':
             return {
@@ -578,6 +635,13 @@ export function gameReducer(state, action) {
         }
 
         case 'TAKE_REST': {
+            if (state.character.isDead) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage('The dead cannot recover by resting.')],
+                };
+            }
+
             const isLong = action.payload === 'long';
             const charClass = CLASSES[state.character.class];
             const conMod = getModifier(state.character.abilityScores?.constitution || 10);
@@ -599,7 +663,7 @@ export function gameReducer(state, action) {
                     rolled += Math.max(1, rollDie(hitDice.die) + conMod);
                     newHitDice.remaining--;
                 }
-                healAmount = rolled || Math.ceil(state.character.maxHP * 0.25); // Fallback: 25% if no dice left
+                healAmount = rolled;
             }
 
             const healed = Math.min(state.character.maxHP, state.character.currentHP + healAmount);
@@ -634,16 +698,23 @@ export function gameReducer(state, action) {
                 role: 'system',
                 content: isLong
                     ? `**Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}`
-                    : `⛺ **Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.`,
+                    : `**Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.`,
             };
 
             return {
                 ...state,
-                character: {
+                character: healed > 0 ? reviveCharacter({
                     ...state.character,
                     currentHP: healed,
                     lowLevelDefeat: clearsEarlyDefeat ? false : state.character.lowLevelDefeat,
                     deathSaves: clearsEarlyDefeat ? { successes: 0, failures: 0 } : state.character.deathSaves,
+                    conditions: currentConditions,
+                    classResources: newResources,
+                    hitDice: newHitDice,
+                    pendingActionSurge: false,
+                }) : {
+                    ...state.character,
+                    currentHP: healed,
                     conditions: currentConditions,
                     classResources: newResources,
                     hitDice: newHitDice,
@@ -751,6 +822,20 @@ export function gameReducer(state, action) {
             const res = resources[resKey];
             if (!def || !res) return state;
 
+            const usesBonusAction = def.actionType === 'bonus';
+            if (usesBonusAction && state.combat.active && !isPlayerCombatTurn(state.combat)) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`**${def.label}** is a bonus action — use it on your turn.`)],
+                };
+            }
+            if (usesBonusAction && state.combat.active && state.combat.bonusActionUsed) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`**Bonus action already used** — ${def.label} can wait until your next turn.`)],
+                };
+            }
+
             if (res.used >= res.max) {
                 return {
                     ...state,
@@ -768,13 +853,19 @@ export function gameReducer(state, action) {
                 const bonus = def.effect.addLevel ? (state.character.level || 0) : 0;
                 const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total + bonus);
                 const gained = healed - state.character.currentHP;
+                const healedCharacter = healed > 0
+                    ? reviveCharacter({ ...state.character, currentHP: healed, classResources: spentResources })
+                    : { ...state.character, currentHP: healed, classResources: spentResources };
                 return {
                     ...state,
-                    character: { ...state.character, currentHP: healed, classResources: spentResources },
+                    character: healedCharacter,
+                    combat: usesBonusAction && state.combat.active
+                        ? { ...state.combat, bonusActionUsed: true }
+                        : state.combat,
                     rollHistory: [...state.rollHistory, roll],
                     messages: [
                         ...state.messages,
-                        systemMessage(`**${def.label}** — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${tail} ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`),
+                        systemMessage(`**${def.label}**${usesBonusAction ? ' *(bonus action)*' : ''} — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${tail} ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`),
                     ],
                 };
             }
@@ -785,6 +876,9 @@ export function gameReducer(state, action) {
             return {
                 ...state,
                 character: { ...state.character, classResources: spentResources, ...pendingPayload },
+                combat: usesBonusAction && state.combat.active
+                    ? { ...state.combat, bonusActionUsed: true }
+                    : state.combat,
                 messages: [...state.messages, systemMessage(`**${def.label}** — ${def.description}. ${tail}`)],
             };
         }
@@ -820,14 +914,15 @@ export function gameReducer(state, action) {
             if (!newItem.equipped) {
                 const isArmor = newItem.type === 'armor' && !newItem.isShield;
                 const isShield = newItem.type === 'shield' || newItem.isShield;
+                const hasEquippedTwoHandedWeapon = state.inventory.some(i => i.equipped && i.type === 'weapon' && i.twoHanded);
                 if (isArmor && !state.inventory.some(i => i.equipped && i.type === 'armor' && !i.isShield)) {
                     newItem.equipped = true;
                 }
-                if (isShield && !state.inventory.some(i => i.equipped && (i.type === 'shield' || i.isShield))) {
+                if (isShield && !hasEquippedTwoHandedWeapon && !state.inventory.some(i => i.equipped && (i.type === 'shield' || i.isShield))) {
                     newItem.equipped = true;
                 }
             }
-            return withInventoryAndAC(state, [...state.inventory, newItem]);
+            return withInventoryAndAC(state, normalizeEquippedSlots([...state.inventory, newItem], newItem.equipped ? newItem.id : null));
         }
 
         case 'PURCHASE_ITEM': {
@@ -881,6 +976,12 @@ export function gameReducer(state, action) {
 
             // Healing consumables resolve fully client-side with real dice.
             if (item.consumableType === 'healing' && item.healing) {
+                if (state.character.isDead) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`The ${item.name} cannot help the dead.`)],
+                    };
+                }
                 if (state.character.currentHP >= state.character.maxHP) {
                     return {
                         ...state,
@@ -890,9 +991,12 @@ export function gameReducer(state, action) {
                 const roll = rollNotation(item.healing, item.name);
                 const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total);
                 const gained = healed - state.character.currentHP;
+                const healedCharacter = healed > 0
+                    ? reviveCharacter({ ...state.character, currentHP: healed })
+                    : { ...state.character, currentHP: healed };
                 return {
                     ...state,
-                    character: { ...state.character, currentHP: healed },
+                    character: healedCharacter,
                     inventory: consumeItem(state.inventory, item.id),
                     rollHistory: [...state.rollHistory, roll],
                     messages: [
@@ -976,27 +1080,12 @@ export function gameReducer(state, action) {
             const itemToEquip = state.inventory.find(i => i.id === action.payload);
             if (!itemToEquip) return state;
 
-            // Mutual exclusion: one armor, one shield, and one (active) weapon at a time.
-            const isArmor = itemToEquip.type === 'armor' && !itemToEquip.isShield;
-            const isShield = itemToEquip.type === 'shield' || itemToEquip.isShield;
-            const isWeapon = itemToEquip.type === 'weapon';
-
             const updatedInv = state.inventory.map(item => {
                 if (item.id === action.payload) return { ...item, equipped: true };
-                if (isArmor && item.type === 'armor' && !item.isShield && item.equipped) {
-                    return { ...item, equipped: false };
-                }
-                if (isShield && (item.type === 'shield' || item.isShield) && item.equipped) {
-                    return { ...item, equipped: false };
-                }
-                // Equipping a weapon makes it the active weapon — sheathe any other.
-                if (isWeapon && item.type === 'weapon' && item.equipped) {
-                    return { ...item, equipped: false };
-                }
                 return item;
             });
 
-            return withInventoryAndAC(state, updatedInv);
+            return withInventoryAndAC(state, normalizeEquippedSlots(updatedInv, action.payload));
         }
 
         case 'EQUIP_ITEM_BY_REF': {
@@ -1179,22 +1268,35 @@ export function gameReducer(state, action) {
             // difficulty for low-level solo play is steered by the system prompt instead, so
             // the narrative and the tracked combatants always stay 1:1.
             const enemies = (action.payload?.enemies || []).map(normalizeCombatEnemy);
-            // Build turn order: player + enemies sorted by initiative
-            const playerInit = action.payload?.playerInitiative || 10;
+            const dexMod = state.character?.abilityScores
+                ? getModifier(state.character.abilityScores.dexterity)
+                : 0;
+            const playerInitiativeRoll = rollWithModifier(1, 20, dexMod, 'Initiative');
+            const companionInitiatives = (state.party || []).map(c => ({
+                companion: c,
+                initiative: rollDie(20),
+            }));
+
+            // Build turn order: player + companions + enemies sorted by engine-owned initiative.
             const turnOrder = [
-                { type: 'player', name: state.character?.name || 'Player', initiative: playerInit },
-                ...(state.party || []).map(c => ({
+                { type: 'player', name: state.character?.name || 'Player', initiative: playerInitiativeRoll.total },
+                ...companionInitiatives.map(({ companion, initiative }) => ({
                     type: 'companion',
-                    id: c.id,
-                    name: c.name,
-                    initiative: rollDie(20), // Companions roll their own init (crypto-random)
+                    id: companion.id,
+                    name: companion.name,
+                    initiative,
                 })),
                 ...enemies.map(e => ({ type: 'enemy', id: e.id, name: e.name, initiative: e.initiative })),
             ].sort((a, b) => b.initiative - a.initiative);
 
             return {
                 ...state,
-                combat: { active: true, enemies, turnOrder, currentTurn: 0, round: 1, xpAwarded: false },
+                combat: { active: true, enemies, turnOrder, currentTurn: 0, round: 1, xpAwarded: false, bonusActionUsed: false },
+                rollHistory: [...state.rollHistory, playerInitiativeRoll],
+                messages: [
+                    ...state.messages,
+                    systemMessage(`**Initiative** — ${state.character?.name || 'You'} rolled **${playerInitiativeRoll.total}** (d20: ${playerInitiativeRoll.rolls.join(', ')}${dexMod ? `, DEX ${dexMod >= 0 ? '+' : ''}${dexMod}` : ''}).`),
+                ],
             };
         }
 
@@ -1202,7 +1304,7 @@ export function gameReducer(state, action) {
             const llmAwardedXp = action.payload?.llmAwardedXp || false;
             let newState = {
                 ...state,
-                combat: { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1, xpAwarded: false },
+                combat: { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1, xpAwarded: false, bonusActionUsed: false },
             };
 
             // Client-side XP fallback — only when NO XP was earned for this fight at all:
@@ -1227,6 +1329,20 @@ export function gameReducer(state, action) {
             }
 
             return newState;
+        }
+
+        case 'FINALIZE_VICTORY': {
+            if (!state.combat.active || !(state.combat.enemies || []).length) return state;
+            const allDefeated = state.combat.enemies.every(e => (e.hp ?? 0) <= 0 || e.condition === 'dead');
+            if (!allDefeated) return state;
+            return gameReducer(state, { type: 'END_COMBAT', payload: { autoVictory: true } });
+        }
+
+        case 'RESOLVE_COMBAT_EXCHANGE': {
+            if (!state.combat.active) return state;
+            const allDefeated = (state.combat.enemies || []).length > 0
+                && state.combat.enemies.every(e => (e.hp ?? 0) <= 0 || e.condition === 'dead');
+            return gameReducer(state, { type: allDefeated ? 'FINALIZE_VICTORY' : 'ADVANCE_ROUND' });
         }
 
         case 'UPDATE_ENEMY':
@@ -1257,6 +1373,9 @@ export function gameReducer(state, action) {
                     ...state.combat,
                     currentTurn: nextTurn % orderLen,
                     round: nextTurn >= orderLen ? state.combat.round + 1 : state.combat.round,
+                    bonusActionUsed: state.combat.turnOrder[nextTurn % orderLen]?.type === 'player'
+                        ? false
+                        : state.combat.bonusActionUsed,
                 },
             };
         }
@@ -1271,6 +1390,7 @@ export function gameReducer(state, action) {
                     ...state.combat,
                     currentTurn: playerIdx >= 0 ? playerIdx : 0,
                     round: state.combat.round + 1,
+                    bonusActionUsed: false,
                 },
             };
         }
@@ -1337,20 +1457,11 @@ export function gameReducer(state, action) {
                     }
                 }
             }
-            // Collapse multiple equipped weapons to a single active weapon (older saves
-            // equipped them all). Keep the first equipped weapon, sheathe the rest.
-            let activeWeaponSeen = false;
-            for (const item of loadedInventory) {
-                if (item.type === 'weapon' && item.equipped) {
-                    if (activeWeaponSeen) item.equipped = false;
-                    else activeWeaponSeen = true;
-                }
-            }
+            // Collapse invalid equipped combinations from older saves: one active weapon,
+            // one armor, one shield, and no shield while a two-handed weapon is active.
+            const normalizedEquippedInventory = normalizeEquippedSlots(loadedInventory);
             const loadedCharacter = action.payload.character;
             // Recalculate AC on load to fix stale saves
-            const recalcedAC = loadedCharacter
-                ? computeACFromInventory(loadedInventory, loadedCharacter)
-                : null;
             // Backfill new character fields for old saves
             const rawBackfilledCharacter = loadedCharacter ? {
                 skillProficiencies: [],
@@ -1362,8 +1473,13 @@ export function gameReducer(state, action) {
                     die: CLASSES[loadedCharacter.class]?.hitDie || 8,
                 },
                 ...loadedCharacter,
-                armorClass: recalcedAC,
+                fightingStyle: normalizeFightingStyle(loadedCharacter.class, loadedCharacter.fightingStyle),
+                martialArchetype: normalizeMartialArchetype(loadedCharacter.class, loadedCharacter.level, loadedCharacter.martialArchetype),
+                ...normalizeAbilityScoreImprovementState(loadedCharacter),
             } : loadedCharacter;
+            if (rawBackfilledCharacter) {
+                rawBackfilledCharacter.armorClass = computeACFromInventory(normalizedEquippedInventory, rawBackfilledCharacter);
+            }
             const pendingProgression = applyPendingLevelUpsOnLoad(rawBackfilledCharacter);
             const backfilledCharacter = pendingProgression.character;
             // Validate required state shape
@@ -1373,7 +1489,7 @@ export function gameReducer(state, action) {
                 // Use the normalized + migrated inventory (auto-equipped armor/shield and the
                 // single-active-weapon collapse). Previously these were computed for AC only
                 // and discarded, leaving the raw saved inventory — so the migrations never applied.
-                inventory: loadedInventory,
+                inventory: normalizedEquippedInventory,
                 character: backfilledCharacter,
                 messages: [...validated.messages, ...pendingProgression.messages],
                 user: state.user,

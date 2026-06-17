@@ -54,4 +54,134 @@ describe('class resource activation', () => {
         expect(rested.character.pendingActionSurge).toBe(false);
         expect(rested.character.classResources.actionSurge.used).toBe(0);
     });
+
+    it('Second Wind clears low-level defeat when it restores HP', () => {
+        const next = gameReducer(makeFighter({
+            level: 1,
+            currentHP: 0,
+            maxHP: 12,
+            lowLevelDefeat: true,
+            conditions: ['Unconscious'],
+            deathSaves: { successes: 0, failures: 0 },
+            classResources: {
+                secondWind: { used: 0, max: 1 },
+            },
+        }), {
+            type: 'ACTIVATE_RESOURCE',
+            payload: 'secondWind',
+        });
+
+        expect(next.character.currentHP).toBeGreaterThan(0);
+        expect(next.character.lowLevelDefeat).toBe(false);
+        expect(next.character.conditions).not.toContain('Unconscious');
+        expect(next.character.deathSaves).toEqual({ successes: 0, failures: 0 });
+        expect(next.character.classResources.secondWind.used).toBe(1);
+    });
+
+    it('Second Wind spends the combat bonus action without ending the main action', () => {
+        const start = makeFighter({
+            currentHP: 10,
+            classResources: {
+                secondWind: { used: 0, max: 2 },
+                actionSurge: { used: 0, max: 1 },
+            },
+        });
+        start.combat = {
+            active: true,
+            enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 7, maxHp: 7, ac: 13, condition: 'healthy' }],
+            turnOrder: [{ type: 'player', name: 'Astra', initiative: 12 }],
+            currentTurn: 0,
+            round: 1,
+            xpAwarded: false,
+            bonusActionUsed: false,
+        };
+
+        const used = gameReducer(start, { type: 'ACTIVATE_RESOURCE', payload: 'secondWind' });
+        const blocked = gameReducer(used, { type: 'ACTIVATE_RESOURCE', payload: 'secondWind' });
+        const nextRound = gameReducer(used, { type: 'ADVANCE_ROUND' });
+
+        expect(used.combat.bonusActionUsed).toBe(true);
+        expect(used.character.classResources.secondWind.used).toBe(1);
+        expect(used.messages.at(-1).content).toContain('bonus action');
+        expect(blocked.character.classResources.secondWind.used).toBe(1);
+        expect(blocked.messages.at(-1).content).toContain('Bonus action already used');
+        expect(nextRound.combat.bonusActionUsed).toBe(false);
+    });
+
+    it('does not allow a bonus action resource outside the player combat turn', () => {
+        const start = makeFighter({ currentHP: 10 });
+        start.combat = {
+            active: true,
+            enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 7, maxHp: 7, ac: 13, condition: 'healthy' }],
+            turnOrder: [
+                { type: 'enemy', id: 'enemy-1', name: 'Goblin', initiative: 13 },
+                { type: 'player', name: 'Astra', initiative: 12 },
+            ],
+            currentTurn: 0,
+            round: 1,
+            xpAwarded: false,
+            bonusActionUsed: false,
+        };
+
+        const next = gameReducer(start, { type: 'ACTIVATE_RESOURCE', payload: 'secondWind' });
+
+        expect(next.character.classResources.secondWind.used).toBe(0);
+        expect(next.combat.bonusActionUsed).toBe(false);
+        expect(next.messages.at(-1).content).toContain('use it on your turn');
+    });
+
+    it('short rest does not grant free healing when no hit dice remain', () => {
+        const next = gameReducer(makeFighter({
+            currentHP: 4,
+            hitDice: { total: 2, remaining: 0, die: 10 },
+        }), {
+            type: 'TAKE_REST',
+            payload: 'short',
+        });
+
+        expect(next.character.currentHP).toBe(4);
+        expect(next.character.hitDice.remaining).toBe(0);
+        expect(next.messages.at(-1).content).toContain('Recovered 0 HP');
+    });
+
+    it('short rest hit dice healing revives a dying character', () => {
+        const next = gameReducer(makeFighter({
+            level: 3,
+            currentHP: 0,
+            dying: true,
+            conditions: ['Unconscious'],
+            deathSaves: { successes: 1, failures: 1 },
+            hitDice: { total: 3, remaining: 1, die: 10 },
+        }), {
+            type: 'TAKE_REST',
+            payload: 'short',
+        });
+
+        expect(next.character.currentHP).toBeGreaterThan(0);
+        expect(next.character.dying).toBe(false);
+        expect(next.character.conditions).not.toContain('Unconscious');
+        expect(next.character.deathSaves).toEqual({ successes: 0, failures: 0 });
+        expect(next.character.hitDice.remaining).toBe(0);
+    });
+
+    it('long rest does not revive a dead character', () => {
+        const start = makeFighter({
+            currentHP: 0,
+            isDead: true,
+            classResources: {
+                secondWind: { used: 1, max: 1 },
+                actionSurge: { used: 1, max: 1 },
+            },
+        });
+
+        const next = gameReducer(start, {
+            type: 'TAKE_REST',
+            payload: 'long',
+        });
+
+        expect(next.character.currentHP).toBe(0);
+        expect(next.character.isDead).toBe(true);
+        expect(next.character.classResources.secondWind.used).toBe(1);
+        expect(next.messages.at(-1).content).toContain('dead cannot recover');
+    });
 });

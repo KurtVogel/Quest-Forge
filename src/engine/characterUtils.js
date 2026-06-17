@@ -13,6 +13,7 @@ import { normalizeItem } from '../data/items.js';
 export const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
 
 const STARTING_GOLD_DICE = { count: 2, sides: 20 };
+const ABILITY_SCORE_IMPROVEMENT_LEVELS = [4];
 
 /**
  * Ability score names in standard order.
@@ -30,6 +31,9 @@ export const ABILITY_SHORT = {
     wisdom: 'WIS',
     charisma: 'CHA',
 };
+
+export const DEFAULT_FIGHTER_FIGHTING_STYLE = 'defense';
+export const DEFAULT_FIGHTER_MARTIAL_ARCHETYPE = 'champion';
 
 /**
  * Human-readable skill labels.
@@ -88,6 +92,50 @@ export function buildClassResources(className, level) {
     return resources;
 }
 
+export function normalizeFightingStyle(className, value) {
+    const styles = CLASSES[className]?.fightingStyles;
+    if (!styles) return null;
+    return styles[value] ? value : DEFAULT_FIGHTER_FIGHTING_STYLE;
+}
+
+export function getFightingStyleLabel(className, value) {
+    const style = normalizeFightingStyle(className, value);
+    return style ? CLASSES[className]?.fightingStyles?.[style]?.label || style : null;
+}
+
+export function normalizeMartialArchetype(className, level, value) {
+    const archetypes = CLASSES[className]?.martialArchetypes;
+    if (!archetypes || (Number(level) || 1) < 3) return null;
+    return archetypes[value] ? value : DEFAULT_FIGHTER_MARTIAL_ARCHETYPE;
+}
+
+export function getMartialArchetypeLabel(className, level, value) {
+    const archetype = normalizeMartialArchetype(className, level, value);
+    return archetype ? CLASSES[className]?.martialArchetypes?.[archetype]?.label || archetype : null;
+}
+
+export function getAbilityScoreImprovementCount(level) {
+    const n = Number(level) || 1;
+    return ABILITY_SCORE_IMPROVEMENT_LEVELS.filter(l => n >= l).length;
+}
+
+export function normalizeAbilityScoreImprovementState(character = {}) {
+    const earned = getAbilityScoreImprovementCount(character.level);
+    const rawApplied = Number(character.abilityScoreImprovementsApplied);
+    const applied = Number.isFinite(rawApplied)
+        ? Math.max(0, Math.min(earned, Math.trunc(rawApplied)))
+        : 0;
+    const rawPending = Number(character.pendingAbilityScoreImprovements);
+    const pending = Number.isFinite(rawPending)
+        ? Math.max(0, Math.min(earned - applied, Math.trunc(rawPending)))
+        : Math.max(0, earned - applied);
+
+    return {
+        abilityScoreImprovementsApplied: applied,
+        pendingAbilityScoreImprovements: pending,
+    };
+}
+
 /**
  * Get features unlocked at a specific level for a class.
  */
@@ -120,7 +168,7 @@ export function getAllFeaturesUpToLevel(className, level) {
  * @param {object} abilityScores - Base ability scores before racial bonuses
  * @param {string[]} chosenSkills - Skills chosen by the player during creation
  */
-export function createCharacter(name, raceName, className, abilityScores, chosenSkills = []) {
+export function createCharacter(name, raceName, className, abilityScores, chosenSkills = [], options = {}) {
     const race = RACES[raceName];
     const charClass = CLASSES[className];
 
@@ -157,6 +205,10 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         skillProficiencies: allSkills,
         expertiseSkills: [], // Rogues pick these at level 1 (future UI)
         savingThrowProficiencies: [...(charClass.savingThrows || [])],
+        fightingStyle: normalizeFightingStyle(className, options.fightingStyle),
+        martialArchetype: normalizeMartialArchetype(className, 1, options.martialArchetype),
+        abilityScoreImprovementsApplied: 0,
+        pendingAbilityScoreImprovements: 0,
         speed: race.speed || 30,
         traits: [...(race.traits || [])],
         features: [...(charClass.features?.['1'] || [])],

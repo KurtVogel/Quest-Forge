@@ -47,4 +47,35 @@ describe('Action Surge prompt state', () => {
         expect(prompt).toContain('Their next declared action gets one additional action');
         expect(prompt).toContain('do NOT emit resources_used');
     });
+
+    it('includes bonus-action state and action cost for resources in combat', () => {
+        const prompt = buildSystemPrompt({
+            character: {
+                ...character,
+                pendingActionSurge: false,
+                classResources: {
+                    secondWind: { used: 0, max: 1 },
+                    actionSurge: { used: 0, max: 1 },
+                },
+            },
+            inventory: [],
+            quests: [],
+            rollHistory: [],
+            preset: 'classicFantasy',
+            ruleset: 'simplified5e',
+            customSystemPrompt: '',
+            journal: [],
+            npcs: [],
+            party: [],
+            currentLocation: 'Road',
+            combat: { active: true, bonusActionUsed: true },
+            worldFacts: [],
+            retrievedMemories: [],
+            premise: '',
+        });
+
+        expect(prompt).toContain('secondWind: 1/1, bonus action');
+        expect(prompt).toContain('Bonus Action This Turn:** used');
+        expect(prompt).toContain('Second Wind is a bonus action');
+    });
 });

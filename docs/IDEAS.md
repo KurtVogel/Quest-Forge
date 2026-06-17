@@ -91,6 +91,41 @@ mechanical floor**, and the prompt rule loses.
 Still needs real-play check with a live LLM: verify that major NPC + guards now becomes
 threat/capture/escape pressure rather than a forced first-scene death match.
 
+### Fighter polish — status: fighting styles + Champion + ASI + combat/rest cleanup `shipped`
+Shipped v1: Fighters now choose Defense, Dueling, Great Weapon Fighting, or Archery during
+creation; old/imported Fighters default to Defense. The engine applies AC/attack/damage/reroll
+effects and exposes the chosen style to the character sheet and DM prompt.
+
+Shipped v2: Fighter's level-3 Martial Archetype is Champion-only for now: old/imported level
+3+ Fighters default to Champion, and player weapon attacks crit on natural 19-20.
+
+Shipped v3: Level 4 Ability Score Improvement is a pending sheet choice. The player assigns
+exactly two ability points, capped at 20; the reducer recalculates derived HP/AC state.
+
+Shipped v4: requested-roll combat exchanges now auto-resolve after the DM follow-up:
+if all tracked enemies are defeated, the reducer ends combat and uses the existing XP fallback
+only if the DM did not already award XP.
+
+Shipped v5: the Character Profile exposes Short Rest and Long Rest buttons. Short rests spend
+hit dice only (no free fallback healing), rests revive living characters when healing brings
+them above 0 HP, dead characters cannot recover by resting, and DM-emitted `resources_used`
+cannot bypass UI-owned Fighter resource activation.
+
+Shipped v6: the Combat panel has an engine-derived status strip for victory, dying/death-save
+progress, low-level defeat, stable-at-0, Action Surge active, player turns, companion turns,
+and enemy turns.
+
+Shipped v7: equipped slots now enforce the two-handed weapon vs shield conflict across UI
+actions, loaded saves, and imported hero files, so AC and attack style math match visible gear.
+
+Shipped v8: lightweight bonus actions. Second Wind is now a bonus-action resource that can be
+used on the player's combat turn without consuming the main action; `bonusActionUsed` blocks a
+second bonus-action resource until the next player turn/round and is shown in the sheet,
+combat status, and prompt.
+
+Still open:
+- Optional later: style retraining during downtime, if players regret the creation choice.
+
 ### Rogue mechanics — status: `designed`, waiting on fighter test-play phase
 The easy class to make real: everything is single-target and binary, no geometry.
 - Sneak Attack: append Xd6 (scaling by level) to damage in `rollResolver.js` when the

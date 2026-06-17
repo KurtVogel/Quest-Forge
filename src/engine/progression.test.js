@@ -54,6 +54,41 @@ describe('D&D 5e XP progression', () => {
         expect(result.messages.some(m => m.content.includes('Average HP **6** from d10 + 2 CON = **+8 HP**'))).toBe(true);
     });
 
+    it('defaults fighters to Champion when Martial Archetype unlocks at level 3', () => {
+        const result = awardExperience({
+            ...character,
+            level: 2,
+            exp: 0,
+            maxHP: 20,
+            currentHP: 20,
+            features: ['Second Wind', 'Fighting Style', 'Action Surge'],
+            classResources: {},
+            hitDice: { total: 2, remaining: 2, die: 10 },
+        }, 600);
+
+        expect(result.character.level).toBe(3);
+        expect(result.character.martialArchetype).toBe('champion');
+        expect(result.character.features).toContain('Martial Archetype');
+    });
+
+    it('grants a pending Ability Score Improvement at level 4', () => {
+        const result = awardExperience({
+            ...character,
+            level: 3,
+            exp: 0,
+            maxHP: 28,
+            currentHP: 28,
+            features: ['Second Wind', 'Fighting Style', 'Action Surge', 'Martial Archetype'],
+            classResources: {},
+            hitDice: { total: 3, remaining: 3, die: 10 },
+        }, 1800);
+
+        expect(result.character.level).toBe(4);
+        expect(result.character.pendingAbilityScoreImprovements).toBe(1);
+        expect(result.character.abilityScoreImprovementsApplied).toBe(0);
+        expect(result.character.features).toContain('Ability Score Improvement');
+    });
+
     it('does not let milestone level-ups exceed level 20', () => {
         const result = awardExperience({ ...character, level: 20, exp: 0 }, 0, {
             milestoneLevelUp: true,

@@ -156,6 +156,27 @@ describe('applyEvents low-level safety', () => {
     });
 });
 
+describe('applyEvents resource contract', () => {
+    it('ignores DM-emitted player resource spends and paired healing for UI-owned resources', () => {
+        const { events } = parseResponse(fence({
+            resources_used: ['secondWind'],
+            healing: 8,
+        }));
+        const dispatch = vi.fn();
+
+        applyEvents(events, dispatch, () => ({
+            character: {
+                class: 'fighter',
+                classResources: { secondWind: { used: 0, max: 1 } },
+            },
+            party: [],
+        }));
+
+        expect(dispatch).not.toHaveBeenCalledWith({ type: 'USE_RESOURCE', payload: 'secondWind' });
+        expect(dispatch).not.toHaveBeenCalledWith({ type: 'HEAL', payload: 8 });
+    });
+});
+
 describe('applyEvents equipment changes', () => {
     it('dispatches equip and unequip item refs', () => {
         const { events } = parseResponse(fence({

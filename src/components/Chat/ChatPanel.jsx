@@ -291,9 +291,8 @@ export default function ChatPanel() {
                     preNarrated: events._preNarratedOutcome || false,
                 });
 
-                // Advance combat round after a full exchange (player + enemies acted)
                 if (stateRef.current.combat?.active) {
-                    dispatch({ type: 'ADVANCE_ROUND' });
+                    dispatch({ type: 'RESOLVE_COMBAT_EXCHANGE' });
                 }
             }
 

@@ -80,7 +80,13 @@ export function computeACFromInventory(inventory, character) {
         i.equipped && (i.type === 'shield' || i.isShield)
     ) || null;
 
-    return getArmorClass(dexMod, equippedArmor, equippedShield);
+    const styleBonus = character.class === 'fighter'
+        && character.fightingStyle === 'defense'
+        && equippedArmor
+        ? 1
+        : 0;
+
+    return getArmorClass(dexMod, equippedArmor, equippedShield) + styleBonus;
 }
 
 export function getEquippedWeapon(inventory = []) {
@@ -135,10 +141,16 @@ export function getWeaponAttackBonus(character, inventory = []) {
     const weapon = getEquippedWeapon(inventory);
     const abilityMod = getWeaponAbilityModifier(character, weapon);
     const proficient = isProficientWithWeapon(character, weapon);
+    const styleBonus = character?.class === 'fighter'
+        && character.fightingStyle === 'archery'
+        && weapon?.ranged
+        ? 2
+        : 0;
     return abilityMod
         + (proficient ? getProficiencyBonus(character.level) : 0)
         + getLevelBonus(character)
-        + (weapon?.attackBonus || weapon?.magicBonus || 0);
+        + (weapon?.attackBonus || weapon?.magicBonus || 0)
+        + styleBonus;
 }
 
 export function getWeaponDamageNotation(character, inventory = [], fallback = '1d4') {
@@ -146,7 +158,14 @@ export function getWeaponDamageNotation(character, inventory = [], fallback = '1
     const dice = weapon?.damage || fallback;
     const abilityMod = getWeaponAbilityModifier(character, weapon);
     const itemBonus = weapon?.damageBonus || weapon?.magicBonus || 0;
-    const modifier = abilityMod + itemBonus;
+    const styleBonus = character?.class === 'fighter'
+        && character.fightingStyle === 'dueling'
+        && weapon
+        && !weapon.ranged
+        && !weapon.twoHanded
+        ? 2
+        : 0;
+    const modifier = abilityMod + itemBonus + styleBonus;
 
     if (!/^\d+d\d+/i.test(String(dice))) {
         return fallback;

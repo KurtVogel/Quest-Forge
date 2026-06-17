@@ -3,13 +3,14 @@
  * Constructs dynamic system prompts that inject character state, rules, and context.
  */
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
-import { ABILITY_SHORT } from '../engine/characterUtils.js';
+import { ABILITY_SHORT, getFightingStyleLabel, getMartialArchetypeLabel } from '../engine/characterUtils.js';
 import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus, getSavingThrowModifier, isProficientWithWeapon } from '../engine/rules.js';
 import { getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
 import { formatCurrency } from '../engine/currency.js';
+import { CLASSES } from '../data/classes.js';
 
 /**
  * Build the complete system prompt for the LLM.
@@ -52,7 +53,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
 
     // Character info
     if (character) {
-        parts.push(buildCharacterBlock(character));
+        parts.push(buildCharacterBlock(character, combat));
         if (character.pendingActionSurge) {
             parts.push(buildActionSurgeBlock(character));
         }
@@ -252,9 +253,8 @@ When game events occur, include a structured JSON block at the END of your respo
   ],
   "combat_start": {
     "enemies": [
-      { "name": "Goblin", "hp": 15, "ac": 13, "initiative": 14 }
-    ],
-    "player_initiative": 12
+      { "name": "Goblin", "hp": 15, "ac": 13 }
+    ]
   },
   "combat_end": false,
   "enemy_updates": [],
@@ -301,7 +301,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - You CAN request multiple rolls in one response (e.g. two enemies both attacking).
 
 COMBAT NOTES:
-- Use "combat_start" when combat initiates, and list EVERY foe that will act — each with name, hp, ac, and initiative. The client tracks exactly what you declare, so keep the narrative and the tracked enemies strictly 1:1: never describe an attacker that isn't in the combat state, and don't silently add or drop foes mid-fight.
+- Use "combat_start" when combat initiates, and list EVERY foe that will act — each with name, hp, and ac. The client rolls initiative for the player, companions, and enemies, then tracks exactly what you declare, so keep the narrative and the tracked enemies strictly 1:1: never describe an attacker that isn't in the combat state, and don't silently add or drop foes mid-fight.
 - **Resolve a whole round in ONE response.** When the player attacks, also request any participating companions' attacks and every still-living foe's response attack in the same requested_rolls block (each with attackerId, target, modifier, and inline damage). The client rolls them in order, skips any combatant whose target/attacker is already down, applies all HP, and you then narrate the exchange once.
 - HP is owned by the client. When a roll result says "HP applied by the system", do NOT also send enemy_updates or damage_taken for it. Use "enemy_updates" only for HP changes the dice did NOT cause (e.g. an enemy drinks a potion).
 - Use "combat_end": true when all enemies are defeated or combat ends.
@@ -329,6 +329,7 @@ REST & RESOURCES:
   - **Long rest:** Full HP restore, recovers half hit dice, resets ALL abilities, clears minor conditions
 - The character sheet shows current resources (Second Wind, Action Surge, Channel Divinity, etc.) with uses remaining. Reference these in narration — e.g., "You steel yourself and catch your breath" for Second Wind.
 - **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "Second Wind — you recover 8 HP" or "You drink a Potion of Healing"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent but gently note they can trigger it from their character sheet or inventory so the system applies it.
+- **Bonus actions are lightweight but real.** If the prompt says Bonus Action This Turn is used, do not suggest another bonus-action resource this turn. Fighter's Second Wind is a bonus action; the UI tracks and spends it.
 - If ACTION SURGE ACTIVE is present, the player has already spent Action Surge in the UI. Honor it on their next declared action; do NOT emit "resources_used" for it.
 - Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC casts a healing spell on the player).
 
@@ -359,7 +360,7 @@ GOOD — DM requests the roll with minimal prose; narrates the full scene AFTER 
 > \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":14,"description":"Slip past the patrol","advantage":false,"disadvantage":false}] }\`\`\`
 > *(The client withholds this pre-roll line. Once the dice return, narrate the whole beat in one vivid pass — the creep along the wall AND whether you're spotted — never split across two messages.)*`;
 
-function buildCharacterBlock(character) {
+function buildCharacterBlock(character, combat = null) {
     const stats = Object.entries(character.abilityScores)
         .map(([ability, score]) => `${ABILITY_SHORT[ability]}: ${score} (${formatModifier(getModifier(score))})`)
         .join(', ');
@@ -390,18 +391,34 @@ function buildCharacterBlock(character) {
     // Class resources status
     let resourceLines = '';
     const classResources = character.classResources || {};
+    const resourceDefs = CLASSES[character.class]?.resources || {};
     if (Object.keys(classResources).length > 0) {
         const resList = Object.entries(classResources).map(([key, res]) => {
             const available = res.max - res.used;
-            return `${key}: ${available}/${res.max}`;
+            const actionType = resourceDefs[key]?.actionType ? `, ${resourceDefs[key].actionType} action` : '';
+            return `${key}: ${available}/${res.max}${actionType}`;
         });
         resourceLines = `\n- **Resources:** ${resList.join(', ')}`;
     }
+    const bonusActionLine = combat?.active
+        ? `\n- **Bonus Action This Turn:** ${combat.bonusActionUsed ? 'used' : 'available'} (the system tracks UI-owned bonus actions like Second Wind)`
+        : '';
 
     // Hit dice
     const hitDice = character.hitDice;
     const hitDiceLine = hitDice
         ? `\n- **Hit Dice:** ${hitDice.remaining}/${hitDice.total} d${hitDice.die} (spend on short rest to heal)`
+        : '';
+    const fightingStyle = getFightingStyleLabel(character.class, character.fightingStyle);
+    const fightingStyleLine = fightingStyle
+        ? `\n- **Fighting Style:** ${fightingStyle} (applied automatically by the system — do NOT add this yourself)`
+        : '';
+    const martialArchetype = getMartialArchetypeLabel(character.class, character.level, character.martialArchetype);
+    const martialArchetypeLine = martialArchetype
+        ? `\n- **Martial Archetype:** ${martialArchetype} (applied automatically by the system — do NOT add this yourself)`
+        : '';
+    const asiLine = character.pendingAbilityScoreImprovements > 0
+        ? `\n- **Pending Ability Score Improvement:** ${character.pendingAbilityScoreImprovements} (player applies this in the character sheet; do NOT change stats yourself)`
         : '';
 
     const expLine = isMaxLevel(character.level)
@@ -421,9 +438,13 @@ function buildCharacterBlock(character) {
 - **Saving Throws:** ${saves} (* = proficient; applied automatically by the system)
 - **Skill Proficiencies:** ${skillProfs}
 - **Speed:** ${character.speed} ft
-- **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}${resourceLines}${hitDiceLine}
+- **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}${fightingStyleLine}${martialArchetypeLine}${asiLine}${resourceLines}${bonusActionLine}${hitDiceLine}
 ${character.traits?.length ? `- **Traits:** ${character.traits.join(', ')}` : ''}
-${character.features?.length ? `- **Features:** ${character.features.join(', ')}` : ''}`;
+${character.features?.length ? `- **Features:** ${character.features.map(f => {
+        if (f === 'Fighting Style' && fightingStyle) return `Fighting Style: ${fightingStyle}`;
+        if (f === 'Martial Archetype' && martialArchetype) return `Martial Archetype: ${martialArchetype}`;
+        return f;
+    }).join(', ')}` : ''}`;
 }
 
 function buildActionSurgeBlock(character) {
@@ -584,13 +605,16 @@ function buildActiveConstraints(quests, worldFacts, character, party) {
 }
 
 function buildCombatBlock(combat) {
-    const enemyList = combat.enemies.map(e =>
-        `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac} | Condition: ${e.condition}`
-    ).join('\n');
+    const enemies = combat.enemies || [];
+    const turnOrder = combat.turnOrder || [];
 
-    const turnList = combat.turnOrder.map((t, i) =>
+    const enemyList = enemies.map(e =>
+        `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac} | Condition: ${e.condition}`
+    ).join('\n') || '- No tracked enemies';
+
+    const turnList = turnOrder.map((t, i) =>
         `${i === combat.currentTurn ? '→ ' : '  '}${t.name} (init: ${t.initiative})`
-    ).join('\n');
+    ).join('\n') || '- Turn order pending';
 
     return `## ACTIVE COMBAT — Round ${combat.round}
 

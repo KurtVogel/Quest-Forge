@@ -28,12 +28,17 @@ export default function CharacterSheet() {
     const [portraitDraft, setPortraitDraft] = useState('');
     const [isGeneratingPortrait, setIsGeneratingPortrait] = useState(false);
     const [portraitError, setPortraitError] = useState('');
+    const [asiDraft, setAsiDraft] = useState({});
     const characterId = character?.id;
     const characterAppearance = character?.appearance || '';
 
     useEffect(() => {
         if (characterId) setPortraitDraft(characterAppearance);
     }, [characterId, characterAppearance]);
+
+    useEffect(() => {
+        setAsiDraft({});
+    }, [characterId, character?.pendingAbilityScoreImprovements]);
 
     const equippedItems = useMemo(() => (state.inventory || [])
         .filter(i => i.equipped && i.name)
@@ -75,7 +80,13 @@ export default function CharacterSheet() {
 
     // Hit dice
     const hitDice = character.hitDice || { total: character.level, remaining: character.level, die: charClass?.hitDie || 8 };
+    const currentCombatant = state.combat?.turnOrder?.[state.combat?.currentTurn];
+    const isPlayerCombatTurn = !!state.combat?.active && currentCombatant?.type === 'player';
+    const bonusActionUsed = !!state.combat?.active && !!state.combat?.bonusActionUsed;
     const portraitPrompt = buildPortraitPrompt(character, portraitDraft.trim(), equippedItems);
+    const pendingAsi = character.pendingAbilityScoreImprovements || 0;
+    const asiUsed = Object.values(asiDraft).reduce((sum, value) => sum + value, 0);
+    const asiRemaining = Math.max(0, 2 - asiUsed);
 
     const handleSaveToRoster = async () => {
         try {
@@ -135,6 +146,26 @@ export default function CharacterSheet() {
         }
     };
 
+    const adjustAsiDraft = (ability, delta) => {
+        setAsiDraft(prev => {
+            const current = prev[ability] || 0;
+            const nextValue = current + delta;
+            if (nextValue < 0 || nextValue > 2) return prev;
+            if (delta > 0 && Object.values(prev).reduce((sum, value) => sum + value, 0) >= 2) return prev;
+            if (delta > 0 && (character.abilityScores[ability] || 0) + current >= 20) return prev;
+            const next = { ...prev };
+            if (nextValue === 0) delete next[ability];
+            else next[ability] = nextValue;
+            return next;
+        });
+    };
+
+    const handleApplyAsi = () => {
+        if (asiUsed !== 2) return;
+        dispatch({ type: 'APPLY_ABILITY_SCORE_IMPROVEMENT', payload: { increases: asiDraft } });
+        setAsiDraft({});
+    };
+
     return (
         <div className="character-sheet">
             <button
@@ -142,6 +173,7 @@ export default function CharacterSheet() {
                 onClick={() => setIsExpanded(!isExpanded)}
             >
                 <span className="cs-dropdown-title">Character Profile</span>
+                {pendingAsi > 0 && <span className="cs-dropdown-badge">ASI</span>}
                 <span className="cs-dropdown-icon">{isExpanded ? '▲' : '▼'}</span>
             </button>
 
@@ -228,6 +260,54 @@ export default function CharacterSheet() {
                         })}
                     </div>
 
+                    {pendingAsi > 0 && (
+                        <div className="cs-section cs-asi-section">
+                            <h4 className="cs-section-title">Ability Score Improvement</h4>
+                            <div className="cs-asi-grid">
+                                {ABILITY_NAMES.map(ability => {
+                                    const draft = asiDraft[ability] || 0;
+                                    const score = character.abilityScores[ability];
+                                    const canAdd = asiRemaining > 0 && draft < 2 && score + draft < 20;
+                                    return (
+                                        <div key={ability} className="cs-asi-row">
+                                            <span className="cs-asi-name">{ABILITY_SHORT[ability]}</span>
+                                            <span className="cs-asi-score">{score + draft}</span>
+                                            <div className="cs-asi-controls">
+                                                <button
+                                                    className="cs-asi-btn"
+                                                    onClick={() => adjustAsiDraft(ability, -1)}
+                                                    disabled={draft <= 0}
+                                                    title={`Remove ${ABILITY_SHORT[ability]} increase`}
+                                                >
+                                                    -
+                                                </button>
+                                                <span className="cs-asi-draft">{draft ? `+${draft}` : ''}</span>
+                                                <button
+                                                    className="cs-asi-btn"
+                                                    onClick={() => adjustAsiDraft(ability, 1)}
+                                                    disabled={!canAdd}
+                                                    title={`Increase ${ABILITY_SHORT[ability]}`}
+                                                >
+                                                    +
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                            <div className="cs-asi-footer">
+                                <span>{asiUsed}/2 points selected · {pendingAsi} improvement{pendingAsi > 1 ? 's' : ''} pending</span>
+                                <button
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={handleApplyAsi}
+                                    disabled={asiUsed !== 2}
+                                >
+                                    Apply
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="cs-section cs-portrait-section">
                         <h4 className="cs-section-title">Portrait</h4>
                         <textarea
@@ -264,9 +344,19 @@ export default function CharacterSheet() {
                                 {activeResources.map(([key, def]) => {
                                     const res = classResources[key];
                                     const available = res.max - res.used;
+                                    const isBonusAction = def.actionType === 'bonus';
+                                    const bonusActionBlocked = isBonusAction && state.combat?.active && (!isPlayerCombatTurn || bonusActionUsed);
+                                    const disabledReason = available <= 0
+                                        ? `${def.label} spent — rest to recharge`
+                                        : bonusActionBlocked
+                                            ? (!isPlayerCombatTurn ? `${def.label} is a bonus action on your turn` : 'Bonus action already used this turn')
+                                            : `Use ${def.label}`;
                                     return (
                                         <div key={key} className="cs-resource-row">
-                                            <span className="cs-resource-name">{def.label}</span>
+                                            <span className="cs-resource-name">
+                                                {def.label}
+                                                {isBonusAction && <span className="cs-resource-tag">Bonus</span>}
+                                            </span>
                                             <span className="cs-resource-pips">
                                                 {Array.from({ length: res.max }, (_, i) => (
                                                     <span key={i} className={`cs-pip ${i < available ? 'available' : 'spent'}`} />
@@ -276,18 +366,41 @@ export default function CharacterSheet() {
                                             <button
                                                 className="cs-resource-use"
                                                 onClick={() => dispatch({ type: 'ACTIVATE_RESOURCE', payload: key })}
-                                                disabled={available <= 0}
-                                                title={available > 0 ? `Use ${def.label}` : `${def.label} spent — rest to recharge`}
+                                                disabled={available <= 0 || bonusActionBlocked}
+                                                title={disabledReason}
                                             >
                                                 Use
                                             </button>
                                         </div>
                                     );
                                 })}
+                                {state.combat?.active && (
+                                    <div className={`cs-bonus-action ${bonusActionUsed ? 'spent' : 'available'}`}>
+                                        Bonus action: {bonusActionUsed ? 'used this turn' : (isPlayerCombatTurn ? 'available' : 'waiting for your turn')}
+                                    </div>
+                                )}
                                 <div className="cs-resource-row">
                                     <span className="cs-resource-name">Hit Dice (d{hitDice.die})</span>
                                     <span className="cs-resource-count">{hitDice.remaining}/{hitDice.total}</span>
-                                    <span className="cs-resource-reset">long rest</span>
+                                    <span className="cs-resource-reset">short rest</span>
+                                </div>
+                                <div className="cs-rest-actions" aria-label="Rest actions">
+                                    <button
+                                        className="cs-rest-btn"
+                                        onClick={() => dispatch({ type: 'TAKE_REST', payload: 'short' })}
+                                        disabled={character.isDead}
+                                        title={character.isDead ? 'Dead characters cannot recover by resting' : 'Take a short rest: spend hit dice and recharge short-rest resources'}
+                                    >
+                                        Short Rest
+                                    </button>
+                                    <button
+                                        className="cs-rest-btn"
+                                        onClick={() => dispatch({ type: 'TAKE_REST', payload: 'long' })}
+                                        disabled={character.isDead}
+                                        title={character.isDead ? 'Dead characters cannot recover by resting' : 'Take a long rest: restore HP, recover hit dice, and recharge resources'}
+                                    >
+                                        Long Rest
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -335,7 +448,13 @@ export default function CharacterSheet() {
                             <h4 className="cs-section-title">Features</h4>
                             <ul className="cs-list">
                                 {character.features.map((feature, i) => (
-                                    <li key={i}>{feature}</li>
+                                    <li key={i}>
+                                        {feature === 'Fighting Style' && character.class === 'fighter' && character.fightingStyle
+                                            ? `Fighting Style: ${CLASSES.fighter.fightingStyles[character.fightingStyle]?.label || character.fightingStyle}`
+                                            : feature === 'Martial Archetype' && character.class === 'fighter' && character.martialArchetype
+                                                ? `Martial Archetype: ${CLASSES.fighter.martialArchetypes[character.martialArchetype]?.label || character.martialArchetype}`
+                                                : feature}
+                                    </li>
                                 ))}
                             </ul>
                         </div>

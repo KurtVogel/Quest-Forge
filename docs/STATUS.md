@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-17_
 
 ## Current focus
 - **Fighter-only test-play phase**: Vesa is play-testing the new combat-stakes mechanics
@@ -14,7 +14,73 @@ _Last updated: 2026-06-16_
 - **Next major feature: campaign "fronts"** (hidden world clocks) — design doc first, then
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
-## Recently shipped (June 10–16, 2026)
+## Recently shipped (June 10–17, 2026)
+- Lightweight bonus actions for Fighter resources (2026-06-17): Second Wind is
+  now marked as a bonus action instead of competing with the fighter's main
+  action. Combat state tracks `bonusActionUsed`, resets it on the next player
+  turn/round, blocks duplicate bonus-action resource use, and exposes the state
+  in the Character Profile, Combat status strip, and DM prompt. This is not a
+  full D&D action-economy implementation; it is a focused player-owned resource
+  rule. Tests: `npm test` 144 passing; `npm run build` passing. Browser QA
+  confirmed the Second Wind bonus tag renders in the live character sheet.
+- Fighter equipment-slot enforcement (2026-06-17): equipped weapon/armor/shield
+  normalization is now shared in `equipment.js` and applied to UI equip actions,
+  loaded saves, found items, and imported hero files. Two-handed weapons and
+  shields are mutually exclusive: equipping a greatsword/longbow/etc. sheaths the
+  shield and recalculates AC, while equipping a shield sheaths an active
+  two-handed weapon. Newly found shields no longer auto-equip over an active
+  two-handed weapon. Tests: `npm test` 139 passing; `npm run build` passing.
+- Engine-derived combat status strip (2026-06-17): the Combat panel now shows a
+  compact status derived from actual engine state: victory, dead, low-level
+  defeat, dying/death-save progress, stable at 0 HP, Action Surge active, player
+  turn, companion turn, and enemy turn. The priority order lives in
+  `combatStatus.js` with tests so important survival states beat ordinary turn
+  prompts. Tests: `npm test` 139 passing; `npm run build` passing. Browser QA:
+  app reloads after the UI change; temporary combat-state injection was blocked
+  by the in-app browser sandbox, so combat rendering is covered by unit tests and
+  build verification this pass.
+- Fighter rest/resource controls (2026-06-17): the Character Profile now has
+  player-facing Short Rest and Long Rest buttons next to resources and hit dice.
+  Short rests spend hit dice only; the old free 25% HP fallback with zero hit
+  dice is gone. Rest healing now uses the same revival cleanup as potions and
+  Second Wind, while dead characters cannot recover by resting. `resources_used`
+  emitted by the DM can no longer spend Fighter UI-owned resources or apply
+  paired healing behind the player's back. Tests: `npm test` 139 passing;
+  `npm run build` passing; browser QA confirmed the controls render and dispatch
+  from the fighter sheet.
+- Engine-owned victory finalization (2026-06-17): after a requested-roll
+  combat exchange resolves and the DM has had one follow-up chance to award XP,
+  the reducer now either advances the round or finalizes victory if all tracked
+  enemies are defeated. Victory uses the existing `END_COMBAT` XP fallback only
+  when no XP was already awarded, avoiding duplicate rewards while removing the
+  need for a manual cleanup click. Tests: `npm test` 139 passing; `npm run build`
+  passing.
+- Engine-owned initiative (2026-06-17): `START_COMBAT` now rolls player,
+  companion, and enemy initiative client-side instead of trusting DM-provided
+  initiative numbers. The player initiative roll is recorded in roll history and
+  chat, while `combat_start` prompt examples now ask the DM to declare foes only.
+  Tests: `npm test` 139 passing; `npm run build` passing.
+- UI healing revival fix (2026-06-17): player-triggered healing now uses the same
+  revival cleanup as authored healing. Second Wind and healing potions restore HP
+  and clear `dying`, `lowLevelDefeat`, death saves, and `Unconscious` when they bring
+  a character above 0 HP; potions still are not consumed at full health and cannot
+  revive dead characters. Tests: `npm test` 117 passing; `npm run build` passing.
+- Ability Score Improvement v1 (2026-06-17): level 4 now grants a pending ASI
+  instead of a dead feature string. The Character Profile lets the player assign
+  exactly two ability points within the 20 cap, then the reducer updates scores,
+  CON-derived max/current HP, AC, and pending/applied ASI state. Old/imported level
+  4+ characters get one pending ASI unless the hero file records it as already
+  applied. Tests: `npm test` 114 passing; `npm run build` passing; browser QA
+  confirmed the ASI panel renders and applies cleanly in the sidebar.
+- Fighter Champion archetype v1 (2026-06-16): Fighter's level-3 Martial Archetype
+  is now the passive Champion archetype. Existing/imported level 3+ Fighters default
+  to Champion, and player attack rolls now crit on natural 19-20 with the existing
+  doubled-damage dice path. Tests: `npm test` 109 passing; `npm run build` passing.
+- Fighter Fighting Styles v1 (2026-06-16): new Fighters choose Defense, Dueling,
+  Great Weapon Fighting, or Archery during character creation; old/imported Fighters
+  default to Defense. The engine applies Defense AC, Dueling damage, Archery attack,
+  and Great Weapon damage rerolls, and the sheet/prompt show the chosen style as an
+  engine-owned feature.
 - Action Surge pending state (2026-06-16): pressing Action Surge now spends the
   short-rest resource and sets `character.pendingActionSurge`. The prompt gets a
   hard `ACTION SURGE ACTIVE` block for the next player action, then ChatPanel clears

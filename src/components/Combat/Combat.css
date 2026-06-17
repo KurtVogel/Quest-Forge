@@ -254,3 +254,86 @@
     color: var(--danger);
     border: 1px solid rgba(244, 67, 54, 0.15);
 }
+
+.combat-status {
+    display: grid;
+    grid-template-columns: minmax(7rem, 0.42fr) 1fr;
+    align-items: center;
+    gap: 0.65rem;
+    margin-top: 0.45rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.16);
+    font-size: 0.76rem;
+}
+
+.combat-status-title {
+    color: var(--text-primary);
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.combat-status-detail {
+    color: var(--text-secondary);
+    line-height: 1.35;
+}
+
+.combat-status.player,
+.combat-status.surge,
+.combat-status.victory {
+    border-color: rgba(212, 175, 55, 0.32);
+    background: rgba(212, 175, 55, 0.08);
+}
+
+.combat-status.surge .combat-status-title {
+    color: var(--gold);
+}
+
+.combat-status.victory {
+    border-color: rgba(76, 175, 80, 0.34);
+    background: rgba(76, 175, 80, 0.09);
+}
+
+.combat-status.victory .combat-status-title,
+.combat-status.ally .combat-status-title {
+    color: var(--success);
+}
+
+.combat-status.danger,
+.combat-status.dead {
+    border-color: rgba(244, 67, 54, 0.34);
+    background: rgba(244, 67, 54, 0.09);
+}
+
+.combat-status.danger .combat-status-title,
+.combat-status.dead .combat-status-title,
+.combat-status.enemy .combat-status-title {
+    color: var(--danger);
+}
+
+.combat-status.defeated,
+.combat-status.stable,
+.combat-status.ally-down {
+    border-color: rgba(230, 162, 60, 0.36);
+    background: rgba(230, 162, 60, 0.09);
+}
+
+.combat-status.defeated .combat-status-title,
+.combat-status.stable .combat-status-title,
+.combat-status.ally-down .combat-status-title {
+    color: #e6a23c;
+}
+
+@media (max-width: 640px) {
+    .combat-status {
+        grid-template-columns: 1fr;
+        gap: 0.25rem;
+    }
+
+    .combat-status-title {
+        white-space: normal;
+    }
+}

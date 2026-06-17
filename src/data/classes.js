@@ -25,6 +25,31 @@ export const CLASSES = {
             4: ['Ability Score Improvement'],
             5: ['Extra Attack'],
         },
+        fightingStyles: {
+            defense: {
+                label: 'Defense',
+                description: '+1 AC while wearing armor',
+            },
+            dueling: {
+                label: 'Dueling',
+                description: '+2 damage with a one-handed melee weapon',
+            },
+            greatWeaponFighting: {
+                label: 'Great Weapon Fighting',
+                description: 'Reroll 1s and 2s on damage dice with two-handed melee weapons',
+            },
+            archery: {
+                label: 'Archery',
+                description: '+2 to attack rolls with ranged weapons',
+            },
+        },
+        martialArchetypes: {
+            champion: {
+                label: 'Champion',
+                description: 'Weapon attacks score a critical hit on a natural 19 or 20',
+                minLevel: 3,
+            },
+        },
         resources: {
             secondWind: {
                 label: 'Second Wind',
@@ -32,6 +57,7 @@ export const CLASSES = {
                 max: 1,
                 resetOn: 'short',
                 minLevel: 1,
+                actionType: 'bonus',
                 effect: { kind: 'heal', dice: '1d10', addLevel: true },
             },
             actionSurge: {

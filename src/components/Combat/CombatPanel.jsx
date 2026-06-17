@@ -1,4 +1,5 @@
 import { useGame } from '../../state/GameContext.jsx';
+import { getCombatStatus } from '../../engine/combatStatus.js';
 import './Combat.css';
 
 export default function CombatPanel() {
@@ -11,6 +12,11 @@ export default function CombatPanel() {
     const isPlayerTurn = currentFighter?.type === 'player';
     const isCompanionTurn = currentFighter?.type === 'companion';
     const aliveEnemies = combat.enemies.filter(e => e.condition !== 'dead');
+    const combatStatus = getCombatStatus({
+        character: state.character,
+        combat,
+        party: state.party || [],
+    });
 
     return (
         <div className="combat-overlay">
@@ -68,6 +74,11 @@ export default function CombatPanel() {
                             ? `${currentFighter?.name} is ready — direct them in chat or let the DM choose their move.`
                             : `${currentFighter?.name}'s turn...`
                     }
+                </div>
+
+                <div className={`combat-status ${combatStatus.variant}`}>
+                    <span className="combat-status-title">{combatStatus.title}</span>
+                    <span className="combat-status-detail">{combatStatus.detail}</span>
                 </div>
             </div>
         </div>

@@ -38,4 +38,104 @@ describe('LOAD_GAME progression migrations', () => {
         expect(next.character.hitDice).toEqual({ total: 2, remaining: 2, die: 10 });
         expect(next.messages.some(m => m.content.includes('Level Up'))).toBe(true);
     });
+
+    it('defaults old fighter saves to Defense and recalculates AC with the style bonus', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...baseCharacter, exp: 0, armorClass: 18 },
+                inventory: [
+                    { type: 'armor', baseAC: 16, armorType: 'heavy', equipped: true },
+                    { type: 'shield', isShield: true, shieldAC: 2, equipped: true },
+                ],
+                messages: [],
+            },
+        });
+
+        expect(next.character.fightingStyle).toBe('defense');
+        expect(next.character.armorClass).toBe(19);
+    });
+
+    it('loads old two-handed weapon plus shield saves into a legal equipment state', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...baseCharacter, exp: 0, armorClass: 18 },
+                inventory: [
+                    { type: 'weapon', name: 'Greatsword', damage: '2d6', twoHanded: true, equipped: true },
+                    { type: 'armor', baseAC: 16, armorType: 'heavy', equipped: true },
+                    { type: 'shield', isShield: true, shieldAC: 2, equipped: true },
+                ],
+                messages: [],
+            },
+        });
+
+        const greatsword = next.inventory.find(i => i.name === 'Greatsword');
+        const shield = next.inventory.find(i => i.type === 'shield');
+        expect(greatsword.equipped).toBe(true);
+        expect(shield.equipped).toBe(false);
+        expect(next.character.armorClass).toBe(17); // chain mail 16 + Defense, no shield
+    });
+
+    it('defaults old level 3+ fighter saves to Champion', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: {
+                    ...baseCharacter,
+                    level: 3,
+                    exp: 0,
+                    maxHP: 28,
+                    currentHP: 28,
+                    features: ['Second Wind', 'Fighting Style', 'Action Surge', 'Martial Archetype'],
+                },
+                inventory: [],
+                messages: [],
+            },
+        });
+
+        expect(next.character.martialArchetype).toBe('champion');
+    });
+
+    it('backfills a pending ASI for old level 4+ saves', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: {
+                    ...baseCharacter,
+                    level: 4,
+                    exp: 0,
+                    maxHP: 36,
+                    currentHP: 36,
+                    features: ['Second Wind', 'Fighting Style', 'Action Surge', 'Martial Archetype', 'Ability Score Improvement'],
+                },
+                inventory: [],
+                messages: [],
+            },
+        });
+
+        expect(next.character.pendingAbilityScoreImprovements).toBe(1);
+        expect(next.character.abilityScoreImprovementsApplied).toBe(0);
+    });
+
+    it('backfills bonus-action combat state for old active combat saves', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...baseCharacter, exp: 0 },
+                inventory: [],
+                messages: [],
+                combat: {
+                    active: true,
+                    enemies: [],
+                    turnOrder: [],
+                    currentTurn: 0,
+                    round: 1,
+                    xpAwarded: false,
+                },
+            },
+        });
+
+        expect(next.combat.bonusActionUsed).toBe(false);
+    });
 });

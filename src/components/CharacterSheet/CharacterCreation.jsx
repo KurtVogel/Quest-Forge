@@ -17,6 +17,7 @@ export default function CharacterCreation() {
     const [name, setName] = useState('');
     const [race, setRace] = useState('');
     const [charClass, setCharClass] = useState('');
+    const [fightingStyle, setFightingStyle] = useState('defense');
     const [statAssignment, setStatAssignment] = useState({});
     const [chosenSkills, setChosenSkills] = useState([]);
     const [adventureName, setAdventureName] = useState('');
@@ -75,6 +76,7 @@ export default function CharacterCreation() {
     const handleClassSelect = (c) => {
         setCharClass(c);
         setChosenSkills([]);
+        setFightingStyle('defense');
     };
 
     const beginAdventure = (character, inventory) => {
@@ -114,7 +116,7 @@ export default function CharacterCreation() {
             abilityScores[ability] = statAssignment[ability];
         }
 
-        const character = createCharacter(name, race, charClass, abilityScores, chosenSkills);
+        const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle });
         const inventory = createStartingInventory(charClass);
         beginAdventure(character, inventory);
     };
@@ -322,6 +324,23 @@ export default function CharacterCreation() {
                                     </button>
                                 ))}
                             </div>
+                            {charClass === 'fighter' && (
+                                <>
+                                    <h3>Choose your fighting style</h3>
+                                    <div className="creation-grid">
+                                        {Object.entries(CLASSES.fighter.fightingStyles).map(([key, style]) => (
+                                            <button
+                                                key={key}
+                                                className={`creation-card ${fightingStyle === key ? 'selected' : ''}`}
+                                                onClick={() => setFightingStyle(key)}
+                                            >
+                                                <div className="card-name">{style.label}</div>
+                                                <div className="card-desc">{style.description}</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
                         </div>
                     )}
 
@@ -418,6 +437,11 @@ export default function CharacterCreation() {
                                 <div className="summary-row"><strong>Name:</strong> {name}</div>
                                 <div className="summary-row"><strong>Race:</strong> {RACES[race]?.name}</div>
                                 <div className="summary-row"><strong>Class:</strong> {CLASSES[charClass]?.name}</div>
+                                {charClass === 'fighter' && (
+                                    <div className="summary-row">
+                                        <strong>Fighting Style:</strong> {CLASSES.fighter.fightingStyles[fightingStyle]?.label}
+                                    </div>
+                                )}
                                 <div className="summary-row">
                                     <strong>Stats:</strong>{' '}
                                     {ABILITY_NAMES.map(a => `${ABILITY_SHORT[a]}: ${statAssignment[a]}`).join(', ')}

@@ -13,6 +13,8 @@ import {
     getLevelBonus,
     getArmorClass,
     computeACFromInventory,
+    getWeaponAttackBonus,
+    getWeaponDamageNotation,
 } from './rules.js';
 
 const fighter = {
@@ -148,5 +150,31 @@ describe('armor class', () => {
             { type: 'armor', baseAC: 12, armorType: 'light', equipped: false },
         ];
         expect(computeACFromInventory(inventory, fighter)).toBe(18);
+    });
+
+    it('applies Defense fighting style only while armor is equipped', () => {
+        const armored = [{ type: 'armor', baseAC: 16, armorType: 'heavy', equipped: true }];
+        const unarmored = [{ type: 'armor', baseAC: 16, armorType: 'heavy', equipped: false }];
+        expect(computeACFromInventory(armored, { ...fighter, fightingStyle: 'defense' })).toBe(17);
+        expect(computeACFromInventory(unarmored, { ...fighter, fightingStyle: 'defense' })).toBe(11);
+    });
+});
+
+describe('fighter fighting styles', () => {
+    it('applies Archery to ranged weapon attacks', () => {
+        const bow = [{ type: 'weapon', category: 'martialRanged', damage: '1d8', ranged: true, equipped: true }];
+        const sword = [{ type: 'weapon', category: 'martialMelee', damage: '1d8', equipped: true }];
+        const dexFighter = { ...fighter, fightingStyle: 'archery', abilityScores: { ...fighter.abilityScores, strength: 10, dexterity: 16 } };
+        expect(getWeaponAttackBonus(dexFighter, bow)).toBe(9); // DEX + prof + level bonus + style
+        expect(getWeaponAttackBonus(dexFighter, sword)).toBe(4); // no Archery bonus
+    });
+
+    it('applies Dueling to one-handed melee damage only', () => {
+        const sword = [{ type: 'weapon', category: 'martialMelee', damage: '1d8', equipped: true }];
+        const bow = [{ type: 'weapon', category: 'martialRanged', damage: '1d8', ranged: true, equipped: true }];
+        const greatsword = [{ type: 'weapon', category: 'martialMelee', damage: '2d6', twoHanded: true, equipped: true }];
+        expect(getWeaponDamageNotation({ ...fighter, fightingStyle: 'dueling' }, sword)).toBe('1d8+5');
+        expect(getWeaponDamageNotation({ ...fighter, fightingStyle: 'dueling' }, bow)).toBe('1d8+1');
+        expect(getWeaponDamageNotation({ ...fighter, fightingStyle: 'dueling' }, greatsword)).toBe('2d6+3');
     });
 });

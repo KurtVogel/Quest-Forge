@@ -11,8 +11,9 @@ import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
 import { getModifier, getProficiencyBonus } from './rules.js';
-import { ABILITY_NAMES, SKILL_LABELS, buildClassResources, getAllFeaturesUpToLevel } from './characterUtils.js';
+import { ABILITY_NAMES, SKILL_LABELS, buildClassResources, getAllFeaturesUpToLevel, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
+import { normalizeEquippedSlots } from './equipment.js';
 
 export const EXPORT_FORMAT = 'quest-forge-character';
 export const EXPORT_VERSION = 1;
@@ -116,7 +117,7 @@ export function sanitizeCharacter(raw) {
     const expertiseSkills = (Array.isArray(raw.expertiseSkills) ? raw.expertiseSkills : [])
         .filter(s => skillProficiencies.includes(s));
 
-    return {
+    const rebuilt = {
         id: `char-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         name,
         race: raw.race,
@@ -134,6 +135,8 @@ export function sanitizeCharacter(raw) {
         skillProficiencies,
         expertiseSkills,
         savingThrowProficiencies: [...(charClass.savingThrows || [])],
+        fightingStyle: normalizeFightingStyle(raw.class, raw.fightingStyle),
+        martialArchetype: normalizeMartialArchetype(raw.class, level, raw.martialArchetype),
         speed: race.speed || 30,
         traits: [...(race.traits || [])],
         features: getAllFeaturesUpToLevel(raw.class, level),
@@ -147,6 +150,14 @@ export function sanitizeCharacter(raw) {
         notes: String(raw.notes || '').slice(0, 2000),
         createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
     };
+
+    return {
+        ...rebuilt,
+        ...normalizeAbilityScoreImprovementState({
+            ...rebuilt,
+            abilityScoreImprovementsApplied: raw.abilityScoreImprovementsApplied,
+        }),
+    };
 }
 
 /**
@@ -156,25 +167,19 @@ export function sanitizeCharacter(raw) {
  */
 export function sanitizeInventory(rawInventory) {
     if (!Array.isArray(rawInventory)) return [];
-    const equippedSlots = new Set();
-    return rawInventory
+    const sanitized = rawInventory
         .slice(0, MAX_INVENTORY_ITEMS)
         .filter(item => item && (typeof item === 'object' || typeof item === 'string'))
         .map((item, index) => {
             const normalized = normalizeItem(item);
-            const slot = normalized.type === 'weapon' ? 'weapon'
-                : normalized.type === 'armor' ? 'armor'
-                    : (normalized.type === 'shield' || normalized.isShield) ? 'shield'
-                        : null;
             const wantsEquip = typeof item === 'object' && item.equipped === true;
-            const equipped = wantsEquip && (!slot || !equippedSlots.has(slot));
-            if (equipped && slot) equippedSlots.add(slot);
             return {
                 ...normalized,
                 id: `item-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
-                equipped,
+                equipped: wantsEquip,
             };
         });
+    return normalizeEquippedSlots(sanitized);
 }
 
 /**
