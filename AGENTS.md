@@ -18,6 +18,7 @@ npm run build     # production build → dist/
 npm run preview   # serve the built dist/ locally
 npm run lint      # ESLint (flat config in eslint.config.js)
 npm test          # vitest (engine math, reducer death saves, parser fixtures)
+npm run eval:combat # optional real-provider combat pacing eval; requires GEMINI_API_KEY or OPENAI_API_KEY in the shell
 ```
 
 Deploy hosting (build first): `npx firebase deploy --only hosting --project quest-forge-99ab1`
@@ -32,7 +33,7 @@ The LLM **narrates and declares game events; it never rolls dice or mutates stat
 2. **`promptBuilder.js`** builds the system prompt from live state (character, inventory, quests, world facts, combat, retrieved memories) plus strict DM pacing rules.
 3. The DM streams back **narrative + a trailing ` ```json ` event block**.
 4. **`responseParser.js`** splits narrative from JSON and normalizes it. It is defensively coded against LLM misbehavior: unfenced/malformed JSON → repair; roll-requests-written-in-prose → text detector; an outcome narrated *before* a roll → flagged for correction.
-5. **`rollResolver.js`** resolves any `requested_rolls` with real dice (`dice.ts`), then **auto-sends the results back to the DM** so it narrates the true outcome — recursively, capped at depth 3.
+5. **`rollResolver.js`** resolves any `requested_rolls` with real dice (`dice.ts`), then **auto-sends the results back to the DM** so it narrates the true outcome — recursively, capped at depth 3. In combat, prompt and follow-up rules expect one whole exchange per player action: player/companion/enemy rolls in one block, inline HP applied by the engine, then one outcome narration with `combat_end` + `exp_awarded` when victory is reached.
 6. **`applyEvents()`** dispatches each change into the reducer.
 
 **Implication when editing:** mechanics belong in the engine, not the prompt. If the DM "should" do math (HP, XP, AC, to-hit, leveling), the client already does it — the prompt explicitly tells the DM *not* to. Adding a feature usually means: a JSON field the DM emits → a normalize step in `responseParser.js` → a reducer action → (optionally) a prompt instruction telling the DM the field exists.

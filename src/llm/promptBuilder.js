@@ -162,19 +162,18 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 
 ### Combat Rounds
 1. **YOU narrate the battle situation** — who is where, what's happening
-2. **The player declares their combat action** (attack, spell, dodge, etc.)
-3. Request the player's attack roll via JSON right away — do NOT narrate the swing or its result first (the client withholds pre-roll text)
-4. System rolls → you narrate the hit or miss + damage effect
-5. **YOU then narrate enemy turns** and request NPC attack rolls via JSON
-6. System rolls → you narrate whether enemy attacks hit or miss
-7. Summarize the state of the battle and ask the player for their next action
+2. **The player declares their combat action** (attack, shove, dash, dodge, use an item, etc.)
+3. If dice are needed, request the whole exchange in ONE JSON \`requested_rolls\` block right away — do NOT narrate the swing, enemy counterattack, or any result first.
+4. Include the player's roll, any companion attacks, and every still-living enemy/NPC response that logically acts in that exchange. Put \`target\`, \`attackerId\`, \`modifier\`, and inline \`damage\` on combat attacks so the client resolves HP.
+5. System rolls and applies inline combat HP → you narrate the complete exchange once, including hit/miss/damage effects, who is down, and the new tactical situation.
+6. If all enemies are down, narrate victory and emit \`combat_end: true\` plus \`exp_awarded\`. If enemies remain, ask for the player's next action.
 
 ### Key Pacing Rules
 - **NEVER narrate the result of an action BEFORE the dice are rolled.** A roll-request response should carry little or no prose — the client hides it from the player. You narrate the full scene (setup AND outcome, fused) in the next response, after the roll result arrives.
 - **NEVER request rolls and narrate their outcome in the same response.** These are always two separate responses.
 - When you receive roll results, narrate the outcome IMMEDIATELY. Don't re-request the same rolls.
 - You CAN request multiple rolls in one response (e.g. two enemies attacking simultaneously).
-- After narrating a roll outcome, you may request further rolls if the situation demands it (chained checks, follow-up attacks, etc).`;
+- In combat, prefer one complete exchange per player action. Only chain further rolls when genuinely new information creates a new immediate hazard; do not split ordinary enemy counterattacks into a second avoidable roll request.`;
 
 const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)
 
@@ -302,9 +301,9 @@ If no game events occurred, just provide the narrative text without any JSON blo
 
 COMBAT NOTES:
 - Use "combat_start" when combat initiates, and list EVERY foe that will act — each with name, hp, and ac. The client rolls initiative for the player, companions, and enemies, then tracks exactly what you declare, so keep the narrative and the tracked enemies strictly 1:1: never describe an attacker that isn't in the combat state, and don't silently add or drop foes mid-fight.
-- **Resolve a whole round in ONE response.** When the player attacks, also request any participating companions' attacks and every still-living foe's response attack in the same requested_rolls block (each with attackerId, target, modifier, and inline damage). The client rolls them in order, skips any combatant whose target/attacker is already down, applies all HP, and you then narrate the exchange once.
+- **Resolve a whole exchange in ONE response.** When the player attacks, also request any participating companions' attacks and every still-living foe's response attack in the same requested_rolls block (each with attackerId, target, modifier, and inline damage). The client rolls them in order, skips any combatant whose target/attacker is already down, applies all HP, and you then narrate the exchange once.
 - HP is owned by the client. When a roll result says "HP applied by the system", do NOT also send enemy_updates or damage_taken for it. Use "enemy_updates" only for HP changes the dice did NOT cause (e.g. an enemy drinks a potion).
-- Use "combat_end": true when all enemies are defeated or combat ends.
+- Use "combat_end": true when all enemies are defeated or combat ends. Include "exp_awarded" in that same victory response.
 
 PLAYER DEATH & DYING:
 - **Combat deaths are owned by the system.** At 0 HP the player falls unconscious and starts dying; the system tracks death saves and declares death at three failures. You narrate the dying state and request { "type": "death_save" } each round — do NOT emit player_death for this; the system records the death itself.
@@ -330,6 +329,7 @@ REST & RESOURCES:
 - The character sheet shows current resources (Second Wind, Action Surge, Channel Divinity, etc.) with uses remaining. Reference these in narration — e.g., "You steel yourself and catch your breath" for Second Wind.
 - **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "Second Wind — you recover 8 HP" or "You drink a Potion of Healing"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent but gently note they can trigger it from their character sheet or inventory so the system applies it.
 - **Bonus actions are lightweight but real.** If the prompt says Bonus Action This Turn is used, do not suggest another bonus-action resource this turn. Fighter's Second Wind is a bonus action; the UI tracks and spends it.
+- If a system message says Second Wind was used as a bonus action, weave that recovery into the scene and remember the fighter still has their main action unless the player already declared it.
 - If ACTION SURGE ACTIVE is present, the player has already spent Action Surge in the UI. Honor it on their next declared action; do NOT emit "resources_used" for it.
 - Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC casts a healing spell on the player).
 
@@ -456,6 +456,7 @@ function buildActionSurgeBlock(character) {
 The player has already spent Action Surge. Their next declared action gets one additional action beyond the normal turn.
 - Let them combine two reasonable actions in this turn: attack plus attack, attack plus dash, shove plus attack, interact plus attack, etc.
 - ${extraAttack}
+- If both actions need dice, put all of those rolls in the same requested_rolls block. Do not split Action Surge into a second DM response.
 - Do NOT spend Action Surge again and do NOT emit resources_used for it.
 - The client will clear this active state after this player action resolves.`;
 }
@@ -624,5 +625,5 @@ ${enemyList}
 **Turn Order:**
 ${turnList}
 
-Use enemy_updates with the enemy id to report HP changes. Use combat_end: true when combat resolves.`;
+Combat roll results apply HP automatically when they say "HP applied by the system." Do NOT repeat those HP changes with enemy_updates, damage_taken, or damage_dealt. Use enemy_updates only for non-roll narrative changes or corrections. When every tracked enemy is down, narrate victory and emit combat_end: true plus exp_awarded.`;
 }

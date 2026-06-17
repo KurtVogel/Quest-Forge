@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "eval:combat": "node scripts/combatPacingEval.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

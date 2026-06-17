@@ -123,6 +123,14 @@ used on the player's combat turn without consuming the main action; `bonusAction
 second bonus-action resource until the next player turn/round and is shown in the sheet,
 combat status, and prompt.
 
+Shipped v9: real-LLM combat pacing contract pass. Combat prompt language now consistently asks
+for one batched exchange per player action, blocks duplicate HP updates after engine-applied
+roll damage, pairs victory with `combat_end` + XP, and tells the DM to batch Action Surge dice
+instead of splitting the extra action into another response. Added `npm run eval:combat` as a
+real-provider scripted eval for attack pacing, Action Surge, Second Wind/main-action UX, and
+low-level solo dogpile checks. It requires an explicit shell API key and was not run live in
+the no-key dev environment.
+
 Still open:
 - Optional later: style retraining during downtime, if players regret the creation choice.
 

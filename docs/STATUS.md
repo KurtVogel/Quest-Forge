@@ -15,6 +15,18 @@ _Last updated: 2026-06-17_
   slices. See IDEAS.md → Campaign & Narrative. Not started.
 
 ## Recently shipped (June 10–17, 2026)
+- Real-LLM combat pacing contract pass (2026-06-17): the DM prompt now gives
+  one unambiguous combat loop: request the whole player/companion/enemy exchange
+  in one `requested_rolls` block, then narrate the complete outcome once after
+  dice return. Active-combat and post-roll follow-up prompts now explicitly
+  forbid duplicate `enemy_updates`/`damage_taken` for engine-applied HP, pair
+  victory with `combat_end: true` + `exp_awarded`, batch Action Surge dice in one
+  response, and remind the DM that Second Wind as a bonus action leaves the main
+  action available. Added `npm run eval:combat`, a real-provider eval harness
+  that runs scripted combat pacing scenarios against Gemini/OpenAI only when an
+  explicit env API key is provided. Tests: `npm test` 149 passing; `npm run
+  build` passing. Real-provider eval was not run in this session because no
+  eval API key was present in the shell.
 - Lightweight bonus actions for Fighter resources (2026-06-17): Second Wind is
   now marked as a bonus action instead of competing with the fighter's main
   action. Combat state tracks `bonusActionUsed`, resets it on the next player

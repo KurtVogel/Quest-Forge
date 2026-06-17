@@ -103,6 +103,7 @@ describe('class resource activation', () => {
         expect(used.combat.bonusActionUsed).toBe(true);
         expect(used.character.classResources.secondWind.used).toBe(1);
         expect(used.messages.at(-1).content).toContain('bonus action');
+        expect(used.messages.at(-1).content).toContain('main action is still available');
         expect(blocked.character.classResources.secondWind.used).toBe(1);
         expect(blocked.messages.at(-1).content).toContain('Bonus action already used');
         expect(nextRound.combat.bonusActionUsed).toBe(false);

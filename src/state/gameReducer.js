@@ -865,7 +865,7 @@ export function gameReducer(state, action) {
                     rollHistory: [...state.rollHistory, roll],
                     messages: [
                         ...state.messages,
-                        systemMessage(`**${def.label}**${usesBonusAction ? ' *(bonus action)*' : ''} — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${tail} ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`),
+                        systemMessage(`**${def.label}**${usesBonusAction ? ' *(bonus action)*' : ''} — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${usesBonusAction && state.combat.active ? 'Your main action is still available. ' : ''}${tail} ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`),
                     ],
                 };
             }

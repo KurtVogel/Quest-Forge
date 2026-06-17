@@ -4,7 +4,7 @@
  * The dice module is mocked with a queue so outcomes are scripted, not random.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resolveRolls } from './rollResolver.js';
+import { handleRequestedRolls, resolveRolls } from './rollResolver.js';
 
 const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
 
@@ -314,5 +314,34 @@ describe('fighter Champion archetype', () => {
 
         expect(results[0]).toMatchObject({ success: false, critical: false });
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'UPDATE_ENEMY' }));
+    });
+});
+
+describe('post-roll combat follow-up prompt', () => {
+    it('tells the DM to end combat with XP instead of requesting more rolls when all tracked enemies are down', async () => {
+        rollQueue.push(18, 6);
+        const enemy = { id: 'enemy-1', name: 'Goblin', hp: 6, maxHp: 6, ac: 13, condition: 'healthy' };
+        const dispatch = vi.fn();
+        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [] });
+
+        await handleRequestedRolls(
+            [{ type: 'attack_roll', skill: 'attack', target: enemy.id, dc: enemy.ac, damage: '1d8+3', description: 'Astra cuts at the goblin' }],
+            {
+                getState: () => ({
+                    character: makeCharacter(),
+                    inventory: [{ type: 'weapon', category: 'martialMelee', name: 'Longsword', damage: '1d8', equipped: true }],
+                    combat: { active: true, enemies: [enemy] },
+                    party: [],
+                }),
+                dispatch,
+                sendToLLM,
+            }
+        );
+
+        expect(sendToLLM).toHaveBeenCalledOnce();
+        const followUpPrompt = sendToLLM.mock.calls[0][0];
+        expect(followUpPrompt).toContain('If the roll results show every tracked enemy is DOWNED');
+        expect(followUpPrompt).toContain('emit combat_end: true plus exp_awarded');
+        expect(followUpPrompt).toContain('do NOT request more combat rolls');
     });
 });

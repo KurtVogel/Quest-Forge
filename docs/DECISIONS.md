@@ -8,6 +8,22 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-17 · Combat pacing is one whole exchange per player action.**
+The DM prompt and roll follow-up now describe combat as a batched exchange: when dice are
+needed, the DM requests the player's roll, participating companion rolls, and logical enemy
+responses in one `requested_rolls` block with inline `target`/`attackerId`/`modifier`/`damage`.
+The engine rolls and applies HP, then the DM narrates the complete exchange once. Post-roll
+victory should be narrated with `combat_end: true` and `exp_awarded`; HP already reported as
+"HP applied by the system" must not be repeated via `enemy_updates`, `damage_taken`, or
+`damage_dealt`. Action Surge follows the same rule: all dice for both actions go in the same
+roll block rather than a second DM response.
+
+**2026-06-17 · Real-provider combat evals require explicit shell keys.**
+`npm run eval:combat` runs scripted combat-pacing scenarios against Gemini/OpenAI, but only
+from an API key intentionally supplied in the shell (`GEMINI_API_KEY` or `OPENAI_API_KEY`).
+It must not read the player's in-app localStorage key. This keeps evals repeatable while
+preserving the app's BYO-key privacy boundary.
+
 **2026-06-17 · Bonus actions are lightweight resource tags, not a full action economy.**
 Quest Forge now supports bonus-action resource use where it matters for the fighter loop:
 Second Wind is a bonus action, `combat.bonusActionUsed` tracks whether the player has spent
