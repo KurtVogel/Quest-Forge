@@ -151,6 +151,38 @@ const scenarios = [
             lowLevelDoesNotStartDogpile,
         ],
     },
+    {
+        id: 'post-roll-victory-closes-combat-with-xp',
+        state: baseState(),
+        userMessage: [
+            '[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own.',
+            'RULES: If the roll results show every tracked enemy is DOWNED, narrate victory now and emit combat_end: true plus exp_awarded; do NOT request more combat rolls.',
+            'Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken, damage_dealt, or enemy_updates for them.]',
+            '',
+            '[ROLL RESULT: Astra cuts at the goblin vs AC 13, rolled 18 — HIT for 9 damage. Goblin Cutter now 0/7 HP — Goblin Cutter is DOWNED. (HP applied by the system — do NOT adjust it via damage_taken/enemy_updates)]',
+        ].join('\n'),
+        checks: [
+            noRollRequests,
+            combatEnded,
+            xpAwarded,
+            noDuplicateEngineHp,
+        ],
+    },
+    {
+        id: 'post-roll-enemy-survives-asks-next-action-not-extra-damage',
+        state: baseState(),
+        userMessage: [
+            '[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own.',
+            'Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken, damage_dealt, or enemy_updates for them.]',
+            '',
+            '[ROLL RESULT: Astra cuts at the goblin vs AC 13, rolled 17 — HIT for 3 damage. Goblin Cutter now 4/7 HP. (HP applied by the system — do NOT adjust it via damage_taken/enemy_updates)]',
+        ].join('\n'),
+        checks: [
+            noDuplicateEngineHp,
+            noCombatEnd,
+            noDamageRollRequest,
+        ],
+    },
 ];
 
 function hasRoll(type) {
@@ -203,6 +235,48 @@ function noResourcesUsed(events) {
     return {
         pass: (events?.resourcesUsed || []).length === 0,
         message: 'expected no DM-emitted resources_used for UI-owned fighter abilities',
+    };
+}
+
+function noRollRequests(events) {
+    return {
+        pass: (events?.requestedRolls || []).length === 0,
+        message: 'expected no further roll requests',
+    };
+}
+
+function noDamageRollRequest(events) {
+    return {
+        pass: !(events?.requestedRolls || []).some(r => r.type === 'damage_roll'),
+        message: 'expected no standalone combat damage_roll after engine-applied HP',
+    };
+}
+
+function combatEnded(events) {
+    return {
+        pass: !!events?.combatEnd,
+        message: 'expected combat_end: true on post-roll victory',
+    };
+}
+
+function noCombatEnd(events) {
+    return {
+        pass: !events?.combatEnd,
+        message: 'expected combat to remain active while an enemy survives',
+    };
+}
+
+function xpAwarded(events) {
+    return {
+        pass: (events?.expAwarded || 0) > 0,
+        message: 'expected exp_awarded on post-roll victory',
+    };
+}
+
+function noDuplicateEngineHp(events) {
+    return {
+        pass: !events || (events.damageTaken === 0 && events.damageDealt === 0 && events.enemyUpdates.length === 0),
+        message: 'expected no duplicate HP mutations after engine-applied damage',
     };
 }
 

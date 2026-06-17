@@ -24,7 +24,9 @@ _Last updated: 2026-06-17_
   response, and remind the DM that Second Wind as a bonus action leaves the main
   action available. Added `npm run eval:combat`, a real-provider eval harness
   that runs scripted combat pacing scenarios against Gemini/OpenAI only when an
-  explicit env API key is provided. Tests: `npm test` 149 passing; `npm run
+  explicit env API key is provided. The eval now covers both initial roll
+  requests and post-roll follow-up cases for victory XP and engine-applied HP
+  duplication. Tests: `npm test` 149 passing; `npm run
   build` passing. Real-provider eval was not run in this session because no
   eval API key was present in the shell.
 - Lightweight bonus actions for Fighter resources (2026-06-17): Second Wind is
