@@ -30,7 +30,25 @@ Output ONLY valid JSON:
       "goals": "what they want (only if newly revealed)",
       "secrets": "hidden info (only if newly hinted at or revealed)",
       "appearance": "concrete physical/visual description — build, face, hair, clothing, distinguishing features (only if newly described)",
-      "lastLocation": "where they are now (only if mentioned)"
+      "lastLocation": "where they are now (only if mentioned)",
+      "agenda": "what this NPC is likely trying to accomplish next (only if implied or revealed)",
+      "relationshipTension": "compact note about attraction, rivalry, resentment, debt, loyalty, fear, or trust strain",
+      "trust": 0,
+      "privateNotes": "hidden NPC intent or unrevealed motive useful for future consistency",
+      "callbackHooks": ["short hooks this NPC could later bring back naturally"]
+    }
+  ],
+  "story_memory": [
+    {
+      "type": "callback|promise|wound|relationship|mystery|playerCanon|foreshadow|npcAgenda",
+      "text": "compact memory card, written as something the DM can naturally use later",
+      "subject": "person, place, object, promise, wound, rumor, or unresolved thread",
+      "tags": ["short", "searchable", "tags"],
+      "salience": 1,
+      "emotionalCharge": 0,
+      "linkedNpcNames": ["exact NPC names"],
+      "location": "place tied to the memory if any",
+      "source": "scribe"
     }
   ],
   "player_appearance": "concrete physical/visual description of the PLAYER's character, only if newly described this turn — otherwise omit",
@@ -41,11 +59,14 @@ Rules:
 - World facts are durable truths: deaths, alliances, betrayals, discoveries, curses, historical facts revealed
 - Do NOT record transient action descriptions as facts ("Player attacked goblin" is not a world fact)
 - DO record outcomes: "The goblin captain Rarg is dead", "The village of Millhaven burned to the ground"
+- Story memory is for emotionally or dramatically useful callbacks: promises, debts, named objects, scars, injuries, insults, flirtation, fears, private vows, unresolved clues, player-authored proper nouns, foreshadowing, NPC agendas, and relationship tension.
+- Capture player-authored canon from the player's action too, especially names, places, backstory details, vows, and personal attachments the DM should remember later.
+- Keep story_memory compact; do not duplicate ordinary world_facts unless the memory has callback value.
 - Only include npc_updates for NPCs that appeared in this specific exchange
 - Capture "appearance"/"player_appearance" only from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation, so accuracy matters.
 - Only include fields you have actual information for — omit empty/unknown fields
 - DO NOT alter explicit words or details: copy names, proper nouns, numbers, and specific phrases exactly as the DM wrote them — never rename, paraphrase, translate, or invent. Refer to each NPC by the exact name used in the narrative so their record never forks.
-- If nothing notable happened (pure narration, no new facts), return { "world_facts": [], "npc_updates": [], "location": null }
+- If nothing notable happened (pure narration, no new facts), return { "world_facts": [], "npc_updates": [], "story_memory": [], "location": null }
 - Output ONLY the JSON, no other text`;
 
 /**
@@ -99,6 +120,11 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             console.log(`[Scribe] Updated ${extracted.npc_updates.length} NPC(s)`);
         }
 
+        if (Array.isArray(extracted.story_memory) && extracted.story_memory.length > 0) {
+            dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: extracted.story_memory });
+            console.log(`[Scribe] Added ${extracted.story_memory.length} story memory card(s)`);
+        }
+
         if (typeof extracted.player_appearance === 'string' && extracted.player_appearance.trim()) {
             dispatch({ type: 'UPDATE_CHARACTER', payload: { appearance: extracted.player_appearance.trim() } });
         }
@@ -109,6 +135,110 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
     } catch (e) {
         // Scribe failures must never block the main game loop, but log clearly
         console.error('[Scribe] Extraction failed:', e.message || e);
+    }
+}
+
+const REFLECTION_SYSTEM_PROMPT = `You are the private campaign continuity assistant for a single-player RPG. Update hidden NPC intent, relationship pressure, dramatic memory hooks, and front symptoms from the current campaign state.
+
+Output ONLY valid JSON:
+{
+  "npc_updates": [
+    {
+      "name": "Exact NPC name",
+      "agenda": "what they likely try next",
+      "relationshipTension": "attraction, rivalry, fear, debt, loyalty, distrust, or leverage",
+      "trust": 50,
+      "privateNotes": "hidden intent or secret pressure",
+      "callbackHooks": ["one or two details they could naturally bring back later"]
+    }
+  ],
+  "front_updates": [
+    {
+      "id": "front id",
+      "publicHints": ["in-world symptom safe for narration"],
+      "notes": "private reasoning; no UI language"
+    }
+  ],
+  "story_memory": [
+    {
+      "type": "callback|promise|wound|relationship|mystery|playerCanon|foreshadow|npcAgenda",
+      "text": "compact dramatic callback opportunity",
+      "subject": "who or what it concerns",
+      "tags": ["short", "tags"],
+      "salience": 3,
+      "emotionalCharge": 2,
+      "linkedNpcNames": ["Exact NPC name"],
+      "location": "place if relevant",
+      "source": "reflection"
+    }
+  ]
+}
+
+Rules:
+- Do not invent a new plot that contradicts canon. Synthesize likely intent from existing facts.
+- Hidden fronts must remain private; publicHints are symptoms only, never clock/stage/title exposition.
+- Potential companions may be seeded as hooks, but never add them to the party.
+- Intriguing NPCs should emerge from agenda, competence, danger, secrets, attraction, rivalry, vulnerability, or leverage, not default sexualization.
+- Keep everything compact. Omit empty arrays when nothing changes.`;
+
+export async function runNpcFrontReflection({ state, dispatch }) {
+    if (!state?.settings?.apiKey) return;
+    const npcs = (state.npcs || []).slice(-12);
+    const fronts = state.fronts || [];
+    if (npcs.length === 0 && fronts.length === 0) return;
+
+    const context = {
+        location: state.currentLocation,
+        premise: state.session?.premise,
+        recentJournal: (state.journal || []).slice(-3),
+        worldFacts: (state.worldFacts || []).slice(-12),
+        npcs,
+        fronts,
+        partySize: (state.party || []).length,
+    };
+
+    try {
+        const response = await sendMessage({
+            provider: state.settings.llmProvider,
+            apiKey: state.settings.apiKey,
+            model: SCRIBE_MODEL,
+            systemPrompt: REFLECTION_SYSTEM_PROMPT,
+            messageHistory: [],
+            userMessage: JSON.stringify(context, null, 2),
+        });
+
+        const jsonMatch = extractBalancedJson(response, 'npc_updates')
+            || extractBalancedJson(response, 'front_updates')
+            || extractBalancedJson(response, 'story_memory');
+        if (!jsonMatch) return;
+
+        let reflected;
+        try {
+            reflected = JSON.parse(jsonMatch.json);
+        } catch {
+            try {
+                reflected = JSON.parse(repairJson(jsonMatch.json));
+            } catch (e2) {
+                console.warn('[Reflection] JSON parse failed after repair:', e2.message);
+                return;
+            }
+        }
+
+        if (Array.isArray(reflected.npc_updates)) {
+            for (const npc of reflected.npc_updates) {
+                dispatch({ type: 'UPDATE_NPC', payload: npc });
+            }
+        }
+        if (Array.isArray(reflected.front_updates)) {
+            for (const front of reflected.front_updates) {
+                dispatch({ type: 'UPDATE_FRONT', payload: front });
+            }
+        }
+        if (Array.isArray(reflected.story_memory) && reflected.story_memory.length > 0) {
+            dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: reflected.story_memory });
+        }
+    } catch (e) {
+        console.warn('[Reflection] NPC/front reflection failed:', e.message || e);
     }
 }
 

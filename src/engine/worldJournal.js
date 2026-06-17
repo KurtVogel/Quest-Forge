@@ -9,6 +9,7 @@
  */
 
 import { sendMessage } from '../llm/adapter.js';
+import { runNpcFrontReflection } from '../llm/scribe.js';
 
 const SUMMARIZE_EVERY = 10; // Summarize every N new messages
 const SCRIBE_MODEL = 'gemini-2.5-flash'; // Cheap & fast — good enough for extraction
@@ -134,6 +135,10 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         // Mark these messages as summarized — they will be excluded from future LLM history
         dispatch({ type: 'MARK_MESSAGES_SUMMARIZED', payload: messageCount });
 
+        // Cadenced private reflection: keep NPC intent, relationship pressure, hidden
+        // front symptoms, and future callback hooks alive without adding per-turn cost.
+        runNpcFrontReflection({ state, dispatch }).catch(() => {});
+
         console.log(`[Journal] Summarized messages ${lastSummarizedIndex}–${messageCount}, extracted ${summary.world_facts?.length || 0} world facts`);
         return messageCount;
     } catch (e) {
@@ -184,9 +189,13 @@ export function buildJournalContext(journal, npcs, currentLocation) {
             const extras = [
                 n.personality && `personality: ${n.personality}`,
                 n.goals && `wants: ${n.goals}`,
+                n.agenda && `agenda: ${n.agenda}`,
                 n.secrets && `secret: ${n.secrets}`,
+                n.relationshipTension && `tension: ${n.relationshipTension}`,
+                Number.isFinite(n.trust) && `trust: ${n.trust}/100`,
                 n.lastLocation && `last seen: ${n.lastLocation}`,
                 arc,
+                Array.isArray(n.callbackHooks) && n.callbackHooks.length > 0 && `hooks: ${n.callbackHooks.slice(0, 2).join('; ')}`,
             ].filter(Boolean).join(' | ');
             return `- **${n.name}**${disp}: ${notes}${extras ? ` [${extras}]` : ''}`;
         }).join('\n');

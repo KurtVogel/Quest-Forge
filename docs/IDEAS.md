@@ -11,6 +11,25 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### LLM WOW Layer / dramatic story memory — status: v1 `shipped` (2026-06-17), priority: HIGH
+Shipped v1 adds a narrative-only `storyMemory` lane for the moments that make the game feel
+uncannily continuous: promises, debts, scars/wounds, player-authored canon, named objects,
+flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NPC agendas.
+- Canonical design doc: [LLM_WOW_LAYER.md](LLM_WOW_LAYER.md).
+- The Scribe extracts compact memory cards from both the player's action and final DM
+  narration. It also enriches NPC records with `agenda`, `relationshipTension`, `trust`,
+  `privateNotes`, and `callbackHooks`.
+- `storyMemory.js` normalizes/dedupes cards and curates the top few by relevance, location,
+  active NPCs, salience, emotional charge, and cooldown. Prompt injection is a bounded
+  `## DRAMATIC CALLBACK OPPORTUNITIES` block that says to use at most one naturally.
+- The DM can emit `memory_updates` to mark a callback used/resolved, but this is strictly
+  narrative bookkeeping: parser/reducer guards keep it from touching HP, XP, inventory,
+  rolls, combat, or conditions.
+- On the journal cadence, a cheap NPC/front reflection pass updates likely NPC intent,
+  relationship pressure, front symptoms, and future callback hooks without per-turn cost.
+- Remaining ideas: real-provider eval for "natural old detail recall without exposition",
+  player-facing memory debug/dev panel, and salience tuning after real play.
+
 ### Fronts / hidden world clocks — status: v1 `shipped` (2026-06-17), priority: HIGH
 The flagship feature. Instead of generic LLM "three acts": 2–3 **fronts** (threats that
 *want* something — à la Dungeon World fronts / Blades in the Dark faction clocks), each
@@ -35,7 +54,7 @@ with escalation steps and a "grim portent" (what happens if nobody interferes).
 ### Campaign milestone XP tied to front/act completion — status: `idea`
 Milestone XP on resolving a front beat, complementing per-combat XP.
 
-### Durable player-authored canon — status: premise `shipped` (2026-06-14), backstop `idea`
+### Durable player-authored canon — status: premise `shipped` (2026-06-14), backstop `shipped` (2026-06-17)
 The memory pipeline faithfully chronicles *what the DM establishes during play* but had no
 guaranteed path for *what the player asserts as canon* (premise, backstory, the proper nouns
 they bring). Real bug (Vesa, 2026-06-13): a starting city "Tanelorn" named only in the
@@ -44,11 +63,11 @@ under "Focus on what HAPPENED, not what might happen", and the player's raw mess
 embedded into RAG, so it fell through every durable tier once the 20-message window slid past.
 - **Shipped:** `session.premise` captured at adventure start, pinned as a never-pruned
   `## CAMPAIGN PREMISE` block, DM auto-opens the scene from it. See DECISIONS.md.
-- **Backstop still open (`idea`):** also embed the *player's* message into RAG, not just the
-  DM narrative (one line near [ChatPanel.jsx] addMemory call ~L294). Cheap; makes any proper
-  noun the player introduces mid-campaign retrievable even if no extractor promotes it to a fact.
-- **Further (`idea`):** widen Scribe/journal extraction to capture player-introduced lore
-  (places/names/factions the player names), not only DM-established outcomes.
+- **Backstop shipped:** player messages are embedded into Gemini RAG, and the Scribe now
+  extracts player-authored proper nouns/backstory/vows/attachments into `storyMemory`
+  `playerCanon` cards when they have callback value.
+- Further idea: tune the extractor after real play if it records too many or too few
+  player-authored details.
 
 ## Gameplay & Mechanics
 

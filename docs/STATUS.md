@@ -7,6 +7,11 @@ replace stale entries, don't let it grow. For deeper context run `git log --onel
 _Last updated: 2026-06-17_
 
 ## Current focus
+- **LLM WOW Layer v1 now shipped**: campaigns have durable story-memory cards for
+  promises, wounds, player-authored canon, mysteries, relationship beats, foreshadowing,
+  and NPC agendas. Real-play should now watch for whether callbacks feel natural rather
+  than showy, and whether NPC/front reflection seeds useful future moments. Design anchor:
+  [docs/LLM_WOW_LAYER.md](LLM_WOW_LAYER.md).
 - **Fighter-only test-play phase with hidden fronts now started**: fighter mechanics are
   stable enough for real sessions; use play feedback to tune combat prompt pacing,
   survivability, and whether solo companion opportunities appear naturally.
@@ -16,6 +21,18 @@ _Last updated: 2026-06-17_
   advancement and richer generated fronts.
 
 ## Recently shipped (June 10–17, 2026)
+- LLM WOW Layer v1 / story memory (2026-06-17): added durable `storyMemory` cards
+  plus `storyMemory.js`, a deterministic recall curator that scores active cards by
+  query/location/NPC/salience/emotional charge/cooldown and injects only a few as
+  `## DRAMATIC CALLBACK OPPORTUNITIES`. The Scribe now extracts player-authored canon,
+  promises, wounds/scars, relationship beats, mysteries, foreshadowing, and NPC agendas
+  from both player action and final narration; player messages and story cards are also
+  embedded into Gemini RAG. The DM can emit narrative-only `memory_updates` to mark a
+  callback used/resolved, while parser/reducer guards keep memory updates from affecting
+  HP, XP, inventory, rolls, combat, or conditions. On the journal cadence, a cheap
+  NPC/front reflection pass updates agenda, relationship tension, hidden front symptoms,
+  and future callback hooks without per-turn cost. Tests: `npm test` 167 passing;
+  `npm run lint` and `npm run build` passing.
 - Shorter default DM cadence (2026-06-17): tightened the prompt from the old "2-4
   paragraphs" target to 1-2 short paragraphs for ordinary turns, 3 only for major openings,
   big consequences, intimate/important NPC moments, or climactic outcomes, and never 4+
@@ -229,7 +246,7 @@ _Last updated: 2026-06-17_
 - This docs system (IDEAS.md / DECISIONS.md / STATUS.md).
 
 ## Up next (agreed order)
-1. Real-play fronts/solo-companion feedback → prompt tuning
+1. Real-play story-memory/fronts/solo-companion feedback → prompt and salience tuning
 2. Fronts v2: automated/background advancement and generated multi-front campaigns
 3. PWA + mobile pass (before going public)
 4. Rogue mechanics (after fighter phase)

@@ -101,6 +101,7 @@ export async function saveGame(slotId, gameState) {
                 journal: gameState.journal || [],
                 npcs: gameState.npcs || [],
                 worldFacts: gameState.worldFacts || [],
+                storyMemory: gameState.storyMemory || [],
                 party: gameState.party || [],
                 currentLocation: gameState.currentLocation || null,
                 combat: gameState.combat || { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },

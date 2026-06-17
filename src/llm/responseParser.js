@@ -289,6 +289,31 @@ function normalizeEvents(raw) {
             : [],
         npcUpdates: Array.isArray(raw.npc_updates) ? raw.npc_updates : [],
         frontUpdates: Array.isArray(raw.front_updates) ? raw.front_updates : [],
+        memoryUpdates: Array.isArray(raw.memory_updates) ? raw.memory_updates
+            .map(update => {
+                if (!update || typeof update !== 'object') return null;
+                return {
+                    ...(update.id && { id: String(update.id) }),
+                    ...(update.memoryId && { memoryId: String(update.memoryId) }),
+                    ...(update.memory_id && { memory_id: String(update.memory_id) }),
+                    ...(update.subject && { subject: String(update.subject) }),
+                    ...(update.text && { text: String(update.text) }),
+                    ...(update.status && { status: String(update.status) }),
+                    ...(update.used !== undefined && { used: !!update.used }),
+                    ...(update.markUsed !== undefined && { markUsed: !!update.markUsed }),
+                    ...(update.mark_used !== undefined && { mark_used: !!update.mark_used }),
+                    ...(typeof update.salience === 'number' && { salience: update.salience }),
+                    ...(typeof update.emotionalCharge === 'number' && { emotionalCharge: update.emotionalCharge }),
+                    ...(typeof update.emotional_charge === 'number' && { emotional_charge: update.emotional_charge }),
+                    ...(Array.isArray(update.tags) && { tags: update.tags.map(String) }),
+                    ...(Array.isArray(update.linkedNpcNames) && { linkedNpcNames: update.linkedNpcNames.map(String) }),
+                    ...(Array.isArray(update.linked_npc_names) && { linked_npc_names: update.linked_npc_names.map(String) }),
+                    ...(update.location && { location: String(update.location) }),
+                };
+            })
+            .filter(Boolean)
+            .slice(0, 10)
+            : [],
         // Player death event (not game-over — triggers narrative transition)
         playerDeath: raw.player_death
             ? { description: raw.player_death.description || 'Your character has fallen.' }
@@ -539,6 +564,10 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
 
     for (const front of events.frontUpdates) {
         dispatch({ type: 'UPDATE_FRONT', payload: front });
+    }
+
+    for (const memory of events.memoryUpdates) {
+        dispatch({ type: 'UPDATE_STORY_MEMORY', payload: memory });
     }
 
     if (events.playerDeath) {

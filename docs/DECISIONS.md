@@ -8,6 +8,26 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-17 · Story memory is narrative-only callback state, not mechanics.**
+Quest Forge now has a durable `storyMemory` lane for the "wow, it remembered that" layer:
+promises, wounds, player canon, mysteries, relationship beats, foreshadowing, and NPC
+agendas. The Scribe extracts compact cards from player action + final narration, and
+`storyMemory.js` curates only a few active cards into `## DRAMATIC CALLBACK OPPORTUNITIES`.
+The DM may use at most one naturally and may emit `memory_updates` to mark a card used or
+resolved. Those updates are strictly bookkeeping: they cannot alter HP, XP, inventory,
+rolls, combat, conditions, or any engine-owned rule. This keeps the LLM rich in continuity
+while preserving the DM↔engine contract.
+See [LLM_WOW_LAYER.md](LLM_WOW_LAYER.md) for the durable design note and follow-up slices.
+
+**2026-06-17 · NPC/front reflection runs on cadence, not every turn.**
+Living NPC intent and hidden-front motion should feel pre-planned without adding a premium
+LLM call to every player action. The journal cadence now also runs a cheap private reflection
+pass that updates NPC agenda, relationship tension, trust/private notes/callback hooks, front
+symptoms, and future story-memory cards. It may seed potential companion hooks through
+fictional needs, leverage, secrets, skills, or front pressure, but it never auto-adds a
+companion; recruitment remains a player choice and still uses `add_companions` only after
+the story supports it.
+
 **2026-06-17 · DM narration is short by default: vivid beat, consequence, next choice.**
 Making the most out of the LLM does not mean letting it monologue over player input. The
 default prompt now asks for 1-2 short paragraphs for ordinary turns, 3 only for major scene

@@ -8,6 +8,7 @@ import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus, getSav
 import { getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
+import { buildStoryMemoryPromptBlock } from '../engine/storyMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
 import { formatCurrency } from '../engine/currency.js';
 import { CLASSES } from '../data/classes.js';
@@ -15,7 +16,7 @@ import { CLASSES } from '../data/classes.js';
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, retrievedMemories, premise }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise }) {
     const parts = [];
 
     // Core DM instructions
@@ -103,6 +104,11 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     const constraints = buildActiveConstraints(quests, worldFacts, character, party);
     if (constraints) {
         parts.push(constraints);
+    }
+
+    const storyMemoryBlock = buildStoryMemoryPromptBlock(storyMemory || []);
+    if (storyMemoryBlock) {
+        parts.push(storyMemoryBlock);
     }
 
     // RAG: retrieved memories most relevant to the current player action
@@ -258,6 +264,9 @@ When game events occur, include a structured JSON block at the END of your respo
   "front_updates": [
     { "id": "front-local-pressure", "clock": 1, "stage": 1, "publicHints": ["Refugees whisper that the north road is watched."], "notes": "Advanced because the party spent a night away from the road." }
   ],
+  "memory_updates": [
+    { "id": "mem-id", "used": true, "status": "active", "salience": 3 }
+  ],
   "combat_start": {
     "enemies": [
       { "name": "Goblin", "hp": 15, "ac": 13 }
@@ -293,6 +302,11 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - If the HIDDEN CAMPAIGN FRONTS section is present, it is private DM state. Never reveal the front title, clock, stage, or grim portent list directly to the player.
 - Use \`front_updates\` when time passes, the player ignores a threat, the player meaningfully interferes, or a front leaks a visible symptom. Keep updates small: usually +1 clock/stage at most.
 - Put only in-world symptoms in \`publicHints\` (rumors, refugees, price spikes, missing NPCs, strange patrols). These are safe to echo in narration. Keep hidden planning details in \`notes\`.
+
+## STORY MEMORY UPDATE INSTRUCTIONS
+- If you visibly use one DRAMATIC CALLBACK OPPORTUNITY in narration, mark it with \`memory_updates\`: use \`{ "id": "<memory id>", "used": true }\`.
+- If the callback is paid off or no longer relevant, set \`status\` to "resolved". If it should rest for a while but may matter later, leave it active and set a lower \`salience\`.
+- \`memory_updates\` is narrative-only bookkeeping. Never use it for HP, XP, rolls, inventory, combat, conditions, or other mechanics.
 
 ## ROLL REQUEST RULES
 - **FATAL ERROR AVOIDANCE**: NEVER ask the player to roll in the narrative text (e.g. "(DM Note: roll stealth)"). The system CANNOT PARSE text.

@@ -7,6 +7,7 @@ import { handleRequestedRolls } from '../../engine/rollResolver.js';
 import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { runScribe } from '../../llm/scribe.js';
 import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../engine/vectorMemory.js';
+import { curateStoryMemory } from '../../engine/storyMemory.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
 import './Chat.css';
@@ -105,6 +106,10 @@ export default function ChatPanel() {
                 text: `${n.name} (${n.disposition || 'unknown'}): ${n.lastNotes || n.notes}`,
                 category: 'npc',
             })),
+            ...(s.storyMemory || []).map(m => ({
+                text: `${m.subject ? `${m.subject}: ` : ''}${m.text}`,
+                category: `story_${m.type || 'callback'}`,
+            })),
         ];
 
         if (items.length > 0) {
@@ -118,7 +123,7 @@ export default function ChatPanel() {
     /**
      * Build the system prompt from current state, with optional RAG memories injected.
      */
-    const buildCurrentSystemPrompt = (retrievedMemories = []) => {
+    const buildCurrentSystemPrompt = (retrievedMemories = [], storyMemory = []) => {
         const s = stateRef.current;
         return buildSystemPrompt({
             character: s.character,
@@ -135,6 +140,7 @@ export default function ChatPanel() {
             combat: s.combat,
             worldFacts: s.worldFacts || [],
             fronts: s.fronts || [],
+            storyMemory,
             retrievedMemories,
             premise: s.session?.premise,
         });
@@ -167,6 +173,7 @@ export default function ChatPanel() {
         // RAG: retrieve memories relevant to the current scene (Gemini only)
         // Include location and combat context for better retrieval relevance
         let retrievedMemories = [];
+        let dramaticMemories = [];
         if (originalPlayerMessage && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
             const sceneContext = [
                 originalPlayerMessage,
@@ -174,9 +181,22 @@ export default function ChatPanel() {
                 s.combat?.active && `In combat with: ${s.combat.enemies.map(e => e.name).join(', ')}`,
             ].filter(Boolean).join('. ');
             retrievedMemories = await retrieveRelevant(s.settings.apiKey, sceneContext).catch(() => []);
+            dramaticMemories = curateStoryMemory({
+                memories: s.storyMemory || [],
+                query: sceneContext,
+                location: s.currentLocation || '',
+                npcs: s.npcs || [],
+            });
+        } else if (originalPlayerMessage) {
+            dramaticMemories = curateStoryMemory({
+                memories: s.storyMemory || [],
+                query: originalPlayerMessage,
+                location: s.currentLocation || '',
+                npcs: s.npcs || [],
+            });
         }
 
-        const systemPrompt = buildCurrentSystemPrompt(retrievedMemories);
+        const systemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories);
         const messageHistory = buildMessageHistory();
 
         abortControllerRef.current = new AbortController();
@@ -321,6 +341,9 @@ export default function ChatPanel() {
             type: 'ADD_MESSAGE',
             payload: { role: 'user', content: trimmed },
         });
+        if (stateRef.current.settings.apiKey && stateRef.current.settings.llmProvider === 'gemini') {
+            addMemory(stateRef.current.settings.apiKey, trimmed.slice(0, 500), 'player').catch(() => {});
+        }
 
         const clearActionSurgeAfterTurn = !!stateRef.current.character?.pendingActionSurge;
 

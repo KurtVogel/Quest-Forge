@@ -10,6 +10,7 @@ import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 import { normalizeEquippedSlots } from '../engine/equipment.js';
 import { createInitialFronts, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
+import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
 
 /**
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
@@ -26,6 +27,9 @@ function validateSaveState(payload) {
         journal: Array.isArray(payload.journal) ? payload.journal : [],
         npcs: Array.isArray(payload.npcs) ? payload.npcs : [],
         worldFacts: Array.isArray(payload.worldFacts) ? payload.worldFacts : [],
+        storyMemory: Array.isArray(payload.storyMemory)
+            ? payload.storyMemory.map(m => normalizeStoryMemoryCard(m)).filter(Boolean)
+            : [],
         fronts: Array.isArray(payload.fronts) ? payload.fronts.map(f => normalizeFront(f)) : [],
         party: Array.isArray(payload.party) ? payload.party : [],
         currentLocation: payload.currentLocation || null,
@@ -206,6 +210,7 @@ export const initialGameState = {
     journal: [],
     npcs: [],
     worldFacts: [], // Canonical world facts that never get compressed — [{id, fact, category, timestamp}]
+    storyMemory: [], // Compact dramatic callback cards — narrative-only memory, never mechanics
     fronts: [], // Hidden campaign clocks/threats — injected into the DM prompt, never shown directly to the player
     party: [], // Companions currently traveling with the player
     currentLocation: null,
@@ -390,6 +395,11 @@ function upsertNpc(npcs, payload) {
         knownFacts: [],
         lastLocation: null,
         relationshipHistory: [],
+        agenda: '',
+        relationshipTension: '',
+        trust: null,
+        privateNotes: '',
+        callbackHooks: [],
         ...update,
     }];
 }
@@ -1237,6 +1247,57 @@ export function gameReducer(state, action) {
         case 'REMOVE_WORLD_FACT':
             return { ...state, worldFacts: state.worldFacts.filter(f => f.id !== action.payload) };
 
+        // --- Story Memory ---
+        case 'ADD_STORY_MEMORY_CARD': {
+            const card = normalizeStoryMemoryCard(action.payload);
+            if (!card) return state;
+            const idx = findStoryMemoryMatch(state.storyMemory || [], card);
+            if (idx === -1) {
+                return { ...state, storyMemory: [...(state.storyMemory || []), card] };
+            }
+            const existing = state.storyMemory[idx];
+            return {
+                ...state,
+                storyMemory: state.storyMemory.map((memory, i) => i === idx
+                    ? normalizeStoryMemoryCard({
+                        ...existing,
+                        ...card,
+                        firstSeenAt: existing.firstSeenAt,
+                        lastSeenAt: Date.now(),
+                        salience: Math.max(existing.salience || 1, card.salience || 1),
+                        emotionalCharge: Math.max(existing.emotionalCharge || 0, card.emotionalCharge || 0),
+                        tags: [...new Set([...(existing.tags || []), ...(card.tags || [])])],
+                        linkedNpcNames: [...new Set([...(existing.linkedNpcNames || []), ...(card.linkedNpcNames || [])])],
+                    }, existing)
+                    : memory),
+            };
+        }
+
+        case 'ADD_STORY_MEMORY_CARDS': {
+            let next = state;
+            for (const card of action.payload || []) {
+                next = gameReducer(next, { type: 'ADD_STORY_MEMORY_CARD', payload: card });
+            }
+            return next;
+        }
+
+        case 'UPDATE_STORY_MEMORY': {
+            const update = normalizeStoryMemoryUpdate(action.payload);
+            if (!update) return state;
+            const idx = (state.storyMemory || []).findIndex(memory =>
+                (update.id && memory.id === update.id) ||
+                (update.subject && memory.subject?.toLowerCase() === update.subject.toLowerCase()) ||
+                (update.text && memory.text?.toLowerCase() === update.text.toLowerCase())
+            );
+            if (idx === -1) return state;
+            return {
+                ...state,
+                storyMemory: state.storyMemory.map((memory, i) => i === idx
+                    ? normalizeStoryMemoryCard({ ...memory, ...update, lastSeenAt: Date.now() }, memory)
+                    : memory),
+            };
+        }
+
         // --- Hidden campaign fronts ---
         case 'INITIALIZE_FRONTS': {
             if ((state.fronts || []).length > 0) return state;
@@ -1597,6 +1658,11 @@ export function gameReducer(state, action) {
                     knownFacts: [],
                     lastLocation: null,
                     relationshipHistory: [],
+                    agenda: '',
+                    relationshipTension: '',
+                    trust: null,
+                    privateNotes: '',
+                    callbackHooks: [],
                     ...npc,
                 })),
                 ui: { ...initialGameState.ui },

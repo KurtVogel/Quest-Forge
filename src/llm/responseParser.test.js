@@ -224,3 +224,37 @@ describe('hidden front events', () => {
         });
     });
 });
+
+describe('story memory events', () => {
+    it('parses and dispatches narrative-only memory updates', () => {
+        const { events } = parseResponse(fence({
+            memory_updates: [{
+                id: 'mem-ribbon',
+                used: true,
+                status: 'resolved',
+                salience: 2,
+                damage_taken: 999,
+            }],
+        }));
+        const dispatch = vi.fn();
+
+        applyEvents(events, dispatch, () => ({ character: {}, party: [] }));
+
+        expect(events.memoryUpdates).toEqual([{
+            id: 'mem-ribbon',
+            status: 'resolved',
+            used: true,
+            salience: 2,
+        }]);
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'UPDATE_STORY_MEMORY',
+            payload: {
+                id: 'mem-ribbon',
+                status: 'resolved',
+                used: true,
+                salience: 2,
+            },
+        });
+        expect(dispatch).not.toHaveBeenCalledWith({ type: 'TAKE_DAMAGE', payload: 999 });
+    });
+});
