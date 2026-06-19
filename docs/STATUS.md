@@ -12,7 +12,9 @@ _Last updated: 2026-06-19_
   omitted player attacks, canonicalizes every exchange into player → companion → enemy
   order, and permits each enemy at most one attack across the whole recursive roll chain.
   Ambiguous missing targets block the exchange safely. The one-time Restore 20 HP repair
-  was claimed and has been removed; the restored character HP persists in the save.
+  was claimed and has been removed; the restored character HP persists in the save. A stale
+  Firebase `index.html` cache then kept the pre-fix bundle alive on mobile; the app shell now
+  uses no-store/revalidation while hashed assets remain immutable.
 - **LLM WOW Layer v1 now shipped**: campaigns have durable story-memory cards for
   promises, wounds, player-authored canon, mysteries, relationship beats, foreshadowing,
   and NPC agendas. Real-play should now watch for whether callbacks feel natural rather

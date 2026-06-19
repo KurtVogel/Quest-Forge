@@ -8,6 +8,14 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-19 · The deployed app shell must never remain stale after a release.**
+Firebase Hosting serves `/` and `/index.html` with `no-cache, no-store, must-revalidate`
+so refreshing immediately discovers the newest hashed asset bundle. Fingerprinted files
+under `/assets/**` remain long-lived (`max-age=31536000, immutable`). This matters during
+live-play fixes: an hour-cached HTML shell can keep executing old combat code even after a
+successful deployment, making a fixed engine appear broken and allowing stale mechanics to
+mutate a current save.
+
 **2026-06-19 · Enemy-only combat batches cannot consume a declared player attack.**
 The whole-exchange prompt is guidance, not a trusted mechanics boundary. When it is the
 player’s turn, their message clearly declares an attack, and the DM returns only
