@@ -58,6 +58,8 @@ describe('combat pacing prompt contract', () => {
 
         expect(text).toContain('request the whole exchange in ONE JSON');
         expect(text).toContain('Resolve a whole exchange in ONE response');
+        expect(text).toContain('Never return an enemy-only roll batch');
+        expect(text).toContain('MUST begin with their attack_roll entry');
         expect(text).toContain('do not split ordinary enemy counterattacks into a second avoidable roll request');
         expect(text).not.toContain('YOU then narrate enemy turns');
     });

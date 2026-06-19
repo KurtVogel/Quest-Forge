@@ -20,6 +20,56 @@ import { getSkillModifier, getModifier, getLevelBonus, getSavingThrowModifier, c
 const MAX_ROLL_DEPTH = 3;
 
 const ABILITY_NAMES = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
+const NON_PLAYER_ROLL_TYPES = new Set(['npc_attack', 'npc_save', 'companion_attack']);
+const ATTACK_INTENT_RE = /\b(attack|attacks|strike|strikes|slash|slashes|stab|stabs|shoot|shoots|fire|fires|swing|swings|smash|smashes|punch|punches|kick|kicks)\b/i;
+
+/**
+ * Repair the dangerous LLM failure mode where a player declares an attack but the
+ * returned combat batch contains only enemy/companion rolls. The engine can safely
+ * infer the target when exactly one living enemy remains, or when the player named
+ * one of several living enemies. Ambiguous batches are blocked rather than inventing
+ * player intent or granting enemies a free exchange.
+ */
+export function repairCombatRollBatch(requestedRolls, { combat, character, playerAction } = {}) {
+    const rolls = Array.isArray(requestedRolls) ? requestedRolls : [];
+    const currentFighter = combat?.turnOrder?.[combat.currentTurn];
+    const isPlayerTurn = combat?.active && currentFighter?.type === 'player';
+    const hasNonPlayerCombatRoll = rolls.some(roll => NON_PLAYER_ROLL_TYPES.has(roll.type));
+    const hasPlayerRoll = rolls.some(roll => !NON_PLAYER_ROLL_TYPES.has(roll.type));
+
+    if (!isPlayerTurn || !hasNonPlayerCombatRoll || hasPlayerRoll || !ATTACK_INTENT_RE.test(playerAction || '')) {
+        return { rolls, repaired: false, blocked: false };
+    }
+
+    const livingEnemies = (combat.enemies || []).filter(enemy =>
+        (enemy.hp ?? 0) > 0 && enemy.condition !== 'dead'
+    );
+    const actionText = String(playerAction || '').toLowerCase();
+    const namedTargets = livingEnemies.filter(enemy =>
+        enemy.name && actionText.includes(enemy.name.toLowerCase())
+    );
+    const target = namedTargets.length === 1
+        ? namedTargets[0]
+        : livingEnemies.length === 1
+            ? livingEnemies[0]
+            : null;
+
+    if (!target) return { rolls: [], repaired: false, blocked: true };
+
+    const attackCount = character?.pendingActionSurge ? 2 : 1;
+    const playerName = character?.name || 'Player';
+    const restoredAttacks = Array.from({ length: attackCount }, (_, index) => ({
+        type: 'attack_roll',
+        skill: 'attack',
+        target: target.id,
+        dc: target.ac,
+        description: attackCount > 1
+            ? `${playerName} attacks ${target.name} (Action ${index + 1})`
+            : `${playerName} attacks ${target.name}`,
+    }));
+
+    return { rolls: [...restoredAttacks, ...rolls], repaired: true, blocked: false };
+}
 
 /**
  * Resolve a batch of requested rolls.
@@ -257,7 +307,7 @@ export function formatRollSummary(rollResults) {
  * @param {number} [depth=0] - Current recursion depth (internal)
  * @returns {Promise<void>}
  */
-export async function handleRequestedRolls(requestedRolls, { getState, dispatch, sendToLLM, preNarrated = false }, depth = 0) {
+export async function handleRequestedRolls(requestedRolls, { getState, dispatch, sendToLLM, preNarrated = false, playerAction = '' }, depth = 0) {
     if (depth >= MAX_ROLL_DEPTH) {
         console.warn(`[RollResolver] Max roll depth (${MAX_ROLL_DEPTH}) reached — stopping recursive follow-ups.`);
         dispatch({
@@ -267,16 +317,44 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
                 content: `Roll chain limit reached (${MAX_ROLL_DEPTH} levels). The DM will continue from here on your next message.`,
             },
         });
-        return;
+        return { resolved: false };
     }
 
     const state = getState();
     const character = state.character;
     const inventory = state.inventory || [];
+    const repairedBatch = depth === 0
+        ? repairCombatRollBatch(requestedRolls, {
+            combat: state.combat,
+            character,
+            playerAction,
+        })
+        : { rolls: requestedRolls, repaired: false, blocked: false };
 
-    console.log(`[RollResolver] Processing ${requestedRolls.length} roll(s) at depth ${depth}`);
+    if (repairedBatch.blocked) {
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+                role: 'system',
+                content: '**Combat safeguard:** The DM omitted your declared attack and the engine could not safely infer its target. Enemy actions were not rolled; name your target and try again.',
+            },
+        });
+        return { resolved: false };
+    }
 
-    const { results: rollResults, appliedHp } = resolveRolls(requestedRolls, {
+    if (repairedBatch.repaired) {
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+                role: 'system',
+                content: '**Combat safeguard:** The DM omitted your declared attack from the roll batch, so the engine restored it before resolving enemy actions.',
+            },
+        });
+    }
+
+    console.log(`[RollResolver] Processing ${repairedBatch.rolls.length} roll(s) at depth ${depth}`);
+
+    const { results: rollResults, appliedHp } = resolveRolls(repairedBatch.rolls, {
         character,
         inventory,
         combat: state.combat,
@@ -324,6 +402,8 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
             console.warn('[RollResolver] Follow-up narration failed:', e);
         }
     }
+
+    return { resolved: rollResults.length > 0 };
 }
 
 // --- Internal Resolution Functions ---

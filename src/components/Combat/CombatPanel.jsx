@@ -1,9 +1,13 @@
+import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getCombatStatus } from '../../engine/combatStatus.js';
 import './Combat.css';
 
 export default function CombatPanel() {
     const { state, dispatch } = useGame();
+    const [isCollapsed, setIsCollapsed] = useState(() =>
+        typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches
+    );
     const combat = state.combat;
 
     if (!combat?.active) return null;
@@ -17,69 +21,93 @@ export default function CombatPanel() {
         combat,
         party: state.party || [],
     });
+    const enemySummary = aliveEnemies.length > 0
+        ? aliveEnemies.map(enemy => `${enemy.name} ${enemy.hp}/${enemy.maxHp} HP`).join(' · ')
+        : 'No foes standing';
 
     return (
         <div className="combat-overlay">
             <div className="combat-panel">
                 <div className="combat-header">
                     <h3 className="combat-title">Combat — Round {combat.round}</h3>
-                    {aliveEnemies.length === 0 && (
-                        <button
-                            className="combat-end-btn"
-                            onClick={() => dispatch({ type: 'END_COMBAT' })}
-                        >
-                            Victory! End Combat
-                        </button>
-                    )}
-                </div>
-
-                {/* Initiative Tracker */}
-                <div className="combat-initiative">
-                    {combat.turnOrder.map((fighter, idx) => {
-                        const isCurrent = idx === combat.currentTurn;
-                        const isDead = fighter.type === 'enemy'
-                            ? combat.enemies.find(e => e.id === fighter.id)?.condition === 'dead'
-                            : fighter.type === 'companion' && (state.party || []).find(c => c.id === fighter.id)?.status === 'downed';
-                        const icon = fighter.type === 'player'
-                            ? 'PC'
-                            : fighter.type === 'companion'
-                                ? 'Ally'
-                                : 'Foe';
-
-                        return (
-                            <div
-                                key={fighter.id || fighter.name}
-                                className={`initiative-slot ${isCurrent ? 'current' : ''} ${isDead ? 'dead' : ''} ${fighter.type}`}
+                    <div className="combat-header-actions">
+                        {aliveEnemies.length === 0 && (
+                            <button
+                                className="combat-end-btn"
+                                onClick={() => dispatch({ type: 'END_COMBAT' })}
                             >
-                                <span className="initiative-icon">{icon}</span>
-                                <span className="initiative-name">{fighter.name}</span>
-                                <span className="initiative-roll">{fighter.initiative}</span>
-                            </div>
-                        );
-                    })}
+                                Victory! End Combat
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            className="combat-collapse-btn"
+                            aria-expanded={!isCollapsed}
+                            aria-controls="combat-details"
+                            onClick={() => setIsCollapsed(collapsed => !collapsed)}
+                        >
+                            {isCollapsed ? 'Show details' : 'Hide details'}
+                            <span aria-hidden="true">{isCollapsed ? '⌄' : '⌃'}</span>
+                        </button>
+                    </div>
                 </div>
 
-                {/* Enemy Cards */}
-                <div className="combat-enemies">
-                    {combat.enemies.map(enemy => (
-                        <EnemyCard key={enemy.id} enemy={enemy} />
-                    ))}
-                </div>
+                {isCollapsed ? (
+                    <div className={`combat-collapsed-summary ${combatStatus.variant}`}>
+                        <span>{combatStatus.title}</span>
+                        <span>{enemySummary}</span>
+                    </div>
+                ) : (
+                    <div id="combat-details">
+                        {/* Initiative Tracker */}
+                        <div className="combat-initiative">
+                            {combat.turnOrder.map((fighter, idx) => {
+                                const isCurrent = idx === combat.currentTurn;
+                                const isDead = fighter.type === 'enemy'
+                                    ? combat.enemies.find(e => e.id === fighter.id)?.condition === 'dead'
+                                    : fighter.type === 'companion' && (state.party || []).find(c => c.id === fighter.id)?.status === 'downed';
+                                const icon = fighter.type === 'player'
+                                    ? 'PC'
+                                    : fighter.type === 'companion'
+                                        ? 'Ally'
+                                        : 'Foe';
 
-                {/* Current Turn Indicator */}
-                <div className={`combat-turn ${isPlayerTurn ? 'player-turn' : 'enemy-turn'}`}>
-                    {isPlayerTurn
-                        ? 'Your turn — describe your action in chat.'
-                        : isCompanionTurn
-                            ? `${currentFighter?.name} is ready — direct them in chat or let the DM choose their move.`
-                            : `${currentFighter?.name}'s turn...`
-                    }
-                </div>
+                                return (
+                                    <div
+                                        key={fighter.id || fighter.name}
+                                        className={`initiative-slot ${isCurrent ? 'current' : ''} ${isDead ? 'dead' : ''} ${fighter.type}`}
+                                    >
+                                        <span className="initiative-icon">{icon}</span>
+                                        <span className="initiative-name">{fighter.name}</span>
+                                        <span className="initiative-roll">{fighter.initiative}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
 
-                <div className={`combat-status ${combatStatus.variant}`}>
-                    <span className="combat-status-title">{combatStatus.title}</span>
-                    <span className="combat-status-detail">{combatStatus.detail}</span>
-                </div>
+                        {/* Enemy Cards */}
+                        <div className="combat-enemies">
+                            {combat.enemies.map(enemy => (
+                                <EnemyCard key={enemy.id} enemy={enemy} />
+                            ))}
+                        </div>
+
+                        {/* Current Turn Indicator */}
+                        <div className={`combat-turn ${isPlayerTurn ? 'player-turn' : 'enemy-turn'}`}>
+                            {isPlayerTurn
+                                ? 'Your turn — describe your action in chat.'
+                                : isCompanionTurn
+                                    ? `${currentFighter?.name} is ready — direct them in chat or let the DM choose their move.`
+                                    : `${currentFighter?.name}'s turn...`
+                            }
+                        </div>
+
+                        <div className={`combat-status ${combatStatus.variant}`}>
+                            <span className="combat-status-title">{combatStatus.title}</span>
+                            <span className="combat-status-detail">{combatStatus.detail}</span>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

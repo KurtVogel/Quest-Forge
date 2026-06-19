@@ -4,7 +4,7 @@
  * The dice module is mocked with a queue so outcomes are scripted, not random.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handleRequestedRolls, resolveRolls } from './rollResolver.js';
+import { handleRequestedRolls, repairCombatRollBatch, resolveRolls } from './rollResolver.js';
 
 const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
 
@@ -85,6 +85,103 @@ const messagesFrom = (dispatch) => dispatch.mock.calls
     .join('\n');
 
 beforeEach(() => { rollQueue.length = 0; });
+
+describe('combat roll-batch safeguard', () => {
+    const combat = {
+        active: true,
+        currentTurn: 0,
+        turnOrder: [{ id: 'player', type: 'player', name: 'Testo', initiative: 18 }],
+        enemies: [
+            { id: 'chief', name: 'Chief Kraul', hp: 23, maxHp: 28, ac: 14, condition: 'healthy' },
+            { id: 'runt', name: 'Goblin Runt', hp: 0, maxHp: 8, ac: 12, condition: 'dead' },
+        ],
+    };
+
+    it('restores a declared player attack before an enemy-only batch', () => {
+        const enemyRoll = { type: 'npc_attack', attackerId: 'chief', target: 'player', modifier: 4, damage: '1d8+2' };
+        const result = repairCombatRollBatch([enemyRoll], {
+            combat,
+            character: makeCharacter(),
+            playerAction: 'I attack it',
+        });
+
+        expect(result).toMatchObject({ repaired: true, blocked: false });
+        expect(result.rolls).toEqual([
+            expect.objectContaining({ type: 'attack_roll', skill: 'attack', target: 'chief', dc: 14 }),
+            enemyRoll,
+        ]);
+    });
+
+    it('restores both Attack actions when Action Surge is already active', () => {
+        const result = repairCombatRollBatch(
+            [{ type: 'npc_attack', attackerId: 'chief', target: 'player' }],
+            {
+                combat,
+                character: makeCharacter({ pendingActionSurge: true }),
+                playerAction: 'I attack again and use action surge',
+            }
+        );
+
+        expect(result.rolls.filter(roll => roll.type === 'attack_roll')).toHaveLength(2);
+        expect(result.rolls.slice(0, 2).every(roll => roll.target === 'chief')).toBe(true);
+    });
+
+    it('does not invent a target when multiple living enemies remain unnamed', () => {
+        const ambiguousCombat = {
+            ...combat,
+            enemies: [
+                ...combat.enemies,
+                { id: 'archer', name: 'Goblin Archer', hp: 7, maxHp: 7, ac: 13, condition: 'healthy' },
+            ],
+        };
+        const enemyRolls = [{ type: 'npc_attack', attackerId: 'chief', target: 'player' }];
+        const result = repairCombatRollBatch(enemyRolls, {
+            combat: ambiguousCombat,
+            character: makeCharacter(),
+            playerAction: 'I attack it',
+        });
+
+        expect(result).toEqual({ rolls: [], repaired: false, blocked: true });
+    });
+
+    it('leaves a complete batch unchanged', () => {
+        const complete = [
+            { type: 'attack_roll', skill: 'attack', target: 'chief' },
+            { type: 'npc_attack', attackerId: 'chief', target: 'player' },
+        ];
+        expect(repairCombatRollBatch(complete, {
+            combat,
+            character: makeCharacter(),
+            playerAction: 'I attack it',
+        })).toEqual({ rolls: complete, repaired: false, blocked: false });
+    });
+
+    it('does not advance or roll enemies when the missing target is ambiguous', async () => {
+        const dispatch = vi.fn();
+        const ambiguousCombat = {
+            ...combat,
+            enemies: [
+                ...combat.enemies,
+                { id: 'archer', name: 'Goblin Archer', hp: 7, maxHp: 7, ac: 13, condition: 'healthy' },
+            ],
+        };
+        const sendToLLM = vi.fn();
+
+        const outcome = await handleRequestedRolls(
+            [{ type: 'npc_attack', attackerId: 'chief', target: 'player' }],
+            {
+                getState: () => ({ character: makeCharacter(), inventory: [], combat: ambiguousCombat, party: [] }),
+                dispatch,
+                sendToLLM,
+                playerAction: 'I attack it',
+            }
+        );
+
+        expect(outcome).toEqual({ resolved: false });
+        expect(sendToLLM).not.toHaveBeenCalled();
+        expect(messagesFrom(dispatch)).toContain('Enemy actions were not rolled');
+    });
+});
 
 describe('death saves', () => {
     const dyingChar = { currentHP: 0, dying: true, deathSaves: { successes: 0, failures: 0 }, conditions: ['Unconscious'] };

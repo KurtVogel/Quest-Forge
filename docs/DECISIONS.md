@@ -8,6 +8,22 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-19 · Enemy-only combat batches cannot consume a declared player attack.**
+The whole-exchange prompt is guidance, not a trusted mechanics boundary. When it is the
+player's turn, their message clearly declares an attack, and the DM returns only
+enemy/companion rolls, `rollResolver.js` restores the missing player attack before hostile
+actions when the target is unambiguous. Pending Action Surge restores both Attack actions.
+If multiple living targets make the intent ambiguous, the engine blocks the entire batch,
+does not roll enemies, and does not advance the round; the player is asked to name a target.
+The prompt still requires player attacks first, but this client-side invariant is the actual
+safety guarantee.
+
+**2026-06-19 · Mobile combat starts compact, with full details on demand.**
+At phone widths the combat panel defaults to a one-line round/status/live-foe HP summary so
+chat narration retains most of the viewport. Initiative, enemy cards, turn guidance, and
+resource/survival status remain available through an explicit Show details / Hide details
+control. Desktop stays expanded by default.
+
 **2026-06-17 · Story memory is narrative-only callback state, not mechanics.**
 Quest Forge now has a durable `storyMemory` lane for the "wow, it remembered that" layer:
 promises, wounds, player canon, mysteries, relationship beats, foreshadowing, and NPC

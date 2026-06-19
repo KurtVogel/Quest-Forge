@@ -51,6 +51,12 @@
     gap: 0.45rem;
 }
 
+.combat-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
 .combat-title::before {
     content: "";
     width: 0.68rem;
@@ -74,6 +80,59 @@
 
 .combat-end-btn:hover {
     background: rgba(76, 175, 80, 0.25);
+}
+
+.combat-collapse-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.55rem;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.18);
+    color: var(--text-secondary);
+    font: 600 0.72rem var(--font-body);
+    cursor: pointer;
+}
+
+.combat-collapse-btn:hover {
+    color: var(--gold);
+    border-color: rgba(212, 175, 55, 0.45);
+}
+
+.combat-collapsed-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    line-height: 1.25;
+}
+
+.combat-collapsed-summary span:first-child {
+    flex-shrink: 0;
+    color: var(--gold);
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.combat-collapsed-summary span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.combat-collapsed-summary.danger span:first-child,
+.combat-collapsed-summary.dead span:first-child,
+.combat-collapsed-summary.enemy span:first-child {
+    color: var(--danger);
+}
+
+.combat-collapsed-summary.victory span:first-child,
+.combat-collapsed-summary.ally span:first-child {
+    color: var(--success);
 }
 
 /* Initiative tracker */
@@ -328,6 +387,22 @@
 }
 
 @media (max-width: 640px) {
+    .combat-panel {
+        padding: 0.55rem 0.75rem;
+    }
+
+    .combat-header {
+        margin-bottom: 0.35rem;
+    }
+
+    .combat-title {
+        font-size: 0.9rem;
+    }
+
+    .combat-collapse-btn {
+        min-height: 2rem;
+    }
+
     .combat-status {
         grid-template-columns: 1fr;
         gap: 0.25rem;

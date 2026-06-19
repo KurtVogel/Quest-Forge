@@ -355,14 +355,15 @@ export default function ChatPanel() {
 
             // Handle requested rolls via the extracted roll resolver (with depth limiting)
             if (events?.requestedRolls?.length > 0) {
-                await handleRequestedRolls(events.requestedRolls, {
+                const rollResolution = await handleRequestedRolls(events.requestedRolls, {
                     getState: () => stateRef.current,
                     dispatch,
                     sendToLLM,
                     preNarrated: events._preNarratedOutcome || false,
+                    playerAction: trimmed,
                 });
 
-                if (stateRef.current.combat?.active) {
+                if (rollResolution?.resolved && stateRef.current.combat?.active) {
                     dispatch({ type: 'RESOLVE_COMBAT_EXCHANGE' });
                 }
             }

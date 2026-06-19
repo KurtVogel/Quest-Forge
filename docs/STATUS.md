@@ -4,9 +4,14 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-19_
 
 ## Current focus
+- **Broken-combat real-play regression fixed**: the DM produced enemy-only roll batches
+  after the player declared an attack. The client now restores omitted player attacks when
+  the target is unambiguous (including two Attack actions for active Action Surge), or
+  blocks the whole exchange without enemy rolls/round advancement when the target is
+  ambiguous. Mobile combat now defaults to a compact expandable summary.
 - **LLM WOW Layer v1 now shipped**: campaigns have durable story-memory cards for
   promises, wounds, player-authored canon, mysteries, relationship beats, foreshadowing,
   and NPC agendas. Real-play should now watch for whether callbacks feel natural rather
@@ -20,7 +25,15 @@ _Last updated: 2026-06-17_
   `front_updates`. Next fronts step is real-play feedback, then automated/background
   advancement and richer generated fronts.
 
-## Recently shipped (June 10–17, 2026)
+## Recently shipped (June 10–19, 2026)
+- Combat batch safeguard + compact mobile combat UI (2026-06-19): player-turn attack
+  declarations can no longer resolve an enemy-only LLM batch. `rollResolver.js` restores
+  the omitted attack(s) ahead of hostile rolls when there is one safe target; ambiguous
+  targets block the batch and preserve the round. The prompt also requires player rolls
+  first. At ≤640px the Combat panel starts as a one-line round/status/live-foe HP summary
+  with Show details / Hide details; desktop remains expanded. Reproduced from five mobile
+  screenshots and browser-checked at 390×844. Tests: `npm test` 172 passing; `npm run lint`
+  and `npm run build` passing.
 - LLM WOW Layer v1 / story memory (2026-06-17): added durable `storyMemory` cards
   plus `storyMemory.js`, a deterministic recall curator that scores active cards by
   query/location/NPC/salience/emotional charge/cooldown and injects only a few as
