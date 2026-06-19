@@ -4,7 +4,7 @@
  * The dice module is mocked with a queue so outcomes are scripted, not random.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handleRequestedRolls, repairCombatRollBatch, resolveRolls } from './rollResolver.js';
+import { canonicalizeCombatRollBatch, handleRequestedRolls, repairCombatRollBatch, resolveRolls } from './rollResolver.js';
 
 const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
 
@@ -154,6 +154,31 @@ describe('combat roll-batch safeguard', () => {
             character: makeCharacter(),
             playerAction: 'I attack it',
         })).toEqual({ rolls: complete, repaired: false, blocked: false });
+    });
+
+    it('puts Action Surge attacks first and allows Kraul only one attack in the exchange', () => {
+        const firstEnemyAttack = { type: 'npc_attack', attacker: 'Chief Kraul', target: 'player' };
+        const firstPlayerAttack = { type: 'attack_roll', skill: 'attack', target: 'chief', description: 'First strike' };
+        const secondPlayerAttack = { type: 'attack_roll', skill: 'attack', target: 'chief', description: 'Action Surge strike' };
+        const duplicateEnemyAttack = { type: 'npc_attack', attackerId: 'chief', target: 'player', description: 'Counterattack' };
+
+        const result = canonicalizeCombatRollBatch([
+            firstEnemyAttack,
+            firstPlayerAttack,
+            secondPlayerAttack,
+            duplicateEnemyAttack,
+        ], combat);
+
+        expect(result.rolls).toEqual([firstPlayerAttack, secondPlayerAttack, firstEnemyAttack]);
+        expect(result.droppedEnemyAttacks).toBe(1);
+
+        const chainedDuplicate = canonicalizeCombatRollBatch(
+            [duplicateEnemyAttack],
+            combat,
+            result.enemyAttackersSeen
+        );
+        expect(chainedDuplicate.rolls).toEqual([]);
+        expect(chainedDuplicate.droppedEnemyAttacks).toBe(1);
     });
 
     it('does not advance or roll enemies when the missing target is ambiguous', async () => {

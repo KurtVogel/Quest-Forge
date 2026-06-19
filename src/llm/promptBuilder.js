@@ -176,6 +176,7 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 3. If dice are needed, request the whole exchange in ONE JSON \`requested_rolls\` block right away — do NOT narrate the swing, enemy counterattack, or any result first.
 4. Include the player's roll, any companion attacks, and every still-living enemy/NPC response that logically acts in that exchange. Put \`target\`, \`attackerId\`, \`modifier\`, and inline \`damage\` on combat attacks so the client resolves HP.
    **Never return an enemy-only roll batch after the player declared an attack. The player's attack roll(s) must come first in the array, before any enemy response.**
+   Each living enemy gets at most ONE response attack in the exchange. Action Surge grants extra actions only to the player; it never grants enemies a retaliation, counterattack, reaction, or second turn.
 5. System rolls and applies inline combat HP → you narrate the complete exchange once, including hit/miss/damage effects, who is down, and the new tactical situation.
 6. If all enemies are down, narrate victory and emit \`combat_end: true\` plus \`exp_awarded\`. If enemies remain, ask for the player's next action.
 
@@ -331,6 +332,7 @@ COMBAT NOTES:
 - Use "combat_start" when combat initiates, and list EVERY foe that will act — each with name, hp, and ac. The client rolls initiative for the player, companions, and enemies, then tracks exactly what you declare, so keep the narrative and the tracked enemies strictly 1:1: never describe an attacker that isn't in the combat state, and don't silently add or drop foes mid-fight.
 - **Resolve a whole exchange in ONE response.** When the player attacks, also request any participating companions' attacks and every still-living foe's response attack in the same requested_rolls block (each with attackerId, target, modifier, and inline damage). The client rolls them in order, skips any combatant whose target/attacker is already down, applies all HP, and you then narrate the exchange once.
 - When the player declared an attack, the requested_rolls array MUST begin with their attack_roll entry (or entries for Action Surge) before companion/enemy rolls. Never send only enemy rolls for that exchange.
+- Each enemy may appear in at most one npc_attack entry per exchange. Action Surge adds player attacks only; never add an enemy retaliation/counterattack for each surged action.
 - HP is owned by the client. When a roll result says "HP applied by the system", do NOT also send enemy_updates or damage_taken for it. Use "enemy_updates" only for HP changes the dice did NOT cause (e.g. an enemy drinks a potion).
 - Use "combat_end": true when all enemies are defeated or combat ends. Include "exp_awarded" in that same victory response.
 

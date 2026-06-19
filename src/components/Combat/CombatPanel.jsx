@@ -31,18 +31,6 @@ export default function CombatPanel() {
                 <div className="combat-header">
                     <h3 className="combat-title">Combat — Round {combat.round}</h3>
                     <div className="combat-header-actions">
-                        {!state.session?.bugCompensationClaimed
-                            && !state.character?.isDead
-                            && state.character?.currentHP < state.character?.maxHP && (
-                            <button
-                                type="button"
-                                className="combat-heal-btn"
-                                aria-label="Restore 20 HP (temporary combat recovery)"
-                                onClick={() => dispatch({ type: 'CLAIM_BUG_COMPENSATION' })}
-                            >
-                                Restore 20 HP
-                            </button>
-                        )}
                         {aliveEnemies.length === 0 && (
                             <button
                                 className="combat-end-btn"

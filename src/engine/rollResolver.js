@@ -72,6 +72,60 @@ export function repairCombatRollBatch(requestedRolls, { combat, character, playe
 }
 
 /**
+ * Put a player-turn exchange into engine order and allow each enemy at most one
+ * attack across the entire recursive roll chain. Action Surge adds player actions,
+ * never extra enemy actions.
+ */
+export function canonicalizeCombatRollBatch(requestedRolls, combat, enemyAttackersSeen = new Set()) {
+    const rolls = Array.isArray(requestedRolls) ? requestedRolls : [];
+    const currentFighter = combat?.turnOrder?.[combat.currentTurn];
+    if (!combat?.active || currentFighter?.type !== 'player') {
+        return { rolls, droppedEnemyAttacks: 0, enemyAttackersSeen: new Set(enemyAttackersSeen) };
+    }
+
+    const seen = new Set(enemyAttackersSeen);
+    const enemies = combat.enemies || [];
+    const enemyKey = (roll) => {
+        const ref = roll.attackerId || roll.attacker;
+        const normalized = String(ref || 'unknown').toLowerCase();
+        const tracked = enemies.find(enemy =>
+            enemy.id === ref || enemy.name?.toLowerCase() === normalized
+        );
+        return tracked ? `enemy:${tracked.id}` : `actor:${normalized}`;
+    };
+
+    const playerRolls = [];
+    const companionRolls = [];
+    const npcSaves = [];
+    const enemyAttacks = [];
+    let droppedEnemyAttacks = 0;
+
+    for (const roll of rolls) {
+        if (roll.type === 'npc_attack') {
+            const key = enemyKey(roll);
+            if (seen.has(key)) {
+                droppedEnemyAttacks += 1;
+                continue;
+            }
+            seen.add(key);
+            enemyAttacks.push(roll);
+        } else if (roll.type === 'companion_attack') {
+            companionRolls.push(roll);
+        } else if (roll.type === 'npc_save') {
+            npcSaves.push(roll);
+        } else {
+            playerRolls.push(roll);
+        }
+    }
+
+    return {
+        rolls: [...playerRolls, ...companionRolls, ...npcSaves, ...enemyAttacks],
+        droppedEnemyAttacks,
+        enemyAttackersSeen: seen,
+    };
+}
+
+/**
  * Resolve a batch of requested rolls.
  *
  * When attacks carry combat fields (`target` + `damage`), damage and HP are applied
@@ -307,7 +361,14 @@ export function formatRollSummary(rollResults) {
  * @param {number} [depth=0] - Current recursion depth (internal)
  * @returns {Promise<void>}
  */
-export async function handleRequestedRolls(requestedRolls, { getState, dispatch, sendToLLM, preNarrated = false, playerAction = '' }, depth = 0) {
+export async function handleRequestedRolls(requestedRolls, {
+    getState,
+    dispatch,
+    sendToLLM,
+    preNarrated = false,
+    playerAction = '',
+    enemyAttackersSeen = new Set(),
+}, depth = 0) {
     if (depth >= MAX_ROLL_DEPTH) {
         console.warn(`[RollResolver] Max roll depth (${MAX_ROLL_DEPTH}) reached — stopping recursive follow-ups.`);
         dispatch({
@@ -352,9 +413,34 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
         });
     }
 
-    console.log(`[RollResolver] Processing ${repairedBatch.rolls.length} roll(s) at depth ${depth}`);
+    const canonicalBatch = canonicalizeCombatRollBatch(
+        repairedBatch.rolls,
+        state.combat,
+        enemyAttackersSeen
+    );
 
-    const { results: rollResults, appliedHp } = resolveRolls(repairedBatch.rolls, {
+    if (canonicalBatch.droppedEnemyAttacks > 0) {
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+                role: 'system',
+                content: `**Combat safeguard:** Removed ${canonicalBatch.droppedEnemyAttacks} duplicate enemy attack${canonicalBatch.droppedEnemyAttacks === 1 ? '' : 's'}. Action Surge grants the player extra actions, not the enemy.`,
+            },
+        });
+    }
+
+    if (canonicalBatch.rolls.length === 0 && canonicalBatch.droppedEnemyAttacks > 0) {
+        await sendToLLM(
+            '[SYSTEM: Combat correction — the enemy attack you just requested was removed because that enemy already acted in this exchange. Action Surge grants only the player an extra action. Narrate the completed exchange now from the existing roll results. Do not request more rolls and do not apply HP again.]',
+            undefined,
+            { suppressHpEvents: true }
+        );
+        return { resolved: true };
+    }
+
+    console.log(`[RollResolver] Processing ${canonicalBatch.rolls.length} roll(s) at depth ${depth}`);
+
+    const { results: rollResults, appliedHp } = resolveRolls(canonicalBatch.rolls, {
         character,
         inventory,
         combat: state.combat,
@@ -394,7 +480,13 @@ export async function handleRequestedRolls(requestedRolls, { getState, dispatch,
             if (followUpEvents?.requestedRolls?.length > 0) {
                 await handleRequestedRolls(
                     followUpEvents.requestedRolls,
-                    { getState, dispatch, sendToLLM, preNarrated: followUpEvents._preNarratedOutcome || false },
+                    {
+                        getState,
+                        dispatch,
+                        sendToLLM,
+                        preNarrated: followUpEvents._preNarratedOutcome || false,
+                        enemyAttackersSeen: canonicalBatch.enemyAttackersSeen,
+                    },
                     depth + 1
                 );
             }

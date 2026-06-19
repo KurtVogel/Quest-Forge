@@ -8,12 +8,11 @@ _Last updated: 2026-06-19_
 
 ## Current focus
 - **Broken-combat real-play regression fixed**: the DM produced enemy-only roll batches
-  after the player declared an attack. The client now restores omitted player attacks when
-  the target is unambiguous (including two Attack actions for active Action Surge), or
-  blocks the whole exchange without enemy rolls/round advancement when the target is
-  ambiguous. Mobile combat now defaults to a compact expandable summary. A temporary,
-  one-time Restore 20 HP combat control is deployed for the affected live campaign; remove
-  it after the compensation has been claimed.
+  and then out-of-order/duplicate enemy attacks during Action Surge. The client now restores
+  omitted player attacks, canonicalizes every exchange into player → companion → enemy
+  order, and permits each enemy at most one attack across the whole recursive roll chain.
+  Ambiguous missing targets block the exchange safely. The one-time Restore 20 HP repair
+  was claimed and has been removed; the restored character HP persists in the save.
 - **LLM WOW Layer v1 now shipped**: campaigns have durable story-memory cards for
   promises, wounds, player-authored canon, mysteries, relationship beats, foreshadowing,
   and NPC agendas. Real-play should now watch for whether callbacks feel natural rather
@@ -31,8 +30,10 @@ _Last updated: 2026-06-19_
 - Combat batch safeguard + compact mobile combat UI (2026-06-19): player-turn attack
   declarations can no longer resolve an enemy-only LLM batch. `rollResolver.js` restores
   the omitted attack(s) ahead of hostile rolls when there is one safe target; ambiguous
-  targets block the batch and preserve the round. The prompt also requires player rolls
-  first. At ≤640px the Combat panel starts as a one-line round/status/live-foe HP summary
+  targets block the batch and preserve the round. A second live-play regression now also
+  canonicalizes player rolls before enemies and drops duplicate attacks by the same enemy,
+  including duplicates requested in chained follow-ups; Action Surge never grants foes
+  extra attacks. At ≤640px the Combat panel starts as a one-line round/status/live-foe HP summary
   with Show details / Hide details; desktop remains expanded. Reproduced from five mobile
   screenshots and browser-checked at 390×844. Tests: `npm test` 172 passing; `npm run lint`
   and `npm run build` passing.

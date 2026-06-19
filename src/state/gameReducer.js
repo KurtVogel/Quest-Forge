@@ -599,20 +599,6 @@ export function gameReducer(state, action) {
             return { ...state, character, messages };
         }
 
-        case 'CLAIM_BUG_COMPENSATION': {
-            if (state.session?.bugCompensationClaimed || state.character?.isDead) return state;
-            const healedState = gameReducer(state, { type: 'HEAL', payload: 20 });
-            const restored = Math.max(0, healedState.character.currentHP - state.character.currentHP);
-            return {
-                ...healedState,
-                session: { ...healedState.session, bugCompensationClaimed: true },
-                messages: [
-                    ...healedState.messages,
-                    systemMessage(`**Combat bug recovery:** Restored **${restored} HP** (${healedState.character.currentHP}/${healedState.character.maxHP}). This one-time repair does not spend an action or resource.`),
-                ],
-            };
-        }
-
         case 'DEATH_SAVE_RESULT': {
             const character = state.character;
             if (!character?.dying || character.isDead) return state;
