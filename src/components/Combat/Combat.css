@@ -38,6 +38,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.35rem;
     margin-bottom: 0.5rem;
 }
 
@@ -80,6 +82,20 @@
 
 .combat-end-btn:hover {
     background: rgba(76, 175, 80, 0.25);
+}
+
+.combat-heal-btn {
+    padding: 0.3rem 0.55rem;
+    border: 1px solid rgba(76, 175, 80, 0.55);
+    border-radius: 6px;
+    background: rgba(76, 175, 80, 0.13);
+    color: var(--success);
+    font: 700 0.72rem var(--font-body);
+    cursor: pointer;
+}
+
+.combat-heal-btn:hover {
+    background: rgba(76, 175, 80, 0.22);
 }
 
 .combat-collapse-btn {

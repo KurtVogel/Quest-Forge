@@ -11,7 +11,9 @@ _Last updated: 2026-06-19_
   after the player declared an attack. The client now restores omitted player attacks when
   the target is unambiguous (including two Attack actions for active Action Surge), or
   blocks the whole exchange without enemy rolls/round advancement when the target is
-  ambiguous. Mobile combat now defaults to a compact expandable summary.
+  ambiguous. Mobile combat now defaults to a compact expandable summary. A temporary,
+  one-time Restore 20 HP combat control is deployed for the affected live campaign; remove
+  it after the compensation has been claimed.
 - **LLM WOW Layer v1 now shipped**: campaigns have durable story-memory cards for
   promises, wounds, player-authored canon, mysteries, relationship beats, foreshadowing,
   and NPC agendas. Real-play should now watch for whether callbacks feel natural rather

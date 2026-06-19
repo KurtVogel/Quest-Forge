@@ -170,6 +170,17 @@ describe('healing while dying', () => {
         expect(next.character.currentHP).toBe(20);
     });
 
+    it('applies the temporary combat compensation once without exceeding max HP', () => {
+        const start = makeState({ currentHP: 4 });
+        const repaired = gameReducer(start, { type: 'CLAIM_BUG_COMPENSATION' });
+        const repeated = gameReducer(repaired, { type: 'CLAIM_BUG_COMPENSATION' });
+
+        expect(repaired.character.currentHP).toBe(20);
+        expect(repaired.session.bugCompensationClaimed).toBe(true);
+        expect(repaired.messages.at(-1).content).toContain('Restored **16 HP**');
+        expect(repeated).toBe(repaired);
+    });
+
     it('clears low-level defeat when healing restores HP', () => {
         const start = levelOneSolo({
             currentHP: 0,
