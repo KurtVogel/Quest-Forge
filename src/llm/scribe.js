@@ -246,11 +246,23 @@ const ART_DIRECTOR_PROMPT = `You are the art director for a gritty, mature, dark
 
 Rules:
 - Output ONLY the prompt text — no preamble, no quotes, no JSON, no explanation.
-- 60-110 words. Concrete and visual: describe the characters in frame (using the provided appearances), the setting, composition/framing, lighting, weather, mood, and art style.
+- 100-170 words. Concrete and visual: describe the characters in frame (using the provided appearances), the setting, composition/framing, lighting, weather, mood, and art style.
+- Render the EXACT latest moment and its consequences, not a generic establishing shot. Preserve every visually important subject, species, count, action, body, wound, pose, and reaction stated in the current situation—especially defeated foes, witnesses, kneeling/cowering figures, and the player's decisive gesture.
+- Do not add generic party members, soldiers, bystanders, creatures, or props that are not supported by the supplied situation and entity details.
+- Make the player character the visual anchor when present. State other subjects' spatial relationship to them so the image model cannot quietly omit half the scene.
 - Use the EXACT appearance details provided for each named character so they look consistent across scenes. If a character has no given appearance, infer modestly from their race/class/equipment — do not contradict known details.
 - Depict only what the situation supports. This is an adult, gritty world: render violence, grime, and mature/sensual content frankly when the scene calls for it, but keep it grounded, never gratuitous.
-- End with a short style tag, e.g. "dark fantasy digital painting, cinematic lighting, highly detailed".
+- End with this quality direction: "grounded cinematic dark-fantasy realism, professional concept art, anatomically coherent figures, detailed materials, dramatic natural lighting, not cartoonish or childlike".
 - Do NOT include any on-image text, captions, watermarks, UI, or speech bubbles.`;
+
+/** Keep both the setup and decisive aftermath when a long narration feeds scene art. */
+export function preserveSceneSituation(situation, maxLength = 1800) {
+    const text = String(situation || '').trim();
+    if (text.length <= maxLength) return text;
+    const tailLength = Math.min(650, Math.floor(maxLength * 0.4));
+    const headLength = maxLength - tailLength;
+    return `${text.slice(0, headLength).trimEnd()}\n[Later in the same moment]\n${text.slice(-tailLength).trimStart()}`;
+}
 
 /**
  * Compose a single image-generation prompt for the current scene. Runs on demand
@@ -265,7 +277,7 @@ export async function composeScenePrompt({ situation, character, npcs = [], comb
 
     const lines = [];
     if (currentLocation) lines.push(`Location: ${currentLocation}`);
-    if (situation) lines.push(`Current situation: ${situation}`);
+    if (situation) lines.push(`Current situation: ${preserveSceneSituation(situation)}`);
 
     if (character) {
         const equipped = (character.equippedSummary || '').trim();

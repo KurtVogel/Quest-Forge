@@ -7,6 +7,12 @@ replace stale entries, don't let it grow. For deeper context run `git log --onel
 _Last updated: 2026-06-19_
 
 ## Current focus
+- **Scene-art quality regression fixed**: a live victory visualization omitted Kraul and
+  the kneeling goblins, invented generic humans, and used visibly poor fallback rendering.
+  Scene prompts now preserve the decisive tail of long narration, require every supported
+  subject/count/action, forbid generic extras, and target grounded professional realism.
+  The UI labels Pollinations output as a lower-quality fallback and distinguishes a missing
+  xAI key from an xAI failure; provider-aware caching lets xAI retry later.
 - **Broken-combat real-play regression fixed**: the DM produced enemy-only roll batches
   and then out-of-order/duplicate enemy attacks during Action Surge. The client now restores
   omitted player attacks, canonicalizes every exchange into player → companion → enemy
@@ -29,6 +35,13 @@ _Last updated: 2026-06-19_
   advancement and richer generated fronts.
 
 ## Recently shipped (June 10–19, 2026)
+- Scene-art completeness + provider transparency (2026-06-19): replaced the old 700-character
+  hard cutoff with a head+aftermath preservation window, strengthened the Scribe art director
+  against omitted subjects and invented party members, and added grounded/anatomically coherent
+  quality direction. Image generation now reports xAI vs Pollinations; mobile Scene Art labels
+  missing-key and xAI-failure fallbacks instead of silently presenting them as intended output.
+  Fallback caching no longer prevents a later xAI retry. Browser-checked at 390px. Tests:
+  `npm test` 178 passing; `npm run lint` and `npm run build` passing.
 - Combat batch safeguard + compact mobile combat UI (2026-06-19): player-turn attack
   declarations can no longer resolve an enemy-only LLM batch. `rollResolver.js` restores
   the omitted attack(s) ahead of hostile rolls when there is one safe target; ambiguous

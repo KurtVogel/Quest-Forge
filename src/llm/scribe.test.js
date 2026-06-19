@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { runScribe } from './scribe.js';
+import { composeScenePrompt, preserveSceneSituation, runScribe } from './scribe.js';
 import { sendMessage } from './adapter.js';
 
 vi.mock('./adapter.js', () => ({
@@ -101,3 +101,36 @@ describe('Scribe story memory extraction', () => {
     });
 });
 
+describe('scene-art prompt composition', () => {
+    beforeEach(() => {
+        sendMessage.mockReset();
+    });
+
+    it('preserves both the opening and decisive aftermath of long narration', () => {
+        const situation = `Vesa charges Chief Kraul. ${'Clashing steel and cavern detail. '.repeat(100)} Kraul lies dead while two goblins kneel before Vesa.`;
+        const preserved = preserveSceneSituation(situation, 500);
+
+        expect(preserved).toContain('Vesa charges Chief Kraul');
+        expect(preserved).toContain('Kraul lies dead while two goblins kneel before Vesa');
+        expect(preserved).toContain('[Later in the same moment]');
+        expect(preserved.length).toBeLessThan(550);
+    });
+
+    it('instructs the art director to preserve all supported subjects without generic extras', async () => {
+        sendMessage.mockResolvedValue('A finished image prompt');
+        const situation = `Vesa raises his bloodied sword over Chief Kraul's corpse. Two sickly goblins kneel in the cavern.`;
+
+        await composeScenePrompt({
+            situation,
+            character: { name: 'Vesa', race: 'human', class: 'fighter', appearance: 'scarred man in chain mail' },
+            currentLocation: 'cavern',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+        });
+
+        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            systemPrompt: expect.stringContaining('Preserve every visually important subject, species, count'),
+            userMessage: expect.stringContaining('Two sickly goblins kneel'),
+        }));
+        expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('Do not add generic party members');
+    });
+});

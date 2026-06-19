@@ -71,20 +71,22 @@ async function downscaleDataUrl(dataUrl, { maxWidth, maxHeight, quality = 0.82 }
  * @param {string} prompt - The fully-composed visual prompt
  * @param {string} imageApiKey - xAI (Grok) API key
  * @param {object} options - Generation options
- * @returns {Promise<string|null>} Data URL (xAI) or image URL (fallback), or null
+ * @returns {Promise<{url:string,provider:'xai'|'pollinations',fallbackReason:string|null}|null>}
  */
-export async function generateImage(prompt, imageApiKey, options = {}) {
+async function generateImageResult(prompt, imageApiKey, options = {}) {
     if (!prompt) return null;
 
     const aspectRatio = options.aspectRatio || '16:9';
     const resolution = options.resolution || '1k';
     const fallbackWidth = options.fallbackWidth || 1280;
     const fallbackHeight = options.fallbackHeight || 720;
-    const cacheKey = `${aspectRatio}|${resolution}|${prompt.toLowerCase().trim()}`;
-    if (IMAGE_CACHE.has(cacheKey)) {
-        return IMAGE_CACHE.get(cacheKey);
+    const baseCacheKey = `${aspectRatio}|${resolution}|${prompt.toLowerCase().trim()}`;
+    const preferredCacheKey = `${imageApiKey ? 'xai' : 'pollinations'}|${baseCacheKey}`;
+    if (IMAGE_CACHE.has(preferredCacheKey)) {
+        return IMAGE_CACHE.get(preferredCacheKey);
     }
 
+    let fallbackReason = imageApiKey ? 'xai-error' : 'missing-key';
     if (imageApiKey) {
         try {
             const response = await fetch(XAI_IMAGE_ENDPOINT, {
@@ -113,10 +115,12 @@ export async function generateImage(prompt, imageApiKey, options = {}) {
                         maxHeight: options.maxHeight,
                         quality: options.quality,
                     });
-                    cacheSet(cacheKey, finalUrl);
-                    return finalUrl;
+                    const result = { url: finalUrl, provider: 'xai', fallbackReason: null };
+                    cacheSet(`xai|${baseCacheKey}`, result);
+                    return result;
                 }
                 // OK status but no image — most likely filtered by content moderation.
+                fallbackReason = 'xai-empty';
                 console.log('[ImageGen] xAI returned no image (possibly filtered by moderation).');
             } else {
                 const errText = await response.text().catch(() => '');
@@ -133,8 +137,9 @@ export async function generateImage(prompt, imageApiKey, options = {}) {
         const safePrompt = encodeURIComponent(prompt);
         const fallbackUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=${fallbackWidth}&height=${fallbackHeight}&nologo=true&seed=${seed}`;
         // Returned as an <img src> URL directly to avoid CORS issues on fetch.
-        cacheSet(cacheKey, fallbackUrl);
-        return fallbackUrl;
+        const result = { url: fallbackUrl, provider: 'pollinations', fallbackReason };
+        cacheSet(`pollinations|${baseCacheKey}`, result);
+        return result;
     } catch (e) {
         console.warn('[ImageGen] Fallback failed:', e);
     }
@@ -142,8 +147,14 @@ export async function generateImage(prompt, imageApiKey, options = {}) {
     return null;
 }
 
-export async function generateSceneImage(prompt, imageApiKey) {
-    return generateImage(prompt, imageApiKey, {
+/** Backward-compatible URL-only renderer used by existing call sites. */
+export async function generateImage(prompt, imageApiKey, options = {}) {
+    const result = await generateImageResult(prompt, imageApiKey, options);
+    return result?.url || null;
+}
+
+export async function generateSceneImageDetailed(prompt, imageApiKey) {
+    return generateImageResult(prompt, imageApiKey, {
         aspectRatio: '16:9',
         resolution: '1k',
         fallbackWidth: 1280,
@@ -151,8 +162,8 @@ export async function generateSceneImage(prompt, imageApiKey) {
     });
 }
 
-export async function generatePortraitImage(prompt, imageApiKey) {
-    return generateImage(prompt, imageApiKey, {
+export async function generatePortraitImageDetailed(prompt, imageApiKey) {
+    return generateImageResult(prompt, imageApiKey, {
         aspectRatio: '3:4',
         resolution: '1k',
         fallbackWidth: 768,
@@ -161,6 +172,16 @@ export async function generatePortraitImage(prompt, imageApiKey) {
         maxHeight: 640,
         quality: 0.82,
     });
+}
+
+export async function generateSceneImage(prompt, imageApiKey) {
+    const result = await generateSceneImageDetailed(prompt, imageApiKey);
+    return result?.url || null;
+}
+
+export async function generatePortraitImage(prompt, imageApiKey) {
+    const result = await generatePortraitImageDetailed(prompt, imageApiKey);
+    return result?.url || null;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
-import { generatePortraitImage, generateSceneImage } from '../../llm/providers/imageGen.js';
+import { generatePortraitImageDetailed, generateSceneImageDetailed } from '../../llm/providers/imageGen.js';
 import { composeScenePrompt } from '../../llm/scribe.js';
 import './SceneArt.css';
 
@@ -67,6 +67,13 @@ function buildCustomPrompt(subject, location, character) {
     ].filter(Boolean).join(' ');
 }
 
+function fallbackNotice(result) {
+    if (result?.provider !== 'pollinations') return '';
+    return result.fallbackReason === 'missing-key'
+        ? 'Free fallback render — add an xAI Image API Key in Settings for the intended high-quality scene art.'
+        : 'xAI rendering failed, so this is a lower-quality free fallback. Check the image key or try again.';
+}
+
 export default function SceneArt() {
     const { state } = useGame();
     const [currentImage, setCurrentImage] = useState(null);
@@ -76,6 +83,7 @@ export default function SceneArt() {
     const [targetId, setTargetId] = useState('');
     const [customSubject, setCustomSubject] = useState('');
     const [error, setError] = useState('');
+    const [generationNotice, setGenerationNotice] = useState('');
     const lastLocationRef = useRef(null);
 
     const gear = useMemo(() => equippedSummary(state.inventory), [state.inventory]);
@@ -123,18 +131,25 @@ export default function SceneArt() {
 
         setIsLoading(true);
         setError('');
+        setGenerationNotice('');
         try {
             if (mode === 'focus') {
                 const prompt = buildFocusedPrompt(selectedTarget, location);
-                const imageUrl = await generatePortraitImage(prompt, state.settings.imageApiKey);
-                if (imageUrl) setCurrentImage({ url: imageUrl, caption: selectedTarget.label, shape: 'portrait' });
+                const result = await generatePortraitImageDetailed(prompt, state.settings.imageApiKey);
+                if (result) {
+                    setCurrentImage({ url: result.url, caption: selectedTarget.label, shape: 'portrait' });
+                    setGenerationNotice(fallbackNotice(result));
+                }
                 return;
             }
 
             if (mode === 'custom') {
                 const prompt = buildCustomPrompt(customSubject.trim(), location, state.character);
-                const imageUrl = await generateSceneImage(prompt, state.settings.imageApiKey);
-                if (imageUrl) setCurrentImage({ url: imageUrl, caption: customSubject.trim(), shape: 'scene' });
+                const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey);
+                if (result) {
+                    setCurrentImage({ url: result.url, caption: customSubject.trim(), shape: 'scene' });
+                    setGenerationNotice(fallbackNotice(result));
+                }
                 return;
             }
 
@@ -143,8 +158,7 @@ export default function SceneArt() {
             const lastNarration = [...(state.messages || [])].reverse()
                 .find(m => m.role === 'assistant' && !m.hidden && m.content?.trim())?.content;
             const lastJournal = state.journal?.length ? state.journal[state.journal.length - 1].summary : '';
-            let situation = (lastNarration || lastJournal || `The scene at ${location}.`).trim();
-            if (situation.length > 700) situation = situation.slice(0, 700) + '…';
+            const situation = (lastNarration || lastJournal || `The scene at ${location}.`).trim();
 
             // Scribe composes the prompt from the situation + known visual details.
             const composed = await composeScenePrompt({
@@ -161,11 +175,15 @@ export default function SceneArt() {
                 `Dark fantasy RPG scene at ${location}.`,
                 state.character && `Featuring ${state.character.name}, a ${state.character.race} ${state.character.class}${state.character.appearance ? `: ${state.character.appearance}` : ''}.`,
                 situation,
-                'dark fantasy digital painting, cinematic lighting, highly detailed',
+                'Render this exact latest tableau and every stated subject, species, count, action, body, and reaction. Do not invent generic party members or bystanders.',
+                'Grounded cinematic dark-fantasy realism, professional concept art, anatomically coherent figures, detailed materials, dramatic natural lighting, not cartoonish or childlike, no text, no watermark.',
             ].filter(Boolean).join(' ');
 
-            const imageUrl = await generateSceneImage(prompt, state.settings.imageApiKey);
-            if (imageUrl) setCurrentImage({ url: imageUrl, caption: location, shape: 'scene' });
+            const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey);
+            if (result) {
+                setCurrentImage({ url: result.url, caption: location, shape: 'scene' });
+                setGenerationNotice(fallbackNotice(result));
+            }
         } catch (e) {
             setError(e.message || 'Image failed.');
         } finally {
@@ -252,6 +270,7 @@ export default function SceneArt() {
                                     : 'Subject'}
                         </button>
                         {error && <div className="scene-art-error">{error}</div>}
+                        {generationNotice && <div className="scene-art-notice">{generationNotice}</div>}
                     </div>
                 )}
 

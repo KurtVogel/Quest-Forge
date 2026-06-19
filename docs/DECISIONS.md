@@ -8,6 +8,15 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-19 · Scene-art fallbacks must be visible, and the latest tableau is binding.**
+The free Pollinations fallback remains available when the separate xAI key is missing or an
+xAI request fails, but the UI must label that image as a lower-quality fallback and explain
+how to restore intended quality. A fallback must not be cached in a way that prevents xAI
+from retrying after a key is added or a transient failure clears. Scene prompt composition
+preserves both the opening and aftermath of long narration, explicitly carries every
+supported subject/species/count/action/reaction, forbids invented generic party members,
+and targets grounded professional dark-fantasy realism rather than cartoonish output.
+
 **2026-06-19 · The deployed app shell must never remain stale after a release.**
 Firebase Hosting serves `/` and `/index.html` with `no-cache, no-store, must-revalidate`
 so refreshing immediately discovers the newest hashed asset bundle. Fingerprinted files
