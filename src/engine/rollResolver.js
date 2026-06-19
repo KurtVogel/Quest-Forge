@@ -35,9 +35,12 @@ export function repairCombatRollBatch(requestedRolls, { combat, character, playe
     const currentFighter = combat?.turnOrder?.[combat.currentTurn];
     const isPlayerTurn = combat?.active && currentFighter?.type === 'player';
     const hasNonPlayerCombatRoll = rolls.some(roll => NON_PLAYER_ROLL_TYPES.has(roll.type));
-    const hasPlayerRoll = rolls.some(roll => !NON_PLAYER_ROLL_TYPES.has(roll.type));
+    const isPlayerAttack = roll => roll?.type === 'attack_roll'
+        || String(roll?.skill || '').toLowerCase() === 'attack';
+    const playerAttacks = rolls.filter(isPlayerAttack);
+    const expectedAttackCount = character?.pendingActionSurge ? 2 : 1;
 
-    if (!isPlayerTurn || !hasNonPlayerCombatRoll || hasPlayerRoll || !ATTACK_INTENT_RE.test(playerAction || '')) {
+    if (!isPlayerTurn || !hasNonPlayerCombatRoll || !ATTACK_INTENT_RE.test(playerAction || '')) {
         return { rolls, repaired: false, blocked: false };
     }
 
@@ -48,27 +51,52 @@ export function repairCombatRollBatch(requestedRolls, { combat, character, playe
     const namedTargets = livingEnemies.filter(enemy =>
         enemy.name && actionText.includes(enemy.name.toLowerCase())
     );
-    const target = namedTargets.length === 1
+    const inferredTarget = namedTargets.length === 1
         ? namedTargets[0]
         : livingEnemies.length === 1
             ? livingEnemies[0]
             : null;
+    const findTarget = ref => {
+        if (!ref) return null;
+        const normalized = String(ref).toLowerCase();
+        return livingEnemies.find(enemy =>
+            enemy.id === ref || enemy.name?.toLowerCase() === normalized
+        ) || null;
+    };
+    const existingTarget = playerAttacks.map(roll => findTarget(roll.target)).find(Boolean);
+    const target = existingTarget || inferredTarget;
+    const needsRepair = playerAttacks.length < expectedAttackCount
+        || playerAttacks.some(roll => !roll.skill || !findTarget(roll.target));
 
+    if (!needsRepair) return { rolls, repaired: false, blocked: false };
     if (!target) return { rolls: [], repaired: false, blocked: true };
 
-    const attackCount = character?.pendingActionSurge ? 2 : 1;
     const playerName = character?.name || 'Player';
-    const restoredAttacks = Array.from({ length: attackCount }, (_, index) => ({
+    const normalizedPlayerAttacks = playerAttacks.map(roll => ({
+        ...roll,
+        type: 'attack_roll',
+        skill: 'attack',
+        target: findTarget(roll.target)?.id || target.id,
+        dc: findTarget(roll.target)?.ac || target.ac,
+        description: roll.description || `${playerName} attacks ${target.name}`,
+    }));
+    const missingAttackCount = Math.max(0, expectedAttackCount - playerAttacks.length);
+    const restoredAttacks = Array.from({ length: missingAttackCount }, (_, index) => ({
         type: 'attack_roll',
         skill: 'attack',
         target: target.id,
         dc: target.ac,
-        description: attackCount > 1
-            ? `${playerName} attacks ${target.name} (Action ${index + 1})`
+        description: expectedAttackCount > 1
+            ? `${playerName} attacks ${target.name} (Action ${playerAttacks.length + index + 1})`
             : `${playerName} attacks ${target.name}`,
     }));
 
-    return { rolls: [...restoredAttacks, ...rolls], repaired: true, blocked: false };
+    const remainingRolls = rolls.filter(roll => !isPlayerAttack(roll));
+    return {
+        rolls: [...normalizedPlayerAttacks, ...restoredAttacks, ...remainingRolls],
+        repaired: true,
+        blocked: false,
+    };
 }
 
 /**
@@ -408,7 +436,7 @@ export async function handleRequestedRolls(requestedRolls, {
             type: 'ADD_MESSAGE',
             payload: {
                 role: 'system',
-                content: '**Combat safeguard:** The DM omitted your declared attack from the roll batch, so the engine restored it before resolving enemy actions.',
+                content: '**Combat safeguard:** The DM omitted or malformed your declared attack, so the engine repaired it before resolving enemy actions.',
             },
         });
     }

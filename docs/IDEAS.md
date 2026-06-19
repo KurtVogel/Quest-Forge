@@ -164,6 +164,11 @@ post-roll victory/XP follow-up, surviving-enemy follow-up, and low-level solo do
 It requires an explicit shell API key; user-run live eval completed with "Combat pacing eval
 passed."
 
+Shipped v10 (2026-06-19): the engine now validates the *substance* of the player's requested
+attack before hostile rolls. Malformed attack entries and damage-only placeholders can no longer
+silently satisfy the player-first safeguard; safely inferable fields/counts are repaired, while
+ambiguous targets stop the exchange.
+
 Shipped v10: healing potions are also lightweight bonus actions. Potion of Healing is
 player-activated from Inventory, rolls real dice client-side, consumes one stack item, revives
 living/dying characters through the shared cleanup path, and in active combat spends the same

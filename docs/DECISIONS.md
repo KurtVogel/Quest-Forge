@@ -8,6 +8,13 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-19 · A declared player attack requires a resolvable attack before hostile rolls.**
+In a player-turn combat exchange, the presence of an arbitrary player-side roll is not enough:
+before enemies may act, the batch must contain every expected Attack action with a valid attack
+skill and living target. The engine repairs safely inferable missing/malformed fields and active
+Action Surge count; a standalone damage roll does not satisfy the invariant. If the target is
+ambiguous, hostile rolls and round advancement are blocked rather than granting a free attack.
+
 **2026-06-19 · Continue/Load is narratively inert.** Restoring a campaign reproduces the
 saved conversational handoff and waits for the player; it never asks the DM for a recap,
 scene reset, or additional “What do you do?” turn. Automatic priming belongs only to a newly
