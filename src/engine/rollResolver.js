@@ -73,8 +73,8 @@ export function repairCombatRollBatch(requestedRolls, { combat, character, playe
 
 /**
  * Put a player-turn exchange into engine order and allow each enemy at most one
- * attack across the entire recursive roll chain. Action Surge adds player actions,
- * never extra enemy actions.
+ * attack across the entire recursive roll chain, regardless of how many player
+ * actions or follow-up roll requests occur.
  */
 export function canonicalizeCombatRollBatch(requestedRolls, combat, enemyAttackersSeen = new Set()) {
     const rolls = Array.isArray(requestedRolls) ? requestedRolls : [];
@@ -424,14 +424,14 @@ export async function handleRequestedRolls(requestedRolls, {
             type: 'ADD_MESSAGE',
             payload: {
                 role: 'system',
-                content: `**Combat safeguard:** Removed ${canonicalBatch.droppedEnemyAttacks} duplicate enemy attack${canonicalBatch.droppedEnemyAttacks === 1 ? '' : 's'}. Action Surge grants the player extra actions, not the enemy.`,
+                content: `**Combat safeguard:** Removed ${canonicalBatch.droppedEnemyAttacks} duplicate enemy attack${canonicalBatch.droppedEnemyAttacks === 1 ? '' : 's'}. Each enemy can attack at most once in a combat exchange.`,
             },
         });
     }
 
     if (canonicalBatch.rolls.length === 0 && canonicalBatch.droppedEnemyAttacks > 0) {
         await sendToLLM(
-            '[SYSTEM: Combat correction — the enemy attack you just requested was removed because that enemy already acted in this exchange. Action Surge grants only the player an extra action. Narrate the completed exchange now from the existing roll results. Do not request more rolls and do not apply HP again.]',
+            '[SYSTEM: Combat correction — the enemy attack you just requested was removed because that enemy already acted in this exchange. Narrate the completed exchange now from the existing roll results. Do not request more rolls and do not apply HP again.]',
             undefined,
             { suppressHpEvents: true }
         );

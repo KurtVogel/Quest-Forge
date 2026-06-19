@@ -206,6 +206,30 @@ describe('combat roll-batch safeguard', () => {
         expect(sendToLLM).not.toHaveBeenCalled();
         expect(messagesFrom(dispatch)).toContain('Enemy actions were not rolled');
     });
+
+    it('explains a duplicate enemy attack without claiming Action Surge was used', async () => {
+        const dispatch = vi.fn();
+        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [] });
+
+        await handleRequestedRolls(
+            [{ type: 'npc_attack', attackerId: 'chief', target: 'player' }],
+            {
+                getState: () => ({ character: makeCharacter(), inventory: [], combat, party: [] }),
+                dispatch,
+                sendToLLM,
+                enemyAttackersSeen: new Set(['enemy:chief']),
+            }
+        );
+
+        const safeguard = messagesFrom(dispatch);
+        expect(safeguard).toContain('Each enemy can attack at most once in a combat exchange');
+        expect(safeguard).not.toContain('Action Surge');
+        expect(sendToLLM).toHaveBeenCalledWith(
+            expect.not.stringContaining('Action Surge'),
+            undefined,
+            { suppressHpEvents: true }
+        );
+    });
 });
 
 describe('death saves', () => {

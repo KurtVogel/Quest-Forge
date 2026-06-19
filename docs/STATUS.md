@@ -7,6 +7,9 @@ replace stale entries, don't let it grow. For deeper context run `git log --onel
 _Last updated: 2026-06-19_
 
 ## Current focus
+- **Combat safeguard copy corrected**: duplicate enemy attacks are still blocked, but the
+  notice now states the actual once-per-exchange rule instead of falsely implying the player
+  used Action Surge. The hidden correction prompt is neutral too; no resource state changes.
 - **Save-resume continuity fixed**: Continue/Load now restores the transcript without making
   an unsolicited DM call. Fresh premise campaigns alone carry an explicit one-time opening
   marker; summarized/pruned assistant history can no longer masquerade as a new campaign.
@@ -43,6 +46,11 @@ _Last updated: 2026-06-19_
   advancement and richer generated fronts.
 
 ## Recently shipped (June 10–19, 2026)
+- Truthful duplicate-enemy safeguard notice (2026-06-19): removed hard-coded Action Surge
+  language from the visible and hidden duplicate-attack correction paths. The safeguard now
+  explains that each enemy can attack at most once per combat exchange, regardless of why
+  the DM requested another roll. Tests: `npm test` 189 passing; `npm run lint` and
+  `npm run build` passing.
 - Save-resume continuity (2026-06-19): removed the old history-based resume priming that
   generated a recap and another “What do you do?” after loading. Character creation now sets
   `session.openingScenePending` only for brand-new premise campaigns, ChatPanel consumes it
