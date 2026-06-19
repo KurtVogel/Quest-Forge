@@ -35,7 +35,7 @@ _Last updated: 2026-06-19_
   including duplicates requested in chained follow-ups; Action Surge never grants foes
   extra attacks. At ≤640px the Combat panel starts as a one-line round/status/live-foe HP summary
   with Show details / Hide details; desktop remains expanded. Reproduced from five mobile
-  screenshots and browser-checked at 390×844. Tests: `npm test` 172 passing; `npm run lint`
+  screenshots and browser-checked at 390×844. Tests: `npm test` 173 passing; `npm run lint`
   and `npm run build` passing.
 - LLM WOW Layer v1 / story memory (2026-06-17): added durable `storyMemory` cards
   plus `storyMemory.js`, a deterministic recall curator that scores active cards by
