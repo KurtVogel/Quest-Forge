@@ -42,6 +42,11 @@ with escalation steps and a "grim portent" (what happens if nobody interferes).
   the DM to introduce recruitable potential companions organically through front symptoms
   (prisoners, deserters, guides, witnesses, rivals, locals with aligned motives). It must not
   force a companion; actual joining still uses `add_companions`.
+- **Shipped contextual migration (2026-06-19):** existing saves can run a private one-time
+  Settings migration that derives additional fronts from premise, facts, journal, quests,
+  NPC agendas/relationships, story memory, recent events, party/location, and existing fronts.
+  Existing clocks are preserved; generated additions are validated, capped, mechanically inert,
+  and may create only optional companion intersections.
 - They advance **off-screen** via a background pass (same cadence hook as the journal
   summarizer): "the player did X for a week — how did each front advance?"
 - The DM is instructed to leak **symptoms** (refugees, price spikes, a missing NPC) every

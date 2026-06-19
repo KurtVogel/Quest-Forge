@@ -7,6 +7,11 @@ replace stale entries, don't let it grow. For deeper context run `git log --onel
 _Last updated: 2026-06-19_
 
 ## Current focus
+- **Contextual living-world migration shipped**: existing campaigns can now privately
+  awaken or enrich hidden fronts from their complete bounded campaign context. Basic fronts
+  and clocks are preserved, dead/resolved figures remain history, mechanics are untouched,
+  and solo campaigns receive organic—but never forced—potential companion intersections.
+  The one-time control lives in Settings → Game and marks the save Contextual afterward.
 - **Scene-art quality regression fixed**: a live victory visualization omitted Kraul and
   the kneeling goblins, invented generic humans, and used visibly poor fallback rendering.
   Scene prompts now preserve the decisive tail of long narration, require every supported
@@ -35,6 +40,14 @@ _Last updated: 2026-06-19_
   advancement and richer generated fronts.
 
 ## Recently shipped (June 10–19, 2026)
+- Existing-campaign living-world migration (2026-06-19): added a one-time Settings → Game
+  action that privately synthesizes up to two validated fronts from premise, hero/origin,
+  canonical facts, journal, quests, up to 30 known NPCs and their relationship/agenda state,
+  story memory, notable gear, recent messages, party, location, and existing hidden fronts.
+  Basic clocks are preserved and the total is capped at three. Migration is blocked during
+  combat, refuses repeats, never alters mechanics or exposes front details, keeps dead figures
+  dead, and seeds only optional companion opportunities. Mobile-checked at 390px. Tests:
+  `npm test` 184 passing; `npm run lint` and `npm run build` passing.
 - Scene-art completeness + provider transparency (2026-06-19): replaced the old 700-character
   hard cutoff with a head+aftermath preservation window, strengthened the Scribe art director
   against omitted subjects and invented party members, and added grounded/anatomically coherent

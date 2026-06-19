@@ -8,6 +8,17 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-19 · Existing campaigns contextualize fronts through a private, one-time migration.**
+Settings → Game exposes **Awaken/Enrich Living World from This Campaign** until the save has
+been contextually migrated. The synthesis uses the pinned premise, hero identity/origin,
+canonical world facts, journal, completed and active quests, known NPC personalities/goals/
+relationships/private agendas, story memories, notable gear, recent events, party, location,
+and any existing hidden fronts. Existing fronts/clocks are preserved; up to two distinct new
+fronts are added, capped at three total. The migration is forbidden during combat, cannot run
+twice, validates and bounds every field, never exposes hidden details, never changes mechanics,
+never resurrects dead/resolved figures, and may seed only optional fictional companion
+intersections—not party membership.
+
 **2026-06-19 · Scene-art fallbacks must be visible, and the latest tableau is binding.**
 The free Pollinations fallback remains available when the separate xAI key is missing or an
 xAI request fails, but the UI must label that image as a lower-quality fallback and explain

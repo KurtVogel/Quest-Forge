@@ -1309,6 +1309,36 @@ export function gameReducer(state, action) {
             return { ...state, fronts };
         }
 
+        case 'MIGRATE_FRONTS': {
+            if (state.session?.frontMigration?.version >= 1 || !Array.isArray(action.payload?.fronts) || action.payload.fronts.length === 0) {
+                return state;
+            }
+            const existingFronts = state.fronts || [];
+            const existingIds = new Set(existingFronts.map(front => front.id).filter(Boolean));
+            const existingTitles = new Set(existingFronts.map(front => front.title?.toLowerCase()).filter(Boolean));
+            const additions = action.payload.fronts
+                .filter(front => !existingIds.has(front.id) && !existingTitles.has(front.title?.toLowerCase()))
+                .slice(0, Math.max(0, 3 - existingFronts.length))
+                .map(front => normalizeFront(front));
+            if (additions.length === 0) return state;
+            return {
+                ...state,
+                fronts: [...existingFronts, ...additions],
+                session: {
+                    ...state.session,
+                    frontMigration: {
+                        version: 1,
+                        migratedAt: Date.now(),
+                        contextCounts: action.payload.counts || {},
+                    },
+                },
+                messages: [
+                    ...state.messages,
+                    systemMessage('**The living world awakens.** Hidden pressures now grow from this campaign’s established history. Their details remain private; you will encounter only their in-world signs, choices, and consequences.'),
+                ],
+            };
+        }
+
         case 'UPDATE_FRONT': {
             const update = normalizeFrontUpdate(action.payload);
             if (!update) return state;

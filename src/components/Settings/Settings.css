@@ -232,6 +232,38 @@
     margin-bottom: 0.25rem;
 }
 
+.living-world-migration {
+    padding: 0.8rem;
+    border: 1px solid rgba(212, 175, 55, 0.28);
+    border-radius: 8px;
+    background: rgba(212, 175, 55, 0.055);
+}
+
+.living-world-badge {
+    padding: 0.15rem 0.4rem;
+    border: 1px solid rgba(76, 175, 80, 0.38);
+    border-radius: 999px;
+    color: var(--success);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.living-world-badge.basic {
+    border-color: rgba(230, 162, 60, 0.4);
+    color: #e6a23c;
+}
+
+.living-world-status {
+    padding: 0.5rem 0.6rem;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.16);
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    line-height: 1.4;
+}
+
 .preset-name {
     font-weight: 600;
     font-size: 0.82rem;
