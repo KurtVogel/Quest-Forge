@@ -7,6 +7,9 @@ replace stale entries, don't let it grow. For deeper context run `git log --onel
 _Last updated: 2026-06-19_
 
 ## Current focus
+- **Save-resume continuity fixed**: Continue/Load now restores the transcript without making
+  an unsolicited DM call. Fresh premise campaigns alone carry an explicit one-time opening
+  marker; summarized/pruned assistant history can no longer masquerade as a new campaign.
 - **Contextual living-world migration shipped**: existing campaigns can now privately
   awaken or enrich hidden fronts from their complete bounded campaign context. Basic fronts
   and clocks are preserved, dead/resolved figures remain history, mechanics are untouched,
@@ -40,6 +43,11 @@ _Last updated: 2026-06-19_
   advancement and richer generated fronts.
 
 ## Recently shipped (June 10–19, 2026)
+- Save-resume continuity (2026-06-19): removed the old history-based resume priming that
+  generated a recap and another “What do you do?” after loading. Character creation now sets
+  `session.openingScenePending` only for brand-new premise campaigns, ChatPanel consumes it
+  once, and all existing/manual/autosave loads remain narratively inert. Tests: `npm test`
+  188 passing; `npm run lint` and `npm run build` passing.
 - Existing-campaign living-world migration (2026-06-19): added a one-time Settings → Game
   action that privately synthesizes up to two validated fronts from premise, hero/origin,
   canonical facts, journal, quests, up to 30 known NPCs and their relationship/agenda state,

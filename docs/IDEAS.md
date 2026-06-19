@@ -68,6 +68,8 @@ under "Focus on what HAPPENED, not what might happen", and the player's raw mess
 embedded into RAG, so it fell through every durable tier once the 20-message window slid past.
 - **Shipped:** `session.premise` captured at adventure start, pinned as a never-pruned
   `## CAMPAIGN PREMISE` block, DM auto-opens the scene from it. See DECISIONS.md.
+- **Shipped (2026-06-19):** fresh-scene opening uses an explicit one-time marker;
+  Continue/Load restores the saved DM question without generating a recap or extra turn.
 - **Backstop shipped:** player messages are embedded into Gemini RAG, and the Scribe now
   extracts player-authored proper nouns/backstory/vows/attachments into `storyMemory`
   `playerCanon` cards when they have callback value.

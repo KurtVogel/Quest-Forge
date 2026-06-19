@@ -91,6 +91,7 @@ export default function CharacterCreation() {
                 id: `session-${Date.now()}`,
                 name: sessionName,
                 premise: trimmedPremise || undefined,
+                openingScenePending: !!trimmedPremise,
                 createdAt: Date.now(),
                 lastPlayedAt: Date.now(),
             },

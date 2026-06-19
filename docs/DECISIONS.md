@@ -8,6 +8,13 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-19 · Continue/Load is narratively inert.** Restoring a campaign reproduces the
+saved conversational handoff and waits for the player; it never asks the DM for a recap,
+scene reset, or additional “What do you do?” turn. Automatic priming belongs only to a newly
+created premise campaign carrying the explicit one-time `session.openingScenePending`
+marker. Journal/world/NPC history and missing or pruned assistant messages are not evidence
+that a campaign needs priming.
+
 **2026-06-19 · Existing campaigns contextualize fronts through a private, one-time migration.**
 Settings → Game exposes **Awaken/Enrich Living World from This Campaign** until the save has
 been contextually migrated. The synthesis uses the pinned premise, hero identity/origin,
