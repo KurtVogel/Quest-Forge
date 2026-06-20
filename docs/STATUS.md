@@ -7,6 +7,10 @@ replace stale entries, don't let it grow. For deeper context run `git log --onel
 _Last updated: 2026-06-20_
 
 ## Current focus — Combat v2 SHIPPED (2026-06-20)
+- **Combat-start target handoff hardened after live play-test:** every declared foe now receives a
+  deterministic canonical ID, and an action emitted alongside `combat_start` is reconciled by
+  exact ID/name/slug (or the sole unambiguous foe) before resolution. This fixes the live-caught
+  case where the engine safely rejected—but therefore lost—the player's attack that began combat.
 - **Explicit engine-owned exchange machine:** active combat no longer consumes
   `requested_rolls`. The DM emits bounded `combat_exchange` intent only; `combatExchange.js`
   validates targets/actions and generates every player, companion, enemy, spell, check, save,
@@ -30,9 +34,11 @@ _Last updated: 2026-06-20_
   two arbitrary action slots, and clears only in the successful atomic commit. Rest is blocked in
   combat. Shared enemy-stat validation covers parser/start/load/update/pre-roll boundaries; 0-HP
   enemies stay dead on load, malformed saves do not crash, and live AC/HP are authoritative.
-- Verification before shipping: **230 tests pass across 25 files**, lint clean, production build clean; local browser
-  boot has no console errors and the 390px layout has no horizontal overflow. Real-provider
-  `npm run eval:combat` was updated for the intent contract but not run (no eval API key supplied).
+- Verification: full automated suite, lint, and production build are green; the Gemini real-provider
+  combat contract passed three consecutive runs before the target-handoff regression was found in
+  a deployed end-to-end fight. Live UI checks also covered attack/enemy ordering, no-turn questions,
+  Dodge disadvantage, one enemy slot, Second Wind preserving the main action, narration, autosave,
+  and round advancement. The combat-start case now has parser/reducer/engine/provider regressions.
 - **Repeated enemy-first combat hole fixed**: the old safeguard mistook any non-enemy roll
   for a valid player attack, so malformed `attack_roll` entries or damage-only placeholders
   could be silently skipped while an enemy still attacked. A declared attack now requires a

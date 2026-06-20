@@ -109,6 +109,25 @@ describe('combat start initiative', () => {
         expect(next.combat.turnOrder[next.combat.currentTurn].type).toBe('enemy');
     });
 
+    it('reconciles a queued starting attack with the canonical enemy id', () => {
+        rollQueue.push(4, 12, 9); // enemy, player +2, companion
+        const next = gameReducer(makeState(), {
+            type: 'START_COMBAT',
+            payload: {
+                enemies: [{ name: 'Goblin Duelist', hp: 15, ac: 13 }],
+                queuedExchange: {
+                    playerSlots: [{ action: 'attack', strikes: [{ target: 'goblin-duelist' }] }],
+                    enemyIntents: [{ enemyId: 'goblin-duelist', action: 'attack', target: 'player' }],
+                    companionIntents: [],
+                },
+            },
+        });
+        const enemyId = next.combat.enemies[0].id;
+        expect(enemyId).toBe('enemy-goblin-duelist');
+        expect(next.combat.queuedExchange.playerSlots[0].strikes[0].target).toBe(enemyId);
+        expect(next.combat.queuedExchange.enemyIntents[0].enemyId).toBe(enemyId);
+    });
+
     it('uses declared surprise only to adjust Opening Initiative slots', () => {
         rollQueue.push(18, 10, 9); // enemy beats player
         const enemiesSurprised = gameReducer(makeState(), {

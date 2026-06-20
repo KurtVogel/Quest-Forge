@@ -11,7 +11,7 @@
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { CLASSES } from '../data/classes.js';
 import { validateEnemyAttackBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP } from '../engine/enemyStats.js';
-import { normalizeCombatExchange } from '../engine/combatExchange.js';
+import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 
 /** Cryptographically random integer in [min, max] — replaces Math.random() fallbacks. */
 function cryptoRandInt(min, max) {
@@ -22,6 +22,21 @@ function cryptoRandInt(min, max) {
 /** Clamp a numeric LLM value to a sane range; non-numbers become the fallback. */
 function clamp(value, min, max, fallback = 0) {
     return typeof value === 'number' ? Math.max(min, Math.min(max, value)) : fallback;
+}
+
+function canonicalEnemyId(enemy, index, usedIds) {
+    const fragment = String(enemy?.id || enemy?.name || index + 1)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80) || String(index + 1);
+    const base = fragment.startsWith('enemy-') ? fragment : `enemy-${fragment}`;
+    let id = base;
+    let suffix = 2;
+    while (usedIds.has(id)) id = `${base}-${suffix++}`;
+    usedIds.add(id);
+    return id;
 }
 
 // All recognized skill and ability names for text roll detection
@@ -52,9 +67,10 @@ function validateCombatStart(combatStart) {
     if (!combatStart) return null;
     if (!Array.isArray(combatStart.enemies) || combatStart.enemies.length === 0) return null;
 
+    const usedIds = new Set();
     const sanitizedEnemies = combatStart.enemies
         .filter(e => e && typeof e.name === 'string' && e.name.trim())
-        .map(e => {
+        .map((e, index) => {
             // Enemy turns are engine-owned, so capture the foe's stats once here, validated at
             // this boundary via the shared sanitizer. Out-of-range offensive stats are dropped
             // (→ engine default), HP/AC are clamped into a safe band.
@@ -63,6 +79,7 @@ function validateCombatStart(combatStart) {
             );
             const damage = sanitizeEnemyDamage(e.damage);
             return {
+                id: canonicalEnemyId(e, index, usedIds),
                 name: e.name.trim().slice(0, 100),
                 hp: clampEnemyHP(e.hp),
                 ac: clampEnemyAC(e.ac),
@@ -231,7 +248,11 @@ function normalizeEvents(raw) {
     const equipmentChanges = Array.isArray(raw.equipment_changes)
         ? raw.equipment_changes
         : (raw.equipment_change ? [raw.equipment_change] : []);
-    const combatExchange = normalizeCombatExchange(raw.combat_exchange);
+    const combatStart = validateCombatStart(raw.combat_start);
+    const normalizedCombatExchange = normalizeCombatExchange(raw.combat_exchange);
+    const combatExchange = combatStart
+        ? reconcileStartingCombatExchange(normalizedCombatExchange, combatStart.enemies)
+        : normalizedCombatExchange;
 
     return {
         requestedRolls: Array.isArray(raw.requested_rolls)
@@ -293,7 +314,7 @@ function normalizeEvents(raw) {
         location: raw.location || null,
         healing: clamp(raw.healing, 0, 999),
         // Combat events (validated to prevent state corruption)
-        combatStart: validateCombatStart(raw.combat_start),
+        combatStart,
         combatEnd: !!raw.combat_end,
         enemyUpdates: Array.isArray(raw.enemy_updates) ? raw.enemy_updates : [],
         // Companion events

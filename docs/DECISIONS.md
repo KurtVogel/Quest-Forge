@@ -28,6 +28,10 @@ Action Surge means exactly two arbitrary player slots and clears only with a suc
 commit. Active-combat rests and legacy combat roll batches are rejected. Shared enemy-stat/load
 validation keeps offensive hallucinations out of the dice engine and preserves legitimate 0-HP
 state. Autosave includes combat/results so reload can safely finish narration without replaying dice.
+Combat-start enemy IDs are canonicalized before state creation, and any `combat_exchange` emitted in
+that same response is reconciled to the canonical roster by unique ID/name/slug (or the sole
+unambiguous foe). This keeps an initiating player action attached to its target across the
+narrative-to-engine boundary without permitting ambiguous multi-foe retargeting.
 
 **2026-06-19 · A declared player attack requires a resolvable attack before hostile rolls.**
 In a player-turn combat exchange, the presence of an arbitrary player-side roll is not enough:

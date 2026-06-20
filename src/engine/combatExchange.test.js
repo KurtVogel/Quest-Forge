@@ -4,6 +4,7 @@ import {
     normalizeCombatExchange,
     planCombatExchange,
     planOpeningExchange,
+    reconcileStartingCombatExchange,
 } from './combatExchange.js';
 
 const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
@@ -94,6 +95,27 @@ const exchange = raw => normalizeCombatExchange({
 
 beforeEach(() => {
     rollQueue.length = 0;
+});
+
+describe('combat-start reference reconciliation', () => {
+    it('maps readable same-response references to a single canonical foe', () => {
+        const exchange = reconcileStartingCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'goblin-duelist' }] }],
+            enemy_intents: [{ enemy_id: 'goblin-duelist', action: 'attack', target: 'player' }],
+        }, [{ id: 'enemy-goblin-duelist', name: 'Goblin Duelist', hp: 15, condition: 'healthy' }]);
+        expect(exchange.playerSlots[0].strikes[0].target).toBe('enemy-goblin-duelist');
+        expect(exchange.enemyIntents[0].enemyId).toBe('enemy-goblin-duelist');
+    });
+
+    it('does not guess between multiple foes when a reference is unknown', () => {
+        const exchange = reconcileStartingCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'unknown-foe' }] }],
+        }, [
+            { id: 'enemy-a', name: 'Goblin A', hp: 7, condition: 'healthy' },
+            { id: 'enemy-b', name: 'Goblin B', hp: 7, condition: 'healthy' },
+        ]);
+        expect(exchange.playerSlots[0].strikes[0].target).toBe('unknown-foe');
+    });
 });
 
 describe('combat exchange validation', () => {

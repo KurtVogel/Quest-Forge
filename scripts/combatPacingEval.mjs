@@ -80,6 +80,24 @@ function baseState(overrides = {}) {
 
 const scenarios = [
     {
+        id: 'attack-that-starts-combat-keeps-its-target',
+        state: baseState({
+            combat: { active: false },
+            messageHistory: [{
+                role: 'assistant',
+                content: 'A lone Goblin Duelist stands five feet away in an empty arena and challenges you to a fight. What do you do?',
+            }],
+        }),
+        userMessage: 'I accept and immediately attack the Goblin Duelist with my longsword.',
+        checks: [
+            hasCombatStart,
+            hasCombatExchange,
+            startingAttackTargetsDeclaredEnemy,
+            noRollRequests,
+            noOutcomeFieldsWithExchange,
+        ],
+    },
+    {
         id: 'active-attack-batched-exchange',
         state: baseState(),
         userMessage: 'I step in behind my shield and slash the goblin with my longsword.',
@@ -166,6 +184,22 @@ const scenarios = [
 
 function hasCombatExchange(events) {
     return { pass: !!events?.combatExchange, message: 'expected a valid combat_exchange intent envelope' };
+}
+
+function hasCombatStart(events) {
+    return { pass: !!events?.combatStart, message: 'expected combat_start for the accepted duel' };
+}
+
+function startingAttackTargetsDeclaredEnemy(events) {
+    const enemyIds = new Set((events?.combatStart?.enemies || []).map(enemy => enemy.id));
+    const attackTargets = (events?.combatExchange?.playerSlots || [])
+        .filter(slot => slot.action === 'attack')
+        .flatMap(slot => slot.strikes || [])
+        .map(strike => strike.target);
+    return {
+        pass: enemyIds.size > 0 && attackTargets.length > 0 && attackTargets.every(target => enemyIds.has(target)),
+        message: 'expected the queued starting attack to target a declared canonical enemy id',
+    };
 }
 
 function noCombatExchange(events) {

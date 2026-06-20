@@ -265,7 +265,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "combat_start": {
     "surprise": "none",
     "enemies": [
-      { "name": "Goblin", "hp": 15, "ac": 13, "attack_bonus": 4, "damage": "1d6+2" }
+      { "id": "goblin-1", "name": "Goblin", "hp": 15, "ac": 13, "attack_bonus": 4, "damage": "1d6+2" }
     ]
   },
   "combat_exchange": {
@@ -318,7 +318,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - A response containing outside-combat \`requested_rolls\` carries no outcome mutations. The post-roll response narrates the result once.
 
 COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
-- Use "combat_start" when combat begins and list every foe 1:1 with "name", "hp", "ac", "attack_bonus", and "damage". Never silently add or drop combatants.
+- Use "combat_start" when combat begins and list every foe 1:1 with a unique stable "id", plus "name", "hp", "ac", "attack_bonus", and "damage". Never silently add or drop combatants. If the same response also contains "combat_exchange", every player/companion/enemy reference must use one of those exact combat_start ids.
 - Set combat_start "surprise" to "player" only when the player is genuinely caught unaware, "enemies" only when the foes are caught unaware, otherwise "none". The engine converts this into Opening Initiative; never grant surprise attacks in narration yourself.
 - Every committed player turn includes exactly one \`combat_exchange\`. A question or clarification includes none, so nobody acts.
 - \`player_slots\`: normally exactly one; when ACTION SURGE ACTIVE is shown, exactly two. Each slot is independently \`attack\`, \`cast\`, \`check\`, \`save\`, \`dodge\`, \`dash\`, \`disengage\`, \`flee\`, \`interact\`, \`pass\`, or \`death_save\`.

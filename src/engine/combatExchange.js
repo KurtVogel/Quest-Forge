@@ -112,6 +112,62 @@ export function normalizeCombatExchange(raw) {
     return { playerSlots, enemyIntents, companionIntents };
 }
 
+const combatRefKey = value => text(value, 100)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+/**
+ * Link a combat-start response's intent references to the engine's canonical enemy ids.
+ * The model sometimes invents a readable slug ("goblin-duelist") while combat_start only
+ * supplied the foe's name. A unique id/name/slug match is safe; a single-foe encounter is
+ * unambiguous. Multi-foe unresolved references remain untouched so normal validation blocks
+ * them instead of silently retargeting the player.
+ */
+export function reconcileStartingCombatExchange(rawExchange, enemies = []) {
+    const exchange = normalizeCombatExchange(rawExchange);
+    if (!exchange) return null;
+
+    const livingEnemies = enemies.filter(isEnemyActive);
+    const aliases = new Map();
+    const addAlias = (alias, enemyId) => {
+        const key = combatRefKey(alias);
+        if (!key) return;
+        const ids = aliases.get(key) || new Set();
+        ids.add(enemyId);
+        aliases.set(key, ids);
+    };
+    for (const enemy of livingEnemies) {
+        addAlias(enemy.id, enemy.id);
+        addAlias(String(enemy.id || '').replace(/^enemy-/, ''), enemy.id);
+        addAlias(enemy.name, enemy.id);
+    }
+    const resolveEnemy = target => {
+        const ids = aliases.get(combatRefKey(target));
+        if (ids?.size === 1) return [...ids][0];
+        if (livingEnemies.length === 1) return livingEnemies[0].id;
+        return target;
+    };
+
+    return {
+        playerSlots: exchange.playerSlots.map(slot => ({
+            ...slot,
+            ...(slot.action === 'attack' && {
+                strikes: slot.strikes.map(strike => ({ ...strike, target: resolveEnemy(strike.target) })),
+            }),
+            ...(slot.action === 'cast' && { target: resolveEnemy(slot.target) }),
+        })),
+        enemyIntents: exchange.enemyIntents.map(intent => ({
+            ...intent,
+            enemyId: resolveEnemy(intent.enemyId),
+        })),
+        companionIntents: exchange.companionIntents.map(intent => ({
+            ...intent,
+            ...(intent.target && { target: resolveEnemy(intent.target) }),
+        })),
+    };
+}
+
 export function isEnemyActive(enemy) {
     return !!enemy
         && (enemy.hp ?? 0) > 0

@@ -12,7 +12,7 @@ import { normalizeEquippedSlots } from '../engine/equipment.js';
 import { createInitialFronts, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
 import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
-import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange } from '../engine/combatExchange.js';
+import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 
 function sanitizeStoredExchangeResult(result) {
     if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
@@ -204,7 +204,22 @@ function consumeItem(inventory, itemId, qty = 1) {
     });
 }
 
-function normalizeCombatEnemy(enemy, index) {
+function canonicalCombatEnemyId(enemy, index, usedIds) {
+    const fragment = String(enemy?.id || enemy?.name || index + 1)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80) || String(index + 1);
+    const base = fragment.startsWith('enemy-') ? fragment : `enemy-${fragment}`;
+    let id = base;
+    let suffix = 2;
+    while (usedIds.has(id)) id = `${base}-${suffix++}`;
+    usedIds.add(id);
+    return id;
+}
+
+function normalizeCombatEnemy(enemy, index, usedIds) {
     const hp = clampEnemyHP(enemy?.hp);
     const ac = clampEnemyAC(enemy?.ac);
     const initiative = rollDie(20);
@@ -219,7 +234,7 @@ function normalizeCombatEnemy(enemy, index) {
 
     return {
         ...rest,
-        id: `enemy-${Date.now()}-${index}`,
+        id: canonicalCombatEnemyId(enemy, index, usedIds),
         name: String(enemy?.name || `Enemy ${index + 1}`).trim().slice(0, 100) || `Enemy ${index + 1}`,
         maxHp: hp,
         hp,
@@ -1521,7 +1536,9 @@ export function gameReducer(state, action) {
             // Track exactly the enemies the DM declared — no count or HP trimming. Encounter
             // difficulty for low-level solo play is steered by the system prompt instead, so
             // the narrative and the tracked combatants always stay 1:1.
-            const enemies = (Array.isArray(action.payload?.enemies) ? action.payload.enemies : []).map(normalizeCombatEnemy);
+            const usedEnemyIds = new Set();
+            const enemies = (Array.isArray(action.payload?.enemies) ? action.payload.enemies : [])
+                .map((enemy, index) => normalizeCombatEnemy(enemy, index, usedEnemyIds));
             if (enemies.length === 0) return state;
             const dexMod = state.character?.abilityScores
                 ? getModifier(state.character.abilityScores.dexterity)
@@ -1555,6 +1572,7 @@ export function gameReducer(state, action) {
             const phase = openingActorIds.length > 0
                 ? COMBAT_PHASES.OPENING
                 : COMBAT_PHASES.AWAITING_PLAYER;
+            const queuedExchange = reconcileStartingCombatExchange(action.payload?.queuedExchange, enemies);
 
             return {
                 ...state,
@@ -1569,7 +1587,7 @@ export function gameReducer(state, action) {
                     phase,
                     openingActorIds,
                     surprise: ['player', 'enemies'].includes(surprise) ? surprise : 'none',
-                    queuedExchange: normalizeCombatExchange(action.payload?.queuedExchange),
+                    queuedExchange,
                     lastExchangeResult: null,
                     resolvedExchangeIds: [],
                 },

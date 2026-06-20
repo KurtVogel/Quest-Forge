@@ -152,6 +152,22 @@ describe('combat_start validation', () => {
 });
 
 describe('combat_exchange validation', () => {
+    it('links a combat-starting attack to the canonical enemy id in the same response', () => {
+        const { events } = parseResponse(fence({
+            combat_start: {
+                enemies: [{ name: 'Goblin Duelist', hp: 15, ac: 13, attack_bonus: 4, damage: '1d6+2' }],
+            },
+            combat_exchange: {
+                player_slots: [{ action: 'attack', strikes: [{ target: 'goblin-duelist' }] }],
+                enemy_intents: [{ enemy_id: 'goblin-duelist', action: 'attack', target: 'player' }],
+            },
+        }));
+        const enemyId = events.combatStart.enemies[0].id;
+        expect(enemyId).toBe('enemy-goblin-duelist');
+        expect(events.combatExchange.playerSlots[0].strikes[0].target).toBe(enemyId);
+        expect(events.combatExchange.enemyIntents[0].enemyId).toBe(enemyId);
+    });
+
     it('normalizes bounded player slots and actor intents without accepting dice authority', () => {
         const { events } = parseResponse(fence({
             combat_exchange: {
