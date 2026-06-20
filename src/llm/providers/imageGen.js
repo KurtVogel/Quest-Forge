@@ -99,8 +99,6 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                     model: XAI_IMAGE_MODEL,
                     prompt,
                     n: 1,
-                    aspect_ratio: aspectRatio,
-                    resolution,
                     response_format: 'b64_json',
                 }),
             });
