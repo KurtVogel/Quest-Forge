@@ -1,16 +1,16 @@
-# Quest Forge — Current Status
+# Quest Forge - Current Status
 
 One-screen answer to "what's been in the works lately?" for any agent starting a fresh
-session. **Update this at the end of any session that ships or decides something** —
+session. **Update this at the end of any session that ships or decides something** -
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-20_
+_Last updated: 2026-06-20 (embedding fix + Combat v2)_
 
-## Current focus — Combat v2 SHIPPED (2026-06-20)
+## Current focus - Combat v2 + RAG embedding fix SHIPPED (2026-06-20)
 - **Combat-start target handoff hardened after live play-test:** every declared foe now receives a
   deterministic canonical ID, and an action emitted alongside `combat_start` is reconciled by
   exact ID/name/slug (or the sole unambiguous foe) before resolution. This fixes the live-caught
-  case where the engine safely rejected—but therefore lost—the player's attack that began combat.
+  case where the engine safely rejected-but therefore lost-the player's attack that began combat.
 - **Explicit engine-owned exchange machine:** active combat no longer consumes
   `requested_rolls`. The DM emits bounded `combat_exchange` intent only; `combatExchange.js`
   validates targets/actions and generates every player, companion, enemy, spell, check, save,
@@ -39,6 +39,13 @@ _Last updated: 2026-06-20_
   a deployed end-to-end fight. Live UI checks also covered attack/enemy ordering, no-turn questions,
   Dodge disadvantage, one enemy slot, Second Wind preserving the main action, narration, autosave,
   and round advancement. The combat-start case now has parser/reducer/engine/provider regressions.
+- **VectorMemory RAG embedding fixed (2026-06-20):** `text-embedding-004` was retired by Google on
+  2026-01-14; the app was silently swallowing all embedding failures so semantic RAG had been broken
+  for months without any visible error. Fixed: switched to `gemini-embedding-001` with
+  `output_dimensionality: 768`, improved error logging to surface HTTP status + body on failure,
+  and bumped IndexedDB vector store version 1 → 2 so stale incompatible vectors are auto-dropped
+  on first load after deploy. Live smoke-tested: 768-dim vector confirmed from API.
+  Files: `src/llm/providers/gemini.js`, `src/engine/vectorMemory.js`, `AGENTS.md`, `CLAUDE.md`.
 - **Repeated enemy-first combat hole fixed**: the old safeguard mistook any non-enemy roll
   for a valid player attack, so malformed `attack_roll` entries or damage-only placeholders
   could be silently skipped while an enemy still attacked. A declared attack now requires a
@@ -49,7 +56,7 @@ _Last updated: 2026-06-20_
 - **Contextual living-world migration shipped**: existing campaigns can now privately
   awaken or enrich hidden fronts from their complete bounded campaign context. Basic fronts
   and clocks are preserved, dead/resolved figures remain history, mechanics are untouched,
-  and solo campaigns receive organic—but never forced—potential companion intersections.
+  and solo campaigns receive organic-but never forced-potential companion intersections.
   The one-time control lives in Settings → Game and marks the save Contextual afterward.
 - **Scene-art quality regression fixed**: a live victory visualization omitted Kraul and
   the kneeling goblins, invented generic humans, and used visibly poor fallback rendering.
@@ -78,7 +85,7 @@ _Last updated: 2026-06-20_
   `front_updates`. Next fronts step is real-play feedback, then automated/background
   advancement and richer generated fronts.
 
-## Recently shipped (June 10–19, 2026)
+## Recently shipped (June 10-19, 2026)
 - Resolvable player-attack invariant (2026-06-19): reproduced the second live enemy-first
   failure despite fresh mobile tabs. The safeguard now repairs attack rolls missing skill,
   target, or DC; does not accept a damage roll as the player's attack; restores a missing
@@ -90,7 +97,7 @@ _Last updated: 2026-06-20_
   the DM requested another roll. Tests: `npm test` 189 passing; `npm run lint` and
   `npm run build` passing.
 - Save-resume continuity (2026-06-19): removed the old history-based resume priming that
-  generated a recap and another “What do you do?” after loading. Character creation now sets
+  generated a recap and another "What do you do?" after loading. Character creation now sets
   `session.openingScenePending` only for brand-new premise campaigns, ChatPanel consumes it
   once, and all existing/manual/autosave loads remain narratively inert. Tests: `npm test`
   188 passing; `npm run lint` and `npm run build` passing.
@@ -300,7 +307,7 @@ _Last updated: 2026-06-20_
   LOW-LEVEL SOLO SAFETY block immediately after custom DM instructions, with encounter
   budgets and roll-stakes guidance. Tests: `npm test` 79 passing; `npm run build` passing.
 - Game-loop fix: chained-roll duplicate narration (2026-06-14). The "withhold the setup,
-  narrate once after the dice" mechanism only worked on the player's FIRST roll — `hideSetup`
+  narrate once after the dice" mechanism only worked on the player's FIRST roll - `hideSetup`
   in ChatPanel keyed off `originalPlayerMessage`, which is undefined on every roll follow-up.
   So any CHAINED roll (failed check → enemy attacks, multi-enemy rounds, triggered saves)
   showed the beat twice: the intermediate narration that requested the next roll, then the
@@ -314,12 +321,12 @@ _Last updated: 2026-06-20_
   The Scribe now captures character/NPC `appearance` each turn and, on "Visualize", composes
   the image prompt from the current situation + accumulated visual details (`composeScenePrompt`)
   rather than stat metadata. Pollinations remains a free fallback (now 720p). NEEDS REAL-PLAY
-  CHECK: couldn't exercise live xAI/Gemini calls in preview (no keys) — verify with real keys.
+  CHECK: couldn't exercise live xAI/Gemini calls in preview (no keys) - verify with real keys.
 - Removed procedural ambient audio (2026-06-14): the old `ambientAudio.js` Web Audio engine
   auto-started a synthetic "wind" drone on location/combat changes (universally disliked).
   Deleted the engine; `AmbientControls.jsx` is now a user-supplied **MP3 player** (pick your
   own files, play/pause/next, volume) that NEVER plays without an explicit action. Tracks are
-  session-only (object URLs, not persisted across reload — see IDEAS for the optional fix).
+  session-only (object URLs, not persisted across reload - see IDEAS for the optional fix).
 - Campaign premise as pinned canon (2026-06-14): a "Set the stage" field at adventure
   start (both new-hero and roster paths) captures the opening scenario. It's stored in
   `session.premise`, injected into the prompt as a never-pruned `## CAMPAIGN PREMISE`
@@ -331,14 +338,14 @@ _Last updated: 2026-06-20_
   Gemini key (couldn't test the actual LLM call in preview).
 - Character roster + export/import (2026-06-12): local hero list (IndexedDB `characters`
   store), versioned JSON hero files, "Use an Existing Hero" fork in the creation wizard,
-  Save to Roster / Export File on the character sheet. Imports are sanitized — derived
+  Save to Roster / Export File on the character sheet. Imports are sanitized - derived
   fields rebuilt from race/class data, not trusted. 13 new vitest cases.
 - Cloud sync root-cause fix: `__autosave__` is a reserved Firestore doc ID; cloud autosave
   had never worked. Also: autosaves are now local-per-device BY DESIGN (see DECISIONS.md).
 - Combat stakes: saving throws w/ proficiencies, engine-owned death saves at 0 HP,
   conditions auto-apply advantage/disadvantage.
 - Save UI: overwrite buttons, cloud-save delete, honest cloud-status feedback.
-- Vitest harness (`npm test`, 84 tests) — engine math, death-save state machine, parser
+- Vitest harness (`npm test`, 84 tests) - engine math, death-save state machine, parser
   golden fixtures. First run caught a real bug ("saving" doesn't contain "save").
 - Visual polish pass (Codex): textures, panel styling, emoji cleanup in system messages.
 - This docs system (IDEAS.md / DECISIONS.md / STATUS.md).

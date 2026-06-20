@@ -8,6 +8,17 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-20 · VectorMemory RAG uses `gemini-embedding-001` at 768 dimensions; old vectors are versioned out.**
+Google retired `text-embedding-004` on 2026-01-14. Failures were silently swallowed so RAG appeared
+functional while embeddings had been broken for months. Fixed: `GEMINI_EMBED_MODEL` →
+`gemini-embedding-001`, `output_dimensionality: 768` (a supported truncation; default 3072 is
+unwieldy). The IndexedDB vector store version was bumped 1 → 2 — stale vectors from the old model
+occupy a different semantic space and cannot be mixed with new ones, so the store drops and
+recreates on first load after deploy. Error logging now emits HTTP status + response body snippet
+so future deprecations surface in the console immediately. Verified live: 768-dim vector confirmed
+from API before commit. `gemini-embedding-2` (Public Preview) was explicitly rejected in favour of
+the GA model.
+
 **2026-06-20 · Active combat is an explicit, atomic, engine-owned exchange state machine.**
 *Implemented and shipped on 2026-06-20.* This supersedes the
 2026-06-19/17 roll-batch and enemy-only safeguard designs below. During active combat the DM never

@@ -5,7 +5,11 @@
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1alpha/models';
 const GEMINI_EMBED_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const GEMINI_EMBED_MODEL = 'text-embedding-004';
+// gemini-embedding-001 is the GA replacement for text-embedding-004, which was
+// retired on 2026-01-14. Default output is 3072-dim; we truncate to 768 to keep
+// cached vectors compact and stay compatible with existing IndexedDB entries.
+const GEMINI_EMBED_MODEL = 'gemini-embedding-001';
+const GEMINI_EMBED_DIMENSIONS = 768;
 
 /**
  * Convert our message format to Gemini's content format.
@@ -68,7 +72,7 @@ export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHi
 
 /**
  * Generate a text embedding vector using Gemini's embedding model.
- * Returns a Float32Array (768 dimensions) or null on failure.
+ * Returns a number[] (768 dimensions) or null on failure.
  * @param {string} apiKey
  * @param {string} text - Text to embed
  * @returns {Promise<number[]|null>}
@@ -82,12 +86,26 @@ export async function embedText(apiKey, text) {
             body: JSON.stringify({
                 model: `models/${GEMINI_EMBED_MODEL}`,
                 content: { parts: [{ text }] },
+                output_dimensionality: GEMINI_EMBED_DIMENSIONS,
             }),
         });
-        if (!response.ok) return null;
+        if (!response.ok) {
+            const body = await response.text().catch(() => '');
+            console.error(
+                `[Gemini embed] HTTP ${response.status} ${response.statusText} from ${GEMINI_EMBED_MODEL}:`,
+                body.slice(0, 500),
+            );
+            return null;
+        }
         const data = await response.json();
-        return data.embedding?.values || null;
-    } catch {
+        const values = data.embedding?.values;
+        if (!values?.length) {
+            console.error('[Gemini embed] Empty/missing embedding.values in response:', data);
+            return null;
+        }
+        return values;
+    } catch (err) {
+        console.error('[Gemini embed] Request failed:', err);
         return null;
     }
 }

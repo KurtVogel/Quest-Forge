@@ -3,7 +3,8 @@
  *
  * How it works:
  * 1. Significant events (world facts, journal summaries, NPC interactions) are
- *    embedded as 768-dim vectors using Gemini's text-embedding-004 model.
+ *    embedded as 768-dim vectors using Gemini's gemini-embedding-001 model
+ *    (with output_dimensionality=768; text-embedding-004 was retired 2026-01-14).
  * 2. Embeddings are persisted in IndexedDB so they survive page refreshes.
  * 3. Before each DM prompt, the current scene context is embedded and we retrieve
  *    the top-N most semantically relevant past memories.
@@ -17,7 +18,9 @@ import { embedText } from '../llm/providers/gemini.js';
 
 // --- IndexedDB persistence for embeddings ---
 const EMBED_DB_NAME = 'rpg-vector-memory';
-const EMBED_DB_VERSION = 1;
+// v2: text-embedding-004 was retired 2026-01-14 and we moved to gemini-embedding-001.
+// Old cached vectors live in a different semantic space, so wipe them on upgrade.
+const EMBED_DB_VERSION = 2;
 const EMBED_STORE = 'embeddings';
 
 function openEmbedDB() {
@@ -27,9 +30,10 @@ function openEmbedDB() {
         request.onsuccess = () => resolve(request.result);
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
-            if (!db.objectStoreNames.contains(EMBED_STORE)) {
-                db.createObjectStore(EMBED_STORE, { keyPath: 'text' });
+            if (db.objectStoreNames.contains(EMBED_STORE)) {
+                db.deleteObjectStore(EMBED_STORE);
             }
+            db.createObjectStore(EMBED_STORE, { keyPath: 'text' });
         };
     });
 }
