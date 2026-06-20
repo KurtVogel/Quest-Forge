@@ -56,7 +56,17 @@ function validateSaveState(payload) {
         ...payload,
         character: payload.character || null,
         inventory: Array.isArray(payload.inventory) ? payload.inventory : [],
-        messages: Array.isArray(payload.messages) ? payload.messages : [],
+        // narrationCue is an ephemeral request created by a player-triggered mechanic
+        // (Second Wind / healing potion). Its visible system result belongs in the save,
+        // but replaying the cue after Continue/Load would create an unsolicited DM turn.
+        // A loaded transcript is history, so every restored cue is already consumed.
+        messages: Array.isArray(payload.messages)
+            ? payload.messages.map(message => {
+                if (!message || typeof message !== 'object' || !message.narrationCue) return message;
+                const { narrationCue: _consumedCue, ...restoredMessage } = message;
+                return restoredMessage;
+            })
+            : [],
         rollHistory: Array.isArray(payload.rollHistory) ? payload.rollHistory : [],
         quests: Array.isArray(payload.quests) ? payload.quests : [],
         journal: Array.isArray(payload.journal) ? payload.journal : [],

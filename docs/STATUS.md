@@ -78,6 +78,9 @@ _Last updated: 2026-06-20 (embedding fix + Combat v2)_
 - **Save-resume continuity fixed**: Continue/Load now restores the transcript without making
   an unsolicited DM call. Fresh premise campaigns alone carry an explicit one-time opening
   marker; summarized/pruned assistant history can no longer masquerade as a new campaign.
+  Restored Second Wind/healing-potion narration cues are also consumed as historical events
+  on load, so their in-memory once-only guard cannot reset in a new browser tab and replay
+  an old fictional beat.
 - **Contextual living-world migration shipped**: existing campaigns can now privately
   awaken or enrich hidden fronts from their complete bounded campaign context. Basic fronts
   and clocks are preserved, dead/resolved figures remain history, mechanics are untouched,

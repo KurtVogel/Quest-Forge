@@ -21,6 +21,35 @@ const baseCharacter = {
 };
 
 describe('LOAD_GAME progression migrations', () => {
+    it('does not replay saved mechanic narration cues after Continue or Load', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...baseCharacter, exp: 0 },
+                inventory: [],
+                messages: [{
+                    id: 'second-wind-result',
+                    role: 'system',
+                    content: 'Second Wind restores 7 HP.',
+                    narrationCue: {
+                        mechanic: 'Second Wind',
+                        actionType: 'bonus action',
+                        effect: 'Vesa regains 7 HP',
+                    },
+                }, {
+                    id: 'dm-flavor',
+                    role: 'assistant',
+                    content: 'Vesa catches his breath and finds his footing.',
+                }],
+            },
+        });
+
+        expect(next.messages).toHaveLength(2);
+        expect(next.messages[0].content).toBe('Second Wind restores 7 HP.');
+        expect(next.messages[0]).not.toHaveProperty('narrationCue');
+        expect(next.messages[1].content).toContain('finds his footing');
+    });
+
     it('applies pending level-ups for saves that crossed the new XP threshold', () => {
         const next = gameReducer(initialGameState, {
             type: 'LOAD_GAME',
