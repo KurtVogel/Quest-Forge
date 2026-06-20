@@ -4,9 +4,35 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-20_
 
-## Current focus
+## Current focus — Combat v2 SHIPPED (2026-06-20)
+- **Explicit engine-owned exchange machine:** active combat no longer consumes
+  `requested_rolls`. The DM emits bounded `combat_exchange` intent only; `combatExchange.js`
+  validates targets/actions and generates every player, companion, enemy, spell, check, save,
+  damage, critical, Extra Attack, and death-save roll from live state. Invalid/missing targets
+  block without granting enemies a free action. Legacy combat roll batches are rejected.
+- **Atomic, reload-safe lifecycle:** reducer phases are `opening` → `awaiting_player` →
+  `awaiting_intent` → `awaiting_narration`. One `APPLY_COMBAT_EXCHANGE` commits HP/status/rolls/Action Surge exactly
+  once by `exchangeId`; narration reads the stored result and cannot mutate mechanics.
+  `COMPLETE_COMBAT_NARRATION` alone advances the round or closes victory/defeat. Failed narration
+  is retryable without rerolling and `combat`/`rollHistory` now trigger autosave.
+- **Opening Initiative:** actors who beat the player receive one opening slot, surprise suppresses
+  or expands the appropriate opening actors, and a player action that began combat is queued rather
+  than lost. After opening, play becomes player-centered exchanges. Companions participate in
+  initiative and exchanges.
+- **Bounded intent vocabulary:** player attack/cast/check/save/dodge/dash/disengage/flee/interact/pass/
+  death-save; companions attack/defend/pass; enemies attack/defend/flee/surrender with explicit
+  player-or-companion targeting. Missing enemy intent defaults to one basic attack; invalid targets
+  lose that actor's slot rather than retargeting. Flee/surrender count as overcoming the threat for
+  XP so the rules do not reward execution.
+- **Action Surge and boundary hardening:** Surge activates only on a live player turn, means exactly
+  two arbitrary action slots, and clears only in the successful atomic commit. Rest is blocked in
+  combat. Shared enemy-stat validation covers parser/start/load/update/pre-roll boundaries; 0-HP
+  enemies stay dead on load, malformed saves do not crash, and live AC/HP are authoritative.
+- Verification before shipping: **230 tests pass across 25 files**, lint clean, production build clean; local browser
+  boot has no console errors and the 390px layout has no horizontal overflow. Real-provider
+  `npm run eval:combat` was updated for the intent contract but not run (no eval API key supplied).
 - **Repeated enemy-first combat hole fixed**: the old safeguard mistook any non-enemy roll
   for a valid player attack, so malformed `attack_roll` entries or damage-only placeholders
   could be silently skipped while an enemy still attacked. A declared attack now requires a

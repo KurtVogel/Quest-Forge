@@ -11,7 +11,7 @@
  */
 import { sendMessage } from '../src/llm/adapter.js';
 import { buildSystemPrompt } from '../src/llm/promptBuilder.js';
-import { detectPreNarratedOutcome, parseResponse } from '../src/llm/responseParser.js';
+import { parseResponse } from '../src/llm/responseParser.js';
 
 const provider = process.env.QF_EVAL_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : 'gemini');
 const apiKey = provider === 'openai' ? process.env.OPENAI_API_KEY : process.env.GEMINI_API_KEY;
@@ -84,11 +84,11 @@ const scenarios = [
         state: baseState(),
         userMessage: 'I step in behind my shield and slash the goblin with my longsword.',
         checks: [
-            hasRoll('attack_roll'),
-            rollHas('attack_roll', 'target'),
-            rollHas('attack_roll', 'damage'),
-            noPreNarratedOutcome,
-            noOutcomeFieldsWithRolls,
+            hasCombatExchange,
+            playerSlot('attack'),
+            attackTargets('enemy-1'),
+            noRollRequests,
+            noOutcomeFieldsWithExchange,
         ],
     },
     {
@@ -104,10 +104,10 @@ const scenarios = [
         }),
         userMessage: 'I use the surge to attack twice, driving forward before it can recover.',
         checks: [
-            atLeastRolls('attack_roll', 2),
+            playerSlotCount(2),
             noResourcesUsed,
-            noPreNarratedOutcome,
-            noOutcomeFieldsWithRolls,
+            noRollRequests,
+            noOutcomeFieldsWithExchange,
         ],
     },
     {
@@ -134,9 +134,11 @@ const scenarios = [
         }),
         userMessage: 'With my breath back, I attack the goblin.',
         checks: [
-            hasRoll('attack_roll'),
+            hasCombatExchange,
+            playerSlot('attack'),
             noResourcesUsed,
-            noOutcomeFieldsWithRolls,
+            noRollRequests,
+            noOutcomeFieldsWithExchange,
         ],
     },
     {
@@ -152,83 +154,54 @@ const scenarios = [
         ],
     },
     {
-        id: 'post-roll-victory-closes-combat-with-xp',
+        id: 'combat-question-does-not-commit-an-action',
         state: baseState(),
-        userMessage: [
-            '[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own.',
-            'RULES: If the roll results show every tracked enemy is DOWNED, narrate victory now and emit combat_end: true plus exp_awarded; do NOT request more combat rolls.',
-            'Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken, damage_dealt, or enemy_updates for them.]',
-            '',
-            '[ROLL RESULT: Astra cuts at the goblin vs AC 13, rolled 18 — HIT for 9 damage. Goblin Cutter now 0/7 HP — Goblin Cutter is DOWNED. (HP applied by the system — do NOT adjust it via damage_taken/enemy_updates)]',
-        ].join('\n'),
+        userMessage: 'Before I act, how far away is the goblin and is there any cover?',
         checks: [
+            noCombatExchange,
             noRollRequests,
-            combatEnded,
-            xpAwarded,
-            noDuplicateEngineHp,
-        ],
-    },
-    {
-        id: 'post-roll-enemy-survives-asks-next-action-not-extra-damage',
-        state: baseState(),
-        userMessage: [
-            '[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own.',
-            'Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken, damage_dealt, or enemy_updates for them.]',
-            '',
-            '[ROLL RESULT: Astra cuts at the goblin vs AC 13, rolled 17 — HIT for 3 damage. Goblin Cutter now 4/7 HP. (HP applied by the system — do NOT adjust it via damage_taken/enemy_updates)]',
-        ].join('\n'),
-        checks: [
-            noDuplicateEngineHp,
-            noCombatEnd,
-            noDamageRollRequest,
         ],
     },
 ];
 
-function hasRoll(type) {
-    return (events) => ({
-        pass: (events?.requestedRolls || []).some(r => r.type === type),
-        message: `expected requested_rolls to include ${type}`,
+function hasCombatExchange(events) {
+    return { pass: !!events?.combatExchange, message: 'expected a valid combat_exchange intent envelope' };
+}
+
+function noCombatExchange(events) {
+    return { pass: !events?.combatExchange, message: 'expected no committed exchange for a clarification question' };
+}
+
+function playerSlot(action) {
+    return events => ({
+        pass: (events?.combatExchange?.playerSlots || []).some(slot => slot.action === action),
+        message: `expected a ${action} player slot`,
     });
 }
 
-function atLeastRolls(type, count) {
-    return (events) => ({
-        pass: (events?.requestedRolls || []).filter(r => r.type === type).length >= count,
-        message: `expected at least ${count} ${type} rolls`,
+function playerSlotCount(count) {
+    return events => ({
+        pass: (events?.combatExchange?.playerSlots || []).length === count,
+        message: `expected exactly ${count} player slots`,
     });
 }
 
-function rollHas(type, field) {
-    return (events) => ({
-        pass: (events?.requestedRolls || []).some(r => r.type === type && r[field]),
-        message: `expected ${type} roll to include ${field}`,
+function attackTargets(target) {
+    return events => ({
+        pass: (events?.combatExchange?.playerSlots || []).some(slot =>
+            slot.action === 'attack' && slot.strikes?.some(strike => strike.target === target)
+        ),
+        message: `expected an engine-targeted attack against ${target}`,
     });
 }
 
-function noPreNarratedOutcome(events, narrative) {
-    return {
-        pass: !(events?.requestedRolls?.length > 0 && detectPreNarratedOutcome(narrative)),
-        message: 'roll request pre-narrated an outcome',
-    };
-}
-
-function noOutcomeFieldsWithRolls(events) {
-    const hasRolls = (events?.requestedRolls || []).length > 0;
+function noOutcomeFieldsWithExchange(events) {
+    const hasExchange = !!events?.combatExchange;
     const hasOutcome = !!events && (
-        events.damageTaken > 0 ||
-        events.damageDealt > 0 ||
-        events.healing > 0 ||
-        events.expAwarded > 0 ||
-        events.enemyUpdates.length > 0 ||
-        events.resourcesUsed.length > 0 ||
-        events.itemsFound.length > 0 ||
-        events.itemsLost.length > 0
+        events.damageTaken > 0 || events.damageDealt > 0 || events.healing > 0 ||
+        events.expAwarded > 0 || events.enemyUpdates.length > 0 || events.combatEnd
     );
-    return {
-        pass: !hasRolls || !hasOutcome,
-        message: 'roll request included outcome mutation fields',
-    };
+    return { pass: !hasExchange || !hasOutcome, message: 'combat_exchange included forbidden outcome mutations' };
 }
 
 function noResourcesUsed(events) {
@@ -242,41 +215,6 @@ function noRollRequests(events) {
     return {
         pass: (events?.requestedRolls || []).length === 0,
         message: 'expected no further roll requests',
-    };
-}
-
-function noDamageRollRequest(events) {
-    return {
-        pass: !(events?.requestedRolls || []).some(r => r.type === 'damage_roll'),
-        message: 'expected no standalone combat damage_roll after engine-applied HP',
-    };
-}
-
-function combatEnded(events) {
-    return {
-        pass: !!events?.combatEnd,
-        message: 'expected combat_end: true on post-roll victory',
-    };
-}
-
-function noCombatEnd(events) {
-    return {
-        pass: !events?.combatEnd,
-        message: 'expected combat to remain active while an enemy survives',
-    };
-}
-
-function xpAwarded(events) {
-    return {
-        pass: (events?.expAwarded || 0) > 0,
-        message: 'expected exp_awarded on post-roll victory',
-    };
-}
-
-function noDuplicateEngineHp(events) {
-    return {
-        pass: !events || (events.damageTaken === 0 && events.damageDealt === 0 && events.enemyUpdates.length === 0),
-        message: 'expected no duplicate HP mutations after engine-applied damage',
     };
 }
 

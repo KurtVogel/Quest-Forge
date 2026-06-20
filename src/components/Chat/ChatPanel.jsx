@@ -4,6 +4,7 @@ import { streamMessage } from '../../llm/adapter.js';
 import { buildSystemPrompt } from '../../llm/promptBuilder.js';
 import { parseResponse, applyEvents, detectPreNarratedOutcome } from '../../llm/responseParser.js';
 import { handleRequestedRolls } from '../../engine/rollResolver.js';
+import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { runScribe } from '../../llm/scribe.js';
 import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../engine/vectorMemory.js';
@@ -26,6 +27,7 @@ export default function ChatPanel() {
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [streamingMessage, setStreamingMessage] = useState('');
+    const [combatNarrationRetry, setCombatNarrationRetry] = useState(0);
     const messagesEndRef = useRef(null);
     const abortControllerRef = useRef(null);
     const inputRef = useRef(null);
@@ -34,6 +36,7 @@ export default function ChatPanel() {
     const memorySeededRef = useRef(false); // Ensure RAG seeding only fires once per mount
     const streamBufferRef = useRef(''); // Accumulated streaming text for JSON fence detection
     const narratedCueIdsRef = useRef(new Set()); // Mechanic system messages already given an LLM flavor beat
+    const narratedCombatExchangeIdsRef = useRef(new Set()); // Prevent duplicate narration calls for one mechanics commit
 
     // Use a ref to always read the latest state inside async callbacks
     const stateRef = useRef(state);
@@ -136,7 +139,9 @@ export default function ChatPanel() {
      */
     const buildMessageHistory = () => {
         const s = stateRef.current;
-        const unsummarized = s.messages.filter(m => !m.summarized);
+        // Hidden setup messages were intentionally superseded by authoritative roll/exchange
+        // results. Sending them back can bias the narrator toward a pre-rolled outcome.
+        const unsummarized = s.messages.filter(m => !m.summarized && !m.hidden);
         const window = unsummarized.slice(-MESSAGE_WINDOW);
         return window.map(m => ({
             role: m.role === 'system' ? 'user' : m.role,
@@ -210,6 +215,7 @@ export default function ChatPanel() {
         const parsed = parseResponse(fullResponse);
         const narrative = parsed.narrative;
         const events = opts.narrationOnly ? null : parsed.events;
+        opts.onNarrative?.(narrative);
 
         // Detect pre-narrated outcome (DM wrote outcome before dice were rolled)
         if (events?.requestedRolls?.length > 0 && detectPreNarratedOutcome(narrative)) {
@@ -227,7 +233,7 @@ export default function ChatPanel() {
         // visible and the player saw the beat twice (setup, then outcome). The flag also
         // drives applyEvents' setupPhase, so deferring outcome mutations to the final
         // narration likewise extends correctly to chained rolls (no double-application).
-        const hideSetup = events?.requestedRolls?.length > 0;
+        const hideSetup = events?.requestedRolls?.length > 0 || !!events?.combatExchange;
         if (hideSetup) setStreamingMessage('');
         dispatch({
             type: 'ADD_MESSAGE',
@@ -245,7 +251,7 @@ export default function ChatPanel() {
             // On a withheld roll-setup turn, defer outcome mutations to the post-roll
             // narration (see applyEvents) so the DM can't double-apply state across the split.
             applyEvents(events, dispatch, () => stateRef.current, { setupPhase: hideSetup });
-            if (events.location) {
+            if (events.location && !s.combat?.active && !events.combatExchange) {
                 dispatch({ type: 'SET_LOCATION', payload: events.location });
             }
         }
@@ -254,7 +260,7 @@ export default function ChatPanel() {
         // The per-turn Scribe + narrative embedding run once in handleSend on the FINAL
         // narrated outcome, so they capture results rather than withheld setup text.
         // Skip on a withheld setup turn — those facts ride on the outcome narration.
-        if (!hideSetup && events?.worldFacts?.length > 0 && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
+        if (!hideSetup && !s.combat?.active && events?.worldFacts?.length > 0 && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
             for (const f of events.worldFacts) {
                 addMemory(s.settings.apiKey, f.fact, f.category || 'world_fact').catch(() => {});
             }
@@ -307,12 +313,95 @@ export default function ChatPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state.messages, isLoading]);
 
+    /** Commit a pure combat plan once. Invalid plans leave every actor untouched. */
+    const commitCombatPlan = (plan) => {
+        if (!plan?.ok) {
+            dispatch({ type: 'REJECT_COMBAT_EXCHANGE', payload: { reason: plan?.error } });
+            return false;
+        }
+        dispatch({ type: 'APPLY_COMBAT_EXCHANGE', payload: plan.payload });
+        return true;
+    };
+
+    /** Opening Initiative is engine-owned and resolves before any queued player action. */
+    useEffect(() => {
+        if (isLoading || state.combat?.phase !== COMBAT_PHASES.OPENING) return;
+        commitCombatPlan(planOpeningExchange(state));
+    // commitCombatPlan only dispatches the pure plan for the current combat snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.combat?.phase, isLoading]);
+
+    /** A player action that started combat waits safely behind Opening Initiative. */
+    useEffect(() => {
+        if (isLoading || state.combat?.phase !== COMBAT_PHASES.AWAITING_PLAYER || !state.combat.queuedExchange) return;
+        commitCombatPlan(planCombatExchange(state, state.combat.queuedExchange));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.combat?.phase, state.combat?.queuedExchange, isLoading]);
+
+    /**
+     * Narration is a retryable acknowledgment of already-committed mechanics. It never
+     * carries events, never rerolls, and is keyed by exchangeId for reload safety.
+     */
+    useEffect(() => {
+        const result = state.combat?.lastExchangeResult;
+        if (isLoading || state.combat?.phase !== COMBAT_PHASES.AWAITING_NARRATION || !result?.exchangeId) return;
+        if (narratedCombatExchangeIdsRef.current.has(result.exchangeId)) return;
+        narratedCombatExchangeIdsRef.current.add(result.exchangeId);
+
+        let narrative = '';
+        setIsLoading(true);
+        setStreamingMessage('');
+        sendToLLM(combatNarrationPrompt(result), null, {
+            narrationOnly: true,
+            onNarrative: text => { narrative = text; },
+        })
+            .then(() => {
+                dispatch({ type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: result.exchangeId } });
+                const latest = stateRef.current;
+                if (narrative.trim()) {
+                    runScribe({
+                        playerMessage: result.kind === 'opening' ? 'Opening Initiative' : 'Combat exchange',
+                        dmNarrative: narrative,
+                        settings: latest.settings,
+                        dispatch,
+                    }).catch(() => {});
+                    if (latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
+                        addMemory(latest.settings.apiKey, narrative.slice(0, 500), 'narrative').catch(() => {});
+                    }
+                }
+                maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current).then(index => {
+                    lastSummarizedRef.current = index;
+                });
+            })
+            .catch(error => {
+                if (error.name !== 'AbortError') {
+                    dispatch({
+                        type: 'ADD_MESSAGE',
+                        payload: {
+                            role: 'system',
+                            content: `Combat mechanics are safely resolved, but narration failed: ${error.message}. Retry narration; the dice and HP will not be applied again.`,
+                        },
+                    });
+                }
+            })
+            .finally(() => {
+                setIsLoading(false);
+                setStreamingMessage('');
+            });
+    // sendToLLM is intentionally driven only by the persisted exchange identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.combat?.phase, state.combat?.lastExchangeResult?.exchangeId, isLoading, combatNarrationRetry]);
+
     /**
      * Handle the full send flow: user message → LLM → dice rolls → auto follow-up.
      */
     const handleSend = async () => {
         const trimmed = input.trim();
         if (!trimmed || isLoading) return;
+
+        const startedCombatIntent = stateRef.current.combat?.active
+            && stateRef.current.combat.phase === COMBAT_PHASES.AWAITING_PLAYER;
+        if (startedCombatIntent) dispatch({ type: 'BEGIN_COMBAT_INTENT' });
 
         setInput('');
         // Reset textarea height to single line
@@ -328,16 +417,31 @@ export default function ChatPanel() {
             addMemory(stateRef.current.settings.apiKey, trimmed.slice(0, 500), 'player').catch(() => {});
         }
 
-        const clearActionSurgeAfterTurn = !!stateRef.current.character?.pendingActionSurge;
-
         setIsLoading(true);
         setStreamingMessage('');
 
         try {
             const events = await sendToLLM(trimmed, trimmed);
 
-            // Handle requested rolls via the extracted roll resolver (with depth limiting)
-            if (events?.requestedRolls?.length > 0) {
+            const combatWasActive = stateRef.current.combat?.active;
+            const combatStartedNow = !!events?.combatStart;
+            let combatIntentHandled = false;
+            if (events?.combatExchangeRejected) {
+                combatIntentHandled = true;
+                dispatch({
+                    type: 'REJECT_COMBAT_EXCHANGE',
+                    payload: { reason: 'The DM returned a malformed combat intent envelope.' },
+                });
+            } else if (events?.combatExchange && !combatStartedNow) {
+                combatIntentHandled = true;
+                commitCombatPlan(planCombatExchange(stateRef.current, events.combatExchange));
+            } else if (events?.requestedRolls?.length > 0 && combatWasActive) {
+                // Active combat never falls back to LLM-authored attack batches. An invalid
+                // envelope costs nobody a turn and cannot produce a free enemy attack.
+                combatIntentHandled = true;
+                dispatch({ type: 'REJECT_COMBAT_EXCHANGE', payload: { reason: 'The DM requested legacy combat rolls instead of a committed action envelope.' } });
+            } else if (events?.requestedRolls?.length > 0) {
+                // Outside combat, ordinary checks/saves continue to use the general resolver.
                 const rollResolution = await handleRequestedRolls(events.requestedRolls, {
                     getState: () => stateRef.current,
                     dispatch,
@@ -345,17 +449,18 @@ export default function ChatPanel() {
                     preNarrated: events._preNarratedOutcome || false,
                     playerAction: trimmed,
                 });
-
-                if (rollResolution?.resolved && stateRef.current.combat?.active) {
-                    dispatch({ type: 'RESOLVE_COMBAT_EXCHANGE' });
-                }
+                void rollResolution;
+            }
+            if (startedCombatIntent && !combatIntentHandled) {
+                dispatch({ type: 'CANCEL_COMBAT_INTENT' });
             }
 
             // Extract world-state from the FINAL narrated outcome (where the real facts
             // live), now that any roll chain has resolved. Covers no-roll turns too, and
             // skips the withheld pre-roll setup (flagged hidden).
             const latest = stateRef.current;
-            const finalNarration = [...latest.messages].reverse()
+            const waitsForCombatNarration = !!events?.combatExchange || combatStartedNow;
+            const finalNarration = waitsForCombatNarration ? null : [...latest.messages].reverse()
                 .find(m => m.role === 'assistant' && !m.hidden && m.content?.trim());
             if (finalNarration) {
                 runScribe({
@@ -370,14 +475,14 @@ export default function ChatPanel() {
             }
 
             // Auto-summarize for session memory (runs in background, uses Gemini 2.5 Flash)
-            maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current).then(idx => {
-                lastSummarizedRef.current = idx;
-            });
-
-            if (clearActionSurgeAfterTurn) {
-                dispatch({ type: 'CLEAR_ACTION_SURGE' });
+            if (!waitsForCombatNarration) {
+                maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current).then(idx => {
+                    lastSummarizedRef.current = idx;
+                });
             }
+
         } catch (error) {
+            if (startedCombatIntent) dispatch({ type: 'CANCEL_COMBAT_INTENT' });
             if (error.name !== 'AbortError') {
                 dispatch({
                     type: 'ADD_MESSAGE',
@@ -421,7 +526,18 @@ export default function ChatPanel() {
         abortControllerRef.current?.abort();
     };
 
+    const handleRetryCombatNarration = () => {
+        const exchangeId = stateRef.current.combat?.lastExchangeResult?.exchangeId;
+        if (!exchangeId) return;
+        narratedCombatExchangeIdsRef.current.delete(exchangeId);
+        setCombatNarrationRetry(value => value + 1);
+    };
+
     const hasApiKey = !!state.settings.apiKey;
+    const awaitingCombatNarration = state.combat?.phase === COMBAT_PHASES.AWAITING_NARRATION;
+    const combatInputLocked = state.combat?.active && (
+        state.combat.phase !== COMBAT_PHASES.AWAITING_PLAYER || !!state.combat.queuedExchange
+    );
 
     return (
         <div className="chat-panel">
@@ -477,7 +593,7 @@ export default function ChatPanel() {
                     onInput={handleInput}
                     onKeyDown={handleKeyDown}
                     placeholder={hasApiKey ? "What do you do?" : "Set your API key in Settings first..."}
-                    disabled={!hasApiKey || isLoading}
+                    disabled={!hasApiKey || isLoading || combatInputLocked}
                     maxLength={4000}
                     rows={1}
                 />
@@ -485,11 +601,20 @@ export default function ChatPanel() {
                     <button className="chat-stop-btn" onClick={handleStop} title="Stop generating">
                         Stop
                     </button>
+                ) : awaitingCombatNarration ? (
+                    <button
+                        className="chat-send-btn"
+                        onClick={handleRetryCombatNarration}
+                        disabled={!hasApiKey}
+                        title="Retry combat narration without rerolling"
+                    >
+                        Retry narration
+                    </button>
                 ) : (
                     <button
                         className="chat-send-btn"
                         onClick={handleSend}
-                        disabled={!input.trim() || !hasApiKey}
+                        disabled={!input.trim() || !hasApiKey || combatInputLocked}
                         title="Send message"
                     >
                         Send

@@ -10,6 +10,8 @@
 
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { CLASSES } from '../data/classes.js';
+import { validateEnemyAttackBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP } from '../engine/enemyStats.js';
+import { normalizeCombatExchange } from '../engine/combatExchange.js';
 
 /** Cryptographically random integer in [min, max] — replaces Math.random() fallbacks. */
 function cryptoRandInt(min, max) {
@@ -52,17 +54,31 @@ function validateCombatStart(combatStart) {
 
     const sanitizedEnemies = combatStart.enemies
         .filter(e => e && typeof e.name === 'string' && e.name.trim())
-        .map(e => ({
-            name: e.name.trim(),
-            hp: (typeof e.hp === 'number' && e.hp > 0) ? e.hp : 20,
-            ac: (typeof e.ac === 'number' && e.ac > 0) ? e.ac : 12,
-            initiative: (typeof e.initiative === 'number') ? e.initiative : cryptoRandInt(1, 20),
-        }));
+        .map(e => {
+            // Enemy turns are engine-owned, so capture the foe's stats once here, validated at
+            // this boundary via the shared sanitizer. Out-of-range offensive stats are dropped
+            // (→ engine default), HP/AC are clamped into a safe band.
+            const attackBonus = validateEnemyAttackBonus(
+                typeof e.attack_bonus === 'number' ? e.attack_bonus : e.attackBonus
+            );
+            const damage = sanitizeEnemyDamage(e.damage);
+            return {
+                name: e.name.trim().slice(0, 100),
+                hp: clampEnemyHP(e.hp),
+                ac: clampEnemyAC(e.ac),
+                initiative: (typeof e.initiative === 'number') ? e.initiative : cryptoRandInt(1, 20),
+                ...(attackBonus !== undefined && { attackBonus }),
+                ...(damage !== undefined && { damage }),
+            };
+        });
 
     if (sanitizedEnemies.length === 0) return null;
 
     return {
         enemies: sanitizedEnemies,
+        surprise: ['player', 'enemies'].includes(String(combatStart.surprise || '').toLowerCase())
+            ? String(combatStart.surprise).toLowerCase()
+            : 'none',
         player_initiative: (typeof combatStart.player_initiative === 'number')
             ? combatStart.player_initiative
             : cryptoRandInt(1, 20),
@@ -215,6 +231,7 @@ function normalizeEvents(raw) {
     const equipmentChanges = Array.isArray(raw.equipment_changes)
         ? raw.equipment_changes
         : (raw.equipment_change ? [raw.equipment_change] : []);
+    const combatExchange = normalizeCombatExchange(raw.combat_exchange);
 
     return {
         requestedRolls: Array.isArray(raw.requested_rolls)
@@ -238,6 +255,8 @@ function normalizeEvents(raw) {
                 disadvantage: !!r.disadvantage,
             }))
             : [],
+        combatExchange,
+        combatExchangeRejected: raw.combat_exchange != null && !combatExchange,
         damageDealt: clamp(raw.damage_dealt, 0, 999),
         damageTaken: clamp(raw.damage_taken, 0, 999),
         itemsFound: Array.isArray(raw.items_found) ? raw.items_found.slice(0, 20) : [],
@@ -343,9 +362,20 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                 payload: {
                     enemies: events.combatStart.enemies || [],
                     playerInitiative: events.combatStart.player_initiative,
+                    surprise: events.combatStart.surprise,
+                    queuedExchange: events.combatExchange,
                 },
             });
         }
+        return;
+    }
+
+    // During engine-owned combat, a response without combat_exchange is either a question,
+    // clarification, or narration. It has no authority to mutate mechanics. Completed
+    // exchanges are committed by APPLY_COMBAT_EXCHANGE and their narration is parsed with
+    // narrationOnly, so dropping inline events here cannot discard a legitimate combat turn.
+    if (getState?.()?.combat?.active) {
+        console.warn('[applyEvents] Ignored non-exchange events during active engine-owned combat.');
         return;
     }
 
@@ -531,6 +561,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             payload: {
                 enemies: events.combatStart.enemies || [],
                 playerInitiative: events.combatStart.player_initiative,
+                surprise: events.combatStart.surprise,
             },
         });
     }

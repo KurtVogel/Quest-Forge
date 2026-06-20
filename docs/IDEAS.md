@@ -229,6 +229,18 @@ Still open:
 - Downed/dead story arcs: rescue, injury, permanent death, memorial notes.
 - Companion roles/traits that affect narration and simple mechanics without full class sheets.
 
+### Combat intent profile expansion — status: `idea` after v2 (2026-06-20)
+Combat v2 deliberately resolves only mechanics with canonical engine profiles. Current bounded
+intents cover standard weapon attacks, basic Wizard/Cleric attack spells, checks/saves,
+Dodge/Dash/Disengage/Interact/Pass/death saves, companion attack/defend/pass, and enemy
+attack/defend/flee/surrender. Expand without returning dice authority to the LLM:
+- Canonical spell catalog with slots, save-based spells, healing, areas, damage types, durations,
+  concentration, and on-hit `pending_save` subphases resolved before the one narration.
+- Shove/grapple/help/use-item/special-monster profiles with explicit contested mechanics.
+- Range, reach, cover, movement, opportunity attacks, target threat/taunt, and battlefield position.
+- Enemy spell/special profiles and morale personalities. Until a profile exists, reject visibly
+  with no action committed rather than inventing numbers or granting a free hostile turn.
+
 ## UX & Platform
 
 ### Persist user music across reloads — status: `idea`, small

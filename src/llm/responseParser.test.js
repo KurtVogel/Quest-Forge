@@ -124,6 +124,77 @@ describe('combat_start validation', () => {
         expect(parseResponse(fence({ combat_start: { enemies: [] } })).events.combatStart).toBeNull();
         expect(parseResponse(fence({ damage_taken: 1 })).events.combatStart).toBeNull();
     });
+
+    it('rejects out-of-range enemy stats to defaults and clamps HP/AC at the boundary', () => {
+        const { events } = parseResponse(fence({
+            combat_start: {
+                enemies: [
+                    { name: 'Brute', hp: 9999, ac: 999, attack_bonus: 99, damage: '50d100+80' },
+                    { name: 'Goblin', hp: 7, ac: 12, attack_bonus: 4, damage: '1d6+2' },
+                    { name: 'Oddity', hp: 5, ac: 10, attack_bonus: -40, damage: '1d7' },
+                ],
+            },
+        }));
+        const [brute, goblin, oddity] = events.combatStart.enemies;
+        // Absurd OFFENSIVE stats are REJECTED (not clamped to max) → omitted → engine default later.
+        expect(brute.attackBonus).toBeUndefined();
+        expect(brute.damage).toBeUndefined();
+        // DEFENSIVE stats are clamped into a safe band.
+        expect(brute.hp).toBe(999);
+        expect(brute.ac).toBe(12);
+        // Reasonable values pass through untouched.
+        expect(goblin.attackBonus).toBe(4);
+        expect(goblin.damage).toBe('1d6+2');
+        // Lower out-of-range + non-weapon die size both rejected.
+        expect(oddity.attackBonus).toBeUndefined();
+        expect(oddity.damage).toBeUndefined();
+    });
+});
+
+describe('combat_exchange validation', () => {
+    it('normalizes bounded player slots and actor intents without accepting dice authority', () => {
+        const { events } = parseResponse(fence({
+            combat_exchange: {
+                player_slots: [{ action: 'attack', strikes: [{ target: 'enemy-1' }], modifier: 99, damage: '50d100' }],
+                enemy_intents: [{ enemy_id: 'enemy-1', action: 'defend', modifier: 99 }],
+                companion_intents: [{ companion_id: 'ally-1', action: 'attack', target: 'enemy-1' }],
+            },
+        }));
+        expect(events.combatExchange).toEqual({
+            playerSlots: [{ id: 'player-slot-1', action: 'attack', description: '', strikes: [{ target: 'enemy-1' }], weaponId: null }],
+            enemyIntents: [{ enemyId: 'enemy-1', action: 'defend', target: 'player', description: '' }],
+            companionIntents: [{ companionId: 'ally-1', action: 'attack', target: 'enemy-1', description: '' }],
+        });
+        expect(events.combatExchange.playerSlots[0]).not.toHaveProperty('modifier');
+        expect(events.combatExchange.playerSlots[0]).not.toHaveProperty('damage');
+    });
+
+    it('marks malformed envelopes as rejected instead of partially resolving them', () => {
+        const { events } = parseResponse(fence({
+            combat_exchange: { player_slots: [{ action: 'wish' }] },
+        }));
+        expect(events.combatExchange).toBeNull();
+        expect(events.combatExchangeRejected).toBe(true);
+    });
+});
+
+describe('active combat event authority', () => {
+    it('ignores mechanical mutations from a response that committed no combat exchange', () => {
+        const events = parseResponse(fence({
+            damage_taken: 20,
+            healing: 20,
+            enemy_updates: [{ id: 'enemy-1', hp: 0 }],
+            combat_end: true,
+            exp_awarded: 999,
+        })).events;
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({
+            combat: { active: true },
+            character: { class: 'fighter', classResources: {} },
+            party: [],
+        }));
+        expect(dispatch).not.toHaveBeenCalled();
+    });
 });
 
 describe('detectPreNarratedOutcome', () => {

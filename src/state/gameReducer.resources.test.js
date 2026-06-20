@@ -26,7 +26,15 @@ function makeFighter(overrides = {}) {
 
 describe('class resource activation', () => {
     it('marks Action Surge as pending until the next player action resolves', () => {
-        const surged = gameReducer(makeFighter(), {
+        const start = makeFighter();
+        start.combat = {
+            ...initialGameState.combat,
+            active: true,
+            phase: 'awaiting_player',
+            turnOrder: [{ type: 'player', name: 'Astra', initiative: 12 }],
+            currentTurn: 0,
+        };
+        const surged = gameReducer(start, {
             type: 'ACTIVATE_RESOURCE',
             payload: 'actionSurge',
         });
@@ -35,8 +43,35 @@ describe('class resource activation', () => {
         expect(surged.character.pendingActionSurge).toBe(true);
         expect(surged.messages.at(-1).content).toContain('Action Surge');
 
-        const cleared = gameReducer(surged, { type: 'CLEAR_ACTION_SURGE' });
-        expect(cleared.character.pendingActionSurge).toBe(false);
+        expect(surged.character.pendingActionSurge).toBe(true);
+    });
+
+    it('does not activate Action Surge off-turn or outside combat', () => {
+        const outside = gameReducer(makeFighter(), { type: 'ACTIVATE_RESOURCE', payload: 'actionSurge' });
+        expect(outside.character.classResources.actionSurge.used).toBe(0);
+
+        const opening = makeFighter();
+        opening.combat = { ...initialGameState.combat, active: true, phase: 'opening' };
+        const blocked = gameReducer(opening, { type: 'ACTIVATE_RESOURCE', payload: 'actionSurge' });
+        expect(blocked.character.classResources.actionSurge.used).toBe(0);
+
+        const awaitingIntent = makeFighter();
+        awaitingIntent.combat = { ...initialGameState.combat, active: true, phase: 'awaiting_intent' };
+        const locked = gameReducer(awaitingIntent, { type: 'ACTIVATE_RESOURCE', payload: 'actionSurge' });
+        expect(locked.character.classResources.actionSurge.used).toBe(0);
+    });
+
+    it('blocks rests during combat so resources cannot recharge mid-fight', () => {
+        const start = makeFighter({
+            classResources: {
+                secondWind: { used: 1, max: 1 },
+                actionSurge: { used: 1, max: 1 },
+            },
+        });
+        start.combat = { ...initialGameState.combat, active: true, phase: 'awaiting_player' };
+        const rested = gameReducer(start, { type: 'TAKE_REST', payload: 'short' });
+        expect(rested.character.classResources.actionSurge.used).toBe(1);
+        expect(rested.messages.at(-1).content).toContain('cannot take');
     });
 
     it('clears pending Action Surge on rest', () => {
@@ -98,7 +133,18 @@ describe('class resource activation', () => {
 
         const used = gameReducer(start, { type: 'ACTIVATE_RESOURCE', payload: 'secondWind' });
         const blocked = gameReducer(used, { type: 'ACTIVATE_RESOURCE', payload: 'secondWind' });
-        const nextRound = gameReducer(used, { type: 'ADVANCE_ROUND' });
+        const awaitingNarration = {
+            ...used,
+            combat: {
+                ...used.combat,
+                phase: 'awaiting_narration',
+                lastExchangeResult: { exchangeId: 'exchange-reset', kind: 'exchange', terminal: null },
+            },
+        };
+        const nextRound = gameReducer(awaitingNarration, {
+            type: 'COMPLETE_COMBAT_NARRATION',
+            payload: { exchangeId: 'exchange-reset' },
+        });
 
         expect(used.combat.bonusActionUsed).toBe(true);
         expect(used.character.classResources.secondWind.used).toBe(1);

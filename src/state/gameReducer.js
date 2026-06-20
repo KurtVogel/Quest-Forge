@@ -11,6 +11,24 @@ import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.j
 import { normalizeEquippedSlots } from '../engine/equipment.js';
 import { createInitialFronts, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
+import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
+import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange } from '../engine/combatExchange.js';
+
+function sanitizeStoredExchangeResult(result) {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+    const exchangeId = String(result.exchangeId || '').slice(0, 160);
+    if (!exchangeId) return null;
+    const kind = result.kind === 'opening' ? 'opening' : 'exchange';
+    const terminal = ['victory', 'defeat', 'dying', 'escaped'].includes(result.terminal) ? result.terminal : null;
+    return {
+        exchangeId,
+        kind,
+        round: Number.isInteger(result.round) ? Math.max(1, result.round) : 1,
+        terminal,
+        summary: String(result.summary || '').slice(0, 12000),
+        events: Array.isArray(result.events) ? result.events.slice(0, 100) : [],
+    };
+}
 
 /**
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
@@ -33,7 +51,45 @@ function validateSaveState(payload) {
         fronts: Array.isArray(payload.fronts) ? payload.fronts.map(f => normalizeFront(f)) : [],
         party: Array.isArray(payload.party) ? payload.party : [],
         currentLocation: payload.currentLocation || null,
-        combat: { ...initialGameState.combat, ...(payload.combat || {}) },
+        combat: (() => {
+            const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)
+                ? payload.combat
+                : {};
+            const merged = { ...initialGameState.combat, ...savedCombat };
+            // Loaded saves are untrusted input: re-validate enemy stats so a tampered or
+            // legacy save can't reintroduce an absurd attackBonus/damage/AC/HP after load.
+            const enemies = Array.isArray(merged.enemies)
+                ? merged.enemies.map(sanitizeLoadedEnemy).filter(Boolean)
+                : [];
+            const knownPhases = new Set(Object.values(COMBAT_PHASES));
+            let phase = merged.active && knownPhases.has(merged.phase)
+                ? merged.phase
+                : (merged.active ? COMBAT_PHASES.AWAITING_PLAYER : null);
+            // A saved in-flight LLM request cannot be resumed after reload. Return control to
+            // the player; no mechanics had committed yet.
+            if (phase === COMBAT_PHASES.AWAITING_INTENT) phase = COMBAT_PHASES.AWAITING_PLAYER;
+            const lastExchangeResult = sanitizeStoredExchangeResult(merged.lastExchangeResult);
+            if (phase === COMBAT_PHASES.AWAITING_NARRATION && !lastExchangeResult?.exchangeId) {
+                phase = COMBAT_PHASES.AWAITING_PLAYER;
+            }
+            const turnOrder = Array.isArray(merged.turnOrder) ? merged.turnOrder : [];
+            const playerIdx = turnOrder.findIndex(actor => actor?.type === 'player');
+            const currentTurn = phase === COMBAT_PHASES.AWAITING_PLAYER && playerIdx >= 0
+                ? playerIdx
+                : Math.max(0, Math.min(turnOrder.length - 1, Number.isInteger(merged.currentTurn) ? merged.currentTurn : 0));
+            return {
+                ...merged,
+                enemies,
+                turnOrder,
+                currentTurn,
+                phase,
+                openingActorIds: Array.isArray(merged.openingActorIds) ? merged.openingActorIds.map(String) : [],
+                resolvedExchangeIds: Array.isArray(merged.resolvedExchangeIds) ? merged.resolvedExchangeIds.slice(-20) : [],
+                surprise: ['player', 'enemies'].includes(merged.surprise) ? merged.surprise : 'none',
+                queuedExchange: normalizeCombatExchange(merged.queuedExchange),
+                lastExchangeResult,
+            };
+        })(),
         session: payload.session || initialGameState.session,
     };
 }
@@ -67,6 +123,7 @@ function systemMessage(content, extra = {}) {
 
 function isPlayerCombatTurn(combat) {
     if (!combat?.active) return false;
+    if (combat.phase) return combat.phase === COMBAT_PHASES.AWAITING_PLAYER;
     return combat.turnOrder?.[combat.currentTurn]?.type === 'player';
 }
 
@@ -148,19 +205,30 @@ function consumeItem(inventory, itemId, qty = 1) {
 }
 
 function normalizeCombatEnemy(enemy, index) {
-    const hp = Number.isFinite(enemy?.hp) ? enemy.hp : 20;
-    const ac = Number.isFinite(enemy?.ac) ? enemy.ac : 12;
+    const hp = clampEnemyHP(enemy?.hp);
+    const ac = clampEnemyAC(enemy?.ac);
     const initiative = rollDie(20);
+    // Engine-owned enemy turns need canonical attack stats. Accept them from the DM's
+    // combat_start when given (validated through the shared sanitizer — defense-in-depth even
+    // though the parser already ran); otherwise the roll resolver fills flat defaults at roll
+    // time, so older saves whose enemies lack these fields still work.
+    const attackProfile = normalizeEnemyAttackProfile(enemy);
+    // Drop the raw attackBonus/damage before spreading so an out-of-range value can't survive
+    // when the validated profile omits it; re-add only the sanitized fields.
+    const { attackBonus: _rawAb, damage: _rawDmg, ...rest } = enemy || {};
 
     return {
-        ...enemy,
+        ...rest,
         id: `enemy-${Date.now()}-${index}`,
-        name: enemy?.name || `Enemy ${index + 1}`,
+        name: String(enemy?.name || `Enemy ${index + 1}`).trim().slice(0, 100) || `Enemy ${index + 1}`,
         maxHp: hp,
         hp,
         ac,
+        ...attackProfile,
         initiative,
-        condition: enemy?.condition || 'healthy',
+        condition: enemyHealthCondition(hp, hp),
+        combatStatus: 'active',
+        defending: false,
     };
 }
 
@@ -214,15 +282,21 @@ export const initialGameState = {
     fronts: [], // Hidden campaign clocks/threats — injected into the DM prompt, never shown directly to the player
     party: [], // Companions currently traveling with the player
     currentLocation: null,
-        combat: {
-            active: false,
-            enemies: [],
-            turnOrder: [],
-            currentTurn: 0,
-            round: 1,
-            xpAwarded: false, // true once any XP is earned during a fight (gates the End-Combat fallback)
-            bonusActionUsed: false,
-        },
+    combat: {
+        active: false,
+        enemies: [],
+        turnOrder: [],
+        currentTurn: 0,
+        round: 1,
+        xpAwarded: false, // true once any XP is earned during a fight (gates the End-Combat fallback)
+        bonusActionUsed: false,
+        phase: null,
+        openingActorIds: [],
+        queuedExchange: null,
+        lastExchangeResult: null,
+        resolvedExchangeIds: [],
+        surprise: 'none',
+    },
     session: {
         id: null,
         name: '',
@@ -659,6 +733,12 @@ export function gameReducer(state, action) {
                     messages: [...state.messages, systemMessage('The dead cannot recover by resting.')],
                 };
             }
+            if (state.combat.active) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage('You cannot take a short or long rest during active combat.')],
+                };
+            }
 
             const isLong = action.payload === 'long';
             const charClass = CLASSES[state.character.class];
@@ -840,6 +920,25 @@ export function gameReducer(state, action) {
             const res = resources[resKey];
             if (!def || !res) return state;
 
+            if (resKey === 'actionSurge') {
+                const unableToAct = state.character.isDead
+                    || state.character.dying
+                    || state.character.lowLevelDefeat
+                    || (state.character.currentHP ?? 0) <= 0;
+                if (!state.combat.active || !isPlayerCombatTurn(state.combat) || unableToAct) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`**${def.label}** can only be activated while you can act on your combat turn.`)],
+                    };
+                }
+                if (state.character.pendingActionSurge) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`**${def.label}** is already active. Commit both action slots before trying to use it again.`)],
+                    };
+                }
+            }
+
             const usesBonusAction = def.actionType === 'bonus';
             if (usesBonusAction && state.combat.active && !isPlayerCombatTurn(state.combat)) {
                 return {
@@ -910,11 +1009,6 @@ export function gameReducer(state, action) {
                 messages: [...state.messages, systemMessage(`**${def.label}** — ${def.description}. ${tail}`)],
             };
         }
-
-        case 'CLEAR_ACTION_SURGE':
-            return state.character?.pendingActionSurge
-                ? { ...state, character: { ...state.character, pendingActionSurge: false } }
-                : state;
 
         case 'LEVEL_UP': {
             const result = awardExperience(state.character, action.payload?.bonusExp || 0, {
@@ -1427,7 +1521,8 @@ export function gameReducer(state, action) {
             // Track exactly the enemies the DM declared — no count or HP trimming. Encounter
             // difficulty for low-level solo play is steered by the system prompt instead, so
             // the narrative and the tracked combatants always stay 1:1.
-            const enemies = (action.payload?.enemies || []).map(normalizeCombatEnemy);
+            const enemies = (Array.isArray(action.payload?.enemies) ? action.payload.enemies : []).map(normalizeCombatEnemy);
+            if (enemies.length === 0) return state;
             const dexMod = state.character?.abilityScores
                 ? getModifier(state.character.abilityScores.dexterity)
                 : 0;
@@ -1448,10 +1543,36 @@ export function gameReducer(state, action) {
                 })),
                 ...enemies.map(e => ({ type: 'enemy', id: e.id, name: e.name, initiative: e.initiative })),
             ].sort((a, b) => b.initiative - a.initiative);
+            const playerIdx = turnOrder.findIndex(actor => actor.type === 'player');
+            const actorsBeforePlayer = playerIdx > 0 ? turnOrder.slice(0, playerIdx) : [];
+            const surprise = action.payload?.surprise;
+            const openingActors = surprise === 'player'
+                ? turnOrder.filter(actor => actor.type === 'enemy' || (actor.type === 'companion' && actorsBeforePlayer.includes(actor)))
+                : surprise === 'enemies'
+                    ? actorsBeforePlayer.filter(actor => actor.type !== 'enemy')
+                    : actorsBeforePlayer;
+            const openingActorIds = openingActors.map(actor => actor.id || actor.name);
+            const phase = openingActorIds.length > 0
+                ? COMBAT_PHASES.OPENING
+                : COMBAT_PHASES.AWAITING_PLAYER;
 
             return {
                 ...state,
-                combat: { active: true, enemies, turnOrder, currentTurn: 0, round: 1, xpAwarded: false, bonusActionUsed: false },
+                combat: {
+                    active: true,
+                    enemies,
+                    turnOrder,
+                    currentTurn: openingActorIds.length > 0 ? 0 : Math.max(0, playerIdx),
+                    round: 1,
+                    xpAwarded: false,
+                    bonusActionUsed: false,
+                    phase,
+                    openingActorIds,
+                    surprise: ['player', 'enemies'].includes(surprise) ? surprise : 'none',
+                    queuedExchange: normalizeCombatExchange(action.payload?.queuedExchange),
+                    lastExchangeResult: null,
+                    resolvedExchangeIds: [],
+                },
                 rollHistory: [...state.rollHistory, playerInitiativeRoll],
                 messages: [
                     ...state.messages,
@@ -1464,14 +1585,14 @@ export function gameReducer(state, action) {
             const llmAwardedXp = action.payload?.llmAwardedXp || false;
             let newState = {
                 ...state,
-                combat: { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1, xpAwarded: false, bonusActionUsed: false },
+                combat: { ...initialGameState.combat },
             };
 
             // Client-side XP fallback — only when NO XP was earned for this fight at all:
             // neither by the DM this turn (llmAwardedXp) nor at any point during it
             // (combat.xpAwarded). Prevents the manual "End Combat" button double-awarding.
             if (!llmAwardedXp && !state.combat.xpAwarded && state.character) {
-                const defeatedEnemies = (state.combat.enemies || []).filter(e => e.hp <= 0);
+                const defeatedEnemies = (state.combat.enemies || []).filter(e => !isEnemyActive(e));
                 const fallbackXp = estimateCombatExperience(defeatedEnemies);
 
                 if (fallbackXp > 0) {
@@ -1493,16 +1614,108 @@ export function gameReducer(state, action) {
 
         case 'FINALIZE_VICTORY': {
             if (!state.combat.active || !(state.combat.enemies || []).length) return state;
-            const allDefeated = state.combat.enemies.every(e => (e.hp ?? 0) <= 0 || e.condition === 'dead');
+            const allDefeated = state.combat.enemies.every(e => !isEnemyActive(e));
             if (!allDefeated) return state;
             return gameReducer(state, { type: 'END_COMBAT', payload: { autoVictory: true } });
         }
 
-        case 'RESOLVE_COMBAT_EXCHANGE': {
+        case 'BEGIN_COMBAT_INTENT':
+            if (!state.combat.active || state.combat.phase !== COMBAT_PHASES.AWAITING_PLAYER) return state;
+            return { ...state, combat: { ...state.combat, phase: COMBAT_PHASES.AWAITING_INTENT } };
+
+        case 'CANCEL_COMBAT_INTENT':
+            if (!state.combat.active || state.combat.phase !== COMBAT_PHASES.AWAITING_INTENT) return state;
+            return { ...state, combat: { ...state.combat, phase: COMBAT_PHASES.AWAITING_PLAYER } };
+
+        case 'APPLY_COMBAT_EXCHANGE': {
+            const payload = action.payload || {};
+            if (!state.combat.active || !payload.exchangeId || !payload.result) return state;
+            if ((state.combat.resolvedExchangeIds || []).includes(payload.exchangeId)) return state;
+            if (state.combat.phase === COMBAT_PHASES.AWAITING_NARRATION) return state;
+            if (state.combat.phase === COMBAT_PHASES.OPENING && payload.result.kind !== 'opening') return state;
+            if ([COMBAT_PHASES.AWAITING_PLAYER, COMBAT_PHASES.AWAITING_INTENT].includes(state.combat.phase) && payload.result.kind !== 'exchange') return state;
+
+            let next = state;
+            if (Number.isInteger(payload.deathSaveNatural)) {
+                next = gameReducer(next, { type: 'DEATH_SAVE_RESULT', payload: { die: payload.deathSaveNatural } });
+            }
+            if (Number.isFinite(payload.playerDamage) && payload.playerDamage > 0) {
+                next = gameReducer(next, { type: 'TAKE_DAMAGE', payload: payload.playerDamage });
+            }
+
+            const resultMessages = String(payload.result.summary || '')
+                .split('\n')
+                .map(line => line.trim())
+                .filter(Boolean)
+                .map(line => systemMessage(line));
+            const playerIdx = state.combat.turnOrder.findIndex(actor => actor.type === 'player');
+            const character = payload.consumeActionSurge && next.character?.pendingActionSurge
+                ? { ...next.character, pendingActionSurge: false }
+                : next.character;
+            return {
+                ...next,
+                character,
+                party: Array.isArray(payload.party) ? payload.party : next.party,
+                rollHistory: [...next.rollHistory, ...(Array.isArray(payload.rolls) ? payload.rolls : [])],
+                messages: [...next.messages, ...resultMessages],
+                combat: {
+                    ...next.combat,
+                    enemies: Array.isArray(payload.enemies) ? payload.enemies : next.combat.enemies,
+                    phase: COMBAT_PHASES.AWAITING_NARRATION,
+                    currentTurn: playerIdx >= 0 ? playerIdx : next.combat.currentTurn,
+                    lastExchangeResult: payload.result,
+                    queuedExchange: payload.result.kind === 'opening' ? next.combat.queuedExchange : null,
+                    openingActorIds: payload.result.kind === 'opening' ? next.combat.openingActorIds : [],
+                    resolvedExchangeIds: [...(next.combat.resolvedExchangeIds || []), payload.exchangeId].slice(-20),
+                },
+            };
+        }
+
+        case 'COMPLETE_COMBAT_NARRATION': {
+            if (!state.combat.active || state.combat.phase !== COMBAT_PHASES.AWAITING_NARRATION) return state;
+            const result = state.combat.lastExchangeResult;
+            if (!result?.exchangeId || result.exchangeId !== action.payload?.exchangeId) return state;
+            if (result.terminal === 'victory') {
+                return gameReducer(state, { type: 'END_COMBAT', payload: { autoVictory: true } });
+            }
+            if (result.terminal === 'defeat') {
+                return gameReducer(state, { type: 'END_COMBAT', payload: { defeat: true, llmAwardedXp: true } });
+            }
+            if (result.terminal === 'escaped') {
+                return gameReducer(state, { type: 'END_COMBAT', payload: { escaped: true, llmAwardedXp: true } });
+            }
+            const playerIdx = state.combat.turnOrder.findIndex(actor => actor.type === 'player');
+            const completedOpening = result.kind === 'opening';
+            return {
+                ...state,
+                combat: {
+                    ...state.combat,
+                    phase: COMBAT_PHASES.AWAITING_PLAYER,
+                    currentTurn: playerIdx >= 0 ? playerIdx : 0,
+                    round: completedOpening ? state.combat.round : state.combat.round + 1,
+                    bonusActionUsed: completedOpening ? state.combat.bonusActionUsed : false,
+                    openingActorIds: [],
+                    lastExchangeResult: null,
+                },
+            };
+        }
+
+        case 'REJECT_COMBAT_EXCHANGE': {
             if (!state.combat.active) return state;
-            const allDefeated = (state.combat.enemies || []).length > 0
-                && state.combat.enemies.every(e => (e.hp ?? 0) <= 0 || e.condition === 'dead');
-            return gameReducer(state, { type: allDefeated ? 'FINALIZE_VICTORY' : 'ADVANCE_ROUND' });
+            const playerIdx = state.combat.turnOrder.findIndex(actor => actor.type === 'player');
+            return {
+                ...state,
+                combat: {
+                    ...state.combat,
+                    phase: COMBAT_PHASES.AWAITING_PLAYER,
+                    currentTurn: playerIdx >= 0 ? playerIdx : state.combat.currentTurn,
+                    queuedExchange: null,
+                },
+                messages: [
+                    ...state.messages,
+                    systemMessage(`**Combat action not resolved:** ${action.payload?.reason || 'The action envelope was invalid.'} No one acted; try again.`),
+                ],
+            };
         }
 
         case 'UPDATE_ENEMY':
@@ -1512,48 +1725,17 @@ export function gameReducer(state, action) {
                     ...state.combat,
                     enemies: state.combat.enemies.map(e => {
                         if (e.id !== action.payload.id) return e;
-                        const updated = { ...e, ...action.payload };
-                        // Auto-compute condition from HP
-                        const hpPercent = updated.hp / updated.maxHp;
-                        if (updated.hp <= 0) updated.condition = 'dead';
-                        else if (hpPercent <= 0.25) updated.condition = 'critical';
-                        else if (hpPercent <= 0.5) updated.condition = 'bloodied';
-                        else updated.condition = 'healthy';
+                        // Allowlist: UPDATE_ENEMY may only change HP. Mechanical stats
+                        // (attackBonus/damage/ac/maxHp/name) are NOT mutable here, so a DM
+                        // enemy_updates payload can't inject "+99" or "50d100". Condition is
+                        // always re-derived from HP, never trusted from the payload.
+                        const newHp = clampEnemyCurrentHP(action.payload.hp, e.maxHp, e.hp);
+                        const updated = { ...e, hp: newHp };
+                        updated.condition = enemyHealthCondition(updated.hp, updated.maxHp);
                         return updated;
                     }),
                 },
             };
-
-        case 'NEXT_TURN': {
-            const nextTurn = state.combat.currentTurn + 1;
-            const orderLen = state.combat.turnOrder.length;
-            return {
-                ...state,
-                combat: {
-                    ...state.combat,
-                    currentTurn: nextTurn % orderLen,
-                    round: nextTurn >= orderLen ? state.combat.round + 1 : state.combat.round,
-                    bonusActionUsed: state.combat.turnOrder[nextTurn % orderLen]?.type === 'player'
-                        ? false
-                        : state.combat.bonusActionUsed,
-                },
-            };
-        }
-
-        case 'ADVANCE_ROUND': {
-            // After a full combat exchange (player + all enemies acted), advance the round
-            // and reset turn to the player so the indicator says "Your turn".
-            const playerIdx = state.combat.turnOrder.findIndex(f => f.type === 'player');
-            return {
-                ...state,
-                combat: {
-                    ...state.combat,
-                    currentTurn: playerIdx >= 0 ? playerIdx : 0,
-                    round: state.combat.round + 1,
-                    bonusActionUsed: false,
-                },
-            };
-        }
 
         // --- Auth ---
         case 'SET_USER':

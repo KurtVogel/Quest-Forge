@@ -86,6 +86,45 @@ describe('combat start initiative', () => {
         ]);
         expect(next.rollHistory[0]).toMatchObject({ description: 'Initiative', total: 14 });
         expect(next.messages.at(-1).content).toContain('Initiative');
+        expect(next.combat.phase).toBe('awaiting_player');
+    });
+
+    it('creates one Opening Initiative slot for actors who beat the player and queues the initiating action', () => {
+        rollQueue.push(18, 10, 9); // enemy, player +2 = 12, companion
+        const queuedExchange = {
+            playerSlots: [{ action: 'dodge', id: 'player-slot-1', description: '' }],
+            enemyIntents: [],
+            companionIntents: [],
+        };
+        const next = gameReducer(makeState(), {
+            type: 'START_COMBAT',
+            payload: {
+                enemies: [{ name: 'Goblin', hp: 7, ac: 13 }],
+                queuedExchange,
+            },
+        });
+        expect(next.combat.phase).toBe('opening');
+        expect(next.combat.openingActorIds).toEqual([next.combat.enemies[0].id]);
+        expect(next.combat.queuedExchange).toMatchObject({ playerSlots: [{ action: 'dodge' }] });
+        expect(next.combat.turnOrder[next.combat.currentTurn].type).toBe('enemy');
+    });
+
+    it('uses declared surprise only to adjust Opening Initiative slots', () => {
+        rollQueue.push(18, 10, 9); // enemy beats player
+        const enemiesSurprised = gameReducer(makeState(), {
+            type: 'START_COMBAT',
+            payload: { surprise: 'enemies', enemies: [{ name: 'Goblin', hp: 7, ac: 13 }] },
+        });
+        expect(enemiesSurprised.combat.openingActorIds).toEqual([]);
+        expect(enemiesSurprised.combat.phase).toBe('awaiting_player');
+
+        rollQueue.push(4, 20, 9); // enemy loses initiative, but surprised player grants its opening
+        const playerSurprised = gameReducer(makeState(), {
+            type: 'START_COMBAT',
+            payload: { surprise: 'player', enemies: [{ name: 'Goblin', hp: 7, ac: 13 }] },
+        });
+        expect(playerSurprised.combat.openingActorIds).toEqual([playerSurprised.combat.enemies[0].id]);
+        expect(playerSurprised.combat.phase).toBe('opening');
     });
 });
 
@@ -131,43 +170,215 @@ describe('combat victory finalization', () => {
         expect(next).toBe(state);
     });
 
-    it('resolves a combat exchange by advancing while enemies remain', () => {
+    it('awards victory XP when a foe flees instead of incentivizing execution', () => {
         const state = {
             ...makeState(),
             combat: {
+                ...initialGameState.combat,
                 active: true,
-                enemies: [{ id: 'enemy-1', name: 'Guard', hp: 5, maxHp: 11, ac: 14, condition: 'bloodied' }],
+                enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 7, maxHp: 7, ac: 13, condition: 'healthy', combatStatus: 'fled' }],
                 turnOrder: [{ type: 'player', name: 'Astra', initiative: 14 }],
-                currentTurn: 0,
-                round: 2,
-                xpAwarded: false,
             },
         };
+        const next = gameReducer(state, { type: 'FINALIZE_VICTORY' });
+        expect(next.combat.active).toBe(false);
+        expect(next.character.exp).toBeGreaterThan(0);
+    });
+});
 
-        const next = gameReducer(state, { type: 'RESOLVE_COMBAT_EXCHANGE' });
-
-        expect(next.combat.active).toBe(true);
-        expect(next.combat.round).toBe(3);
+describe('enemy-stat validation at every entry point', () => {
+    it('clamps HP/AC and rejects absurd attack stats at START_COMBAT', () => {
+        rollQueue.push(5, 10, 9); // enemy init, player init, companion init
+        const next = gameReducer(makeState(), {
+            type: 'START_COMBAT',
+            payload: { enemies: [{ name: 'Brute', hp: 9999, ac: 999, attackBonus: 99, damage: '50d100' }] },
+        });
+        const e = next.combat.enemies[0];
+        expect(e.hp).toBe(999);
+        expect(e.ac).toBe(12);
+        expect(e.attackBonus).toBeUndefined();
+        expect(e.damage).toBeUndefined();
     });
 
-    it('resolves a combat exchange by ending defeated combat without duplicate XP', () => {
+    it('UPDATE_ENEMY only changes HP and ignores injected mechanical stats', () => {
         const state = {
             ...makeState(),
-            character: { ...makeState().character, exp: 50 },
             combat: {
                 active: true,
-                enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' }],
-                turnOrder: [{ type: 'player', name: 'Astra', initiative: 14 }],
+                enemies: [{ id: 'e1', name: 'Goblin', hp: 10, maxHp: 10, ac: 13, attackBonus: 4, damage: '1d6+2', condition: 'healthy' }],
+                turnOrder: [],
                 currentTurn: 0,
-                round: 2,
-                xpAwarded: true,
+                round: 1,
             },
         };
+        const next = gameReducer(state, {
+            type: 'UPDATE_ENEMY',
+            payload: { id: 'e1', hp: 4, attackBonus: 99, damage: '50d100', ac: 999, name: 'Hacked' },
+        });
+        const e = next.combat.enemies[0];
+        expect(e.hp).toBe(4);
+        expect(e.condition).toBe('bloodied');
+        expect(e.attackBonus).toBe(4);
+        expect(e.damage).toBe('1d6+2');
+        expect(e.ac).toBe(13);
+        expect(e.name).toBe('Goblin');
+    });
 
-        const next = gameReducer(state, { type: 'RESOLVE_COMBAT_EXCHANGE' });
+    it('LOAD_GAME re-validates enemy stats from an untrusted save', () => {
+        const next = gameReducer(makeState(), {
+            type: 'LOAD_GAME',
+            payload: {
+                character: makeState().character,
+                inventory: [],
+                combat: {
+                    active: true,
+                    enemies: [{ id: 'e1', name: 'Brute', hp: 9999, maxHp: 9999, ac: 999, attackBonus: 99, damage: '50d100', condition: 'healthy' }],
+                    turnOrder: [],
+                    currentTurn: 0,
+                    round: 1,
+                },
+            },
+        });
+        const e = next.combat.enemies[0];
+        expect(e.hp).toBe(999);
+        expect(e.ac).toBe(12);
+        expect(e.attackBonus).toBeUndefined();
+        expect(e.damage).toBeUndefined();
+    });
 
-        expect(next.combat.active).toBe(false);
-        expect(next.character.exp).toBe(50);
-        expect(next.messages.some(m => m.content.includes('Experience gained'))).toBe(false);
+    it('preserves a defeated enemy at zero HP and safely ignores malformed enemy collections', () => {
+        const defeated = gameReducer(makeState(), {
+            type: 'LOAD_GAME',
+            payload: {
+                character: makeState().character,
+                combat: {
+                    active: true,
+                    enemies: [{ id: 'e1', name: 'Goblin', hp: 0, maxHp: 7, ac: 12, condition: 'healthy' }],
+                },
+            },
+        });
+        expect(defeated.combat.enemies[0]).toMatchObject({ hp: 0, maxHp: 7, condition: 'dead' });
+
+        const malformed = gameReducer(makeState(), {
+            type: 'LOAD_GAME',
+            payload: { character: makeState().character, combat: { active: true, enemies: { nope: true } } },
+        });
+        expect(malformed.combat.enemies).toEqual([]);
+    });
+
+    it('clamps UPDATE_ENEMY HP to an integer between zero and max HP', () => {
+        const base = {
+            ...makeState(),
+            combat: {
+                ...initialGameState.combat,
+                active: true,
+                enemies: [{ id: 'e1', name: 'Goblin', hp: 5, maxHp: 10, ac: 12, condition: 'bloodied' }],
+            },
+        };
+        const overhealed = gameReducer(base, { type: 'UPDATE_ENEMY', payload: { id: 'e1', hp: 999.8 } });
+        expect(overhealed.combat.enemies[0]).toMatchObject({ hp: 10, condition: 'healthy' });
+        const defeated = gameReducer(base, { type: 'UPDATE_ENEMY', payload: { id: 'e1', hp: -4 } });
+        expect(defeated.combat.enemies[0]).toMatchObject({ hp: 0, condition: 'dead' });
+    });
+});
+
+describe('atomic combat exchange lifecycle', () => {
+    function activeState(overrides = {}) {
+        return {
+            ...makeState(),
+            character: {
+                ...makeState().character,
+                pendingActionSurge: true,
+                classResources: { actionSurge: { used: 1, max: 1 } },
+            },
+            combat: {
+                ...initialGameState.combat,
+                active: true,
+                phase: 'awaiting_player',
+                round: 2,
+                enemies: [{ id: 'e1', name: 'Goblin', hp: 7, maxHp: 7, ac: 12, condition: 'healthy', combatStatus: 'active' }],
+                turnOrder: [{ type: 'player', name: 'Astra', initiative: 12 }],
+                currentTurn: 0,
+            },
+            ...overrides,
+        };
+    }
+
+    it('commits HP, rolls, phase, and Action Surge once by exchangeId', () => {
+        const payload = {
+            exchangeId: 'exchange-1',
+            enemies: [{ id: 'e1', name: 'Goblin', hp: 4, maxHp: 7, ac: 12, condition: 'bloodied', combatStatus: 'active' }],
+            party: makeState().party,
+            playerDamage: 3,
+            deathSaveNatural: null,
+            rolls: [{ id: 'roll-1', total: 17 }],
+            consumeActionSurge: true,
+            result: { exchangeId: 'exchange-1', kind: 'exchange', round: 2, terminal: null, summary: '**Astra attacks Goblin** — Hit.' },
+        };
+        const committed = gameReducer(activeState(), { type: 'APPLY_COMBAT_EXCHANGE', payload });
+        expect(committed.character.currentHP).toBe(9);
+        expect(committed.character.pendingActionSurge).toBe(false);
+        expect(committed.combat.phase).toBe('awaiting_narration');
+        expect(committed.combat.enemies[0].hp).toBe(4);
+        expect(committed.rollHistory).toHaveLength(1);
+
+        const duplicate = gameReducer(committed, { type: 'APPLY_COMBAT_EXCHANGE', payload });
+        expect(duplicate).toBe(committed);
+        expect(duplicate.character.currentHP).toBe(9);
+        expect(duplicate.rollHistory).toHaveLength(1);
+    });
+
+    it('locks an in-flight intent and safely unlocks it without committing mechanics', () => {
+        const start = activeState();
+        const locked = gameReducer(start, { type: 'BEGIN_COMBAT_INTENT' });
+        expect(locked.combat.phase).toBe('awaiting_intent');
+        expect(locked.character.currentHP).toBe(start.character.currentHP);
+        const cancelled = gameReducer(locked, { type: 'CANCEL_COMBAT_INTENT' });
+        expect(cancelled.combat.phase).toBe('awaiting_player');
+        expect(cancelled.combat.round).toBe(start.combat.round);
+    });
+
+    it('advances the round only after matching narration and ignores duplicate acknowledgments', () => {
+        const committed = {
+            ...activeState(),
+            combat: {
+                ...activeState().combat,
+                phase: 'awaiting_narration',
+                lastExchangeResult: { exchangeId: 'exchange-2', kind: 'exchange', terminal: null },
+            },
+        };
+        const wrong = gameReducer(committed, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'wrong' } });
+        expect(wrong).toBe(committed);
+
+        const complete = gameReducer(committed, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'exchange-2' } });
+        expect(complete.combat.phase).toBe('awaiting_player');
+        expect(complete.combat.round).toBe(3);
+        const duplicate = gameReducer(complete, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'exchange-2' } });
+        expect(duplicate).toBe(complete);
+    });
+
+    it('keeps a queued initiating action through Opening Initiative narration', () => {
+        const queued = { playerSlots: [{ action: 'dodge' }], enemyIntents: [], companionIntents: [] };
+        const opening = activeState({
+            combat: {
+                ...activeState().combat,
+                phase: 'opening',
+                queuedExchange: queued,
+                openingActorIds: ['e1'],
+            },
+        });
+        const committed = gameReducer(opening, {
+            type: 'APPLY_COMBAT_EXCHANGE',
+            payload: {
+                exchangeId: 'opening-1', enemies: opening.combat.enemies, party: opening.party,
+                playerDamage: 0, rolls: [], consumeActionSurge: false,
+                result: { exchangeId: 'opening-1', kind: 'opening', terminal: null, summary: 'Goblin misses.' },
+            },
+        });
+        expect(committed.combat.queuedExchange).toEqual(queued);
+        const narrated = gameReducer(committed, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'opening-1' } });
+        expect(narrated.combat.phase).toBe('awaiting_player');
+        expect(narrated.combat.queuedExchange).toEqual(queued);
+        expect(narrated.combat.round).toBe(2);
     });
 });

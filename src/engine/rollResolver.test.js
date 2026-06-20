@@ -146,7 +146,7 @@ describe('combat roll-batch safeguard', () => {
         });
     });
 
-    it('actually rolls a repaired player attack before resolving the enemy attack', async () => {
+    it('never runs repaired legacy batches during active combat', async () => {
         rollQueue.push(12, 12);
         const dispatch = vi.fn();
         const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [] });
@@ -164,14 +164,9 @@ describe('combat roll-batch safeguard', () => {
             }
         );
 
-        expect(outcome).toEqual({ resolved: true });
-        const rollMessages = dispatch.mock.calls
-            .filter(([action]) => action.type === 'ADD_MESSAGE' && action.payload.role === 'system')
-            .map(([action]) => action.payload.content);
-        const playerIndex = rollMessages.findIndex(message => message.includes('Vesa sword strike'));
-        const enemyIndex = rollMessages.findIndex(message => message.includes('Chief Kraul'));
-        expect(playerIndex).toBeGreaterThan(-1);
-        expect(enemyIndex).toBeGreaterThan(playerIndex);
+        expect(outcome).toEqual({ resolved: false, requiresCombatExchange: true });
+        expect(dispatch).not.toHaveBeenCalled();
+        expect(sendToLLM).not.toHaveBeenCalled();
     });
 
     it('does not treat a damage roll as the player attack that must precede an enemy', () => {
@@ -219,6 +214,16 @@ describe('combat roll-batch safeguard', () => {
 
         expect(result).toEqual({ rolls: [], repaired: false, blocked: true });
     });
+
+    it.each(['I cut at the chief', 'I hew the chief', 'I thrust at the chief', 'I chop the chief down', 'I lunge at the chief'])(
+        'recognizes the attack verb in %p and restores the omitted player attack',
+        (playerAction) => {
+            const enemyRoll = { type: 'npc_attack', attackerId: 'chief', target: 'player', modifier: 4, damage: '1d8+2' };
+            const result = repairCombatRollBatch([enemyRoll], { combat, character: makeCharacter(), playerAction });
+            expect(result.repaired).toBe(true);
+            expect(result.rolls[0]).toMatchObject({ type: 'attack_roll', skill: 'attack', target: 'chief' });
+        }
+    );
 
     it('leaves a complete batch unchanged', () => {
         const complete = [
@@ -278,12 +283,12 @@ describe('combat roll-batch safeguard', () => {
             }
         );
 
-        expect(outcome).toEqual({ resolved: false });
+        expect(outcome).toEqual({ resolved: false, requiresCombatExchange: true });
         expect(sendToLLM).not.toHaveBeenCalled();
-        expect(messagesFrom(dispatch)).toContain('Enemy actions were not rolled');
+        expect(dispatch).not.toHaveBeenCalled();
     });
 
-    it('explains a duplicate enemy attack without claiming Action Surge was used', async () => {
+    it('does not process a chained legacy enemy attack in active combat', async () => {
         const dispatch = vi.fn();
         const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [] });
 
@@ -297,14 +302,65 @@ describe('combat roll-batch safeguard', () => {
             }
         );
 
-        const safeguard = messagesFrom(dispatch);
-        expect(safeguard).toContain('Each enemy can attack at most once in a combat exchange');
-        expect(safeguard).not.toContain('Action Surge');
-        expect(sendToLLM).toHaveBeenCalledWith(
-            expect.not.stringContaining('Action Surge'),
-            undefined,
-            { suppressHpEvents: true }
+        expect(dispatch).not.toHaveBeenCalled();
+        expect(sendToLLM).not.toHaveBeenCalled();
+    });
+});
+
+describe('active-combat isolation from the legacy roll resolver', () => {
+    const playerTurnCombat = (enemies) => ({
+        active: true,
+        round: 1,
+        currentTurn: 0,
+        turnOrder: [{ id: 'player', type: 'player', name: 'Testo', initiative: 18 }],
+        enemies,
+    });
+
+    it('rejects all legacy requested_rolls during active combat', async () => {
+        const dispatch = vi.fn();
+        const sendToLLM = vi.fn();
+        const combat = playerTurnCombat([
+            { id: 'gob', name: 'Goblin', hp: 7, maxHp: 7, ac: 13, attackBonus: 4, damage: '1d6+2', condition: 'healthy' },
+        ]);
+        const outcome = await handleRequestedRolls(
+            [
+                { type: 'attack_roll', skill: 'attack', target: 'gob', dc: 13 },
+                { type: 'npc_attack', attackerId: 'gob', target: 'player', modifier: 99, damage: '50d100' },
+            ],
+            {
+                getState: () => ({ character: makeCharacter(), inventory: [], combat, party: [] }),
+                dispatch,
+                sendToLLM,
+                playerAction: 'I attack the goblin',
+            }
         );
+        expect(outcome).toEqual({ resolved: false, requiresCombatExchange: true });
+        expect(sendToLLM).not.toHaveBeenCalled();
+        expect(dispatch).not.toHaveBeenCalled();
+    });
+});
+
+describe('player attack uses live enemy AC, not the DM dc', () => {
+    it('hits an AC-11 foe on a roll that beats AC but not the bogus DM dc', () => {
+        rollQueue.push(10, 3); // attack die 10 (+bonus beats AC 11), damage die
+        const enemy = { id: 'gob', name: 'Goblin', hp: 7, maxHp: 7, ac: 11, condition: 'healthy' };
+        const inventory = [{ type: 'weapon', category: 'martialMelee', name: 'Longsword', damage: '1d8', equipped: true }];
+        const { results } = runWithContext(
+            [{ type: 'attack_roll', skill: 'attack', target: 'gob', dc: 99, description: 'Strike' }],
+            { combat: { enemies: [enemy] }, inventory }
+        );
+        // Resolved against the enemy's real AC (11), not the DM's dc: 99.
+        expect(results[0].dc).toBe(11);
+        expect(results[0].success).toBe(true);
+    });
+
+    it('falls back to roll.dc when the attack has no tracked enemy target', () => {
+        rollQueue.push(20); // arbitrary
+        const { results } = runWithContext(
+            [{ type: 'attack_roll', skill: 'attack', dc: 15, description: 'Smash the door' }],
+            { combat: { enemies: [] } }
+        );
+        expect(results[0].dc).toBe(15);
     });
 });
 
@@ -539,8 +595,8 @@ describe('fighter Champion archetype', () => {
     });
 });
 
-describe('post-roll combat follow-up prompt', () => {
-    it('tells the DM to end combat with XP instead of requesting more rolls when all tracked enemies are down', async () => {
+describe('legacy combat roll isolation', () => {
+    it('does not ask the DM to close combat from legacy attack rolls', async () => {
         rollQueue.push(18, 6);
         const enemy = { id: 'enemy-1', name: 'Goblin', hp: 6, maxHp: 6, ac: 13, condition: 'healthy' };
         const dispatch = vi.fn();
@@ -560,10 +616,7 @@ describe('post-roll combat follow-up prompt', () => {
             }
         );
 
-        expect(sendToLLM).toHaveBeenCalledOnce();
-        const followUpPrompt = sendToLLM.mock.calls[0][0];
-        expect(followUpPrompt).toContain('If the roll results show every tracked enemy is DOWNED');
-        expect(followUpPrompt).toContain('emit combat_end: true plus exp_awarded');
-        expect(followUpPrompt).toContain('do NOT request more combat rolls');
+        expect(sendToLLM).not.toHaveBeenCalled();
+        expect(dispatch).not.toHaveBeenCalled();
     });
 });

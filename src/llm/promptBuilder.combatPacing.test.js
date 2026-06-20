@@ -53,26 +53,23 @@ function prompt(overrides = {}) {
 }
 
 describe('combat pacing prompt contract', () => {
-    it('asks the DM to batch a whole combat exchange instead of splitting enemy turns', () => {
+    it('makes the full exchange engine-owned and limits the DM to intent', () => {
         const text = prompt();
 
-        expect(text).toContain('request the whole exchange in ONE JSON');
-        expect(text).toContain('Resolve a whole exchange in ONE response');
-        expect(text).toContain('Never return an enemy-only roll batch');
-        expect(text).toContain('MUST begin with their attack_roll entry');
-        expect(text).toContain('Each living enemy gets at most ONE response attack');
-        expect(text).toContain('Action Surge adds player attacks only');
-        expect(text).toContain('do not split ordinary enemy counterattacks into a second avoidable roll request');
-        expect(text).not.toContain('YOU then narrate enemy turns');
+        expect(text).toContain('COMBAT INTENT, NEVER COMBAT DICE');
+        expect(text).toContain('Every committed player turn includes exactly one `combat_exchange`');
+        expect(text).toContain('Never emit `attack_roll`, `companion_attack`, or `npc_attack`');
+        expect(text).toContain('player slots, companions, then one intent per still-active foe');
+        expect(text).toContain('A defeated foe cannot act');
+        expect(text).toContain('A question or clarification is not a committed action');
     });
 
-    it('tells the DM not to duplicate engine-applied HP and to pair victory with XP', () => {
+    it('keeps HP, terminal state, and XP entirely engine-owned', () => {
         const text = prompt();
 
-        expect(text).toContain('do NOT also send enemy_updates or damage_taken');
-        expect(text).toContain('Do NOT repeat those HP changes with enemy_updates');
-        expect(text).toContain('combat_end: true plus exp_awarded');
-        expect(text).toContain('Include "exp_awarded" in that same victory response');
+        expect(text).toContain('HP, criticals, victory/defeat, XP, Action Surge consumption, and round advancement are engine-owned');
+        expect(text).toContain('Never emit `combat_end`, `exp_awarded`, `damage_taken`, or `enemy_updates`');
+        expect(text).toContain('Never invent a retaliation, counterattack, extra hit');
     });
 
     it('makes Action Surge dice batching explicit', () => {
@@ -87,8 +84,8 @@ describe('combat pacing prompt contract', () => {
         });
 
         expect(text).toContain('## ACTION SURGE ACTIVE');
-        expect(text).toContain('put all of those rolls in the same requested_rolls block');
-        expect(text).toContain('Do not split Action Surge into a second DM response');
+        expect(text).toContain('exactly two player_slots in one combat_exchange');
+        expect(text).toContain('clears this state only after both validated slots commit successfully');
     });
 
     it('frames Second Wind as bonus-action recovery with the main action still available', () => {

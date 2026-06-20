@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getCombatStatus } from '../../engine/combatStatus.js';
+import { COMBAT_PHASES, isEnemyActive } from '../../engine/combatExchange.js';
 import './Combat.css';
 
 export default function CombatPanel() {
@@ -15,7 +16,7 @@ export default function CombatPanel() {
     const currentFighter = combat.turnOrder[combat.currentTurn];
     const isPlayerTurn = currentFighter?.type === 'player';
     const isCompanionTurn = currentFighter?.type === 'companion';
-    const aliveEnemies = combat.enemies.filter(e => e.condition !== 'dead');
+    const aliveEnemies = combat.enemies.filter(isEnemyActive);
     const combatStatus = getCombatStatus({
         character: state.character,
         combat,
@@ -31,7 +32,7 @@ export default function CombatPanel() {
                 <div className="combat-header">
                     <h3 className="combat-title">Combat — Round {combat.round}</h3>
                     <div className="combat-header-actions">
-                        {aliveEnemies.length === 0 && (
+                        {aliveEnemies.length === 0 && combat.phase !== COMBAT_PHASES.AWAITING_NARRATION && (
                             <button
                                 className="combat-end-btn"
                                 onClick={() => dispatch({ type: 'END_COMBAT' })}
@@ -94,7 +95,13 @@ export default function CombatPanel() {
 
                         {/* Current Turn Indicator */}
                         <div className={`combat-turn ${isPlayerTurn ? 'player-turn' : 'enemy-turn'}`}>
-                            {isPlayerTurn
+                            {combat.phase === COMBAT_PHASES.OPENING
+                                ? 'Opening Initiative — faster actors resolve once before your first turn.'
+                                : combat.phase === COMBAT_PHASES.AWAITING_INTENT
+                                    ? 'Action committed — awaiting validated intent.'
+                                : combat.phase === COMBAT_PHASES.AWAITING_NARRATION
+                                    ? 'Exchange resolved — awaiting its narration.'
+                                    : isPlayerTurn
                                 ? 'Your turn — describe your action in chat.'
                                 : isCompanionTurn
                                     ? `${currentFighter?.name} is ready — direct them in chat or let the DM choose their move.`
@@ -115,6 +122,9 @@ export default function CombatPanel() {
 
 function EnemyCard({ enemy }) {
     const hpPercent = Math.max(0, (enemy.hp / enemy.maxHp) * 100);
+    const displayStatus = enemy.combatStatus && enemy.combatStatus !== 'active'
+        ? enemy.combatStatus
+        : enemy.condition;
 
     const conditionColors = {
         healthy: '#4caf50',
@@ -124,11 +134,11 @@ function EnemyCard({ enemy }) {
     };
 
     return (
-        <div className={`enemy-card ${enemy.condition}`}>
+        <div className={`enemy-card ${displayStatus}`}>
             <div className="enemy-info">
                 <span className="enemy-name">{enemy.name}</span>
-                <span className={`enemy-condition ${enemy.condition}`}>
-                    {enemy.condition}
+                <span className={`enemy-condition ${displayStatus}`}>
+                    {displayStatus}
                 </span>
             </div>
             <div className="enemy-hp-bar-container">
@@ -136,13 +146,13 @@ function EnemyCard({ enemy }) {
                     className="enemy-hp-bar"
                     style={{
                         width: `${hpPercent}%`,
-                        backgroundColor: conditionColors[enemy.condition],
+                        backgroundColor: conditionColors[enemy.condition] || '#777',
                     }}
                 />
             </div>
             <div className="enemy-stats">
                 <span className="enemy-hp-text">
-                    {enemy.condition === 'dead' ? 'Dead' : `${enemy.hp}/${enemy.maxHp} HP`}
+                    {enemy.condition === 'dead' ? 'Dead' : displayStatus === 'fled' ? 'Fled' : displayStatus === 'surrendered' ? 'Surrendered' : `${enemy.hp}/${enemy.maxHp} HP`}
                 </span>
                 <span className="enemy-ac">AC {enemy.ac}</span>
             </div>

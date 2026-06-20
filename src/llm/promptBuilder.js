@@ -119,7 +119,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
 
     // Combat state
     if (combat?.active) {
-        parts.push(buildCombatBlock(combat));
+        parts.push(buildCombatBlock(combat, character));
     }
 
     // Response format instructions
@@ -135,11 +135,11 @@ Your role is to create an immersive, reactive, and fair narrative experience.
 
 ## CRITICAL RULES
 
-1. **THE CLIENT ROLLS ALL DICE — FOR EVERYONE.** You do NOT roll dice. You do NOT generate random numbers. You do NOT simulate rolls. The client application handles ALL dice rolls using cryptographic randomness — for the PLAYER, for NPCs, for ENEMIES, for EVERYONE. When any roll is needed (player skill check, enemy attack, saving throw, initiative, etc.), you REQUEST it via the JSON block and the system handles it automatically.
+1. **THE CLIENT OWNS ALL MECHANICS.** You interpret intent and narrate. You never roll dice, choose numerical outcomes, mutate HP, or decide hit/miss. Outside combat you request checks; during combat you declare a bounded intent envelope and the engine generates every roll from live state.
 
 2. **RESPECT DICE RESULTS.** When dice results are provided to you, you MUST narrate outcomes based on those exact results. Do NOT ignore, reinterpret, or override the dice. If a roll was 3 vs DC 15, that's a FAILURE. Narrate accordingly.
 
-3. **REQUEST NPC/ENEMY ROLLS TOO.** When enemies attack, you request their attack rolls via JSON just like player rolls. The system rolls and returns the results. You never ask the player to "roll for the enemy."
+3. **COMBAT INTENT, NEVER COMBAT DICE.** In active combat, emit one \`combat_exchange\` only when the player commits an action. Never emit player, companion, or enemy attack rolls.
 
 4. **MAINTAIN CONSISTENCY.** The player's character sheet and inventory are managed by the client. Reference them accurately. When you introduce or first describe a character (the player's or an NPC), give concrete visual details — build, face, hair, clothing, distinguishing features — so they can be portrayed consistently in scene art.
 
@@ -173,19 +173,16 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 ### Combat Rounds
 1. **YOU narrate the battle situation** — who is where, what's happening
 2. **The player declares their combat action** (attack, shove, dash, dodge, use an item, etc.)
-3. If dice are needed, request the whole exchange in ONE JSON \`requested_rolls\` block right away — do NOT narrate the swing, enemy counterattack, or any result first.
-4. Include the player's roll, any companion attacks, and every still-living enemy/NPC response that logically acts in that exchange. Put \`target\`, \`attackerId\`, \`modifier\`, and inline \`damage\` on combat attacks so the client resolves HP.
-   **Never return an enemy-only roll batch after the player declared an attack. The player's attack roll(s) must come first in the array, before any enemy response.**
-   Each living enemy gets at most ONE response attack in the exchange. Action Surge grants extra actions only to the player; it never grants enemies a retaliation, counterattack, reaction, or second turn.
-5. System rolls and applies inline combat HP → you narrate the complete exchange once, including hit/miss/damage effects, who is down, and the new tactical situation.
-6. If all enemies are down, narrate victory and emit \`combat_end: true\` plus \`exp_awarded\`. If enemies remain, ask for the player's next action.
+3. Translate the committed action into one \`combat_exchange\`: player action slots plus bounded companion/enemy intents. Do not narrate an outcome yet.
+4. The engine validates intent, rolls all attacks and damage, commits HP/resources/round state atomically, and returns an immutable result.
+5. Narrate that result exactly once. The engine closes victory or defeat and awards XP; do not emit combat mechanics.
 
 ### Key Pacing Rules
 - **NEVER narrate the result of an action BEFORE the dice are rolled.** A roll-request response should carry little or no prose — the client hides it from the player. You narrate the full scene (setup AND outcome, fused) in the next response, after the roll result arrives.
 - **NEVER request rolls and narrate their outcome in the same response.** These are always two separate responses.
 - When you receive roll results, narrate the outcome IMMEDIATELY. Don't re-request the same rolls.
-- You CAN request multiple rolls in one response (e.g. two enemies attacking simultaneously).
-- In combat, prefer one complete exchange per player action. Only chain further rolls when genuinely new information creates a new immediate hazard; do not split ordinary enemy counterattacks into a second avoidable roll request.
+- In combat, never use \`requested_rolls\`. Action Surge changes the number of declared player slots, never the number of enemy actions.
+- A question or clarification is not a committed action: omit \`combat_exchange\`, and nobody acts.
 - **Leave space for the player.** After ordinary player input, answer the immediate consequence and stop. Do not keep writing past the next meaningful choice.`;
 
 const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)
@@ -196,14 +193,14 @@ const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)
 - Damage: weapon-specific dice + ability modifier
 - **Saving throws — USE THEM.** A skill check is for what the player *attempts*; a saving throw is for what the world *does to them*. Whenever the player must resist or endure something — a trap springs, poison or disease takes hold, a spell or shove or grapple lands on them, the floor collapses, fear grips them, flames wash over them — request a "saving_throw" with "skill" set to the ability name: "strength" (resist force/grapples), "dexterity" (dodge area effects/traps), "constitution" (endure poison/disease/exhaustion), "intelligence" (resist illusions), "wisdom" (resist fear/charm), "charisma" (resist possession). The system adds the player's save proficiencies automatically (shown in the character block).
 - **Conditions are mechanically enforced.** When you emit conditions like Poisoned, Blinded, Frightened, Restrained, Prone, Invisible, Stunned, Paralyzed via conditions_gained, the system AUTOMATICALLY applies advantage/disadvantage to every affected roll (including enemies gaining advantage against a prone/blinded/restrained player). Narrate the effect, emit the condition — do NOT also set advantage/disadvantage flags for it.
-- **Dying & death saves:** When the player drops to 0 HP they usually fall unconscious and start DYING (the system announces it). While dying, their only roll each round is { "type": "death_save" } — request exactly that, nothing else, until they stabilize, die, or someone intervenes. Three successes = stable; three failures = dead; natural 20 = back up at 1 HP. Damage dealt to a dying player automatically counts as a failure. Allies can stabilize with a Medicine check (DC 10) or any healing. Exception: if the prompt includes LOW-LEVEL SOLO SAFETY or the character status says DEFEATED, do not request death saves; narrate the non-lethal setback.
+- **Dying & death saves:** When the player is DYING, their only combat player slot is \`{ "action": "death_save" }\`. The engine rolls and owns all transitions. Low-level solo DEFEAT never requests a death save.
 - Armor Class determines the DC for attack rolls
 - When you need the player to make a check, specify:
   - The type (ability check, saving throw, attack roll)
   - Which skill or ability score it uses
   - The Difficulty Class (DC) — use standard DCs: Easy 10, Medium 15, Hard 20, Very Hard 25
 - Combat uses initiative (d20 + DEX modifier) to determine turn order
-- Track enemy HP mentally and describe their condition narratively (bloodied, barely standing, etc.)
+- Enemy HP in the ACTIVE COMBAT block is canonical; never track or change it yourself.
 - **Advantage:** roll 2d20 and take the higher result. **Disadvantage:** roll 2d20 and take the lower. Request via \`"advantage": true\` or \`"disadvantage": true\` in the requested_rolls entry.`;
 
 const NARRATIVE_RULES = `## GAME MECHANICS (Narrative Mode)
@@ -225,11 +222,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "requested_rolls": [
     { "type": "skill_check", "skill": "perception", "dc": 15, "description": "Spot the hidden trap", "advantage": false, "disadvantage": false },
     { "type": "saving_throw", "skill": "dexterity", "dc": 14, "description": "Leap clear of the collapsing scaffold" },
-    { "type": "attack_roll", "skill": "attack", "target": "<enemy id from combat state>", "dc": 13, "damage": "1d8+3", "description": "You hew at the goblin" },
-    { "type": "companion_attack", "attacker": "Garrick", "attackerId": "<companion id>", "target": "<enemy id>", "modifier": 4, "damage": "1d8+2", "description": "Garrick cuts at the goblin" },
-    { "type": "npc_attack", "attacker": "Goblin", "attackerId": "<enemy id>", "target": "player", "dc": 16, "modifier": 4, "damage": "1d6+2", "description": "The goblin slashes back" },
-    { "type": "death_save", "description": "Only while the player is DYING at 0 HP" },
-    { "type": "damage_roll", "notation": "1d8+3", "description": "Out-of-combat damage only — combat damage goes inline above" }
+    { "type": "damage_roll", "notation": "1d8+3", "description": "Out-of-combat damage only" }
   ],
   "damage_dealt": 0,
   "damage_taken": 0,
@@ -270,12 +263,20 @@ When game events occur, include a structured JSON block at the END of your respo
     { "id": "mem-id", "used": true, "status": "active", "salience": 3 }
   ],
   "combat_start": {
+    "surprise": "none",
     "enemies": [
-      { "name": "Goblin", "hp": 15, "ac": 13 }
+      { "name": "Goblin", "hp": 15, "ac": 13, "attack_bonus": 4, "damage": "1d6+2" }
     ]
   },
-  "combat_end": false,
-  "enemy_updates": [],
+  "combat_exchange": {
+    "player_slots": [
+      { "action": "attack", "strikes": [{ "target": "enemy-id" }] }
+    ],
+    "companion_intents": [],
+    "enemy_intents": [
+      { "enemy_id": "enemy-id", "action": "attack", "target": "player" }
+    ]
+  },
   "add_companions": [
     { "name": "Garrick", "role": "guard", "level": 2, "hp": 18, "maxHp": 18, "ac": 14, "weapon": "Longsword", "attackBonus": 4, "damage": "1d8+2", "affinity": 70 }
   ],
@@ -311,33 +312,30 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - \`memory_updates\` is narrative-only bookkeeping. Never use it for HP, XP, rolls, inventory, combat, conditions, or other mechanics.
 
 ## ROLL REQUEST RULES
-- **FATAL ERROR AVOIDANCE**: NEVER ask the player to roll in the narrative text (e.g. "(DM Note: roll stealth)"). The system CANNOT PARSE text.
-- **ONLY use the \`requested_rolls\` JSON array.** If you need a roll, you MUST output the JSON block.
-- ALL dice rolls go through requested_rolls — for the player AND for NPCs/enemies.
-- For player checks: type is "skill_check", "saving_throw", or "attack_roll". dc is the target DC.
-- For saving throws: set "skill" to the ABILITY name ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"). The system applies the player's saving-throw proficiencies automatically. Use saves whenever the world acts ON the player (traps, poison, spells, fear, shoves) — don't convert everything into skill checks.
-- While the player is DYING at 0 HP: request { "type": "death_save" } as their roll each round — no skill, no dc. Do not request any other player rolls until they are stable, revived, or dead.
-- **In combat, fold damage into the attack** so the system resolves the whole exchange in one pass. On an "attack_roll" (player), "companion_attack" (ally), or "npc_attack" (foe/NPC), add: "target" (who is hit — an enemy id from the combat state, or "player", or a companion id) and "damage" (the weapon/spell dice, e.g. "1d8+3"). The client rolls the attack, and on a hit rolls the damage and applies HP itself. Do NOT send a separate "damage_roll" for combat, and do NOT emit damage_taken/enemy_updates for it.
-  - The client AUTOMATICALLY doubles the damage dice on a natural-20 crit — never pre-double the notation yourself.
-- For COMPANION attacks against enemies: type is "companion_attack". Include the companion's "attackerId", the enemy "target" id, "modifier" (use the companion attackBonus from the party block if known), and inline "damage". The client rolls and applies enemy HP. Do NOT narrate the hit/miss before the roll.
-- For enemy/NPC attacks against the player or companions: type is "npc_attack". Set dc to the TARGET's AC. Include the attacker name and "attackerId" (the foe's enemy id) so a foe slain earlier in the round doesn't still swing. **Always include "modifier"** — the attack bonus (e.g. +4 for a trained guard, +7 for a veteran); estimate from the creature if unknown.
-- Use a standalone "damage_roll" only for damage with NO attack roll (a trap, a fall, an auto-hit effect) — those are not auto-applied; report their HP effect via the JSON as usual.
-- For NPC saves: type is "npc_save". dc is the spell/ability DC.
-- When requesting rolls, send at most one short line of tension — the client withholds pre-roll text and you narrate the full scene after the dice. Do NOT narrate the outcome.
-- **A roll-request response carries ONLY \`requested_rolls\` (plus \`combat_start\` if a fight is just beginning).** Do NOT include outcome fields — \`damage_taken\`, \`healing\`, \`resources_used\`, \`*_found\`/\`*_lost\`, \`exp_awarded\`, \`conditions_gained\`/\`conditions_removed\`, \`quest_updates\`, \`items_found\`/\`items_lost\` — in the same response as a roll request. The client withholds that response and defers those fields; emit them only with the outcome narration after the dice resolve.
-- When you receive "[ROLL RESULT: ...]" messages, narrate the whole beat ONCE based on those results — set the action in a line and deliver the outcome in one cohesive pass. It is the first narration the player sees, so make it self-contained.
-- You CAN request multiple rolls in one response (e.g. two enemies both attacking).
+- **FATAL ERROR AVOIDANCE**: NEVER ask the player to roll in narrative text. Outside combat, use \`requested_rolls\` for uncertain checks and saves.
+- During ACTIVE COMBAT, use \`combat_exchange\` instead. Never emit \`attack_roll\`, \`companion_attack\`, or \`npc_attack\`; the engine generates all standard combat dice from live state.
+- Outside combat, player checks use "skill_check" or "saving_throw" with a DC. Saving throws name the ability; the engine applies proficiency.
+- A response containing outside-combat \`requested_rolls\` carries no outcome mutations. The post-roll response narrates the result once.
 
-COMBAT NOTES:
-- Use "combat_start" when combat initiates, and list EVERY foe that will act — each with name, hp, and ac. The client rolls initiative for the player, companions, and enemies, then tracks exactly what you declare, so keep the narrative and the tracked enemies strictly 1:1: never describe an attacker that isn't in the combat state, and don't silently add or drop foes mid-fight.
-- **Resolve a whole exchange in ONE response.** When the player attacks, also request any participating companions' attacks and every still-living foe's response attack in the same requested_rolls block (each with attackerId, target, modifier, and inline damage). The client rolls them in order, skips any combatant whose target/attacker is already down, applies all HP, and you then narrate the exchange once.
-- When the player declared an attack, the requested_rolls array MUST begin with their attack_roll entry (or entries for Action Surge) before companion/enemy rolls. Never send only enemy rolls for that exchange.
-- Each enemy may appear in at most one npc_attack entry per exchange. Action Surge adds player attacks only; never add an enemy retaliation/counterattack for each surged action.
-- HP is owned by the client. When a roll result says "HP applied by the system", do NOT also send enemy_updates or damage_taken for it. Use "enemy_updates" only for HP changes the dice did NOT cause (e.g. an enemy drinks a potion).
-- Use "combat_end": true when all enemies are defeated or combat ends. Include "exp_awarded" in that same victory response.
+COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
+- Use "combat_start" when combat begins and list every foe 1:1 with "name", "hp", "ac", "attack_bonus", and "damage". Never silently add or drop combatants.
+- Set combat_start "surprise" to "player" only when the player is genuinely caught unaware, "enemies" only when the foes are caught unaware, otherwise "none". The engine converts this into Opening Initiative; never grant surprise attacks in narration yourself.
+- Every committed player turn includes exactly one \`combat_exchange\`. A question or clarification includes none, so nobody acts.
+- \`player_slots\`: normally exactly one; when ACTION SURGE ACTIVE is shown, exactly two. Each slot is independently \`attack\`, \`cast\`, \`check\`, \`save\`, \`dodge\`, \`dash\`, \`disengage\`, \`flee\`, \`interact\`, \`pass\`, or \`death_save\`.
+- An Attack slot uses \`strikes: [{"target":"<living enemy id>"}]\`. A Fighter with Extra Attack may name two strikes in one Attack slot, including different targets. Action Surge grants another action slot, not automatically another attack.
+- A Cast slot uses \`{"action":"cast","spell":"fire bolt|arcane bolt|sacred flame|divine bolt","target":"<living enemy id>"}\`. These bounded Wizard/Cleric basic spell attacks use engine-owned class stats; unsupported spells must be clarified rather than assigned invented mechanics.
+- A Check/Save slot uses \`{"action":"check|save","skill":"<skill or ability>","dc":<5-30>}\` for a genuinely uncertain non-attack action committed during combat. The engine rolls it before companion/enemy intents; do not also use requested_rolls.
+- Use \`flee\` only when the fiction establishes a successful escape; it ends combat without XP or pursuit attacks. If escape is uncertain, use a Check slot instead and let its result decide the fiction.
+- \`enemy_intents\`: at most one per living foe, using only \`attack\`, \`defend\`, \`flee\`, or \`surrender\`. An attack targets \`player\` or a living companion id. Missing intent defaults to that foe's basic attack.
+- \`companion_intents\` is optional: \`attack\`, \`defend\`, or \`pass\`; an attack names a living enemy target. Missing companion intent defaults to a basic attack against a living foe.
+- Intent envelopes contain no dice authority: never supply modifiers, AC, damage, hit/miss, HP changes, or outcomes. Never narrate the outcome before the engine returns it.
+- The engine resolves player slots, companions, then one intent per still-active foe. A defeated foe cannot act. An invalid target loses that actor's slot and never silently redirects to the player.
+- While the player is DYING, commit one \`death_save\` slot and no other player action.
+- HP, criticals, victory/defeat, XP, Action Surge consumption, and round advancement are engine-owned. Never emit \`combat_end\`, \`exp_awarded\`, \`damage_taken\`, or \`enemy_updates\` for a combat exchange.
+- When the engine returns a resolved exchange for narration, narrate it exactly once. Never invent a retaliation, counterattack, extra hit, or additional state change.
 
 PLAYER DEATH & DYING:
-- **Combat deaths are owned by the system.** At 0 HP the player falls unconscious and starts dying; the system tracks death saves and declares death at three failures. You narrate the dying state and request { "type": "death_save" } each round — do NOT emit player_death for this; the system records the death itself.
+- **Combat deaths are owned by the system.** At 0 HP the player falls unconscious and starts dying; declare one \`death_save\` player slot each round and let the engine own every transition. Do not emit player_death for this.
 - If LOW-LEVEL SOLO SAFETY is active or the character status says DEFEATED, do NOT request death saves and do NOT emit player_death. Narrate capture, subdual, being left for dead, a costly escape, loss of gear, leverage, or rescue instead.
 - Use "player_death": { "description": "..." } ONLY for unavoidable narrative deaths with no dying state — an execution, disintegration, a fall from a mile up — and never while LOW-LEVEL SOLO SAFETY is active.
 - Death does NOT end the game — the player will describe what happens next (their spirit may linger, possess another body, etc.)
@@ -350,7 +348,7 @@ ECONOMY & HEALING:
 - For sales (the player sells loot to a merchant), use one atomic "sell" event: { "itemKey": "longsword", "quantity": 1 } — or identify the item by "name" if it has no catalog key. The client values it (about half the catalog price), removes it, and adds the coin. Set "priceCp" (total) only to model haggling or a stingy/eager buyer. Do NOT also emit items_lost or gold_found/silver_found/copper_found for the same sale.
 - For ordinary equipment loot or shop goods, use catalog "itemKey" values when possible. For unusual story objects, use a plain item name/type.
 - Magic weapon/armor/shield bonuses are supported from +1 to +3 only. Use "magicBonus": 1, 2, or 3. Weapons apply this to both attack and damage; armor and shields apply it to AC. Do not create +4 or higher equipment unless the user explicitly asks for high-power homebrew.
-- The client owns equipped weapon attack/damage and armor/shield AC math. When requesting a player attack roll, identify the target and describe the strike; the client will use the equipped weapon's dice and magic bonus.
+- The client owns equipped weapon attack/damage and armor/shield AC math. In combat, identify only each strike's target; the engine supplies the weapon mechanics.
 - When the player puts on, removes, draws, sheathes, swaps, drops from hand, or otherwise changes worn/wielded equipment they still own, emit "equipment_changes": [{ "action": "equip"|"unequip", "type": "armor"|"shield"|"weapon", "name": "<item name if known>" }]. Use this for removing armor so AC updates. Do NOT use items_lost unless the item leaves the player's possession.
 
 REST & RESOURCES:
@@ -365,9 +363,9 @@ REST & RESOURCES:
 - Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC casts a healing spell on the player).
 
 PROGRESSION & STATUS EFFECTS:
-- ALWAYS provide "exp_awarded" as an integer when the player defeats enemies, completes objectives, or overcomes challenges. Players expect to see XP after every combat. Typical values: weak enemy 25-50, standard enemy 50-100, tough enemy 100-200, boss 300+, quest completion 100-500.
+- The engine awards combat XP automatically for defeated, surrendered, or fled threats. Use "exp_awarded" only for non-combat objectives and quests; never duplicate combat XP.
 - **LEVELING:** The client owns XP thresholds, HP gain, hit dice, feature unlocks, and level-up messages. Do NOT narrate HP or stat changes yourself. Use "level_up": true only for a deliberate story milestone where the character should gain exactly one level regardless of current XP; otherwise award XP normally and let the system decide.
-- **FIGHTER EXTRA ATTACK:** Fighters of level 5+ make two attack rolls when they take the Attack action. Request one player "attack_roll" with an inline "damage" notation; the client rolls BOTH attacks and rolls/applies damage for each that hits — no separate damage rolls needed.
+- **FIGHTER EXTRA ATTACK:** Fighters of level 5+ may declare two targetable strikes inside each Attack slot. The engine rolls and applies both.
 - Provide "rest_taken" as exactly "short" or "long" when the party rests at a camp, inn, or safe zone.
 - Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.
 
@@ -480,16 +478,16 @@ ${character.features?.length ? `- **Features:** ${character.features.map(f => {
 
 function buildActionSurgeBlock(character) {
     const extraAttack = character.level >= 5
-        ? 'If they use the extra action to take another Attack action, request another full Attack action. For a level 5+ Fighter this means two more attacks, because Extra Attack applies to each Attack action.'
-        : 'If they use the extra action to attack, request one additional attack roll for the extra Attack action.';
+        ? 'Each Attack slot may contain two strikes because Extra Attack applies independently to both action slots.'
+        : 'Each Attack slot contains one strike.';
 
     return `## ACTION SURGE ACTIVE
 The player has already spent Action Surge. Their next declared action gets one additional action beyond the normal turn.
-- Let them combine two reasonable actions in this turn: attack plus attack, attack plus dash, shove plus attack, interact plus attack, etc.
+- Let them combine two supported actions in this turn: attack plus attack, attack plus dash, cast plus dodge, interact plus attack, etc.
 - ${extraAttack}
-- If both actions need dice, put all of those rolls in the same requested_rolls block. Do not split Action Surge into a second DM response.
+- Emit exactly two player_slots in one combat_exchange. Do not split Action Surge across responses.
 - Do NOT spend Action Surge again and do NOT emit resources_used for it.
-- The client will clear this active state after this player action resolves.`;
+- The client clears this state only after both validated slots commit successfully.`;
 }
 
 function buildPartyBlock(party) {
@@ -647,7 +645,7 @@ function buildActiveConstraints(quests, worldFacts, character, party) {
         reminders.push(`The player's original character is dead. They are now playing as a spirit/successor. Acknowledge this reality in narration.`);
     } else if (character?.dying) {
         const ds = character.deathSaves || { successes: 0, failures: 0 };
-        reminders.push(`THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures). They cannot act, speak, or perceive. Their only roll each round is { "type": "death_save" } — request it now via requested_rolls. Enemies may flee, loot, or finish them; allies may stabilize (Medicine, DC 10) or heal them. Keep the tension high.`);
+        reminders.push(`THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures). Their only player slot is { "action": "death_save" } inside combat_exchange. They cannot act, speak, or perceive.`);
     }
 
     const isLowLevelSolo = (character?.level ?? 1) <= 2 && (!party || party.length === 0);
@@ -659,19 +657,25 @@ function buildActiveConstraints(quests, worldFacts, character, party) {
     return `## DM REMINDERS — MAINTAIN THESE PRESSURES\n${reminders.join('\n\n')}`;
 }
 
-function buildCombatBlock(combat) {
+function buildCombatBlock(combat, character) {
     const enemies = combat.enemies || [];
     const turnOrder = combat.turnOrder || [];
 
-    const enemyList = enemies.map(e =>
-        `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac} | Condition: ${e.condition}`
-    ).join('\n') || '- No tracked enemies';
+    const enemyList = enemies.map(e => {
+        const atk = Number.isFinite(e.attackBonus) ? ` | Atk: +${e.attackBonus}` : '';
+        const dmg = (typeof e.damage === 'string' && e.damage) ? ` | Dmg: ${e.damage}` : '';
+        const status = e.combatStatus && e.combatStatus !== 'active' ? ` | Status: ${e.combatStatus}` : '';
+        const defense = e.defending ? ' | DEFENDING' : '';
+        return `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac}${atk}${dmg} | Condition: ${e.condition}${status}${defense}`;
+    }).join('\n') || '- No tracked enemies';
 
     const turnList = turnOrder.map((t, i) =>
         `${i === combat.currentTurn ? '→ ' : '  '}${t.name} (init: ${t.initiative})`
     ).join('\n') || '- Turn order pending';
 
-    return `## ACTIVE COMBAT — Round ${combat.round}
+    const phase = combat.phase || 'awaiting_player';
+    const surge = character?.pendingActionSurge ? 'ACTIVE — exactly two player_slots required' : 'inactive — exactly one player_slot required';
+    return `## ACTIVE COMBAT — Round ${combat.round} | Phase: ${phase} | Surprise: ${combat.surprise || 'none'}
 
 **Enemies:**
 ${enemyList}
@@ -679,5 +683,5 @@ ${enemyList}
 **Turn Order:**
 ${turnList}
 
-Combat roll results apply HP automatically when they say "HP applied by the system." Do NOT repeat those HP changes with enemy_updates, damage_taken, or damage_dealt. Use enemy_updates only for non-roll narrative changes or corrections. When every tracked enemy is down, narrate victory and emit combat_end: true plus exp_awarded.`;
+The engine owns every combat die and state transition. If phase is awaiting_player, translate a committed player action into one combat_exchange intent envelope. Action Surge: ${surge}. If phase is opening or awaiting_narration, do not declare more actions.`;
 }

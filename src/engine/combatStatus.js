@@ -1,10 +1,12 @@
+import { COMBAT_PHASES, isEnemyActive } from './combatExchange.js';
+
 /**
  * Derive the concise player-facing combat status from engine state.
  * Kept outside React so the priority order is testable.
  */
 export function getCombatStatus({ character = {}, combat = {}, party = [] } = {}) {
     const enemies = combat.enemies || [];
-    const aliveEnemies = enemies.filter(e => (e.hp ?? 0) > 0 && e.condition !== 'dead');
+    const aliveEnemies = enemies.filter(isEnemyActive);
     if (combat.active && enemies.length > 0 && aliveEnemies.length === 0) {
         return {
             variant: 'victory',
@@ -34,7 +36,7 @@ export function getCombatStatus({ character = {}, combat = {}, party = [] } = {}
         return {
             variant: 'danger',
             title: 'Dying',
-            detail: `Death saves ${saves.successes || 0}/3 successes, ${saves.failures || 0}/3 failures. Wait for the DM to request a death save or use healing if available.`,
+            detail: `Death saves ${saves.successes || 0}/3 successes, ${saves.failures || 0}/3 failures. Your next combat exchange is an engine-owned death save; healing can still revive you.`,
         };
     }
 
@@ -43,6 +45,30 @@ export function getCombatStatus({ character = {}, combat = {}, party = [] } = {}
             variant: 'stable',
             title: 'Stable at 0 HP',
             detail: 'You are unconscious and safe from death saves for now. Healing brings you back.',
+        };
+    }
+
+    if (combat.phase === COMBAT_PHASES.OPENING) {
+        return {
+            variant: 'enemy',
+            title: 'Opening Initiative',
+            detail: 'Actors who beat your initiative are resolving their one opening action.',
+        };
+    }
+
+    if (combat.phase === COMBAT_PHASES.AWAITING_NARRATION) {
+        return {
+            variant: 'neutral',
+            title: 'Exchange resolved',
+            detail: 'The mechanics are committed. The DM is narrating the stored result without rerolling.',
+        };
+    }
+
+    if (combat.phase === COMBAT_PHASES.AWAITING_INTENT) {
+        return {
+            variant: 'neutral',
+            title: 'Action committed',
+            detail: 'The DM is translating your declared action into bounded intent; no mechanics have resolved yet.',
         };
     }
 

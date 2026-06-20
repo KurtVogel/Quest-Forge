@@ -21,7 +21,11 @@ const MAX_ROLL_DEPTH = 3;
 
 const ABILITY_NAMES = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 const NON_PLAYER_ROLL_TYPES = new Set(['npc_attack', 'npc_save', 'companion_attack']);
-const ATTACK_INTENT_RE = /\b(attack|attacks|strike|strikes|slash|slashes|stab|stabs|shoot|shoots|fire|fires|swing|swings|smash|smashes|punch|punches|kick|kicks)\b/i;
+// Recognize a player's attack intent from prose. This is a SAFETY NET for when the DM
+// returns an enemy-only batch despite engine-owned enemy turns — it must be broad, because
+// a missed verb silently costs the player their declared attack. Stems cover tense/plural.
+const ATTACK_INTENT_RE = /\b(attack|strik|hits?|slash|stab|shoot|shot|fires?|swing|smash|punch|kick|cuts?|hack|chop|cleav|hew|thrust|lunge|jab|bash|slam|drives?|plunge|skewer|carve|guts?|impal|charge|throws?|threw|loose|clubs?|whack|pummel|maul|gores?|bites?|claw|hammer|pierc|sever|behead|decapitat|lash|whips?|headbutt|tackl|smite|sweeps?|run through|bring .{0,20}(?:down|around|to bear))\b/i;
+
 
 /**
  * Repair the dangerous LLM failure mode where a player declares an attack but the
@@ -271,9 +275,16 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
             const result = resolveDeathSave(character, dispatch);
             if (result) results.push(result);
         } else if (roll.skill && character) {
-            const resolved = resolvePlayerRoll(roll, character, dispatch, inventory);
-            const list = Array.isArray(resolved) ? resolved : (resolved ? [resolved] : []);
             const isAttack = roll.type === 'attack_roll' || String(roll.skill).toLowerCase() === 'attack';
+            // Player to-hit is engine-owned: an attack on a tracked enemy resolves against
+            // that enemy's LIVE AC, never a DM-supplied dc — mirroring how enemy attacks always
+            // use the player's live AC. Falls back to roll.dc only with no tracked target.
+            const targetEnemyForAc = isAttack && roll.target ? findEnemy(roll.target) : null;
+            const effectiveRoll = (targetEnemyForAc && Number.isFinite(targetEnemyForAc.ac))
+                ? { ...roll, dc: targetEnemyForAc.ac }
+                : roll;
+            const resolved = resolvePlayerRoll(effectiveRoll, character, dispatch, inventory);
+            const list = Array.isArray(resolved) ? resolved : (resolved ? [resolved] : []);
             const damageNotation = isAttack
                 ? getWeaponDamageNotation(character, inventory, roll.damage || '1d4')
                 : roll.damage;
@@ -412,6 +423,10 @@ export async function handleRequestedRolls(requestedRolls, {
     const state = getState();
     const character = state.character;
     const inventory = state.inventory || [];
+    if (depth === 0 && state.combat?.active) {
+        console.warn('[RollResolver] Rejected legacy requested_rolls during active combat; combat_exchange is required.');
+        return { resolved: false, requiresCombatExchange: true };
+    }
     const repairedBatch = depth === 0
         ? repairCombatRollBatch(requestedRolls, {
             combat: state.combat,
@@ -499,12 +514,12 @@ export async function handleRequestedRolls(requestedRolls, {
                 : '';
 
             const followUpEvents = await sendToLLM(
-                `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) If the roll results show every tracked enemy is DOWNED, narrate victory now and emit combat_end: true plus exp_awarded; do NOT request more combat rolls. (5) If other enemies, companions, or NPCs still must act in this same exchange, request their rolls now via JSON — for each, include "attackerId", "target", "modifier", and an inline "damage" notation so the system resolves them in one pass. (6) Never narrate an NPC, companion, or enemy result without rolling first.]${correctionNote}\n\n${summary}`,
+                `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) Never narrate a result that is not supported by the rolls below. (5) If the result starts combat, declare combat_start; active combat actions use combat_exchange rather than requested_rolls.]${correctionNote}\n\n${summary}`,
                 undefined,
                 { suppressHpEvents: appliedHp }
             );
 
-            // Handle any follow-up rolls (e.g. the next foe acting, or a triggered save)
+            // Handle any genuinely new outside-combat follow-up roll (e.g. a triggered save).
             if (followUpEvents?.requestedRolls?.length > 0) {
                 await handleRequestedRolls(
                     followUpEvents.requestedRolls,

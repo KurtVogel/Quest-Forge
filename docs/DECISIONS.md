@@ -8,6 +8,27 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-20 · Active combat is an explicit, atomic, engine-owned exchange state machine.**
+*Implemented and shipped on 2026-06-20.* This supersedes the
+2026-06-19/17 roll-batch and enemy-only safeguard designs below. During active combat the DM never
+emits `requested_rolls` or numerical outcomes. It translates fiction into a bounded
+`combat_exchange`: player action slots plus companion/enemy intent. `combatExchange.js` validates
+the live targets/actions and generates all attack, damage, spell, check, save, critical, Extra
+Attack, Action Surge, companion, enemy, and death-save rolls from canonical state. The reducer
+commits the complete plan once by `exchangeId`; the later LLM call is narration-only and cannot
+reroll or mutate mechanics. A failed narration is retryable from the persisted result.
+
+Combat phases are `opening` → `awaiting_player` → `awaiting_intent` → `awaiting_narration`. Initiative matters once:
+actors who beat the player get one Opening Initiative action (modified by declared surprise), then
+combat uses player-centered exchanges. A player action that started combat waits safely behind the
+opening rather than disappearing. Supported enemy intents are attack/defend/flee/surrender; invalid
+targets lose the actor's slot instead of silently retargeting, missing intent defaults to one basic
+attack, and a foe overcome before its slot cannot act. Fleeing/surrendering earns normal overcome-XP.
+Action Surge means exactly two arbitrary player slots and clears only with a successful atomic
+commit. Active-combat rests and legacy combat roll batches are rejected. Shared enemy-stat/load
+validation keeps offensive hallucinations out of the dice engine and preserves legitimate 0-HP
+state. Autosave includes combat/results so reload can safely finish narration without replaying dice.
+
 **2026-06-19 · A declared player attack requires a resolvable attack before hostile rolls.**
 In a player-turn combat exchange, the presence of an arbitrary player-side roll is not enough:
 before enemies may act, the batch must contain every expected Attack action with a valid attack
