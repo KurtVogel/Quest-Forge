@@ -387,7 +387,7 @@ export default function CharacterSheet() {
                                 <div className="cs-rest-actions" aria-label="Rest actions">
                                     <button
                                         className="cs-rest-btn"
-                                        onClick={() => dispatch({ type: 'TAKE_REST', payload: 'short' })}
+                                        onClick={() => dispatch({ type: 'TAKE_REST', payload: 'short', meta: { narrate: true } })}
                                         disabled={character.isDead}
                                         title={character.isDead ? 'Dead characters cannot recover by resting' : 'Take a short rest: spend hit dice and recharge short-rest resources'}
                                     >
@@ -395,7 +395,7 @@ export default function CharacterSheet() {
                                     </button>
                                     <button
                                         className="cs-rest-btn"
-                                        onClick={() => dispatch({ type: 'TAKE_REST', payload: 'long' })}
+                                        onClick={() => dispatch({ type: 'TAKE_REST', payload: 'long', meta: { narrate: true } })}
                                         disabled={character.isDead}
                                         title={character.isDead ? 'Dead characters cannot recover by resting' : 'Take a long rest: restore HP, recover hit dice, and recharge resources'}
                                     >

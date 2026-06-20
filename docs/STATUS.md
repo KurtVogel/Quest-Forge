@@ -81,6 +81,10 @@ _Last updated: 2026-06-20 (embedding fix + Combat v2)_
   Restored Second Wind/healing-potion narration cues are also consumed as historical events
   on load, so their in-memory once-only guard cannot reset in a new browser tab and replay
   an old fictional beat.
+- **Rest buttons now receive DM flavor:** successful Short Rest and Long Rest actions from the
+  Character Sheet attach one narration-only fictional beat after the engine commits healing,
+  hit dice, conditions, companion recovery, and resource resets. A rest already narrated in a
+  normal DM response does not request duplicate prose, and restored cues remain inert on load.
 - **Contextual living-world migration shipped**: existing campaigns can now privately
   awaken or enrich hidden fronts from their complete bounded campaign context. Basic fronts
   and clocks are preserved, dead/resolved figures remain history, mechanics are untouched,

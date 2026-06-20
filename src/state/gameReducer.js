@@ -840,6 +840,16 @@ export function gameReducer(state, action) {
                 content: isLong
                     ? `**Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}`
                     : `**Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.`,
+                ...(action.meta?.narrate && {
+                    narrationCue: {
+                        type: 'player_mechanic',
+                        mechanic: isLong ? 'Long Rest' : 'Short Rest',
+                        actionType: 'rest',
+                        effect: isLong
+                            ? `${state.character.name} completes a long rest, recovers fully, and recharges their abilities`
+                            : `${state.character.name} completes a short rest, regains ${healedAmount} HP, and recharges short-rest abilities`,
+                    },
+                }),
             };
 
             return {

@@ -90,6 +90,39 @@ describe('class resource activation', () => {
         expect(rested.character.classResources.actionSurge.used).toBe(0);
     });
 
+    it('requests one fictional beat for a successful player-triggered rest', () => {
+        const shortRest = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'short',
+            meta: { narrate: true },
+        });
+        const longRest = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { narrate: true },
+        });
+
+        expect(shortRest.messages.at(-1).narrationCue).toMatchObject({
+            type: 'player_mechanic',
+            mechanic: 'Short Rest',
+            actionType: 'rest',
+        });
+        expect(longRest.messages.at(-1).narrationCue).toMatchObject({
+            type: 'player_mechanic',
+            mechanic: 'Long Rest',
+            actionType: 'rest',
+        });
+    });
+
+    it('does not duplicate narration for a rest already declared by the DM', () => {
+        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'long',
+        });
+
+        expect(rested.messages.at(-1)).not.toHaveProperty('narrationCue');
+    });
+
     it('Second Wind clears low-level defeat when it restores HP', () => {
         const next = gameReducer(makeFighter({
             level: 1,
