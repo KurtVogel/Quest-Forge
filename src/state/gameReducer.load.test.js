@@ -138,4 +138,42 @@ describe('LOAD_GAME progression migrations', () => {
 
         expect(next.combat.bonusActionUsed).toBe(false);
     });
+
+    it('preserves bounded enemy conditions and narration post-state across reloads', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...baseCharacter, exp: 0 },
+                inventory: [],
+                messages: [],
+                combat: {
+                    active: true,
+                    phase: 'awaiting_narration',
+                    enemies: [{
+                        id: 'worg', name: 'Cave-Worg', hp: 9, maxHp: 32, ac: 14,
+                        condition: 'critical', conditions: ['Prone', 'made-up'], combatStatus: 'active',
+                    }],
+                    turnOrder: [{ type: 'player', name: 'Survivor', initiative: 15 }],
+                    currentTurn: 0,
+                    round: 5,
+                    lastExchangeResult: {
+                        exchangeId: 'exchange-5',
+                        kind: 'exchange',
+                        round: 5,
+                        terminal: null,
+                        summary: 'Cave-Worg remains alive.',
+                        events: [],
+                        postState: {
+                            player: { name: 'Survivor', hp: 12, maxHp: 12 },
+                            enemies: [{ name: 'Cave-Worg', hp: 9, maxHp: 32, status: 'active', conditions: ['Prone'] }],
+                            companions: [],
+                        },
+                    },
+                },
+            },
+        });
+
+        expect(next.combat.enemies[0].conditions).toEqual(['prone']);
+        expect(next.combat.lastExchangeResult.postState.enemies[0].conditions).toEqual(['prone']);
+    });
 });

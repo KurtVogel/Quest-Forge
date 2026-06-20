@@ -111,6 +111,7 @@ describe('combat_start validation', () => {
         expect(enemy.name).toBe('Goblin');
         expect(enemy.hp).toBeGreaterThan(0);
         expect(enemy.ac).toBeGreaterThan(0);
+        expect(enemy.conditions).toEqual([]);
         expect(enemy.initiative).toBeGreaterThanOrEqual(1);
         expect(enemy.initiative).toBeLessThanOrEqual(20);
     });
@@ -149,9 +150,35 @@ describe('combat_start validation', () => {
         expect(oddity.attackBonus).toBeUndefined();
         expect(oddity.damage).toBeUndefined();
     });
+
+    it('keeps only engine-supported enemy conditions at combat start', () => {
+        const { events } = parseResponse(fence({
+            combat_start: {
+                enemies: [{ name: 'Wolf', hp: 12, ac: 13, conditions: ['Prone', 'Made Up'] }],
+            },
+        }));
+        expect(events.combatStart.enemies[0].conditions).toEqual(['prone']);
+    });
 });
 
 describe('combat_exchange validation', () => {
+    it('normalizes bounded enemy-condition synchronization and successful-check effects', () => {
+        const { events } = parseResponse(fence({
+            combat_exchange: {
+                player_slots: [{
+                    action: 'check', skill: 'athletics', dc: 14,
+                    on_success: { target: 'wolf', add: ['Prone', 'Made Up'] },
+                }],
+                enemy_intents: [{ enemy_id: 'wolf', action: 'attack', target: 'player', remove_conditions: ['Prone'] }],
+                enemy_condition_updates: [{ enemy_id: 'wolf', add: ['Prone'] }],
+            },
+        }));
+
+        expect(events.combatExchange.playerSlots[0].onSuccess).toEqual({ target: 'wolf', add: ['prone'], remove: [] });
+        expect(events.combatExchange.enemyIntents[0].removeConditions).toEqual(['prone']);
+        expect(events.combatExchange.enemyConditionUpdates).toEqual([{ target: 'wolf', add: ['prone'], remove: [] }]);
+    });
+
     it('links a combat-starting attack to the canonical enemy id in the same response', () => {
         const { events } = parseResponse(fence({
             combat_start: {

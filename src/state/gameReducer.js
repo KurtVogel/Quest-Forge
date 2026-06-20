@@ -11,7 +11,7 @@ import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.j
 import { normalizeEquippedSlots } from '../engine/equipment.js';
 import { createInitialFronts, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
-import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
+import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
 import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 
 function sanitizeStoredExchangeResult(result) {
@@ -20,6 +20,22 @@ function sanitizeStoredExchangeResult(result) {
     if (!exchangeId) return null;
     const kind = result.kind === 'opening' ? 'opening' : 'exchange';
     const terminal = ['victory', 'defeat', 'dying', 'escaped'].includes(result.terminal) ? result.terminal : null;
+    const postState = result.postState && typeof result.postState === 'object'
+        ? {
+            player: result.postState.player && typeof result.postState.player === 'object'
+                ? { ...result.postState.player }
+                : null,
+            enemies: Array.isArray(result.postState.enemies)
+                ? result.postState.enemies.slice(0, 30).map(enemy => ({
+                    ...enemy,
+                    conditions: normalizeEnemyConditions(enemy?.conditions),
+                }))
+                : [],
+            companions: Array.isArray(result.postState.companions)
+                ? result.postState.companions.slice(0, 4)
+                : [],
+        }
+        : undefined;
     return {
         exchangeId,
         kind,
@@ -27,6 +43,7 @@ function sanitizeStoredExchangeResult(result) {
         terminal,
         summary: String(result.summary || '').slice(0, 12000),
         events: Array.isArray(result.events) ? result.events.slice(0, 100) : [],
+        ...(postState && { postState }),
     };
 }
 
@@ -242,6 +259,7 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
         ...attackProfile,
         initiative,
         condition: enemyHealthCondition(hp, hp),
+        conditions: normalizeEnemyConditions(enemy?.conditions),
         combatStatus: 'active',
         defending: false,
     };

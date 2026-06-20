@@ -19,7 +19,7 @@ import {
     getWeaponAttackBonus,
     getWeaponDamageNotation,
 } from './rules.js';
-import { sanitizeEnemyDamage, validateEnemyAttackBonus, enemyHealthCondition } from './enemyStats.js';
+import { sanitizeEnemyDamage, validateEnemyAttackBonus, enemyHealthCondition, normalizeEnemyConditions } from './enemyStats.js';
 
 export const COMBAT_PHASES = Object.freeze({
     OPENING: 'opening',
@@ -56,12 +56,24 @@ function normalizeStrikes(slot) {
     return raw.slice(0, 4).map(strike => ({ target: ref(strike?.target || strike) })).filter(s => s.target);
 }
 
+function normalizeConditionDelta(raw, targetValue) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const target = ref(targetValue || raw.target || raw.enemy_id || raw.enemyId);
+    if (!target) return null;
+    const asList = value => Array.isArray(value) ? value : [value];
+    const add = normalizeEnemyConditions(asList(raw.add_conditions || raw.addConditions || raw.add || raw.add_condition || raw.addCondition));
+    const remove = normalizeEnemyConditions(asList(raw.remove_conditions || raw.removeConditions || raw.remove || raw.remove_condition || raw.removeCondition));
+    if (add.length === 0 && remove.length === 0) return null;
+    return { target, add, remove };
+}
+
 /** Normalize an LLM-authored intent envelope without consulting mutable game state. */
 export function normalizeCombatExchange(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const rawPlayerSlots = raw.player_slots || raw.playerSlots;
     const rawEnemyIntents = raw.enemy_intents || raw.enemyIntents;
     const rawCompanionIntents = raw.companion_intents || raw.companionIntents;
+    const rawEnemyConditionUpdates = raw.enemy_condition_updates || raw.enemyConditionUpdates;
     const playerSlots = Array.isArray(rawPlayerSlots)
         ? rawPlayerSlots.slice(0, 2).map((slot, index) => {
             const action = text(slot?.action, 30).toLowerCase();
@@ -76,6 +88,9 @@ export function normalizeCombatExchange(raw) {
                     skill: normalizeSkillRef(slot.skill || slot.ability),
                     dc: Number.isFinite(slot.dc) ? Math.max(5, Math.min(30, Math.round(slot.dc))) : 15,
                 }),
+                ...(action === 'check' && normalizeConditionDelta(slot.on_success || slot.onSuccess) && {
+                    onSuccess: normalizeConditionDelta(slot.on_success || slot.onSuccess),
+                }),
             };
         }).filter(Boolean)
         : [];
@@ -86,11 +101,16 @@ export function normalizeCombatExchange(raw) {
             const action = text(intent?.action, 30).toLowerCase();
             const enemyId = ref(intent?.enemy_id || intent?.enemyId);
             if (!enemyId || !ENEMY_ACTIONS.has(action)) return null;
+            const rawRemoveConditions = intent.remove_conditions || intent.removeConditions;
+            const removeConditions = normalizeEnemyConditions(
+                Array.isArray(rawRemoveConditions) ? rawRemoveConditions : [rawRemoveConditions]
+            );
             return {
                 enemyId,
                 action,
                 target: ref(intent.target) || 'player',
                 description: text(intent.description, 180),
+                ...(removeConditions.length > 0 && { removeConditions }),
             };
         }).filter(Boolean)
         : [];
@@ -109,7 +129,18 @@ export function normalizeCombatExchange(raw) {
         }).filter(Boolean)
         : [];
 
-    return { playerSlots, enemyIntents, companionIntents };
+    const enemyConditionUpdates = Array.isArray(rawEnemyConditionUpdates)
+        ? rawEnemyConditionUpdates.slice(0, 30)
+            .map(update => normalizeConditionDelta(update, update?.enemy_id || update?.enemyId))
+            .filter(Boolean)
+        : [];
+
+    return {
+        playerSlots,
+        enemyIntents,
+        companionIntents,
+        ...(enemyConditionUpdates.length > 0 && { enemyConditionUpdates }),
+    };
 }
 
 const combatRefKey = value => text(value, 100)
@@ -156,11 +187,20 @@ export function reconcileStartingCombatExchange(rawExchange, enemies = []) {
                 strikes: slot.strikes.map(strike => ({ ...strike, target: resolveEnemy(strike.target) })),
             }),
             ...(slot.action === 'cast' && { target: resolveEnemy(slot.target) }),
+            ...(slot.onSuccess && {
+                onSuccess: { ...slot.onSuccess, target: resolveEnemy(slot.onSuccess.target) },
+            }),
         })),
         enemyIntents: exchange.enemyIntents.map(intent => ({
             ...intent,
             enemyId: resolveEnemy(intent.enemyId),
         })),
+        ...((exchange.enemyConditionUpdates || []).length > 0 && {
+            enemyConditionUpdates: exchange.enemyConditionUpdates.map(update => ({
+                ...update,
+                target: resolveEnemy(update.target),
+            })),
+        }),
         companionIntents: exchange.companionIntents.map(intent => ({
             ...intent,
             ...(intent.target && { target: resolveEnemy(intent.target) }),
@@ -181,6 +221,31 @@ function isCompanionActive(companion) {
         && (companion.hp ?? 0) > 0
         && companion.status !== 'downed'
         && companion.status !== 'dead';
+}
+
+function applyEnemyConditionDelta(enemy, delta, events) {
+    if (!enemy || !delta) return;
+    const remove = new Set(normalizeEnemyConditions(delta.remove));
+    const before = normalizeEnemyConditions(enemy.conditions);
+    const after = normalizeEnemyConditions([
+        ...before.filter(condition => !remove.has(condition)),
+        ...normalizeEnemyConditions(delta.add),
+    ]);
+    enemy.conditions = after;
+    const added = after.filter(condition => !before.includes(condition));
+    const removed = before.filter(condition => !after.includes(condition));
+    if (added.length > 0) events?.push({ type: 'note', text: `${enemy.name} gains: ${added.join(', ')}.` });
+    if (removed.length > 0) events?.push({ type: 'note', text: `${enemy.name} is no longer: ${removed.join(', ')}.` });
+}
+
+function conditionAwareAttackModifiers(attackerConditions, targetConditions, baseAdvantage = false, baseDisadvantage = false) {
+    const attacker = getConditionRollEffects(attackerConditions, 'attack');
+    const target = getConditionRollEffects(targetConditions, 'incomingAttack');
+    return combineRollModifiers(baseAdvantage, baseDisadvantage, {
+        advantage: attacker.advantage || target.advantage,
+        disadvantage: attacker.disadvantage || target.disadvantage,
+        sources: [...attacker.sources, ...target.sources],
+    });
 }
 
 function companionHealthStatus(companion) {
@@ -290,6 +355,7 @@ function enemySnapshot(enemy) {
         hp: enemy.hp,
         maxHp: enemy.maxHp,
         condition: enemy.condition,
+        conditions: normalizeEnemyConditions(enemy.conditions),
         status,
     };
 }
@@ -389,6 +455,9 @@ function validatePlayerSlots(exchange, state) {
         if (slot.action === 'check' && !ABILITIES.has(slot.skill) && !SKILLS.has(slot.skill)) {
             return { ok: false, error: `Check skill or ability "${slot.skill}" is unsupported.` };
         }
+        if (slot.action === 'check' && slot.onSuccess && !findByRef(living, slot.onSuccess.target)) {
+            return { ok: false, error: `Check condition target "${slot.onSuccess.target}" is not an active enemy in this fight.` };
+        }
         if (slot.action === 'cast') {
             if (!basicSpellProfile(state.character, slot.spell)) {
                 return { ok: false, error: 'That spell has no engine-owned combat profile yet; choose a basic class attack spell or another action.' };
@@ -448,8 +517,7 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
                 events.push({ type: 'note', text: `${slot.spell || 'The spell'} has no valid target and is not redirected.` });
                 continue;
             }
-            const conditionEffects = getConditionRollEffects(character.conditions, 'attack');
-            const modifiers = combineRollModifiers(false, !!enemy.defending, conditionEffects);
+            const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, false, !!enemy.defending);
             const spellMod = getModifier(character.abilityScores?.[profile.ability] || 10) + getProficiencyBonus(character.level || 1);
             const attack = rollD20(spellMod, `${character.name || 'Player'} casts ${profile.name} at ${enemy.name}`, modifiers.advantage, modifiers.disadvantage);
             rolls.push(attack.roll);
@@ -481,6 +549,7 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
             const conditionEffects = getConditionRollEffects(character.conditions, slot.action === 'save' ? 'save' : 'check');
             const roll = rollD20(modifier, slot.description || `${skill} ${slot.action}`, conditionEffects.advantage, conditionEffects.disadvantage);
             rolls.push(roll.roll);
+            const success = roll.roll.total >= slot.dc;
             events.push({
                 type: slot.action,
                 actor: character.name || 'Player',
@@ -488,9 +557,13 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
                 rolled: roll.roll.total,
                 natural: roll.natural,
                 dc: slot.dc,
-                success: roll.roll.total >= slot.dc,
+                success,
                 mode: roll.detail,
             });
+            if (success && slot.action === 'check' && slot.onSuccess) {
+                const enemy = findByRef(enemies, slot.onSuccess.target);
+                applyEnemyConditionDelta(enemy, slot.onSuccess, events);
+            }
             continue;
         }
         if (slot.action !== 'attack') {
@@ -515,8 +588,7 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
                 events.push({ type: 'note', text: `${enemy?.name || strike.target} has already been overcome; the unused strike does not retarget without player intent.` });
                 continue;
             }
-            const conditionEffects = getConditionRollEffects(character.conditions, 'attack');
-            const modifiers = combineRollModifiers(false, !!enemy.defending, conditionEffects);
+            const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, false, !!enemy.defending);
             const attack = rollD20(
                 getWeaponAttackBonus(character, attackInventory),
                 `${character.name || 'Player'} attacks ${enemy.name}`,
@@ -550,7 +622,13 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
 }
 
 function resolveCompanionAttack(companion, target, events, rolls) {
-    const attack = rollD20(companion.attackBonus ?? 2, `${companion.name} attacks ${target.name}`, false, !!target.defending);
+    const modifiers = conditionAwareAttackModifiers(companion.conditions, target.conditions, false, !!target.defending);
+    const attack = rollD20(
+        companion.attackBonus ?? 2,
+        `${companion.name} attacks ${target.name}`,
+        modifiers.advantage,
+        modifiers.disadvantage
+    );
     rolls.push(attack.roll);
     const critical = attack.natural === 20;
     const hit = attack.natural !== 1 && (critical || attack.roll.total >= target.ac);
@@ -604,6 +682,7 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
     let targetName = character.name || 'Player';
     let targetAc = computeACFromInventory(inventory, character) ?? character.armorClass ?? 10;
     let targetDisadvantage = playerDodging;
+    let targetConditions = character.conditions;
 
     if (targetRef && targetRef !== 'player') {
         const companion = findByRef(companions, targetRef);
@@ -616,15 +695,13 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
         targetName = companion.name;
         targetAc = companion.ac ?? 10;
         targetDisadvantage = !!companion.defending;
+        targetConditions = companion.conditions;
     } else if (playerHp <= 0 || character.isDead || character.lowLevelDefeat) {
         events.push({ type: 'note', text: `${enemy.name} does not make another attack against the already-defeated player.` });
         return { playerHp, playerDamage: 0 };
     }
 
-    const conditionEffects = targetType === 'player'
-        ? getConditionRollEffects(character.conditions, 'incomingAttack')
-        : { advantage: false, disadvantage: false, note: '' };
-    const modifiers = combineRollModifiers(false, targetDisadvantage, conditionEffects);
+    const modifiers = conditionAwareAttackModifiers(enemy.conditions, targetConditions, false, targetDisadvantage);
     const attackBonus = validateEnemyAttackBonus(enemy.attackBonus) ?? DEFAULT_ENEMY_ATTACK_BONUS;
     const attack = rollD20(attackBonus, `${enemy.name} attacks ${targetName}`, modifiers.advantage, modifiers.disadvantage);
     rolls.push(attack.roll);
@@ -665,6 +742,9 @@ function resolveEnemies({ state, exchange, enemies, companions, playerHp, player
         if (!isEnemyActive(enemy)) continue;
         if (onlyIds && !onlyIds.has(enemy.id)) continue;
         const intent = intents.get(enemy.id) || { action: 'attack', target: 'player' };
+        if (intent.removeConditions?.length) {
+            applyEnemyConditionDelta(enemy, { remove: intent.removeConditions, add: [] }, events);
+        }
         if (intent.action === 'defend') {
             enemy.defending = true;
             events.push({ type: 'note', text: `${enemy.name} defends and gives up its attack.` });
@@ -736,6 +816,10 @@ export function planCombatExchange(state, exchange) {
     const companions = (state.party || []).map(companion => ({ ...companion, defending: false }));
     const events = [];
     const rolls = [];
+    for (const update of exchange.enemyConditionUpdates || []) {
+        const enemy = findByRef(enemies, update.target);
+        if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, update, events);
+    }
     const player = resolvePlayerSlots({ state, exchange, enemies, events, rolls });
 
     if (player.fled) {
@@ -865,7 +949,8 @@ export function combatNarrationPrompt(result) {
             if (enemy.status === 'defeated') return `- DEFEATED: ${enemy.name} — 0/${enemy.maxHp} HP.`;
             if (enemy.status === 'fled') return `- ALIVE, FLED: ${enemy.name} — ${enemy.hp}/${enemy.maxHp} HP.`;
             if (enemy.status === 'surrendered') return `- ALIVE, SURRENDERED: ${enemy.name} — ${enemy.hp}/${enemy.maxHp} HP.`;
-            return `- ALIVE AND ACTIVE: ${enemy.name} — ${enemy.hp}/${enemy.maxHp} HP (${enemy.condition || 'wounded'}).`;
+            const conditions = enemy.conditions?.length ? `; conditions: ${enemy.conditions.join(', ')}` : '';
+            return `- ALIVE AND ACTIVE: ${enemy.name} — ${enemy.hp}/${enemy.maxHp} HP (${enemy.condition || 'wounded'}${conditions}).`;
         })
         : result.events
             .filter(event => event.type === 'attack' && Number.isFinite(event.remainingHp))
@@ -883,6 +968,7 @@ export function combatNarrationPrompt(result) {
         'Never turn a miss into a hit or invent a counterattack.',
         `The terminal state is mechanically authoritative: ${result.terminal || 'ongoing'}.`,
         'The POST-EXCHANGE STATE is absolute. Never describe an ALIVE AND ACTIVE combatant as dead, defeated, lifeless, finished, going slack, or collapsing permanently. Fled and surrendered foes may be overcome, but remain alive. Do not quote HP numbers in the prose.',
+        'Do not introduce, remove, or imply a mechanical condition unless it appears in the POST-EXCHANGE STATE or resolved events.',
         ending,
         '',
         'POST-EXCHANGE STATE (AUTHORITATIVE):',

@@ -47,7 +47,7 @@ _Last updated: 2026-06-20 (embedding fix + Combat v2)_
   removes the old vector space, and each entry is schema-tagged and dimension-checked so future
   migrations cannot silently mix incompatible vectors. Provider failures include HTTP details.
   Focused regressions pin the exact REST contract and document/query roles; full verification is
-  243 tests plus clean lint and production build.
+  248 tests plus clean lint and production build.
 - **Soft player-authority boundary (2026-06-20):** the DM now distinguishes character intent from
   unilateral external-reality edits without suppressing creativity. Emergent absurdity and harmless
   compatible color remain welcome; plausible stretches become attempts/rolls/complications, while
@@ -63,6 +63,14 @@ _Last updated: 2026-06-20 (embedding fix + Combat v2)_
   snapshot and deterministically drops contradictory death/survival facts and story cards, while
   non-terminal combat prose is excluded from long-term RAG. The exact 20/32 minus 11 → 9/32
   Cave-Worg case is regression-tested.
+- **Enemy prone/condition mechanics fixed (2026-06-20):** live play narrated the Cave-Worg prone,
+  but enemies only had an HP-health descriptor, so the next longsword attack rolled one d20. Enemies
+  now carry a separate bounded `conditions` array. Previously established conditions can be synced
+  before player rolls, successful combat checks can impose them, and enemy intents can clear them
+  on the enemy's later slot. Attacker/target conditions correctly combine and cancel; prone grants
+  incoming advantage and imposes outgoing disadvantage. Conditions survive reload, appear on enemy
+  cards, and are included in authoritative narration snapshots. Regression tests cover both the
+  synchronized-prone advantage roll and successful shove → prone → disadvantaged enemy attack.
 - **Repeated enemy-first combat hole fixed**: the old safeguard mistook any non-enemy roll
   for a valid player attack, so malformed `attack_roll` entries or damage-only placeholders
   could be silently skipped while an enemy still attacked. A declared attack now requires a

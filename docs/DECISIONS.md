@@ -57,6 +57,13 @@ that same response is reconciled to the canonical roster by unique ID/name/slug 
 unambiguous foe). This keeps an initiating player action attached to its target across the
 narrative-to-engine boundary without permitting ambiguous multi-foe retargeting.
 
+Enemy health descriptors and mechanical conditions are separate state. A bounded
+`enemy_condition_updates` list may synchronize only conditions already established before an
+exchange; a successful player Check may apply an `on_success` condition, and an enemy intent may
+clear a condition immediately before that enemy acts. Both attacker-side and target-side condition
+effects participate in advantage/disadvantage cancellation. Conditions persist across save/load and
+are visible in combat UI; narration may not invent a condition absent from the engine result.
+
 **2026-06-19 · A declared player attack requires a resolvable attack before hostile rolls.**
 In a player-turn combat exchange, the presence of an arbitrary player-side roll is not enough:
 before enemies may act, the batch must contain every expected Attack action with a valid attack

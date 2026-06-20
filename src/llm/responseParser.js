@@ -10,7 +10,7 @@
 
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { CLASSES } from '../data/classes.js';
-import { validateEnemyAttackBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP } from '../engine/enemyStats.js';
+import { validateEnemyAttackBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 
 /** Cryptographically random integer in [min, max] — replaces Math.random() fallbacks. */
@@ -83,6 +83,7 @@ function validateCombatStart(combatStart) {
                 name: e.name.trim().slice(0, 100),
                 hp: clampEnemyHP(e.hp),
                 ac: clampEnemyAC(e.ac),
+                conditions: normalizeEnemyConditions(e.conditions),
                 initiative: (typeof e.initiative === 'number') ? e.initiative : cryptoRandInt(1, 20),
                 ...(attackBonus !== undefined && { attackBonus }),
                 ...(damage !== undefined && { damage }),

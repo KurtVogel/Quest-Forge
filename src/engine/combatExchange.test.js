@@ -66,6 +66,7 @@ const enemy = (id, overrides = {}) => ({
     attackBonus: 4,
     damage: '1d6+2',
     condition: 'healthy',
+    conditions: [],
     combatStatus: 'active',
     ...overrides,
 });
@@ -101,10 +102,17 @@ beforeEach(() => {
 describe('combat-start reference reconciliation', () => {
     it('maps readable same-response references to a single canonical foe', () => {
         const exchange = reconcileStartingCombatExchange({
-            player_slots: [{ action: 'attack', strikes: [{ target: 'goblin-duelist' }] }],
+            player_slots: [
+                { action: 'attack', strikes: [{ target: 'goblin-duelist' }] },
+                {
+                    action: 'check', skill: 'athletics', dc: 14,
+                    on_success: { target: 'goblin-duelist', add: ['prone'] },
+                },
+            ],
             enemy_intents: [{ enemy_id: 'goblin-duelist', action: 'attack', target: 'player' }],
         }, [{ id: 'enemy-goblin-duelist', name: 'Goblin Duelist', hp: 15, condition: 'healthy' }]);
         expect(exchange.playerSlots[0].strikes[0].target).toBe('enemy-goblin-duelist');
+        expect(exchange.playerSlots[1].onSuccess.target).toBe('enemy-goblin-duelist');
         expect(exchange.enemyIntents[0].enemyId).toBe('enemy-goblin-duelist');
     });
 
@@ -184,6 +192,47 @@ describe('engine-owned exchange resolution', () => {
         expect(plan.payload.result.events[1]).toMatchObject({ actor: 'Goblin', hit: false });
         expect(plan.payload.result.events[1].mode).toContain('18, 3');
         expect(plan.payload.playerDamage).toBe(0);
+    });
+
+    it('synchronizes an established prone foe and grants advantage on the player attack', () => {
+        rollQueue.push(4, 12, 2); // advantage keeps 12; damage roll 2 + modifiers
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Cave-Worg' }] }],
+            enemy_intents: [{ enemy_id: 'Cave-Worg', action: 'defend' }],
+            enemy_condition_updates: [{ enemy_id: 'Cave-Worg', add: ['prone'] }],
+        });
+        const plan = planCombatExchange(state({
+            enemies: [enemy('Cave-Worg', { hp: 9, maxHp: 32, ac: 14 })],
+        }), intent);
+
+        const attack = plan.payload.result.events.find(event => event.type === 'attack');
+        expect(attack.mode).toContain('d20 4, 12');
+        expect(attack.rolled).toBeGreaterThanOrEqual(14);
+        expect(plan.payload.enemies[0].conditions).toContain('prone');
+        expect(plan.payload.result.postState.enemies[0].conditions).toContain('prone');
+    });
+
+    it('applies a bounded enemy condition only after its combat check succeeds', () => {
+        rollQueue.push(14, 1, 2); // Athletics succeeds; prone enemy attacks with disadvantage and misses
+        const intent = normalizeCombatExchange({
+            player_slots: [{
+                action: 'check',
+                skill: 'athletics',
+                dc: 15,
+                description: 'Shove the Cave-Worg prone',
+                on_success: { target: 'Cave-Worg', add: ['prone'] },
+            }],
+            enemy_intents: [{ enemy_id: 'Cave-Worg', action: 'attack', target: 'player' }],
+        });
+        const plan = planCombatExchange(state({
+            character: { skillProficiencies: ['athletics'] },
+            enemies: [enemy('Cave-Worg', { hp: 20, maxHp: 32, ac: 14 })],
+        }), intent);
+
+        expect(plan.payload.result.events[0]).toMatchObject({ type: 'check', success: true });
+        expect(plan.payload.enemies[0].conditions).toContain('prone');
+        const enemyAttack = plan.payload.result.events.find(event => event.actor === 'Cave-Worg' && event.type === 'attack');
+        expect(enemyAttack.mode).toContain('d20 1, 2');
     });
 
     it('resolves a committed combat check before the enemy response', () => {

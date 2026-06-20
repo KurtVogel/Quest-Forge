@@ -156,6 +156,13 @@ function EnemyCard({ enemy }) {
                 </span>
                 <span className="enemy-ac">AC {enemy.ac}</span>
             </div>
+            {enemy.conditions?.length > 0 && (
+                <div className="enemy-mechanical-conditions">
+                    {enemy.conditions.map(condition => (
+                        <span key={condition}>{condition}</span>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

@@ -388,6 +388,25 @@
     color: #e6a23c;
 }
 
+.enemy-mechanical-conditions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.4rem;
+}
+
+.enemy-mechanical-conditions span {
+    padding: 0.12rem 0.4rem;
+    border: 1px solid rgba(212, 175, 55, 0.32);
+    border-radius: 999px;
+    background: rgba(212, 175, 55, 0.08);
+    color: var(--gold-light);
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 @media (max-width: 640px) {
     .combat-panel {
         padding: 0.55rem 0.75rem;

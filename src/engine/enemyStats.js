@@ -20,6 +20,19 @@ const DAMAGE_MOD_MAX = 15;
 const AC_MIN = 1;
 const AC_MAX = 25;
 const HP_MAX = 999;
+const SUPPORTED_ENEMY_CONDITIONS = new Set([
+    'poisoned', 'blinded', 'frightened', 'restrained', 'prone',
+    'invisible', 'stunned', 'paralyzed', 'unconscious',
+]);
+
+/** Bounded, normalized conditions that the combat engine knows how to resolve. */
+export function normalizeEnemyConditions(value) {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value
+        .map(condition => String(condition || '').trim().toLowerCase())
+        .filter(condition => SUPPORTED_ENEMY_CONDITIONS.has(condition)))]
+        .slice(0, 10);
+}
 
 /** A to-hit bonus within the allowed band, or undefined (→ engine default) if absurd/out-of-range. */
 export function validateEnemyAttackBonus(n) {
@@ -96,6 +109,7 @@ export function sanitizeLoadedEnemy(enemy) {
         maxHp,
         ac: clampEnemyAC(enemy.ac),
         condition: enemyHealthCondition(hp, maxHp),
+        conditions: normalizeEnemyConditions(enemy.conditions),
         combatStatus: ['active', 'fled', 'surrendered'].includes(enemy.combatStatus) ? enemy.combatStatus : 'active',
         defending: !!enemy.defending,
     };

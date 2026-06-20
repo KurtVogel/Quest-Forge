@@ -283,7 +283,10 @@ When game events occur, include a structured JSON block at the END of your respo
     ],
     "companion_intents": [],
     "enemy_intents": [
-      { "enemy_id": "enemy-id", "action": "attack", "target": "player" }
+      { "enemy_id": "enemy-id", "action": "attack", "target": "player", "remove_conditions": [] }
+    ],
+    "enemy_condition_updates": [
+      { "enemy_id": "enemy-id", "add": ["prone"], "remove": [] }
     ]
   },
   "add_companions": [
@@ -334,8 +337,11 @@ COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
 - An Attack slot uses \`strikes: [{"target":"<living enemy id>"}]\`. A Fighter with Extra Attack may name two strikes in one Attack slot, including different targets. Action Surge grants another action slot, not automatically another attack.
 - A Cast slot uses \`{"action":"cast","spell":"fire bolt|arcane bolt|sacred flame|divine bolt","target":"<living enemy id>"}\`. These bounded Wizard/Cleric basic spell attacks use engine-owned class stats; unsupported spells must be clarified rather than assigned invented mechanics.
 - A Check/Save slot uses \`{"action":"check|save","skill":"<skill or ability>","dc":<5-30>}\` for a genuinely uncertain non-attack action committed during combat. The engine rolls it before companion/enemy intents; do not also use requested_rolls.
+- A Check intended to impose a condition may include \`"on_success":{"target":"<living enemy id>","add":["prone"]}\`. The engine applies the bounded condition only if the check succeeds. Supported enemy conditions are poisoned, blinded, frightened, restrained, prone, invisible, stunned, paralyzed, and unconscious.
+- \`enemy_condition_updates\` synchronizes a condition already established by prior authoritative fiction before this exchange (for example, a foe the previous narration left prone). It is not permission to grant advantage merely because the player asserts one. These updates apply before player rolls.
 - Use \`flee\` only when the fiction establishes a successful escape; it ends combat without XP or pursuit attacks. If escape is uncertain, use a Check slot instead and let its result decide the fiction.
 - \`enemy_intents\`: at most one per living foe, using only \`attack\`, \`defend\`, \`flee\`, or \`surrender\`. An attack targets \`player\` or a living companion id. Missing intent defaults to that foe's basic attack.
+- An enemy intent may include \`"remove_conditions":["prone"]\` when the foe stands, recovers, or otherwise clears an established condition immediately before its own action. Do not remove conditions before the player's earlier slot resolves.
 - \`companion_intents\` is optional: \`attack\`, \`defend\`, or \`pass\`; an attack names a living enemy target. Missing companion intent defaults to a basic attack against a living foe.
 - Intent envelopes contain no dice authority: never supply modifiers, AC, damage, hit/miss, HP changes, or outcomes. Never narrate the outcome before the engine returns it.
 - The engine resolves player slots, companions, then one intent per still-active foe. A defeated foe cannot act. An invalid target loses that actor's slot and never silently redirects to the player.
@@ -675,7 +681,8 @@ function buildCombatBlock(combat, character) {
         const dmg = (typeof e.damage === 'string' && e.damage) ? ` | Dmg: ${e.damage}` : '';
         const status = e.combatStatus && e.combatStatus !== 'active' ? ` | Status: ${e.combatStatus}` : '';
         const defense = e.defending ? ' | DEFENDING' : '';
-        return `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac}${atk}${dmg} | Condition: ${e.condition}${status}${defense}`;
+        const conditions = e.conditions?.length ? ` | Conditions: ${e.conditions.join(', ')}` : '';
+        return `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac}${atk}${dmg} | Health: ${e.condition}${conditions}${status}${defense}`;
     }).join('\n') || '- No tracked enemies';
 
     const turnList = turnOrder.map((t, i) =>

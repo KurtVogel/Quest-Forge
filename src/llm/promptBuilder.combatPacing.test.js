@@ -64,6 +64,8 @@ describe('combat pacing prompt contract', () => {
         expect(text).toContain('A question or clarification is not a committed action');
         expect(text).toContain('LIVE COMBAT STATE OVERRIDES any contradictory earlier narration');
         expect(text).toContain('with HP above 0 and active status is alive');
+        expect(text).toContain('`enemy_condition_updates` synchronizes a condition already established');
+        expect(text).toContain('`"on_success":{"target":"<living enemy id>","add":["prone"]}`');
     });
 
     it('keeps HP, terminal state, and XP entirely engine-owned', () => {
