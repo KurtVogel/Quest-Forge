@@ -8,6 +8,15 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-20 · Players control character intent, not unilateral external reality.**
+Quest Forge welcomes comedic, bizarre, and increasingly gonzo play when established fiction and
+player choices lead there. Harmless compatible color is welcome; plausible stretches may become
+attempts, costs, complications, or rolls. A player declaration does not automatically create an
+external creature, item, exit, relationship, event, enemy response, or successful outcome—especially
+when doing so would bypass danger or erase consequences. The DM answers unsupported assertions from
+the actual situation without scolding. Raw player RAG entries are explicitly non-canonical, while the
+Scribe may preserve compatible personal backstory/vows and external claims the DM actually accepts.
+
 **2026-06-20 · VectorMemory RAG uses `gemini-embedding-2` with asymmetric retrieval formatting.**
 Google retired `text-embedding-004` on 2026-01-14 and scheduled the interim
 `gemini-embedding-001` model to shut down on 2026-07-14, explicitly naming

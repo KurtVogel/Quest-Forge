@@ -11,6 +11,15 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### Soft player narrative authority — status: `shipped` (2026-06-20)
+Players own character intent, speech, inner life, and harmless compatible scene color; the DM owns
+external reality and uncertain outcomes. The prompt deliberately welcomes absurd or comedic play
+when choices and established fiction lead there, but unsupported assertions cannot conjure an escape,
+erase consequences, or grant an advantage. Plausible stretches become attempts, costs, complications,
+or rolls rather than blunt refusals. Raw player RAG entries are labeled non-canonical, and the Scribe
+requires DM-narrative acceptance before turning external player claims into durable facts. Why: danger
+stays meaningful without making imaginative players feel fenced in.
+
 ### LLM WOW Layer / dramatic story memory — status: v1 `shipped` (2026-06-17), priority: HIGH
 Shipped v1 adds a narrative-only `storyMemory` lane for the moments that make the game feel
 uncannily continuous: promises, debts, scars/wounds, player-authored canon, named objects,

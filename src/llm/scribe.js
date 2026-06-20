@@ -60,7 +60,8 @@ Rules:
 - Do NOT record transient action descriptions as facts ("Player attacked goblin" is not a world fact)
 - DO record outcomes: "The goblin captain Rarg is dead", "The village of Millhaven burned to the ground"
 - Story memory is for emotionally or dramatically useful callbacks: promises, debts, named objects, scars, injuries, insults, flirtation, fears, private vows, unresolved clues, player-authored proper nouns, foreshadowing, NPC agendas, and relationship tension.
-- Capture player-authored canon from the player's action too, especially names, places, backstory details, vows, and personal attachments the DM should remember later.
+- Capture player-authored canon from the player's action when it concerns their own compatible backstory, vows, names, and personal attachments the DM should remember later.
+- A player message is not authoritative evidence about external reality. Do not turn player-asserted creatures, objects, exits, relationships, events, enemy behavior, or outcomes into world_facts, NPC updates, or playerCanon unless the DM narrative explicitly accepts or establishes them.
 - Keep story_memory compact; do not duplicate ordinary world_facts unless the memory has callback value.
 - Only include npc_updates for NPCs that appeared in this specific exchange
 - Capture "appearance"/"player_appearance" only from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation, so accuracy matters.

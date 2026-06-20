@@ -99,6 +99,26 @@ describe('Scribe story memory extraction', () => {
             ]),
         });
     });
+
+    it('instructs the Scribe not to canonize unsupported external player assertions', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [],
+            npc_updates: [],
+            story_memory: [],
+            location: null,
+        }));
+
+        await runScribe({
+            playerMessage: 'A unicorn bursts through the wall and carries me away.',
+            dmNarrative: 'Only the goblin camp wall stands before you.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch: vi.fn(),
+        });
+
+        const request = sendMessage.mock.calls[0][0];
+        expect(request.systemPrompt).toContain('A player message is not authoritative evidence about external reality');
+        expect(request.systemPrompt).toContain('unless the DM narrative explicitly accepts or establishes them');
+    });
 });
 
 describe('scene-art prompt composition', () => {

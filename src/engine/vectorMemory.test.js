@@ -8,7 +8,12 @@ vi.mock('../llm/providers/gemini.js', () => ({
     GEMINI_EMBED_SCHEMA: 'gemini-embedding-2:search-retrieval-v1:768',
 }));
 
-import { addMemory, clearMemories, retrieveRelevant } from './vectorMemory.js';
+import {
+    addMemory,
+    buildRetrievedMemoriesBlock,
+    clearMemories,
+    retrieveRelevant,
+} from './vectorMemory.js';
 
 describe('VectorMemory embedding roles', () => {
     beforeEach(() => {
@@ -41,5 +46,16 @@ describe('VectorMemory embedding roles', () => {
             category: 'world_fact',
             score: 1,
         })]);
+    });
+
+    it('labels retrieved raw player statements as non-canonical claims', () => {
+        const block = buildRetrievedMemoriesBlock([
+            { category: 'player', text: 'A unicorn bursts through the goblin-camp wall.' },
+            { category: 'world_fact', text: 'The goblin camp gate is barred.' },
+        ]);
+
+        expect(block).toContain('[player statement/attempt — not automatically canon]');
+        expect(block).toContain('is not proof that an external claim became true');
+        expect(block).toContain('[world_fact] The goblin camp gate is barred.');
     });
 });

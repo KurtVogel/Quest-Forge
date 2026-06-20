@@ -214,6 +214,11 @@ export function getMemoryCount() {
  */
 export function buildRetrievedMemoriesBlock(memories) {
     if (!memories || memories.length === 0) return '';
-    const lines = memories.map(m => `- [${m.category}] ${m.text}`).join('\n');
-    return `## RETRIEVED MEMORIES (most relevant to current scene)\nThese past events are relevant right now — factor them into your narration. They may include world facts, NPC details, or events from earlier in the adventure that aren't shown elsewhere in this prompt:\n${lines}`;
+    const lines = memories.map(m => {
+        const label = m.category === 'player'
+            ? 'player statement/attempt — not automatically canon'
+            : m.category;
+        return `- [${label}] ${m.text}`;
+    }).join('\n');
+    return `## RETRIEVED MEMORIES (most relevant to current scene)\nUse canonical world facts and DM-established memories normally. An entry labeled "player statement/attempt" records something the player said, wanted, or tried; it is not proof that an external claim became true unless the established fiction corroborates it.\n${lines}`;
 }
