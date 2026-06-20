@@ -85,6 +85,12 @@ _Last updated: 2026-06-20 (embedding fix + Combat v2)_
   Character Sheet attach one narration-only fictional beat after the engine commits healing,
   hit dice, conditions, companion recovery, and resource resets. A rest already narrated in a
   normal DM response does not request duplicate prose, and restored cues remain inert on load.
+- **Situational combat negotiation restored:** engine-owned combat now accepts a bounded DM ruling
+  of advantage/disadvantage plus a required fictional reason on player actions and companion/enemy
+  attacks. The player's claim alone is not authoritative; the DM adjudicates established positioning
+  and circumstances, while the engine rolls, applies condition cancellation, and shows the reason
+  beside the result. This restores rulings such as a genuine flank without returning dice or math
+  authority to the model.
 - **Contextual living-world migration shipped**: existing campaigns can now privately
   awaken or enrich hidden fronts from their complete bounded campaign context. Basic fronts
   and clocks are preserved, dead/resolved figures remain history, mechanics are untouched,

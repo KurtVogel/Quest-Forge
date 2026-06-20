@@ -279,7 +279,7 @@ When game events occur, include a structured JSON block at the END of your respo
   },
   "combat_exchange": {
     "player_slots": [
-      { "action": "attack", "strikes": [{ "target": "enemy-id" }] }
+      { "action": "attack", "strikes": [{ "target": "enemy-id" }], "situational_ruling": { "mode": "advantage", "reason": "accepted fictional positioning" } }
     ],
     "companion_intents": [],
     "enemy_intents": [
@@ -338,6 +338,7 @@ COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
 - A Cast slot uses \`{"action":"cast","spell":"fire bolt|arcane bolt|sacred flame|divine bolt","target":"<living enemy id>"}\`. These bounded Wizard/Cleric basic spell attacks use engine-owned class stats; unsupported spells must be clarified rather than assigned invented mechanics.
 - A Check/Save slot uses \`{"action":"check|save","skill":"<skill or ability>","dc":<5-30>}\` for a genuinely uncertain non-attack action committed during combat. The engine rolls it before companion/enemy intents; do not also use requested_rolls.
 - A Check intended to impose a condition may include \`"on_success":{"target":"<living enemy id>","add":["prone"]}\`. The engine applies the bounded condition only if the check succeeds. Supported enemy conditions are poisoned, blinded, frightened, restrained, prone, invisible, stunned, paralyzed, and unconscious.
+- **Situational rulings preserve table negotiation.** Any player slot, companion intent, or enemy attack intent may include \`"situational_ruling":{"mode":"advantage|disadvantage","reason":"<brief established fictional reason>"}\`. Use this only when you, as DM, accept that current established fiction or a plausible tactical setup warrants it (for example, a genuinely established flank). The player's claim alone does not make the reason true. If it is unsupported, omit the ruling and briefly adjudicate from the actual situation. Never supply numerical modifiers or dice. The engine combines an accepted ruling with conditions and normal advantage/disadvantage cancellation, and shows the reason beside the roll.
 - \`enemy_condition_updates\` synchronizes a condition already established by prior authoritative fiction before this exchange (for example, a foe the previous narration left prone). It is not permission to grant advantage merely because the player asserts one. These updates apply before player rolls.
 - Use \`flee\` only when the fiction establishes a successful escape; it ends combat without XP or pursuit attacks. If escape is uncertain, use a Check slot instead and let its result decide the fiction.
 - \`enemy_intents\`: at most one per living foe, using only \`attack\`, \`defend\`, \`flee\`, or \`surrender\`. An attack targets \`player\` or a living companion id. Missing intent defaults to that foe's basic attack.

@@ -67,6 +67,16 @@ function normalizeConditionDelta(raw, targetValue) {
     return { target, add, remove };
 }
 
+function normalizeSituationalRuling(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const source = raw.situational_ruling || raw.situationalRuling || raw;
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+    const mode = text(source.roll_mode || source.rollMode || source.mode, 20).toLowerCase();
+    const reason = text(source.roll_reason || source.rollReason || source.reason, 180);
+    if (!['advantage', 'disadvantage'].includes(mode) || !reason) return null;
+    return { mode, reason };
+}
+
 /** Normalize an LLM-authored intent envelope without consulting mutable game state. */
 export function normalizeCombatExchange(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -78,6 +88,7 @@ export function normalizeCombatExchange(raw) {
         ? rawPlayerSlots.slice(0, 2).map((slot, index) => {
             const action = text(slot?.action, 30).toLowerCase();
             if (!PLAYER_ACTIONS.has(action)) return null;
+            const situationalRuling = normalizeSituationalRuling(slot);
             return {
                 id: ref(slot.id) || `player-slot-${index + 1}`,
                 action,
@@ -91,6 +102,7 @@ export function normalizeCombatExchange(raw) {
                 ...(action === 'check' && normalizeConditionDelta(slot.on_success || slot.onSuccess) && {
                     onSuccess: normalizeConditionDelta(slot.on_success || slot.onSuccess),
                 }),
+                ...(situationalRuling && { situationalRuling }),
             };
         }).filter(Boolean)
         : [];
@@ -102,6 +114,7 @@ export function normalizeCombatExchange(raw) {
             const enemyId = ref(intent?.enemy_id || intent?.enemyId);
             if (!enemyId || !ENEMY_ACTIONS.has(action)) return null;
             const rawRemoveConditions = intent.remove_conditions || intent.removeConditions;
+            const situationalRuling = normalizeSituationalRuling(intent);
             const removeConditions = normalizeEnemyConditions(
                 Array.isArray(rawRemoveConditions) ? rawRemoveConditions : [rawRemoveConditions]
             );
@@ -111,6 +124,7 @@ export function normalizeCombatExchange(raw) {
                 target: ref(intent.target) || 'player',
                 description: text(intent.description, 180),
                 ...(removeConditions.length > 0 && { removeConditions }),
+                ...(situationalRuling && { situationalRuling }),
             };
         }).filter(Boolean)
         : [];
@@ -120,11 +134,13 @@ export function normalizeCombatExchange(raw) {
             const action = text(intent?.action, 30).toLowerCase();
             const companionId = ref(intent?.companion_id || intent?.companionId);
             if (!companionId || !COMPANION_ACTIONS.has(action)) return null;
+            const situationalRuling = normalizeSituationalRuling(intent);
             return {
                 companionId,
                 action,
                 target: ref(intent.target),
                 description: text(intent.description, 180),
+                ...(situationalRuling && { situationalRuling }),
             };
         }).filter(Boolean)
         : [];
@@ -248,6 +264,26 @@ function conditionAwareAttackModifiers(attackerConditions, targetConditions, bas
     });
 }
 
+function rulingFlags(ruling) {
+    return {
+        advantage: ruling?.mode === 'advantage',
+        disadvantage: ruling?.mode === 'disadvantage',
+    };
+}
+
+function rollModeLabel(roll, modifiers, ruling) {
+    const parts = [];
+    if (roll.detail) parts.push(roll.detail);
+    else if (modifiers.advantage) parts.push('advantage');
+    else if (modifiers.disadvantage) parts.push('disadvantage');
+    if (ruling) {
+        const cancelled = !roll.detail && !modifiers.advantage && !modifiers.disadvantage;
+        parts.push(`DM ruling — ${ruling.mode}: ${ruling.reason}${cancelled ? ' (cancelled by an opposing modifier)' : ''}`);
+    }
+    if (modifiers.note) parts.push(modifiers.note.trim());
+    return parts.join('; ');
+}
+
 function companionHealthStatus(companion) {
     if ((companion.hp ?? 0) <= 0) return 'downed';
     const ratio = companion.maxHp > 0 ? companion.hp / companion.maxHp : 1;
@@ -335,7 +371,8 @@ function eventMessage(event) {
         return `**${event.actor} attacks ${event.target}** —${roll}; **Hit for ${event.damage} damage.**${crit}${survival}`;
     }
     if (event.type === 'check' || event.type === 'save') {
-        return `**${event.actor}: ${event.description}** — Rolled **${event.rolled}** vs DC ${event.dc}; **${event.success ? 'Success' : 'Failure'}.**`;
+        const checkMode = event.mode ? ` (${event.mode})` : '';
+        return `**${event.actor}: ${event.description}** — Rolled **${event.rolled}** vs DC ${event.dc}${checkMode}; **${event.success ? 'Success' : 'Failure'}.**`;
     }
     if (event.type === 'death_save') return `**Death Saving Throw:** natural **${event.natural}**.`;
     return event.text || `${event.actor} ${event.type}.`;
@@ -517,7 +554,8 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
                 events.push({ type: 'note', text: `${slot.spell || 'The spell'} has no valid target and is not redirected.` });
                 continue;
             }
-            const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, false, !!enemy.defending);
+            const ruling = rulingFlags(slot.situationalRuling);
+            const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, ruling.advantage, ruling.disadvantage || !!enemy.defending);
             const spellMod = getModifier(character.abilityScores?.[profile.ability] || 10) + getProficiencyBonus(character.level || 1);
             const attack = rollD20(spellMod, `${character.name || 'Player'} casts ${profile.name} at ${enemy.name}`, modifiers.advantage, modifiers.disadvantage);
             rolls.push(attack.roll);
@@ -534,7 +572,7 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
             events.push({
                 type: 'attack', actor: character.name || 'Player', target: enemy.name,
                 rolled: attack.roll.total, natural: attack.natural, dc: enemy.ac,
-                mode: attack.detail || (modifiers.disadvantage ? 'disadvantage' : modifiers.advantage ? 'advantage' : ''),
+                mode: rollModeLabel(attack, modifiers, slot.situationalRuling),
                 hit, critical, damage, remainingHp: enemy.hp, maxHp: enemy.maxHp,
             });
             continue;
@@ -547,7 +585,9 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
                     ? getModifier(character.abilityScores[skill])
                     : getSkillModifier(character, skill);
             const conditionEffects = getConditionRollEffects(character.conditions, slot.action === 'save' ? 'save' : 'check');
-            const roll = rollD20(modifier, slot.description || `${skill} ${slot.action}`, conditionEffects.advantage, conditionEffects.disadvantage);
+            const ruling = rulingFlags(slot.situationalRuling);
+            const modifiers = combineRollModifiers(ruling.advantage, ruling.disadvantage, conditionEffects);
+            const roll = rollD20(modifier, slot.description || `${skill} ${slot.action}`, modifiers.advantage, modifiers.disadvantage);
             rolls.push(roll.roll);
             const success = roll.roll.total >= slot.dc;
             events.push({
@@ -558,7 +598,7 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
                 natural: roll.natural,
                 dc: slot.dc,
                 success,
-                mode: roll.detail,
+                mode: rollModeLabel(roll, modifiers, slot.situationalRuling),
             });
             if (success && slot.action === 'check' && slot.onSuccess) {
                 const enemy = findByRef(enemies, slot.onSuccess.target);
@@ -588,7 +628,8 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
                 events.push({ type: 'note', text: `${enemy?.name || strike.target} has already been overcome; the unused strike does not retarget without player intent.` });
                 continue;
             }
-            const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, false, !!enemy.defending);
+            const ruling = rulingFlags(slot.situationalRuling);
+            const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, ruling.advantage, ruling.disadvantage || !!enemy.defending);
             const attack = rollD20(
                 getWeaponAttackBonus(character, attackInventory),
                 `${character.name || 'Player'} attacks ${enemy.name}`,
@@ -613,7 +654,7 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
             events.push({
                 type: 'attack', actor: character.name || 'Player', target: enemy.name,
                 rolled: attack.roll.total, natural: attack.natural, dc: enemy.ac,
-                mode: attack.detail || (modifiers.disadvantage ? 'disadvantage' : modifiers.advantage ? 'advantage' : ''),
+                mode: rollModeLabel(attack, modifiers, slot.situationalRuling),
                 hit, critical, damage, remainingHp: enemy.hp, maxHp: enemy.maxHp,
             });
         }
@@ -621,8 +662,9 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
     return { dodging, fled, deathSaveNatural };
 }
 
-function resolveCompanionAttack(companion, target, events, rolls) {
-    const modifiers = conditionAwareAttackModifiers(companion.conditions, target.conditions, false, !!target.defending);
+function resolveCompanionAttack(companion, target, events, rolls, situationalRuling = null) {
+    const ruling = rulingFlags(situationalRuling);
+    const modifiers = conditionAwareAttackModifiers(companion.conditions, target.conditions, ruling.advantage, ruling.disadvantage || !!target.defending);
     const attack = rollD20(
         companion.attackBonus ?? 2,
         `${companion.name} attacks ${target.name}`,
@@ -642,7 +684,7 @@ function resolveCompanionAttack(companion, target, events, rolls) {
     }
     events.push({
         type: 'attack', actor: companion.name, target: target.name, rolled: attack.roll.total,
-        natural: attack.natural, dc: target.ac, mode: attack.detail, hit, critical, damage,
+        natural: attack.natural, dc: target.ac, mode: rollModeLabel(attack, modifiers, situationalRuling), hit, critical, damage,
         remainingHp: target.hp, maxHp: target.maxHp,
     });
 }
@@ -672,11 +714,11 @@ function resolveCompanions({ exchange, enemies, companions, events, rolls, onlyI
             events.push({ type: 'note', text: `${companion.name}'s declared target is unavailable; the action is dropped rather than redirected.` });
             continue;
         }
-        resolveCompanionAttack(companion, target, events, rolls);
+        resolveCompanionAttack(companion, target, events, rolls, intent.situationalRuling);
     }
 }
 
-function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions, playerHp, playerDodging, events, rolls }) {
+function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions, playerHp, playerDodging, situationalRuling, events, rolls }) {
     let targetType = 'player';
     let target = character;
     let targetName = character.name || 'Player';
@@ -701,7 +743,8 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
         return { playerHp, playerDamage: 0 };
     }
 
-    const modifiers = conditionAwareAttackModifiers(enemy.conditions, targetConditions, false, targetDisadvantage);
+    const ruling = rulingFlags(situationalRuling);
+    const modifiers = conditionAwareAttackModifiers(enemy.conditions, targetConditions, ruling.advantage, ruling.disadvantage || targetDisadvantage);
     const attackBonus = validateEnemyAttackBonus(enemy.attackBonus) ?? DEFAULT_ENEMY_ATTACK_BONUS;
     const attack = rollD20(attackBonus, `${enemy.name} attacks ${targetName}`, modifiers.advantage, modifiers.disadvantage);
     rolls.push(attack.roll);
@@ -723,7 +766,7 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
     events.push({
         type: 'attack', actor: enemy.name, target: targetName, rolled: attack.roll.total,
         natural: attack.natural, dc: targetAc,
-        mode: attack.detail || (modifiers.disadvantage ? 'disadvantage' : modifiers.advantage ? 'advantage' : ''),
+        mode: rollModeLabel(attack, modifiers, situationalRuling),
         hit, critical, damage,
         remainingHp: targetType === 'player' ? playerHp : target.hp,
         maxHp: targetType === 'player' ? character.maxHP : target.maxHp,
@@ -770,6 +813,7 @@ function resolveEnemies({ state, exchange, enemies, companions, playerHp, player
             companions,
             playerHp,
             playerDodging,
+            situationalRuling: intent.situationalRuling,
             events,
             rolls,
         });

@@ -137,6 +137,37 @@ describe('combat exchange validation', () => {
         });
     });
 
+    it('accepts only reasoned, bounded situational roll rulings', () => {
+        const accepted = normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'advantage', reason: 'Wit already flanks the goblin' },
+            }],
+        });
+        const unsupported = normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'advantage' },
+            }],
+        });
+        const inventedMode = normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'triple-advantage', reason: 'because' },
+            }],
+        });
+
+        expect(accepted.playerSlots[0].situationalRuling).toEqual({
+            mode: 'advantage',
+            reason: 'Wit already flanks the goblin',
+        });
+        expect(unsupported.playerSlots[0]).not.toHaveProperty('situationalRuling');
+        expect(inventedMode.playerSlots[0]).not.toHaveProperty('situationalRuling');
+    });
+
     it('rejects a missing or invalid combat target before rolling anyone', () => {
         const missing = exchange({ player_slots: [{ action: 'attack' }] });
         expect(planCombatExchange(state(), missing)).toMatchObject({ ok: false, error: expect.stringContaining('living target') });
@@ -210,6 +241,71 @@ describe('engine-owned exchange resolution', () => {
         expect(attack.rolled).toBeGreaterThanOrEqual(14);
         expect(plan.payload.enemies[0].conditions).toContain('prone');
         expect(plan.payload.result.postState.enemies[0].conditions).toContain('prone');
+    });
+
+    it('applies and exposes a DM-approved situational advantage ruling', () => {
+        rollQueue.push(4, 12, 2);
+        const intent = normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'advantage', reason: 'Wit threatens it from the opposite side' },
+            }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        });
+        const plan = planCombatExchange(state(), intent);
+        const attack = plan.payload.result.events.find(event => event.type === 'attack');
+
+        expect(attack.mode).toContain('d20 4, 12');
+        expect(attack.mode).toContain('DM ruling — advantage: Wit threatens it from the opposite side');
+        expect(plan.payload.result.summary).toContain('Wit threatens it from the opposite side');
+    });
+
+    it('cancels an accepted advantage against condition disadvantage', () => {
+        rollQueue.push(15, 2);
+        const intent = normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'advantage', reason: 'The goblin is distracted' },
+            }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        });
+        const plan = planCombatExchange(state({ character: { conditions: ['poisoned'] } }), intent);
+        const attack = plan.payload.result.events.find(event => event.type === 'attack');
+
+        expect(attack.natural).toBe(15);
+        expect(attack.mode).not.toContain('d20 15,');
+        expect(attack.mode).toContain('cancelled');
+    });
+
+    it('applies situational rulings symmetrically to companions and enemies', () => {
+        rollQueue.push(2, 18, 1, 17, 3);
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            companion_intents: [{
+                companion_id: 'wit',
+                action: 'attack',
+                target: 'Goblin',
+                situational_ruling: { mode: 'advantage', reason: 'Wit attacks from concealment' },
+            }],
+            enemy_intents: [{
+                enemy_id: 'Goblin',
+                action: 'attack',
+                target: 'player',
+                situational_ruling: { mode: 'disadvantage', reason: 'Smoke obscures Vesa' },
+            }],
+        });
+        const plan = planCombatExchange(state({
+            party: [{ id: 'wit', name: 'Wit', hp: 10, maxHp: 10, ac: 13, attackBonus: 3, damage: '1d6+1', status: 'healthy' }],
+        }), intent);
+        const companionAttack = plan.payload.result.events.find(event => event.actor === 'Wit');
+        const enemyAttack = plan.payload.result.events.find(event => event.actor === 'Goblin');
+
+        expect(companionAttack.mode).toContain('d20 2, 18');
+        expect(companionAttack.mode).toContain('Wit attacks from concealment');
+        expect(enemyAttack.mode).toContain('d20 17, 3');
+        expect(enemyAttack.mode).toContain('Smoke obscures Vesa');
     });
 
     it('applies a bounded enemy condition only after its combat check succeeds', () => {

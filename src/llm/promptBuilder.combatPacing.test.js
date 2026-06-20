@@ -58,6 +58,8 @@ describe('combat pacing prompt contract', () => {
 
         expect(text).toContain('COMBAT INTENT, NEVER COMBAT DICE');
         expect(text).toContain('Every committed player turn includes exactly one `combat_exchange`');
+        expect(text).toContain('Situational rulings preserve table negotiation');
+        expect(text).toContain('The player\'s claim alone does not make the reason true');
         expect(text).toContain('Never emit `attack_roll`, `companion_attack`, or `npc_attack`');
         expect(text).toContain('player slots, companions, then one intent per still-active foe');
         expect(text).toContain('A defeated foe cannot act');

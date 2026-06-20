@@ -64,6 +64,12 @@ clear a condition immediately before that enemy acts. Both attacker-side and tar
 effects participate in advantage/disadvantage cancellation. Conditions persist across save/load and
 are visible in combat UI; narration may not invent a condition absent from the engine result.
 
+Table-style situational adjudication remains LLM-rich without returning dice authority to the
+model. Player slots and companion/enemy attack intents may carry one bounded `situational_ruling`:
+advantage or disadvantage plus a required short fictional reason. The DM accepts or refuses the
+ruling from established fiction (a player's assertion alone is not truth); the engine rolls,
+combines it with conditions/defense and normal cancellation, and prints the reason with the result.
+
 **2026-06-19 · A declared player attack requires a resolvable attack before hostile rolls.**
 In a player-turn combat exchange, the presence of an arbitrary player-side roll is not enough:
 before enemies may act, the batch must contain every expected Attack action with a valid attack
