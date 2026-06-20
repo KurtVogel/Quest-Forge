@@ -62,6 +62,8 @@ describe('combat pacing prompt contract', () => {
         expect(text).toContain('player slots, companions, then one intent per still-active foe');
         expect(text).toContain('A defeated foe cannot act');
         expect(text).toContain('A question or clarification is not a committed action');
+        expect(text).toContain('LIVE COMBAT STATE OVERRIDES any contradictory earlier narration');
+        expect(text).toContain('with HP above 0 and active status is alive');
     });
 
     it('keeps HP, terminal state, and XP entirely engine-owned', () => {

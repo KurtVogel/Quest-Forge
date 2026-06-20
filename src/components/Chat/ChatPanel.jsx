@@ -364,8 +364,16 @@ export default function ChatPanel() {
                         dmNarrative: narrative,
                         settings: latest.settings,
                         dispatch,
+                        authoritativeContext: {
+                            terminal: result.terminal || 'ongoing',
+                            postState: result.postState,
+                        },
                     }).catch(() => {});
-                    if (latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
+                    // Ordinary combat beats are transient and the engine snapshot, not prose,
+                    // owns their truth. Persist only terminal combat narration to RAG so a
+                    // model wording mistake cannot become a long-lived semantic memory.
+                    if (['victory', 'defeat', 'escaped'].includes(result.terminal)
+                        && latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
                         addMemory(latest.settings.apiKey, narrative.slice(0, 500), 'narrative').catch(() => {});
                     }
                 }

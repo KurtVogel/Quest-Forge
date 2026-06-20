@@ -686,6 +686,8 @@ function buildCombatBlock(combat, character) {
     const surge = character?.pendingActionSurge ? 'ACTIVE — exactly two player_slots required' : 'inactive — exactly one player_slot required';
     return `## ACTIVE COMBAT — Round ${combat.round} | Phase: ${phase} | Surprise: ${combat.surprise || 'none'}
 
+LIVE COMBAT STATE OVERRIDES any contradictory earlier narration, journal entry, retrieved memory, or world fact about these combatants. A foe shown below with HP above 0 and active status is alive; never treat it as dead merely because earlier prose said so.
+
 **Enemies:**
 ${enemyList}
 

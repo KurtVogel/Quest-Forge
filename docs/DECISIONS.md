@@ -35,7 +35,12 @@ emits `requested_rolls` or numerical outcomes. It translates fiction into a boun
 the live targets/actions and generates all attack, damage, spell, check, save, critical, Extra
 Attack, Action Surge, companion, enemy, and death-save rolls from canonical state. The reducer
 commits the complete plan once by `exchangeId`; the later LLM call is narration-only and cannot
-reroll or mutate mechanics. A failed narration is retryable from the persisted result.
+reroll or mutate mechanics. The result also persists the authoritative post-exchange combatant
+snapshot. Narration receives explicit alive/active/defeated/fled/surrendered labels plus remaining
+HP and may not infer death from dramatic damage; the Scribe receives the same snapshot and filters
+contradictory survival claims before they become durable facts or memories. Non-terminal combat
+prose is intentionally excluded from long-term vector memory; the immutable result remains its
+source of truth. A failed narration is retryable from the persisted result.
 
 Combat phases are `opening` → `awaiting_player` → `awaiting_intent` → `awaiting_narration`. Initiative matters once:
 actors who beat the player get one Opening Initiative action (modified by declared surprise), then

@@ -264,8 +264,10 @@ function eventMessage(event) {
     if (event.type === 'attack') {
         if (!event.hit) return `**${event.actor} attacks ${event.target}** —${roll}; **Miss.**`;
         const crit = event.critical ? ' Critical hit.' : '';
-        const down = event.remainingHp <= 0 ? ` ${event.target} is down.` : '';
-        return `**${event.actor} attacks ${event.target}** —${roll}; **Hit for ${event.damage} damage.**${crit}${down}`;
+        const survival = event.remainingHp <= 0
+            ? ` ${event.target} is down.`
+            : ` ${event.target} remains alive at ${event.remainingHp}/${event.maxHp} HP.`;
+        return `**${event.actor} attacks ${event.target}** —${roll}; **Hit for ${event.damage} damage.**${crit}${survival}`;
     }
     if (event.type === 'check' || event.type === 'save') {
         return `**${event.actor}: ${event.description}** — Rolled **${event.rolled}** vs DC ${event.dc}; **${event.success ? 'Success' : 'Failure'}.**`;
@@ -274,7 +276,30 @@ function eventMessage(event) {
     return event.text || `${event.actor} ${event.type}.`;
 }
 
-function makeResult(kind, exchangeId, round, events, terminal) {
+function enemySnapshot(enemy) {
+    const status = (enemy.hp ?? 0) <= 0 || enemy.condition === 'dead'
+        ? 'defeated'
+        : enemy.combatStatus === 'fled'
+            ? 'fled'
+            : enemy.combatStatus === 'surrendered'
+                ? 'surrendered'
+                : 'active';
+    return {
+        id: enemy.id,
+        name: enemy.name,
+        hp: enemy.hp,
+        maxHp: enemy.maxHp,
+        condition: enemy.condition,
+        status,
+    };
+}
+
+function makeResult(kind, exchangeId, round, events, terminal, {
+    enemies = [],
+    companions = [],
+    character = null,
+    playerHp = null,
+} = {}) {
     return {
         exchangeId,
         kind,
@@ -282,6 +307,21 @@ function makeResult(kind, exchangeId, round, events, terminal) {
         terminal,
         events,
         summary: events.map(eventMessage).join('\n'),
+        postState: {
+            player: character ? {
+                name: character.name || 'Player',
+                hp: Number.isFinite(playerHp) ? playerHp : character.currentHP,
+                maxHp: character.maxHP,
+            } : null,
+            enemies: enemies.map(enemySnapshot),
+            companions: companions.map(companion => ({
+                id: companion.id,
+                name: companion.name,
+                hp: companion.hp,
+                maxHp: companion.maxHp,
+                status: companion.status,
+            })),
+        },
     };
 }
 
@@ -699,7 +739,12 @@ export function planCombatExchange(state, exchange) {
     const player = resolvePlayerSlots({ state, exchange, enemies, events, rolls });
 
     if (player.fled) {
-        const result = makeResult('exchange', exchangeId, state.combat.round, events, 'escaped');
+        const result = makeResult('exchange', exchangeId, state.combat.round, events, 'escaped', {
+            enemies,
+            companions,
+            character: state.character,
+            playerHp: state.character.currentHP,
+        });
         return {
             ok: true,
             payload: {
@@ -726,7 +771,13 @@ export function planCombatExchange(state, exchange) {
         events, rolls,
     });
     const terminal = terminalState(enemies, enemyResult.playerHp, state.character, player.deathSaveNatural, companions);
-    const result = makeResult('exchange', exchangeId, state.combat.round, events, terminal);
+    const playerHp = player.deathSaveNatural === 20 ? Math.max(1, enemyResult.playerHp) : enemyResult.playerHp;
+    const result = makeResult('exchange', exchangeId, state.combat.round, events, terminal, {
+        enemies,
+        companions,
+        character: state.character,
+        playerHp,
+    });
 
     return {
         ok: true,
@@ -778,7 +829,12 @@ export function planOpeningExchange(state) {
         }
     }
     const terminal = terminalState(enemies, playerHp, state.character, null, companions);
-    const result = makeResult('opening', exchangeId, state.combat.round, events, terminal);
+    const result = makeResult('opening', exchangeId, state.combat.round, events, terminal, {
+        enemies,
+        companions,
+        character: state.character,
+        playerHp,
+    });
     return {
         ok: true,
         payload: {
@@ -803,14 +859,36 @@ export function combatNarrationPrompt(result) {
                 ? 'The player has mechanically escaped combat. Narrate the retreat without adding pursuit attacks or XP.'
             : result.terminal === 'dying'
                 ? 'The player remains unconscious and dying. Narrate the danger briefly; do not end combat or invent another attack.'
-            : 'End with the situation returned to the player for their next decision.';
+            : 'COMBAT IS STILL ACTIVE. End with the situation returned to the player for their next decision. Do not narrate victory or the end of the fight.';
+    const enemyStates = result.postState?.enemies?.length
+        ? result.postState.enemies.map(enemy => {
+            if (enemy.status === 'defeated') return `- DEFEATED: ${enemy.name} — 0/${enemy.maxHp} HP.`;
+            if (enemy.status === 'fled') return `- ALIVE, FLED: ${enemy.name} — ${enemy.hp}/${enemy.maxHp} HP.`;
+            if (enemy.status === 'surrendered') return `- ALIVE, SURRENDERED: ${enemy.name} — ${enemy.hp}/${enemy.maxHp} HP.`;
+            return `- ALIVE AND ACTIVE: ${enemy.name} — ${enemy.hp}/${enemy.maxHp} HP (${enemy.condition || 'wounded'}).`;
+        })
+        : result.events
+            .filter(event => event.type === 'attack' && Number.isFinite(event.remainingHp))
+            .map(event => event.remainingHp <= 0
+                ? `- DEFEATED: ${event.target} — 0/${event.maxHp} HP.`
+                : `- ALIVE AND ACTIVE: ${event.target} — ${event.remainingHp}/${event.maxHp} HP.`);
+    const playerState = result.postState?.player
+        ? `- PLAYER: ${result.postState.player.name} — ${result.postState.player.hp}/${result.postState.player.maxHp} HP.`
+        : null;
+    const postState = [playerState, ...enemyStates].filter(Boolean).join('\n');
     return [
         `[SYSTEM: Combat exchange ${result.exchangeId} has already been resolved completely by the engine.`,
         'Narrate these exact results once in one cohesive, vivid but concise passage.',
         'Do not roll, request rolls, change HP, add attacks, repeat actions, or emit JSON.',
         'Never turn a miss into a hit or invent a counterattack.',
+        `The terminal state is mechanically authoritative: ${result.terminal || 'ongoing'}.`,
+        'The POST-EXCHANGE STATE is absolute. Never describe an ALIVE AND ACTIVE combatant as dead, defeated, lifeless, finished, going slack, or collapsing permanently. Fled and surrendered foes may be overcome, but remain alive. Do not quote HP numbers in the prose.',
         ending,
         '',
+        'POST-EXCHANGE STATE (AUTHORITATIVE):',
+        postState || '- No combatant snapshot available; obey each event\'s remaining-HP statement exactly.',
+        '',
+        'RESOLVED EVENTS:',
         result.summary,
         ']'
     ].join('\n');

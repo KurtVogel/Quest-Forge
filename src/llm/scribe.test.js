@@ -119,6 +119,33 @@ describe('Scribe story memory extraction', () => {
         expect(request.systemPrompt).toContain('A player message is not authoritative evidence about external reality');
         expect(request.systemPrompt).toContain('unless the DM narrative explicitly accepts or establishes them');
     });
+
+    it('filters combat survival claims that contradict authoritative engine state', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [{ fact: 'The Cave-Worg is dead.', category: 'event' }],
+            npc_updates: [],
+            story_memory: [{ type: 'callback', text: 'Vesa killed the Cave-Worg.', subject: 'Cave-Worg' }],
+            location: null,
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'Combat exchange',
+            dmNarrative: 'The Cave-Worg collapses lifeless.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+            authoritativeContext: {
+                terminal: 'ongoing',
+                postState: {
+                    enemies: [{ name: 'Cave-Worg', hp: 9, maxHp: 32, status: 'active' }],
+                },
+            },
+        });
+
+        expect(sendMessage.mock.calls[0][0].userMessage).toContain('AUTHORITATIVE ENGINE STATE');
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_WORLD_FACTS' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_STORY_MEMORY_CARDS' }));
+    });
 });
 
 describe('scene-art prompt composition', () => {

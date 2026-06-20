@@ -62,6 +62,7 @@ Rules:
 - Story memory is for emotionally or dramatically useful callbacks: promises, debts, named objects, scars, injuries, insults, flirtation, fears, private vows, unresolved clues, player-authored proper nouns, foreshadowing, NPC agendas, and relationship tension.
 - Capture player-authored canon from the player's action when it concerns their own compatible backstory, vows, names, and personal attachments the DM should remember later.
 - A player message is not authoritative evidence about external reality. Do not turn player-asserted creatures, objects, exits, relationships, events, enemy behavior, or outcomes into world_facts, NPC updates, or playerCanon unless the DM narrative explicitly accepts or establishes them.
+- When AUTHORITATIVE ENGINE STATE is provided, it overrides the prose. Never record a combatant dead, alive, fled, surrendered, victorious, or defeated contrary to that state.
 - Keep story_memory compact; do not duplicate ordinary world_facts unless the memory has callback value.
 - Only include npc_updates for NPCs that appeared in this specific exchange
 - Capture "appearance"/"player_appearance" only from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation, so accuracy matters.
@@ -79,8 +80,24 @@ Rules:
  * @param {string} options.dmNarrative - The DM's response narrative
  * @param {object} options.settings - Game settings (provider, apiKey)
  * @param {function} options.dispatch - Game state dispatch
+ * @param {object|null} [options.authoritativeContext] - Engine truth that narration cannot override
  */
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch }) {
+function contradictsAuthoritativeCombat(value, authoritativeContext) {
+    const claim = String(value || '').toLowerCase();
+    const enemies = authoritativeContext?.postState?.enemies || [];
+    const deathClaim = /\b(dead|dies|died|killed|slain|lifeless|destroyed|finished off)\b/i;
+    const activeCombatEndedClaim = /\b(defeated|vanquished)\b/i;
+    const aliveClaim = /\b(alive|survives|survived|fighting|active)\b/i;
+    return enemies.some(enemy => {
+        const name = String(enemy.name || '').toLowerCase();
+        if (!name || !claim.includes(name)) return false;
+        if (enemy.status === 'defeated' || (enemy.hp ?? 0) <= 0) return aliveClaim.test(claim);
+        if (enemy.status === 'active') return deathClaim.test(claim) || activeCombatEndedClaim.test(claim);
+        return deathClaim.test(claim);
+    });
+}
+
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null }) {
     if (!settings.apiKey || !dmNarrative) return;
 
     try {
@@ -90,7 +107,13 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             model: SCRIBE_MODEL,
             systemPrompt: SCRIBE_SYSTEM_PROMPT,
             messageHistory: [],
-            userMessage: `Player action: ${playerMessage}\n\nDM narrative: ${dmNarrative}`,
+            userMessage: [
+                `Player action: ${playerMessage}`,
+                `DM narrative: ${dmNarrative}`,
+                authoritativeContext
+                    ? `AUTHORITATIVE ENGINE STATE (prose cannot override this): ${JSON.stringify(authoritativeContext)}`
+                    : null,
+            ].filter(Boolean).join('\n\n'),
         });
 
         const jsonMatch = extractBalancedJson(response, 'world_facts');
@@ -109,9 +132,12 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             }
         }
 
-        if (Array.isArray(extracted.world_facts) && extracted.world_facts.length > 0) {
-            dispatch({ type: 'ADD_WORLD_FACTS', payload: extracted.world_facts });
-            console.log(`[Scribe] Added ${extracted.world_facts.length} world fact(s)`);
+        const worldFacts = Array.isArray(extracted.world_facts)
+            ? extracted.world_facts.filter(fact => !contradictsAuthoritativeCombat(fact?.fact, authoritativeContext))
+            : [];
+        if (worldFacts.length > 0) {
+            dispatch({ type: 'ADD_WORLD_FACTS', payload: worldFacts });
+            console.log(`[Scribe] Added ${worldFacts.length} world fact(s)`);
         }
 
         if (Array.isArray(extracted.npc_updates) && extracted.npc_updates.length > 0) {
@@ -121,9 +147,12 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             console.log(`[Scribe] Updated ${extracted.npc_updates.length} NPC(s)`);
         }
 
-        if (Array.isArray(extracted.story_memory) && extracted.story_memory.length > 0) {
-            dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: extracted.story_memory });
-            console.log(`[Scribe] Added ${extracted.story_memory.length} story memory card(s)`);
+        const storyMemory = Array.isArray(extracted.story_memory)
+            ? extracted.story_memory.filter(memory => !contradictsAuthoritativeCombat(memory?.text, authoritativeContext))
+            : [];
+        if (storyMemory.length > 0) {
+            dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: storyMemory });
+            console.log(`[Scribe] Added ${storyMemory.length} story memory card(s)`);
         }
 
         if (typeof extracted.player_appearance === 'string' && extracted.player_appearance.trim()) {

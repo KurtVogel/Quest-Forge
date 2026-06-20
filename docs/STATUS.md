@@ -47,7 +47,7 @@ _Last updated: 2026-06-20 (embedding fix + Combat v2)_
   removes the old vector space, and each entry is schema-tagged and dimension-checked so future
   migrations cannot silently mix incompatible vectors. Provider failures include HTTP details.
   Focused regressions pin the exact REST contract and document/query roles; full verification is
-  241 tests plus clean lint and production build.
+  243 tests plus clean lint and production build.
 - **Soft player-authority boundary (2026-06-20):** the DM now distinguishes character intent from
   unilateral external-reality edits without suppressing creativity. Emergent absurdity and harmless
   compatible color remain welcome; plausible stretches become attempts/rolls/complications, while
@@ -55,6 +55,14 @@ _Last updated: 2026-06-20 (embedding fix + Combat v2)_
   because the player declared them. The Scribe only canonizes external player claims accepted by DM
   narration, and raw player RAG memories are visibly labeled statements/attempts rather than facts.
   Focused prompt/Scribe/RAG regressions cover the boundary.
+- **Premature combat-death narration fixed (2026-06-20):** live play showed the engine correctly
+  holding a Cave-Worg at 9/32 HP while the narration described it dead. Exchange results now persist
+  a complete post-state snapshot; every damaging event says whether its target remains alive, and
+  the narration prompt marks ongoing combat plus each foe's authoritative survival/status. Active
+  combat state overrides contradictory earlier prose or memories. The Scribe receives that same
+  snapshot and deterministically drops contradictory death/survival facts and story cards, while
+  non-terminal combat prose is excluded from long-term RAG. The exact 20/32 minus 11 → 9/32
+  Cave-Worg case is regression-tested.
 - **Repeated enemy-first combat hole fixed**: the old safeguard mistook any non-enemy roll
   for a valid player attack, so malformed `attack_roll` entries or damage-only placeholders
   could be silently skipped while an enemy still attacked. A declared attack now requires a
