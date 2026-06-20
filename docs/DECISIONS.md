@@ -8,16 +8,15 @@ Format: date · decision · why. Newest first.
 
 ---
 
-**2026-06-20 · VectorMemory RAG uses `gemini-embedding-001` at 768 dimensions; old vectors are versioned out.**
-Google retired `text-embedding-004` on 2026-01-14. Failures were silently swallowed so RAG appeared
-functional while embeddings had been broken for months. Fixed: `GEMINI_EMBED_MODEL` →
-`gemini-embedding-001`, `output_dimensionality: 768` (a supported truncation; default 3072 is
-unwieldy). The IndexedDB vector store version was bumped 1 → 2 — stale vectors from the old model
-occupy a different semantic space and cannot be mixed with new ones, so the store drops and
-recreates on first load after deploy. Error logging now emits HTTP status + response body snippet
-so future deprecations surface in the console immediately. Verified live: 768-dim vector confirmed
-from API before commit. `gemini-embedding-2` (Public Preview) was explicitly rejected in favour of
-the GA model.
+**2026-06-20 · VectorMemory RAG uses `gemini-embedding-2` with asymmetric retrieval formatting.**
+Google retired `text-embedding-004` on 2026-01-14 and scheduled the interim
+`gemini-embedding-001` model to shut down on 2026-07-14, explicitly naming
+`gemini-embedding-2` as its replacement. Stored memories are embedded as
+`title: none | text: {content}` documents; scene context is embedded as
+`task: search result | query: {content}`. Output remains an officially supported 768 dimensions.
+The IndexedDB store is version 3 and every entry carries a model/format/dimension schema, so stale
+or corrupt vectors cannot enter cosine comparisons even if a future migration forgets to bump the
+database version. Provider regressions pin the exact REST URL, request body, roles, and vector size.
 
 **2026-06-20 · Active combat is an explicit, atomic, engine-owned exchange state machine.**
 *Implemented and shipped on 2026-06-20.* This supersedes the

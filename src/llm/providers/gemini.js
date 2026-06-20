@@ -5,11 +5,24 @@
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1alpha/models';
 const GEMINI_EMBED_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-// gemini-embedding-001 is the GA replacement for text-embedding-004, which was
-// retired on 2026-01-14. Default output is 3072-dim; we truncate to 768 to keep
-// cached vectors compact and stay compatible with existing IndexedDB entries.
-const GEMINI_EMBED_MODEL = 'gemini-embedding-001';
-const GEMINI_EMBED_DIMENSIONS = 768;
+// Google's current embedding model. Its default output is 3072 dimensions; 768 is
+// an officially supported Matryoshka truncation that keeps the browser cache compact.
+// The schema includes our asymmetric retrieval format because changing either the
+// model or formatting makes previously cached vectors semantically incompatible.
+const GEMINI_EMBED_MODEL = 'gemini-embedding-2';
+export const GEMINI_EMBED_DIMENSIONS = 768;
+export const GEMINI_EMBED_SCHEMA = `${GEMINI_EMBED_MODEL}:search-retrieval-v1:${GEMINI_EMBED_DIMENSIONS}`;
+
+function formatEmbeddingInput(text, inputType) {
+    const content = String(text || '').trim();
+    if (inputType === 'query') {
+        return `task: search result | query: ${content}`;
+    }
+    if (inputType === 'document') {
+        return `title: none | text: ${content}`;
+    }
+    throw new Error(`Unsupported Gemini embedding input type: ${inputType}`);
+}
 
 /**
  * Convert our message format to Gemini's content format.
@@ -75,17 +88,21 @@ export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHi
  * Returns a number[] (768 dimensions) or null on failure.
  * @param {string} apiKey
  * @param {string} text - Text to embed
+ * @param {{inputType?: 'document'|'query'}} [options]
  * @returns {Promise<number[]|null>}
  */
-export async function embedText(apiKey, text) {
+export async function embedText(apiKey, text, { inputType = 'document' } = {}) {
+    if (!apiKey || !String(text || '').trim()) return null;
+
     const url = `${GEMINI_EMBED_BASE}/${GEMINI_EMBED_MODEL}:embedContent`;
     try {
+        const formattedText = formatEmbeddingInput(text, inputType);
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
             body: JSON.stringify({
                 model: `models/${GEMINI_EMBED_MODEL}`,
-                content: { parts: [{ text }] },
+                content: { parts: [{ text: formattedText }] },
                 output_dimensionality: GEMINI_EMBED_DIMENSIONS,
             }),
         });
@@ -99,8 +116,11 @@ export async function embedText(apiKey, text) {
         }
         const data = await response.json();
         const values = data.embedding?.values;
-        if (!values?.length) {
-            console.error('[Gemini embed] Empty/missing embedding.values in response:', data);
+        if (!Array.isArray(values) || values.length !== GEMINI_EMBED_DIMENSIONS) {
+            console.error(
+                `[Gemini embed] Expected ${GEMINI_EMBED_DIMENSIONS} values from ${GEMINI_EMBED_MODEL}, received ${values?.length || 0}:`,
+                data,
+            );
             return null;
         }
         return values;

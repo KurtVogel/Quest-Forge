@@ -3,24 +3,27 @@
  *
  * How it works:
  * 1. Significant events (world facts, journal summaries, NPC interactions) are
- *    embedded as 768-dim vectors using Gemini's gemini-embedding-001 model
- *    (with output_dimensionality=768; text-embedding-004 was retired 2026-01-14).
+ *    embedded as 768-dim retrieval documents using Gemini's gemini-embedding-2.
  * 2. Embeddings are persisted in IndexedDB so they survive page refreshes.
- * 3. Before each DM prompt, the current scene context is embedded and we retrieve
- *    the top-N most semantically relevant past memories.
+ * 3. Before each DM prompt, the current scene context is embedded as a search query
+ *    and we retrieve the top-N most semantically relevant past memories.
  * 4. Retrieved memories are injected into the system prompt so the DM "remembers"
  *    relevant past events even from very early in the session.
  *
  * All similarity search is done client-side (cosine similarity) — no backend needed.
  */
 
-import { embedText } from '../llm/providers/gemini.js';
+import {
+    embedText,
+    GEMINI_EMBED_DIMENSIONS,
+    GEMINI_EMBED_SCHEMA,
+} from '../llm/providers/gemini.js';
 
 // --- IndexedDB persistence for embeddings ---
 const EMBED_DB_NAME = 'rpg-vector-memory';
-// v2: text-embedding-004 was retired 2026-01-14 and we moved to gemini-embedding-001.
-// Old cached vectors live in a different semantic space, so wipe them on upgrade.
-const EMBED_DB_VERSION = 2;
+// v3: gemini-embedding-2 plus Google's asymmetric search/document formatting.
+// Vectors from a different model or input format cannot be compared meaningfully.
+const EMBED_DB_VERSION = 3;
 const EMBED_STORE = 'embeddings';
 
 function openEmbedDB() {
@@ -60,7 +63,18 @@ async function loadPersistedEmbeddings() {
         return new Promise((resolve, reject) => {
             const tx = db.transaction(EMBED_STORE, 'readonly');
             const request = tx.objectStore(EMBED_STORE).getAll();
-            request.onsuccess = () => resolve(request.result || []);
+            request.onsuccess = () => {
+                const entries = request.result || [];
+                const compatible = entries.filter(entry => (
+                    entry.schema === GEMINI_EMBED_SCHEMA
+                    && Array.isArray(entry.vector)
+                    && entry.vector.length === GEMINI_EMBED_DIMENSIONS
+                ));
+                if (compatible.length !== entries.length) {
+                    console.warn(`[VectorMemory] Ignored ${entries.length - compatible.length} incompatible cached embeddings.`);
+                }
+                resolve(compatible);
+            };
             request.onerror = () => reject(request.error);
             tx.oncomplete = () => db.close();
         });
@@ -100,13 +114,19 @@ export async function addMemory(apiKey, text, category = 'general') {
     // Deduplicate by exact text
     if (memoryStore.some(m => m.text === text)) return;
 
-    const vector = await embedText(apiKey, text);
+    const vector = await embedText(apiKey, text, { inputType: 'document' });
     if (!vector) {
         console.error('[VectorMemory] Embedding failed for:', text.slice(0, 80));
         return;
     }
 
-    const entry = { text, vector, category, timestamp: Date.now() };
+    const entry = {
+        text,
+        vector,
+        category,
+        schema: GEMINI_EMBED_SCHEMA,
+        timestamp: Date.now(),
+    };
     memoryStore.push(entry);
     persistEmbedding(entry); // fire-and-forget to IndexedDB
 }
@@ -160,7 +180,7 @@ export async function seedMemories(apiKey, items) {
 export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55) {
     if (!apiKey || !query || memoryStore.length === 0) return [];
 
-    const queryVector = await embedText(apiKey, query);
+    const queryVector = await embedText(apiKey, query, { inputType: 'query' });
     if (!queryVector) return [];
 
     const scored = memoryStore
