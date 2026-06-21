@@ -47,7 +47,7 @@ describe('scene image provider reporting', () => {
 
         expect(result).toMatchObject({
             provider: 'pollinations',
-            fallbackReason: 'xai-error',
+            fallbackReason: expect.stringContaining('401'),
         });
     });
 });
