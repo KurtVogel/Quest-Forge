@@ -8,6 +8,28 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-21 · Fronts v2 uses LLM judgment inside an idempotent engine-owned cadence.**
+Fresh campaigns privately generate two or three interacting, premise-grounded pressures with
+specific driving factions/forces, goals, stances, and cross-front relationships; the original
+deterministic front remains the safe fallback if generation fails or is weak. On each successful
+journal cadence, the just-created summary/decisions/consequences feed one private reflection. It
+may propose at most -1/0/+1 movement per known active front with a canonical reason and an
+in-world symptom. The reducer rejects unknown IDs, stale/repeated cadence identities, and jumps;
+it derives non-regressing portent stages, stores the cadence boundary, and autosaves front-only
+changes. Passage of a cadence is never itself sufficient reason to move a clock. Ordinary DM
+responses may update a front only for immediate player interference or a symptom established in
+that response, preventing double advancement. Hidden titles, clocks, stages, and notes remain
+private; only symptoms and concrete world consequences enter the fiction.
+
+**2026-06-21 · Beloved existing campaigns upgrade in place; they never restart for Fronts v2.**
+Settings → Game offers an explicit one-time Dynamic World v2 upgrade for the currently loaded
+legacy campaign. The private synthesis uses bounded established history, must enrich every existing
+front by exact ID, and may add only enough distinct canon-grounded fronts to reach a total of two or
+three. The reducer checks the session identity and preserves existing IDs, clocks, stages, portents,
+hints, notes, character/level, inventory, quests, party, combat, and all other mechanics. Missing or
+malformed enrichment rejects atomically. A manual save before upgrade is recommended as a human
+safety anchor, but the engine does not overwrite or mutate the selected manual save slot.
+
 **2026-06-21 · Keep Combat v2 two-phase; optimize the intent pass without merging authority.**
 Combat intent and authoritative outcome narration remain separate LLM calls. Narration cannot be
 correct until the client has validated the intent, generated every die, and atomically committed the

@@ -39,7 +39,7 @@ flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NP
 - Remaining ideas: real-provider eval for "natural old detail recall without exposition",
   player-facing memory debug/dev panel, and salience tuning after real play.
 
-### Fronts / hidden world clocks — status: v1 `shipped` (2026-06-17), priority: HIGH
+### Fronts / hidden world clocks — status: v2 `shipped` (2026-06-21), priority: HIGH
 The flagship feature. Instead of generic LLM "three acts": 2–3 **fronts** (threats that
 *want* something — à la Dungeon World fronts / Blades in the Dark faction clocks), each
 with escalation steps and a "grim portent" (what happens if nobody interferes).
@@ -56,12 +56,24 @@ with escalation steps and a "grim portent" (what happens if nobody interferes).
   NPC agendas/relationships, story memory, recent events, party/location, and existing fronts.
   Existing clocks are preserved; generated additions are validated, capped, mechanically inert,
   and may create only optional companion intersections.
-- They advance **off-screen** via a background pass (same cadence hook as the journal
-  summarizer): "the player did X for a week — how did each front advance?"
+- **Shipped v2 generation (2026-06-21):** fresh campaigns privately replace the generic
+  safety-net pressure with 2–3 premise-grounded, interacting fronts. Each has a concrete
+  driving faction/force, goal, stance toward the hero, and bounded relationships to the
+  other generated factions. Weak generations safely retain the deterministic fallback.
+- **Shipped established-campaign upgrade (2026-06-21):** a loaded legacy campaign can run one
+  explicit private Settings upgrade. Existing clocks/history are preserved exactly, every old
+  front receives validated faction context, and only enough canon-grounded additions are allowed
+  to reach a 2–3-front web. Missing enrichment rejects the whole result without mutation.
+- **Shipped v2 background movement (2026-06-21):** the journal cadence passes its just-made
+  summary, decisions, and consequences into the private reflection. The LLM may propose only
+  -1/0/+1 movement with a canonical reason and fictional symptom; the reducer validates known
+  IDs, applies each cadence once, derives non-regressing portent stages, persists metadata, and
+  autosaves front-only changes. A cadence alone is explicitly not a reason to advance.
 - The DM is instructed to leak **symptoms** (refugees, price spikes, a missing NPC) every
   few scenes. Investigation is rewarded; ignoring has real consequences; nothing rails the player.
-- Campaign creation generates fronts + factions with goals and opinions of each other.
-- Remaining build order: real-play v1 → automated advance pass → generation at creation.
+- Remaining work: real-provider campaign play should tune how often symptoms surface, whether
+  faction intersections feel organic, and whether ten-message cadence movement is too slow or
+  fast. Consider milestone XP only after front resolution is proven reliable in real play.
 - Why: player agency stays absolute, but the world is *up to something* — the "behind the
   scenes goings-on" feel. Vesa considers this the killer feature for going public.
 

@@ -315,7 +315,8 @@ If no game events occurred, just provide the narrative text without any JSON blo
 
 ## HIDDEN FRONT UPDATE INSTRUCTIONS
 - If the HIDDEN CAMPAIGN FRONTS section is present, it is private DM state. Never reveal the front title, clock, stage, or grim portent list directly to the player.
-- Use \`front_updates\` when time passes, the player ignores a threat, the player meaningfully interferes, or a front leaks a visible symptom. Keep updates small: usually +1 clock/stage at most.
+- A private cadenced director owns ordinary off-screen clock movement. Do not increment a front merely because time passed or it was ignored in this response.
+- Use \`front_updates\` only for an immediate, response-established change: the player meaningfully helps/hinders/resolves a pressure, or the narration makes a new symptom concretely visible. Keep any clock/stage change to one step at most.
 - Put only in-world symptoms in \`publicHints\` (rumors, refugees, price spikes, missing NPCs, strange patrols). These are safe to echo in narration. Keep hidden planning details in \`notes\`.
 
 ## STORY MEMORY UPDATE INSTRUCTIONS
@@ -575,13 +576,16 @@ function buildFrontsBlock(fronts, character, party) {
     const lines = active.map(front => {
         const portents = (front.grimPortents || []).map((p, i) => `    ${i + 1}. ${p}`).join('\n') || '    1. No grim portents recorded yet.';
         const hints = (front.publicHints || []).slice(-3).map(h => `    - ${h}`).join('\n') || '    - No public hints leaked yet.';
-        return `- **${front.title}** (id: ${front.id})\n  Goal: ${front.goal}\n  Stakes: ${front.stakes}\n  Clock: ${front.clock || 0}/${front.maxClock || 6}; stage ${front.stage || 0}\n  Grim portents:\n${portents}\n  Recent public hints:\n${hints}`;
+        const faction = front.faction?.name
+            ? `\n  Driving faction/force: ${front.faction.name}\n    Goal: ${front.faction.goal || 'Not recorded'}\n    Stance toward hero: ${front.faction.stance || 'Unknown'}${front.faction.relationships?.length ? `\n    Relationships: ${front.faction.relationships.join('; ')}` : ''}`
+            : '';
+        return `- **${front.title}** (id: ${front.id})\n  Goal: ${front.goal}\n  Stakes: ${front.stakes}${faction}\n  Clock: ${front.clock || 0}/${front.maxClock || 6}; stage ${front.stage || 0}\n  Grim portents:\n${portents}\n  Recent public hints:\n${hints}`;
     }).join('\n');
 
     return `## HIDDEN CAMPAIGN FRONTS — PRIVATE DM STATE
 These are off-screen threats and world clocks. Use them to make the world feel active, but never expose this section as mechanics or labels.
 - Leak symptoms into scenes every few turns when natural: rumors, changed prices, frightened NPCs, missing people, patrols, omens, closed roads, or faction moves.
-- Advance or soften a front with front_updates when meaningful time passes or the player helps/hinders it. Do not railroad; offer clues, choices, and consequences.
+- Use front_updates for direct player interference or a symptom established in this response; the private cadenced director handles ordinary off-screen movement. Do not railroad; offer clues, choices, and consequences.
 - If a front reaches its final portent, change the world with a concrete public consequence and record it as a world_fact.${companionGuidance}
 
 ${lines}`;

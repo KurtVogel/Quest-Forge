@@ -4,9 +4,34 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** -
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-21 (live play-test hardening + Combat v2)_
+_Last updated: 2026-06-21 (Fronts v2 + living-world tuning gate)_
 
-## Current focus - Live play-test hardening + Combat v2 SHIPPED (2026-06-21)
+## Current focus - Fronts v2 SHIPPED; real-provider tuning next (2026-06-21)
+- **Richer campaign generation:** fresh campaigns now privately replace the deterministic
+  safety-net pressure with 2–3 premise-grounded, interacting fronts. Each has a specific
+  driving faction/force, goal, stance toward the hero, and compact relationships to other
+  generated factions. Invalid or weak output leaves the fallback untouched.
+- **Established-campaign v2 upgrade:** Settings → Game upgrades a loaded legacy campaign in
+  place from its bounded premise, journal, facts, quests, NPCs, memories, recent events, party,
+  inventory, and existing hidden fronts. Every preserved front gains a driving faction; only
+  enough grounded pressures may be added to reach a 2–3-front web. Session identity is checked,
+  all existing clocks/history/mechanics remain unchanged, and incomplete output rejects atomically.
+- **Automatic background movement:** every successful ten-message journal cadence passes its
+  newly produced summary, key decisions, and consequences into the private reflection pass.
+  The LLM may propose only -1/0/+1 movement with a canonical reason and fictional symptom;
+  reducer-owned validation rejects unknown IDs, jumps, and stale/duplicate cadence batches,
+  derives non-regressing portent stages, and persists the processed boundary.
+- **No double advancement or hidden-state leakage:** ordinary DM turns update fronts only for
+  immediate player interference or symptoms established in that response; elapsed-time/ignored
+  pressure belongs to the background director. Front titles, clocks, stages, and notes remain
+  private. Settings reports v2 campaigns as Dynamic and offers legacy/contextual saves an
+  explicit one-time **Upgrade This Campaign to Dynamic World v2** action.
+- **Reload/provider safety:** front-only changes and cadence metadata now trigger autosave.
+  Background Scribe/journal/art-director calls use the selected OpenAI model for OpenAI campaigns
+  instead of accidentally sending a Gemini model ID. Verification: 274 tests, clean lint,
+  production build, and a local browser smoke with no console warnings/errors. No provider keys
+  were present in this shell, so the next meaningful gate is a keyed 20–30-turn campaign tuning
+  symptom frequency, faction intersections, callbacks, and the ten-message cadence.
 - **Antigravity end-to-end findings fixed (2026-06-21):** catalog item recognition now accepts
   bounded descriptive prefixes such as "massive warhammer," then restores engine-owned catalog
   type/stats instead of trusting conflicting LLM fields. Non-equipment cannot be equipped through
@@ -146,10 +171,6 @@ _Last updated: 2026-06-21 (live play-test hardening + Combat v2)_
 - **Fighter-only test-play phase with hidden fronts now started**: fighter mechanics are
   stable enough for real sessions; use play feedback to tune combat prompt pacing,
   survivability, and whether solo companion opportunities appear naturally.
-- **Campaign fronts v1 slice is in code**: new campaigns seed one hidden local-pressure
-  front, the prompt injects hidden front clocks privately, and the DM can update them with
-  `front_updates`. Next fronts step is real-play feedback, then automated/background
-  advancement and richer generated fronts.
 
 ## Recently shipped (June 10-19, 2026)
 - Resolvable player-attack invariant (2026-06-19): reproduced the second live enemy-first

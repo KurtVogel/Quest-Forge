@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { composeScenePrompt, preserveSceneSituation, runScribe } from './scribe.js';
+import { composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe } from './scribe.js';
 import { sendMessage } from './adapter.js';
 
 vi.mock('./adapter.js', () => ({
@@ -145,6 +145,42 @@ describe('Scribe story memory extraction', () => {
         expect(sendMessage.mock.calls[0][0].userMessage).toContain('AUTHORITATIVE ENGINE STATE');
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_WORLD_FACTS' }));
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_STORY_MEMORY_CARDS' }));
+    });
+});
+
+describe('cadenced living-world reflection', () => {
+    beforeEach(() => sendMessage.mockReset());
+
+    it('dispatches a single engine-owned front advance batch with the trusted cadence identity', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            npc_updates: [],
+            front_advances: [{ id: 'front-road', delta: 1, symptom: 'Empty carts creak through the gate.', reason: 'The hero spent a week elsewhere.' }],
+            story_memory: [],
+        }));
+        const dispatch = vi.fn();
+        await runNpcFrontReflection({
+            state: {
+                settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+                session: { id: 'campaign' },
+                fronts: [{ id: 'front-road', status: 'active' }],
+                npcs: [],
+                journal: [],
+                worldFacts: [],
+                party: [],
+            },
+            dispatch,
+            cadence: { id: 'journal-campaign-20', journalEnd: 20, summary: 'A week passed.' },
+        });
+
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'APPLY_FRONT_ADVANCE_BATCH',
+            payload: {
+                cadenceId: 'journal-campaign-20',
+                journalEnd: 20,
+                advances: [expect.objectContaining({ id: 'front-road', delta: 1 })],
+            },
+        });
+        expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('A journal cadence is not itself a reason');
     });
 });
 

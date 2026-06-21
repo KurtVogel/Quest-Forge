@@ -48,6 +48,7 @@ function prompt(overrides = {}) {
             stage: 1,
             status: 'active',
             publicHints: ['A mule train arrived empty.'],
+            faction: { name: 'North Road Wardens', goal: 'Control the grain road.', stance: 'Dismissive', relationships: ['They distrust the millers.'] },
         }],
         retrievedMemories: [],
         premise: '',
@@ -62,6 +63,8 @@ describe('hidden fronts prompt contract', () => {
         expect(text).toContain('Trouble around Jewelglade');
         expect(text).toContain('front_updates');
         expect(text).toContain('Never reveal the front title, clock, stage, or grim portent list directly');
+        expect(text).toContain('North Road Wardens');
+        expect(text).toContain('private cadenced director');
     });
 
     it('asks the DM to introduce possible companions when the player is alone', () => {

@@ -9,6 +9,7 @@ import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { runScribe } from '../../llm/scribe.js';
 import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../engine/vectorMemory.js';
 import { curateStoryMemory } from '../../engine/storyMemory.js';
+import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { shouldPrimeCampaignOpening } from './sessionPriming.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
@@ -38,6 +39,7 @@ export default function ChatPanel() {
     const streamBufferRef = useRef(''); // Accumulated streaming text for JSON fence detection
     const narratedCueIdsRef = useRef(new Set()); // Mechanic system messages already given an LLM flavor beat
     const narratedCombatExchangeIdsRef = useRef(new Set()); // Prevent duplicate narration calls for one mechanics commit
+    const frontGenerationSessionRef = useRef(null); // One private generation request per fresh campaign at a time
 
     // Use a ref to always read the latest state inside async callbacks
     const stateRef = useRef(state);
@@ -73,6 +75,23 @@ export default function ChatPanel() {
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Only on mount
+
+    /** Privately replace the generic safety-net front with a grounded 2–3-front web. */
+    useEffect(() => {
+        const s = stateRef.current;
+        if (!shouldGenerateCampaignFronts(s) || frontGenerationSessionRef.current === s.session.id) return;
+        const sessionId = s.session.id;
+        frontGenerationSessionRef.current = sessionId;
+        generateCampaignFronts(s)
+            .then(fronts => {
+                dispatch({ type: 'INSTALL_GENERATED_FRONTS', payload: { sessionId, fronts } });
+                console.info(`[Fronts] Generated ${fronts.length} private campaign pressures.`);
+            })
+            .catch(error => {
+                console.warn('[Fronts] Initial private generation failed; deterministic front remains active:', error.message || error);
+                if (frontGenerationSessionRef.current === sessionId) frontGenerationSessionRef.current = null;
+            });
+    }, [state.session?.id, state.session?.frontDirector?.version, state.settings.apiKey, state.messages.length, state.combat?.active, dispatch]);
 
     /**
      * RAG seeding: embed all existing world facts and journal summaries once on mount.

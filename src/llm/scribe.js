@@ -14,6 +14,10 @@ import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 
 const SCRIBE_MODEL = 'gemini-2.5-flash';
 
+function backgroundModel(settings) {
+    return settings?.llmProvider === 'gemini' ? SCRIBE_MODEL : settings?.model;
+}
+
 const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Given a DM's narrative response and the player's action that prompted it, extract any new canonical facts about the game world.
 
 Output ONLY valid JSON:
@@ -104,7 +108,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         const response = await sendMessage({
             provider: settings.llmProvider,
             apiKey: settings.apiKey,
-            model: SCRIBE_MODEL,
+            model: backgroundModel(settings),
             systemPrompt: SCRIBE_SYSTEM_PROMPT,
             messageHistory: [],
             userMessage: [
@@ -168,7 +172,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
     }
 }
 
-const REFLECTION_SYSTEM_PROMPT = `You are the private campaign continuity assistant for a single-player RPG. Update hidden NPC intent, relationship pressure, dramatic memory hooks, and front symptoms from the current campaign state.
+const REFLECTION_SYSTEM_PROMPT = `You are the private campaign continuity assistant for a single-player RPG. Update hidden NPC intent, relationship pressure, dramatic memory hooks, and off-screen campaign pressure from the current campaign state.
 
 Output ONLY valid JSON:
 {
@@ -182,11 +186,12 @@ Output ONLY valid JSON:
       "callbackHooks": ["one or two details they could naturally bring back later"]
     }
   ],
-  "front_updates": [
+  "front_advances": [
     {
       "id": "front id",
-      "publicHints": ["in-world symptom safe for narration"],
-      "notes": "private reasoning; no UI language"
+      "delta": -1,
+      "symptom": "one in-world sign that can surface naturally",
+      "reason": "private canonical reason for -1, 0, or +1 movement"
     }
   ],
   "story_memory": [
@@ -206,12 +211,14 @@ Output ONLY valid JSON:
 
 Rules:
 - Do not invent a new plot that contradicts canon. Synthesize likely intent from existing facts.
-- Hidden fronts must remain private; publicHints are symptoms only, never clock/stage/title exposition.
+- Hidden fronts must remain private; symptoms are fiction only, never clock/stage/title exposition.
+- Front delta is strictly -1, 0, or +1. Advance only when meaningful fictional time passed, the hero ignored a pressure to pursue something else, or an off-screen faction gained a concrete opportunity. Soften only when canonical player action hindered it. Use 0 when only its symptoms or posture evolve.
+- A journal cadence is not itself a reason to move a front. Omit fronts with no meaningful change. Never jump multiple steps, resolve a front, or undo an established grim portent here.
 - Potential companions may be seeded as hooks, but never add them to the party.
 - Intriguing NPCs should emerge from agenda, competence, danger, secrets, attraction, rivalry, vulnerability, or leverage, not default sexualization.
 - Keep everything compact. Omit empty arrays when nothing changes.`;
 
-export async function runNpcFrontReflection({ state, dispatch }) {
+export async function runNpcFrontReflection({ state, dispatch, cadence = null }) {
     if (!state?.settings?.apiKey) return;
     const npcs = (state.npcs || []).slice(-12);
     const fronts = state.fronts || [];
@@ -225,20 +232,27 @@ export async function runNpcFrontReflection({ state, dispatch }) {
         npcs,
         fronts,
         partySize: (state.party || []).length,
+        cadence: cadence ? {
+            id: cadence.id,
+            journalEnd: cadence.journalEnd,
+            latestSummary: cadence.summary,
+            keyDecisions: cadence.keyDecisions || [],
+            consequences: cadence.consequences || [],
+        } : null,
     };
 
     try {
         const response = await sendMessage({
             provider: state.settings.llmProvider,
             apiKey: state.settings.apiKey,
-            model: SCRIBE_MODEL,
+            model: backgroundModel(state.settings),
             systemPrompt: REFLECTION_SYSTEM_PROMPT,
             messageHistory: [],
             userMessage: JSON.stringify(context, null, 2),
         });
 
         const jsonMatch = extractBalancedJson(response, 'npc_updates')
-            || extractBalancedJson(response, 'front_updates')
+            || extractBalancedJson(response, 'front_advances')
             || extractBalancedJson(response, 'story_memory');
         if (!jsonMatch) return;
 
@@ -259,10 +273,15 @@ export async function runNpcFrontReflection({ state, dispatch }) {
                 dispatch({ type: 'UPDATE_NPC', payload: npc });
             }
         }
-        if (Array.isArray(reflected.front_updates)) {
-            for (const front of reflected.front_updates) {
-                dispatch({ type: 'UPDATE_FRONT', payload: front });
-            }
+        if (cadence?.id && Number.isFinite(cadence.journalEnd)) {
+            dispatch({
+                type: 'APPLY_FRONT_ADVANCE_BATCH',
+                payload: {
+                    cadenceId: cadence.id,
+                    journalEnd: cadence.journalEnd,
+                    advances: Array.isArray(reflected.front_advances) ? reflected.front_advances : [],
+                },
+            });
         }
         if (Array.isArray(reflected.story_memory) && reflected.story_memory.length > 0) {
             dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: reflected.story_memory });
@@ -334,7 +353,7 @@ export async function composeScenePrompt({ situation, character, npcs = [], comb
         const prompt = await sendMessage({
             provider: settings.llmProvider,
             apiKey: settings.apiKey,
-            model: SCRIBE_MODEL,
+            model: backgroundModel(settings),
             systemPrompt: ART_DIRECTOR_PROMPT,
             messageHistory: [],
             userMessage: lines.join('\n'),

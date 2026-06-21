@@ -76,7 +76,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         const response = await sendMessage({
             provider: state.settings.llmProvider,
             apiKey: state.settings.apiKey,
-            model: SCRIBE_MODEL,
+            model: state.settings.llmProvider === 'gemini' ? SCRIBE_MODEL : state.settings.model,
             systemPrompt: JOURNAL_SYSTEM_PROMPT,
             messageHistory: [],
             userMessage: `Summarize these recent game events:\n\n${recentMessages}`,
@@ -137,7 +137,17 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
 
         // Cadenced private reflection: keep NPC intent, relationship pressure, hidden
         // front symptoms, and future callback hooks alive without adding per-turn cost.
-        runNpcFrontReflection({ state, dispatch }).catch(() => {});
+        runNpcFrontReflection({
+            state,
+            dispatch,
+            cadence: {
+                id: `journal-${state.session?.id || 'campaign'}-${messageCount}`,
+                journalEnd: messageCount,
+                summary: summary.summary,
+                keyDecisions: summary.key_decisions || [],
+                consequences: summary.consequences || [],
+            },
+        }).catch(() => {});
 
         console.log(`[Journal] Summarized messages ${lastSummarizedIndex}–${messageCount}, extracted ${summary.world_facts?.length || 0} world facts`);
         return messageCount;

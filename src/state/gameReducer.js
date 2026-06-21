@@ -9,7 +9,7 @@ import { ABILITY_NAMES, buildClassResources, normalizeAbilityScoreImprovementSta
 import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js';
-import { createInitialFronts, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
+import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
 import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
 import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
@@ -1484,6 +1484,29 @@ export function gameReducer(state, action) {
             return { ...state, fronts };
         }
 
+        case 'INSTALL_GENERATED_FRONTS': {
+            if (action.payload?.sessionId !== state.session?.id
+                || state.session?.frontDirector?.version >= FRONTS_VERSION
+                || !Array.isArray(action.payload?.fronts)
+                || (state.messages || []).filter(message => !message.hidden).length > 2) return state;
+            const fronts = action.payload.fronts.slice(0, 3).map(front => normalizeFront(front));
+            if (fronts.length < 2) return state;
+            return {
+                ...state,
+                fronts,
+                session: {
+                    ...state.session,
+                    frontDirector: {
+                        version: FRONTS_VERSION,
+                        generationVersion: FRONTS_VERSION,
+                        source: 'campaign-creation',
+                        generatedAt: Date.now(),
+                        lastJournalEnd: 0,
+                    },
+                },
+            };
+        }
+
         case 'MIGRATE_FRONTS': {
             if (state.session?.frontMigration?.version >= 1 || !Array.isArray(action.payload?.fronts) || action.payload.fronts.length === 0) {
                 return state;
@@ -1506,6 +1529,13 @@ export function gameReducer(state, action) {
                         migratedAt: Date.now(),
                         contextCounts: action.payload.counts || {},
                     },
+                    frontDirector: {
+                        ...state.session?.frontDirector,
+                        version: FRONTS_VERSION,
+                        source: 'contextual-migration',
+                        generatedAt: Date.now(),
+                        lastJournalEnd: state.session?.frontDirector?.lastJournalEnd || 0,
+                    },
                 },
                 messages: [
                     ...state.messages,
@@ -1514,17 +1544,96 @@ export function gameReducer(state, action) {
             };
         }
 
+        case 'UPGRADE_FRONTS_V2': {
+            if (action.payload?.sessionId !== state.session?.id
+                || state.session?.frontDirector?.generationVersion >= FRONTS_VERSION
+                || !Array.isArray(action.payload?.enrichments)
+                || !Array.isArray(action.payload?.newFronts)) return state;
+            const existingFronts = state.fronts || [];
+            const enrichmentById = new Map(action.payload.enrichments
+                .filter(entry => entry?.id && entry?.faction?.name && entry?.faction?.goal)
+                .map(entry => [entry.id, entry.faction]));
+            const enriched = existingFronts.map(front => enrichmentById.has(front.id)
+                ? normalizeFront({ ...front, faction: enrichmentById.get(front.id) }, front)
+                : front);
+            if (enriched.some(front => !front.faction?.name || !front.faction?.goal)) return state;
+
+            const existingIds = new Set(enriched.map(front => front.id));
+            const existingTitles = new Set(enriched.map(front => front.title?.toLowerCase()).filter(Boolean));
+            const additions = action.payload.newFronts
+                .filter(front => front?.id && front?.title && front?.goal && front?.stakes
+                    && Array.isArray(front?.grimPortents) && front.grimPortents.length >= 3
+                    && front?.faction?.name && front?.faction?.goal
+                    && !existingIds.has(front.id) && !existingTitles.has(front.title.toLowerCase()))
+                .slice(0, Math.max(0, 3 - enriched.length))
+                .map(front => normalizeFront(front));
+            const fronts = [...enriched, ...additions];
+            if (fronts.length < 2 || fronts.length > 3) return state;
+
+            return {
+                ...state,
+                fronts,
+                session: {
+                    ...state.session,
+                    frontDirector: {
+                        ...state.session?.frontDirector,
+                        version: FRONTS_VERSION,
+                        generationVersion: FRONTS_VERSION,
+                        source: 'existing-campaign-upgrade',
+                        upgradedAt: Date.now(),
+                        contextCounts: action.payload.counts || {},
+                        lastJournalEnd: state.session?.frontDirector?.lastJournalEnd || state.session?.prunedMessageCount || 0,
+                    },
+                },
+            };
+        }
+
         case 'UPDATE_FRONT': {
             const update = normalizeFrontUpdate(action.payload);
             if (!update) return state;
             const fronts = state.fronts || [];
             const idx = fronts.findIndex(f => f.id === update.id || f.title?.toLowerCase() === update.title?.toLowerCase());
-            if (idx === -1) {
-                return { ...state, fronts: [...fronts, normalizeFront(update)] };
-            }
+            if (idx === -1) return state;
+            const existing = fronts[idx];
+            const boundedUpdate = {
+                ...update,
+                ...(update.clock !== undefined && {
+                    clock: Math.max((existing.clock || 0) - 1, Math.min((existing.clock || 0) + 1, update.clock)),
+                }),
+                ...(update.stage !== undefined && {
+                    stage: Math.max((existing.stage || 0) - 1, Math.min((existing.stage || 0) + 1, update.stage)),
+                }),
+                maxClock: existing.maxClock || 6,
+            };
             return {
                 ...state,
-                fronts: fronts.map((front, i) => i === idx ? normalizeFront(update, front) : front),
+                fronts: fronts.map((front, i) => i === idx ? normalizeFront(boundedUpdate, front) : front),
+            };
+        }
+
+        case 'APPLY_FRONT_ADVANCE_BATCH': {
+            const cadenceId = String(action.payload?.cadenceId || '').trim().slice(0, 160);
+            const journalEnd = Math.max(0, Math.round(Number(action.payload?.journalEnd) || 0));
+            const previousEnd = state.session?.frontDirector?.lastJournalEnd || 0;
+            if (!cadenceId || journalEnd <= previousEnd) return state;
+            const result = applyFrontAdvanceBatch(state.fronts || [], {
+                cadenceId,
+                advances: action.payload?.advances,
+            });
+            return {
+                ...state,
+                fronts: result.fronts,
+                session: {
+                    ...state.session,
+                    frontDirector: {
+                        ...state.session?.frontDirector,
+                        version: FRONTS_VERSION,
+                        lastCadenceId: cadenceId,
+                        lastJournalEnd: journalEnd,
+                        lastProcessedAt: Date.now(),
+                        lastAppliedCount: result.appliedCount,
+                    },
+                },
             };
         }
 

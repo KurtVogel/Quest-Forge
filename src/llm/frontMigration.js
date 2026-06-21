@@ -111,6 +111,12 @@ export function buildFrontMigrationContext(state) {
             stage: front.stage || 0,
             publicHints: (front.publicHints || []).slice(-3),
             notes: cleanText(front.notes, 500),
+            faction: front.faction ? {
+                name: cleanText(front.faction.name, 100),
+                goal: cleanText(front.faction.goal, 300),
+                stance: cleanText(front.faction.stance, 200),
+                relationships: (front.faction.relationships || []).slice(0, 4),
+            } : null,
         })),
     };
 

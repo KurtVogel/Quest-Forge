@@ -7,7 +7,7 @@ import { saveGame, loadGame, listSaves, deleteSave } from '../../state/persisten
 import { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud } from '../../state/cloudSync.js';
 import { getFirebaseConfigError, initializeFirebase } from '../../config/firebase.js';
 import { signInWithGoogle, logOut } from '../../state/auth.js';
-import { generateContextualFronts } from '../../llm/frontMigration.js';
+import { upgradeCampaignFrontsV2 } from '../../llm/frontUpgrade.js';
 import './Settings.css';
 
 export default function SettingsModal() {
@@ -27,6 +27,7 @@ export default function SettingsModal() {
     const [syncStatus, setSyncStatus] = useState('');
     const [isMigratingFronts, setIsMigratingFronts] = useState(false);
     const [frontMigrationStatus, setFrontMigrationStatus] = useState('');
+    const hasRichLivingWorld = state.session?.frontDirector?.generationVersion >= 2;
 
     useEffect(() => {
         let isCancelled = false;
@@ -188,15 +189,15 @@ export default function SettingsModal() {
     };
 
     const handleFrontMigration = async () => {
-        if (isMigratingFronts || state.session?.frontMigration?.version >= 1) return;
+        if (isMigratingFronts || hasRichLivingWorld) return;
         setIsMigratingFronts(true);
-        setFrontMigrationStatus('Reading established campaign history…');
+        setFrontMigrationStatus(`Reading ${state.character?.name || 'this hero'}’s established campaign history…`);
         try {
-            const result = await generateContextualFronts(state);
-            dispatch({ type: 'MIGRATE_FRONTS', payload: result });
-            setFrontMigrationStatus(`Living world awakened from ${result.counts.facts} canonical facts, ${result.counts.journalEntries} journal entries, ${result.counts.npcs} known NPCs, and ${result.counts.memories} dramatic memories.`);
+            const result = await upgradeCampaignFrontsV2(state);
+            dispatch({ type: 'UPGRADE_FRONTS_V2', payload: result });
+            setFrontMigrationStatus(`Dynamic world upgraded from ${result.counts.facts} canonical facts, ${result.counts.journalEntries} journal entries, ${result.counts.npcs} known NPCs, and ${result.counts.memories} dramatic memories. Existing clocks and campaign state were preserved.`);
         } catch (e) {
-            setFrontMigrationStatus(e.message || 'Migration failed. No campaign state was changed.');
+            setFrontMigrationStatus(e.message || 'Upgrade failed. No campaign state was changed.');
         } finally {
             setIsMigratingFronts(false);
         }
@@ -431,20 +432,22 @@ export default function SettingsModal() {
                             <div className="setting-group living-world-migration">
                                 <div className="setting-label-row">
                                     <label className="setting-label">Living World</label>
-                                    {state.session?.frontMigration?.version >= 1
-                                        ? <span className="living-world-badge">Contextual</span>
+                                    {hasRichLivingWorld
+                                        ? <span className="living-world-badge">Dynamic</span>
+                                        : state.session?.frontMigration?.version >= 1
+                                            ? <span className="living-world-badge basic">Contextual</span>
                                         : (state.fronts || []).length > 0
                                             ? <span className="living-world-badge basic">Basic</span>
                                             : null}
                                 </div>
                                 <p className="setting-hint">
-                                    {state.session?.frontMigration?.version >= 1
-                                        ? 'Contextual hidden pressures are evolving from this campaign’s history and can create organic NPC, consequence, and companion opportunities.'
+                                    {hasRichLivingWorld
+                                        ? 'Interacting hidden pressures are evolving from this campaign’s premise and history, creating organic NPC, consequence, and companion opportunities.'
                                         : (state.fronts || []).length > 0
-                                            ? 'A basic hidden pressure is active. Enrich it with additional pressures derived from this campaign while preserving its existing clock and history.'
+                                            ? 'This established campaign can be upgraded to interacting dynamic pressures derived from its full history while preserving every existing clock and consequence.'
                                             : 'Awaken hidden campaign pressures from the premise, canonical facts, journal, known characters, relationships, story memories, and recent events. This never changes mechanics or forces a companion.'}
                                 </p>
-                                {!state.session?.frontMigration?.version && (
+                                {!hasRichLivingWorld && (
                                     <button
                                         type="button"
                                         className="btn btn-primary"
@@ -452,17 +455,15 @@ export default function SettingsModal() {
                                         disabled={isMigratingFronts || !state.character || !state.session?.id || !state.settings.apiKey || state.combat?.active}
                                     >
                                         {isMigratingFronts
-                                            ? 'Awakening Living World…'
-                                            : (state.fronts || []).length > 0
-                                                ? 'Enrich Living World from This Campaign'
-                                                : 'Awaken Living World from This Campaign'}
+                                            ? 'Upgrading Dynamic World…'
+                                            : 'Upgrade This Campaign to Dynamic World v2'}
                                     </button>
                                 )}
-                                {!state.settings.apiKey && !state.session?.frontMigration?.version && (
-                                    <p className="setting-hint">Set your DM API key before running this one-time migration.</p>
+                                {!state.settings.apiKey && !hasRichLivingWorld && (
+                                    <p className="setting-hint">Set your DM API key before running this one-time private upgrade.</p>
                                 )}
-                                {state.combat?.active && !state.session?.frontMigration?.version && (
-                                    <p className="setting-hint">Finish the current combat first so the migration captures its final outcome.</p>
+                                {state.combat?.active && !hasRichLivingWorld && (
+                                    <p className="setting-hint">Finish the current combat first so the upgrade captures its final outcome.</p>
                                 )}
                                 {frontMigrationStatus && <div className="living-world-status">{frontMigrationStatus}</div>}
                             </div>
