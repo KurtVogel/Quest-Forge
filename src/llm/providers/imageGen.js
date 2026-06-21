@@ -122,7 +122,9 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                 console.log('[ImageGen] xAI returned no image (possibly filtered by moderation).');
             } else {
                 const errText = await response.text().catch(() => '');
-                console.log(`[ImageGen] xAI image request failed (Status ${response.status}). ${errText.slice(0, 200)}`);
+                const errSummary = `[ImageGen] xAI failed — Status ${response.status}: ${errText.slice(0, 400)}`;
+                console.warn(errSummary);
+                fallbackReason = errSummary;
             }
         } catch (e) {
             console.log('[ImageGen] xAI image generation failed, falling back:', e.message);
