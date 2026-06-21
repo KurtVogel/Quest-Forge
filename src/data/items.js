@@ -102,6 +102,10 @@ const NAME_TO_KEY = Object.entries(ITEM_CATALOG).reduce((acc, [key, item]) => {
     return acc;
 }, {});
 
+const CATALOG_NAMES_BY_LENGTH = Object.entries(ITEM_CATALOG)
+    .map(([key, item]) => [key, item.name.toLowerCase()])
+    .sort((a, b) => b[1].length - a[1].length);
+
 export function clampMagicBonus(value) {
     if (!Number.isFinite(value)) return 0;
     return Math.max(0, Math.min(MAGIC_BONUS_MAX, Math.trunc(value)));
@@ -118,7 +122,15 @@ export function normalizeItemKey(value = '') {
     if (ITEM_CATALOG[raw]) return raw;
     const lower = raw.toLowerCase();
     if (NAME_TO_KEY[lower]) return NAME_TO_KEY[lower];
-    return NAME_TO_KEY[lower.replace(/\s*\+[1-3]\b/g, '').replace(/[^a-z0-9]/g, '')] || null;
+    const withoutBonus = lower.replace(/\s*\+[1-3]\b/g, '').trim();
+    const compact = withoutBonus.replace(/[^a-z0-9]/g, '');
+    if (NAME_TO_KEY[compact]) return NAME_TO_KEY[compact];
+
+    // LLMs commonly add a bounded descriptive prefix to ordinary equipment
+    // ("massive warhammer", "weathered leather armor"). Match only a complete
+    // catalog-name suffix so unrelated story objects do not become mechanical gear.
+    const descriptorMatch = CATALOG_NAMES_BY_LENGTH.find(([, name]) => withoutBonus.endsWith(` ${name}`));
+    return descriptorMatch?.[0] || null;
 }
 
 function applyMagicName(item) {
@@ -136,23 +148,26 @@ export function normalizeItem(raw = {}) {
     const magicBonus = clampMagicBonus(source.magicBonus ?? source.enhancement ?? source.bonus ?? parsedBonus);
     const hasExplicitValue = Number.isFinite(source.valueCp) || Number.isFinite(source.priceCp);
     const quantity = Number.isFinite(source.quantity) && source.quantity > 0 ? Math.trunc(source.quantity) : (base.quantity || 1);
-    const itemType = source.type || base.type || 'gear';
+    const itemType = base.type || source.type || 'gear';
     const isWeapon = itemType === 'weapon';
     const isArmorLike = itemType === 'armor' || itemType === 'shield' || source.isShield || base.isShield;
     const normalized = {
-        itemKey: itemKey || source.itemKey || null,
-        name: source.name || base.name || 'Unknown item',
-        type: itemType,
-        weight: Number.isFinite(source.weight) ? source.weight : (base.weight ?? 1),
         ...base,
         ...source,
+        // A recognized catalog entry is canonical. The LLM may identify and describe
+        // the item, but it cannot override its mechanical type or statistics.
+        ...(itemKey ? base : {}),
+        itemKey: itemKey || source.itemKey || null,
+        name: itemKey ? base.name : (source.name || 'Unknown item'),
+        type: itemType,
+        weight: itemKey ? (base.weight ?? 1) : (Number.isFinite(source.weight) ? source.weight : 1),
         magicBonus,
         valueCp: hasExplicitValue
-            ? (Number.isFinite(source.valueCp) ? source.valueCp : source.priceCp)
+            ? (itemKey ? (magicBonus ? MAGIC_ITEM_VALUES[magicBonus] : base.valueCp) : (Number.isFinite(source.valueCp) ? source.valueCp : source.priceCp))
             : (magicBonus ? MAGIC_ITEM_VALUES[magicBonus] : base.valueCp),
-        attackBonus: Number.isFinite(source.attackBonus) ? source.attackBonus : (base.attackBonus || (isWeapon ? magicBonus : 0)),
-        damageBonus: Number.isFinite(source.damageBonus) ? source.damageBonus : (base.damageBonus || (isWeapon ? magicBonus : 0)),
-        acBonus: Number.isFinite(source.acBonus) ? source.acBonus : (base.acBonus || (isArmorLike ? magicBonus : 0)),
+        attackBonus: itemKey ? (base.attackBonus || (isWeapon ? magicBonus : 0)) : (Number.isFinite(source.attackBonus) ? source.attackBonus : 0),
+        damageBonus: itemKey ? (base.damageBonus || (isWeapon ? magicBonus : 0)) : (Number.isFinite(source.damageBonus) ? source.damageBonus : 0),
+        acBonus: itemKey ? (base.acBonus || (isArmorLike ? magicBonus : 0)) : (Number.isFinite(source.acBonus) ? source.acBonus : 0),
         rarity: source.rarity || base.rarity || (magicBonus ? MAGIC_ITEM_RARITY[magicBonus] : undefined),
         quantity,
     };

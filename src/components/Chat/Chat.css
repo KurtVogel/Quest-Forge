@@ -215,6 +215,16 @@
   animation-delay: 0.4s;
 }
 
+.typing-indicator .loading-status {
+  width: auto;
+  height: auto;
+  margin-right: 6px;
+  background: transparent;
+  border-radius: 0;
+  color: var(--text-secondary);
+  animation: none;
+}
+
 @keyframes bounce {
 
   0%,

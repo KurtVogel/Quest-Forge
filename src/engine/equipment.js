@@ -10,6 +10,10 @@ export function isWeaponItem(item) {
     return item?.type === 'weapon';
 }
 
+export function isEquippableItem(item) {
+    return isWeaponItem(item) || isArmorItem(item) || isShieldItem(item);
+}
+
 /**
  * Normalize equipped slots while preserving inventory order.
  * - one active weapon
@@ -37,6 +41,13 @@ export function normalizeEquippedSlots(inventory = [], preferredItemId = null) {
 
     for (const item of ordered) {
         if (!item.equipped) continue;
+
+        // Invalid equipped flags can arrive from old saves, imports, or malformed
+        // LLM equipment changes. Clear them instead of leaking gear into the slot UI.
+        if (!isEquippableItem(item)) {
+            item.equipped = false;
+            continue;
+        }
 
         if (isArmorItem(item)) {
             if (equippedArmor) item.equipped = false;

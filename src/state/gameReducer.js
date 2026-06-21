@@ -8,7 +8,7 @@ import { rollDie, rollNotation, rollWithModifier } from '../engine/dice.ts';
 import { ABILITY_NAMES, buildClassResources, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../engine/characterUtils.js';
 import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
-import { normalizeEquippedSlots } from '../engine/equipment.js';
+import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js';
 import { createInitialFronts, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
 import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
@@ -1279,7 +1279,7 @@ export function gameReducer(state, action) {
 
         case 'EQUIP_ITEM': {
             const itemToEquip = state.inventory.find(i => i.id === action.payload);
-            if (!itemToEquip) return state;
+            if (!itemToEquip || !isEquippableItem(itemToEquip)) return state;
 
             const updatedInv = state.inventory.map(item => {
                 if (item.id === action.payload) return { ...item, equipped: true };
@@ -1337,24 +1337,52 @@ export function gameReducer(state, action) {
             };
 
         // --- Quests ---
-        case 'ADD_QUEST':
+        case 'ADD_QUEST': {
+            const payload = action.payload || {};
+            const nameToken = normalizeRefToken(payload.name);
+            const existing = state.quests.find(quest =>
+                quest.status === 'active' && (
+                    (payload.id && quest.id === payload.id) ||
+                    (nameToken && normalizeRefToken(quest.name) === nameToken)
+                )
+            );
+            if (existing) {
+                return {
+                    ...state,
+                    quests: state.quests.map(quest => quest.id === existing.id
+                        ? {
+                            ...quest,
+                            name: payload.name || quest.name,
+                            description: payload.description || quest.description,
+                        }
+                        : quest),
+                };
+            }
             return {
                 ...state,
                 quests: [...state.quests, {
-                    id: `quest-${Date.now()}`,
+                    id: payload.id || `quest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                     status: 'active',
                     addedAt: Date.now(),
-                    ...action.payload,
+                    ...payload,
                 }],
             };
+        }
 
-        case 'COMPLETE_QUEST':
+        case 'COMPLETE_QUEST': {
+            const ref = action.payload || '';
+            const refId = typeof ref === 'object' ? ref.id : ref;
+            const refName = typeof ref === 'object' ? ref.name : ref;
+            const nameToken = normalizeRefToken(refName);
             return {
                 ...state,
                 quests: state.quests.map(q =>
-                    q.id === action.payload ? { ...q, status: 'completed' } : q
+                    q.id === refId || (nameToken && normalizeRefToken(q.name) === nameToken)
+                        ? { ...q, status: 'completed' }
+                        : q
                 ),
             };
+        }
 
         case 'REMOVE_QUEST':
             return {

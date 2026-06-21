@@ -15,6 +15,12 @@ const XAI_IMAGE_ENDPOINT = 'https://api.x.ai/v1/images/generations';
 // Recommended model as of 2026 (grok-imagine-image-pro is deprecated May 2026).
 const XAI_IMAGE_MODEL = 'grok-imagine-image-quality';
 
+function normalizeXaiApiKey(apiKey) {
+    const trimmed = apiKey?.trim();
+    if (!trimmed) return '';
+    return trimmed.startsWith('xai-') ? trimmed : `xai-${trimmed}`;
+}
+
 /**
  * Insert or update a cache entry with LRU eviction (max IMAGE_CACHE_MAX entries).
  */
@@ -76,24 +82,25 @@ async function downscaleDataUrl(dataUrl, { maxWidth, maxHeight, quality = 0.82 }
 async function generateImageResult(prompt, imageApiKey, options = {}) {
     if (!prompt) return null;
 
+    const normalizedImageApiKey = normalizeXaiApiKey(imageApiKey);
     const aspectRatio = options.aspectRatio || '16:9';
     const resolution = options.resolution || '1k';
     const fallbackWidth = options.fallbackWidth || 1280;
     const fallbackHeight = options.fallbackHeight || 720;
     const baseCacheKey = `${aspectRatio}|${resolution}|${prompt.toLowerCase().trim()}`;
-    const preferredCacheKey = `${imageApiKey ? 'xai' : 'pollinations'}|${baseCacheKey}`;
+    const preferredCacheKey = `${normalizedImageApiKey ? 'xai' : 'pollinations'}|${baseCacheKey}`;
     if (IMAGE_CACHE.has(preferredCacheKey)) {
         return IMAGE_CACHE.get(preferredCacheKey);
     }
 
-    let fallbackReason = imageApiKey ? 'xai-error' : 'missing-key';
-    if (imageApiKey) {
+    let fallbackReason = normalizedImageApiKey ? 'xai-error' : 'missing-key';
+    if (normalizedImageApiKey) {
         try {
             const response = await fetch(XAI_IMAGE_ENDPOINT, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${imageApiKey}`,
+                    'Authorization': `Bearer ${normalizedImageApiKey}`,
                 },
                 body: JSON.stringify({
                     model: XAI_IMAGE_MODEL,
@@ -122,11 +129,12 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                 console.log('[ImageGen] xAI returned no image (possibly filtered by moderation).');
             } else {
                 const errText = await response.text().catch(() => '');
-                const errSummary = `[ImageGen] xAI failed — Status ${response.status}: ${errText.slice(0, 400)}`;
-                console.warn(errSummary);
-                fallbackReason = errSummary;
+                const compactError = errText.replace(/\s+/g, ' ').trim().slice(0, 300);
+                fallbackReason = `xai-http-${response.status}${compactError ? `: ${compactError}` : ''}`;
+                console.warn(`[ImageGen] xAI image request failed (Status ${response.status}). ${compactError}`);
             }
         } catch (e) {
+            fallbackReason = `xai-network: ${String(e.message || e).slice(0, 200)}`;
             console.log('[ImageGen] xAI image generation failed, falling back:', e.message);
         }
     }

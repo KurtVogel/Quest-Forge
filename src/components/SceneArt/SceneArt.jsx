@@ -69,9 +69,19 @@ function buildCustomPrompt(subject, location, character) {
 
 function fallbackNotice(result) {
     if (result?.provider !== 'pollinations') return '';
-    return result.fallbackReason === 'missing-key'
-        ? 'Free fallback render — add an xAI Image API Key in Settings for the intended high-quality scene art.'
-        : 'xAI rendering failed, so this is a lower-quality free fallback. Check the image key or try again.';
+    if (result.fallbackReason === 'missing-key') {
+        return 'Free fallback render — add an xAI Image API Key in Settings for the intended high-quality scene art.';
+    }
+    if (result.fallbackReason === 'xai-empty') {
+        return 'xAI returned no image, possibly because the prompt was filtered. This is a lower-quality free fallback.';
+    }
+    if (result.fallbackReason?.startsWith('xai-http-')) {
+        return `xAI rendering failed (${result.fallbackReason.replace('xai-http-', 'HTTP ')}). This is a lower-quality free fallback.`;
+    }
+    if (result.fallbackReason?.startsWith('xai-network:')) {
+        return `The browser could not reach xAI (${result.fallbackReason.slice('xai-network:'.length).trim()}). This is a lower-quality free fallback.`;
+    }
+    return 'xAI rendering failed, so this is a lower-quality free fallback. Check the image key or try again.';
 }
 
 export default function SceneArt() {

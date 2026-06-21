@@ -35,4 +35,14 @@ describe('normalizeEquippedSlots', () => {
         expect(items.find(i => i.id === 'shield').equipped).toBe(true);
         expect(items.find(i => i.id === 'greatsword').equipped).toBe(false);
     });
+
+    it('clears invalid equipped flags from non-equipment', () => {
+        const items = normalizeEquippedSlots([
+            { id: 'pack', name: "Explorer's Pack", type: 'gear', equipped: true },
+            { id: 'sword', name: 'Longsword', type: 'weapon', equipped: true },
+        ]);
+
+        expect(items.find(i => i.id === 'pack').equipped).toBe(false);
+        expect(items.find(i => i.id === 'sword').equipped).toBe(true);
+    });
 });

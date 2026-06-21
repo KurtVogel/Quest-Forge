@@ -4,9 +4,37 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** -
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-20 (embedding fix + Combat v2)_
+_Last updated: 2026-06-21 (live play-test hardening + Combat v2)_
 
-## Current focus - Combat v2 + RAG embedding fix SHIPPED (2026-06-20)
+## Current focus - Live play-test hardening + Combat v2 SHIPPED (2026-06-21)
+- **Antigravity end-to-end findings fixed (2026-06-21):** catalog item recognition now accepts
+  bounded descriptive prefixes such as "massive warhammer," then restores engine-owned catalog
+  type/stats instead of trusting conflicting LLM fields. Non-equipment cannot be equipped through
+  UI/DM actions, and invalid equipped flags are cleared on normalization. The exact live failure
+  (generic gear displayed as a second active weapon with no toggle) is regression-tested.
+- **Quest updates are idempotent:** repeated `new` events for the same normalized active quest
+  update the existing entry instead of duplicating it. Active quest IDs are exposed to the DM,
+  while completion safely resolves by ID or normalized name. This fixes the duplicated
+  "The Alderman's Bounty" visible in the audit screenshots.
+- **Combat pacing improved without redesigning Combat v2:** the intent pass is now JSON-only and
+  withholds speculative prose, while the UI labels the intent and narration waits separately.
+  Per-call TTFT/total timing is logged for evidence-based provider tuning. The authoritative second
+  narration call remains separate and reload-safe; combat input now has a contextual placeholder.
+- **Play-test tooling hardened:** rapid skill selection uses functional React state updates; the
+  real-provider Puppeteer harness reads keys only from shell environment variables, asserts valid
+  equipment/unique quests/skill completion/art/combat limits/console health, and no longer turns
+  screenshot-only runs with invariant failures into false passes. Verification: 263 tests, clean
+  lint, production build, harness syntax check, workspace secret scan, and zero production audit
+  vulnerabilities after refreshing Firebase transitive dependencies.
+- **xAI scene-art key compatibility fixed (2026-06-21):** live provider testing reproduced the
+  fallback with a valid xAI secret pasted without its required `xai-` prefix. The image provider
+  now trims keys and supplies the prefix when omitted, while preserving already-prefixed keys.
+  Both the current and reduced image payloads returned real base64 images once authenticated;
+  the supplied Gemini key was also independently accepted. A real-browser-only failure was then
+  traced to Firebase Hosting's CSP blocking `api.x.ai` before fetch could leave the page; xAI is
+  now included in `connect-src`. HTTP, empty-result/moderation, and browser-network failures surface
+  distinct details in the Scene Art notice instead of the same generic warning. Regression coverage
+  pins the normalized Authorization header. Full verification: 256 tests, clean lint, production build.
 - **Combat-start target handoff hardened after live play-test:** every declared foe now receives a
   deterministic canonical ID, and an action emitted alongside `combat_start` is reconciled by
   exact ID/name/slug (or the sole unambiguous foe) before resolution. This fixes the live-caught

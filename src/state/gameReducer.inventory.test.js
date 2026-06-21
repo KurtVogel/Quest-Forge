@@ -210,6 +210,20 @@ describe('equipment changes', () => {
         expect(next.inventory.find(i => i.id === 'weapon-2').equipped).toBe(true);
         expect(next.character.armorClass).toBe(16);
     });
+
+    it('refuses to equip non-equipment items', () => {
+        const start = {
+            ...makeState(),
+            inventory: [
+                ...makeState().inventory,
+                { id: 'pack-1', name: "Explorer's Pack", type: 'gear', equipped: false },
+            ],
+        };
+
+        const next = gameReducer(start, { type: 'EQUIP_ITEM', payload: 'pack-1' });
+
+        expect(next.inventory.find(i => i.id === 'pack-1').equipped).toBe(false);
+    });
 });
 
 describe('consumable use', () => {

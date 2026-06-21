@@ -65,11 +65,10 @@ export default function CharacterCreation() {
     const allSkillsChosen = chosenSkills.length >= numChoices;
 
     const handleToggleSkill = (skill) => {
-        if (chosenSkills.includes(skill)) {
-            setChosenSkills(chosenSkills.filter(s => s !== skill));
-        } else if (chosenSkills.length < numChoices) {
-            setChosenSkills([...chosenSkills, skill]);
-        }
+        setChosenSkills(previous => {
+            if (previous.includes(skill)) return previous.filter(selected => selected !== skill);
+            return previous.length < numChoices ? [...previous, skill] : previous;
+        });
     };
 
     // Reset skills when class changes

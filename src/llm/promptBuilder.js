@@ -550,7 +550,7 @@ Magic equipment: add "magicBonus": 1, 2, or 3 only.`;
 }
 
 function buildQuestBlock(quests) {
-    return `## ACTIVE QUESTS\n${quests.map(q => `- **${q.name}:** ${q.description || 'No details'}`).join('\n')}`;
+    return `## ACTIVE QUESTS\n${quests.map(q => `- **${q.name}** [id: ${q.id}]: ${q.description || 'No details'}`).join('\n')}`;
 }
 
 function buildRecentRollsBlock(rolls) {

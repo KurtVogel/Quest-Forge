@@ -27,6 +27,7 @@ export default function ChatPanel() {
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [streamingMessage, setStreamingMessage] = useState('');
+    const [loadingStatus, setLoadingStatus] = useState('');
     const [combatNarrationRetry, setCombatNarrationRetry] = useState(0);
     const messagesEndRef = useRef(null);
     const abortControllerRef = useRef(null);
@@ -184,11 +185,17 @@ export default function ChatPanel() {
             });
         }
 
-        const systemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories);
+        const baseSystemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories);
+        const systemPrompt = opts.combatIntentOnly
+            ? `${baseSystemPrompt}\n\n## CURRENT RESPONSE MODE — COMBAT INTENT ONLY
+Translate the player's committed action into the single bounded combat_exchange required by the live combat rules. Return ONLY the trailing fenced JSON event block: no narrative, setup, outcome, commentary, or prose outside the JSON. Keep descriptions brief. The engine will resolve mechanics and make a separate narration-only request from the authoritative result.`
+            : baseSystemPrompt;
         const messageHistory = buildMessageHistory();
 
         abortControllerRef.current = new AbortController();
         streamBufferRef.current = '';
+        const requestStartedAt = performance.now();
+        let firstChunkAt = null;
 
         const fullResponse = await streamMessage({
             provider: s.settings.llmProvider,
@@ -198,7 +205,9 @@ export default function ChatPanel() {
             messageHistory,
             userMessage,
             onChunk: (chunk) => {
+                if (firstChunkAt === null) firstChunkAt = performance.now();
                 streamBufferRef.current += chunk;
+                if (opts.combatIntentOnly) return;
                 const buf = streamBufferRef.current;
                 // Once we hit a ```json fence, freeze the display — all remaining
                 // chunks are JSON data that parseResponse handles on the full text.
@@ -211,6 +220,11 @@ export default function ChatPanel() {
             },
             signal: abortControllerRef.current.signal,
         });
+        const requestFinishedAt = performance.now();
+        const mode = opts.combatIntentOnly ? 'combat-intent' : (opts.narrationOnly ? 'narration-only' : 'standard');
+        console.info(
+            `[LLM timing] ${mode}: TTFT ${firstChunkAt === null ? 'n/a' : `${Math.round(firstChunkAt - requestStartedAt)}ms`}, total ${Math.round(requestFinishedAt - requestStartedAt)}ms`
+        );
 
         const parsed = parseResponse(fullResponse);
         const narrative = parsed.narrative;
@@ -351,6 +365,7 @@ export default function ChatPanel() {
         let narrative = '';
         setIsLoading(true);
         setStreamingMessage('');
+        setLoadingStatus('Narrating combat outcome');
         sendToLLM(combatNarrationPrompt(result), null, {
             narrationOnly: true,
             onNarrative: text => { narrative = text; },
@@ -395,6 +410,7 @@ export default function ChatPanel() {
             .finally(() => {
                 setIsLoading(false);
                 setStreamingMessage('');
+                setLoadingStatus('');
             });
     // sendToLLM is intentionally driven only by the persisted exchange identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -427,9 +443,10 @@ export default function ChatPanel() {
 
         setIsLoading(true);
         setStreamingMessage('');
+        setLoadingStatus(startedCombatIntent ? 'Interpreting combat action' : '');
 
         try {
-            const events = await sendToLLM(trimmed, trimmed);
+            const events = await sendToLLM(trimmed, trimmed, { combatIntentOnly: startedCombatIntent });
 
             const combatWasActive = stateRef.current.combat?.active;
             const combatStartedNow = !!events?.combatStart;
@@ -503,6 +520,7 @@ export default function ChatPanel() {
         } finally {
             setIsLoading(false);
             setStreamingMessage('');
+            setLoadingStatus('');
             // Prevent auto-focusing on mobile to stop the virtual keyboard from forcing 
             // the whole app layout to suddenly scroll up, which hides the top header.
             if (window.innerWidth > 768) {
@@ -582,6 +600,7 @@ export default function ChatPanel() {
                         <div className="message-content">
                             <div className="message-role">Dungeon Master</div>
                             <div className="message-text typing-indicator">
+                                {loadingStatus && <span className="loading-status">{loadingStatus}</span>}
                                 <span></span><span></span><span></span>
                             </div>
                         </div>
@@ -600,7 +619,11 @@ export default function ChatPanel() {
                     value={input}
                     onInput={handleInput}
                     onKeyDown={handleKeyDown}
-                    placeholder={hasApiKey ? "What do you do?" : "Set your API key in Settings first..."}
+                    placeholder={!hasApiKey
+                        ? 'Set your API key in Settings first...'
+                        : state.combat?.active
+                            ? 'Describe your combat action (e.g., attack the goblin)...'
+                            : 'What do you do?'}
                     disabled={!hasApiKey || isLoading || combatInputLocked}
                     maxLength={4000}
                     rows={1}

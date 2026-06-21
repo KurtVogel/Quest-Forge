@@ -463,7 +463,8 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
 
     for (const item of itemsFound) {
         const itemData = typeof item === 'string'
-            ? { name: item, type: 'gear', weight: 1 }
+            // Let ADD_ITEM recognize catalog strings before falling back to generic gear.
+            ? { name: item }
             : {
                 // Let normalizeItem (in ADD_ITEM) fill name/type/weight from the catalog
                 // when an itemKey or recognizable name matches — only override when the DM
@@ -572,8 +573,8 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     for (const quest of events.questUpdates) {
         if (quest.status === 'new') {
             dispatch({ type: 'ADD_QUEST', payload: { name: quest.name, description: quest.description } });
-        } else if (quest.status === 'completed' && quest.id) {
-            dispatch({ type: 'COMPLETE_QUEST', payload: quest.id });
+        } else if (quest.status === 'completed' && (quest.id || quest.name)) {
+            dispatch({ type: 'COMPLETE_QUEST', payload: { id: quest.id, name: quest.name } });
         }
     }
 

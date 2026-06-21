@@ -8,6 +8,21 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-21 · Keep Combat v2 two-phase; optimize the intent pass without merging authority.**
+Combat intent and authoritative outcome narration remain separate LLM calls. Narration cannot be
+correct until the client has validated the intent, generated every die, and atomically committed the
+result; speculative single-pass prose would weaken that invariant. Active-combat intent responses
+are therefore JSON-only and short, the UI labels intent/narration wait phases, and TTFT/total timings
+are logged for later provider/model tuning. This is a pacing optimization, not a combat redesign.
+
+**2026-06-21 · Catalog mechanics and state identities are idempotent engine boundaries.**
+Descriptive prefixes may resolve to a complete catalog-name suffix (for example, "massive
+warhammer"), but recognized catalog type, stats, weight, and value override conflicting LLM fields.
+Only weapons, armor, and shields may carry `equipped`; normalization clears invalid legacy/import/LLM
+flags and equip actions reject non-equipment. Repeated active quest `new` events match by stable ID or
+normalized name and update rather than append; completion accepts the same identities. Why: LLM
+wording variance must not create impossible loadouts or duplicate durable state.
+
 **2026-06-20 · Players control character intent, not unilateral external reality.**
 Quest Forge welcomes comedic, bizarre, and increasingly gonzo play when established fiction and
 player choices lead there. Harmless compatible color is welcome; plausible stretches may become

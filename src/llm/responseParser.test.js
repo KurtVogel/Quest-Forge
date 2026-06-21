@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { parseResponse, detectPreNarratedOutcome, applyEvents } from './responseParser.js';
+import { gameReducer, initialGameState } from '../state/gameReducer.js';
 
 const fence = (obj) => '```json\n' + JSON.stringify(obj, null, 2) + '\n```';
 
@@ -81,6 +82,42 @@ describe('defenses against LLM misbehavior', () => {
     it('caps items_found at 20 entries', () => {
         const { events } = parseResponse(fence({ items_found: Array.from({ length: 50 }, (_, i) => `Trinket ${i}`) }));
         expect(events.itemsFound).toHaveLength(20);
+    });
+
+    it('canonicalizes and safely equips descriptive catalog loot', () => {
+        const { events } = parseResponse(fence({
+            items_found: [{
+                name: 'massive warhammer',
+                type: 'gear',
+                damage: '50d100',
+                attackBonus: 99,
+                valueCp: 1,
+            }],
+            equipment_changes: [{ action: 'equip', name: 'massive warhammer' }],
+        }));
+        let state = {
+            ...initialGameState,
+            character: {
+                name: 'Vesa',
+                class: 'fighter',
+                level: 1,
+                armorClass: 18,
+                abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 },
+            },
+            inventory: [{
+                id: 'longsword-1', itemKey: 'longsword', name: 'Longsword', type: 'weapon', damage: '1d8', equipped: true,
+            }],
+        };
+        const dispatch = action => { state = gameReducer(state, action); };
+
+        applyEvents(events, dispatch, () => state);
+
+        const warhammer = state.inventory.find(item => item.itemKey === 'warhammer');
+        expect(warhammer).toMatchObject({
+            name: 'Warhammer', type: 'weapon', damage: '1d8', attackBonus: 0, valueCp: 1500, equipped: true,
+        });
+        expect(state.inventory.find(item => item.id === 'longsword-1').equipped).toBe(false);
+        expect(state.inventory.filter(item => item.equipped && item.type === 'weapon')).toHaveLength(1);
     });
 
     it('parses unfenced JSON containing requested_rolls', () => {

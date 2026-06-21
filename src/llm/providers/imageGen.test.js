@@ -22,10 +22,11 @@ describe('scene image provider reporting', () => {
     });
 
     it('reports xAI success without a fallback warning', async () => {
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
             json: async () => ({ data: [{ b64_json: 'dGVzdA==' }] }),
-        }));
+        });
+        vi.stubGlobal('fetch', fetchMock);
 
         const result = await generateSceneImageDetailed('Vesa defeats Kraul', 'xai-test-key');
 
@@ -34,6 +35,27 @@ describe('scene image provider reporting', () => {
             fallbackReason: null,
             url: 'data:image/jpeg;base64,dGVzdA==',
         });
+        expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+            headers: expect.objectContaining({
+                Authorization: 'Bearer xai-test-key',
+            }),
+        }));
+    });
+
+    it('adds the xAI prefix when a pasted key omits it', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ data: [{ b64_json: 'dGVzdA==' }] }),
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        await generateSceneImageDetailed('Vesa lights a lantern', 'secret-suffix');
+
+        expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+            headers: expect.objectContaining({
+                Authorization: 'Bearer xai-secret-suffix',
+            }),
+        }));
     });
 
     it('labels fallback output when xAI rejects the request', async () => {
@@ -47,7 +69,7 @@ describe('scene image provider reporting', () => {
 
         expect(result).toMatchObject({
             provider: 'pollinations',
-            fallbackReason: expect.stringContaining('401'),
+            fallbackReason: expect.stringContaining('xai-http-401'),
         });
     });
 });
