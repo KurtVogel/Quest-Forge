@@ -12,6 +12,7 @@ import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { CLASSES } from '../data/classes.js';
 import { validateEnemyAttackBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
+import { normalizeItem } from '../data/items.js';
 
 /** Cryptographically random integer in [min, max] — replaces Math.random() fallbacks. */
 function cryptoRandInt(min, max) {
@@ -283,6 +284,22 @@ function normalizeEvents(raw) {
         combatExchangeRejected: raw.combat_exchange != null && !combatExchange,
         damageDealt: clamp(raw.damage_dealt, 0, 999),
         damageTaken: clamp(raw.damage_taken, 0, 999),
+        startingItems: (Array.isArray(raw.starting_items) ? raw.starting_items : [])
+            .map(item => {
+                if (typeof item === 'string') return { name: item };
+                if (!item || typeof item !== 'object') return null;
+                const name = String(item.name || '').trim();
+                const itemKey = String(item.itemKey || item.key || '').trim();
+                if (!name && !itemKey) return null;
+                return {
+                    ...(name && { name }),
+                    ...(itemKey && { itemKey }),
+                    ...(item.description && { description: String(item.description).slice(0, 500) }),
+                    ...(item.equipped === true && { equipped: true }),
+                };
+            })
+            .filter(Boolean)
+            .slice(0, 12),
         itemsFound: Array.isArray(raw.items_found) ? raw.items_found.slice(0, 20) : [],
         itemsLost: Array.isArray(raw.items_lost) ? raw.items_lost.slice(0, 20) : [],
         equipmentChanges: equipmentChanges
@@ -412,6 +429,27 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         return res && res.used >= res.max;
     });
     const suppressResourceHealing = (unavailableResources.length > 0 || uiOwnedResources.length > 0) && events.healing > 0;
+
+    // Premise reconciliation has distinct semantics from ordinary loot: starting
+    // belongings must not duplicate class gear or each other. Normalize through the
+    // catalog first so aliases such as "massive warhammer" share the catalog identity.
+    const itemIdentityTokens = item => {
+        const normalized = normalizeItem(typeof item === 'string' ? { name: item } : item);
+        return [normalized.itemKey, normalized.name]
+            .filter(Boolean)
+            .map(value => String(value).toLowerCase().replace(/[^a-z0-9]/g, ''));
+    };
+    const startingInventoryTokens = new Set((state?.inventory || []).flatMap(itemIdentityTokens));
+    for (const item of events.startingItems || []) {
+        const normalized = normalizeItem(item);
+        const tokens = itemIdentityTokens(normalized);
+        if (tokens.some(token => startingInventoryTokens.has(token))) {
+            console.warn(`[applyEvents] Ignored duplicate premise starting item "${normalized.name}".`);
+            continue;
+        }
+        dispatch({ type: 'ADD_ITEM', payload: normalized });
+        tokens.forEach(token => startingInventoryTokens.add(token));
+    }
 
     // Player abilities/consumables are activated through the game UI now, which marks
     // them spent and applies any dice-backed effect. If the DM emits a known player
@@ -654,6 +692,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
  * @property {Array} requestedRolls - Dice rolls the DM is requesting
  * @property {number} damageDealt - Damage player dealt to enemies
  * @property {number} damageTaken - Damage player took
+ * @property {Array} startingItems - Premise-owned starting belongings, deduplicated against live inventory
  * @property {Array} itemsFound - Items found/received
  * @property {Array} itemsLost - Items lost/consumed
  * @property {Array} questUpdates - Quest state changes

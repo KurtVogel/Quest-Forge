@@ -11,6 +11,25 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### Escape the Elara/Silas/Thorne naming basin — status: `shipped` (2026-06-22)
+Live campaigns repeatedly converged on the same high-probability LLM fantasy names; the response
+schema itself also primed Mira and Garrick. A shared `nameGuidance.js` now steers both the DM and
+living-world front creation away from a bounded stock list and cosmetic respellings, asks for
+culture/community-derived naming patterns with phonetic variety, and forbids replacing the list
+with another tiny repertoire. Established/player-authored names are never renamed. Revisit the
+bounded list from real-play evidence if a new cluster starts dominating rather than growing it
+speculatively forever.
+
+### Premise-owned starting belongings — status: `shipped` (2026-06-22)
+The premise is character canon as well as world canon: if it explicitly says the hero owns or
+carries a lute, keeps a mother's letter, or begins wearing a particular cloak, that object should
+exist in inventory before the first player action. The existing one-time opening pass now compares
+premise possessions with live class inventory and emits only missing bounded `starting_items`;
+the engine also rejects exact/catalog duplicates and explicit worn/wielded wording equips the item.
+It excludes NPC possessions, scenery, wishes, future
+rewards, and non-portable assets, and may not invent mechanics. Why: asking players to establish
+rich backstory and then making its tangible belongings imaginary breaks the premise's canon promise.
+
 ### Soft player narrative authority — status: `shipped` (2026-06-20)
 Players own character intent, speech, inner life, and harmless compatible scene color; the DM owns
 external reality and uncertain outcomes. The prompt deliberately welcomes absurd or comedic play
@@ -108,6 +127,13 @@ clever approaches can remove the roll or earn advantage/lower DC. The solo ladde
 8/10/12/15/18+, with 15 reserved for strong opposition. Social results govern the NPC's
 external response without taking control of the player character's words, feelings, or delivery.
 Malformed prose roll requests without a stated DC now fall back to 10 instead of 15.
+
+Second live failure (2026-06-22): answering an NPC's question with an explicitly truthful personal
+statement still triggered “Convince Galdric of your innocent intentions (DC 12).” A narrow engine
+policy now rejects belief/innocence/sincerity checks in that situation when no concrete concession
+is sought, then requests a no-roll NPC response. The NPC may remain suspicious; what disappears is
+the coin flip for whether sincere roleplay happened. Concrete asks such as release/access/aid remain
+eligible for a check, with truth/evidence affecting advantage or DC.
 
 ### Low-level encounter difficulty / unwinnable fights — status: `shipped` (2026-06-14)
 Recurring, confirmed in play (2026-06-14): a **lone level-1 character** gets dropped into an

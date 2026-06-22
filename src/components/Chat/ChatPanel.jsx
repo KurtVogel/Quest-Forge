@@ -4,13 +4,14 @@ import { streamMessage } from '../../llm/adapter.js';
 import { buildSystemPrompt } from '../../llm/promptBuilder.js';
 import { parseResponse, applyEvents, detectPreNarratedOutcome } from '../../llm/responseParser.js';
 import { handleRequestedRolls } from '../../engine/rollResolver.js';
+import { reviewOutsideCombatRolls, truthfulAnswerCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { runScribe } from '../../llm/scribe.js';
 import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../engine/vectorMemory.js';
 import { curateStoryMemory } from '../../engine/storyMemory.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
-import { shouldPrimeCampaignOpening } from './sessionPriming.js';
+import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
 import './Chat.css';
@@ -61,10 +62,9 @@ export default function ChatPanel() {
             dispatch({ type: 'UPDATE_SESSION', payload: { openingScenePending: false } });
             setIsLoading(true);
 
-            // The authored premise is already pinned in the system prompt as canon.
-            const primingMessage = `[SYSTEM: This is the opening of a brand-new campaign. Open the very first scene, drawing on the CAMPAIGN PREMISE in your context. Establish the setting and the character's immediate situation vividly, honoring every place, name, and detail in the premise as canon. Do NOT mention game mechanics, saving, or that a game is starting. End with "What do you do?" as usual.]`;
-
-            sendToLLM(primingMessage, null)
+            // The authored premise and live starting inventory are already in the system
+            // prompt. The one-time opening also reconciles explicit premise possessions.
+            sendToLLM(buildCampaignOpeningPrompt(), null)
                 .catch(e => {
                     console.warn('[Priming] Session start priming failed:', e);
                 })
@@ -250,6 +250,15 @@ Translate the player's committed action into the single bounded combat_exchange 
         const events = opts.narrationOnly ? null : parsed.events;
         opts.onNarrative?.(narrative);
 
+        if (events?.requestedRolls?.length > 0 && originalPlayerMessage && !s.combat?.active) {
+            const review = reviewOutsideCombatRolls(events.requestedRolls, originalPlayerMessage);
+            events.requestedRolls = review.acceptedRolls;
+            if (review.rejectedRolls.length > 0) {
+                events._truthOnlySocialRollRejected = true;
+                console.warn('[ChatPanel] Rejected truth-only NPC belief check; requesting a no-roll roleplay response.');
+            }
+        }
+
         // Detect pre-narrated outcome (DM wrote outcome before dice were rolled)
         if (events?.requestedRolls?.length > 0 && detectPreNarratedOutcome(narrative)) {
             events._preNarratedOutcome = true;
@@ -266,7 +275,9 @@ Translate the player's committed action into the single bounded combat_exchange 
         // visible and the player saw the beat twice (setup, then outcome). The flag also
         // drives applyEvents' setupPhase, so deferring outcome mutations to the final
         // narration likewise extends correctly to chained rolls (no double-application).
-        const hideSetup = events?.requestedRolls?.length > 0 || !!events?.combatExchange;
+        const hideSetup = events?.requestedRolls?.length > 0
+            || !!events?.combatExchange
+            || !!events?._truthOnlySocialRollRejected;
         if (hideSetup) setStreamingMessage('');
         dispatch({
             type: 'ADD_MESSAGE',
@@ -494,6 +505,8 @@ Translate the player's committed action into the single bounded combat_exchange 
                     playerAction: trimmed,
                 });
                 void rollResolution;
+            } else if (events?._truthOnlySocialRollRejected) {
+                await sendToLLM(truthfulAnswerCorrectionPrompt(), null, { narrationOnly: true });
             }
             if (startedCombatIntent && !combatIntentHandled) {
                 dispatch({ type: 'CANCEL_COMBAT_INTENT' });

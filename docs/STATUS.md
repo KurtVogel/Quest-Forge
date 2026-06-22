@@ -4,9 +4,24 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** -
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-22 (fiction-first check tuning)_
+_Last updated: 2026-06-22 (NPC name diversity + non-combat advantage)_
 
 ## Current focus - Fronts v2 SHIPPED; real-provider tuning next (2026-06-21)
+- **NPC name diversity + non-combat advantage (2026-06-22):** DM and front generation now
+  share a bounded blocklist for the recurring Elara/Silas/Thorne-style fantasy autocomplete
+  cluster, replace name-shaped schema examples with culture-grounded placeholders, and preserve
+  all established names. Fiction-first guidance now explicitly routes materially helpful setup
+  to outside-combat advantage (already engine-owned: two d20, keep high), or a lower DC.
+- **Truthful-answer social-roll guard (2026-06-22):** after live play still rolled DC 12 merely
+  to make an NPC believe an explicitly truthful answer, a narrow engine policy now rejects that
+  belief/innocence/sincerity roll when no concrete concession is requested. The invalid setup is
+  hidden and the DM continues without dice; NPC doubt still follows motives and evidence, while
+  release/access/aid/risk and other concrete asks can legitimately require a check.
+- **Premise-owned starting inventory (2026-06-22):** the one-time opening now reconciles
+  concrete portable belongings explicitly owned/carried/worn/wielded by the hero against class
+  inventory through bounded `starting_items`. Missing items are added, explicit equipment state
+  is honored, synonym/exact/catalog duplicates and other entities' possessions are excluded, and
+  catalog mechanics remain engine-owned.
 - **Fiction-first check tuning (2026-06-22):** live play caught routine roleplay becoming a
   DC 15 coin flip and failed social narration seizing the hero's authored delivery. Outside-
   combat checks now require uncertainty, pressure/opposition, and an interesting consequence;

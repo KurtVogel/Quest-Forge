@@ -8,6 +8,38 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-22 · New NPC/faction names avoid a shared stock-LLM list; established names are
+untouchable.** DM and living-world generation share `nameGuidance.js`, blocking Elara-family,
+Silas/Sylas, Thorne/Thorn, and other repeatedly observed fantasy autocomplete defaults. Generated
+names should follow culture/community patterns while varying sounds, length, and ornament rather
+than converging on a replacement shortlist. Prompt response examples use placeholders instead of
+priming Mira/Garrick. Premise, world-fact, NPC, journal, memory, and player-established names remain
+canon even when they match the blocked list.
+
+**2026-06-22 · Non-combat advantage is DM-adjudicated fiction and engine-enforced dice.**
+Outside-combat `requested_rolls` already preserve advantage/disadvantage, and `rollResolver.js`
+rolls two crypto-random d20s, keeps high/low, combines condition effects, and reports both dice.
+The fiction-first check gate now explicitly tells the DM: a solved obstacle skips the roll; a
+materially improved but unresolved position earns advantage or a lower DC. The engine does not
+infer narrative merit from prose—it faithfully executes the DM's bounded adjudication.
+
+One narrow semantic guard supplements that general boundary: when the player explicitly labels
+their answer truthful, a Persuasion/Deception-style roll whose only outcome is NPC belief,
+innocence, sincerity, or intentions is rejected unless its description seeks a concrete concession
+such as release, access, aid, risk, betrayal, or material help. ChatPanel withholds the invalid
+setup and asks the DM for a no-roll roleplay response. This does not force belief or canonize
+unsupported external claims; NPC doubt remains governed by established motives and evidence.
+
+**2026-06-22 · Explicit premise-owned belongings become starting inventory during the
+one-time opening.** The opening DM call already sees both permanent premise canon and the
+engine-owned class inventory, so it reconciles concrete portable items the premise says the
+hero owns/carries/brought/wears/wields through bounded `starting_items`, without a second provider
+call. The LLM compares identity/synonyms and the engine rejects exact/catalog duplicates;
+worn/wielded state is applied only when explicit. NPC/scenery/future inheritance mentions and
+non-portable assets are excluded. The LLM may preserve descriptive flavor but cannot invent
+prices, bonuses, damage, armor, or item effects; recognized catalog mechanics remain engine-owned.
+Continue/Load never reruns reconciliation.
+
 **2026-06-22 · Outside combat, fiction decides whether dice are needed and DC 15 is not
 the default.** A check now requires genuine uncertainty, active opposition or pressure, and
 an interesting failure consequence. Routine competence and approaches that neutralize the

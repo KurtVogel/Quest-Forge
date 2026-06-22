@@ -84,6 +84,38 @@ describe('defenses against LLM misbehavior', () => {
         expect(events.itemsFound).toHaveLength(20);
     });
 
+    it('adds premise starting belongings once without trusting invented mechanics', () => {
+        const { events } = parseResponse(fence({
+            starting_items: [
+                { name: 'Longsword', damage: '50d100', magicBonus: 3 },
+                { name: "Mother's old lute", description: 'Carried from Tanelorn', damage: '20d20', valueCp: 99999 },
+                { name: "Mother's old lute", description: 'Duplicate wording' },
+            ],
+        }));
+        let state = {
+            ...initialGameState,
+            character: {
+                name: 'Vesa',
+                class: 'fighter',
+                level: 1,
+                armorClass: 12,
+                abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 },
+            },
+            inventory: [{ id: 'sword-1', itemKey: 'longsword', name: 'Longsword', type: 'weapon', damage: '1d8', equipped: true }],
+        };
+        const dispatch = action => { state = gameReducer(state, action); };
+
+        expect(events.startingItems[1]).toEqual({ name: "Mother's old lute", description: 'Carried from Tanelorn' });
+        applyEvents(events, dispatch, () => state);
+
+        expect(state.inventory.filter(item => item.itemKey === 'longsword')).toHaveLength(1);
+        const lutes = state.inventory.filter(item => item.name === "Mother's old lute");
+        expect(lutes).toHaveLength(1);
+        expect(lutes[0]).toMatchObject({ type: 'gear', description: 'Carried from Tanelorn', attackBonus: 0, damageBonus: 0 });
+        expect(lutes[0].damage).toBeUndefined();
+        expect(lutes[0].valueCp).toBeUndefined();
+    });
+
     it('canonicalizes and safely equips descriptive catalog loot', () => {
         const { events } = parseResponse(fence({
             items_found: [{

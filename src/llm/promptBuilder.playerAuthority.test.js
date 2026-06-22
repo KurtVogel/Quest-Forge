@@ -28,6 +28,12 @@ describe('player narrative authority guidance', () => {
         expect(prompt).toContain('does not automatically create external creatures, objects, exits');
         expect(prompt).toContain('treat it as a wish, joke, or attempted idea — not established reality');
         expect(prompt).toContain('without scolding the player');
+        expect(prompt).toContain('## NPC NAME DIVERSITY — AVOID THE LLM FANTASY DEFAULTS');
+        expect(prompt).toContain('Elara, Elora, Elyra, Silas, Sylas, Thorne');
+        expect(prompt).toContain('Never rename or erase an established name');
+        expect(prompt).toContain("Build names from the person's culture, region, class, age, and community");
+        expect(prompt).not.toContain('"Mira the Innkeeper"');
+        expect(prompt).not.toContain('"name": "Garrick"');
     });
 
     it('makes checks exceptional, rewards clever play, and preserves authored delivery', () => {
@@ -56,6 +62,8 @@ describe('player narrative authority guidance', () => {
         expect(prompt).toContain('DC 15 only for strong opposition or serious risk');
         expect(prompt).toContain('There is no default DC 15');
         expect(prompt).toContain('automatic success when it removes the obstacle; otherwise advantage OR a lower DC');
+        expect(prompt).toContain('the engine rolls two d20s and keeps the higher');
+        expect(prompt).toContain('express advantage/disadvantage directly on the requested_rolls entry');
         expect(prompt).toContain('A failed social check controls the NPC\'s external response only');
         expect(prompt).toContain('never invent stammering, trembling, cowardice, or incompetence');
     });

@@ -422,6 +422,16 @@ describe('saving throws', () => {
 });
 
 describe('condition effects on rolls', () => {
+    it('applies explicit advantage to an outside-combat skill check', () => {
+        rollQueue.push(4, 17); // advantage keeps 17; CHA -1 => 16
+        const { results, dispatch } = run([
+            { type: 'skill_check', skill: 'persuasion', dc: 12, advantage: true, description: 'Use the evidence convincingly' },
+        ]);
+        expect(results[0]).toMatchObject({ rolled: 16, success: true });
+        expect(messagesFrom(dispatch)).toContain('advantage');
+        expect(messagesFrom(dispatch)).toContain('kept 17');
+    });
+
     it('poisoned imposes disadvantage on checks (two dice, lower kept)', () => {
         rollQueue.push(18, 6); // disadvantage keeps the 6
         const { results, dispatch } = run(
