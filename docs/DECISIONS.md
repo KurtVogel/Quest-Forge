@@ -8,6 +8,21 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-22 · Outside combat, fiction decides whether dice are needed and DC 15 is not
+the default.** A check now requires genuine uncertainty, active opposition or pressure, and
+an interesting failure consequence. Routine competence and approaches that neutralize the
+obstacle resolve without dice; clever positioning otherwise earns advantage or a lower DC.
+Solo-play DCs are 8 easy under pressure, 10 standard, 12 meaningful, 15 strong opposition,
+and 18+ exceptional. Social failures govern NPC reactions only: they may not rewrite the
+player's authored speech, emotions, confidence, or delivery as stammering or incompetence.
+
+**2026-06-22 · Campaign premises may be substantial, with one shared 8,000-character
+limit.** The opening setup is permanent player-authored canon and now feeds both the DM and
+premise-grounded living-world director without separate hidden truncation. The allowance is
+large enough for factions, geography, history, and active tensions, while remaining bounded
+because the premise is pinned into every turn's prompt. Both new-hero and roster adventure
+paths show the same live character count; oversized loaded data is bounded before prompt use.
+
 **2026-06-21 · Fronts v2 uses LLM judgment inside an idempotent engine-owned cadence.**
 Fresh campaigns privately generate two or three interacting, premise-grounded pressures with
 specific driving factions/forces, goals, stances, and cross-front relationships; the original

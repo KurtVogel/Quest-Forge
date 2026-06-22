@@ -29,4 +29,34 @@ describe('player narrative authority guidance', () => {
         expect(prompt).toContain('treat it as a wish, joke, or attempted idea — not established reality');
         expect(prompt).toContain('without scolding the player');
     });
+
+    it('makes checks exceptional, rewards clever play, and preserves authored delivery', () => {
+        const prompt = buildSystemPrompt({
+            character: null,
+            inventory: [],
+            quests: [],
+            rollHistory: [],
+            preset: 'classicFantasy',
+            ruleset: 'simplified5e',
+            customSystemPrompt: '',
+            journal: [],
+            npcs: [],
+            party: [],
+            currentLocation: 'Inquisitor Chapel',
+            combat: null,
+            worldFacts: [],
+            fronts: [],
+            storyMemory: [],
+            retrievedMemories: [],
+            premise: '',
+        });
+
+        expect(prompt).toContain('## CHECK DISCIPLINE — FICTION FIRST, DICE SECOND');
+        expect(prompt).toContain('Request a check only when ALL THREE are true');
+        expect(prompt).toContain('DC 15 only for strong opposition or serious risk');
+        expect(prompt).toContain('There is no default DC 15');
+        expect(prompt).toContain('automatic success when it removes the obstacle; otherwise advantage OR a lower DC');
+        expect(prompt).toContain('A failed social check controls the NPC\'s external response only');
+        expect(prompt).toContain('never invent stammering, trembling, cowardice, or incompetence');
+    });
 });

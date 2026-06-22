@@ -115,7 +115,9 @@ function detectTextRollRequests(narrative) {
 
     // Extract DC if mentioned: "DC 15", "DC15", "difficulty class 14"
     const dcMatch = lower.match(/\bdc\s*(\d+)\b/) || lower.match(/difficulty class\s*(\d+)/);
-    const dc = dcMatch ? parseInt(dcMatch[1], 10) : 15;
+    // A malformed prose request without an explicit DC should fall back to the
+    // normal solo-play obstacle, not the old overly punishing DC 15 default.
+    const dc = dcMatch ? parseInt(dcMatch[1], 10) : 10;
 
     // Pattern 1: "roll a/an [skill] check/save"
     const rollPattern = /(?:roll|make|attempt)\s+(?:a|an)\s+([\w\s']+?)\s+(?:check|save|saving throw)/gi;

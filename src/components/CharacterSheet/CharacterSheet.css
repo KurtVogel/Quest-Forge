@@ -518,6 +518,13 @@
     font-family: var(--font-body);
 }
 
+.creation-character-count {
+    margin-top: 0.35rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-align: right;
+}
+
 .creation-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

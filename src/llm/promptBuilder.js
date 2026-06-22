@@ -12,6 +12,7 @@ import { buildStoryMemoryPromptBlock } from '../engine/storyMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
 import { formatCurrency } from '../engine/currency.js';
 import { CLASSES } from '../data/classes.js';
+import { normalizeCampaignPremise } from '../config/contentLimits.js';
 
 /**
  * Build the complete system prompt for the LLM.
@@ -48,8 +49,9 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     // Campaign premise — the player's opening scenario. Foundational canon set at
     // adventure start, pinned verbatim and NEVER compressed or pruned (unlike the
     // journal, which summarizes away setup that isn't an in-scene event).
-    if (premise && premise.trim()) {
-        parts.push(buildPremiseBlock(premise.trim()));
+    const normalizedPremise = normalizeCampaignPremise(premise);
+    if (normalizedPremise) {
+        parts.push(buildPremiseBlock(normalizedPremise));
     }
 
     if (fronts && fronts.length > 0) {
@@ -160,6 +162,15 @@ Welcome creative, comedic, and bizarre player choices. Let the campaign become a
 - When an unsupported assertion would bypass danger, erase a consequence, contradict canon, or grant a meaningful advantage, treat it as a wish, joke, or attempted idea — not established reality. Respond briefly from the actual situation without scolding the player.
 - If a surprising idea is plausible but not guaranteed, offer an attempt, cost, complication, or roll. Preserve both imaginative agency and genuine stakes.
 
+## CHECK DISCIPLINE — FICTION FIRST, DICE SECOND
+
+Outside combat, a roll is an exception, not the default response to an action. Request a check only when ALL THREE are true: the outcome is genuinely uncertain, an active obstacle or pressure opposes the attempt, and failure would create an interesting consequence. If any is missing, honor the action and narrate what follows without dice.
+- Do not roll for routine competence, harmless color, ordinary conversation, expressing an emotion, recalling obvious information, or actions already solved by the player's approach.
+- Reward attention and roleplay in the fiction. A clever, specific approach that neutralizes the obstacle succeeds automatically. If it only improves the odds, grant advantage OR lower the DC. Never ignore good positioning and then use the generic default DC.
+- Calibrate conservatively for a solo protagonist: DC 8 for easy actions under light pressure, DC 10 for a standard obstacle, DC 12 for a meaningful challenge, DC 15 only for strong opposition or serious risk, DC 18+ only for exceptional feats. There is no default DC 15.
+- Social checks determine what an NPC believes, reveals, risks, or does — never whether the player spoke the words they authored or felt the emotion they declared. On failure, preserve the player's chosen delivery and explain the NPC's resistance through their motives, knowledge, leverage, or suspicion.
+- Failure means the intended external result is not achieved, not that the character suddenly becomes incompetent, cowardly, foolish, or inarticulate. Add proportionate pressure, cost, or a changed situation; do not humiliate the character unless the player invited that tone.
+
 ## GAME LOOP — PACING (VERY IMPORTANT)
 
 The game follows a strict narration cycle. You must adhere to this pacing to ensure a natural flow:
@@ -207,7 +218,7 @@ const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)
 - When you need the player to make a check, specify:
   - The type (ability check, saving throw, attack roll)
   - Which skill or ability score it uses
-  - The Difficulty Class (DC) — use standard DCs: Easy 10, Medium 15, Hard 20, Very Hard 25
+  - The Difficulty Class (DC) — use this solo-play ladder: Easy under pressure 8, Standard 10, Meaningful challenge 12, Strong opposition 15, Exceptional 18+. Do not default to 15.
 - Combat uses initiative (d20 + DEX modifier) to determine turn order
 - Enemy HP in the ACTIVE COMBAT block is canonical; never track or change it yourself.
 - **Advantage:** roll 2d20 and take the higher result. **Disadvantage:** roll 2d20 and take the lower. Request via \`"advantage": true\` or \`"disadvantage": true\` in the requested_rolls entry.`;
@@ -325,6 +336,9 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - \`memory_updates\` is narrative-only bookkeeping. Never use it for HP, XP, rolls, inventory, combat, conditions, or other mechanics.
 
 ## ROLL REQUEST RULES
+- **ROLL GATE**: Outside combat, request dice only when uncertainty, active opposition/pressure, AND an interesting failure consequence are all present. Otherwise narrate success or the NPC's natural response without dice.
+- Clever preparation or persuasive leverage must change resolution: automatic success when it removes the obstacle; otherwise advantage OR a lower DC. Routine roleplay is not a DC 15 check.
+- A failed social check controls the NPC's external response only. Preserve the player's authored words, confidence, emotions, and delivery; never invent stammering, trembling, cowardice, or incompetence.
 - **FATAL ERROR AVOIDANCE**: NEVER ask the player to roll in narrative text. Outside combat, use \`requested_rolls\` for uncertain checks and saves.
 - During ACTIVE COMBAT, use \`combat_exchange\` instead. Never emit \`attack_roll\`, \`companion_attack\`, or \`npc_attack\`; the engine generates all standard combat dice from live state.
 - Outside combat, player checks use "skill_check" or "saving_throw" with a DC. Saving throws name the ability; the engine applies proficiency.

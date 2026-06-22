@@ -4,9 +4,18 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** -
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-21 (Fronts v2 + living-world tuning gate)_
+_Last updated: 2026-06-22 (fiction-first check tuning)_
 
 ## Current focus - Fronts v2 SHIPPED; real-provider tuning next (2026-06-21)
+- **Fiction-first check tuning (2026-06-22):** live play caught routine roleplay becoming a
+  DC 15 coin flip and failed social narration seizing the hero's authored delivery. Outside-
+  combat checks now require uncertainty, pressure/opposition, and an interesting consequence;
+  clever play removes the roll or earns advantage/lower DC. The solo ladder is 8/10/12/15/18+,
+  and social failure controls NPC response without inventing player stammering or cowardice.
+- **Hefty campaign scaffolding (2026-06-22):** both adventure-start paths now accept up to
+  8,000 premise characters with a live count. One shared bound protects prompt injection,
+  and the DM plus initial/migration/upgrade living-world paths receive the same premise
+  allowance instead of silently trimming fresh faction context at 2,400 characters.
 - **Richer campaign generation:** fresh campaigns now privately replace the deterministic
   safety-net pressure with 2–3 premise-grounded, interacting fronts. Each has a specific
   driving faction/force, goal, stance toward the hero, and compact relationships to other

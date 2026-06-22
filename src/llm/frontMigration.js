@@ -1,6 +1,7 @@
 import { sendMessage } from './adapter.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { normalizeFront } from '../engine/fronts.js';
+import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 
 const MAX_FRONTS = 2;
 
@@ -48,7 +49,7 @@ export function buildFrontMigrationContext(state) {
     const character = state.character || {};
     const context = {
         currentLocation: cleanText(state.currentLocation, 160),
-        campaignPremise: cleanText(state.session?.premise, 3000),
+        campaignPremise: cleanText(state.session?.premise, CAMPAIGN_PREMISE_MAX_LENGTH),
         hero: {
             name: cleanText(character.name, 100),
             race: cleanText(character.race, 60),

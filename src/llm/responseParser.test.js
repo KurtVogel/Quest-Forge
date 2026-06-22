@@ -137,6 +137,11 @@ describe('defenses against LLM misbehavior', () => {
         const { events } = parseResponse('Poison gas fills the corridor! Make a constitution saving throw (DC 13).');
         expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'saving_throw', skill: 'constitution', dc: 13 });
     });
+
+    it('uses the standard solo-play DC when a prose roll request omits one', () => {
+        const { events } = parseResponse('Make a Perception check to listen at the door.');
+        expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'skill_check', skill: 'perception', dc: 10 });
+    });
 });
 
 describe('combat_start validation', () => {

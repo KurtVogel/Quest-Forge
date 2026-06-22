@@ -99,6 +99,16 @@ embedded into RAG, so it fell through every durable tier once the 20-message win
 
 ## Gameplay & Mechanics
 
+### Fiction-first out-of-combat checks — status: `shipped` (2026-06-22)
+Live play showed routine committed roleplay being assigned DC 15, then a failed social check
+rewriting the authored performance as stammering, trembling incompetence. The prompt's old
+“minimal dice” sentence lost to the much more salient 5e Easy 10 / Medium 15 / Hard 20 ladder.
+Checks now require uncertainty + active opposition/pressure + an interesting consequence;
+clever approaches can remove the roll or earn advantage/lower DC. The solo ladder is
+8/10/12/15/18+, with 15 reserved for strong opposition. Social results govern the NPC's
+external response without taking control of the player character's words, feelings, or delivery.
+Malformed prose roll requests without a stated DC now fall back to 10 instead of 15.
+
 ### Low-level encounter difficulty / unwinnable fights — status: `shipped` (2026-06-14)
 Recurring, confirmed in play (2026-06-14): a **lone level-1 character** gets dropped into an
 unwinnable fight (a major NPC + two guards) and dies — even when actively hiding/avoiding. Vesa

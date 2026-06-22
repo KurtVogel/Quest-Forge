@@ -6,6 +6,7 @@ import { listRosterCharacters, saveRosterCharacter, deleteRosterCharacter } from
 import { RACES, RACE_LIST } from '../../data/races.js';
 import { CLASSES, CLASS_LIST } from '../../data/classes.js';
 import { SKILL_ABILITIES } from '../../engine/rules.js';
+import { CAMPAIGN_PREMISE_MAX_LENGTH, normalizeCampaignPremise } from '../../config/contentLimits.js';
 import './CharacterSheet.css';
 
 const STEPS = ['name', 'race', 'class', 'stats', 'skills', 'confirm', 'adventure'];
@@ -83,7 +84,7 @@ export default function CharacterCreation() {
 
         // Create session — the premise is pinned here as permanent campaign canon.
         const sessionName = adventureName.trim() || `${character.name}'s Adventure`;
-        const trimmedPremise = premise.trim();
+        const trimmedPremise = normalizeCampaignPremise(premise);
         dispatch({
             type: 'UPDATE_SESSION',
             payload: {
@@ -240,8 +241,11 @@ export default function CharacterCreation() {
                                 onChange={(e) => setPremise(e.target.value)}
                                 placeholder={`Where does ${selectedHero.name}'s new tale open, and what's at stake? Name the places and people that matter — the DM opens the scene from this, and it stays canon for the whole campaign.`}
                                 rows={5}
-                                maxLength={2000}
+                                maxLength={CAMPAIGN_PREMISE_MAX_LENGTH}
                             />
+                            <div className="creation-character-count">
+                                {premise.length.toLocaleString()} / {CAMPAIGN_PREMISE_MAX_LENGTH.toLocaleString()}
+                            </div>
                         </div>
                     )}
 
@@ -477,8 +481,11 @@ export default function CharacterCreation() {
                                 onChange={(e) => setPremise(e.target.value)}
                                 placeholder={`Exiled from the city of Tanelorn, ${name || 'your hero'} arrives at the rain-soaked frontier town of Jewelglade with a borrowed sword and a grudge. The town has been losing people to the woods...`}
                                 rows={5}
-                                maxLength={2000}
+                                maxLength={CAMPAIGN_PREMISE_MAX_LENGTH}
                             />
+                            <div className="creation-character-count">
+                                {premise.length.toLocaleString()} / {CAMPAIGN_PREMISE_MAX_LENGTH.toLocaleString()}
+                            </div>
                         </div>
                     )}
                 </div>
