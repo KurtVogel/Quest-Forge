@@ -266,6 +266,12 @@ function normalizeEvents(raw) {
                 ability: r.ability || null,
                 dc: typeof r.dc === 'number' ? r.dc : 15,
                 description: r.description || '',
+                reason: String(r.reason || r.roll_reason || '').slice(0, 500),
+                opposition: String(r.opposition || '').slice(0, 500),
+                failureStakes: String(r.failure_stakes || r.failureStakes || '').slice(0, 500),
+                difficultyReason: String(r.difficulty_reason || r.difficultyReason || '').slice(0, 500),
+                advantageReason: String(r.advantage_reason || r.advantageReason || '').slice(0, 500),
+                disadvantageReason: String(r.disadvantage_reason || r.disadvantageReason || '').slice(0, 500),
                 // NPC attack fields
                 attacker: r.attacker || null,
                 attackerId: r.attackerId || r.companionId || r.companion_id || null,

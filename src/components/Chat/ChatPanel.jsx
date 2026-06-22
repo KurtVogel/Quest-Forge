@@ -12,6 +12,7 @@ import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../
 import { curateStoryMemory } from '../../engine/storyMemory.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
+import { buildRoleplayChallengePrompt, buildRoleplayCheckProposal } from '../../engine/roleplayCheck.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
 import './Chat.css';
@@ -31,6 +32,8 @@ export default function ChatPanel() {
     const [streamingMessage, setStreamingMessage] = useState('');
     const [loadingStatus, setLoadingStatus] = useState('');
     const [combatNarrationRetry, setCombatNarrationRetry] = useState(0);
+    const [roleplayChallenge, setRoleplayChallenge] = useState('');
+    const [showRoleplayChallenge, setShowRoleplayChallenge] = useState(false);
     const messagesEndRef = useRef(null);
     const abortControllerRef = useRef(null);
     const inputRef = useRef(null);
@@ -446,6 +449,105 @@ Translate the player's committed action into the single bounded combat_exchange 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state.combat?.phase, state.combat?.lastExchangeResult?.exchangeId, isLoading, combatNarrationRetry]);
 
+    const stageRoleplayCheck = (rolls, playerAction, challengeUsed = false, preNarrated = false) => {
+        const proposal = buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed, preNarrated });
+        if (!proposal) return false;
+        dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
+        setRoleplayChallenge('');
+        setShowRoleplayChallenge(false);
+        return true;
+    };
+
+    const finalizeRoleplayTurn = (playerAction) => {
+        const latest = stateRef.current;
+        const finalNarration = [...(latest.messages || [])].reverse()
+            .find(message => message.role === 'assistant' && !message.hidden && message.content?.trim());
+        if (finalNarration) {
+            runScribe({
+                playerMessage: playerAction,
+                dmNarrative: finalNarration.content,
+                settings: latest.settings,
+                dispatch,
+            }).catch(() => {});
+            if (latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
+                addMemory(latest.settings.apiKey, finalNarration.content.slice(0, 500), 'narrative').catch(() => {});
+            }
+        }
+        maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current).then(index => {
+            lastSummarizedRef.current = index;
+        });
+    };
+
+    const handleAcceptRoleplayCheck = async () => {
+        const proposal = stateRef.current.pendingRoleplayCheck;
+        if (!proposal || isLoading) return;
+        dispatch({ type: 'CLEAR_ROLEPLAY_CHECK' });
+        setIsLoading(true);
+        setLoadingStatus('Rolling accepted check');
+        let stagedFollowUp = false;
+        try {
+            await handleRequestedRolls(proposal.rolls, {
+                getState: () => stateRef.current,
+                dispatch,
+                sendToLLM,
+                playerAction: proposal.playerAction,
+                preNarrated: proposal.preNarrated,
+                onFollowUpRolls: (rolls, meta) => {
+                    stagedFollowUp = stageRoleplayCheck(rolls, meta.playerAction || proposal.playerAction, false, meta.preNarrated);
+                },
+            });
+            if (!stagedFollowUp) finalizeRoleplayTurn(proposal.playerAction);
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error resolving check: ${error.message}` } });
+            }
+        } finally {
+            setIsLoading(false);
+            setStreamingMessage('');
+            setLoadingStatus('');
+        }
+    };
+
+    const handleChallengeRoleplayCheck = async () => {
+        const proposal = stateRef.current.pendingRoleplayCheck;
+        const challenge = roleplayChallenge.trim();
+        if (!proposal || proposal.challengeUsed || !challenge || isLoading) return;
+        dispatch({ type: 'CLEAR_ROLEPLAY_CHECK' });
+        dispatch({ type: 'ADD_MESSAGE', payload: { role: 'user', content: `**Roll challenge:** ${challenge}` } });
+        setIsLoading(true);
+        setLoadingStatus('DM reconsidering the ruling');
+        try {
+            const events = await sendToLLM(
+                buildRoleplayChallengePrompt(proposal, challenge),
+                proposal.playerAction
+            );
+            if (events?.requestedRolls?.length > 0) {
+                stageRoleplayCheck(events.requestedRolls, proposal.playerAction, true, events._preNarratedOutcome);
+            } else {
+                if (events?._playerAuthorityRollRejected) {
+                    await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
+                }
+                finalizeRoleplayTurn(proposal.playerAction);
+            }
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error challenging check: ${error.message}` } });
+                dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
+            }
+        } finally {
+            setIsLoading(false);
+            setStreamingMessage('');
+            setLoadingStatus('');
+        }
+    };
+
+    const handleChangeRoleplayApproach = () => {
+        dispatch({ type: 'CLEAR_ROLEPLAY_CHECK' });
+        dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: 'The proposed check is set aside. Describe a different approach; no dice were rolled.' } });
+        setRoleplayChallenge('');
+        setShowRoleplayChallenge(false);
+    };
+
     /**
      * Handle the full send flow: user message → LLM → dice rolls → auto follow-up.
      */
@@ -490,21 +592,15 @@ Translate the player's committed action into the single bounded combat_exchange 
             } else if (events?.combatExchange && !combatStartedNow) {
                 combatIntentHandled = true;
                 commitCombatPlan(planCombatExchange(stateRef.current, events.combatExchange));
-            } else if (events?.requestedRolls?.length > 0 && combatWasActive) {
+            } else if (events?.requestedRolls?.length > 0 && (combatWasActive || combatStartedNow)) {
                 // Active combat never falls back to LLM-authored attack batches. An invalid
                 // envelope costs nobody a turn and cannot produce a free enemy attack.
                 combatIntentHandled = true;
                 dispatch({ type: 'REJECT_COMBAT_EXCHANGE', payload: { reason: 'The DM requested legacy combat rolls instead of a committed action envelope.' } });
             } else if (events?.requestedRolls?.length > 0) {
-                // Outside combat, ordinary checks/saves continue to use the general resolver.
-                const rollResolution = await handleRequestedRolls(events.requestedRolls, {
-                    getState: () => stateRef.current,
-                    dispatch,
-                    sendToLLM,
-                    preNarrated: events._preNarratedOutcome || false,
-                    playerAction: trimmed,
-                });
-                void rollResolution;
+                // Outside combat, dice do not exist until the player accepts the public
+                // adjudication. Combat remains immediate and engine-owned above.
+                stageRoleplayCheck(events.requestedRolls, trimmed, false, events._preNarratedOutcome);
             } else if (events?._playerAuthorityRollRejected) {
                 await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
             }
@@ -516,8 +612,10 @@ Translate the player's committed action into the single bounded combat_exchange 
             // live), now that any roll chain has resolved. Covers no-roll turns too, and
             // skips the withheld pre-roll setup (flagged hidden).
             const latest = stateRef.current;
-            const waitsForCombatNarration = !!events?.combatExchange || combatStartedNow;
-            const finalNarration = waitsForCombatNarration ? null : [...latest.messages].reverse()
+            const waitsForResolution = !!events?.combatExchange
+                || combatStartedNow
+                || !!events?.requestedRolls?.length;
+            const finalNarration = waitsForResolution ? null : [...latest.messages].reverse()
                 .find(m => m.role === 'assistant' && !m.hidden && m.content?.trim());
             if (finalNarration) {
                 runScribe({
@@ -532,7 +630,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
 
             // Auto-summarize for session memory (runs in background, uses Gemini 2.5 Flash)
-            if (!waitsForCombatNarration) {
+            if (!waitsForResolution) {
                 maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current).then(idx => {
                     lastSummarizedRef.current = idx;
                 });
@@ -593,6 +691,7 @@ Translate the player's committed action into the single bounded combat_exchange 
 
     const hasApiKey = !!state.settings.apiKey;
     const awaitingCombatNarration = state.combat?.phase === COMBAT_PHASES.AWAITING_NARRATION;
+    const pendingRoleplayCheck = state.pendingRoleplayCheck;
     const combatInputLocked = state.combat?.active && (
         state.combat.phase !== COMBAT_PHASES.AWAITING_PLAYER || !!state.combat.queuedExchange
     );
@@ -644,6 +743,20 @@ Translate the player's committed action into the single bounded combat_exchange 
 
             {state.combat?.active && <CombatPanel />}
 
+            {pendingRoleplayCheck && !state.combat?.active && (
+                <RoleplayCheckPanel
+                    proposal={pendingRoleplayCheck}
+                    challenge={roleplayChallenge}
+                    showChallenge={showRoleplayChallenge}
+                    disabled={isLoading}
+                    onAccept={handleAcceptRoleplayCheck}
+                    onShowChallenge={() => setShowRoleplayChallenge(true)}
+                    onChallengeChange={setRoleplayChallenge}
+                    onSubmitChallenge={handleChallengeRoleplayCheck}
+                    onChangeApproach={handleChangeRoleplayApproach}
+                />
+            )}
+
             <div className="chat-input-area">
                 <textarea
                     ref={inputRef}
@@ -656,7 +769,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                         : state.combat?.active
                             ? 'Describe your combat action (e.g., attack the goblin)...'
                             : 'What do you do?'}
-                    disabled={!hasApiKey || isLoading || combatInputLocked}
+                    disabled={!hasApiKey || isLoading || combatInputLocked || !!pendingRoleplayCheck}
                     maxLength={4000}
                     rows={1}
                 />
@@ -677,7 +790,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                     <button
                         className="chat-send-btn"
                         onClick={handleSend}
-                        disabled={!input.trim() || !hasApiKey || combatInputLocked}
+                        disabled={!input.trim() || !hasApiKey || combatInputLocked || !!pendingRoleplayCheck}
                         title="Send message"
                     >
                         Send
@@ -685,6 +798,79 @@ Translate the player's committed action into the single bounded combat_exchange 
                 )}
             </div>
         </div>
+    );
+}
+
+function RoleplayCheckPanel({
+    proposal,
+    challenge,
+    showChallenge,
+    disabled,
+    onAccept,
+    onShowChallenge,
+    onChallengeChange,
+    onSubmitChallenge,
+    onChangeApproach,
+}) {
+    return (
+        <section className="roleplay-check-panel" aria-label="Proposed roleplay check">
+            <div className="roleplay-check-heading">
+                <div>
+                    <span className="roleplay-check-kicker">DM ruling · no dice rolled yet</span>
+                    <h3>Proposed roleplay check</h3>
+                </div>
+                {proposal.challengeUsed && <span className="roleplay-check-final">Final ruling</span>}
+            </div>
+
+            {proposal.rolls.map((roll, index) => (
+                <div className="roleplay-check-roll" key={`${roll.type}-${roll.skill}-${index}`}>
+                    <div className="roleplay-check-title">
+                        <strong>{roll.description || `${roll.skill || 'Ability'} check`}</strong>
+                        <span>DC {roll.dc}</span>
+                        {roll.advantage && <span className="roleplay-check-edge">Advantage</span>}
+                        {roll.disadvantage && <span className="roleplay-check-edge danger">Disadvantage</span>}
+                    </div>
+                    <dl className="roleplay-check-reasoning">
+                        <div><dt>Why roll?</dt><dd>{roll.reason || 'The DM did not provide a specific justification.'}</dd></div>
+                        <div><dt>Opposition</dt><dd>{roll.opposition || 'No active opposition was specified.'}</dd></div>
+                        <div><dt>Failure stakes</dt><dd>{roll.failureStakes || 'No distinct failure consequence was specified.'}</dd></div>
+                        <div><dt>Why this DC?</dt><dd>{roll.difficultyReason || 'No difficulty basis was specified.'}</dd></div>
+                        {(roll.advantage || roll.disadvantage) && (
+                            <div>
+                                <dt>Situation</dt>
+                                <dd>{(roll.advantage ? roll.advantageReason : roll.disadvantageReason) || 'No situational reason was specified.'}</dd>
+                            </div>
+                        )}
+                    </dl>
+                </div>
+            ))}
+
+            {showChallenge && !proposal.challengeUsed && (
+                <div className="roleplay-check-challenge">
+                    <label htmlFor="roleplay-check-challenge">Why should this ruling change?</label>
+                    <textarea
+                        id="roleplay-check-challenge"
+                        value={challenge}
+                        onChange={event => onChallengeChange(event.target.value)}
+                        placeholder="Explain what removes the uncertainty, lowers the DC, or grants advantage..."
+                        maxLength={2000}
+                        rows={3}
+                        disabled={disabled}
+                    />
+                </div>
+            )}
+
+            <div className="roleplay-check-actions">
+                <button className="btn btn-primary" onClick={onAccept} disabled={disabled}>Roll</button>
+                {!proposal.challengeUsed && !showChallenge && (
+                    <button className="btn btn-secondary" onClick={onShowChallenge} disabled={disabled}>Challenge ruling</button>
+                )}
+                {!proposal.challengeUsed && showChallenge && (
+                    <button className="btn btn-secondary" onClick={onSubmitChallenge} disabled={disabled || !challenge.trim()}>Send challenge</button>
+                )}
+                <button className="btn btn-secondary" onClick={onChangeApproach} disabled={disabled}>Change approach</button>
+            </div>
+        </section>
     );
 }
 

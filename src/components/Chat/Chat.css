@@ -253,6 +253,140 @@
   background-blend-mode: overlay, normal, normal;
 }
 
+.roleplay-check-panel {
+  margin: 0.75rem 1rem 0;
+  padding: 1rem;
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(55, 46, 25, 0.96), rgba(25, 28, 27, 0.98));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.roleplay-check-heading,
+.roleplay-check-title,
+.roleplay-check-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.roleplay-check-heading {
+  justify-content: space-between;
+  margin-bottom: 0.8rem;
+}
+
+.roleplay-check-heading h3 {
+  margin: 0.15rem 0 0;
+  color: var(--gold-light);
+}
+
+.roleplay-check-kicker,
+.roleplay-check-final {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.roleplay-check-final,
+.roleplay-check-edge {
+  padding: 0.2rem 0.45rem;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 999px;
+  color: var(--gold-light);
+}
+
+.roleplay-check-roll + .roleplay-check-roll {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border-primary);
+}
+
+.roleplay-check-title > strong {
+  flex: 1 1 260px;
+}
+
+.roleplay-check-edge {
+  font-size: 0.72rem;
+}
+
+.roleplay-check-edge.danger {
+  border-color: rgba(220, 90, 80, 0.45);
+  color: #f2a49d;
+}
+
+.roleplay-check-reasoning {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+}
+
+.roleplay-check-reasoning > div {
+  padding: 0.55rem 0.65rem;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.roleplay-check-reasoning dt {
+  color: var(--gold-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.roleplay-check-reasoning dd {
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.roleplay-check-challenge {
+  margin-top: 0.85rem;
+}
+
+.roleplay-check-challenge label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.roleplay-check-challenge textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.65rem;
+  border: 1px solid var(--border-primary);
+  border-radius: 7px;
+  background: var(--surface-primary);
+  color: var(--text-primary);
+  font: inherit;
+  resize: vertical;
+}
+
+.roleplay-check-actions {
+  margin-top: 0.9rem;
+}
+
+@media (max-width: 640px) {
+  .roleplay-check-panel {
+    margin-inline: 0.55rem;
+    padding: 0.8rem;
+  }
+
+  .roleplay-check-reasoning {
+    grid-template-columns: 1fr;
+  }
+
+  .roleplay-check-actions .btn {
+    flex: 1 1 120px;
+  }
+}
+
 .chat-input {
   flex: 1;
   background: var(--surface-primary);

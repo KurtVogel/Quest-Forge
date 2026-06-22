@@ -13,6 +13,7 @@ import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeF
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
 import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
 import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
+import { sanitizePendingRoleplayCheck } from '../engine/roleplayCheck.js';
 
 function sanitizeStoredExchangeResult(result) {
     if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
@@ -78,6 +79,7 @@ function validateSaveState(payload) {
         fronts: Array.isArray(payload.fronts) ? payload.fronts.map(f => normalizeFront(f)) : [],
         party: Array.isArray(payload.party) ? payload.party : [],
         currentLocation: payload.currentLocation || null,
+        pendingRoleplayCheck: sanitizePendingRoleplayCheck(payload.pendingRoleplayCheck),
         combat: (() => {
             const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)
                 ? payload.combat
@@ -325,6 +327,7 @@ export const initialGameState = {
     fronts: [], // Hidden campaign clocks/threats — injected into the DM prompt, never shown directly to the player
     party: [], // Companions currently traveling with the player
     currentLocation: null,
+    pendingRoleplayCheck: null, // Reload-safe out-of-combat check proposal; no dice exist yet
     combat: {
         active: false,
         enemies: [],
@@ -1328,6 +1331,15 @@ export function gameReducer(state, action) {
                     idx === state.messages.length - 1 ? { ...msg, ...action.payload } : msg
                 ),
             };
+
+        case 'PROPOSE_ROLEPLAY_CHECK': {
+            if (state.combat?.active) return state;
+            const pendingRoleplayCheck = sanitizePendingRoleplayCheck(action.payload);
+            return pendingRoleplayCheck ? { ...state, pendingRoleplayCheck } : state;
+        }
+
+        case 'CLEAR_ROLEPLAY_CHECK':
+            return state.pendingRoleplayCheck ? { ...state, pendingRoleplayCheck: null } : state;
 
         // --- Dice Rolls ---
         case 'ADD_ROLL':

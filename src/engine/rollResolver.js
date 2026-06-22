@@ -407,6 +407,7 @@ export async function handleRequestedRolls(requestedRolls, {
     preNarrated = false,
     playerAction = '',
     enemyAttackersSeen = new Set(),
+    onFollowUpRolls = null,
 }, depth = 0) {
     if (depth >= MAX_ROLL_DEPTH) {
         console.warn(`[RollResolver] Max roll depth (${MAX_ROLL_DEPTH}) reached — stopping recursive follow-ups.`);
@@ -521,17 +522,24 @@ export async function handleRequestedRolls(requestedRolls, {
 
             // Handle any genuinely new outside-combat follow-up roll (e.g. a triggered save).
             if (followUpEvents?.requestedRolls?.length > 0) {
-                await handleRequestedRolls(
-                    followUpEvents.requestedRolls,
-                    {
-                        getState,
-                        dispatch,
-                        sendToLLM,
+                if (onFollowUpRolls) {
+                    onFollowUpRolls(followUpEvents.requestedRolls, {
+                        playerAction,
                         preNarrated: followUpEvents._preNarratedOutcome || false,
-                        enemyAttackersSeen: canonicalBatch.enemyAttackersSeen,
-                    },
-                    depth + 1
-                );
+                    });
+                } else {
+                    await handleRequestedRolls(
+                        followUpEvents.requestedRolls,
+                        {
+                            getState,
+                            dispatch,
+                            sendToLLM,
+                            preNarrated: followUpEvents._preNarratedOutcome || false,
+                            enemyAttackersSeen: canonicalBatch.enemyAttackersSeen,
+                        },
+                        depth + 1
+                    );
+                }
             }
         } catch (e) {
             console.warn('[RollResolver] Follow-up narration failed:', e);

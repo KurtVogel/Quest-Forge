@@ -4,9 +4,13 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** -
 replace stale entries, don't let it grow. For deeper context run `git log --oneline -15`.
 
-_Last updated: 2026-06-22 (NPC name diversity + non-combat advantage)_
+_Last updated: 2026-06-22 (discussable roleplay check proposals)_
 
 ## Current focus - Fronts v2 SHIPPED; real-provider tuning next (2026-06-21)
+- **Discussable roleplay checks (2026-06-22):** outside-combat checks now pause before dice in a
+  reload-safe proposal card showing the DM's public reason, opposition, failure stakes, DC basis,
+  and advantage/disadvantage basis. The player can Roll, challenge once (withdraw/revise/uphold),
+  or change approach; follow-up checks pause too. Combat remains immediate and atomic.
 - **NPC name diversity + non-combat advantage (2026-06-22):** DM and front generation now
   share a bounded blocklist for the recurring Elara/Silas/Thorne-style fantasy autocomplete
   cluster, replace name-shaped schema examples with culture-grounded placeholders, and preserve

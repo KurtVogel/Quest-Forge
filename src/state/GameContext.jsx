@@ -99,7 +99,7 @@ export function GameProvider({ children }) {
         }
     // Autosave is intentionally keyed to gameplay state, not every state object field.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.character, state.inventory, state.messages, state.rollHistory, state.quests, state.party, state.combat, state.fronts, state.session.id, state.session.frontDirector, state.user?.uid, showSaveToast]);
+    }, [state.character, state.inventory, state.messages, state.rollHistory, state.quests, state.party, state.combat, state.fronts, state.pendingRoleplayCheck, state.session.id, state.session.frontDirector, state.user?.uid, showSaveToast]);
 
     return (
         <GameContext.Provider value={state}>

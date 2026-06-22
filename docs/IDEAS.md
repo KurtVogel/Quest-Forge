@@ -118,6 +118,14 @@ embedded into RAG, so it fell through every durable tier once the 20-message win
 
 ## Gameplay & Mechanics
 
+### Discussable roleplay check proposals — status: `shipped` (2026-06-22)
+Outside-combat rolls now expose a concise public ruling log—reason, opposition, failure stakes,
+DC basis, and situational advantage/disadvantage—before any dice exist. The player can Roll,
+Challenge once, or Change approach. The DM must withdraw, revise, or uphold after a challenge;
+revised/upheld is final. Pending proposals persist across reload and recursive follow-up checks
+pause too. Why: inspectability plus bounded pre-roll table negotiation restores trust and agency
+without revealing chain-of-thought or permitting post-result bargaining. Combat remains untouched.
+
 ### Fiction-first out-of-combat checks — status: `shipped` (2026-06-22)
 Live play showed routine committed roleplay being assigned DC 15, then a failed social check
 rewriting the authored performance as stammering, trembling incompetence. The prompt's old

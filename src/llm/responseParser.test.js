@@ -36,6 +36,27 @@ describe('well-formed responses', () => {
         expect(events.requestedRolls[1].type).toBe('death_save');
     });
 
+    it('preserves public roll adjudication fields', () => {
+        const { events } = parseResponse(fence({
+            requested_rolls: [{
+                type: 'skill_check', skill: 'persuasion', dc: 12,
+                reason: 'A guard actively refuses entry',
+                opposition: 'Strict orders',
+                failure_stakes: 'The gate closes',
+                difficulty_reason: 'Meaningful opposition',
+                advantage: true,
+                advantage_reason: 'The player has a signed writ',
+            }],
+        }));
+        expect(events.requestedRolls[0]).toMatchObject({
+            reason: 'A guard actively refuses entry',
+            opposition: 'Strict orders',
+            failureStakes: 'The gate closes',
+            difficultyReason: 'Meaningful opposition',
+            advantageReason: 'The player has a signed writ',
+        });
+    });
+
     it('normalizes purchases: accepts both singular and plural forms', () => {
         const single = parseResponse(fence({ purchase: { itemKey: 'longsword', quantity: 1 } })).events;
         expect(single.purchases).toHaveLength(1);

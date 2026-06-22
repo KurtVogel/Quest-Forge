@@ -69,5 +69,9 @@ describe('player narrative authority guidance', () => {
         expect(prompt).toContain('One roll settles the entire immediate approach');
         expect(prompt).toContain('do not demand another check for the same objective');
         expect(prompt).toContain('Apply one proportionate consequence, then give the player a meaningful new choice');
+        expect(prompt).toContain('PUBLIC TABLE RULING, not private chain-of-thought');
+        expect(prompt).toContain('reason, opposition, failure_stakes, and difficulty_reason');
+        expect(prompt).toContain('player may challenge one proposed ruling before dice');
+        expect(prompt).toContain('Roll, Challenge once, or Change approach');
     });
 });

@@ -8,6 +8,16 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-22 · Outside-combat dice are proposed and negotiable before rolling; combat dice
+remain immediate.** Every roleplay `requested_rolls` entry carries a concise public adjudication:
+why uncertainty warrants dice, active opposition, failure stakes, DC basis, and any situational
+advantage/disadvantage reason. The reload-safe proposal generates no dice until the player chooses
+Roll. They may instead challenge once or change approach. A challenge asks the DM to withdraw,
+revise, or uphold; revised/upheld adjudication is final for that proposal. This is table-facing
+ruling discussion, never hidden chain-of-thought, and because it precedes random generation it
+cannot become outcome-driven reroll bargaining. Follow-up roleplay rolls pause the same way. Active
+combat never enters this flow: its atomic engine-owned exchange remains swift and by the book.
+
 **2026-06-22 · New NPC/faction names avoid a shared stock-LLM list; established names are
 untouchable.** DM and living-world generation share `nameGuidance.js`, blocking Elara-family,
 Silas/Sylas, Thorne/Thorn, and other repeatedly observed fantasy autocomplete defaults. Generated

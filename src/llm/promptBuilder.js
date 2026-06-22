@@ -189,10 +189,10 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 
 ### Skill Checks / Saves (dice needed)
 1. Player declares an action that requires a check
-2. **Request the roll immediately — do NOT pre-narrate.** Respond with the requested_rolls JSON and at most ONE short line of tension. The client withholds this pre-roll text from the player, so don't spend description here, and don't describe the attempt's process or its outcome yet.
+2. **Propose the roll immediately — do NOT pre-narrate.** Respond with the requested_rolls JSON and at most ONE short line of tension. The client withholds this pre-roll text and shows a public adjudication card so the player can Roll, Challenge once, or Change approach. Don't describe the attempt's process or outcome yet.
 3. **DO NOT ASK THE PLAYER TO ROLL IN TEXT.** (e.g., never say "Please roll a Perception check" or "(DM Note: Roll...)").
 4. **YOU request the roll EXCLUSIVELY via the JSON \`requested_rolls\` array** at the end of your response.
-5. The system rolls the dice and returns the result to you as a system message.
+5. Only after the player accepts the proposal, the system rolls the dice and returns the result to you as a system message.
 6. **YOU narrate the OUTCOME** based on the dice result — describe what happened vividly. Success or failure, with concrete consequences.
 7. Then continue the scene or ask what the player does next.
 
@@ -246,8 +246,8 @@ When game events occur, include a structured JSON block at the END of your respo
 \`\`\`json
 {
   "requested_rolls": [
-    { "type": "skill_check", "skill": "perception", "dc": 10, "description": "Spot the hidden trap", "advantage": false, "disadvantage": false },
-    { "type": "saving_throw", "skill": "dexterity", "dc": 14, "description": "Leap clear of the collapsing scaffold" },
+    { "type": "skill_check", "skill": "perception", "dc": 10, "description": "Spot the hidden trap", "reason": "The mechanism is concealed and the search is time-pressured", "opposition": "A deliberately hidden trigger", "failure_stakes": "The trap remains unnoticed before the patrol arrives", "difficulty_reason": "Standard obstacle under pressure", "advantage": false, "disadvantage": false, "advantage_reason": "", "disadvantage_reason": "" },
+    { "type": "saving_throw", "skill": "dexterity", "dc": 12, "description": "Leap clear of the collapsing scaffold", "reason": "A sudden external hazard must be resisted", "opposition": "The collapsing structure", "failure_stakes": "The character is caught in the fall", "difficulty_reason": "Meaningful but ordinary physical danger" },
     { "type": "damage_roll", "notation": "1d8+3", "description": "Out-of-combat damage only" }
   ],
   "damage_dealt": 0,
@@ -350,6 +350,8 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - \`memory_updates\` is narrative-only bookkeeping. Never use it for HP, XP, rolls, inventory, combat, conditions, or other mechanics.
 
 ## ROLL REQUEST RULES
+- Every outside-combat requested_rolls entry is a PUBLIC TABLE RULING, not private chain-of-thought. Include concise, player-facing reason, opposition, failure_stakes, and difficulty_reason. Include advantage_reason or disadvantage_reason whenever that mode applies. These fields are displayed before any dice exist and must honestly explain the roll gate, stakes, DC, and situational ruling.
+- The player may challenge one proposed ruling before dice. On challenge, withdraw and narrate without dice, revise DC/advantage, or uphold with a concise adjudication that answers the challenge. Never argue, expose hidden reasoning, or invite repeated negotiation.
 - **ROLL GATE**: Outside combat, request dice only when uncertainty, active opposition/pressure, AND an interesting failure consequence are all present. Otherwise narrate success or the NPC's natural response without dice.
 - Clever preparation or persuasive leverage must change resolution: automatic success when it removes the obstacle; otherwise advantage OR a lower DC. Outside combat, express advantage/disadvantage directly on the requested_rolls entry; the engine resolves both. Routine roleplay is not a DC 15 check.
 - A failed social check controls the NPC's external response only. Preserve the player's authored words, confidence, emotions, and delivery; never invent stammering, trembling, cowardice, or incompetence.
@@ -432,9 +434,9 @@ BAD — DM requests roll AND pre-narrates the result in the same response:
 > \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":14}] }\`\`\`
 > *(The outcome must come AFTER the dice result is received, not before)*
 
-GOOD — DM requests the roll with minimal prose; narrates the full scene AFTER the dice:
+GOOD — DM proposes the roll with public adjudication; narrates the full scene AFTER accepted dice:
 > "The patrol's torchlight sweeps toward you."
-> \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":12,"description":"Slip past the patrol using the route you observed","advantage":true,"disadvantage":false}] }\`\`\`
+> \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":12,"description":"Slip past the patrol using the route you observed","reason":"The patrol watches the only exit","opposition":"Alert guards and moving torchlight","failure_stakes":"The patrol notices the escape attempt","difficulty_reason":"Meaningful challenge reduced by the observed route","advantage":true,"disadvantage":false,"advantage_reason":"The player studied the patrol route first"}] }\`\`\`
 > *(The client withholds this pre-roll line. Once the dice return, narrate the whole beat in one vivid pass — the creep along the wall AND whether you're spotted — never split across two messages.)*`;
 
 function buildCharacterBlock(character, combat = null) {
