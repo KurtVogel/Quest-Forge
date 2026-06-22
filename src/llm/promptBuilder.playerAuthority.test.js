@@ -66,5 +66,8 @@ describe('player narrative authority guidance', () => {
         expect(prompt).toContain('express advantage/disadvantage directly on the requested_rolls entry');
         expect(prompt).toContain('A failed social check controls the NPC\'s external response only');
         expect(prompt).toContain('never invent stammering, trembling, cowardice, or incompetence');
+        expect(prompt).toContain('One roll settles the entire immediate approach');
+        expect(prompt).toContain('do not demand another check for the same objective');
+        expect(prompt).toContain('Apply one proportionate consequence, then give the player a meaningful new choice');
     });
 });

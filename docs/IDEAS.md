@@ -135,6 +135,12 @@ is sought, then requests a no-roll NPC response. The NPC may remain suspicious; 
 the coin flip for whether sincere roleplay happened. Concrete asks such as release/access/aid remain
 eligible for a check, with truth/evidence affecting advantage or DC.
 
+Third live failure (2026-06-22): “I remain calm, truthful and stoic” triggered “Maintain a stoic,
+emotionless facade (DC 12).” The policy now also rejects checks whose sole purpose is deciding
+whether the hero maintains an authored composure, courage, sincerity, emotion, or demeanor. The
+world and NPCs still react externally, and real saves against spells, poison, supernatural fear,
+or defined physical effects remain mechanics; dice cannot seize the player's portrayal.
+
 ### Low-level encounter difficulty / unwinnable fights — status: `shipped` (2026-06-14)
 Recurring, confirmed in play (2026-06-14): a **lone level-1 character** gets dropped into an
 unwinnable fight (a major NPC + two guards) and dies — even when actively hiding/avoiding. Vesa

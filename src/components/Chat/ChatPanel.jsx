@@ -4,7 +4,7 @@ import { streamMessage } from '../../llm/adapter.js';
 import { buildSystemPrompt } from '../../llm/promptBuilder.js';
 import { parseResponse, applyEvents, detectPreNarratedOutcome } from '../../llm/responseParser.js';
 import { handleRequestedRolls } from '../../engine/rollResolver.js';
-import { reviewOutsideCombatRolls, truthfulAnswerCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
+import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { runScribe } from '../../llm/scribe.js';
@@ -254,8 +254,8 @@ Translate the player's committed action into the single bounded combat_exchange 
             const review = reviewOutsideCombatRolls(events.requestedRolls, originalPlayerMessage);
             events.requestedRolls = review.acceptedRolls;
             if (review.rejectedRolls.length > 0) {
-                events._truthOnlySocialRollRejected = true;
-                console.warn('[ChatPanel] Rejected truth-only NPC belief check; requesting a no-roll roleplay response.');
+                events._playerAuthorityRollRejected = true;
+                console.warn('[ChatPanel] Rejected a check that overrides player-authored portrayal; requesting a no-roll roleplay response.');
             }
         }
 
@@ -277,7 +277,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         // narration likewise extends correctly to chained rolls (no double-application).
         const hideSetup = events?.requestedRolls?.length > 0
             || !!events?.combatExchange
-            || !!events?._truthOnlySocialRollRejected;
+            || !!events?._playerAuthorityRollRejected;
         if (hideSetup) setStreamingMessage('');
         dispatch({
             type: 'ADD_MESSAGE',
@@ -505,8 +505,8 @@ Translate the player's committed action into the single bounded combat_exchange 
                     playerAction: trimmed,
                 });
                 void rollResolution;
-            } else if (events?._truthOnlySocialRollRejected) {
-                await sendToLLM(truthfulAnswerCorrectionPrompt(), null, { narrationOnly: true });
+            } else if (events?._playerAuthorityRollRejected) {
+                await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
             }
             if (startedCombatIntent && !combatIntentHandled) {
                 dispatch({ type: 'CANCEL_COMBAT_INTENT' });

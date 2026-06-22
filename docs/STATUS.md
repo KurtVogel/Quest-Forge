@@ -12,11 +12,14 @@ _Last updated: 2026-06-22 (NPC name diversity + non-combat advantage)_
   cluster, replace name-shaped schema examples with culture-grounded placeholders, and preserve
   all established names. Fiction-first guidance now explicitly routes materially helpful setup
   to outside-combat advantage (already engine-owned: two d20, keep high), or a lower DC.
-- **Truthful-answer social-roll guard (2026-06-22):** after live play still rolled DC 12 merely
-  to make an NPC believe an explicitly truthful answer, a narrow engine policy now rejects that
-  belief/innocence/sincerity roll when no concrete concession is requested. The invalid setup is
-  hidden and the DM continues without dice; NPC doubt still follows motives and evidence, while
-  release/access/aid/risk and other concrete asks can legitimately require a check.
+- **Player-portrayal roll guard (2026-06-22):** after live play rolled DC 12 first to make an NPC
+  believe an explicitly truthful answer, then again to decide whether the hero stayed stoic, a
+  narrow engine policy now rejects belief/innocence checks without a concrete concession and any
+  check whose sole outcome is authored composure/courage/sincerity/demeanor. The invalid setup is
+  hidden and the DM continues without dice; NPC doubt/external consequences remain free, concrete
+  asks may require checks, and genuine saves against imposed effects remain valid.
+  One roll now explicitly settles an immediate approach: failure gives one proportionate
+  consequence and a new choice, never repeated same-objective checks or a punishment cascade.
 - **Premise-owned starting inventory (2026-06-22):** the one-time opening now reconciles
   concrete portable belongings explicitly owned/carried/worn/wielded by the hero against class
   inventory through bounded `starting_items`. Missing items are added, explicit equipment state

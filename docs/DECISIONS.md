@@ -23,12 +23,19 @@ The fiction-first check gate now explicitly tells the DM: a solved obstacle skip
 materially improved but unresolved position earns advantage or a lower DC. The engine does not
 infer narrative merit from prose—it faithfully executes the DM's bounded adjudication.
 
-One narrow semantic guard supplements that general boundary: when the player explicitly labels
-their answer truthful, a Persuasion/Deception-style roll whose only outcome is NPC belief,
-innocence, sincerity, or intentions is rejected unless its description seeks a concrete concession
-such as release, access, aid, risk, betrayal, or material help. ChatPanel withholds the invalid
-setup and asks the DM for a no-roll roleplay response. This does not force belief or canonize
-unsupported external claims; NPC doubt remains governed by established motives and evidence.
+A narrow semantic guard supplements that general boundary. It rejects a Persuasion/Deception-style
+roll whose only outcome is NPC belief/innocence/sincerity when the player explicitly answers
+truthfully without seeking a concrete concession. It also rejects checks whose sole outcome is
+whether the hero maintains a calm/stoic/brave/composed/sincere demeanor the player authored.
+ChatPanel withholds the invalid setup and asks the DM for a no-roll roleplay response. This does
+not force belief, block external consequences, or canonize unsupported claims; NPC doubt remains
+governed by motives/evidence, concrete concessions can require checks, and genuine saves against
+spells, poison, supernatural fear, or defined physical effects remain valid.
+
+Roll cadence is part of agency: one roll settles the immediate approach. Failure applies one
+proportionate consequence and returns a meaningful choice; the DM must not request another check
+for the same objective unless the player materially changes approach or a new external condition
+arises, and minor failure must not become an automatic chain of worsening punishment rolls.
 
 **2026-06-22 · Explicit premise-owned belongings become starting inventory during the
 one-time opening.** The opening DM call already sees both permanent premise canon and the
