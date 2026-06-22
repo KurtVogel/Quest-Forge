@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { streamMessage } from '../../llm/adapter.js';
 import { buildSystemPrompt } from '../../llm/promptBuilder.js';
-import { parseResponse, applyEvents, detectPreNarratedOutcome } from '../../llm/responseParser.js';
+import { parseResponse, applyEvents, detectPreNarratedOutcome, normalizeEvents, detectSemanticTextRolls } from '../../llm/responseParser.js';
 import { handleRequestedRolls } from '../../engine/rollResolver.js';
 import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
@@ -250,22 +250,31 @@ Translate the player's committed action into the single bounded combat_exchange 
 
         const parsed = parseResponse(fullResponse);
         const narrative = parsed.narrative;
-        const events = opts.narrationOnly ? null : parsed.events;
+        let events = opts.narrationOnly ? null : parsed.events;
         opts.onNarrative?.(narrative);
 
+        // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text
+        if (!opts.narrationOnly && (!events || !events.requestedRolls?.length) && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
+            const semanticRolls = await detectSemanticTextRolls(narrative, s.settings);
+            if (semanticRolls && semanticRolls.length > 0) {
+                console.warn('[ChatPanel] Scribe detected text-based rolls semantically:', semanticRolls);
+                events = normalizeEvents({ requested_rolls: semanticRolls });
+                events._textRollDetected = true;
+            }
+        }
+
         if (events?.requestedRolls?.length > 0 && originalPlayerMessage && !s.combat?.active) {
-            const review = reviewOutsideCombatRolls(events.requestedRolls, originalPlayerMessage);
+            const review = await reviewOutsideCombatRolls(events.requestedRolls, originalPlayerMessage, narrative, s.settings);
             events.requestedRolls = review.acceptedRolls;
             if (review.rejectedRolls.length > 0) {
                 events._playerAuthorityRollRejected = true;
                 console.warn('[ChatPanel] Rejected a check that overrides player-authored portrayal; requesting a no-roll roleplay response.');
             }
-        }
-
-        // Detect pre-narrated outcome (DM wrote outcome before dice were rolled)
-        if (events?.requestedRolls?.length > 0 && detectPreNarratedOutcome(narrative)) {
-            events._preNarratedOutcome = true;
-            console.warn('[ChatPanel] DM pre-narrated outcome before roll — correction will be injected with roll results.');
+            const preNarrated = review.preNarrated !== undefined ? review.preNarrated : detectPreNarratedOutcome(narrative);
+            if (preNarrated) {
+                events._preNarratedOutcome = true;
+                console.warn('[ChatPanel] DM pre-narrated outcome before roll — correction will be injected with roll results.');
+            }
         }
 
         // Any narration that still has PENDING ROLLS is a "setup" the post-roll narration

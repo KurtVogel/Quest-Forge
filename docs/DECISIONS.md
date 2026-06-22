@@ -33,14 +33,7 @@ The fiction-first check gate now explicitly tells the DM: a solved obstacle skip
 materially improved but unresolved position earns advantage or a lower DC. The engine does not
 infer narrative merit from prose—it faithfully executes the DM's bounded adjudication.
 
-A narrow semantic guard supplements that general boundary. It rejects a Persuasion/Deception-style
-roll whose only outcome is NPC belief/innocence/sincerity when the player explicitly answers
-truthfully without seeking a concrete concession. It also rejects checks whose sole outcome is
-whether the hero maintains a calm/stoic/brave/composed/sincere demeanor the player authored.
-ChatPanel withholds the invalid setup and asks the DM for a no-roll roleplay response. This does
-not force belief, block external consequences, or canonize unsupported claims; NPC doubt remains
-governed by motives/evidence, concrete concessions can require checks, and genuine saves against
-spells, poison, supernatural fear, or defined physical effects remain valid.
+A background Scribe model pass (using Gemini Flash) semantically audits proposed out-of-combat rolls to enforce these rules, utilizing local regex/keyword rules as a zero-cost offline fallback. The same background Scribe flow semantically detects and extracts text-based roll requests when the DM narrates checks in prose instead of JSON, eliminating brittle regex keyword scanners. This does not force belief, block external consequences, or canonize unsupported claims; NPC doubt remains governed by motives/evidence, concrete concessions can require checks, and genuine saves against spells, poison, supernatural fear, or defined physical effects remain valid.
 
 Roll cadence is part of agency: one roll settles the immediate approach. Failure applies one
 proportionate consequence and returns a meaningful choice; the DM must not request another check

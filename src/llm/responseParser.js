@@ -2,6 +2,10 @@
  * Response parser — extract game events from LLM responses.
  * Looks for JSON blocks embedded in the narrative text.
  *
+/**
+ * Response parser — extract game events from LLM responses.
+ * Looks for JSON blocks embedded in the narrative text.
+ *
  * Failure-mode resilience:
  * - Mode A: DM wrote roll request in text → text roll detector converts it
  * - Mode B/C: DM pre-narrated outcome before roll → flagged for corrector in ChatPanel
@@ -9,6 +13,7 @@
  */
 
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { sendMessage } from './adapter.js';
 import { CLASSES } from '../data/classes.js';
 import { validateEnemyAttackBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
@@ -110,7 +115,7 @@ function validateCombatStart(combatStart) {
  * @param {string} narrative
  * @returns {Array}
  */
-function detectTextRollRequests(narrative) {
+export function detectTextRollRequests(narrative) {
     const rolls = [];
     const lower = narrative.toLowerCase();
 
@@ -248,7 +253,7 @@ export function parseResponse(response) {
 /**
  * Normalize and validate event data from the LLM.
  */
-function normalizeEvents(raw) {
+export function normalizeEvents(raw) {
     const equipmentChanges = Array.isArray(raw.equipment_changes)
         ? raw.equipment_changes
         : (raw.equipment_change ? [raw.equipment_change] : []);
@@ -690,6 +695,61 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             },
         });
         dispatch({ type: 'UPDATE_CHARACTER', payload: { currentHP: 0, isDead: true, dying: false } });
+    }
+}
+
+export async function detectSemanticTextRolls(narrative, settings) {
+    if (!settings?.apiKey || !narrative) return null;
+
+    const SCRIBE_MODEL = 'gemini-2.5-flash';
+    const model = settings.llmProvider === 'gemini' ? SCRIBE_MODEL : settings.model;
+
+    const systemPrompt = `You are a parser assistant for a tabletop RPG. Analyze the Dungeon Master's (DM) narrative text to determine if they requested the player to make a non-combat check or saving throw in the text (which violates the system's structured event schema).
+
+For example, if the DM wrote "Make a Perception check (DC 12) to spot the hidden door" or "Roll a Charisma check", extract the requested check.
+
+Output ONLY valid JSON:
+{
+  "requested_rolls": [
+    {
+      "type": "skill_check|saving_throw",
+      "skill": "perception|stealth|athletics|insight|etc", // the specific skill or ability name
+      "dc": 12, // the DC if specified, default to 10
+      "description": "The exact check description or context"
+    }
+  ]
+}
+
+If no roll request is found in the text, return:
+{
+  "requested_rolls": []
+}
+
+Output ONLY the JSON, no prose outside the JSON.`;
+
+    try {
+        const response = await sendMessage({
+            provider: settings.llmProvider,
+            apiKey: settings.apiKey,
+            model,
+            systemPrompt,
+            messageHistory: [],
+            userMessage: `DM narrative: ${narrative}`,
+        });
+
+        const jsonMatch = extractBalancedJson(response, 'requested_rolls');
+        if (!jsonMatch) return null;
+
+        let parsed;
+        try {
+            parsed = JSON.parse(jsonMatch.json);
+        } catch {
+            return null;
+        }
+        return Array.isArray(parsed.requested_rolls) ? parsed.requested_rolls : null;
+    } catch (e) {
+        console.warn('[ResponseParser] Semantic roll detection failed:', e.message || e);
+        return null;
     }
 }
 

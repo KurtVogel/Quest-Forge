@@ -211,6 +211,7 @@ Output ONLY valid JSON:
 
 Rules:
 - Do not invent a new plot that contradicts canon. Synthesize likely intent from existing facts.
+- Do not contradict the authoritative combat state of any character or NPC (e.g. do not record agendas, goals, or callback hooks for a character who is dead/defeated in the engine state).
 - Hidden fronts must remain private; symptoms are fiction only, never clock/stage/title exposition.
 - Front delta is strictly -1, 0, or +1. Advance only when meaningful fictional time passed, the hero ignored a pressure to pursue something else, or an off-screen faction gained a concrete opportunity. Soften only when canonical player action hindered it. Use 0 when only its symptoms or posture evolve.
 - A journal cadence is not itself a reason to move a front. Omit fronts with no meaningful change. Never jump multiple steps, resolve a front, or undo an established grim portent here.
