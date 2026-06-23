@@ -49,6 +49,19 @@ export default function ChatPanel() {
     const stateRef = useRef(state);
     stateRef.current = state;
 
+    const runAutoSummarize = async (waitsForResolution = false) => {
+        if (waitsForResolution) return;
+        try {
+            const result = await maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current);
+            lastSummarizedRef.current = result.index;
+            if (result.journalEntry && stateRef.current.settings.apiKey && stateRef.current.settings.llmProvider === 'gemini') {
+                await addMemory(stateRef.current.settings.apiKey, result.journalEntry.summary, 'journal').catch(() => {});
+            }
+        } catch (e) {
+            console.error('[Journal RAG Seeding] Failed:', e);
+        }
+    };
+
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [state.messages, streamingMessage]);
@@ -434,9 +447,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                         addMemory(latest.settings.apiKey, narrative.slice(0, 500), 'narrative').catch(() => {});
                     }
                 }
-                maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current).then(index => {
-                    lastSummarizedRef.current = index;
-                });
+                runAutoSummarize();
             })
             .catch(error => {
                 if (error.name !== 'AbortError') {
@@ -482,9 +493,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 addMemory(latest.settings.apiKey, finalNarration.content.slice(0, 500), 'narrative').catch(() => {});
             }
         }
-        maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current).then(index => {
-            lastSummarizedRef.current = index;
-        });
+        runAutoSummarize();
     };
 
     const handleAcceptRoleplayCheck = async () => {
@@ -638,12 +647,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 }
             }
 
-            // Auto-summarize for session memory (runs in background, uses Gemini 2.5 Flash)
-            if (!waitsForResolution) {
-                maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current).then(idx => {
-                    lastSummarizedRef.current = idx;
-                });
-            }
+            runAutoSummarize(waitsForResolution);
 
         } catch (error) {
             if (startedCombatIntent) dispatch({ type: 'CANCEL_COMBAT_INTENT' });

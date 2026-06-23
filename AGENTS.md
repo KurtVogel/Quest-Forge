@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for Codex (and any coding agent) working in this repo. Read this first — it's the fast path to being productive here. This file is the twin of `CLAUDE.md`; keep both in sync.
+Guidance for any coding agent working in this repo. Read this first — it's the fast path to being productive here. This file is the twin of `CLAUDE.md`; keep both in sync.
 
 ## What Quest Forge is
 

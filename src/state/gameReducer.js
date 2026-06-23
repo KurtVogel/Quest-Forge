@@ -1667,8 +1667,8 @@ export function gameReducer(state, action) {
             return {
                 ...state,
                 journal: [...state.journal, {
-                    id: `journal-${Date.now()}`,
-                    timestamp: Date.now(),
+                    id: action.payload.id || `journal-${Date.now()}`,
+                    timestamp: action.payload.timestamp || Date.now(),
                     ...action.payload,
                 }],
             };

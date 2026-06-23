@@ -149,6 +149,17 @@ whether the hero maintains an authored composure, courage, sincerity, emotion, o
 world and NPCs still react externally, and real saves against spells, poison, supernatural fear,
 or defined physical effects remain mechanics; dice cannot seize the player's portrayal.
 
+### Natural 20 outside combat — exceptional outcome — status: `idea` (2026-06-22)
+A natural 20 on a non-combat skill check should feel special — not just a pass, but a
+exceptionally good outcome: extra info, unexpected help, a bonus item, a lasting NPC impression,
+or a door that swings wider than expected. Currently the DM narrates any roll outcome but has no
+explicit signal that a nat 20 warrants going beyond mere success. Why: it's one of tabletop's
+best dopamine moments and we're leaving it on the floor. Design notes: the engine already surfaces
+the raw d20 result in the roll resolution payload; `rollResolver.js` could flag `critical_success:
+true` when the d20 is 20, the DM prompt rule could instruct "a natural 20 is an exceptional
+outcome — narrate a concrete extra benefit beyond the check's base success, don't just say
+'you succeed brilliantly'." No mechanical inflation needed — purely a narration quality signal.
+
 ### Low-level encounter difficulty / unwinnable fights — status: `shipped` (2026-06-14)
 Recurring, confirmed in play (2026-06-14): a **lone level-1 character** gets dropped into an
 unwinnable fight (a major NPC + two guards) and dies — even when actively hiding/avoiding. Vesa

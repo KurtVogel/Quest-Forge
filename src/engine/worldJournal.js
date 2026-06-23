@@ -11,6 +11,15 @@
 import { sendMessage } from '../llm/adapter.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
 
+export function normalizeLocationName(loc) {
+    if (!loc) return '';
+    return loc.trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/^the\s+/, '')
+        .replace(/[^\w\s]/g, '');
+}
+
 const SUMMARIZE_EVERY = 10; // Summarize every N new messages
 const SCRIBE_MODEL = 'gemini-2.5-flash'; // Cheap & fast — good enough for extraction
 
@@ -53,17 +62,17 @@ Rules:
  * @param {object} state - Current game state
  * @param {function} dispatch - Game state dispatch function
  * @param {number} lastSummarizedIndex - Index of last message that was summarized
- * @returns {number} Updated lastSummarizedIndex
+ * @returns {Promise<{index: number, journalEntry: object|null}>} Updated index and new journal entry if created
  */
 export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
     const messageCount = state.messages.length;
     const newMessages = messageCount - lastSummarizedIndex;
 
     if (newMessages < SUMMARIZE_EVERY) {
-        return lastSummarizedIndex;
+        return { index: lastSummarizedIndex, journalEntry: null };
     }
 
-    if (!state.settings.apiKey) return lastSummarizedIndex;
+    if (!state.settings.apiKey) return { index: lastSummarizedIndex, journalEntry: null };
 
     try {
         // Get the unsummarized messages
@@ -85,20 +94,27 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         const jsonMatch = response.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
             console.warn('[Journal] Could not parse summary response — messages NOT marked as summarized');
-            return lastSummarizedIndex; // Don't advance — retry next time
+            return { index: lastSummarizedIndex, journalEntry: null }; // Don't advance — retry next time
         }
 
         const summary = JSON.parse(jsonMatch[0]);
 
+        const journalId = `journal-${Date.now()}`;
+        const journalTimestamp = Date.now();
+        const journalEntry = {
+            id: journalId,
+            timestamp: journalTimestamp,
+            summary: summary.summary,
+            keyDecisions: summary.key_decisions || [],
+            consequences: summary.consequences || [],
+            messageRange: [lastSummarizedIndex, messageCount],
+            location: summary.location || state.currentLocation || null,
+        };
+
         // Add journal entry
         dispatch({
             type: 'ADD_JOURNAL_ENTRY',
-            payload: {
-                summary: summary.summary,
-                keyDecisions: summary.key_decisions || [],
-                consequences: summary.consequences || [],
-                messageRange: [lastSummarizedIndex, messageCount],
-            },
+            payload: journalEntry,
         });
 
         // Update NPCs with richer data. The reducer upserts by name — creating any the
@@ -150,10 +166,10 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         }).catch(() => {});
 
         console.log(`[Journal] Summarized messages ${lastSummarizedIndex}–${messageCount}, extracted ${summary.world_facts?.length || 0} world facts`);
-        return messageCount;
+        return { index: messageCount, journalEntry };
     } catch (e) {
         console.warn('[Journal] Auto-summarize failed:', e);
-        return lastSummarizedIndex;
+        return { index: lastSummarizedIndex, journalEntry: null };
     }
 }
 
@@ -179,6 +195,39 @@ export function buildJournalContext(journal, npcs, currentLocation) {
             return entry;
         }).join('\n');
         parts.push(`\n## SESSION HISTORY (what has happened so far)\n${entrySummaries}`);
+    }
+
+    // Location transition history ledger
+    const normCurrentLoc = normalizeLocationName(currentLocation);
+    if (normCurrentLoc && journal.length > 0) {
+        let transitionIdx = -1;
+        let i = journal.length - 1;
+        while (i >= 0) {
+            const entryLoc = normalizeLocationName(journal[i].location);
+            if (entryLoc === normCurrentLoc) {
+                transitionIdx = i;
+            } else {
+                if (transitionIdx !== -1) {
+                    break;
+                }
+            }
+            i--;
+        }
+
+        if (transitionIdx !== -1) {
+            const arrivalEntry = journal[transitionIdx];
+            const prevEntry = transitionIdx > 0 ? journal[transitionIdx - 1] : null;
+            const lines = [];
+            if (prevEntry) {
+                let prevText = `[Entry ${transitionIdx}] ${prevEntry.summary}`;
+                if (prevEntry.location) {
+                    prevText = `[Entry ${transitionIdx} at ${prevEntry.location}] ${prevEntry.summary}`;
+                }
+                lines.push(`- **Right before entering:** ${prevText}`);
+            }
+            lines.push(`- **Arrival at ${currentLocation}:** [Entry ${transitionIdx + 1}] ${arrivalEntry.summary}`);
+            parts.push(`\n## LOCATION TRANSITION HISTORY\n${lines.join('\n')}`);
+        }
     }
 
     // NPC tracker — show most recently active NPCs (cap at 8, rest handled by RAG)

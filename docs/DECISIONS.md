@@ -8,6 +8,8 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-23 · Deterministic location-transition history ledger is injected into the DM prompt; new journal entries are dynamically seeded to RAG mid-session.** To solve context-window pruning issues where the DM forgot events immediately prior to entering a location, the engine now stores a `location` field on each journal entry and scans backward through the journal list to find the earliest contiguous entry of the `currentLocation` (the arrival) and the entry immediately preceding it (what happened right before). This chronological ledger is formatted as `## LOCATION TRANSITION HISTORY` and injected directly into the DM's prompt, bypassing semantic RAG limitations for timeline queries. Additionally, newly created journal entries are immediately seeded into RAG during active play via `runAutoSummarize` rather than waiting for a page reload, and location names are normalized using a strict normalizer (stripping punctuation, extra whitespace, and leading "the" articles) for robust matching.
+
 **2026-06-22 · Outside-combat dice are proposed and negotiable before rolling; combat dice
 remain immediate.** Every roleplay `requested_rolls` entry carries a concise public adjudication:
 why uncertainty warrants dice, active opposition, failure stakes, DC basis, and any situational
