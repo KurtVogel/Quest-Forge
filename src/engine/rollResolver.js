@@ -384,7 +384,10 @@ export function formatRollSummary(rollResults) {
         }
         // skill_check / saving_throw / plain attack_roll
         const isAttack = r.type === 'attack_roll';
-        const verb = r.success ? (isAttack ? 'HIT' : 'SUCCESS') : (isAttack ? 'MISS' : 'FAILURE');
+        let verb = r.success ? (isAttack ? 'HIT' : 'SUCCESS') : (isAttack ? 'MISS' : 'FAILURE');
+        if (!isAttack && r.critical) {
+            verb = 'SUCCESS (CRITICAL SUCCESS / NATURAL 20)';
+        }
         const dcLabel = isAttack ? `vs AC ${r.dc}` : `DC ${r.dc}`;
         return `[ROLL RESULT: ${r.description || r.skill + ' check'}, ${dcLabel}, rolled ${r.rolled} — ${verb}]`;
     }).join('\n');
@@ -902,7 +905,7 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
         };
     }
 
-    const success = (isAttack && critical) || result.total >= (roll.dc || 15);
+    const success = (isAttack && critical) || result.isCritical || result.total >= (roll.dc || 15);
     const advLabel = effRoll.advantage ? ' *(advantage)*' : effRoll.disadvantage ? ' *(disadvantage)*' : '';
     const dcLabel = isAttack ? `vs AC ${roll.dc}` : `DC ${roll.dc}`;
     const hitMiss = isAttack

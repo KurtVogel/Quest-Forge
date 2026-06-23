@@ -438,6 +438,23 @@ describe('engine-owned exchange resolution', () => {
         expect(revived.payload.result.terminal).toBeNull();
         expect(revived.payload.deathSaveNatural).toBe(20);
     });
+
+    it('forces a combat check/save slot to succeed on a natural 20 regardless of DC', () => {
+        rollQueue.push(20); // natural 20
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'check', skill: 'stealth', dc: 35, description: 'Hide from the dragon' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        });
+        const plan = planCombatExchange(state(), intent);
+        expect(plan.ok).toBe(true);
+        const checkEvent = plan.payload.result.events.find(event => event.type === 'check');
+        expect(checkEvent).toMatchObject({
+            success: true,
+            rolled: 21, // 20 + stealth mod (+1)
+            natural: 20,
+        });
+        expect(plan.payload.result.summary).toContain('Success (Critical Success / Natural 20)');
+    });
 });
 
 describe('Opening Initiative', () => {

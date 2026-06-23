@@ -4,7 +4,7 @@
  * The dice module is mocked with a queue so outcomes are scripted, not random.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { canonicalizeCombatRollBatch, handleRequestedRolls, repairCombatRollBatch, resolveRolls } from './rollResolver.js';
+import { canonicalizeCombatRollBatch, handleRequestedRolls, repairCombatRollBatch, resolveRolls, formatRollSummary } from './rollResolver.js';
 
 const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
 
@@ -628,5 +628,33 @@ describe('legacy combat roll isolation', () => {
 
         expect(sendToLLM).not.toHaveBeenCalled();
         expect(dispatch).not.toHaveBeenCalled();
+    });
+});
+
+describe('natural 20 out-of-combat checks', () => {
+    it('forces a skill check to succeed on a natural 20 regardless of DC', () => {
+        rollQueue.push(20); // natural 20
+        const { results, dispatch } = run(
+            [{ type: 'skill_check', skill: 'athletics', dc: 30 }]
+        );
+        expect(results[0]).toMatchObject({
+            success: true,
+            critical: true,
+            rolled: 23, // 20 + athletics mod (+3)
+        });
+        expect(messagesFrom(dispatch)).toContain('Natural 20!');
+    });
+
+    it('formats a natural 20 skill check outcome as a CRITICAL SUCCESS in the roll summary', () => {
+        const summary = formatRollSummary([{
+            type: 'skill_check',
+            skill: 'stealth',
+            dc: 25,
+            rolled: 22,
+            success: true,
+            critical: true,
+            description: 'Sneak past the giant',
+        }]);
+        expect(summary).toContain('SUCCESS (CRITICAL SUCCESS / NATURAL 20)');
     });
 });

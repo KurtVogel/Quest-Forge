@@ -372,7 +372,10 @@ function eventMessage(event) {
     }
     if (event.type === 'check' || event.type === 'save') {
         const checkMode = event.mode ? ` (${event.mode})` : '';
-        return `**${event.actor}: ${event.description}** — Rolled **${event.rolled}** vs DC ${event.dc}${checkMode}; **${event.success ? 'Success' : 'Failure'}.**`;
+        const outcome = event.natural === 20
+            ? 'Success (Critical Success / Natural 20)'
+            : event.success ? 'Success' : 'Failure';
+        return `**${event.actor}: ${event.description}** — Rolled **${event.rolled}** vs DC ${event.dc}${checkMode}; **${outcome}.**`;
     }
     if (event.type === 'death_save') return `**Death Saving Throw:** natural **${event.natural}**.`;
     return event.text || `${event.actor} ${event.type}.`;
@@ -589,7 +592,7 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
             const modifiers = combineRollModifiers(ruling.advantage, ruling.disadvantage, conditionEffects);
             const roll = rollD20(modifier, slot.description || `${skill} ${slot.action}`, modifiers.advantage, modifiers.disadvantage);
             rolls.push(roll.roll);
-            const success = roll.roll.total >= slot.dc;
+            const success = roll.natural === 20 || roll.roll.total >= slot.dc;
             events.push({
                 type: slot.action,
                 actor: character.name || 'Player',
