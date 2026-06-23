@@ -15,6 +15,7 @@ import {
     computeACFromInventory,
     getWeaponAttackBonus,
     getWeaponDamageNotation,
+    getSneakAttackDice,
 } from './rules.js';
 
 const fighter = {
@@ -176,5 +177,46 @@ describe('fighter fighting styles', () => {
         expect(getWeaponDamageNotation({ ...fighter, fightingStyle: 'dueling' }, sword)).toBe('1d8+5');
         expect(getWeaponDamageNotation({ ...fighter, fightingStyle: 'dueling' }, bow)).toBe('1d8+1');
         expect(getWeaponDamageNotation({ ...fighter, fightingStyle: 'dueling' }, greatsword)).toBe('2d6+3');
+    });
+});
+
+describe('getSneakAttackDice', () => {
+    const rogueL1 = { class: 'rogue', level: 1 };
+    const rogueL3 = { class: 'rogue', level: 3 };
+    const rogueL5 = { class: 'rogue', level: 5 };
+    const nonRogue = { class: 'cleric', level: 5 };
+
+    const finesseWeapon = { finesse: true };
+    const rangedWeapon = { ranged: true };
+    const normalWeapon = { name: 'Longsword' };
+
+    it('returns 0 if character is not a rogue', () => {
+        expect(getSneakAttackDice(nonRogue, finesseWeapon, true, false, false)).toBe(0);
+        expect(getSneakAttackDice(null, finesseWeapon, true, false, false)).toBe(0);
+    });
+
+    it('returns 0 if weapon is not finesse or ranged', () => {
+        expect(getSneakAttackDice(rogueL1, normalWeapon, true, false, false)).toBe(0);
+        expect(getSneakAttackDice(rogueL1, null, true, false, false)).toBe(0);
+    });
+
+    it('returns 0 if disadvantage is active', () => {
+        expect(getSneakAttackDice(rogueL1, finesseWeapon, true, true, true)).toBe(0);
+    });
+
+    it('returns correct dice if advantage is active', () => {
+        expect(getSneakAttackDice(rogueL1, finesseWeapon, true, false, false)).toBe(1);
+        expect(getSneakAttackDice(rogueL3, finesseWeapon, true, false, false)).toBe(2);
+        expect(getSneakAttackDice(rogueL5, finesseWeapon, true, false, false)).toBe(3);
+    });
+
+    it('returns correct dice if companion (hasAlly) is active and no disadvantage', () => {
+        expect(getSneakAttackDice(rogueL1, rangedWeapon, false, false, true)).toBe(1);
+        expect(getSneakAttackDice(rogueL3, rangedWeapon, false, false, true)).toBe(2);
+        expect(getSneakAttackDice(rogueL5, rangedWeapon, false, false, true)).toBe(3);
+    });
+
+    it('returns 0 if neither advantage nor companion is active', () => {
+        expect(getSneakAttackDice(rogueL1, finesseWeapon, false, false, false)).toBe(0);
     });
 });

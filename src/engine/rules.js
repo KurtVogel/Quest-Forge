@@ -327,6 +327,26 @@ export function getLevelBonus(character) {
 }
 
 /**
+ * Calculate the number of Sneak Attack dice (d6) for a Rogue.
+ * @param {object} character
+ * @param {object|null} weapon
+ * @param {boolean} advantage
+ * @param {boolean} disadvantage
+ * @param {boolean} hasAlly
+ * @returns {number} Number of d6 dice to roll
+ */
+export function getSneakAttackDice(character, weapon, advantage, disadvantage, hasAlly) {
+    if (!character || character.class !== 'rogue') return 0;
+    const isFinesseOrRanged = !!(weapon?.finesse || weapon?.ranged);
+    if (!isFinesseOrRanged) return 0;
+    if (disadvantage) return 0;
+    if (advantage || hasAlly) {
+        return Math.ceil((character.level || 1) / 2);
+    }
+    return 0;
+}
+
+/**
  * Resolve a check against a difficulty class.
  * @param {number} roll - The d20 roll (before modifiers)
  * @param {number} total - Total result (roll + modifiers)

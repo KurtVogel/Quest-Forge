@@ -203,7 +203,7 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         tempHP: 0,
         proficiencyBonus: getProficiencyBonus(1),
         skillProficiencies: allSkills,
-        expertiseSkills: [], // Rogues pick these at level 1 (future UI)
+        expertiseSkills: className === 'rogue' ? (options.expertiseSkills || []) : [],
         savingThrowProficiencies: [...(charClass.savingThrows || [])],
         fightingStyle: normalizeFightingStyle(className, options.fightingStyle),
         martialArchetype: normalizeMartialArchetype(className, 1, options.martialArchetype),

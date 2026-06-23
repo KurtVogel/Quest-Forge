@@ -21,6 +21,7 @@ export default function CharacterCreation() {
     const [fightingStyle, setFightingStyle] = useState('defense');
     const [statAssignment, setStatAssignment] = useState({});
     const [chosenSkills, setChosenSkills] = useState([]);
+    const [expertiseSkills, setExpertiseSkills] = useState([]);
     const [adventureName, setAdventureName] = useState('');
     const [premise, setPremise] = useState('');
     const [roster, setRoster] = useState([]);
@@ -76,6 +77,7 @@ export default function CharacterCreation() {
     const handleClassSelect = (c) => {
         setCharClass(c);
         setChosenSkills([]);
+        setExpertiseSkills([]);
         setFightingStyle('defense');
     };
 
@@ -117,7 +119,7 @@ export default function CharacterCreation() {
             abilityScores[ability] = statAssignment[ability];
         }
 
-        const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle });
+        const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle, expertiseSkills });
         const inventory = createStartingInventory(charClass);
         beginAdventure(character, inventory);
     };
@@ -431,6 +433,39 @@ export default function CharacterCreation() {
                             <div className="skill-selection-count">
                                 {chosenSkills.length} / {numChoices} selected
                             </div>
+
+                            {charClass === 'rogue' && allSkillsChosen && (
+                                <div className="expertise-selection" style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid var(--border-color)' }}>
+                                    <h3>Choose two skills for Expertise</h3>
+                                    <p className="creation-hint">Double your proficiency bonus for these skills.</p>
+                                    <div className="skill-selection-grid">
+                                        {allSkillProficiencies.map(skill => {
+                                            const isExpert = expertiseSkills.includes(skill);
+                                            const abilityKey = SKILL_ABILITIES[skill];
+                                            const maxExpertiseSelected = expertiseSkills.length >= 2;
+                                            return (
+                                                <button
+                                                    key={skill}
+                                                    className={`skill-choice-card ${isExpert ? 'selected' : ''} ${!isExpert && maxExpertiseSelected ? 'disabled' : ''}`}
+                                                    onClick={() => {
+                                                        setExpertiseSkills(previous => {
+                                                            if (previous.includes(skill)) return previous.filter(s => s !== skill);
+                                                            return previous.length < 2 ? [...previous, skill] : previous;
+                                                        });
+                                                    }}
+                                                    disabled={!isExpert && maxExpertiseSelected}
+                                                >
+                                                    <div className="skill-choice-name">{SKILL_LABELS[skill] || skill}</div>
+                                                    <div className="skill-choice-ability">{ABILITY_SHORT[abilityKey]}</div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="skill-selection-count">
+                                        {expertiseSkills.length} / 2 selected
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -454,6 +489,12 @@ export default function CharacterCreation() {
                                     <strong>Skills:</strong>{' '}
                                     {allSkillProficiencies.map(s => SKILL_LABELS[s] || s).join(', ')}
                                 </div>
+                                {charClass === 'rogue' && (
+                                    <div className="summary-row">
+                                        <strong>Expertise Skills:</strong>{' '}
+                                        {expertiseSkills.map(s => SKILL_LABELS[s] || s).join(', ')}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -511,7 +552,7 @@ export default function CharacterCreation() {
                                 (currentStep === 'race' && !race) ||
                                 (currentStep === 'class' && !charClass) ||
                                 (currentStep === 'stats' && !allStatsAssigned) ||
-                                (currentStep === 'skills' && !allSkillsChosen)
+                                (currentStep === 'skills' && (!allSkillsChosen || (charClass === 'rogue' && expertiseSkills.length !== 2)))
                             }
                         >
                             Next →

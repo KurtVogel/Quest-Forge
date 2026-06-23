@@ -18,6 +18,7 @@ import {
     getSkillModifier,
     getWeaponAttackBonus,
     getWeaponDamageNotation,
+    getSneakAttackDice,
 } from './rules.js';
 import { sanitizeEnemyDamage, validateEnemyAttackBonus, enemyHealthCondition, normalizeEnemyConditions } from './enemyStats.js';
 
@@ -323,7 +324,7 @@ function shouldUseGreatWeaponFighting(character, inventory) {
     return !!weapon && !weapon.ranged && weapon.twoHanded;
 }
 
-function rollDamage(notation, description, { critical = false, character = null, inventory = [] } = {}) {
+function rollDamage(notation, description, { critical = false, character = null, inventory = [], advantage = false, disadvantage = false, hasAlly = false } = {}) {
     let parsed;
     try {
         parsed = parseNotation(notation);
@@ -346,7 +347,31 @@ function rollDamage(notation, description, { critical = false, character = null,
     const levelBonus = character ? getLevelBonus(character) : 0;
     roll.total += levelBonus;
     roll.modifier += levelBonus;
-    return { roll, total: Math.max(0, roll.total), notation, rerolls };
+
+    // Rogue Sneak Attack (in-combat)
+    let sneakAttackDetail = null;
+    if (character && character.class === 'rogue') {
+        const weapon = getEquippedWeapon(inventory);
+        const sneakAttackDice = getSneakAttackDice(character, weapon, advantage, disadvantage, hasAlly);
+        if (sneakAttackDice > 0) {
+            const saDiceCount = critical ? sneakAttackDice * 2 : sneakAttackDice;
+            const saRolls = [];
+            let saTotal = 0;
+            for (let i = 0; i < saDiceCount; i++) {
+                const r = rollWithModifier(1, 6, 0, 'Sneak Attack').rolls[0];
+                saRolls.push(r);
+                saTotal += r;
+            }
+            roll.total += saTotal;
+            sneakAttackDetail = {
+                diceCount: saDiceCount,
+                rolls: saRolls,
+                total: saTotal,
+            };
+        }
+    }
+
+    return { roll, total: Math.max(0, roll.total), notation, rerolls, sneakAttackDetail };
 }
 
 function championCritical(character, natural) {
@@ -365,10 +390,14 @@ function eventMessage(event) {
     if (event.type === 'attack') {
         if (!event.hit) return `**${event.actor} attacks ${event.target}** —${roll}; **Miss.**`;
         const crit = event.critical ? ' Critical hit.' : '';
+        const sa = event.sneakAttackDetail
+            ? ` Includes **${event.sneakAttackDetail.total}** Sneak Attack damage (${event.sneakAttackDetail.diceCount}d6: ${event.sneakAttackDetail.rolls.join(', ')}).`
+            : '';
+        const ud = event.uncannyDodgeApplied ? ' (damage halved by Uncanny Dodge)' : '';
         const survival = event.remainingHp <= 0
             ? ` ${event.target} is down.`
             : ` ${event.target} remains alive at ${event.remainingHp}/${event.maxHp} HP.`;
-        return `**${event.actor} attacks ${event.target}** —${roll}; **Hit for ${event.damage} damage.**${crit}${survival}`;
+        return `**${event.actor} attacks ${event.target}** —${roll}; **Hit for ${event.damage} damage.**${crit}${sa}${ud}${survival}`;
     }
     if (event.type === 'check' || event.type === 'save') {
         const checkMode = event.mode ? ` (${event.mode})` : '';
@@ -460,13 +489,52 @@ function basicSpellProfile(character, spellRef) {
 function validatePlayerSlots(exchange, state) {
     const slots = exchange.playerSlots || [];
     const surge = !!state.character?.pendingActionSurge;
-    const expectedSlots = surge ? 2 : 1;
-    if (slots.length !== expectedSlots) {
+    const isRogue = state.character?.class === 'rogue';
+    const hasCunningActionFeature = isRogue && (state.character?.level >= 2);
+
+    const maxSlots = hasCunningActionFeature ? 2 : (surge ? 2 : 1);
+
+    if (slots.length > maxSlots || slots.length === 0) {
         return {
             ok: false,
-            error: surge
-                ? 'Action Surge is active: declare exactly two action slots in this turn.'
-                : 'Declare exactly one action slot for this turn.',
+            error: hasCunningActionFeature
+                ? 'Declare one action slot, or up to two slots if one is a Cunning Action (dash, disengage, or stealth check).'
+                : (surge ? 'Action Surge is active: declare exactly two action slots in this turn.' : 'Declare exactly one action slot for this turn.'),
+        };
+    }
+
+    if (slots.length === 2) {
+        if (hasCunningActionFeature && !surge) {
+            const isCunning = slot => slot.action === 'dash' || slot.action === 'disengage' || (slot.action === 'check' && slot.skill === 'stealth');
+            const cunningCount = slots.filter(isCunning).length;
+            if (cunningCount < 1) {
+                return {
+                    ok: false,
+                    error: 'To declare two slots, a Rogue must use one slot for a Cunning Action (dash, disengage, or stealth check).',
+                };
+            }
+            const attacks = slots.filter(s => s.action === 'attack').length;
+            const casts = slots.filter(s => s.action === 'cast').length;
+            if (attacks > 1 || casts > 1 || (attacks > 0 && casts > 0)) {
+                return {
+                    ok: false,
+                    error: 'A Rogue cannot declare multiple attack or spellcast actions in a single turn.',
+                };
+            }
+        } else if (surge) {
+            // Fighter Action Surge
+        } else {
+            return {
+                ok: false,
+                error: 'Declare exactly one action slot for this turn.',
+            };
+        }
+    }
+
+    if (surge && slots.length === 1) {
+        return {
+            ok: false,
+            error: 'Action Surge is active: declare exactly two action slots in this turn.',
         };
     }
     if (state.character?.isDead || state.character?.lowLevelDefeat) {
@@ -643,14 +711,24 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
             const critical = championCritical(character, attack.natural);
             const hit = attack.natural !== 1 && (critical || attack.roll.total >= enemy.ac);
             let damage = 0;
+            let sneakAttackDetail = null;
             if (hit) {
+                const hasAlly = (state.party || []).some(isCompanionActive);
                 const damageRoll = rollDamage(
                     getWeaponDamageNotation(character, attackInventory, '1d4'),
                     `Damage to ${enemy.name}`,
-                    { critical, character, inventory: attackInventory }
+                    {
+                        critical,
+                        character,
+                        inventory: attackInventory,
+                        advantage: modifiers.advantage,
+                        disadvantage: modifiers.disadvantage,
+                        hasAlly,
+                    }
                 );
                 rolls.push(damageRoll.roll);
                 damage = damageRoll.total;
+                sneakAttackDetail = damageRoll.sneakAttackDetail;
                 enemy.hp = Math.max(0, enemy.hp - damage);
                 enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
             }
@@ -659,6 +737,7 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
                 rolled: attack.roll.total, natural: attack.natural, dc: enemy.ac,
                 mode: rollModeLabel(attack, modifiers, slot.situationalRuling),
                 hit, critical, damage, remainingHp: enemy.hp, maxHp: enemy.maxHp,
+                sneakAttackDetail,
             });
         }
     }
@@ -721,7 +800,7 @@ function resolveCompanions({ exchange, enemies, companions, events, rolls, onlyI
     }
 }
 
-function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions, playerHp, playerDodging, situationalRuling, events, rolls }) {
+function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions, playerHp, playerDodging, situationalRuling, events, rolls, uncannyDodgeState }) {
     let targetType = 'player';
     let target = character;
     let targetName = character.name || 'Player';
@@ -754,11 +833,19 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
     const critical = attack.natural === 20;
     const hit = attack.natural !== 1 && (critical || attack.roll.total >= targetAc);
     let damage = 0;
+    let uncannyDodgeApplied = false;
     if (hit) {
         const notation = sanitizeEnemyDamage(enemy.damage) || DEFAULT_ENEMY_DAMAGE;
         const damageRoll = rollDamage(notation, `${enemy.name} damage`, { critical });
         rolls.push(damageRoll.roll);
         damage = damageRoll.total;
+        
+        if (targetType === 'player' && character?.class === 'rogue' && (character?.level >= 5) && damage > 0 && uncannyDodgeState && !uncannyDodgeState.used) {
+            damage = Math.floor(damage / 2);
+            uncannyDodgeState.used = true;
+            uncannyDodgeApplied = true;
+        }
+
         if (targetType === 'player') {
             playerHp = Math.max(0, playerHp - damage);
         } else {
@@ -773,6 +860,7 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
         hit, critical, damage,
         remainingHp: targetType === 'player' ? playerHp : target.hp,
         maxHp: targetType === 'player' ? character.maxHP : target.maxHp,
+        uncannyDodgeApplied,
     });
     return { playerHp, playerDamage: targetType === 'player' ? damage : 0 };
 }
@@ -784,6 +872,7 @@ function resolveEnemies({ state, exchange, enemies, companions, playerHp, player
         if (enemy && !intents.has(enemy.id)) intents.set(enemy.id, intent);
     }
     let playerDamage = 0;
+    const uncannyDodgeState = { used: false };
     for (const enemy of enemies) {
         if (!isEnemyActive(enemy)) continue;
         if (onlyIds && !onlyIds.has(enemy.id)) continue;
@@ -819,6 +908,7 @@ function resolveEnemies({ state, exchange, enemies, companions, playerHp, player
             situationalRuling: intent.situationalRuling,
             events,
             rolls,
+            uncannyDodgeState,
         });
         playerHp = resolved.playerHp;
         playerDamage += resolved.playerDamage;

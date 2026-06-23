@@ -480,3 +480,145 @@ describe('Opening Initiative', () => {
         expect(plan.payload.result.events.some(event => event.actor === 'Slow')).toBe(false);
     });
 });
+
+describe('Rogue Combat Features', () => {
+    it('validates Cunning Action slot count for Rogue level 2+', () => {
+        const rogueL2 = state({
+            character: { class: 'rogue', level: 2 },
+        });
+
+        // 1. Valid: 1 attack slot
+        const oneSlot = normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }] }],
+        });
+        expect(planCombatExchange(rogueL2, oneSlot).ok).toBe(true);
+
+        // 2. Valid: 1 attack + 1 dash (Cunning Action)
+        const attackAndDash = normalizeCombatExchange({
+            player_slots: [
+                { action: 'attack', strikes: [{ target: 'Goblin' }] },
+                { action: 'dash' }
+            ],
+        });
+        expect(planCombatExchange(rogueL2, attackAndDash).ok).toBe(true);
+
+        // 3. Valid: 1 attack + 1 stealth check (Cunning Action)
+        const attackAndStealth = normalizeCombatExchange({
+            player_slots: [
+                { action: 'attack', strikes: [{ target: 'Goblin' }] },
+                { action: 'check', skill: 'stealth', dc: 10 }
+            ],
+        });
+        expect(planCombatExchange(rogueL2, attackAndStealth).ok).toBe(true);
+
+        // 4. Invalid: 2 attack slots (no Action Surge)
+        const doubleAttack = normalizeCombatExchange({
+            player_slots: [
+                { action: 'attack', strikes: [{ target: 'Goblin' }] },
+                { action: 'attack', strikes: [{ target: 'Goblin' }] }
+            ],
+        });
+        expect(planCombatExchange(rogueL2, doubleAttack).ok).toBe(false);
+
+        // 5. Invalid: 2 slots but neither is a Cunning Action (e.g. cast + dodge)
+        const castAndDodge = normalizeCombatExchange({
+            player_slots: [
+                { action: 'cast', spell: 'fire bolt', target: 'Goblin' },
+                { action: 'dodge' }
+            ],
+        });
+        expect(planCombatExchange(rogueL2, castAndDodge).ok).toBe(false);
+
+        // 6. Invalid: Level 1 Rogue trying to declare 2 slots
+        const rogueL1 = state({
+            character: { class: 'rogue', level: 1 },
+        });
+        expect(planCombatExchange(rogueL1, attackAndDash).ok).toBe(false);
+    });
+
+    it('applies Sneak Attack damage in combat when Rogue has advantage or companion', () => {
+        const rogueL3 = state({
+            character: { class: 'rogue', level: 3, abilityScores: { ...character().abilityScores, dexterity: 16 } },
+        });
+        // We equip a finesse weapon: dagger
+        rogueL3.inventory = [{ id: 'dagger', name: 'Dagger', type: 'weapon', finesse: true, damage: '1d4', equipped: true }];
+
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }], situationalRuling: { mode: 'advantage', reason: 'flanking' } }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        });
+
+        // rolls needed:
+        // 1. Player attack to-hit: d20 = 15 (hits AC 12)
+        // 2. Weapon damage: 1d4 = 3
+        // 3. Sneak Attack: 2d6 = 4, 5
+        rollQueue.push(15, 5); // to-hit (advantage draws two)
+        rollQueue.push(3);     // weapon damage
+        rollQueue.push(4, 5);  // sneak attack damage
+
+        const plan = planCombatExchange(rogueL3, intent);
+        expect(plan.ok).toBe(true);
+
+        const attackEvent = plan.payload.result.events.find(e => e.type === 'attack' && e.actor === 'Vesa');
+        expect(attackEvent).toMatchObject({
+            hit: true,
+            // 3 (weapon) + 3 (DEX mod) + 9 (Sneak Attack) = 15
+            damage: 15,
+        });
+        expect(attackEvent.sneakAttackDetail).toMatchObject({
+            diceCount: 2,
+            rolls: [4, 5],
+            total: 9,
+        });
+        expect(plan.payload.result.summary).toContain('Includes **9** Sneak Attack damage');
+    });
+
+    it('applies Uncanny Dodge to the first hit on a level 5+ Rogue in an exchange', () => {
+        const rogueL5 = state({
+            character: { class: 'rogue', level: 5, maxHP: 35, currentHP: 35 },
+            enemies: [enemy('G1'), enemy('G2')],
+        });
+
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            enemy_intents: [
+                { enemy_id: 'G1', action: 'attack', target: 'player' },
+                { enemy_id: 'G2', action: 'attack', target: 'player' }
+            ],
+        });
+
+        // rolls needed:
+        // 1. G1 to-hit: d20 = 15
+        // 2. G1 damage: 1d6+2 = 4 (roll 2 + 2)
+        // 3. G2 to-hit: d20 = 15
+        // 4. G2 damage: 1d6+2 = 4 (roll 2 + 2)
+        rollQueue.push(15); // G1 to-hit
+        rollQueue.push(2);  // G1 damage
+        rollQueue.push(15); // G2 to-hit
+        rollQueue.push(2);  // G2 damage
+
+        const plan = planCombatExchange(rogueL5, intent);
+        expect(plan.ok).toBe(true);
+
+        const attacks = plan.payload.result.events.filter(e => e.type === 'attack' && e.target === 'Vesa');
+        expect(attacks.length).toBe(2);
+
+        // First attack (G1): halved (4 -> 2)
+        expect(attacks[0]).toMatchObject({
+            actor: 'G1',
+            hit: true,
+            damage: 2,
+            uncannyDodgeApplied: true,
+        });
+
+        // Second attack (G2): normal (4)
+        expect(attacks[1]).toMatchObject({
+            actor: 'G2',
+            hit: true,
+            damage: 4,
+            uncannyDodgeApplied: false,
+        });
+
+        expect(plan.payload.result.summary).toContain('halved by Uncanny Dodge');
+    });
+});

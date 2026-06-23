@@ -417,6 +417,11 @@ PROGRESSION & STATUS EFFECTS:
 - The engine awards combat XP automatically for defeated, surrendered, or fled threats. Use "exp_awarded" only for non-combat objectives and quests; never duplicate combat XP.
 - **LEVELING:** The client owns XP thresholds, HP gain, hit dice, feature unlocks, and level-up messages. Do NOT narrate HP or stat changes yourself. Use "level_up": true only for a deliberate story milestone where the character should gain exactly one level regardless of current XP; otherwise award XP normally and let the system decide.
 - **FIGHTER EXTRA ATTACK:** Fighters of level 5+ may declare two targetable strikes inside each Attack slot. The engine rolls and applies both.
+- **ROGUE CLASS FEATURES (Level 1–5):**
+  - **Expertise:** A Rogue's selected expertise skills double their proficiency bonus. The engine applies this bonus automatically to any check/save.
+  - **Sneak Attack:** A Rogue automatically adds extra damage (1d6 at L1-2, 2d6 at L3-4, 3d6 at L5+) on weapon attacks using finesse or ranged weapons if they have advantage, or if they have an active companion (adjacent ally) and no disadvantage. The engine automatically rolls and applies this damage—do NOT add it or roll it yourself. Narrate it when you see the Sneak Attack damage in the system results.
+  - **Cunning Action:** Rogues of level 2+ can Dash, Disengage, or Hide (Stealth check) as a bonus action, allowing them to declare up to **two slots** in a combat exchange, provided one of them is a Cunning Action ('dash', 'disengage', or a 'stealth' check).
+  - **Uncanny Dodge:** Rogues of level 5+ automatically halve the damage from the first hit that lands on them each combat exchange. The engine automatically handles this and sets 'uncannyDodgeApplied: true' in the system event—narrate their evasion/reaction accordingly.
 - Provide "rest_taken" as exactly "short" or "long" when the party rests at a camp, inn, or safe zone.
 - Provide "conditions_gained" (e.g. ["Poisoned", "Blinded"]) and "conditions_removed" as string arrays when status effects are applied or cured.
 
@@ -516,7 +521,7 @@ function buildCharacterBlock(character, combat = null) {
 - **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}${getLevelBonus(character) > 0 ? `\n- **Level Bonus (combat):** +${getLevelBonus(character)} to hit and damage (applied automatically by the system — do NOT add this yourself)` : ''}
 - **Stats:** ${stats}
 - **Saving Throws:** ${saves} (* = proficient; applied automatically by the system)
-- **Skill Proficiencies:** ${skillProfs}
+- **Skill Proficiencies:** ${skillProfs}${character.expertiseSkills?.length ? `\n- **Expertise Skills:** ${character.expertiseSkills.join(', ')} (applied automatically by the system)` : ''}
 - **Speed:** ${character.speed} ft
 - **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}${fightingStyleLine}${martialArchetypeLine}${asiLine}${resourceLines}${bonusActionLine}${hitDiceLine}
 ${character.traits?.length ? `- **Traits:** ${character.traits.join(', ')}` : ''}

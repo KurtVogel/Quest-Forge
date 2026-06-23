@@ -41,6 +41,7 @@ vi.mock('./dice.ts', () => {
         },
         parseNotation,
         rollDie: () => draw(),
+        rollDice: (count) => Array.from({ length: count }, draw),
     };
 });
 
@@ -656,5 +657,49 @@ describe('natural 20 out-of-combat checks', () => {
             description: 'Sneak past the giant',
         }]);
         expect(summary).toContain('SUCCESS (CRITICAL SUCCESS / NATURAL 20)');
+    });
+});
+
+describe('Rogue Sneak Attack (out-of-combat)', () => {
+    it('applies Sneak Attack damage on a hit with a finesse weapon when having advantage', () => {
+        const rogue = {
+            class: 'rogue',
+            level: 3, // Sneak Attack is 2d6
+            abilityScores: { strength: 10, dexterity: 16, constitution: 12, intelligence: 10, wisdom: 10, charisma: 10 },
+            conditions: [],
+        };
+        const inventory = [
+            { id: 'rapier', type: 'weapon', finesse: true, damage: '1d8', equipped: true },
+        ];
+        // We need:
+        // 1. To-hit roll: d20 = 15 (success)
+        // 2. Weapon damage roll: 1d8 = 5
+        // 3. Sneak Attack rolls: 2d6 = 3, 4
+        rollQueue.push(15, 5); // to-hit (advantage draws two)
+        rollQueue.push(5);     // weapon damage
+        rollQueue.push(3, 4);  // sneak attack rolls (2d6)
+
+        const dispatch = vi.fn();
+        const { results } = resolveRolls(
+            [{ type: 'attack_roll', skill: 'attack', target: 'enemy-1', advantage: true }],
+            {
+                character: rogue,
+                inventory,
+                combat: {
+                    enemies: [{ id: 'enemy-1', name: 'Orc', hp: 30, maxHp: 30, ac: 12 }]
+                },
+                party: [],
+                dispatch,
+            }
+        );
+
+        // Weapon damage (5) + DEX modifier (3) + Sneak Attack (7) = 15 total damage
+        expect(results[0]).toMatchObject({
+            success: true,
+            damage: 15,
+        });
+        const msg = messagesFrom(dispatch);
+        expect(msg).toContain('Sneak Attack');
+        expect(msg).toContain('2d6');
     });
 });

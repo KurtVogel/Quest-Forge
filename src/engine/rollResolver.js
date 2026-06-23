@@ -13,8 +13,8 @@
  * `target`/`damage` fall back to the original two-step flow (DM applies HP).
  */
 
-import { rollWithModifier, parseNotation } from './dice.ts';
-import { getSkillModifier, getModifier, getLevelBonus, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getEquippedWeapon, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES } from './rules.js';
+import { rollWithModifier, parseNotation, rollDice } from './dice.ts';
+import { getSkillModifier, getModifier, getLevelBonus, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getEquippedWeapon, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES, getSneakAttackDice } from './rules.js';
 
 /** Maximum depth for recursive follow-up roll handling. */
 const MAX_ROLL_DEPTH = 3;
@@ -295,7 +295,15 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
                 if (one.success && isAttack && damageNotation && roll.target) {
                     const enemy = findEnemy(roll.target);
                     if (enemy) {
-                        const dmg = rollAndShowDamage(damageNotation, `Damage to ${enemy.name}`, dispatch, { crit: one.critical, character, inventory });
+                        const hasAlly = companions.some(c => (c.hp ?? 0) > 0 && c.status !== 'downed' && c.status !== 'dead');
+                        const dmg = rollAndShowDamage(damageNotation, `Damage to ${enemy.name}`, dispatch, {
+                            crit: one.critical,
+                            character,
+                            inventory,
+                            advantage: one.advantage,
+                            disadvantage: one.disadvantage,
+                            hasAlly
+                        });
                         enemy.hp = Math.max(0, (enemy.hp ?? 0) - dmg.total);
                         Object.assign(one, { damage: dmg.total, targetName: enemy.name, targetHp: enemy.hp, targetMaxHp: enemy.maxHp });
                         appliedHp = true;
@@ -623,7 +631,7 @@ function rollDamageWithStyle(notation, label, { crit = false, character = null, 
  * crit and adds the player's Fighter level bonus when a player `character` is supplied.
  * @returns {{ total: number }}
  */
-function rollAndShowDamage(notation, label, dispatch, { crit = false, character = null, inventory = [] } = {}) {
+function rollAndShowDamage(notation, label, dispatch, { crit = false, character = null, inventory = [], advantage = false, disadvantage = false, hasAlly = false } = {}) {
     let result;
     try {
         result = rollDamageWithStyle(notation, label, { crit, character, inventory });
@@ -639,6 +647,20 @@ function rollAndShowDamage(notation, label, dispatch, { crit = false, character 
         result.modifier += lvlBonus;
     }
 
+    // Rogue Sneak Attack (out-of-combat)
+    let sneakAttackDetail = '';
+    if (character && character.class === 'rogue') {
+        const weapon = getEquippedWeapon(inventory);
+        const sneakAttackDice = getSneakAttackDice(character, weapon, advantage, disadvantage, hasAlly);
+        if (sneakAttackDice > 0) {
+            const saDiceCount = crit ? sneakAttackDice * 2 : sneakAttackDice;
+            const saRolls = rollDice(saDiceCount, 6);
+            const saTotal = saRolls.reduce((sum, r) => sum + r, 0);
+            result.total += saTotal;
+            sneakAttackDetail = `, +**${saTotal}** Sneak Attack (${saDiceCount}d6: ${saRolls.join(', ')})`;
+        }
+    }
+
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     const critLabel = crit ? ' *(crit — dice doubled)*' : '';
@@ -647,7 +669,7 @@ function rollAndShowDamage(notation, label, dispatch, { crit = false, character 
         type: 'ADD_MESSAGE',
         payload: {
             role: 'system',
-            content: `**${label}**${critLabel} (${notation}): **${result.total}** damage (dice: ${result.rolls.join(', ')}${baseMod ? `, mod: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel}${result.fightingStyleDetail || ''})`,
+            content: `**${label}**${critLabel} (${notation}): **${result.total}** damage (dice: ${result.rolls.join(', ')}${baseMod ? `, mod: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel}${result.fightingStyleDetail || ''}${sneakAttackDetail})`,
         },
     });
 
@@ -829,6 +851,8 @@ function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
         success,
         critical,
         description: label,
+        advantage: roll.advantage,
+        disadvantage: roll.disadvantage,
     };
 }
 
@@ -929,5 +953,7 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
         success,
         critical,
         description: roll.description,
+        advantage: effRoll.advantage,
+        disadvantage: effRoll.disadvantage,
     };
 }
