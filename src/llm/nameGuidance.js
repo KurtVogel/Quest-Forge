@@ -4,9 +4,15 @@ export const STOCK_LLM_FANTASY_NAMES = [
     'Zephyr', 'Aldric', 'Garrick', 'Mira', 'Vesper', 'Cassian',
 ];
 
-export const NPC_NAME_DIVERSITY_RULES = `## NPC NAME DIVERSITY — AVOID THE LLM FANTASY DEFAULTS
+export const STOCK_LLM_LOCATION_NAMES = [
+    'Whispering Woods', 'Oakhaven',
+];
 
-For NEW people or person-like factions you invent, never use or cosmetically respell these stock LLM fantasy names: ${STOCK_LLM_FANTASY_NAMES.join(', ')}.
+export const NPC_NAME_DIVERSITY_RULES = `## NAME DIVERSITY — AVOID LLM FANTASY DEFAULTS
+
+For NEW people, factions, or locations you invent:
+1. Never use or cosmetically respell these stock LLM fantasy person names: ${STOCK_LLM_FANTASY_NAMES.join(', ')}.
+2. Never use these overused stock LLM location/settlement names: ${STOCK_LLM_LOCATION_NAMES.join(', ')}.
 - This restriction applies only to names you create. Never rename or erase an established name from the CAMPAIGN PREMISE, WORLD FACTS, NPC records, journal, memories, or player input.
-- Build names from the person's culture, region, class, age, and community. Let people from one culture share a subtle naming logic, while varying sounds, syllable counts, initials, and endings across the cast.
-- Do not replace the blocked list with one new repeated shortlist. Mix ordinary, occupational, regional, devotional, nickname-based, and unusual names as the setting supports; not every fantasy person needs a lyrical or ornate name.`;
+- Build names from the setting's culture, region, geography, and community. Let people and places from the same region share a subtle naming logic, while varying sounds, syllable counts, initials, and endings.
+- Do not replace the blocked list with one new repeated shortlist. Mix ordinary, occupational, regional, nickname-based, and unusual names; not every person or place needs a lyrical or ornate name.`;

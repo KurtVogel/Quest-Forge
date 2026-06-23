@@ -28,10 +28,10 @@ describe('player narrative authority guidance', () => {
         expect(prompt).toContain('does not automatically create external creatures, objects, exits');
         expect(prompt).toContain('treat it as a wish, joke, or attempted idea — not established reality');
         expect(prompt).toContain('without scolding the player');
-        expect(prompt).toContain('## NPC NAME DIVERSITY — AVOID THE LLM FANTASY DEFAULTS');
+        expect(prompt).toContain('## NAME DIVERSITY — AVOID LLM FANTASY DEFAULTS');
         expect(prompt).toContain('Elara, Elora, Elyra, Silas, Sylas, Thorne');
         expect(prompt).toContain('Never rename or erase an established name');
-        expect(prompt).toContain("Build names from the person's culture, region, class, age, and community");
+        expect(prompt).toContain("Build names from the setting's culture, region, geography, and community");
         expect(prompt).not.toContain('"Mira the Innkeeper"');
         expect(prompt).not.toContain('"name": "Garrick"');
     });
