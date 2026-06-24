@@ -60,7 +60,11 @@ async function typeIntoInput(page, text) {
 
 async function waitForLLM(page) {
     await page.waitForFunction(() => {
-        return !document.querySelector('.chat-stop-btn') && !document.querySelector('.typing-indicator');
+        const hasStopBtn = !!document.querySelector('.chat-stop-btn');
+        const hasTyping = !!document.querySelector('.typing-indicator');
+        const textarea = document.querySelector('textarea.chat-input');
+        const hasCheckPanel = !!document.querySelector('.roleplay-check-panel');
+        return !hasStopBtn && !hasTyping && textarea && (!textarea.disabled || hasCheckPanel);
     }, { timeout: 120000 });
     await delay(2500);
 }
@@ -94,16 +98,17 @@ async function lastAssistantText(page) {
 }
 
 function summarizeState(save) {
-    if (!save) return null;
+    if (!save || !save.state) return null;
+    const state = save.state;
     return {
-        location: save.session?.currentLocation || save.currentLocation || null,
-        messageCount: (save.messages || []).length,
-        journalEntries: (save.journal || []).map((entry, index) => ({
+        location: save.location || state.currentLocation || null,
+        messageCount: (state.messages || []).length,
+        journalEntries: (state.journal || []).map((entry, index) => ({
             index: index + 1,
             location: entry.location || null,
             summary: String(entry.summary || '').slice(0, 220),
         })),
-        storyMemory: (save.storyMemory || []).map(card => ({
+        storyMemory: (state.storyMemory || []).map(card => ({
             id: card.id,
             type: card.type,
             status: card.status,
@@ -112,9 +117,9 @@ function summarizeState(save) {
             salience: card.salience,
             lastUsedAt: card.lastUsedAt || null,
         })),
-        worldFactsCount: (save.worldFacts || []).length,
-        npcCount: (save.npcs || []).length,
-        fronts: (save.fronts || []).map(front => ({
+        worldFactsCount: (state.worldFacts || []).length,
+        npcCount: (state.npcs || []).length,
+        fronts: (state.fronts || []).map(front => ({
             id: front.id,
             title: front.title,
             clock: front.clock,
@@ -122,7 +127,7 @@ function summarizeState(save) {
             portentStage: front.portentStage,
             lastMovementReason: front.lastMovementReason || null,
         })),
-        questsActive: (save.quests || []).filter(q => q.status === 'active').length,
+        questsActive: (state.quests || []).filter(q => q.status === 'active').length,
     };
 }
 
@@ -212,6 +217,46 @@ const TURN_ACTIONS = [
     {
         label: '20 — orchard close',
         text: 'At the orchard I compare the sundial shadow to my sketch and look for the keeper I promised to help.',
+    },
+    {
+        label: '21 — set up camp and long rest',
+        text: 'Feeling exhausted from my long travels, I pitch a tent near the orchard and settle in for a long rest under the stars.',
+    },
+    {
+        label: '22 — wake up refreshed',
+        text: 'I wake up at dawn feeling fully refreshed, pack up my camp, and check if my spellbook is safe.',
+    },
+    {
+        label: '23 — chat with keeper Lannis',
+        text: 'I meet the keeper Lannis in the orchard and show him the star charts, asking if he has any advice on fixing the sundial.',
+    },
+    {
+        label: '24 — afternoon rest',
+        text: 'I spend the warm afternoon sitting by the well, taking a short rest to recharge my energy.',
+    },
+    {
+        label: '25 — travel back to conservatory',
+        text: 'I head back to the Whispering Conservatory to check if any new sapphire orchids have blossomed.',
+    },
+    {
+        label: '26 — buy healing potion',
+        text: 'I talk to the apprentice acolyte and ask if I can purchase a potion of healing to prepare for any dangers ahead.',
+    },
+    {
+        label: '27 — study strange artifact',
+        text: 'I examine a metallic, ancient sphere on the conservatory bookshelf, trying to identify its properties using my Arcana knowledge.',
+    },
+    {
+        label: '28 — evening meditation',
+        text: 'I sit quietly on a bench under the glass dome, taking a short rest to regain my focus.',
+    },
+    {
+        label: '29 — final return to orchard',
+        text: 'I return to the Sunlit Orchard, determined to inspect the sundial one last time before leaving Eldoria.',
+    },
+    {
+        label: '30 — check into inn and rest',
+        text: 'As night falls, I check into the Orchard Tavern, pay the keeper for a warm room, and take a long rest in a soft bed.',
     },
 ];
 
@@ -358,6 +403,9 @@ async function run() {
             label: action.label,
             responsePreview: response.slice(0, 400),
         });
+        if (turnLog.length === 22) {
+            await page.screenshot({ path: path.join(REPORT_DIR, 'after_rest.png') }).catch(() => {});
+        }
     }
 
     const midSave = await loadAutosave(page);
