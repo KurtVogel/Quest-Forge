@@ -55,7 +55,10 @@ export default function ChatPanel() {
             const result = await maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current);
             lastSummarizedRef.current = result.index;
             if (result.journalEntry && stateRef.current.settings.apiKey && stateRef.current.settings.llmProvider === 'gemini') {
-                await addMemory(stateRef.current.settings.apiKey, result.journalEntry.summary, 'journal').catch(() => {});
+                const journalText = result.journalEntry.location
+                    ? `[Location: ${result.journalEntry.location}] ${result.journalEntry.summary}`
+                    : result.journalEntry.summary;
+                await addMemory(stateRef.current.settings.apiKey, journalText, 'journal').catch(() => {});
             }
         } catch (e) {
             console.error('[Journal RAG Seeding] Failed:', e);
@@ -450,7 +453,11 @@ Translate the player's committed action into the single bounded combat_exchange 
                     // model wording mistake cannot become a long-lived semantic memory.
                     if (['victory', 'defeat', 'escaped'].includes(result.terminal)
                         && latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
-                        addMemory(latest.settings.apiKey, narrative.slice(0, 500), 'narrative').catch(() => {});
+                        const loc = latest.currentLocation;
+                        const narrativeText = loc
+                            ? `[Location: ${loc}] ${narrative.slice(0, 500)}`
+                            : narrative.slice(0, 500);
+                        addMemory(latest.settings.apiKey, narrativeText, 'narrative').catch(() => {});
                     }
                 }
                 runAutoSummarize();
@@ -496,7 +503,11 @@ Translate the player's committed action into the single bounded combat_exchange 
                 dispatch,
             }).catch(() => {});
             if (latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
-                addMemory(latest.settings.apiKey, finalNarration.content.slice(0, 500), 'narrative').catch(() => {});
+                const loc = latest.currentLocation;
+                const narrativeText = loc
+                    ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
+                    : finalNarration.content.slice(0, 500);
+                addMemory(latest.settings.apiKey, narrativeText, 'narrative').catch(() => {});
             }
         }
         runAutoSummarize();
@@ -594,7 +605,11 @@ Translate the player's committed action into the single bounded combat_exchange 
             payload: { role: 'user', content: trimmed },
         });
         if (stateRef.current.settings.apiKey && stateRef.current.settings.llmProvider === 'gemini') {
-            addMemory(stateRef.current.settings.apiKey, trimmed.slice(0, 500), 'player').catch(() => {});
+            const loc = stateRef.current.currentLocation;
+            const playerText = loc
+                ? `[Location: ${loc}] ${trimmed.slice(0, 500)}`
+                : trimmed.slice(0, 500);
+            addMemory(stateRef.current.settings.apiKey, playerText, 'player').catch(() => {});
         }
 
         setIsLoading(true);
@@ -649,7 +664,11 @@ Translate the player's committed action into the single bounded combat_exchange 
                     dispatch,
                 }).catch(() => {});
                 if (latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
-                    addMemory(latest.settings.apiKey, finalNarration.content.slice(0, 500), 'narrative').catch(() => {});
+                    const loc = latest.currentLocation;
+                    const narrativeText = loc
+                        ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
+                        : finalNarration.content.slice(0, 500);
+                    addMemory(latest.settings.apiKey, narrativeText, 'narrative').catch(() => {});
                 }
             }
 
