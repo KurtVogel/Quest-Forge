@@ -9,6 +9,11 @@
  */
 
 import { sendMessage } from '../llm/adapter.js';
+import {
+    briefNpcFieldForPrompt,
+    classifyNpcCandidate,
+    curateNpcsForPrompt,
+} from './npcRoster.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
 
 export function normalizeLocationName(loc) {
@@ -31,12 +36,15 @@ Your output MUST be valid JSON with this exact structure:
   "npcs_encountered": [
     {
       "name": "NPC Name",
+      "kind": "character|creature|ephemeral",
+      "rosterEligible": true,
       "disposition": "friendly|neutral|hostile|wary|unknown",
       "notes": "brief note about interaction",
       "personality": "key personality trait(s) observed",
       "goals": "what this NPC wants, if revealed",
       "secrets": "any secrets or hidden info hinted at",
-      "lastLocation": "where they were last seen"
+      "basedIn": "where they are currently rooted — update when fiction relocates them",
+      "lastLocation": "where they were last seen this batch"
     }
   ],
   "location": "Current location name or null if unchanged",
@@ -50,8 +58,9 @@ Your output MUST be valid JSON with this exact structure:
 Rules:
 - Be concise but capture ALL important narrative beats
 - Track NPCs by their EXACT name as written (never rename or paraphrase it — their record forks if the name drifts) and how they feel about the player
+- Only include npcs_encountered entries worth tracking across sessions: named characters with dialogue, rivalry, debt, secrets, or recurring story weight. Use kind "creature" or "ephemeral" and rosterEligible false for nameless combat fodder (generic goblins, numbered guards, one-line minions). Combat fodder does not belong in the durable roster.
 - Preserve proper nouns and numbers verbatim — never approximate or invent them
-- Note location changes
+- Note location changes. basedIn is their current world anchor (can change); lastLocation is where they were seen
 - World facts should be durable truths: deaths, alliances, betrayals, discoveries, established history
 - Focus on what HAPPENED, not what might happen
 - Output ONLY the JSON, no other text`;
@@ -123,16 +132,31 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         if (Array.isArray(summary.npcs_encountered)) {
             for (const npc of summary.npcs_encountered) {
                 if (!npc.name) continue;
+                const classified = classifyNpcCandidate({
+                    name: npc.name,
+                    kind: npc.kind,
+                    rosterEligible: npc.rosterEligible ?? npc.roster_eligible,
+                    disposition: npc.disposition,
+                    lastNotes: npc.notes,
+                    personality: npc.personality,
+                    goals: npc.goals,
+                    secrets: npc.secrets,
+                    lastLocation: npc.lastLocation,
+                    basedIn: npc.basedIn,
+                });
+                if (!classified.allowRoster) continue;
                 dispatch({
                     type: 'UPDATE_NPC',
                     payload: {
                         name: npc.name,
+                        kind: classified.kind,
                         disposition: npc.disposition,
                         lastNotes: npc.notes,
                         ...(npc.personality && { personality: npc.personality }),
                         ...(npc.goals && { goals: npc.goals }),
                         ...(npc.secrets && { secrets: npc.secrets }),
                         ...(npc.lastLocation && { lastLocation: npc.lastLocation }),
+                        ...(npc.basedIn && { basedIn: npc.basedIn }),
                     },
                 });
             }
@@ -230,12 +254,12 @@ export function buildJournalContext(journal, npcs, currentLocation) {
         }
     }
 
-    // NPC tracker — show most recently active NPCs (cap at 8, rest handled by RAG)
-    if (npcs.length > 0) {
+    // NPC tracker — curated by importance, pins, location, and tension (not recency alone)
+    const rosterNpcs = (npcs || []).filter(n => n.rosterTier === 'character' || !n.rosterTier);
+    if (rosterNpcs.length > 0) {
         const MAX_PROMPT_NPCS = 8;
-        const sorted = [...npcs].sort((a, b) => (b.lastSeen || b.firstMet || 0) - (a.lastSeen || a.firstMet || 0));
-        const shown = sorted.slice(0, MAX_PROMPT_NPCS);
-        const hiddenCount = Math.max(0, npcs.length - MAX_PROMPT_NPCS);
+        const shown = curateNpcsForPrompt(rosterNpcs, { location: currentLocation, limit: MAX_PROMPT_NPCS });
+        const hiddenCount = Math.max(0, rosterNpcs.length - shown.length);
 
         const npcList = shown.map(n => {
             const disp = n.disposition ? ` (${n.disposition})` : '';
@@ -246,12 +270,15 @@ export function buildJournalContext(journal, npcs, currentLocation) {
                 ? `relationship: ${[...n.relationshipHistory.map(h => h.from), n.disposition].join(' → ')}`
                 : '';
             const extras = [
-                n.personality && `personality: ${n.personality}`,
-                n.goals && `wants: ${n.goals}`,
-                n.agenda && `agenda: ${n.agenda}`,
-                n.secrets && `secret: ${n.secrets}`,
-                n.relationshipTension && `tension: ${n.relationshipTension}`,
+                n.pinned && 'pinned',
+                n.importance && `importance: ${n.importance}/5`,
+                n.personality && `personality: ${briefNpcFieldForPrompt(n.personality)}`,
+                n.goals && `wants: ${briefNpcFieldForPrompt(n.goals)}`,
+                n.agenda && `agenda: ${briefNpcFieldForPrompt(n.agenda)}`,
+                n.secrets && `secret: ${briefNpcFieldForPrompt(n.secrets)}`,
+                n.relationshipTension && `tension: ${briefNpcFieldForPrompt(n.relationshipTension)}`,
                 Number.isFinite(n.trust) && `trust: ${n.trust}/100`,
+                n.basedIn && `based in: ${n.basedIn}`,
                 n.lastLocation && `last seen: ${n.lastLocation}`,
                 arc,
                 Array.isArray(n.callbackHooks) && n.callbackHooks.length > 0 && `hooks: ${n.callbackHooks.slice(0, 2).join('; ')}`,

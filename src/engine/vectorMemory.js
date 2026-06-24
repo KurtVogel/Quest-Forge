@@ -183,8 +183,24 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55)
     const queryVector = await embedText(apiKey, query, { inputType: 'query' });
     if (!queryVector) return [];
 
+    const categoryBoost = {
+        npc_character: 0.08,
+        story_relationship: 0.07,
+        story_npcAgenda: 0.07,
+        story_callback: 0.05,
+        story_promise: 0.05,
+        story_playerCanon: 0.04,
+        world_fact: 0.03,
+        journal: 0.02,
+        narrative: -0.04,
+        npc: 0.02,
+    };
+
     const scored = memoryStore
-        .map(m => ({ ...m, score: cosineSimilarity(queryVector, m.vector) }))
+        .map(m => ({
+            ...m,
+            score: cosineSimilarity(queryVector, m.vector) + (categoryBoost[m.category] || 0),
+        }))
         .filter(m => m.score >= minScore)
         .sort((a, b) => b.score - a.score)
         .slice(0, topN);

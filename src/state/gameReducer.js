@@ -11,6 +11,14 @@ import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.j
 import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js';
 import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
+import {
+    buildStoryMemoryPromotion,
+    classifyNpcCandidate,
+    listArchivableFodder,
+    migrateLegacyNpc,
+    normalizeNpcRecord,
+    namesMatch,
+} from '../engine/npcRoster.js';
 import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
 import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 import { sanitizePendingRoleplayCheck } from '../engine/roleplayCheck.js';
@@ -476,17 +484,36 @@ function pruneBlankFields(payload) {
  * This is what lets a just-met NPC be created the moment they appear instead of waiting
  * for a journal summary to happen to mention them.
  */
+export function mergeNpcUpdate(npcs, payload) {
+    return upsertNpc(npcs, payload);
+}
+
+export function archiveNpcBulk(npcs = [], ids = []) {
+    const idSet = new Set((ids || []).filter(Boolean));
+    if (idSet.size === 0) return npcs;
+    return npcs.map(npc => (
+        idSet.has(npc.id)
+            ? normalizeNpcRecord({ ...npc, rosterTier: 'archived_creature', kind: 'creature', pinned: false })
+            : npc
+    ));
+}
+
 function upsertNpc(npcs, payload) {
     if (!payload || (!payload.id && !payload.name)) return npcs;
     const update = pruneBlankFields({ ...payload, lastSeen: Date.now() });
 
     const idx = npcs.findIndex(n =>
         (payload.id && n.id === payload.id) ||
-        (payload.name && n.name?.toLowerCase() === payload.name.toLowerCase())
+        (payload.name && namesMatch(n.name, payload.name))
     );
 
+    const existing = idx !== -1 ? npcs[idx] : null;
+    const classified = classifyNpcCandidate(payload, existing);
+
     if (idx !== -1) {
-        const existing = npcs[idx];
+        if (!classified.allowRoster && existing.rosterTier !== 'character' && !existing.pinned) {
+            return npcs;
+        }
         // Record a genuine disposition shift between known stances (skip the initial
         // 'unknown' → X establishment) so the relationship's arc is preserved. A friend
         // turning hostile — or an enemy won over — is exactly the beat the DM and player
@@ -500,12 +527,22 @@ function upsertNpc(npcs, payload) {
                 { from: existing.disposition, to: update.disposition, at: Date.now(), note: update.lastNotes || '' },
             ].slice(-MAX_NPC_HISTORY);
         }
-        return npcs.map((npc, i) => (i === idx ? { ...npc, ...update } : npc));
+        const nameToKeep = (update.name && update.name.length > (existing.name || '').length) ? update.name : existing.name;
+        const merged = normalizeNpcRecord({
+            ...existing,
+            ...update,
+            name: nameToKeep,
+            rosterTier: classified.rosterTier || existing.rosterTier || 'character',
+            kind: classified.kind || existing.kind || 'character',
+            importance: classified.importance,
+            pinned: update.pinned ?? existing.pinned,
+        });
+        return npcs.map((npc, i) => (i === idx ? merged : npc));
     }
 
-    // No match — only create when we can name them (an id-only miss is a stale update).
-    if (!payload.name) return npcs;
-    return [...npcs, {
+    // No match — only create roster-worthy characters.
+    if (!payload.name || !classified.allowRoster) return npcs;
+    return [...npcs, normalizeNpcRecord({
         id: `npc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
         firstMet: Date.now(),
         disposition: 'unknown',
@@ -513,6 +550,7 @@ function upsertNpc(npcs, payload) {
         goals: '',
         secrets: '',
         knownFacts: [],
+        basedIn: null,
         lastLocation: null,
         relationshipHistory: [],
         agenda: '',
@@ -520,8 +558,21 @@ function upsertNpc(npcs, payload) {
         trust: null,
         privateNotes: '',
         callbackHooks: [],
+        pinned: false,
         ...update,
-    }];
+        rosterTier: classified.rosterTier || 'character',
+        kind: classified.kind || 'character',
+        importance: classified.importance,
+    })];
+}
+
+function findTouchedNpc(after = [], payload = {}) {
+    const id = payload.id;
+    const name = payload.name;
+    return after.find(npc =>
+        (id && npc.id === id)
+        || (name && namesMatch(npc.name, name))
+    ) || null;
 }
 
 export function gameReducer(state, action) {
@@ -1678,8 +1729,78 @@ export function gameReducer(state, action) {
         // DM's inline npc_updates can introduce a brand-new NPC the instant it appears,
         // instead of being silently dropped until the next journal pass.
         case 'ADD_NPC':
-        case 'UPDATE_NPC':
-            return { ...state, npcs: upsertNpc(state.npcs, action.payload) };
+        case 'UPDATE_NPC': {
+            const nextNpcs = upsertNpc(state.npcs, action.payload);
+            if (nextNpcs === state.npcs) return state;
+            const touched = findTouchedNpc(nextNpcs, action.payload);
+            let storyMemory = state.storyMemory || [];
+            if (touched) {
+                const promotion = buildStoryMemoryPromotion(touched);
+                if (promotion) {
+                    const idx = findStoryMemoryMatch(storyMemory, promotion);
+                    if (idx === -1) {
+                        const card = normalizeStoryMemoryCard(promotion);
+                        if (card) storyMemory = [...storyMemory, card];
+                    } else {
+                        storyMemory = storyMemory.map((card, i) => (
+                            i === idx ? normalizeStoryMemoryCard({ ...promotion, id: card.id }, card) : card
+                        ));
+                    }
+                }
+            }
+            return { ...state, npcs: nextNpcs, storyMemory };
+        }
+
+        case 'PIN_NPC':
+            return {
+                ...state,
+                npcs: (state.npcs || []).map(npc => (
+                    npc.id === action.payload?.id
+                        ? normalizeNpcRecord({
+                            ...npc,
+                            pinned: !!action.payload.pinned,
+                            rosterTier: 'character',
+                            importance: 5,
+                        })
+                        : npc
+                )),
+            };
+
+        case 'ARCHIVE_NPC':
+            return {
+                ...state,
+                npcs: (state.npcs || []).map(npc => (
+                    npc.id === action.payload?.id
+                        ? normalizeNpcRecord({ ...npc, rosterTier: 'archived_creature', kind: 'creature', pinned: false })
+                        : npc
+                )),
+            };
+
+        case 'MIGRATE_NPC_ROSTER': {
+            const needsMigration = (state.npcs || []).some(npc => !npc.rosterTier);
+            if (!needsMigration) return state;
+            return { ...state, npcs: (state.npcs || []).map(npc => migrateLegacyNpc(npc)) };
+        }
+
+        case 'ARCHIVE_NPC_BULK': {
+            const ids = action.payload?.ids || [];
+            if (ids.length === 0) return state;
+            return { ...state, npcs: archiveNpcBulk(state.npcs, ids) };
+        }
+
+        case 'ARCHIVE_GENERIC_FODDER': {
+            const fodder = listArchivableFodder(state.npcs || []);
+            if (fodder.length === 0) return state;
+            const ids = new Set(fodder.map(npc => npc.id));
+            return {
+                ...state,
+                npcs: state.npcs.map(npc => (
+                    ids.has(npc.id)
+                        ? normalizeNpcRecord({ ...npc, rosterTier: 'archived_creature', kind: 'creature', pinned: false })
+                        : npc
+                )),
+            };
+        }
 
         case 'SET_LOCATION':
             return { ...state, currentLocation: action.payload };
@@ -2068,20 +2189,7 @@ export function gameReducer(state, action) {
                     // index from a trimmed cloud save or an older save format.
                     prunedMessageCount: (validated.messages || []).filter(m => m.summarized).length,
                 },
-                npcs: (action.payload.npcs || []).map(npc => ({
-                    personality: '',
-                    goals: '',
-                    secrets: '',
-                    knownFacts: [],
-                    lastLocation: null,
-                    relationshipHistory: [],
-                    agenda: '',
-                    relationshipTension: '',
-                    trust: null,
-                    privateNotes: '',
-                    callbackHooks: [],
-                    ...npc,
-                })),
+                npcs: (action.payload.npcs || []).map(npc => migrateLegacyNpc(npc)),
                 ui: { ...initialGameState.ui },
             };
         }

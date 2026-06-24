@@ -28,6 +28,7 @@ npm run preview   # serve the built dist/ locally
 npm run lint      # ESLint (flat config in eslint.config.js)
 npm test          # vitest (engine math, reducer death saves, parser fixtures)
 npm run eval:combat # optional real-provider combat pacing eval; requires GEMINI_API_KEY or OPENAI_API_KEY in the shell
+npm run eval:memory # optional 20-turn memory/fronts tuning playtest; requires GEMINI_API_KEY + dev server
 ```
 
 Deploy hosting (build first): `npx firebase deploy --only hosting --project quest-forge-99ab1`

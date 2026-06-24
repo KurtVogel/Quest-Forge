@@ -10,6 +10,7 @@
  */
 
 import { sendMessage } from './adapter.js';
+import { classifyNpcCandidate, curateNpcsForPrompt } from '../engine/npcRoster.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 
 const SCRIBE_MODEL = 'gemini-2.5-flash';
@@ -28,13 +29,16 @@ Output ONLY valid JSON:
   "npc_updates": [
     {
       "name": "NPC name",
+      "kind": "character|creature|ephemeral",
+      "rosterEligible": true,
       "disposition": "friendly|neutral|hostile|wary|unknown",
       "lastNotes": "brief note on what happened with them this turn",
       "personality": "trait observed (only if newly revealed)",
       "goals": "what they want (only if newly revealed)",
       "secrets": "hidden info (only if newly hinted at or revealed)",
       "appearance": "concrete physical/visual description — build, face, hair, clothing, distinguishing features (only if newly described)",
-      "lastLocation": "where they are now (only if mentioned)",
+      "basedIn": "place they are currently rooted — town they command, post they hold, territory they haunt. Update when fiction relocates or reassigns them; omit if unknown",
+      "lastLocation": "where they were in this specific exchange (only if mentioned)",
       "agenda": "what this NPC is likely trying to accomplish next (only if implied or revealed)",
       "relationshipTension": "compact note about attraction, rivalry, resentment, debt, loyalty, fear, or trust strain",
       "trust": 0,
@@ -69,6 +73,8 @@ Rules:
 - When AUTHORITATIVE ENGINE STATE is provided, it overrides the prose. Never record a combatant dead, alive, fled, surrendered, victorious, or defeated contrary to that state.
 - Keep story_memory compact; do not duplicate ordinary world_facts unless the memory has callback value.
 - Only include npc_updates for NPCs that appeared in this specific exchange
+- basedIn is the NPC's current anchor in the world (not permanent): update it when they are reassigned, relocate, or fiction establishes a new base. lastLocation is ephemeral — where they were this turn
+- Use kind "character" and rosterEligible true only for named people worth tracking across sessions (dialogue, rivalry, debt, secrets, recurring villains, quest givers). Use kind "creature" or "ephemeral" with rosterEligible false for nameless combat fodder, generic goblins/guards, or one-line minions that should not enter the durable roster.
 - Capture "appearance"/"player_appearance" only from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation, so accuracy matters.
 - Only include fields you have actual information for — omit empty/unknown fields
 - DO NOT alter explicit words or details: copy names, proper nouns, numbers, and specific phrases exactly as the DM wrote them — never rename, paraphrase, translate, or invent. Refer to each NPC by the exact name used in the narrative so their record never forks.
@@ -145,10 +151,22 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         }
 
         if (Array.isArray(extracted.npc_updates) && extracted.npc_updates.length > 0) {
+            let rostered = 0;
             for (const npc of extracted.npc_updates) {
-                dispatch({ type: 'UPDATE_NPC', payload: npc });
+                const classified = classifyNpcCandidate(npc);
+                if (!classified.allowRoster) continue;
+                dispatch({
+                    type: 'UPDATE_NPC',
+                    payload: {
+                        ...npc,
+                        kind: classified.kind,
+                    },
+                });
+                rostered += 1;
             }
-            console.log(`[Scribe] Updated ${extracted.npc_updates.length} NPC(s)`);
+            if (rostered > 0) {
+                console.log(`[Scribe] Updated ${rostered} roster NPC(s)`);
+            }
         }
 
         const storyMemory = Array.isArray(extracted.story_memory)
@@ -179,6 +197,7 @@ Output ONLY valid JSON:
   "npc_updates": [
     {
       "name": "Exact NPC name",
+      "basedIn": "current anchor — command post, town, territory. Update when they relocate; omit if unknown",
       "agenda": "what they likely try next",
       "relationshipTension": "attraction, rivalry, fear, debt, loyalty, distrust, or leverage",
       "trust": 50,
@@ -221,7 +240,10 @@ Rules:
 
 export async function runNpcFrontReflection({ state, dispatch, cadence = null }) {
     if (!state?.settings?.apiKey) return;
-    const npcs = (state.npcs || []).slice(-12);
+    const npcs = curateNpcsForPrompt(state.npcs || [], {
+        location: state.currentLocation,
+        limit: 12,
+    });
     const fronts = state.fronts || [];
     if (npcs.length === 0 && fronts.length === 0) return;
 
@@ -271,7 +293,12 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
 
         if (Array.isArray(reflected.npc_updates)) {
             for (const npc of reflected.npc_updates) {
-                dispatch({ type: 'UPDATE_NPC', payload: npc });
+                const classified = classifyNpcCandidate(npc);
+                if (!classified.allowRoster) continue;
+                dispatch({
+                    type: 'UPDATE_NPC',
+                    payload: { ...npc, kind: classified.kind },
+                });
             }
         }
         if (cadence?.id && Number.isFinite(cadence.journalEnd)) {

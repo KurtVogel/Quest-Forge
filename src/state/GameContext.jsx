@@ -3,7 +3,7 @@
  */
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useReducer, useEffect, useCallback, useState, useRef } from 'react';
-import { gameReducer, initialGameState } from './gameReducer.js';
+import { archiveNpcBulk, gameReducer, initialGameState, mergeNpcUpdate } from './gameReducer.js';
 import { loadSettings, saveSettings, autoSave } from './persistence.js';
 import { PROVIDERS } from '../llm/adapter.js';
 import { initializeFirebase } from '../config/firebase.js';
@@ -12,11 +12,13 @@ import { subscribeToAuth } from './auth.js';
 const GameContext = createContext(null);
 const GameDispatchContext = createContext(null);
 const SaveToastContext = createContext(null);
+const FlushAutoSaveContext = createContext(null);
 
 export function GameProvider({ children }) {
     // null = hidden, otherwise { status: 'local' | 'cloud' | 'cloud-error' }
     const [saveToast, setSaveToast] = useState(null);
     const saveToastTimer = useRef(null);
+    const stateRef = useRef(null);
 
     const showSaveToast = useCallback((status = 'local') => {
         setSaveToast({ status });
@@ -44,10 +46,47 @@ export function GameProvider({ children }) {
         return initial;
     });
 
+    useEffect(() => {
+        stateRef.current = state;
+    }, [state]);
+
+    const flushAutoSave = useCallback(async ({ npcUpdate = null, npcBulkArchiveIds = null } = {}) => {
+        let current = stateRef.current;
+        if (!current?.session?.id || !current.character) return;
+
+        if (npcUpdate) {
+            current = {
+                ...current,
+                npcs: mergeNpcUpdate(current.npcs || [], npcUpdate),
+            };
+        } else if (Array.isArray(npcBulkArchiveIds) && npcBulkArchiveIds.length > 0) {
+            current = {
+                ...current,
+                npcs: archiveNpcBulk(current.npcs, npcBulkArchiveIds),
+            };
+        }
+
+        await autoSave({
+            ...current,
+            session: {
+                ...current.session,
+                updatedAt: new Date().toISOString(),
+            },
+        });
+        showSaveToast('local');
+    }, [showSaveToast]);
+
     // Auto-save settings when they change
     useEffect(() => {
         saveSettings(state.settings);
     }, [state.settings]);
+
+    // Grandfather legacy NPC records from long-running saves without requiring a reload.
+    useEffect(() => {
+        if ((state.npcs || []).some(npc => !npc.rosterTier)) {
+            dispatch({ type: 'MIGRATE_NPC_ROSTER' });
+        }
+    }, [state.npcs]);
 
     // Initialize Firebase and Auth listener when config is present
     useEffect(() => {
@@ -99,14 +138,35 @@ export function GameProvider({ children }) {
         }
     // Autosave is intentionally keyed to gameplay state, not every state object field.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.character, state.inventory, state.messages, state.rollHistory, state.quests, state.party, state.combat, state.fronts, state.pendingRoleplayCheck, state.session.id, state.session.frontDirector, state.user?.uid, showSaveToast]);
+    }, [
+        state.character,
+        state.inventory,
+        state.messages,
+        state.rollHistory,
+        state.quests,
+        state.party,
+        state.combat,
+        state.fronts,
+        state.pendingRoleplayCheck,
+        state.npcs,
+        state.journal,
+        state.worldFacts,
+        state.storyMemory,
+        state.currentLocation,
+        state.session.id,
+        state.session.frontDirector,
+        state.user?.uid,
+        showSaveToast,
+    ]);
 
     return (
         <GameContext.Provider value={state}>
             <GameDispatchContext.Provider value={dispatch}>
-                <SaveToastContext.Provider value={saveToast}>
-                    {children}
-                </SaveToastContext.Provider>
+                <FlushAutoSaveContext.Provider value={flushAutoSave}>
+                    <SaveToastContext.Provider value={saveToast}>
+                        {children}
+                    </SaveToastContext.Provider>
+                </FlushAutoSaveContext.Provider>
             </GameDispatchContext.Provider>
         </GameContext.Provider>
     );
@@ -142,9 +202,18 @@ export function useGameDispatch() {
 /**
  * Combined hook for convenience.
  */
+export function useFlushAutoSave() {
+    const flush = useContext(FlushAutoSaveContext);
+    if (!flush) {
+        throw new Error('useFlushAutoSave must be used within a GameProvider');
+    }
+    return flush;
+}
+
 export function useGame() {
     return {
         state: useGameState(),
         dispatch: useGameDispatch(),
+        flushAutoSave: useFlushAutoSave(),
     };
 }

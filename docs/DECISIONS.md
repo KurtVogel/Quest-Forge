@@ -8,6 +8,34 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-23 · NPC roster uses promotion gating; legacy NPCs are grandfathered as characters.**
+Combat fodder (`creature`/`ephemeral`, generic names, combat-only notes) does not enter the durable
+`state.npcs` roster. Named people with dialogue, rivalry, tension, hooks, or explicit
+`rosterEligible`/`kind: character` are promoted. Existing saves migrate every pre-tier NPC to
+`rosterTier: character` on load or first mount so long-running campaigns never lose early
+antagonists. Prompt injection curates characters by importance (pins, tension, location, hooks),
+not `lastSeen` alone. Players can Pin or Archive from Journal → Characters. Relationship tension
+can auto-create story-memory cards for long-horizon callbacks.
+
+**2026-06-23 · Wizard/Cleric full spellcasting waits until the memory layer is proven in live play.**
+Fighter and Rogue combat mechanics are now in good shape, but casters require spell slots, a
+curated spell catalog, save-based profiles, and concentration — a large engine expansion.
+Fronts, story memory, RAG, journal cadence, and location-transition recall are the product
+differentiator and still need keyed real-play tuning. Ship memory excellence first; open
+spellcasting only after `eval:memory` and manual campaigns show callbacks and world pressure
+feel right. Basic Wizard/Cleric attack-bolt combat profiles remain for low-level play.
+
+**2026-06-23 · Natural 20 on out-of-combat checks is auto-success with a narration-only critical-success signal.**
+When the engine rolls d20=20 on a non-combat check or save, the result succeeds regardless of DC
+and the roll summary labels critical success. The DM prompt instructs an exceptional fictional
+benefit beyond mere success without inflating mechanics. Combat nat-20 behavior is unchanged.
+
+**2026-06-23 · Rogue combat v1 is engine-owned in the exchange machine.**
+Rogues pick two Expertise skills at creation. In combat: Sneak Attack adds scaling d6 damage when
+advantage applies or a companion is present; level 2+ may pair one main action with a Cunning
+Action slot (dash, disengage, stealth check); level 5+ Uncanny Dodge halves the first damaging hit
+per exchange. Out-of-combat Rogue skills use the same roll/check paths as other classes.
+
 **2026-06-23 · Deterministic location-transition history ledger is injected into the DM prompt; new journal entries are dynamically seeded to RAG mid-session.** To solve context-window pruning issues where the DM forgot events immediately prior to entering a location, the engine now stores a `location` field on each journal entry and scans backward through the journal list to find the earliest contiguous entry of the `currentLocation` (the arrival) and the entry immediately preceding it (what happened right before). This chronological ledger is formatted as `## LOCATION TRANSITION HISTORY` and injected directly into the DM's prompt, bypassing semantic RAG limitations for timeline queries. Additionally, newly created journal entries are immediately seeded into RAG during active play via `runAutoSummarize` rather than waiting for a page reload, and location names are normalized using a strict normalizer (stripping punctuation, extra whitespace, and leading "the" articles) for robust matching.
 
 **2026-06-22 · Outside-combat dice are proposed and negotiable before rolling; combat dice
@@ -493,9 +521,10 @@ race/class data — the DM↔engine trust rule applied to files. Heroes start ro
 adventures rested (full HP, fresh resources); importing into an *ongoing* campaign was
 deliberately excluded (tangles combat state, DM context, and XP coherence).
 
-**2026-06-11 · Test-play with Fighter only for now.** Magic classes need real design work
-(spell slots, curated lists, theater-of-mind area handling) — see IDEAS.md "Spellcasting".
-Rogue is the agreed next class when the fighter phase ends. Don't build caster mechanics ad hoc.
+**2026-06-11 · Test-play with Fighter only for now.** *(Superseded 2026-06-23 for casters;
+Rogue v1 shipped.)* Magic classes need real design work (spell slots, curated lists,
+theater-of-mind area handling) — see IDEAS.md "Spellcasting". Rogue shipped after the fighter
+phase; Wizard/Cleric remain deferred until memory tuning passes. Don't build caster mechanics ad hoc.
 
 **2026-06-11 · Campaign structure = hidden "fronts", not generated act outlines.** Acts
 produce generic, railroady plots. Fronts (hidden threats with goals that advance off-screen

@@ -284,7 +284,7 @@ When game events occur, include a structured JSON block at the END of your respo
     { "fact": "The village of Thornhaven has been burned by the Iron Claw bandits.", "category": "location" }
   ],
   "npc_updates": [
-    { "name": "<culture-grounded NPC name>", "disposition": "friendly", "lastNotes": "Gave the player a room and hinted at a missing merchant", "lastLocation": "The Rusty Flagon, Millhaven" }
+    { "name": "<culture-grounded NPC name>", "disposition": "friendly", "lastNotes": "Gave the player a room and hinted at a missing merchant", "basedIn": "Millhaven", "lastLocation": "The Rusty Flagon, Millhaven" }
   ],
   "front_updates": [
     { "id": "front-local-pressure", "clock": 1, "stage": 1, "publicHints": ["Refugees whisper that the north road is watched."], "notes": "Advanced because the party spent a night away from the road." }
@@ -336,8 +336,10 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - These facts persist forever and are shown to you at the start of every future response
 
 ## NPC UPDATE INSTRUCTIONS
-- Use \`npc_updates\` whenever an NPC appears in the scene, especially if their disposition or status changes
-- Always include \`name\` and \`lastNotes\`; include other fields only when newly learned
+- Use \`npc_updates\` only for **named characters worth tracking across sessions** — rivals, authority figures, quest givers, recurring villains, allies with relationship weight, anyone the player may meet again.
+- Do **not** emit \`npc_updates\` for nameless combat fodder, generic goblins/guards, or numbered minions. Those belong in \`combat_start\` / \`enemy_updates\` only.
+- For roster-worthy people include \`kind: "character"\` and \`rosterEligible: true\`. For fodder omit npc_updates entirely.
+- Always include \`name\` and \`lastNotes\` for roster entries; include other fields only when newly learned
 
 ## HIDDEN FRONT UPDATE INSTRUCTIONS
 - If the HIDDEN CAMPAIGN FRONTS section is present, it is private DM state. Never reveal the front title, clock, stage, or grim portent list directly to the player.

@@ -56,7 +56,7 @@ flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NP
 - On the journal cadence, a cheap NPC/front reflection pass updates likely NPC intent,
   relationship pressure, front symptoms, and future callback hooks without per-turn cost.
 - Remaining ideas: real-provider eval for "natural old detail recall without exposition",
-  player-facing memory debug/dev panel, and salience tuning after real play.
+  salience tuning after real play, and the memory debug inspector (below).
 
 ### Fronts / hidden world clocks — status: v2 `shipped` (2026-06-21), priority: HIGH
 The flagship feature. Instead of generic LLM "three acts": 2–3 **fronts** (threats that
@@ -95,6 +95,13 @@ with escalation steps and a "grim portent" (what happens if nobody interferes).
   fast. Consider milestone XP only after front resolution is proven reliable in real play.
 - Why: player agency stays absolute, but the world is *up to something* — the "behind the
   scenes goings-on" feel. Vesa considers this the killer feature for going public.
+
+### Location-transition recall ledger — status: `shipped` (2026-06-23)
+Journal entries now store `location`; the DM prompt receives a deterministic
+`## LOCATION TRANSITION HISTORY` block for chronological "what happened right before I arrived?"
+queries, complementing semantic RAG. New journal chunks seed into RAG mid-session. Why: RAG
+alone missed immediate pre-arrival events after the 20-message window slid. Pair with
+`npm run eval:memory` for regression.
 
 ### Campaign milestone XP tied to front/act completion — status: `idea`
 Milestone XP on resolving a front beat, complementing per-combat XP.
@@ -149,16 +156,12 @@ whether the hero maintains an authored composure, courage, sincerity, emotion, o
 world and NPCs still react externally, and real saves against spells, poison, supernatural fear,
 or defined physical effects remain mechanics; dice cannot seize the player's portrayal.
 
-### Natural 20 outside combat — exceptional outcome — status: `idea` (2026-06-22)
-A natural 20 on a non-combat skill check should feel special — not just a pass, but a
-exceptionally good outcome: extra info, unexpected help, a bonus item, a lasting NPC impression,
-or a door that swings wider than expected. Currently the DM narrates any roll outcome but has no
-explicit signal that a nat 20 warrants going beyond mere success. Why: it's one of tabletop's
-best dopamine moments and we're leaving it on the floor. Design notes: the engine already surfaces
-the raw d20 result in the roll resolution payload; `rollResolver.js` could flag `critical_success:
-true` when the d20 is 20, the DM prompt rule could instruct "a natural 20 is an exceptional
-outcome — narrate a concrete extra benefit beyond the check's base success, don't just say
-'you succeed brilliantly'." No mechanical inflation needed — purely a narration quality signal.
+### Natural 20 outside combat — exceptional outcome — status: `shipped` (2026-06-23)
+Out-of-combat checks and saves that roll a natural 20 now auto-succeed regardless of DC, and the
+roll summary labels **CRITICAL SUCCESS / NATURAL 20**. `promptBuilder.js` instructs the DM to
+narrate a concrete exceptional benefit beyond standard success — extra clues, favorable NPC shift,
+bonus item, clean resolution — without mechanical inflation. Combat nat-20 behavior unchanged.
+Still needs real-play check: verify the DM actually delivers standout moments, not generic praise.
 
 ### Low-level encounter difficulty / unwinnable fights — status: `shipped` (2026-06-14)
 Recurring, confirmed in play (2026-06-14): a **lone level-1 character** gets dropped into an
@@ -270,19 +273,28 @@ outcomes; four or more requires an explicit player request.
 Still open:
 - Optional later: style retraining during downtime, if players regret the creation choice.
 
-### Rogue mechanics — status: `designed`, waiting on fighter test-play phase
-The easy class to make real: everything is single-target and binary, no geometry.
-- Sneak Attack: append Xd6 (scaling by level) to damage in `rollResolver.js` when the
-  attack has advantage or the DM flags an adjacent ally. ~20 lines.
-- Expertise picker at creation (the `expertiseSkills` field exists, always empty today).
-- Cunning Action / Uncanny Dodge: narrative triggers + simple arithmetic.
-- Estimated effort: ~1 day. Parked per DECISIONS.md (fighter-only test-play phase).
+### Rogue mechanics — status: combat v1 `shipped` (2026-06-23), real-play tuning `open`
+Shipped in `combatExchange.js` and character creation:
+- **Expertise:** player picks two proficient skills at creation (`expertiseSkills`).
+- **Sneak Attack:** scaling d6 damage when the Rogue has advantage or a live companion is in play.
+- **Cunning Action:** level 2+ may take dash, disengage, or a stealth check as the second slot
+  alongside a main action (validated in exchange planning).
+- **Uncanny Dodge:** level 5+ halves the first damaging hit taken in an exchange.
+- `scripts/test_play_rogue.cjs` added for automated combat smoke.
 
-### Spellcasting (Wizard/Cleric) — status: `idea`, deliberately deferred
+Still open after memory tuning: out-of-combat stealth/sleight edge cases, narrative feel of
+Sneak Attack setup, and whether Cunning Action needs UI hints beyond combat validation.
+
+### Spellcasting (Wizard/Cleric) — status: `idea`, deferred until memory layer is proven
 Hard part is NOT geometry — solve theater-of-mind areas by **modeling targets, not shapes**:
 "fireball hits the goblins you name; each makes a DEX save" (saves are engine-owned now).
 The real work is slots + curated spell lists (~15 spells per caster in `src/data/spells.js`),
 tracked like `classResources`. DM emits `spell_cast`; engine validates and decrements.
+
+**Why wait:** Fighter and Rogue combat are now solid; Wizard/Cleric multiply engine profiles,
+save subphases, and slot tracking. The LLM memory stack (fronts, story memory, RAG, journal,
+location ledger) is the differentiator — polish that in live play before opening the caster
+surface area. See DECISIONS.md 2026-06-23.
 
 ### Character portraits — status: player portrait v1 `shipped` (2026-06-15), NPC portraits `idea`
 Shipped v1: the Character Profile has a Portrait section where the player confirms the hero's
@@ -368,15 +380,42 @@ test button, possibly a limited demo mode. Matters at "going public" threshold.
 
 ## Tech & Infra
 
-### Eval harness for the DM prompt — status: `idea`
+### NPC roster promotion / character vs fodder — status: `shipped` (2026-06-23)
+Generic goblins/guards no longer pollute the durable NPC roster, prompt, or RAG. Legacy saves
+grandfather all pre-existing NPCs as characters so long-running campaigns keep early antagonists.
+New entries pass engine heuristics + Scribe `kind`/`rosterEligible`; prompt shows top characters by
+importance (pins, tension, location) not recency; Journal has Pin/Archive. Remaining: optional
+bulk archive pass for obvious legacy fodder entries the player no longer wants visible.
+
+### Memory debug inspector — status: `designed`, priority: HIGH (2026-06-23)
+Dev/settings panel to make the invisible memory stack inspectable during real-play tuning.
+Motivation: callbacks, RAG hits, and front symptoms are engine-curated but player-invisible —
+hard to tune salience without seeing what the DM actually received.
+
+**Proposed surfaces (read-only, collapsible):**
+- **Last turn injection:** which story-memory cards were curated and their scores/cooldowns
+- **RAG retrieval:** top memories for the last player message (text, category, similarity)
+- **Pinned tiers:** premise excerpt, active world facts count, journal tail, location-transition block
+- **Story memory ledger:** all cards with type, status, salience, lastUsedAt
+- **Fronts (dev-only):** clock/stage/symptom for each hidden front — normally never player-facing
+- **Scribe last pass:** optional log of facts/cards extracted (dev mode)
+
+**Conventions to borrow:** MemGPT-style tier visibility; asymmetric retrieval roles already used
+in `vectorMemory.js`; cooldown/salience scoring from `storyMemory.js`. Not a player feature —
+Settings → Game → "Memory inspector" behind a toggle, or `?debugMemory=1` URL flag.
+
+**Pair with:** `npm run eval:memory` report JSON for automated regression; manual inspector for
+feel tuning. Why: perfecting memory is the current gate before Wizard/Cleric and public launch.
+
+### Eval harness for the DM prompt — status: `partial` (combat + memory playtests exist)
 Scripted scenarios against the real LLM ("player is dying — did the DM request a death_save?"),
 scored on JSON behavior. Run before prompt changes. Builds on the vitest fixture corpus
 (shipped 2026-06-11). DEV-mode hook that dumps unparseable LLM responses into fixture files —
 players generate the test corpus.
 
-### Code splitting — status: `idea`, low priority
-Bundle is ~706 KB minified (Vite warns at 500 KB). Dynamic import for Firebase and/or
-SceneArt would cut initial load meaningfully.
+### Code splitting — status: `idea`, low priority (pre-public)
+Bundle is ~884 KB minified (Vite warns at 500 KB). Dynamic import for Firebase and/or
+SceneArt would cut initial load meaningfully. Deferred until the public-launch project.
 
 ### Fix "Continue as Guest" — status: `idea`, decide: fix or remove
 Anonymous auth is **disabled** in the Firebase project (`ADMIN_ONLY_OPERATION`, verified

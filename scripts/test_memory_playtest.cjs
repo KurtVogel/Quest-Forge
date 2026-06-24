@@ -218,13 +218,19 @@ async function run() {
     }
 
     // Now, inspect the journal entries in the state via console evaluation
-    const journalState = await globalPage.evaluate(() => {
-        const saves = Object.keys(localStorage).filter(k => k.startsWith('rpg-save-'));
-        if (saves.length > 0) {
-            const data = JSON.parse(localStorage.getItem(saves[0]));
-            return data.journal || [];
-        }
-        return [];
+    const journalState = await globalPage.evaluate(async () => {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open('rpg-client-saves', 2);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                const db = request.result;
+                const tx = db.transaction('saves', 'readonly');
+                const store = tx.objectStore('saves');
+                const getReq = store.get('__autosave__');
+                getReq.onerror = () => reject(getReq.error);
+                getReq.onsuccess = () => resolve(getReq.result?.journal || []);
+            };
+        });
     });
 
     console.log("=== EXTRACTED JOURNAL ENTRIES ===");

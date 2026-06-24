@@ -34,3 +34,9 @@ dist-ssr
 # Test outputs
 test-results/
 
+# Agent/app scratch artifacts
+.codex-remote-attachments/
+.claude/launch.json
+claudeception/
+ANTIGRAVITY_FINDINGS.md
+

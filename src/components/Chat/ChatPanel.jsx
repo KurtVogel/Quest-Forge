@@ -177,7 +177,13 @@ export default function ChatPanel() {
         const s = stateRef.current;
         // Hidden setup messages were intentionally superseded by authoritative roll/exchange
         // results. Sending them back can bias the narrator toward a pre-rolled outcome.
-        const unsummarized = s.messages.filter(m => !m.summarized && !m.hidden);
+        const unsummarized = s.messages.filter(m => {
+            if (m.summarized || m.hidden) return false;
+            if (m.role === 'system') {
+                return /rolled \*\*/i.test(m.content || '');
+            }
+            return true;
+        });
         const window = unsummarized.slice(-MESSAGE_WINDOW);
         return window.map(m => ({
             role: m.role === 'system' ? 'user' : m.role,

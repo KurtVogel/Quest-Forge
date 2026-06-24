@@ -4,6 +4,42 @@
  * from LLM output that may contain multiple JSON-like blocks.
  */
 
+export function stripMarkdownFences(text) {
+    return String(text || '')
+        .trim()
+        .replace(/^```(?:json)?\s*\n?/i, '')
+        .replace(/\n?```\s*$/i, '')
+        .trim();
+}
+
+/**
+ * Parse a JSON object from LLM output, trying repair and optional keyword anchors.
+ * Never throws — returns null on failure.
+ */
+export function parseJsonObjectLoose(text, keywords = []) {
+    const cleaned = stripMarkdownFences(text);
+    if (!cleaned) return null;
+
+    const anchors = [...keywords, null];
+    for (const keyword of anchors) {
+        const jsonMatch = keyword
+            ? extractBalancedJson(cleaned, keyword)
+            : (cleaned.startsWith('{') ? { json: cleaned } : null);
+        if (!jsonMatch?.json) continue;
+
+        try {
+            return JSON.parse(jsonMatch.json);
+        } catch {
+            try {
+                return JSON.parse(repairJson(jsonMatch.json));
+            } catch {
+                // try next anchor
+            }
+        }
+    }
+    return null;
+}
+
 /**
  * Extract a balanced JSON object from text that contains a given keyword.
  * Uses brace counting instead of greedy regex to avoid grabbing too much

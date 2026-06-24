@@ -44,7 +44,7 @@ describe('VectorMemory embedding roles', () => {
         expect(matches).toEqual([expect.objectContaining({
             text: 'Kraul was defeated in the cavern.',
             category: 'world_fact',
-            score: 1,
+            score: expect.closeTo(1.03, 2),
         })]);
     });
 

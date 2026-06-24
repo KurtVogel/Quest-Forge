@@ -84,18 +84,15 @@ uses `add_companions` only after the fiction supports it.
 
 ## Next Slices
 
-- Real-play tuning: watch whether callbacks feel natural, too frequent, too rare, or too
-  on-the-nose.
-- Add a real-provider eval: "Does the DM naturally recall an old detail without exposition?"
-- Consider a dev-only memory inspector for debugging card salience, cooldown, and usage.
+- **Current gate:** keyed real-play tuning via `npm run eval:memory` — watch callback naturalness,
+  front symptom frequency, and location-transition recall (`docs/STATUS.md`).
+- **Memory debug inspector:** dev/settings panel for curated cards, RAG hits, and front clocks
+  (see IDEAS.md).
 - Tune Scribe extraction if it records too many generic cards or misses player-authored canon.
-- Fronts v2 can build on the reflection cadence for richer generated multi-front campaigns.
 
 ## Verification Baseline
 
-Initial shipped v1 verification:
-
-- `npm test` passed with 167 tests.
-- `npm run lint` passed.
-- `npm run build` passed, with the existing Vite large chunk warning.
+- `npm test` — 314 tests (engine, reducer, parser fixtures).
+- `npm run eval:memory` — 20-turn real-provider memory report → `test-results/memory-tuning/report.json`.
+- `npm run lint` / `npm run build` — clean; ~884 KB main chunk (split deferred pre-public).
 
