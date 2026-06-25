@@ -791,9 +791,13 @@ function resolveCompanions({ exchange, enemies, companions, events, rolls, onlyI
             continue;
         }
         const targets = activeEnemies(enemies);
-        const target = intent.target ? findByRef(targets, intent.target) : targets[0];
+        let target = intent.target ? findByRef(targets, intent.target) : targets[0];
+        if (!target && intent.target && targets.length > 0) {
+            target = targets[0];
+            events.push({ type: 'note', text: `${companion.name}'s target is down; retargeting to ${target.name}.` });
+        }
         if (!target) {
-            events.push({ type: 'note', text: `${companion.name}'s declared target is unavailable; the action is dropped rather than redirected.` });
+            events.push({ type: 'note', text: `${companion.name} has no valid target and holds position.` });
             continue;
         }
         resolveCompanionAttack(companion, target, events, rolls, intent.situationalRuling);

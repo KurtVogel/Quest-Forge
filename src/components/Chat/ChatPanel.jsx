@@ -313,9 +313,11 @@ Translate the player's committed action into the single bounded combat_exchange 
             || !!events?.combatExchange
             || !!events?._playerAuthorityRollRejected;
         if (hideSetup) setStreamingMessage('');
+        // Pre-generate a stable message ID so applyEvents can reference it as a loot source key.
+        const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: { role: 'assistant', content: narrative, events, hidden: hideSetup },
+            payload: { id: msgId, role: 'assistant', content: narrative, events, hidden: hideSetup },
         });
 
         // Apply game events (damage, items, etc.)
@@ -328,7 +330,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
             // On a withheld roll-setup turn, defer outcome mutations to the post-roll
             // narration (see applyEvents) so the DM can't double-apply state across the split.
-            applyEvents(events, dispatch, () => stateRef.current, { setupPhase: hideSetup });
+            applyEvents(events, dispatch, () => stateRef.current, { setupPhase: hideSetup, lootSourceId: msgId });
             if (events.location && !s.combat?.active && !events.combatExchange) {
                 dispatch({ type: 'SET_LOCATION', payload: events.location });
             }

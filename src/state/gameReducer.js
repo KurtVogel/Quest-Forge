@@ -336,6 +336,7 @@ export const initialGameState = {
     party: [], // Companions currently traveling with the player
     currentLocation: null,
     pendingRoleplayCheck: null, // Reload-safe out-of-combat check proposal; no dice exist yet
+    appliedLootSourceIds: [], // Message IDs whose gold/item loot has already been applied — prevents double-grant
     combat: {
         active: false,
         enemies: [],
@@ -1369,11 +1370,18 @@ export function gameReducer(state, action) {
             return {
                 ...state,
                 messages: [...state.messages, {
-                    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    id: action.payload.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                     timestamp: Date.now(),
                     ...action.payload,
                 }],
             };
+
+        case 'CLAIM_LOOT_SOURCE': {
+            const sourceId = action.payload;
+            if (!sourceId || (state.appliedLootSourceIds || []).includes(sourceId)) return state;
+            const updated = [...(state.appliedLootSourceIds || []), sourceId];
+            return { ...state, appliedLootSourceIds: updated.slice(-500) };
+        }
 
         case 'UPDATE_LAST_MESSAGE':
             return {

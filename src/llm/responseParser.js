@@ -512,7 +512,23 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     const itemsFound = dropMatching(events.itemsFound, purchasedTokens, 'purchase');
     const itemsLost = dropMatching(events.itemsLost, soldTokens, 'sale');
 
+    // Loot deduplication guard — prevent the same message from granting gold/items twice
+    // (e.g. from a re-render, state restore, or DM re-narrating already-applied loot).
+    const lootSourceId = opts?.lootSourceId;
+    const hasLoot = itemsFound.length > 0
+        || (events.goldFound ?? 0) > 0 || (events.silverFound ?? 0) > 0 || (events.copperFound ?? 0) > 0;
+    let lootAlreadyClaimed = false;
+    if (lootSourceId && hasLoot) {
+        if ((getState?.()?.appliedLootSourceIds || []).includes(lootSourceId)) {
+            lootAlreadyClaimed = true;
+            console.warn(`[applyEvents] Loot from source ${lootSourceId} already applied; skipping items and gold.`);
+        } else {
+            dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: lootSourceId });
+        }
+    }
+
     for (const item of itemsFound) {
+        if (lootAlreadyClaimed) break;
         const itemData = typeof item === 'string'
             // Let ADD_ITEM recognize catalog strings before falling back to generic gear.
             ? { name: item }
@@ -594,11 +610,11 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         goldFound = silverFound = copperFound = 0;
     }
 
-    if (goldFound > 0) dispatch({ type: 'ADD_GOLD', payload: goldFound });
+    if (!lootAlreadyClaimed && goldFound > 0) dispatch({ type: 'ADD_GOLD', payload: goldFound });
     if (goldLost > 0) dispatch({ type: 'REMOVE_GOLD', payload: goldLost });
-    if (silverFound > 0) dispatch({ type: 'ADD_SILVER', payload: silverFound });
+    if (!lootAlreadyClaimed && silverFound > 0) dispatch({ type: 'ADD_SILVER', payload: silverFound });
     if (silverLost > 0) dispatch({ type: 'REMOVE_SILVER', payload: silverLost });
-    if (copperFound > 0) dispatch({ type: 'ADD_COPPER', payload: copperFound });
+    if (!lootAlreadyClaimed && copperFound > 0) dispatch({ type: 'ADD_COPPER', payload: copperFound });
     if (copperLost > 0) dispatch({ type: 'REMOVE_COPPER', payload: copperLost });
 
     if (events.levelUp) {
