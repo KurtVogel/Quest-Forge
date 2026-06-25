@@ -744,9 +744,16 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
     return { dodging, fled, deathSaveNatural };
 }
 
-function resolveCompanionAttack(companion, target, events, rolls, situationalRuling = null) {
+function resolveCompanionAttack(companion, target, events, rolls, situationalRuling = null, flankingEnemyIds = null) {
     const ruling = rulingFlags(situationalRuling);
-    const modifiers = conditionAwareAttackModifiers(companion.conditions, target.conditions, ruling.advantage, ruling.disadvantage || !!target.defending);
+    // Propagate player flanking advantage to companions attacking the same enemy.
+    // If the player gained advantage via a situational ruling on this target, any ally
+    // in melee on the same enemy benefits too (per the flanking rule).
+    const companionFlanking = !ruling.advantage && (flankingEnemyIds?.has(target.id) ?? false);
+    const effectiveRuling = companionFlanking
+        ? { mode: 'advantage', reason: 'flanking' }
+        : situationalRuling;
+    const modifiers = conditionAwareAttackModifiers(companion.conditions, target.conditions, ruling.advantage || companionFlanking, ruling.disadvantage || !!target.defending);
     const attack = rollD20(
         companion.attackBonus ?? 2,
         `${companion.name} attacks ${target.name}`,
@@ -766,12 +773,12 @@ function resolveCompanionAttack(companion, target, events, rolls, situationalRul
     }
     events.push({
         type: 'attack', actor: companion.name, target: target.name, rolled: attack.roll.total,
-        natural: attack.natural, dc: target.ac, mode: rollModeLabel(attack, modifiers, situationalRuling), hit, critical, damage,
+        natural: attack.natural, dc: target.ac, mode: rollModeLabel(attack, modifiers, effectiveRuling), hit, critical, damage,
         remainingHp: target.hp, maxHp: target.maxHp,
     });
 }
 
-function resolveCompanions({ exchange, enemies, companions, events, rolls, onlyIds = null }) {
+function resolveCompanions({ exchange, enemies, companions, events, rolls, onlyIds = null, flankingEnemyIds = null }) {
     const intents = new Map();
     for (const intent of exchange?.companionIntents || []) {
         const companion = findByRef(companions, intent.companionId);
@@ -800,7 +807,7 @@ function resolveCompanions({ exchange, enemies, companions, events, rolls, onlyI
             events.push({ type: 'note', text: `${companion.name} has no valid target and holds position.` });
             continue;
         }
-        resolveCompanionAttack(companion, target, events, rolls, intent.situationalRuling);
+        resolveCompanionAttack(companion, target, events, rolls, intent.situationalRuling, flankingEnemyIds);
     }
 }
 
@@ -985,7 +992,23 @@ export function planCombatExchange(state, exchange) {
         };
     }
 
-    resolveCompanions({ state, exchange, enemies, companions, events, rolls });
+    // Collect enemies the player attacked with a situational advantage ruling this exchange.
+    // Companions targeting the same enemy will receive flanking advantage automatically.
+    const flankingEnemyIds = new Set();
+    for (const slot of exchange.playerSlots || []) {
+        if (slot.situationalRuling?.mode !== 'advantage') continue;
+        if (slot.action === 'attack') {
+            for (const strike of slot.strikes || []) {
+                const e = findByRef(enemies, strike.target);
+                if (e) flankingEnemyIds.add(e.id);
+            }
+        } else if (slot.action === 'cast' && slot.target) {
+            const e = findByRef(enemies, slot.target);
+            if (e) flankingEnemyIds.add(e.id);
+        }
+    }
+
+    resolveCompanions({ state, exchange, enemies, companions, events, rolls, flankingEnemyIds });
     // A defense declared last exchange protects against this exchange's player and companion
     // attacks, then expires before foes choose their new actions.
     for (const enemy of enemies) enemy.defending = false;
