@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-06-23 (NPC roster promotion gating)_
+_Last updated: 2026-06-26 (flanking propagation hardening)_
 
 ## Current focus — memory & fronts real-play tuning
 
@@ -22,8 +22,16 @@ feels excellent in live play — casters multiply engine surface area; polish th
 - **Roleplay-check proposals** remaining fair; Scribe roll audit catching bad setups
 - Console clean; autosave intact after front-only or combat changes
 
-## Recently shipped (June 21–23, 2026)
+## Recently shipped (June 21–26, 2026)
 
+- **Flanking propagation hardening (2026-06-26):** player situational advantage now becomes
+  companion advantage only when the accepted reason explicitly describes allied flanking-style
+  positioning on one target. Generic advantage sources such as concealment/distraction stay local,
+  companion-specific rulings are preserved, and regression tests cover both positive and negative
+  cases.
+- **Combat/memory follow-ups (2026-06-24/25):** RAG entries now carry active location context;
+  the memory playtest supports 30 turns with better deadlock handling; companion retargeting avoids
+  wasted ally turns after a player kill; loot grants are deduped by stable assistant message IDs.
 - **NPC roster promotion gating (2026-06-23):** generic combat fodder no longer enters the durable
   NPC list; legacy saves grandfather every existing NPC as a **character** (your starting-town
   captain stays). Prompt injection curates by importance/pins/location/tension instead of recency
@@ -50,9 +58,9 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **325** tests passing (39 files)
+- `npm test` — **345** tests passing (41 files)
 - `npm run lint` — clean
-- `npm run build` — green (~884 KB JS main chunk; split deferred pre-public)
+- `npm run build` — green (~913 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)
 
 ## Up next (agreed order)

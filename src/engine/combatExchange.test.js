@@ -308,6 +308,73 @@ describe('engine-owned exchange resolution', () => {
         expect(enemyAttack.mode).toContain('Smoke obscures Vesa');
     });
 
+    it('shares explicit player flanking advantage with a companion on the same target', () => {
+        rollQueue.push(2, 3, 4, 18, 1);
+        const intent = normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'advantage', reason: 'Wit flanks the goblin from the opposite side' },
+            }],
+            companion_intents: [{ companion_id: 'wit', action: 'attack', target: 'Goblin' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        });
+        const plan = planCombatExchange(state({
+            party: [{ id: 'wit', name: 'Wit', hp: 10, maxHp: 10, ac: 13, attackBonus: 3, damage: '1d6+1', status: 'healthy' }],
+        }), intent);
+        const companionAttack = plan.payload.result.events.find(event => event.actor === 'Wit');
+
+        expect(companionAttack.mode).toContain('d20 4, 18');
+        expect(companionAttack.mode).toContain('DM ruling — advantage: flanking');
+    });
+
+    it('does not share non-flanking player advantage with companions', () => {
+        rollQueue.push(2, 3, 18, 1);
+        const intent = normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'advantage', reason: 'The goblin is distracted by falling debris' },
+            }],
+            companion_intents: [{ companion_id: 'wit', action: 'attack', target: 'Goblin' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        });
+        const plan = planCombatExchange(state({
+            party: [{ id: 'wit', name: 'Wit', hp: 10, maxHp: 10, ac: 13, attackBonus: 3, damage: '1d6+1', status: 'healthy' }],
+        }), intent);
+        const companionAttack = plan.payload.result.events.find(event => event.actor === 'Wit');
+
+        expect(companionAttack.natural).toBe(18);
+        expect(companionAttack.mode).not.toContain('flanking');
+        expect(companionAttack.mode).not.toContain('d20 18,');
+    });
+
+    it('does not replace a companion-specific disadvantage ruling with inherited flanking', () => {
+        rollQueue.push(2, 3, 18, 4);
+        const intent = normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'advantage', reason: 'Wit flanks the goblin from the opposite side' },
+            }],
+            companion_intents: [{
+                companion_id: 'wit',
+                action: 'attack',
+                target: 'Goblin',
+                situational_ruling: { mode: 'disadvantage', reason: 'Smoke obscures Wit' },
+            }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        });
+        const plan = planCombatExchange(state({
+            party: [{ id: 'wit', name: 'Wit', hp: 10, maxHp: 10, ac: 13, attackBonus: 3, damage: '1d6+1', status: 'healthy' }],
+        }), intent);
+        const companionAttack = plan.payload.result.events.find(event => event.actor === 'Wit');
+
+        expect(companionAttack.mode).toContain('d20 18, 4');
+        expect(companionAttack.mode).toContain('DM ruling — disadvantage: Smoke obscures Wit');
+        expect(companionAttack.mode).not.toContain('advantage: flanking');
+    });
+
     it('applies a bounded enemy condition only after its combat check succeeds', () => {
         rollQueue.push(14, 1, 2); // Athletics succeeds; prone enemy attacks with disadvantage and misses
         const intent = normalizeCombatExchange({

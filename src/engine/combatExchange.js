@@ -272,6 +272,19 @@ function rulingFlags(ruling) {
     };
 }
 
+function isSharedFlankingRuling(ruling) {
+    if (ruling?.mode !== 'advantage') return false;
+    const reason = String(ruling.reason || '').toLowerCase();
+    return /\bflank(?:ed|ing|s)?\b/.test(reason)
+        || /\bopposite side\b/.test(reason)
+        || /\bopposite sides\b/.test(reason)
+        || /\bpincer\b/.test(reason)
+        || /\bbetween\b.+\band\b/.test(reason)
+        || /\bboxed in\b/.test(reason)
+        || /\bsurrounded\b/.test(reason)
+        || /\bhemmed in\b/.test(reason);
+}
+
 function rollModeLabel(roll, modifiers, ruling) {
     const parts = [];
     if (roll.detail) parts.push(roll.detail);
@@ -746,10 +759,8 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
 
 function resolveCompanionAttack(companion, target, events, rolls, situationalRuling = null, flankingEnemyIds = null) {
     const ruling = rulingFlags(situationalRuling);
-    // Propagate player flanking advantage to companions attacking the same enemy.
-    // If the player gained advantage via a situational ruling on this target, any ally
-    // in melee on the same enemy benefits too (per the flanking rule).
-    const companionFlanking = !ruling.advantage && (flankingEnemyIds?.has(target.id) ?? false);
+    // Propagate explicit player flanking only when the companion has no separate ruling.
+    const companionFlanking = !situationalRuling && (flankingEnemyIds?.has(target.id) ?? false);
     const effectiveRuling = companionFlanking
         ? { mode: 'advantage', reason: 'flanking' }
         : situationalRuling;
@@ -992,19 +1003,16 @@ export function planCombatExchange(state, exchange) {
         };
     }
 
-    // Collect enemies the player attacked with a situational advantage ruling this exchange.
-    // Companions targeting the same enemy will receive flanking advantage automatically.
+    // Collect enemies the player explicitly flanked this exchange. Other situational
+    // advantage sources, such as concealment or distraction, stay local to the actor.
     const flankingEnemyIds = new Set();
     for (const slot of exchange.playerSlots || []) {
-        if (slot.situationalRuling?.mode !== 'advantage') continue;
+        if (!isSharedFlankingRuling(slot.situationalRuling)) continue;
         if (slot.action === 'attack') {
-            for (const strike of slot.strikes || []) {
-                const e = findByRef(enemies, strike.target);
-                if (e) flankingEnemyIds.add(e.id);
-            }
-        } else if (slot.action === 'cast' && slot.target) {
-            const e = findByRef(enemies, slot.target);
-            if (e) flankingEnemyIds.add(e.id);
+            const targetedEnemies = new Set((slot.strikes || [])
+                .map(strike => findByRef(enemies, strike.target)?.id)
+                .filter(Boolean));
+            if (targetedEnemies.size === 1) flankingEnemyIds.add([...targetedEnemies][0]);
         }
     }
 

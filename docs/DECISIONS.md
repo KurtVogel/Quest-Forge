@@ -8,6 +8,14 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-06-26 · Shared flanking advantage is explicit, not inferred from generic advantage.**
+Combat `situational_ruling` remains a broad table-style tool, but only explicit flanking-style
+player attack rulings propagate to companions attacking the same target. Concealment, high ground,
+distraction, spell-specific openings, and other actor-local advantage sources do not become
+party-wide advantage. Companion-specific rulings are preserved instead of being overwritten by
+synthetic flanking. Why: advantage is a large D&D-lite swing, and companions are lightweight allies;
+the DM can still grant a companion its own bounded ruling when the fiction supports it.
+
 **2026-06-23 · NPC roster uses promotion gating; legacy NPCs are grandfathered as characters.**
 Combat fodder (`creature`/`ephemeral`, generic names, combat-only notes) does not enter the durable
 `state.npcs` roster. Named people with dialogue, rivalry, tension, hooks, or explicit
