@@ -241,6 +241,8 @@ scene art, the dice roll, combat cards, the (redesigned) character screen.
 - A 1-paragraph store/landing blurb (derive from the 3 pillars once they're locked).
 
 ## Related docs
+- [COMPETITORS.md](COMPETITORS.md) — competitive-intelligence memo (Old Greg's Tavern deep dive,
+  the wider landscape, pricing/positioning, and the wedges this doc leans on).
 - [IDEAS.md](IDEAS.md) — product backlog; the features that make these claims true.
 - [DECISIONS.md](DECISIONS.md) — settled design choices behind the differentiators.
 - [LLM_WOW_LAYER.md](LLM_WOW_LAYER.md) — the memory/fronts design that powers "it remembers."
