@@ -305,6 +305,14 @@ fallback. Hero exports/imports preserve confirmed appearance and safe portrait U
 Still open: one portrait at creation and portraits for major NPCs, reusing Scribe-captured
 `appearance` records for consistency.
 
+**Competitive angle (2026-06-28):** Old Greg's Tavern generates the portrait *immediately in
+the creation flow* — write the character's story, describe their looks, see the face right away.
+That first-impression moment is a strong hook we're missing (our v1 portrait lives in the Profile
+*after* creation). Pull it forward: when the player authors backstory/appearance during creation,
+offer a Generate Portrait step inline so the hero has a face before the first scene. See
+[MARKETING.md](MARKETING.md) steal-table. Why: the immediate face makes the character feel real
+and is one of the most screenshot/trailer-friendly moments we can offer.
+
 ### Scene-art polish follow-ups — status: `idea`, small
 Now that scene art runs on xAI + Scribe-composed prompts (shipped 2026-06-14) and has
 target modes for Scene / Character / Custom (shipped 2026-06-15): a 1k/2k resolution toggle
@@ -336,6 +344,32 @@ attack/defend/flee/surrender. Expand without returning dice authority to the LLM
   with no action committed rather than inventing numbers or granting a free hostile turn.
 
 ## UX & Platform
+
+### Character screen redesign — dedicated, "engine-y" sheet with legible skills — status: `idea` (2026-06-28)
+The character view is currently a cascading panel; it should feel like a real game's character
+**screen**, not a side panel. Two parts, both partly inspired by Old Greg's Tavern:
+- **Visible, first-class skills.** Surface all skills with their computed values inline
+  (e.g. "Intimidation +2", "Stealth +5") and **color-code** them — e.g. proficient vs
+  expertise vs untrained, or a heat scale by modifier. The math already exists in
+  `rules.js`/`character.skillProficiencies`/`expertiseSkills`; this is presentation, not new
+  mechanics. Makes competence legible at a glance and reinforces the "honest engine" feel.
+- **Promote to a dedicated screen.** Move the sheet from the cascading panel into a fuller
+  layout (its own route/view) so it reads as a deliberate UI: portrait, core stats, skills
+  grid, features/resources, inventory link. More "engine-y," and it screenshots well.
+- Pairs with portrait-at-creation (above) and the ASI/level-up flows already living on the sheet.
+Why: the inspectable engine is a real differentiator and a marketing asset (see
+[MARKETING.md](MARKETING.md)) — a sheet that looks like a game, not a chat sidebar, sells the
+"this is a real RPG" story. Scope is mostly UX/layout; keep all derived values engine-computed.
+
+### Character creation as the first "engine proof" moment — status: `idea` (2026-06-28)
+The creation flow should not end on a plain form submit. It should culminate in a crisp,
+game-feeling hero reveal: portrait, ancestry/class, level, AC/HP, key proficiencies, skill
+modifiers, starting equipment, and the campaign premise handoff. This borrows the emotional
+hit from competitors that generate a portrait immediately, but aims it at our own promise:
+the hero is not just a prompt; they are now an engine-owned character with visible numbers.
+Why: the first five minutes are the marketing experience. A player who sees their authored
+backstory become a face, a sheet, and a real playable build is much more likely to believe the
+rest of the campaign will remember and respect it.
 
 ### Persist user music across reloads — status: `idea`, small
 The MP3 player (`AmbientControls.jsx`, shipped 2026-06-14) holds tracks as in-memory object
