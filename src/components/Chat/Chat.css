@@ -368,6 +368,12 @@
   resize: vertical;
 }
 
+.roleplay-check-challenge-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.55rem;
+}
+
 .roleplay-check-actions {
   margin-top: 0.9rem;
 }
@@ -384,6 +390,10 @@
 
   .roleplay-check-actions .btn {
     flex: 1 1 120px;
+  }
+
+  .roleplay-check-challenge-actions .btn {
+    width: 100%;
   }
 }
 

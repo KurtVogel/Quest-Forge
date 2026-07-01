@@ -897,6 +897,9 @@ function RoleplayCheckPanel({
                         rows={3}
                         disabled={disabled}
                     />
+                    <div className="roleplay-check-challenge-actions">
+                        <button className="btn btn-secondary" onClick={onSubmitChallenge} disabled={disabled || !challenge.trim()}>Send challenge</button>
+                    </div>
                 </div>
             )}
 
@@ -904,9 +907,6 @@ function RoleplayCheckPanel({
                 <button className="btn btn-primary" onClick={onAccept} disabled={disabled}>Roll</button>
                 {!proposal.challengeUsed && !showChallenge && (
                     <button className="btn btn-secondary" onClick={onShowChallenge} disabled={disabled}>Challenge ruling</button>
-                )}
-                {!proposal.challengeUsed && showChallenge && (
-                    <button className="btn btn-secondary" onClick={onSubmitChallenge} disabled={disabled || !challenge.trim()}>Send challenge</button>
                 )}
                 <button className="btn btn-secondary" onClick={onChangeApproach} disabled={disabled}>Change approach</button>
             </div>

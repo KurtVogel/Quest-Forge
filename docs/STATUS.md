@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-01 (test coverage expansion)_
+_Last updated: 2026-07-01 (mobile roleplay challenge action)_
 
 ## Current focus — memory & fronts real-play tuning
 
@@ -24,6 +24,9 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Recently shipped (June 21 – July 1, 2026)
 
+- **Mobile roleplay challenge action (2026-07-01):** the challenge textbox in proposed
+  roleplay checks now has its own inline **Send challenge** button directly under the
+  textarea, so phone browsers/keyboards cannot hide the only submit action below the viewport.
 - **Test coverage expansion (2026-07-01):** filled the gaps identified by a full-codebase
   coverage analysis (project-wide statement coverage 51% → 60%). Added dedicated tests for
   `engine/currency.js` (was untested), `state/persistence.js` save/load/roster round-trips
