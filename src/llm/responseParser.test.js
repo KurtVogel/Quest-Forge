@@ -3,8 +3,12 @@
  * failure mode this codebase has had to survive: unfenced JSON, malformed
  * JSON, prose roll requests, pre-narrated outcomes, insane numeric values.
  */
-import { describe, it, expect, vi } from 'vitest';
-import { parseResponse, detectPreNarratedOutcome, applyEvents } from './responseParser.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const { sendMessage } = vi.hoisted(() => ({ sendMessage: vi.fn() }));
+vi.mock('./adapter.js', () => ({ sendMessage }));
+
+import { parseResponse, detectPreNarratedOutcome, applyEvents, detectSemanticTextRolls } from './responseParser.js';
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 
 const fence = (obj) => '```json\n' + JSON.stringify(obj, null, 2) + '\n```';
@@ -194,6 +198,16 @@ describe('defenses against LLM misbehavior', () => {
     it('uses the standard solo-play DC when a prose roll request omits one', () => {
         const { events } = parseResponse('Make a Perception check to listen at the door.');
         expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'skill_check', skill: 'perception', dc: 10 });
+    });
+
+    it('detects a standalone "[Skill] check" phrase without a roll verb', () => {
+        const { events } = parseResponse('A Perception check reveals nothing unusual here.');
+        expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'skill_check', skill: 'perception' });
+    });
+
+    it('detects a standalone "[Skill] saving throw" phrase as a saving_throw', () => {
+        const { events } = parseResponse('A constitution saving throw is called for as the poison spreads.');
+        expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'saving_throw', skill: 'constitution' });
     });
 });
 
@@ -465,5 +479,266 @@ describe('story memory events', () => {
             },
         });
         expect(dispatch).not.toHaveBeenCalledWith({ type: 'TAKE_DAMAGE', payload: 999 });
+    });
+});
+
+describe('parseResponse JSON repair paths', () => {
+    it('repairs a fenced JSON block with a trailing comma', () => {
+        const raw = '```json\n{ "gold_found": 5, }\n```';
+        const { events } = parseResponse(raw);
+        expect(events).not.toBeNull();
+        expect(events.goldFound).toBe(5);
+    });
+
+    it('gives up on an irreparable fenced JSON block and returns null events', () => {
+        const raw = 'You find a chest.\n```json\n{ gold_found: 5 }\n```';
+        const { narrative, events } = parseResponse(raw);
+        expect(events).toBeNull();
+        // On total repair failure the raw response (including the broken fence) is
+        // returned verbatim rather than just the pre-JSON narrative.
+        expect(narrative).toBe(raw);
+    });
+
+    it('repairs an unfenced JSON block with a trailing comma', () => {
+        const raw = 'The door creaks open.\n{ "requested_rolls": [ { "type": "skill_check", "skill": "perception", "dc": 12 }, ], }';
+        const { events } = parseResponse(raw);
+        expect(events?.requestedRolls).toHaveLength(1);
+    });
+
+    it('falls through to the text-roll detector when unfenced JSON is irreparable', () => {
+        const raw = 'Make a Perception check (DC 12) to notice the trap.\n{ requested_rolls: [broken] }';
+        const { events } = parseResponse(raw);
+        expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'skill_check', skill: 'perception' });
+    });
+
+    it('returns empty narrative and null events for an empty response', () => {
+        expect(parseResponse('')).toEqual({ narrative: '', events: null });
+        expect(parseResponse(null)).toEqual({ narrative: '', events: null });
+    });
+});
+
+describe('applyEvents dispatch coverage', () => {
+    function run(payload, state = { character: {}, party: [] }) {
+        const { events } = parseResponse(fence(payload));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => state);
+        return dispatch;
+    }
+
+    it('dispatches TAKE_DAMAGE and HEAL for plain damage/healing events', () => {
+        const dispatch = run({ damage_taken: 5, healing: 3 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'TAKE_DAMAGE', payload: 5 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'HEAL', payload: 3 });
+    });
+
+    it('dispatches USE_RESOURCE for a resource the class catalog does not own', () => {
+        // Rogue has no UI-tracked class resources, so any resource the DM names
+        // falls through to the generic (non-UI) dispatch path.
+        const dispatch = run(
+            { resources_used: ['sneakAttack'] },
+            { character: { class: 'rogue', classResources: {} }, party: [] },
+        );
+        expect(dispatch).toHaveBeenCalledWith({ type: 'USE_RESOURCE', payload: 'sneakAttack' });
+    });
+
+    it('does not dispatch USE_RESOURCE again for an already-exhausted resource', () => {
+        const dispatch = run(
+            { resources_used: ['sneakAttack'] },
+            { character: { class: 'rogue', classResources: { sneakAttack: { used: 1, max: 1 } } }, party: [] },
+        );
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'USE_RESOURCE' }));
+    });
+
+    it('dispatches purchases and sells and suppresses matching found/lost duplicates', () => {
+        const dispatch = run({
+            purchase: { itemKey: 'torch' },
+            sell: { itemKey: 'dagger' },
+            items_found: [{ itemKey: 'torch' }],
+            items_lost: [{ name: 'dagger' }],
+        });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'PURCHASE_ITEM', payload: { itemKey: 'torch' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'SELL_ITEM', payload: { itemKey: 'dagger' } });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ITEM' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'REMOVE_ITEM_BY_NAME' }));
+    });
+
+    it('dispatches a found item and a lost item by name', () => {
+        const dispatch = run({ items_found: ['Rusty Key'], items_lost: ['Torch'] });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_ITEM', payload: { name: 'Rusty Key' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: 'Torch' });
+    });
+
+    it('suppresses a loose coin loss emitted alongside an atomic purchase', () => {
+        const dispatch = run({ purchase: { itemKey: 'torch' }, gold_lost: 5 });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'REMOVE_GOLD' }));
+    });
+
+    it('suppresses a loose coin gain emitted alongside an atomic sale', () => {
+        const dispatch = run({ sell: { itemKey: 'torch' }, gold_found: 5 });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+    });
+
+    it('dispatches loose gold/silver/copper found and lost independently of trades', () => {
+        const dispatch = run({ gold_found: 3, silver_lost: 2, copper_found: 7 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_GOLD', payload: 3 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_SILVER', payload: 2 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_COPPER', payload: 7 });
+    });
+
+    it('skips loot dispatch when the loot source was already claimed', () => {
+        const state = { character: {}, party: [], appliedLootSourceIds: ['msg-1'] };
+        const { events } = parseResponse(fence({ items_found: ['Gem'], gold_found: 10 }));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => state, { lootSourceId: 'msg-1' });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ITEM' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'CLAIM_LOOT_SOURCE' }));
+    });
+
+    it('claims a new loot source before granting the loot', () => {
+        const { events } = parseResponse(fence({ gold_found: 10 }));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({ character: {}, party: [], appliedLootSourceIds: [] }), { lootSourceId: 'msg-2' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'CLAIM_LOOT_SOURCE', payload: 'msg-2' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_GOLD', payload: 10 });
+    });
+
+    it('dispatches an explicit LEVEL_UP without also awarding raw exp', () => {
+        const dispatch = run({ level_up: true, exp_awarded: 50 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'LEVEL_UP', payload: { bonusExp: 50, reason: 'milestone' } });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_EXP' }));
+    });
+
+    it('dispatches ADD_EXP when no explicit level-up is signaled', () => {
+        const dispatch = run({ exp_awarded: 25 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_EXP', payload: 25 });
+    });
+
+    it('dispatches a rest, conditions, and quest updates', () => {
+        const dispatch = run({
+            rest_taken: 'short',
+            conditions_gained: ['prone'],
+            conditions_removed: ['blinded'],
+            quest_updates: [
+                { status: 'new', name: 'Find the relic', description: 'It was lost long ago.' },
+                { status: 'completed', id: 'q1', name: 'Find the relic' },
+            ],
+        });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'TAKE_REST', payload: 'short' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_CONDITION', payload: 'prone' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_CONDITION', payload: 'blinded' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_QUEST', payload: { name: 'Find the relic', description: 'It was lost long ago.' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_QUEST', payload: { id: 'q1', name: 'Find the relic' } });
+    });
+
+    it('dispatches combat start/end, enemy, and companion updates', () => {
+        const dispatch = run({
+            combat_start: { enemies: [{ name: 'Goblin', hp: 7, maxHp: 7, ac: 12 }] },
+            enemy_updates: [{ id: 'e1', hp: 3 }],
+            add_companions: [{ name: 'Garrick' }],
+            update_companions: [{ name: 'Garrick', hp: 8 }],
+            remove_companions: ['Garrick'],
+        });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'START_COMBAT' }));
+        expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_ENEMY', payload: { id: 'e1', hp: 3 } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_COMPANION', payload: { name: 'Garrick' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_COMPANION', payload: { name: 'Garrick', hp: 8 } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_COMPANION', payload: { name: 'Garrick' } });
+    });
+
+    it('dispatches END_COMBAT with whether the DM already awarded XP', () => {
+        const dispatch = run({ combat_end: true, exp_awarded: 40 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'END_COMBAT', payload: { llmAwardedXp: true } });
+    });
+
+    it('normalizes string world facts into fact/category objects and dispatches them', () => {
+        const dispatch = run({ world_facts: ['The bridge is out.'] });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'ADD_WORLD_FACTS',
+            payload: [{ fact: 'The bridge is out.', category: 'general' }],
+        });
+    });
+
+    it('dispatches npc updates', () => {
+        const dispatch = run({ npc_updates: [{ name: 'Captain Voss', disposition: 'hostile' }] });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_NPC', payload: { name: 'Captain Voss', disposition: 'hostile' } });
+    });
+
+    it('converts a non-lethal player_death into a narrative continuation for a leveled party character', () => {
+        const dispatch = run(
+            { player_death: { description: 'The blade finds its mark.' } },
+            { character: { level: 5 }, party: [{ id: 'c1' }] },
+        );
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'ADD_MESSAGE',
+            payload: expect.objectContaining({ role: 'system', isDeathEvent: true }),
+        }));
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'UPDATE_CHARACTER',
+            payload: { currentHP: 0, isDead: true, dying: false },
+        });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'PLAYER_DEFEAT' }));
+    });
+
+    it('applyEvents is a no-op when events is null', () => {
+        const dispatch = vi.fn();
+        applyEvents(null, dispatch, () => ({ character: {}, party: [] }));
+        expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('ignores mutation events during setupPhase except starting combat', () => {
+        const { events } = parseResponse(fence({
+            combat_start: { enemies: [{ name: 'Goblin', hp: 7, maxHp: 7, ac: 12 }] },
+            gold_found: 100,
+        }));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({ character: {}, party: [] }), { setupPhase: true });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'START_COMBAT' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+        expect(dispatch).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('detectSemanticTextRolls', () => {
+    beforeEach(() => {
+        sendMessage.mockReset();
+    });
+
+    it('returns null without settings or narrative', async () => {
+        expect(await detectSemanticTextRolls('Some text.', null)).toBeNull();
+        expect(await detectSemanticTextRolls('', { apiKey: 'k' })).toBeNull();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('extracts detected rolls from a well-formed response', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            requested_rolls: [{ type: 'skill_check', skill: 'perception', dc: 12, description: 'Spot the trap' }],
+        }));
+        const rolls = await detectSemanticTextRolls('Make a Perception check.', { apiKey: 'k', llmProvider: 'gemini' });
+        expect(rolls).toEqual([{ type: 'skill_check', skill: 'perception', dc: 12, description: 'Spot the trap' }]);
+    });
+
+    it('returns null when no JSON is extractable', async () => {
+        sendMessage.mockResolvedValue('no json here');
+        const rolls = await detectSemanticTextRolls('Some narration.', { apiKey: 'k', llmProvider: 'gemini' });
+        expect(rolls).toBeNull();
+    });
+
+    it('returns null when the extracted JSON fails to parse', async () => {
+        sendMessage.mockResolvedValue('{ requested_rolls: [broken] }');
+        const rolls = await detectSemanticTextRolls('Some narration.', { apiKey: 'k', llmProvider: 'gemini' });
+        expect(rolls).toBeNull();
+    });
+
+    it('returns null when requested_rolls is missing or not an array', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({ requested_rolls: 'nope' }));
+        const rolls = await detectSemanticTextRolls('Some narration.', { apiKey: 'k', llmProvider: 'gemini' });
+        expect(rolls).toBeNull();
+    });
+
+    it('returns null when the provider call throws', async () => {
+        sendMessage.mockRejectedValue(new Error('network down'));
+        const rolls = await detectSemanticTextRolls('Some narration.', { apiKey: 'k', llmProvider: 'gemini' });
+        expect(rolls).toBeNull();
     });
 });
