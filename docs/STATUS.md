@@ -33,7 +33,10 @@ feels excellent in live play — casters multiply engine surface area; polish th
   `llm/adapter.js` routing/error paths, the async Scribe-arbiter path in
   `outOfCombatRollPolicy.js`, and much deeper coverage of `vectorMemory.js` (41% → 96%),
   `responseParser.js` (65% → 97%), and `promptBuilder.js` (64% → 98%). No production code
-  changed — tests only.
+  changed — tests only. Percentages are statement coverage from a one-time local run (not
+  tracked in CI); reproduce with
+  `npm install --no-save @vitest/coverage-v8 && npx vitest run --coverage --coverage.all --coverage.include='src/**/*.{js,jsx,ts}'`
+  for the project-wide number, or scope `--coverage.include` to one file for its per-file number.
 - **Flanking propagation hardening (2026-06-26):** player situational advantage now becomes
   companion advantage only when the accepted reason explicitly describes allied flanking-style
   positioning on one target. Generic advantage sources such as concealment/distraction stay local,

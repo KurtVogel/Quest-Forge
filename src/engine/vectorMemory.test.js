@@ -49,8 +49,13 @@ function putEmbedding(entry) {
 
 describe('VectorMemory embedding roles', () => {
     beforeEach(() => {
-        globalThis.indexedDB = new IDBFactory();
+        // Clear against whatever factory was active from the previous test (or none, on
+        // the first run) BEFORE swapping in a fresh one. clearMemories()'s IndexedDB clear
+        // is fire-and-forget, so if we swapped the factory first, that stale clear could
+        // race a subsequent read/write against the fresh factory. Clearing first means the
+        // fire-and-forget work only ever targets a factory this test never touches again.
         clearMemories();
+        globalThis.indexedDB = new IDBFactory();
         embedTextMock.mockReset();
     });
 
@@ -101,8 +106,13 @@ describe('VectorMemory embedding roles', () => {
 
 describe('addMemory guards and dedup', () => {
     beforeEach(() => {
-        globalThis.indexedDB = new IDBFactory();
+        // Clear against whatever factory was active from the previous test (or none, on
+        // the first run) BEFORE swapping in a fresh one. clearMemories()'s IndexedDB clear
+        // is fire-and-forget, so if we swapped the factory first, that stale clear could
+        // race a subsequent read/write against the fresh factory. Clearing first means the
+        // fire-and-forget work only ever targets a factory this test never touches again.
         clearMemories();
+        globalThis.indexedDB = new IDBFactory();
         embedTextMock.mockReset();
     });
 
@@ -135,8 +145,13 @@ describe('addMemory guards and dedup', () => {
 
 describe('retrieveRelevant guards, scoring, and ranking', () => {
     beforeEach(() => {
-        globalThis.indexedDB = new IDBFactory();
+        // Clear against whatever factory was active from the previous test (or none, on
+        // the first run) BEFORE swapping in a fresh one. clearMemories()'s IndexedDB clear
+        // is fire-and-forget, so if we swapped the factory first, that stale clear could
+        // race a subsequent read/write against the fresh factory. Clearing first means the
+        // fire-and-forget work only ever targets a factory this test never touches again.
         clearMemories();
+        globalThis.indexedDB = new IDBFactory();
         embedTextMock.mockReset();
     });
 
@@ -198,8 +213,13 @@ describe('retrieveRelevant guards, scoring, and ranking', () => {
 
 describe('seedMemories', () => {
     beforeEach(() => {
-        globalThis.indexedDB = new IDBFactory();
+        // Clear against whatever factory was active from the previous test (or none, on
+        // the first run) BEFORE swapping in a fresh one. clearMemories()'s IndexedDB clear
+        // is fire-and-forget, so if we swapped the factory first, that stale clear could
+        // race a subsequent read/write against the fresh factory. Clearing first means the
+        // fire-and-forget work only ever targets a factory this test never touches again.
         clearMemories();
+        globalThis.indexedDB = new IDBFactory();
         embedTextMock.mockReset();
     });
 

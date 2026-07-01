@@ -201,7 +201,10 @@ describe('defenses against LLM misbehavior', () => {
     });
 
     it('detects a standalone "[Skill] check" phrase without a roll verb', () => {
-        const { events } = parseResponse('A Perception check reveals nothing unusual here.');
+        // Deliberately no outcome language here — narrating a result ("reveals...",
+        // "you notice...") before dice exist is the pre-narrated-outcome failure mode
+        // this parser is supposed to catch, not something a clean roll request looks like.
+        const { events } = parseResponse('A Perception check is called for as you scan the room.');
         expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'skill_check', skill: 'perception' });
     });
 
