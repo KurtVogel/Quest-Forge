@@ -119,3 +119,76 @@ describe('gameReducer NPC roster gating', () => {
         expect(state4.npcs[0].lastNotes).toBe('Met Lannis at the solar.');
     });
 });
+
+describe('gameReducer NPC archive/migration actions', () => {
+    it('ARCHIVE_NPC demotes a single NPC to an archived creature and unpins it', () => {
+        const state = {
+            ...initialGameState,
+            npcs: [{ id: 'npc-1', name: 'Captain Voss', rosterTier: 'character', kind: 'character', pinned: true }],
+        };
+        const next = gameReducer(state, { type: 'ARCHIVE_NPC', payload: { id: 'npc-1' } });
+        expect(next.npcs[0].rosterTier).toBe('archived_creature');
+        expect(next.npcs[0].kind).toBe('creature');
+        expect(next.npcs[0].pinned).toBe(false);
+    });
+
+    it('ARCHIVE_NPC leaves non-matching NPCs untouched', () => {
+        const state = {
+            ...initialGameState,
+            npcs: [{ id: 'npc-1', name: 'Captain Voss', rosterTier: 'character' }],
+        };
+        const next = gameReducer(state, { type: 'ARCHIVE_NPC', payload: { id: 'does-not-exist' } });
+        expect(next.npcs[0].rosterTier).toBe('character');
+    });
+
+    it('ARCHIVE_NPC_BULK archives every listed id', () => {
+        const state = {
+            ...initialGameState,
+            npcs: [
+                { id: 'npc-1', name: 'Goblin #1', rosterTier: 'archived_creature', kind: 'creature' },
+                { id: 'npc-2', name: 'Goblin #2', rosterTier: 'archived_creature', kind: 'creature' },
+            ],
+        };
+        const next = gameReducer(state, { type: 'ARCHIVE_NPC_BULK', payload: { ids: ['npc-1', 'npc-2'] } });
+        expect(next.npcs.every(npc => npc.rosterTier === 'archived_creature')).toBe(true);
+    });
+
+    it('ARCHIVE_NPC_BULK is a no-op with an empty id list', () => {
+        const state = { ...initialGameState, npcs: [{ id: 'npc-1', name: 'Captain Voss' }] };
+        const next = gameReducer(state, { type: 'ARCHIVE_NPC_BULK', payload: { ids: [] } });
+        expect(next).toBe(state);
+    });
+
+    it('ARCHIVE_GENERIC_FODDER sweeps unpinned generic-named creatures into the archive', () => {
+        const state = {
+            ...initialGameState,
+            npcs: [
+                { id: 'npc-1', name: 'Goblin #12', rosterTier: 'character', kind: 'creature', lastNotes: 'Killed in combat.' },
+                { id: 'npc-2', name: 'Captain Voss', rosterTier: 'character', kind: 'character' },
+            ],
+        };
+        const next = gameReducer(state, { type: 'ARCHIVE_GENERIC_FODDER' });
+        const goblin = next.npcs.find(npc => npc.id === 'npc-1');
+        const captain = next.npcs.find(npc => npc.id === 'npc-2');
+        expect(goblin.rosterTier).toBe('archived_creature');
+        expect(captain.rosterTier).toBe('character');
+    });
+
+    it('ARCHIVE_GENERIC_FODDER is a no-op when nothing qualifies', () => {
+        const state = { ...initialGameState, npcs: [{ id: 'npc-1', name: 'Captain Voss', rosterTier: 'character' }] };
+        const next = gameReducer(state, { type: 'ARCHIVE_GENERIC_FODDER' });
+        expect(next).toBe(state);
+    });
+
+    it('MIGRATE_NPC_ROSTER backfills rosterTier on legacy records missing it', () => {
+        const state = { ...initialGameState, npcs: [{ id: 'npc-1', name: 'Captain Voss', disposition: 'hostile' }] };
+        const next = gameReducer(state, { type: 'MIGRATE_NPC_ROSTER' });
+        expect(next.npcs[0].rosterTier).toBeTruthy();
+    });
+
+    it('MIGRATE_NPC_ROSTER is a no-op when every NPC already has a rosterTier', () => {
+        const state = { ...initialGameState, npcs: [{ id: 'npc-1', name: 'Captain Voss', rosterTier: 'character' }] };
+        const next = gameReducer(state, { type: 'MIGRATE_NPC_ROSTER' });
+        expect(next).toBe(state);
+    });
+});

@@ -401,3 +401,48 @@ describe('atomic combat exchange lifecycle', () => {
         expect(narrated.combat.round).toBe(2);
     });
 });
+
+describe('REJECT_COMBAT_EXCHANGE', () => {
+    function lockedState() {
+        return {
+            ...makeState(),
+            combat: {
+                ...initialGameState.combat,
+                active: true,
+                phase: 'awaiting_intent',
+                round: 1,
+                enemies: [{ id: 'e1', name: 'Goblin', hp: 7, maxHp: 7, ac: 12, condition: 'healthy', combatStatus: 'active' }],
+                turnOrder: [
+                    { type: 'enemy', id: 'e1', initiative: 18 },
+                    { type: 'player', name: 'Astra', initiative: 12 },
+                ],
+                currentTurn: 0,
+                queuedExchange: { playerSlots: [{ action: 'attack' }] },
+            },
+        };
+    }
+
+    it('unlocks a bad exchange envelope back to awaiting_player and clears the queue', () => {
+        const state = lockedState();
+        const rejected = gameReducer(state, {
+            type: 'REJECT_COMBAT_EXCHANGE',
+            payload: { reason: 'Target no longer exists.' },
+        });
+        expect(rejected.combat.phase).toBe('awaiting_player');
+        expect(rejected.combat.queuedExchange).toBeNull();
+        expect(rejected.combat.currentTurn).toBe(1); // player's turnOrder index
+        expect(rejected.messages.at(-1).content).toMatch(/Target no longer exists/);
+    });
+
+    it('falls back to a generic reason when none is provided', () => {
+        const state = lockedState();
+        const rejected = gameReducer(state, { type: 'REJECT_COMBAT_EXCHANGE', payload: {} });
+        expect(rejected.messages.at(-1).content).toMatch(/action envelope was invalid/);
+    });
+
+    it('is a no-op when combat is not active', () => {
+        const state = { ...makeState(), combat: { ...initialGameState.combat, active: false } };
+        const rejected = gameReducer(state, { type: 'REJECT_COMBAT_EXCHANGE', payload: {} });
+        expect(rejected).toBe(state);
+    });
+});

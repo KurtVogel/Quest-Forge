@@ -1,0 +1,103 @@
+/**
+ * Tests for the provider-agnostic LLM adapter: routing, validation, and the
+ * PROVIDERS/PROVIDER_LIST catalog consumed by Settings.
+ */
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+
+const { sendGeminiMessage, streamGeminiMessage, sendOpenAIMessage, streamOpenAIMessage } = vi.hoisted(() => ({
+    sendGeminiMessage: vi.fn(),
+    streamGeminiMessage: vi.fn(),
+    sendOpenAIMessage: vi.fn(),
+    streamOpenAIMessage: vi.fn(),
+}));
+
+vi.mock('./providers/gemini.js', () => ({ sendGeminiMessage, streamGeminiMessage }));
+vi.mock('./providers/openai.js', () => ({ sendOpenAIMessage, streamOpenAIMessage }));
+
+const { sendMessage, streamMessage, PROVIDERS, PROVIDER_LIST } = await import('./adapter.js');
+
+beforeEach(() => {
+    sendGeminiMessage.mockReset();
+    streamGeminiMessage.mockReset();
+    sendOpenAIMessage.mockReset();
+    streamOpenAIMessage.mockReset();
+});
+
+const baseOptions = {
+    apiKey: 'test-key',
+    model: 'gemini-3.1-pro-preview',
+    systemPrompt: 'You are a DM.',
+    messageHistory: [],
+    userMessage: 'I open the door.',
+};
+
+describe('sendMessage', () => {
+    it('routes to the gemini provider', async () => {
+        sendGeminiMessage.mockResolvedValue('narration');
+        const result = await sendMessage({ ...baseOptions, provider: 'gemini' });
+        expect(result).toBe('narration');
+        expect(sendGeminiMessage).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'test-key', model: 'gemini-3.1-pro-preview' }));
+        expect(sendOpenAIMessage).not.toHaveBeenCalled();
+    });
+
+    it('routes to the openai provider', async () => {
+        sendOpenAIMessage.mockResolvedValue('narration');
+        const result = await sendMessage({ ...baseOptions, provider: 'openai', model: 'gpt-4o-mini' });
+        expect(result).toBe('narration');
+        expect(sendOpenAIMessage).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-4o-mini' }));
+        expect(sendGeminiMessage).not.toHaveBeenCalled();
+    });
+
+    it('throws for an unknown provider', async () => {
+        await expect(sendMessage({ ...baseOptions, provider: 'anthropic' })).rejects.toThrow('Unknown LLM provider: "anthropic"');
+    });
+
+    it('throws when the API key is missing', async () => {
+        await expect(sendMessage({ ...baseOptions, provider: 'gemini', apiKey: '' })).rejects.toThrow('API key is required');
+        expect(sendGeminiMessage).not.toHaveBeenCalled();
+    });
+});
+
+describe('streamMessage', () => {
+    it('routes to the gemini provider and forwards onChunk/signal', async () => {
+        streamGeminiMessage.mockResolvedValue('full response');
+        const onChunk = vi.fn();
+        const signal = new AbortController().signal;
+        const result = await streamMessage({ ...baseOptions, provider: 'gemini', onChunk, signal });
+        expect(result).toBe('full response');
+        expect(streamGeminiMessage).toHaveBeenCalledWith(expect.objectContaining({ onChunk, signal }));
+    });
+
+    it('routes to the openai provider', async () => {
+        streamOpenAIMessage.mockResolvedValue('full response');
+        const result = await streamMessage({ ...baseOptions, provider: 'openai' });
+        expect(result).toBe('full response');
+        expect(streamOpenAIMessage).toHaveBeenCalled();
+    });
+
+    it('throws for an unknown provider', async () => {
+        await expect(streamMessage({ ...baseOptions, provider: 'anthropic' })).rejects.toThrow('Unknown LLM provider: "anthropic"');
+    });
+
+    it('throws when the API key is missing', async () => {
+        await expect(streamMessage({ ...baseOptions, provider: 'openai', apiKey: undefined })).rejects.toThrow('API key is required');
+        expect(streamOpenAIMessage).not.toHaveBeenCalled();
+    });
+});
+
+describe('PROVIDERS / PROVIDER_LIST', () => {
+    it('lists gemini and openai with at least one model each', () => {
+        expect(PROVIDER_LIST).toEqual(['gemini', 'openai']);
+        expect(PROVIDERS.gemini.models.length).toBeGreaterThan(0);
+        expect(PROVIDERS.openai.models.length).toBeGreaterThan(0);
+    });
+
+    it('gives every model an id and a name', () => {
+        for (const provider of PROVIDER_LIST) {
+            for (const model of PROVIDERS[provider].models) {
+                expect(model.id).toBeTruthy();
+                expect(model.name).toBeTruthy();
+            }
+        }
+    });
+});

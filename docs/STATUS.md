@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-06-26 (flanking propagation hardening)_
+_Last updated: 2026-07-01 (test coverage expansion)_
 
 ## Current focus — memory & fronts real-play tuning
 
@@ -22,8 +22,21 @@ feels excellent in live play — casters multiply engine surface area; polish th
 - **Roleplay-check proposals** remaining fair; Scribe roll audit catching bad setups
 - Console clean; autosave intact after front-only or combat changes
 
-## Recently shipped (June 21–26, 2026)
+## Recently shipped (June 21 – July 1, 2026)
 
+- **Test coverage expansion (2026-07-01):** filled the gaps identified by a full-codebase
+  coverage analysis (project-wide statement coverage 51% → 60%). Added dedicated tests for
+  `engine/currency.js` (was untested), `state/persistence.js` save/load/roster round-trips
+  (new `fake-indexeddb` dev dependency), ~15 previously-untested `gameReducer` actions
+  (`PURCHASE_ITEM`, `SELL_ITEM`, `LEVEL_UP`, `CLAIM_LOOT_SOURCE`, NPC archive/migrate,
+  story-memory actions, `SET_USER`/`SIGNOUT_USER`, `REJECT_COMBAT_EXCHANGE`),
+  `llm/adapter.js` routing/error paths, the async Scribe-arbiter path in
+  `outOfCombatRollPolicy.js`, and much deeper coverage of `vectorMemory.js` (41% → 96%),
+  `responseParser.js` (65% → 97%), and `promptBuilder.js` (64% → 98%). No production code
+  changed — tests only. Percentages are statement coverage from a one-time local run (not
+  tracked in CI); reproduce with
+  `npm install --no-save @vitest/coverage-v8 && npx vitest run --coverage --coverage.all --coverage.include='src/**/*.{js,jsx,ts}'`
+  for the project-wide number, or scope `--coverage.include` to one file for its per-file number.
 - **Flanking propagation hardening (2026-06-26):** player situational advantage now becomes
   companion advantage only when the accepted reason explicitly describes allied flanking-style
   positioning on one target. Generic advantage sources such as concealment/distraction stay local,
@@ -58,7 +71,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **345** tests passing (41 files)
+- `npm test` — **537** tests passing (48 files)
 - `npm run lint` — clean
 - `npm run build` — green (~913 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)
