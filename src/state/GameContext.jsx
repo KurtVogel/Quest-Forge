@@ -50,6 +50,15 @@ export function GameProvider({ children }) {
         stateRef.current = state;
     }, [state]);
 
+    // Automated-playtest hook (?debugState=1): a sanitized live snapshot for
+    // assertions the DOM cannot answer (hidden fronts, combat phase, loot dedupe).
+    // `settings` (API keys) and `user` (auth) are never included.
+    useEffect(() => {
+        if (!new URLSearchParams(window.location.search).has('debugState')) return;
+        const { settings: _settings, user: _user, ...snapshot } = state;
+        window.__QF_STATE__ = snapshot;
+    }, [state]);
+
     const flushAutoSave = useCallback(async ({ npcUpdate = null, npcBulkArchiveIds = null } = {}) => {
         let current = stateRef.current;
         if (!current?.session?.id || !current.character) return;
