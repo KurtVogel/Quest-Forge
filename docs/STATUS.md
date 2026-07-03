@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-01 (mobile roleplay challenge action)_
+_Last updated: 2026-07-02 (loot persistence hardening)_
 
 ## Current focus — memory & fronts real-play tuning
 
@@ -22,8 +22,18 @@ feels excellent in live play — casters multiply engine surface area; polish th
 - **Roleplay-check proposals** remaining fair; Scribe roll audit catching bad setups
 - Console clean; autosave intact after front-only or combat changes
 
-## Recently shipped (June 21 – July 1, 2026)
+## Recently shipped (June 21 – July 2, 2026)
 
+- **Loot persistence hardening (2026-07-02):** fixes narrated-but-never-applied loot (live bug:
+  tomb coins vanished until the player complained). Three layers: (1) the parser now coerces
+  string-typed numeric amounts (`"gold_found": "15"` / `"15 gp"`) instead of silently zeroing
+  them; (2) the per-turn Scribe pass doubles as a **loot persistence audit** — it compares the
+  narrative against the events actually applied and grants only the missing shortfall, deduped
+  per narration message via `CLAIM_LOOT_SOURCE`, with a visible "Loot recovered from narration"
+  system line; it also runs on victory narration (whose narration-only contract discards all DM
+  events, so narrated victory looting previously had no persistence channel at all); (3) the
+  ECONOMY prompt now demands a matching event in the same response as any narrated acquisition.
+  No regex fallback by explicit decision — see DECISIONS.md 2026-07-02.
 - **Mobile roleplay challenge action (2026-07-01):** the challenge textbox in proposed
   roleplay checks now has its own inline **Send challenge** button directly under the
   textarea, so phone browsers/keyboards cannot hide the only submit action below the viewport.
@@ -74,7 +84,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **537** tests passing (48 files)
+- `npm test` — **547** tests passing (48 files)
 - `npm run lint` — clean
 - `npm run build` — green (~913 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)

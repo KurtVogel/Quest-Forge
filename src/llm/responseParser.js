@@ -25,9 +25,22 @@ function cryptoRandInt(min, max) {
     return min + (crypto.getRandomValues(new Uint32Array(1))[0] % range);
 }
 
-/** Clamp a numeric LLM value to a sane range; non-numbers become the fallback. */
+/**
+ * Clamp a numeric LLM value to a sane range; unusable values become the fallback.
+ * LLMs regularly emit numeric fields as strings ("15") or with a trailing unit
+ * ("15 gp"); silently zeroing those made narrated coin/XP grants vanish, so a
+ * leading-number parse is accepted and logged before falling back.
+ */
 function clamp(value, min, max, fallback = 0) {
-    return typeof value === 'number' ? Math.max(min, Math.min(max, value)) : fallback;
+    let num = value;
+    if (typeof value === 'string' && value.trim() !== '') {
+        num = Number(value);
+        if (!Number.isFinite(num)) num = parseFloat(value);
+        if (Number.isFinite(num)) {
+            console.warn(`[ResponseParser] Coerced string numeric value "${value}" -> ${num}.`);
+        }
+    }
+    return Number.isFinite(num) ? Math.max(min, Math.min(max, num)) : fallback;
 }
 
 function canonicalEnemyId(enemy, index, usedIds) {

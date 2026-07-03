@@ -104,6 +104,29 @@ describe('defenses against LLM misbehavior', () => {
         expect(events.expAwarded).toBe(0);
     });
 
+    it('coerces string-typed coin/XP amounts instead of silently zeroing them', () => {
+        // Real failure mode: the DM emitted "gold_found": "15" and the player's
+        // narrated tomb loot vanished with no warning.
+        const { events } = parseResponse(fence({
+            gold_found: '15',
+            silver_found: '3',
+            copper_found: '15 cp',
+            exp_awarded: '50',
+            healing: '4 HP',
+        }));
+        expect(events.goldFound).toBe(15);
+        expect(events.silverFound).toBe(3);
+        expect(events.copperFound).toBe(15);
+        expect(events.expAwarded).toBe(50);
+        expect(events.healing).toBe(4);
+    });
+
+    it('still clamps coerced string amounts to sane bounds', () => {
+        const { events } = parseResponse(fence({ gold_found: '999999', damage_taken: '-5' }));
+        expect(events.goldFound).toBe(10000);
+        expect(events.damageTaken).toBe(0);
+    });
+
     it('caps items_found at 20 entries', () => {
         const { events } = parseResponse(fence({ items_found: Array.from({ length: 50 }, (_, i) => `Trinket ${i}`) }));
         expect(events.itemsFound).toHaveLength(20);

@@ -217,3 +217,180 @@ describe('scene-art prompt composition', () => {
         expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('Do not add generic party members');
     });
 });
+
+describe('Scribe loot persistence audit', () => {
+    beforeEach(() => {
+        sendMessage.mockReset();
+    });
+
+    const settings = { apiKey: 'test-key', llmProvider: 'gemini' };
+
+    function scribeResponse(missingLoot) {
+        return JSON.stringify({
+            world_facts: [],
+            npc_updates: [],
+            story_memory: [],
+            location: null,
+            ...(missingLoot !== undefined && { missing_loot: missingLoot }),
+        });
+    }
+
+    function makeLootAudit(overrides = {}) {
+        return {
+            sourceId: 'msg-1:scribe-loot',
+            appliedEvents: null,
+            getState: () => ({ appliedLootSourceIds: [] }),
+            ...overrides,
+        };
+    }
+
+    it('adds the loot-audit task and applied-events summary only when lootAudit is passed', async () => {
+        sendMessage.mockResolvedValue(scribeResponse());
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I grab the bling for the wenches',
+            dmNarrative: 'You sweep the tomb offerings into your pack: 23 gold pieces.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                appliedEvents: { goldFound: 23, itemsFound: [], purchases: [], sells: [], startingItems: [] },
+            }),
+        });
+        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            systemPrompt: expect.stringContaining('LOOT PERSISTENCE AUDIT'),
+            userMessage: expect.stringContaining('EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN'),
+        }));
+        expect(sendMessage.mock.calls[0][0].userMessage).toContain('gold +23');
+
+        sendMessage.mockClear();
+        sendMessage.mockResolvedValue(scribeResponse());
+        await runScribe({
+            playerMessage: 'Hello',
+            dmNarrative: 'The innkeeper nods.',
+            settings,
+            dispatch,
+        });
+        expect(sendMessage.mock.calls[0][0].systemPrompt).not.toContain('LOOT PERSISTENCE AUDIT');
+    });
+
+    it('grants missing coins and items once, claims the source, and announces it', async () => {
+        sendMessage.mockResolvedValue(scribeResponse({
+            gold: 23,
+            copper: 4,
+            items: [{ name: 'Jeweled circlet', quantity: 1 }],
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I loot the tomb.',
+            dmNarrative: 'You pocket 23 gold, 4 coppers, and a jeweled circlet.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit(),
+        });
+
+        expect(dispatch).toHaveBeenCalledWith({ type: 'CLAIM_LOOT_SOURCE', payload: 'msg-1:scribe-loot' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_GOLD', payload: 23 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_COPPER', payload: 4 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_ITEM', payload: { name: 'Jeweled circlet', quantity: 1 } });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'ADD_MESSAGE',
+            payload: expect.objectContaining({
+                role: 'system',
+                content: expect.stringContaining('Loot recovered from narration'),
+            }),
+        }));
+    });
+
+    it('skips an already-claimed audit source so retries and reloads cannot double-grant', async () => {
+        sendMessage.mockResolvedValue(scribeResponse({ gold: 23 }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I loot the tomb.',
+            dmNarrative: 'You pocket 23 gold.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({ getState: () => ({ appliedLootSourceIds: ['msg-1:scribe-loot'] }) }),
+        });
+
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'CLAIM_LOOT_SOURCE' }));
+    });
+
+    it('does nothing when the Scribe reports no missing loot', async () => {
+        sendMessage.mockResolvedValue(scribeResponse({ gold: 0, silver: 0, copper: 0, items: [] }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I inspect the empty alcove.',
+            dmNarrative: 'Dust and old bones. Nothing of value.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit(),
+        });
+
+        expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when missing_loot is absent or malformed', async () => {
+        sendMessage.mockResolvedValue(scribeResponse());
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I look around.', dmNarrative: 'A quiet crypt.',
+            settings, dispatch, lootAudit: makeLootAudit(),
+        });
+        expect(dispatch).not.toHaveBeenCalled();
+
+        sendMessage.mockResolvedValue(scribeResponse('lots of gold'));
+        await runScribe({
+            playerMessage: 'I look around.', dmNarrative: 'A quiet crypt.',
+            settings, dispatch, lootAudit: makeLootAudit(),
+        });
+        expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('clamps insane audit values and caps items at four', async () => {
+        sendMessage.mockResolvedValue(scribeResponse({
+            gold: 999999,
+            silver: '12',
+            copper: -5,
+            items: [
+                { name: 'A', quantity: 999 }, { name: 'B' }, { name: 'C' },
+                { name: 'D' }, { name: 'E' }, { name: '' },
+            ],
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I loot everything.',
+            dmNarrative: 'You haul away a fortune.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit(),
+        });
+
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_GOLD', payload: 10000 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_SILVER', payload: 12 });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COPPER' }));
+        const addItemCalls = dispatch.mock.calls.filter(([action]) => action.type === 'ADD_ITEM');
+        expect(addItemCalls).toHaveLength(4);
+        expect(addItemCalls[0][0].payload.quantity).toBe(20);
+    });
+
+    it('skips the audit entirely when no sourceId is available', async () => {
+        sendMessage.mockResolvedValue(scribeResponse({ gold: 23 }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I loot the tomb.',
+            dmNarrative: 'You pocket 23 gold.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({ sourceId: null }),
+        });
+
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+    });
+});

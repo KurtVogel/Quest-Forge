@@ -327,3 +327,11 @@ describe('item catalog block', () => {
         expect(text).toContain('## ITEM CATALOG (common mechanical items)');
     });
 });
+
+describe('loot persistence contract', () => {
+    it('requires every narrated acquisition to carry its event in the same response', () => {
+        const text = prompt();
+        expect(text).toContain('EVERY narrated acquisition MUST carry its matching event in the SAME response');
+        expect(text).toContain('Never attach loot to a response that proposes requested_rolls');
+    });
+});

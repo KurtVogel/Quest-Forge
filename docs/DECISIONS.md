@@ -8,6 +8,19 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-02 · Loot persistence is Scribe-audited; regex never decides semantic game outcomes.**
+The engine persists coins/items only from structured events, and the DM regularly narrates an
+acquisition without emitting the event (or emits amounts as strings, or narrates loot in a
+narration-only victory acknowledgment that has no event channel at all). The per-turn Scribe pass
+now doubles as a loot persistence audit: it compares the narrative against the events actually
+applied and grants only the missing shortfall, deduped per narration message (or exchangeId for
+victory narration) via `CLAIM_LOOT_SOURCE`, clamped by the engine, and announced with a visible
+system line so both player and DM context see the correction. Explicit user decision: **no regex
+fallback** — players phrase actions freely ("I grab the bling for the wenches") and offline play
+is not a target; if the Scribe is unavailable the audit simply skips. Purchases/sales are excluded
+from the audit so the twin-emission suppressions can't be re-granted. The parser also coerces
+string-typed numeric amounts ("15", "15 gp") instead of silently zeroing them.
+
 **2026-06-26 · Shared flanking advantage is explicit, not inferred from generic advantage.**
 Combat `situational_ruling` remains a broad table-style tool, but only explicit flanking-style
 player attack rulings propagate to companions attacking the same target. Concealment, high ground,

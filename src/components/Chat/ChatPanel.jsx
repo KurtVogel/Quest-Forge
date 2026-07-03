@@ -449,6 +449,15 @@ Translate the player's committed action into the single bounded combat_exchange 
                             terminal: result.terminal || 'ongoing',
                             postState: result.postState,
                         },
+                        // Victory narration is narration-only, so loot the DM narrates
+                        // there ("you pry 15 gold from the bandit's purse") has no event
+                        // channel at all — the audit is its only way to persist. Keyed to
+                        // the exchangeId, matching the narration's own retry idempotency.
+                        lootAudit: result.terminal === 'victory' ? {
+                            sourceId: `loot-${result.exchangeId}:scribe-loot`,
+                            appliedEvents: null,
+                            getState: () => stateRef.current,
+                        } : null,
                     }).catch(() => {});
                     // Ordinary combat beats are transient and the engine snapshot, not prose,
                     // owns their truth. Persist only terminal combat narration to RAG so a
@@ -503,6 +512,13 @@ Translate the player's committed action into the single bounded combat_exchange 
                 dmNarrative: finalNarration.content,
                 settings: latest.settings,
                 dispatch,
+                // Post-roll outcomes are where narrated loot most often loses its
+                // events (the withheld setup already dropped them by design).
+                lootAudit: (!latest.combat?.active && finalNarration.id) ? {
+                    sourceId: `${finalNarration.id}:scribe-loot`,
+                    appliedEvents: finalNarration.events || null,
+                    getState: () => stateRef.current,
+                } : null,
             }).catch(() => {});
             if (latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
                 const loc = latest.currentLocation;
@@ -664,6 +680,14 @@ Translate the player's committed action into the single bounded combat_exchange 
                     dmNarrative: finalNarration.content,
                     settings: latest.settings,
                     dispatch,
+                    // Loot persistence audit: recover coins/items the narrative granted
+                    // but the DM's structured events missed. Out-of-combat only; keyed
+                    // to the narration message so retries/reloads cannot double-grant.
+                    lootAudit: (!latest.combat?.active && finalNarration.id) ? {
+                        sourceId: `${finalNarration.id}:scribe-loot`,
+                        appliedEvents: finalNarration.events || null,
+                        getState: () => stateRef.current,
+                    } : null,
                 }).catch(() => {});
                 if (latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
                     const loc = latest.currentLocation;

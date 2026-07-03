@@ -81,6 +81,93 @@ Rules:
 - If nothing notable happened (pure narration, no new facts), return { "world_facts": [], "npc_updates": [], "story_memory": [], "location": null }
 - Output ONLY the JSON, no other text`;
 
+const LOOT_AUDIT_RULES = `
+
+ADDITIONAL TASK — LOOT PERSISTENCE AUDIT:
+The game engine persists coins and items ONLY from structured events; anything narrated but not emitted as an event silently vanishes. Compare the DM narrative against the EVENTS ALREADY APPLIED section of the user message and report acquisitions the narrative established that the engine did not apply, as one extra top-level field:
+"missing_loot": { "gold": 0, "silver": 0, "copper": 0, "items": [{ "name": "exact item name from the narrative", "quantity": 1 }] }
+
+Loot audit rules:
+- Report ONLY acquisitions the DM NARRATIVE explicitly completes for the hero: taken, pocketed, looted, claimed, received, handed over. The player's own message is never sufficient evidence — the DM narrative must confirm the acquisition happened.
+- Anything listed under EVENTS ALREADY APPLIED is NOT missing. Report only the shortfall (narrative grants coins and a ring, events applied only the coins -> report only the ring).
+- Never report offers, prices, rewards merely promised, goods only seen or described, another character's possessions, or attempts/intentions.
+- Exact amounts only. If the narrative gives no specific number ("a handful of coins"), omit that coin field entirely — never estimate.
+- Purchases and sales are engine transactions handled elsewhere; never report coins or goods exchanged in a purchase or sale.
+- When in doubt, omit. Omit "missing_loot" entirely when nothing is missing.`;
+
+/** Compact human-readable summary of the loot-relevant events the engine applied. */
+function describeAppliedLoot(events) {
+    if (!events) return 'None. No structured events were applied for this narrative.';
+    const parts = [];
+    if (events.goldFound > 0) parts.push(`gold +${events.goldFound}`);
+    if (events.silverFound > 0) parts.push(`silver +${events.silverFound}`);
+    if (events.copperFound > 0) parts.push(`copper +${events.copperFound}`);
+    for (const item of events.itemsFound || []) {
+        parts.push(`item: ${typeof item === 'string' ? item : item?.name || item?.itemKey || 'unknown'}`);
+    }
+    for (const purchase of events.purchases || []) parts.push(`purchase: ${purchase?.itemKey || purchase?.name || purchase?.item?.name || 'item'}`);
+    for (const sale of events.sells || []) parts.push(`sale: ${sale?.itemKey || sale?.name || 'item'}`);
+    for (const item of events.startingItems || []) parts.push(`starting item: ${item?.name || item?.itemKey || 'unknown'}`);
+    return parts.length ? parts.join('; ') : 'None. No coins or items were applied for this narrative.';
+}
+
+function coerceLootAmount(value, max = 10000) {
+    const num = typeof value === 'number' ? value : parseFloat(value);
+    if (!Number.isFinite(num)) return 0;
+    return Math.max(0, Math.min(max, Math.trunc(num)));
+}
+
+/**
+ * Apply Scribe-detected narrated-but-unapplied loot. Idempotent per sourceId via
+ * CLAIM_LOOT_SOURCE, clamped by the engine, and announced with a visible system
+ * message so both the player and the DM's future context see the correction.
+ */
+function applyMissingLoot(missing, lootAudit, dispatch) {
+    if (!missing || typeof missing !== 'object') return;
+    const gold = coerceLootAmount(missing.gold);
+    const silver = coerceLootAmount(missing.silver);
+    const copper = coerceLootAmount(missing.copper);
+    const items = (Array.isArray(missing.items) ? missing.items : [])
+        .map(entry => {
+            const name = String((typeof entry === 'string' ? entry : entry?.name) || '').trim().slice(0, 80);
+            if (!name) return null;
+            const quantity = coerceLootAmount(typeof entry === 'object' ? entry.quantity : 1, 20) || 1;
+            const itemKey = typeof entry === 'object' && entry.itemKey ? String(entry.itemKey).slice(0, 60) : null;
+            return { name, quantity, ...(itemKey && { itemKey }) };
+        })
+        .filter(Boolean)
+        .slice(0, 4);
+    if (gold <= 0 && silver <= 0 && copper <= 0 && items.length === 0) return;
+
+    const { sourceId, getState } = lootAudit;
+    if (!sourceId) return;
+    if ((getState?.()?.appliedLootSourceIds || []).includes(sourceId)) {
+        console.warn(`[Scribe] Loot audit for ${sourceId} already applied; skipping.`);
+        return;
+    }
+    dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: sourceId });
+
+    if (gold > 0) dispatch({ type: 'ADD_GOLD', payload: gold });
+    if (silver > 0) dispatch({ type: 'ADD_SILVER', payload: silver });
+    if (copper > 0) dispatch({ type: 'ADD_COPPER', payload: copper });
+    for (const item of items) dispatch({ type: 'ADD_ITEM', payload: item });
+
+    const parts = [
+        gold > 0 ? `${gold} gp` : null,
+        silver > 0 ? `${silver} sp` : null,
+        copper > 0 ? `${copper} cp` : null,
+        ...items.map(item => (item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name)),
+    ].filter(Boolean);
+    dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+            role: 'system',
+            content: `**Loot recovered from narration:** ${parts.join(', ')} added to your possessions.`,
+        },
+    });
+    console.log(`[Scribe] Loot audit recovered: ${parts.join(', ')}`);
+}
+
 /**
  * Run the Scribe after a DM response to extract world-state updates.
  * Dispatches updates silently — the player never sees this.
@@ -107,7 +194,7 @@ function contradictsAuthoritativeCombat(value, authoritativeContext) {
     });
 }
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null }) {
     if (!settings.apiKey || !dmNarrative) return;
 
     try {
@@ -115,13 +202,16 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             provider: settings.llmProvider,
             apiKey: settings.apiKey,
             model: backgroundModel(settings),
-            systemPrompt: SCRIBE_SYSTEM_PROMPT,
+            systemPrompt: lootAudit ? SCRIBE_SYSTEM_PROMPT + LOOT_AUDIT_RULES : SCRIBE_SYSTEM_PROMPT,
             messageHistory: [],
             userMessage: [
                 `Player action: ${playerMessage}`,
                 `DM narrative: ${dmNarrative}`,
                 authoritativeContext
                     ? `AUTHORITATIVE ENGINE STATE (prose cannot override this): ${JSON.stringify(authoritativeContext)}`
+                    : null,
+                lootAudit
+                    ? `EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN (anything listed here is NOT missing): ${describeAppliedLoot(lootAudit.appliedEvents)}`
                     : null,
             ].filter(Boolean).join('\n\n'),
         });
@@ -183,6 +273,10 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
 
         if (extracted.location) {
             dispatch({ type: 'SET_LOCATION', payload: extracted.location });
+        }
+
+        if (lootAudit) {
+            applyMissingLoot(extracted.missing_loot, lootAudit, dispatch);
         }
     } catch (e) {
         // Scribe failures must never block the main game loop, but log clearly
