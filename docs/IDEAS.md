@@ -412,6 +412,31 @@ A local list of saved heroes, plus JSON file export/import operated from it.
 BYO API key + BYO Firebase is a wall for new users. Ideas: guided setup wizard, key-validation
 test button, possibly a limited demo mode. Matters at "going public" threshold.
 
+### Findings from the 2026-07-03 live playtest — status: `idea` backlog
+Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md.
+- **Cross-turn duplicate purchase guard** (bug, moderate): the DM completed a dagger
+  purchase, then re-emitted the same purchase in its next response — two daggers, double
+  charge. Same-response twins are already suppressed; add a recent-purchase dedupe window
+  (itemKey+price within the last ~2 assistant messages, à la `appliedLootSourceIds`) or a
+  prompt rule against re-emitting completed transactions.
+- **Scribe extraction budget** (top memory-tuning item): ~4+ world facts AND story cards
+  per turn → 109 facts/106 cards in one evening; facts inject into the prompt uncompressed.
+  Raise the bar ("durable, campaign-level truths only"), cap per-turn extraction, or add a
+  periodic merge/prune pass for near-duplicate facts.
+- **Front clock pacing:** deterministic front ran 0→6 (max clock) + stage 4 in a single
+  session via cadence movement. Verify the reflection isn't proposing +1 every cadence;
+  consider requiring an explicit fictional trigger for consecutive advances.
+- **Quest emission nudge:** an entire session of clear quest-shaped deals (rat clearing for
+  a room, debt collection, smuggler investigation) produced zero `quest_updates`; the Quests
+  panel stayed empty. Prompt likely needs a concrete "open/update a quest when the hero
+  accepts a job/goal" instruction.
+- **XP for slain enemies in a lost fight:** the player killed the bruiser, then dropped to
+  0 HP; combat ended in capture with no XP. Consider awarding overcome-XP for enemies
+  genuinely defeated before the player falls.
+- **Creation-time front title:** with no location yet, `createInitialFronts` anchors on the
+  premise's first sentence ("Trouble around Kalden Vor, a human fighter and…"). Prefer a
+  location-like anchor or a tighter trim; heals correctly once a location exists.
+
 ## Tech & Infra
 
 ### NPC roster promotion / character vs fodder — status: `shipped` (2026-06-23)

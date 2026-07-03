@@ -4,7 +4,22 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-03 (save-layer + loot + provider hardening pass — all four known issues fixed)_
+_Last updated: 2026-07-03 (hardening pass shipped + live production playtest passed)_
+
+## Live playtest (2026-07-03, production build, real Gemini DM)
+
+~25-turn automated campaign via `scripts/playtest_full_session.cjs` (phases: create /
+play seg1-3 / persist; sanitized `?debugState=1` hook). Full report with screenshots:
+`test-results/full_session/TEST_REPORT.md` (local, gitignored). **All hardened systems
+verified in production**: save round-trip, legacy fronts heal, live Dynamic World upgrade
+from healed state (3 canon-derived fronts surviving reload), sticky scroll, honest toast,
+coin math, loot audit (one clean recovery, zero double-grants), low-level solo capture
+instead of death, equipment-fiction sync, Short Rest at 0 HP. Zero console/page errors.
+**New bug found:** cross-turn duplicate purchase (one dagger requested, purchase event
+re-emitted next response → two daggers, 4 gp). **Top tuning finding:** Scribe over-extraction
+— 109 world facts + 106 story cards in ~25 turns; world facts inject uncompressed. Also:
+front clock ran 0→6 in one session (pacing), no quest_updates emitted all session, no XP
+from a lost fight's slain enemy, creation-time front title embeds the premise sentence.
 
 ## Current focus — memory & fronts real-play tuning
 
