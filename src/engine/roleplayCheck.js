@@ -25,11 +25,27 @@ export function sanitizePendingRoleplayCheck(value) {
         challengeUsed: value.challengeUsed === true,
         preNarrated: value.preNarrated === true,
         proposedAt: Number.isFinite(value.proposedAt) ? value.proposedAt : Date.now(),
+        loot: value.loot ? {
+            goldFound: Number.isFinite(value.loot.goldFound) ? Math.max(0, value.loot.goldFound) : 0,
+            silverFound: Number.isFinite(value.loot.silverFound) ? Math.max(0, value.loot.silverFound) : 0,
+            copperFound: Number.isFinite(value.loot.copperFound) ? Math.max(0, value.loot.copperFound) : 0,
+            itemsFound: Array.isArray(value.loot.itemsFound) ? value.loot.itemsFound.map(item => {
+                if (typeof item === 'string') return item.slice(0, 100);
+                if (item && typeof item === 'object') {
+                    const name = String(item.name || item.itemKey || '').trim().slice(0, 100);
+                    if (!name) return null;
+                    const quantity = Number.isFinite(item.quantity) ? Math.max(1, item.quantity) : 1;
+                    const itemKey = item.itemKey ? String(item.itemKey).trim().slice(0, 100) : undefined;
+                    return { name, quantity, ...(itemKey && { itemKey }) };
+                }
+                return null;
+            }).filter(Boolean) : [],
+        } : null,
     };
 }
 
-export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false } = {}) {
-    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, proposedAt: Date.now() });
+export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null } = {}) {
+    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, proposedAt: Date.now() });
 }
 
 export function buildRoleplayChallengePrompt(proposal, challenge) {

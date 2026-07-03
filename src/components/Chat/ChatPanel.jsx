@@ -275,6 +275,28 @@ Translate the player's committed action into the single bounded combat_exchange 
         let events = opts.narrationOnly ? null : parsed.events;
         opts.onNarrative?.(narrative);
 
+        if (!opts.narrationOnly && opts.pendingLoot) {
+            if (!events) {
+                events = normalizeEvents({});
+            }
+            events.goldFound = (events.goldFound || 0) + (opts.pendingLoot.goldFound || 0);
+            events.silverFound = (events.silverFound || 0) + (opts.pendingLoot.silverFound || 0);
+            events.copperFound = (events.copperFound || 0) + (opts.pendingLoot.copperFound || 0);
+
+            const existingItemNames = new Set((events.itemsFound || []).map(item => {
+                return typeof item === 'string' ? item.toLowerCase().trim() : (item?.name || '').toLowerCase().trim();
+            }));
+
+            for (const item of opts.pendingLoot.itemsFound || []) {
+                const itemName = typeof item === 'string' ? item : item?.name || '';
+                if (itemName && !existingItemNames.has(itemName.toLowerCase().trim())) {
+                    events.itemsFound = events.itemsFound || [];
+                    events.itemsFound.push(item);
+                }
+            }
+            console.log('[ChatPanel] Merged pending roll-setup loot into outcome events:', opts.pendingLoot);
+        }
+
         // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text
         if (!opts.narrationOnly && (!events || !events.requestedRolls?.length) && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
             const semanticRolls = await detectSemanticTextRolls(narrative, s.settings);
@@ -493,8 +515,8 @@ Translate the player's committed action into the single bounded combat_exchange 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state.combat?.phase, state.combat?.lastExchangeResult?.exchangeId, isLoading, combatNarrationRetry]);
 
-    const stageRoleplayCheck = (rolls, playerAction, challengeUsed = false, preNarrated = false) => {
-        const proposal = buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed, preNarrated });
+    const stageRoleplayCheck = (rolls, playerAction, challengeUsed = false, preNarrated = false, loot = null) => {
+        const proposal = buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed, preNarrated, loot });
         if (!proposal) return false;
         dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
         setRoleplayChallenge('');
@@ -548,6 +570,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 onFollowUpRolls: (rolls, meta) => {
                     stagedFollowUp = stageRoleplayCheck(rolls, meta.playerAction || proposal.playerAction, false, meta.preNarrated);
                 },
+                pendingLoot: proposal.loot,
             });
             if (!stagedFollowUp) finalizeRoleplayTurn(proposal.playerAction);
         } catch (error) {
@@ -572,10 +595,11 @@ Translate the player's committed action into the single bounded combat_exchange 
         try {
             const events = await sendToLLM(
                 buildRoleplayChallengePrompt(proposal, challenge),
-                proposal.playerAction
+                proposal.playerAction,
+                { pendingLoot: proposal.loot }
             );
             if (events?.requestedRolls?.length > 0) {
-                stageRoleplayCheck(events.requestedRolls, proposal.playerAction, true, events._preNarratedOutcome);
+                stageRoleplayCheck(events.requestedRolls, proposal.playerAction, true, events._preNarratedOutcome, proposal.loot);
             } else {
                 if (events?._playerAuthorityRollRejected) {
                     await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
@@ -657,7 +681,13 @@ Translate the player's committed action into the single bounded combat_exchange 
             } else if (events?.requestedRolls?.length > 0) {
                 // Outside combat, dice do not exist until the player accepts the public
                 // adjudication. Combat remains immediate and engine-owned above.
-                stageRoleplayCheck(events.requestedRolls, trimmed, false, events._preNarratedOutcome);
+                const initialLoot = (events.goldFound || events.silverFound || events.copperFound || events.itemsFound?.length) ? {
+                    goldFound: events.goldFound || 0,
+                    silverFound: events.silverFound || 0,
+                    copperFound: events.copperFound || 0,
+                    itemsFound: events.itemsFound || [],
+                } : null;
+                stageRoleplayCheck(events.requestedRolls, trimmed, false, events._preNarratedOutcome, initialLoot);
             } else if (events?._playerAuthorityRollRejected) {
                 await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
             }

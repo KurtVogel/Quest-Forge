@@ -106,6 +106,7 @@ export async function saveGame(slotId, gameState) {
                 currentLocation: gameState.currentLocation || null,
                 combat: gameState.combat || { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
                 session: { ...gameState.session, prunedMessageCount },
+                appliedLootSourceIds: gameState.appliedLootSourceIds || [],
                 // Strip secrets from local saves — keys are persisted separately via saveSettings()
                 settings: { ...gameState.settings, apiKey: undefined, imageApiKey: undefined, firebaseConfig: undefined },
             },

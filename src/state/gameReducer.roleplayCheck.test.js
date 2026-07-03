@@ -21,4 +21,26 @@ describe('pending roleplay check state', () => {
         const combatState = { ...initialGameState, combat: { ...initialGameState.combat, active: true } };
         expect(gameReducer(combatState, { type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal })).toBe(combatState);
     });
+
+    it('stores a proposal containing setup-phase loot and sanitizes it correctly', () => {
+        const proposalWithLoot = {
+            ...proposal,
+            loot: {
+                goldFound: 15,
+                silverFound: 20,
+                copperFound: 0,
+                itemsFound: ['silver ring', { name: 'Potion of Healing', quantity: 1, itemKey: 'potion_healing' }],
+            },
+        };
+        const proposed = gameReducer(initialGameState, { type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposalWithLoot });
+        expect(proposed.pendingRoleplayCheck.loot).toEqual({
+            goldFound: 15,
+            silverFound: 20,
+            copperFound: 0,
+            itemsFound: [
+                'silver ring',
+                { name: 'Potion of Healing', quantity: 1, itemKey: 'potion_healing' },
+            ],
+        });
+    });
 });

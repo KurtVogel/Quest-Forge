@@ -88,6 +88,7 @@ function validateSaveState(payload) {
         party: Array.isArray(payload.party) ? payload.party : [],
         currentLocation: payload.currentLocation || null,
         pendingRoleplayCheck: sanitizePendingRoleplayCheck(payload.pendingRoleplayCheck),
+        appliedLootSourceIds: Array.isArray(payload.appliedLootSourceIds) ? payload.appliedLootSourceIds : [],
         combat: (() => {
             const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)
                 ? payload.combat

@@ -205,4 +205,27 @@ describe('LOAD_GAME progression migrations', () => {
         expect(next.combat.enemies[0].conditions).toEqual(['prone']);
         expect(next.combat.lastExchangeResult.postState.enemies[0].conditions).toEqual(['prone']);
     });
+
+    it('hydrates appliedLootSourceIds from save state and backfills to empty array if missing', () => {
+        const withIds = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...baseCharacter, exp: 0 },
+                inventory: [],
+                messages: [],
+                appliedLootSourceIds: ['msg-1', 'msg-2'],
+            },
+        });
+        expect(withIds.appliedLootSourceIds).toEqual(['msg-1', 'msg-2']);
+
+        const withoutIds = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...baseCharacter, exp: 0 },
+                inventory: [],
+                messages: [],
+            },
+        });
+        expect(withoutIds.appliedLootSourceIds).toEqual([]);
+    });
 });
