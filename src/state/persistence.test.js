@@ -110,7 +110,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
 
     // Regression for the lost-fronts bug: the old field whitelist silently dropped
     // fronts and pendingRoleplayCheck, killing the hidden-fronts system on reload.
-    it('persists fronts, pendingRoleplayCheck, and appliedLootSourceIds', async () => {
+    it('persists fronts, pendingRoleplayCheck, appliedLootSourceIds, and recentPurchases', async () => {
         await saveGame('slot-1', makeGameState({
             fronts: [{ id: 'front-1', title: 'The Withering Tide', goal: 'Drown the coast', stakes: 'The port falls', clock: 3, grimPortents: ['a', 'b', 'c'] }],
             pendingRoleplayCheck: {
@@ -119,6 +119,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
                 playerAction: 'I sneak by',
             },
             appliedLootSourceIds: ['msg-1'],
+            recentPurchases: [{ signature: 'dagger|1|200', itemKey: 'dagger', name: 'Dagger', quantity: 1, priceCp: 200, sourceId: 'msg-buy-1', messageIndex: 4 }],
         }));
         const loaded = await loadGame('slot-1');
         expect(loaded.fronts).toHaveLength(1);
@@ -126,6 +127,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         expect(loaded.fronts[0].clock).toBe(3);
         expect(loaded.pendingRoleplayCheck.rolls).toHaveLength(1);
         expect(loaded.appliedLootSourceIds).toEqual(['msg-1']);
+        expect(loaded.recentPurchases).toEqual([expect.objectContaining({ signature: 'dagger|1|200', itemKey: 'dagger' })]);
         expect(loaded.saveVersion).toBe(2);
     });
 

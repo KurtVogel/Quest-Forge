@@ -89,6 +89,7 @@ function validateSaveState(payload) {
         currentLocation: payload.currentLocation || null,
         pendingRoleplayCheck: sanitizePendingRoleplayCheck(payload.pendingRoleplayCheck),
         appliedLootSourceIds: Array.isArray(payload.appliedLootSourceIds) ? payload.appliedLootSourceIds : [],
+        recentPurchases: normalizeRecentPurchases(payload.recentPurchases),
         combat: (() => {
             const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)
                 ? payload.combat
@@ -175,6 +176,120 @@ function normalizeInventory(inventory = []) {
 
 function normalizeRefToken(value) {
     return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+const RECENT_PURCHASE_LIMIT = 20;
+const RECENT_PURCHASE_MESSAGE_WINDOW = 8;
+const PURCHASE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|pay|pays|paying|paid|order|orders|ordering|ordered|take|takes|taking|grab|grabs|grabbing|get|gets|getting)\b/i;
+const REPEAT_PURCHASE_RE = /\b(another|one more|second|same)\b/i;
+
+function sanitizeRecentPurchase(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const signature = String(entry.signature || '').slice(0, 200);
+    if (!signature) return null;
+    return {
+        signature,
+        itemKey: String(entry.itemKey || '').slice(0, 100),
+        name: String(entry.name || '').slice(0, 160),
+        quantity: Number.isFinite(entry.quantity) ? Math.max(1, Math.trunc(entry.quantity)) : 1,
+        priceCp: Number.isFinite(entry.priceCp) ? Math.max(0, Math.trunc(entry.priceCp)) : 0,
+        sourceId: String(entry.sourceId || '').slice(0, 160),
+        messageIndex: Number.isInteger(entry.messageIndex) ? Math.max(0, entry.messageIndex) : 0,
+        timestamp: Number.isFinite(entry.timestamp) ? entry.timestamp : Date.now(),
+        status: entry.status === 'ignored' ? 'ignored' : 'applied',
+    };
+}
+
+function normalizeRecentPurchases(entries) {
+    return (Array.isArray(entries) ? entries : [])
+        .map(sanitizeRecentPurchase)
+        .filter(Boolean)
+        .slice(-RECENT_PURCHASE_LIMIT);
+}
+
+function buildPurchaseTransaction(payload = {}) {
+    const root = payload && typeof payload === 'object'
+        ? payload
+        : { name: String(payload || '') };
+    const rawWithMeta = root.item && typeof root.item === 'object'
+        ? { ...root.item }
+        : root.item
+            ? { name: String(root.item) }
+            : { ...root };
+    const { _meta: _rawMeta, ...raw } = rawWithMeta;
+    const item = normalizeItem({
+        ...raw,
+        itemKey: raw.itemKey || root.itemKey || raw.key || root.key,
+        name: raw.name || root.name,
+        quantity: root.quantity || raw.quantity || 1,
+    });
+    const quantity = item.quantity || 1;
+    const priceCp = Number.isFinite(root.priceCp)
+        ? root.priceCp
+        : Number.isFinite(item.valueCp)
+            ? item.valueCp * quantity
+            : 0;
+    const identity = normalizeItemKey(item.itemKey || item.key || item.name)
+        || normalizeRefToken(item.itemKey || item.name);
+    return {
+        item,
+        quantity,
+        priceCp,
+        signature: `${identity || normalizeRefToken(item.name)}|${quantity}|${Math.max(0, Math.trunc(priceCp))}`,
+    };
+}
+
+function currentMessageIndex(state) {
+    return Math.max(0, (state.messages || []).length - 1);
+}
+
+function findRecentPurchaseDuplicate(state, transaction, sourceId) {
+    const currentIndex = currentMessageIndex(state);
+    return normalizeRecentPurchases(state.recentPurchases)
+        .slice()
+        .reverse()
+        .find(entry => {
+            if (entry.signature !== transaction.signature) return false;
+            if (sourceId && entry.sourceId === sourceId) return true;
+            const distance = currentIndex - entry.messageIndex;
+            return distance >= 0 && distance <= RECENT_PURCHASE_MESSAGE_WINDOW;
+        }) || null;
+}
+
+function rememberPurchase(state, transaction, sourceId, status = 'applied') {
+    const record = sanitizeRecentPurchase({
+        signature: transaction.signature,
+        itemKey: transaction.item.itemKey,
+        name: transaction.item.name,
+        quantity: transaction.quantity,
+        priceCp: transaction.priceCp,
+        sourceId,
+        messageIndex: currentMessageIndex(state),
+        timestamp: Date.now(),
+        status,
+    });
+    if (!record) return normalizeRecentPurchases(state.recentPurchases);
+    const previous = normalizeRecentPurchases(state.recentPurchases)
+        .filter(entry => !(entry.signature === record.signature && entry.sourceId === record.sourceId));
+    return [...previous, record].slice(-RECENT_PURCHASE_LIMIT);
+}
+
+function playerMessageSupportsRepeatPurchase(item, playerMessage) {
+    const text = String(playerMessage || '');
+    if (!text.trim()) return false;
+    if (!PURCHASE_VERB_RE.test(text) && !REPEAT_PURCHASE_RE.test(text)) return false;
+
+    const compactText = normalizeRefToken(text);
+    const tokens = [item.itemKey, item.name]
+        .filter(Boolean)
+        .map(normalizeRefToken)
+        .filter(Boolean);
+    if (tokens.some(token => compactText.includes(token))) return true;
+
+    const nameWords = String(item.name || '').toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
+    if (nameWords.length > 0 && nameWords.every(word => text.toLowerCase().includes(word))) return true;
+
+    return REPEAT_PURCHASE_RE.test(text) && /\b(one|it|that|same)\b/i.test(text);
 }
 
 function equipmentKindMatches(item, kind) {
@@ -338,6 +453,7 @@ export const initialGameState = {
     currentLocation: null,
     pendingRoleplayCheck: null, // Reload-safe out-of-combat check proposal; no dice exist yet
     appliedLootSourceIds: [], // Message IDs whose gold/item loot has already been applied — prevents double-grant
+    recentPurchases: [], // Recent one-shot purchase signatures — prevents cross-turn LLM replays from double-charging
     combat: {
         active: false,
         enemies: [],
@@ -1157,18 +1273,22 @@ export function gameReducer(state, action) {
         }
 
         case 'PURCHASE_ITEM': {
-            const raw = action.payload?.item || action.payload || {};
-            const item = normalizeItem({
-                ...raw,
-                itemKey: raw.itemKey || action.payload?.itemKey,
-                quantity: action.payload?.quantity || raw.quantity || 1,
-            });
-            const quantity = item.quantity || 1;
-            const priceCp = Number.isFinite(action.payload?.priceCp)
-                ? action.payload.priceCp
-                : Number.isFinite(item.valueCp)
-                    ? item.valueCp * quantity
-                    : 0;
+            const transaction = buildPurchaseTransaction(action.payload);
+            const { item, quantity, priceCp } = transaction;
+            const meta = action.payload?._meta || {};
+            const sourceId = String(meta.sourceId || '').slice(0, 160);
+            const duplicate = findRecentPurchaseDuplicate(state, transaction, sourceId);
+            const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
+            if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatPurchase(item, meta.playerMessage))) {
+                return {
+                    ...state,
+                    recentPurchases: rememberPurchase(state, transaction, sourceId, 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`Duplicate purchase ignored — ${item.name} was already bought recently.`),
+                    ],
+                };
+            }
             const payment = spendCurrency(state.character, priceCp);
             if (!payment.paid) {
                 return {
@@ -1190,6 +1310,7 @@ export function gameReducer(state, action) {
             const nextState = {
                 ...state,
                 character: payment.character,
+                recentPurchases: rememberPurchase(state, transaction, sourceId),
                 messages: [
                     ...state.messages,
                     systemMessage(`Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)}.`),

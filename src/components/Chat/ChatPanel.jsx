@@ -364,7 +364,11 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
             // On a withheld roll-setup turn, defer outcome mutations to the post-roll
             // narration (see applyEvents) so the DM can't double-apply state across the split.
-            applyEvents(events, dispatch, () => stateRef.current, { setupPhase: hideSetup, lootSourceId: msgId });
+            applyEvents(events, dispatch, () => stateRef.current, {
+                setupPhase: hideSetup,
+                lootSourceId: msgId,
+                playerMessage: originalPlayerMessage,
+            });
             if (events.location && !s.combat?.active && !events.combatExchange) {
                 dispatch({ type: 'SET_LOCATION', payload: events.location });
             }

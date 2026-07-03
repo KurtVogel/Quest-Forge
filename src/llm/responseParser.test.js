@@ -588,6 +588,25 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'REMOVE_ITEM_BY_NAME' }));
     });
 
+    it('passes source and player-message metadata to purchase transactions when available', () => {
+        const { events } = parseResponse(fence({ purchase: { itemKey: 'dagger' } }));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({ character: {}, party: [] }), {
+            lootSourceId: 'msg-buy-1',
+            playerMessage: 'I buy a dagger.',
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'PURCHASE_ITEM',
+            payload: {
+                itemKey: 'dagger',
+                _meta: {
+                    sourceId: 'msg-buy-1',
+                    playerMessage: 'I buy a dagger.',
+                },
+            },
+        });
+    });
+
     it('dispatches a found item and a lost item by name', () => {
         const dispatch = run({ items_found: ['Rusty Key'], items_lost: ['Torch'] });
         expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_ITEM', payload: { name: 'Rusty Key' } });

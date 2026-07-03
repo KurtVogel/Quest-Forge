@@ -58,6 +58,96 @@ describe('PURCHASE_ITEM', () => {
         const torch = next.inventory.find(i => i.itemKey === 'torch');
         expect(torch.quantity).toBe(3);
     });
+
+    it('keeps transaction metadata out of inventory and treats nested custom price as per-unit', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: {
+                item: { name: 'Ink Vial', priceCp: 15 },
+                quantity: 2,
+                _meta: { sourceId: 'msg-buy-1', playerMessage: 'I buy two ink vials.' },
+            },
+        });
+
+        expect(next.character.gold).toBe(4);
+        expect(next.character.silver).toBe(7);
+        const ink = next.inventory.find(i => i.name === 'Ink Vial');
+        expect(ink.quantity).toBe(2);
+        expect(ink._meta).toBeUndefined();
+    });
+
+    it('ignores an identical nearby purchase replay when the player did not ask to buy again', () => {
+        const state = makeState();
+        const bought = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: {
+                itemKey: 'dagger',
+                _meta: { sourceId: 'msg-buy-1', playerMessage: 'I buy a dagger.' },
+            },
+        });
+        const nextAssistant = gameReducer(bought, {
+            type: 'ADD_MESSAGE',
+            payload: { id: 'msg-buy-2', role: 'assistant', content: 'The street opens beyond the shop.' },
+        });
+        const replayed = gameReducer(nextAssistant, {
+            type: 'PURCHASE_ITEM',
+            payload: {
+                itemKey: 'Dagger',
+                _meta: { sourceId: 'msg-buy-2', playerMessage: 'I leave the stall.' },
+            },
+        });
+
+        expect(replayed.character.gold).toBe(3);
+        expect(replayed.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(1);
+        expect(replayed.messages.at(-1).content).toMatch(/Duplicate purchase ignored/);
+    });
+
+    it('ignores an exact same-message purchase replay even if metadata is repeated', () => {
+        const state = makeState();
+        const bought = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: {
+                itemKey: 'dagger',
+                _meta: { sourceId: 'msg-buy-1', playerMessage: 'I buy a dagger.' },
+            },
+        });
+        const replayed = gameReducer(bought, {
+            type: 'PURCHASE_ITEM',
+            payload: {
+                itemKey: 'dagger',
+                _meta: { sourceId: 'msg-buy-1', playerMessage: 'I buy a dagger.' },
+            },
+        });
+
+        expect(replayed.character.gold).toBe(3);
+        expect(replayed.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(1);
+    });
+
+    it('allows a nearby repeat purchase when the player explicitly buys another copy', () => {
+        const state = makeState();
+        const bought = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: {
+                itemKey: 'dagger',
+                _meta: { sourceId: 'msg-buy-1', playerMessage: 'I buy a dagger.' },
+            },
+        });
+        const nextAssistant = gameReducer(bought, {
+            type: 'ADD_MESSAGE',
+            payload: { id: 'msg-buy-2', role: 'assistant', content: 'The merchant waits.' },
+        });
+        const second = gameReducer(nextAssistant, {
+            type: 'PURCHASE_ITEM',
+            payload: {
+                itemKey: 'dagger',
+                _meta: { sourceId: 'msg-buy-2', playerMessage: 'I buy another dagger.' },
+            },
+        });
+
+        expect(second.character.gold).toBe(1);
+        expect(second.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(2);
+    });
 });
 
 describe('SELL_ITEM', () => {

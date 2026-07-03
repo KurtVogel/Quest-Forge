@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-03 (hardening pass shipped + live production playtest passed)_
+_Last updated: 2026-07-03 (duplicate-purchase guard shipped after live playtest finding)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -15,9 +15,9 @@ verified in production**: save round-trip, legacy fronts heal, live Dynamic Worl
 from healed state (3 canon-derived fronts surviving reload), sticky scroll, honest toast,
 coin math, loot audit (one clean recovery, zero double-grants), low-level solo capture
 instead of death, equipment-fiction sync, Short Rest at 0 HP. Zero console/page errors.
-**New bug found:** cross-turn duplicate purchase (one dagger requested, purchase event
-re-emitted next response → two daggers, 4 gp). **Top tuning finding:** Scribe over-extraction
-— 109 world facts + 106 story cards in ~25 turns; world facts inject uncompressed. Also:
+**Follow-up fixed same day:** cross-turn duplicate purchase (one dagger requested, purchase event
+re-emitted next response → two daggers, 4 gp) now has a reducer-level recent-purchase guard.
+**Top tuning finding:** Scribe over-extraction — 109 world facts + 106 story cards in ~25 turns; world facts inject uncompressed. Also:
 front clock ran 0→6 in one session (pacing), no quest_updates emitted all session, no XP
 from a lost fight's slain enemy, creation-time front title embeds the premise sentence.
 
@@ -39,6 +39,13 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Recently shipped (June 21 – July 3, 2026)
 
+- **Duplicate purchase hardening (2026-07-03):** fixed the live playtest bug where a DM
+  re-emitted the same `purchase` event on the next response and double-charged the player.
+  `PURCHASE_ITEM` now records recent normalized transaction signatures
+  (`itemKey/name + quantity + priceCp + sourceId/messageIndex`) and ignores exact-source
+  replays or nearby identical purchases unless the new player message explicitly supports
+  buying another copy. `applyEvents` passes assistant source id + player text into purchase
+  actions; the economy prompt now states purchase/sale events are one-shot transactions.
 - **Save-layer + loot + provider hardening (2026-07-03):** a deep analysis pass found and fixed
   four issues (see DECISIONS.md 2026-07-03 ×3):
   1. **P0 fronts persistence bug** — local saves whitelisted state fields and silently dropped
@@ -122,9 +129,9 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **572** tests passing (49 files)
+- `npm test` — **577** tests passing (49 files)
 - `npm run lint` — clean
-- `npm run build` — green (~913 KB JS main chunk; split deferred pre-public)
+- `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)
 
 ## Up next (agreed order)

@@ -333,5 +333,6 @@ describe('loot persistence contract', () => {
         const text = prompt();
         expect(text).toContain('EVERY narrated acquisition MUST carry its matching event in the SAME response');
         expect(text).toContain('Never attach loot to a response that proposes requested_rolls');
+        expect(text).toContain('Purchases and sales are one-shot transaction events');
     });
 });

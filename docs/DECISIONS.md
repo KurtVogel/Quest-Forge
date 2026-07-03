@@ -8,6 +8,16 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-03 · Purchase events are one-shot transactions with reducer-level replay protection.**
+The live production playtest caught a real economy bug: after a dagger purchase was completed, the
+DM re-emitted the same `purchase` event on the next response, producing a second dagger and another
+2 gp charge. Prompt guidance alone is not enough for this failure mode. `PURCHASE_ITEM` now records
+a compact `recentPurchases` ledger keyed by normalized item identity/name, quantity, price, source
+message, and message index. Exact source replays and nearby identical purchases are ignored unless
+the current player message explicitly supports buying another copy. The ledger persists with saves
+so reloads cannot reopen the duplicate window, and the DM prompt now names purchases/sales as
+one-shot transaction events.
+
 **2026-07-03 · Saves are serialized by one shared spread-plus-strip snapshot, never a field whitelist.**
 `serializeGameState()` in `persistence.js` is the single source for BOTH local IndexedDB and cloud
 Firestore saves: spread the whole state, strip `user`/`ui`/settings-secrets, stamp `saveVersion`.

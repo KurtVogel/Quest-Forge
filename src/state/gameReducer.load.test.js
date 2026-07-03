@@ -266,7 +266,7 @@ describe('LOAD_GAME progression migrations', () => {
         expect(next.combat.lastExchangeResult.postState.enemies[0].conditions).toEqual(['prone']);
     });
 
-    it('hydrates appliedLootSourceIds from save state and backfills to empty array if missing', () => {
+    it('hydrates appliedLootSourceIds and recentPurchases from save state and backfills missing arrays', () => {
         const withIds = gameReducer(initialGameState, {
             type: 'LOAD_GAME',
             payload: {
@@ -274,9 +274,24 @@ describe('LOAD_GAME progression migrations', () => {
                 inventory: [],
                 messages: [],
                 appliedLootSourceIds: ['msg-1', 'msg-2'],
+                recentPurchases: [{
+                    signature: 'dagger|1|200',
+                    itemKey: 'dagger',
+                    name: 'Dagger',
+                    quantity: 1,
+                    priceCp: 200,
+                    sourceId: 'msg-buy-1',
+                    messageIndex: 4,
+                    timestamp: 123,
+                }],
             },
         });
         expect(withIds.appliedLootSourceIds).toEqual(['msg-1', 'msg-2']);
+        expect(withIds.recentPurchases).toEqual([expect.objectContaining({
+            signature: 'dagger|1|200',
+            itemKey: 'dagger',
+            priceCp: 200,
+        })]);
 
         const withoutIds = gameReducer(initialGameState, {
             type: 'LOAD_GAME',
@@ -287,5 +302,6 @@ describe('LOAD_GAME progression migrations', () => {
             },
         });
         expect(withoutIds.appliedLootSourceIds).toEqual([]);
+        expect(withoutIds.recentPurchases).toEqual([]);
     });
 });

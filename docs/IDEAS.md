@@ -414,11 +414,11 @@ test button, possibly a limited demo mode. Matters at "going public" threshold.
 
 ### Findings from the 2026-07-03 live playtest — status: `idea` backlog
 Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md.
-- **Cross-turn duplicate purchase guard** (bug, moderate): the DM completed a dagger
+- **Cross-turn duplicate purchase guard** — fixed 2026-07-03. The DM completed a dagger
   purchase, then re-emitted the same purchase in its next response — two daggers, double
-  charge. Same-response twins are already suppressed; add a recent-purchase dedupe window
-  (itemKey+price within the last ~2 assistant messages, à la `appliedLootSourceIds`) or a
-  prompt rule against re-emitting completed transactions.
+  charge. The reducer now keeps a recent normalized purchase-signature ledger and ignores
+  nearby replays unless the player explicitly buys another copy; the prompt also says
+  purchase/sale events are one-shot transactions.
 - **Scribe extraction budget** (top memory-tuning item): ~4+ world facts AND story cards
   per turn → 109 facts/106 cards in one evening; facts inject into the prompt uncompressed.
   Raise the bar ("durable, campaign-level truths only"), cap per-turn extraction, or add a

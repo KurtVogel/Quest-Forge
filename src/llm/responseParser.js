@@ -585,8 +585,19 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         dispatch({ type: 'ADD_ITEM', payload: itemData });
     }
 
+    const transactionMeta = {
+        ...(lootSourceId && { sourceId: lootSourceId }),
+        ...(opts?.playerMessage && { playerMessage: opts.playerMessage }),
+    };
+    const withTransactionMeta = (entry) => {
+        if (Object.keys(transactionMeta).length === 0) return entry;
+        return entry && typeof entry === 'object' && !Array.isArray(entry)
+            ? { ...entry, _meta: transactionMeta }
+            : { name: String(entry || ''), _meta: transactionMeta };
+    };
+
     for (const purchase of events.purchases) {
-        dispatch({ type: 'PURCHASE_ITEM', payload: purchase });
+        dispatch({ type: 'PURCHASE_ITEM', payload: withTransactionMeta(purchase) });
     }
 
     for (const sale of events.sells) {
