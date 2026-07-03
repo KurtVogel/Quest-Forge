@@ -155,6 +155,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
         systemPrompt: ENRICH_SYSTEM_PROMPT,
         messageHistory: [],
         userMessage: JSON.stringify(context, null, 2),
+        temperature: 0.4, // grounded agenda inference with a little invention
     });
 
     const jsonMatch = extractBalancedJson(response, 'agenda')

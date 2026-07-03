@@ -79,6 +79,7 @@ Output ONLY the JSON, no prose outside the JSON.`;
             systemPrompt,
             messageHistory: [],
             userMessage,
+            temperature: 0.2, // adjudication audit — determinism over flair
         });
 
         const jsonMatch = extractBalancedJson(response, 'rolls_evaluation');

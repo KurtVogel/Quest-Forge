@@ -730,6 +730,13 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
 export async function detectSemanticTextRolls(narrative, settings) {
     if (!settings?.apiKey || !narrative) return null;
 
+    // Cheap gate: prose that requests a roll essentially always names one of these.
+    // Without it, EVERY ordinary no-roll narration pays a blocking LLM round-trip
+    // for a detector that almost always returns empty. (DECISIONS.md 2026-06-22
+    // rejected regex *extraction* — this only decides whether to make the semantic
+    // call at all; false positives merely cost one call.)
+    if (!/\b(roll|check|saving throw|save|dc\s*\d|d20)\b/i.test(narrative)) return null;
+
     const SCRIBE_MODEL = 'gemini-2.5-flash';
     const model = settings.llmProvider === 'gemini' ? SCRIBE_MODEL : settings.model;
 
@@ -764,6 +771,7 @@ Output ONLY the JSON, no prose outside the JSON.`;
             systemPrompt,
             messageHistory: [],
             userMessage: `DM narrative: ${narrative}`,
+            temperature: 0.2, // roll detection — determinism over flair
         });
 
         const jsonMatch = extractBalancedJson(response, 'requested_rolls');

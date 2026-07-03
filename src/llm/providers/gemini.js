@@ -25,9 +25,37 @@ function formatEmbeddingInput(text, inputType) {
 }
 
 /**
+ * Output cap is a glitch-loop guard, NOT a budget. The old 4096 silently
+ * truncated long turns — and the trailing JSON event block is exactly what a
+ * truncation eats, so events (loot, XP, rolls) vanished without a trace.
+ * Thinking-capable models also count reasoning tokens against this cap.
+ */
+const GEMINI_MAX_OUTPUT_TOKENS = 32768;
+
+/**
+ * A finishReason other than STOP means the text is truncated or blocked; treating
+ * it as a complete response silently drops the trailing JSON event block. Fail
+ * loudly instead — the caller surfaces a retryable error to the player.
+ */
+function assertCompleteResponse(finishReason) {
+    if (!finishReason || finishReason === 'STOP') return;
+    if (finishReason === 'MAX_TOKENS') {
+        throw new Error('The model hit its output token cap mid-response (MAX_TOKENS) — the reply would be truncated. Please retry.');
+    }
+    throw new Error(`The model stopped early (${finishReason}) — the response is blocked or incomplete. Please retry or rephrase.`);
+}
+
+async function httpError(response) {
+    const error = await response.json().catch(() => ({}));
+    const err = new Error(`Gemini API error (${response.status}): ${error.error?.message || response.statusText}`);
+    err.status = response.status; // lets the adapter retry transient failures
+    return err;
+}
+
+/**
  * Convert our message format to Gemini's content format.
  */
-function formatMessages(systemPrompt, messageHistory, userMessage) {
+function formatMessages(systemPrompt, messageHistory, userMessage, temperature) {
     const contents = [];
 
     // Convert history
@@ -50,9 +78,11 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
         },
         contents,
         generationConfig: {
-            temperature: 0.9,
+            // 0.9 suits creative DM narration; extraction tasks (Scribe, journal,
+            // roll policy) pass a low temperature for reliable JSON.
+            temperature: temperature ?? 0.9,
             topP: 0.95,
-            maxOutputTokens: 4096,
+            maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
         },
     };
 }
@@ -60,9 +90,9 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
 /**
  * Send a non-streaming message to Gemini.
  */
-export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage }) {
+export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature }) {
     const url = `${GEMINI_API_BASE}/${model}:generateContent`;
-    const body = formatMessages(systemPrompt, messageHistory, userMessage);
+    const body = formatMessages(systemPrompt, messageHistory, userMessage, temperature);
 
     const response = await fetch(url, {
         method: 'POST',
@@ -71,12 +101,13 @@ export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHi
     });
 
     if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(`Gemini API error (${response.status}): ${error.error?.message || response.statusText}`);
+        throw await httpError(response);
     }
 
     const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    const candidate = data.candidates?.[0];
+    assertCompleteResponse(candidate?.finishReason);
+    const text = candidate?.content?.parts?.[0]?.text;
     if (!text) {
         throw new Error('No response generated. The model may have been blocked or returned empty.');
     }
@@ -133,9 +164,9 @@ export async function embedText(apiKey, text, { inputType = 'document' } = {}) {
 /**
  * Stream a message from Gemini.
  */
-export async function streamGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal }) {
+export async function streamGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature }) {
     const url = `${GEMINI_API_BASE}/${model}:streamGenerateContent?alt=sse`;
-    const body = formatMessages(systemPrompt, messageHistory, userMessage);
+    const body = formatMessages(systemPrompt, messageHistory, userMessage, temperature);
 
     const response = await fetch(url, {
         method: 'POST',
@@ -145,14 +176,14 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
     });
 
     if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(`Gemini API error (${response.status}): ${error.error?.message || response.statusText}`);
+        throw await httpError(response);
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let fullText = '';
     let buffer = '';
+    let finishReason = null;
 
     while (true) {
         const { done, value } = await reader.read();
@@ -171,7 +202,9 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
 
                 try {
                     const data = JSON.parse(jsonStr);
-                    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                    const candidate = data.candidates?.[0];
+                    if (candidate?.finishReason) finishReason = candidate.finishReason;
+                    const text = candidate?.content?.parts?.[0]?.text || '';
                     if (text) {
                         fullText += text;
                         onChunk(text);
@@ -183,5 +216,8 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
         }
     }
 
+    // A truncated stream looks complete but is missing its tail — usually the JSON
+    // event block. Surface it as an error so the turn is retried, not half-applied.
+    assertCompleteResponse(finishReason);
     return fullText;
 }

@@ -120,6 +120,7 @@ export async function upgradeCampaignFrontsV2(state) {
         systemPrompt: FRONT_UPGRADE_PROMPT,
         messageHistory: [],
         userMessage: JSON.stringify(context, null, 2),
+        temperature: 0.7, // creative front invention, but inside a strict JSON schema
     });
     const sanitized = sanitizeFrontUpgrade(parseUpgradeResponse(response), existingFronts);
     const enrichmentIds = new Set(sanitized.enrichments.map(entry => entry.id));

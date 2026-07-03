@@ -2,7 +2,7 @@
  * Tests for the provider-agnostic LLM adapter: routing, validation, and the
  * PROVIDERS/PROVIDER_LIST catalog consumed by Settings.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 
 const { sendGeminiMessage, streamGeminiMessage, sendOpenAIMessage, streamOpenAIMessage } = vi.hoisted(() => ({
     sendGeminiMessage: vi.fn(),
@@ -82,6 +82,46 @@ describe('streamMessage', () => {
     it('throws when the API key is missing', async () => {
         await expect(streamMessage({ ...baseOptions, provider: 'openai', apiKey: undefined })).rejects.toThrow('API key is required');
         expect(streamOpenAIMessage).not.toHaveBeenCalled();
+    });
+});
+
+describe('sendMessage retry/backoff', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('retries a transient failure and succeeds', async () => {
+        vi.useFakeTimers();
+        const transient = Object.assign(new Error('Gemini API error (503): overloaded'), { status: 503 });
+        sendGeminiMessage.mockRejectedValueOnce(transient).mockResolvedValueOnce('recovered');
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini' });
+        await vi.advanceTimersByTimeAsync(2000);
+        await expect(promise).resolves.toBe('recovered');
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry a non-transient error', async () => {
+        const fatal = Object.assign(new Error('Gemini API error (400): bad request'), { status: 400 });
+        sendGeminiMessage.mockRejectedValue(fatal);
+        await expect(sendMessage({ ...baseOptions, provider: 'gemini' })).rejects.toThrow('(400)');
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives up after two retries and surfaces the error', async () => {
+        vi.useFakeTimers();
+        const transient = Object.assign(new Error('rate limited'), { status: 429 });
+        sendGeminiMessage.mockRejectedValue(transient);
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini' });
+        const outcome = expect(promise).rejects.toThrow('rate limited');
+        await vi.advanceTimersByTimeAsync(10000);
+        await outcome;
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(3);
+    });
+
+    it('forwards temperature to the provider', async () => {
+        sendGeminiMessage.mockResolvedValue('ok');
+        await sendMessage({ ...baseOptions, provider: 'gemini', temperature: 0.2 });
+        expect(sendGeminiMessage).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.2 }));
     });
 });
 

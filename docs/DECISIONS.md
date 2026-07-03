@@ -8,6 +8,37 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-03 · Saves are serialized by one shared spread-plus-strip snapshot, never a field whitelist.**
+`serializeGameState()` in `persistence.js` is the single source for BOTH local IndexedDB and cloud
+Firestore saves: spread the whole state, strip `user`/`ui`/settings-secrets, stamp `saveVersion`.
+Why: the old local whitelist silently dropped every top-level field added after it was written —
+`fronts` (the flagship hidden-world system was dead in every reloaded campaign) and
+`pendingRoleplayCheck` both vanished, and `appliedLootSourceIds` only survived because it was
+individually patched. New state must persist by default; forgetting must be impossible.
+`LOAD_GAME` additionally heals front-less established campaigns (pre-fix saves) by reseeding the
+deterministic local-pressure front and clearing `frontDirector.generationVersion`, which reopens
+the explicit Settings Dynamic-World upgrade; cadence watermarks are kept so old cadences can't replay.
+
+**2026-07-03 · Cloud saves chunk across a Firestore subcollection; no size ceiling, no trimming.**
+Quest Forge campaigns are "sort of infinite" — a 1 MiB document cap is a guaranteed eventual failure,
+and trimming summarized messages only postponed it while making cloud saves lossier than local ones.
+Payloads over one chunk (~300k chars) split into `users/{uid}/saves/{slotId}/chunks/{i}` written in
+one atomic `writeBatch` (metadata doc last points at the chunk count; stale chunks deleted in the
+same batch; deletes remove chunks explicitly since Firestore never cascades). Cloud saves now carry
+the FULL message history, same as local. Deployed `firestore.rules` must include the chunks match —
+redeploy rules on your own Firebase project when adopting this.
+
+**2026-07-03 · Roll-proposal loot is a prompt reminder, never a client-side grant.**
+The short-lived ac190ff behavior (merge proposal-attached loot into the outcome events client-side)
+could grant loot the dice denied, double coins when the DM correctly re-emitted them in the outcome,
+and still lost the loot on chained or prose-detected rolls. Now declared loot rides the proposal as
+sanitized metadata and returns to the DM as an explicit grant-or-deny note in the post-roll outcome
+prompt (and the challenge prompt), carried through chained follow-ups until a roll-free outcome
+lands. The DM's own events remain the primary grant channel; the Scribe loot audit
+(2026-07-02) remains the backstop when a narrated grant lacks events. Why: only the DM knows
+whether the fiction awarded the loot after the dice spoke — the engine enforcing either answer
+guesses wrong in one direction or the other.
+
 **2026-07-02 · Loot persistence is Scribe-audited; regex never decides semantic game outcomes.**
 The engine persists coins/items only from structured events, and the DM regularly narrates an
 acquisition without emitting the event (or emits amounts as strings, or narrates loot in a

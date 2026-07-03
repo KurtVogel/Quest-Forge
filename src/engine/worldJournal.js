@@ -98,6 +98,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             systemPrompt: JOURNAL_SYSTEM_PROMPT,
             messageHistory: [],
             userMessage: `Summarize these recent game events:\n\n${recentMessages}`,
+            temperature: 0.2, // faithful extraction — proper nouns and numbers must survive verbatim
         });
 
         const jsonMatch = response.match(/\{[\s\S]*\}/);

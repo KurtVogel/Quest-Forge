@@ -2171,6 +2171,35 @@ export function gameReducer(state, action) {
             const backfilledCharacter = pendingProgression.character;
             // Validate required state shape
             const validated = validateSaveState(action.payload);
+            const loadedSession = {
+                ...initialGameState.session,
+                ...action.payload.session,
+                // Derive the summarization boundary from the messages actually present
+                // (summarized messages are a contiguous prefix). This self-heals a stale
+                // index from a trimmed cloud save or an older save format.
+                prunedMessageCount: (validated.messages || []).filter(m => m.summarized).length,
+            };
+            let loadedFronts = Array.isArray(action.payload.fronts)
+                ? action.payload.fronts.map(f => normalizeFront(f))
+                : [];
+            // Heal pre-serializer saves: local saves before 2026-07-03 never persisted
+            // fronts, so every reloaded campaign silently lost its hidden world clocks.
+            // An established campaign must never run front-less — reseed the deterministic
+            // local pressure, and drop the generation/upgrade marker that described the
+            // lost front web so Settings → "Upgrade to Dynamic World" becomes available
+            // again to rebuild rich fronts from campaign canon. Cadence watermarks
+            // (lastCadenceId/lastJournalEnd) are kept so old cadences cannot replay.
+            if (loadedFronts.length === 0 && backfilledCharacter) {
+                loadedFronts = createInitialFronts({
+                    premise: loadedSession.premise,
+                    character: backfilledCharacter,
+                    location: action.payload.currentLocation || null,
+                });
+                if (loadedSession.frontDirector) {
+                    const { generationVersion: _lostGeneration, source: _lostSource, ...directorRest } = loadedSession.frontDirector;
+                    loadedSession.frontDirector = directorRest;
+                }
+            }
             return {
                 ...validated,
                 // Use the normalized + migrated inventory (auto-equipped armor/shield and the
@@ -2187,17 +2216,8 @@ export function gameReducer(state, action) {
                 },
                 // Backfill new fields for old saves that don't have them
                 worldFacts: action.payload.worldFacts || [],
-                fronts: Array.isArray(action.payload.fronts)
-                    ? action.payload.fronts.map(f => normalizeFront(f))
-                    : [],
-                session: {
-                    ...initialGameState.session,
-                    ...action.payload.session,
-                    // Derive the summarization boundary from the messages actually present
-                    // (summarized messages are a contiguous prefix). This self-heals a stale
-                    // index from a trimmed cloud save or an older save format.
-                    prunedMessageCount: (validated.messages || []).filter(m => m.summarized).length,
-                },
+                fronts: loadedFronts,
+                session: loadedSession,
                 npcs: (action.payload.npcs || []).map(npc => migrateLegacyNpc(npc)),
                 ui: { ...initialGameState.ui },
             };

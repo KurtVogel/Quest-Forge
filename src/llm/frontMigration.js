@@ -183,6 +183,7 @@ export async function generateContextualFronts(state) {
         systemPrompt: FRONT_MIGRATION_PROMPT,
         messageHistory: [],
         userMessage: JSON.stringify(context, null, 2),
+        temperature: 0.7, // creative front invention, but inside a strict JSON schema
     });
     const extracted = extractBalancedJson(String(response || ''), 'fronts');
     if (!extracted) throw new Error('The migration response did not contain campaign fronts. Try again.');

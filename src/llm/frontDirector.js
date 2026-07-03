@@ -128,6 +128,7 @@ export async function generateCampaignFronts(state) {
         systemPrompt: INITIAL_FRONTS_PROMPT,
         messageHistory: [],
         userMessage: JSON.stringify(context, null, 2),
+        temperature: 0.7, // creative front invention, but inside a strict JSON schema
     });
     const fronts = sanitizeGeneratedFronts(parseJsonResponse(response).fronts);
     if (fronts.length < 2) throw new Error('The living-world director did not produce two safe, specific fronts.');

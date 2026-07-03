@@ -703,3 +703,75 @@ describe('Rogue Sneak Attack (out-of-combat)', () => {
         expect(msg).toContain('2d6');
     });
 });
+
+describe('pending declared loot rides the outcome prompt, never the engine', () => {
+    const outOfCombatState = () => ({
+        character: makeCharacter(),
+        inventory: [],
+        combat: { active: false, enemies: [] },
+        party: [],
+    });
+    const searchRoll = [{ type: 'skill_check', skill: 'perception', dc: 12, description: 'Search the tomb' }];
+    const tombLoot = { goldFound: 15, silverFound: 0, copperFound: 0, itemsFound: [{ name: 'Silver Ring', quantity: 1 }] };
+
+    it('adds a grant-or-deny loot note to the outcome prompt without granting anything itself', async () => {
+        rollQueue.push(10);
+        const dispatch = vi.fn();
+        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [] });
+
+        await handleRequestedRolls(searchRoll, {
+            getState: outOfCombatState,
+            dispatch,
+            sendToLLM,
+            playerAction: 'I search the tomb',
+            pendingLoot: tombLoot,
+        });
+
+        expect(sendToLLM).toHaveBeenCalledTimes(1);
+        const [prompt, , opts] = sendToLLM.mock.calls[0];
+        expect(prompt).toContain('15 gold');
+        expect(prompt).toContain('Silver Ring');
+        expect(prompt).toContain('NOT applied');
+        // The old design merged loot into events client-side; the engine must not grant it.
+        expect(opts.pendingLoot).toBeUndefined();
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ITEM' }));
+    });
+
+    it('carries pendingLoot metadata through follow-up roll staging', async () => {
+        rollQueue.push(10);
+        const dispatch = vi.fn();
+        const sendToLLM = vi.fn().mockResolvedValue({
+            requestedRolls: [{ type: 'saving_throw', skill: 'dexterity', dc: 12, description: 'Dart trap' }],
+        });
+        const onFollowUpRolls = vi.fn();
+
+        await handleRequestedRolls(searchRoll, {
+            getState: outOfCombatState,
+            dispatch,
+            sendToLLM,
+            playerAction: 'I search the tomb',
+            pendingLoot: tombLoot,
+            onFollowUpRolls,
+        });
+
+        expect(onFollowUpRolls).toHaveBeenCalledWith(
+            expect.any(Array),
+            expect.objectContaining({ pendingLoot: tombLoot })
+        );
+    });
+
+    it('omits the loot note when nothing was declared', async () => {
+        rollQueue.push(10);
+        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [] });
+
+        await handleRequestedRolls(searchRoll, {
+            getState: outOfCombatState,
+            dispatch: vi.fn(),
+            sendToLLM,
+            playerAction: 'I search the tomb',
+        });
+
+        expect(sendToLLM.mock.calls[0][0]).not.toContain('declared potential loot');
+    });
+});

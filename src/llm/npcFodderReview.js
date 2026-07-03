@@ -96,6 +96,7 @@ async function reviewFodderBatch(batch, settings) {
         systemPrompt: FODDER_REVIEW_SYSTEM_PROMPT,
         messageHistory: [],
         userMessage: JSON.stringify({ npcs: batch }),
+        temperature: 0.2, // pure classification — determinism over flair
     });
 
     const ids = parseReviewResponse(response, allowedIds);

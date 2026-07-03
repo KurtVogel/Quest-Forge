@@ -1,13 +1,12 @@
-import { collection, doc, setDoc, getDoc, getDocs, deleteDoc } from "firebase/firestore";
+import { collection, doc, setDoc, getDoc, getDocs, writeBatch } from "firebase/firestore";
 import { db } from "../config/firebase.js";
+import { serializeGameState, buildSaveMetadata } from "./persistence.js";
 
 /**
- * Interface mapping to existing persistence.js
- * The structure mirroring allows us to easily drop this in alongside IndexedDB.
+ * Cloud save layer (bring-your-own Firebase, manual saves only).
+ * Mirrors persistence.js: both paths persist the SAME serialized state via
+ * serializeGameState(), so a field cannot exist in one save format and not the other.
  */
-
-/** Max roll history entries to persist in cloud saves. */
-const MAX_SAVED_ROLLS = 50;
 
 /**
  * Firestore REJECTS document IDs that begin and end with double underscores
@@ -22,6 +21,39 @@ function cloudDocId(slotId) {
     return slotId === AUTOSAVE_SLOT ? CLOUD_AUTOSAVE_DOC_ID : slotId;
 }
 
+/**
+ * Firestore caps a document at 1 MiB, which a "sort of infinite" campaign will
+ * eventually exceed no matter what gets trimmed. Payloads larger than one chunk
+ * are split across a `chunks` subcollection and reassembled on load, so cloud
+ * saves have no practical size ceiling (a whole batched write is capped at
+ * 10 MiB by the Firestore API — tens of megabytes of pure JSON text — and can
+ * be revisited with multi-batch generations if a campaign ever gets there).
+ *
+ * 300k JS chars ≤ ~900 KB even if every char encodes to 3 UTF-8 bytes; typical
+ * prose is ~1 byte/char, so a chunk usually carries ~300 KB.
+ */
+const CHUNK_CHAR_LIMIT = 300000;
+
+/** Split without ever cutting a surrogate pair in half (Firestore requires valid UTF-8). */
+function splitPayload(payload) {
+    const chunks = [];
+    let start = 0;
+    while (start < payload.length) {
+        let end = Math.min(start + CHUNK_CHAR_LIMIT, payload.length);
+        const lastCode = payload.charCodeAt(end - 1);
+        if (end < payload.length && lastCode >= 0xd800 && lastCode <= 0xdbff) {
+            end -= 1; // high surrogate at the boundary — keep the pair together
+        }
+        chunks.push(payload.slice(start, end));
+        start = end;
+    }
+    return chunks;
+}
+
+function chunksCollection(uid, slotId) {
+    return collection(db, `users/${uid}/saves/${cloudDocId(slotId)}/chunks`);
+}
+
 export async function saveGameToCloud(uid, slotId, gameState) {
     if (!db) return false;
     if (!uid) return false;
@@ -30,63 +62,64 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         const userSavesRef = collection(db, `users/${uid}/saves`);
         const saveDocRef = doc(userSavesRef, cloudDocId(slotId));
 
-        // Cloud saves trim summarized messages to stay under Firestore's ~1MB doc limit
-        // (their content lives on in journal entries + world facts). Local saves keep the
-        // full history — see persistence.js.
-        const trimmedMessages = (gameState.messages || []).filter(m => !m.summarized);
-        // Cap: keep only the most recent rolls
-        const trimmedRolls = (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS);
-        // prunedMessageCount indexes into the array we actually persist. We just dropped
-        // every summarized message, so the boundary resets to what remains (0).
-        const prunedMessageCount = trimmedMessages.filter(m => m.summarized).length;
-
-        // Build a trimmed copy of the state for the payload, stripping secrets
+        // Cloud saves now carry the FULL message history, same as local saves —
+        // chunking removed the 1 MiB reason to trim summarized scrollback.
+        const messages = gameState.messages || [];
+        const prunedMessageCount = messages.filter(m => m.summarized).length;
         const trimmedState = {
-            ...gameState,
-            messages: trimmedMessages,
-            rollHistory: trimmedRolls,
+            ...serializeGameState(gameState),
             session: { ...gameState.session, prunedMessageCount },
-            settings: {
-                ...gameState.settings,
-                apiKey: undefined,
-                imageApiKey: undefined,
-                firebaseConfig: undefined,
-            },
         };
 
-        // Extract metadata for the list view
         const metadata = {
             slotId,
+            ...buildSaveMetadata(gameState),
             name: gameState.session?.name || 'Auto-Save',
             savedAt: new Date().toISOString(),
-            characterName: gameState.character?.name || 'Unknown Hero',
-            characterLevel: gameState.character?.level || 1,
-            characterClass: gameState.character?.class || 'Unknown Class',
-            characterHP: gameState.character?.currentHP || 0,
-            characterMaxHP: gameState.character?.maxHP || 0,
-            characterAC: gameState.character?.armorClass || 10,
-            gold: gameState.character?.gold || 0,
-            silver: gameState.character?.silver || 0,
-            copper: gameState.character?.copper || 0,
-            inventoryCount: gameState.inventory?.length || 0,
-            location: gameState.currentLocation || null,
-            questCount: gameState.quests?.filter(q => q.status === 'active')?.length || 0,
-            partySize: gameState.party?.length || 0,
-            messageCount: trimmedMessages.length,
+            messageCount: messages.length,
             isAuto: slotId === AUTOSAVE_SLOT
         };
 
-        // We store the full state as a stringified JSON blob to avoid Firestore's nested object limits/index explosion
-        // and a separate metadata object for fast querying.
-        await setDoc(saveDocRef, {
-            ...metadata,
-            payload: JSON.stringify(trimmedState)
-        });
+        // The state is stored as a stringified JSON blob (avoids Firestore's nested
+        // object limits/index explosion) beside the metadata used by the list view.
+        const payload = JSON.stringify(trimmedState);
 
-        console.log(`Cloud save successful: ${slotId}`);
+        // How many chunks does the PREVIOUS save occupy? Stale ones must go in the
+        // same atomic write, or an old chunk could survive and corrupt a later load.
+        const existingSnap = await getDoc(saveDocRef);
+        const previousChunkCount = existingSnap.exists() ? (existingSnap.data().payloadChunks || 0) : 0;
+
+        if (payload.length <= CHUNK_CHAR_LIMIT && previousChunkCount === 0) {
+            // Common case: everything fits in one document.
+            await setDoc(saveDocRef, { ...metadata, payload, payloadChunks: 0 });
+        } else {
+            // Chunked write, or an inline write that must also clear stale chunks
+            // from a previously-chunked save — one atomic batch either way.
+            const inline = payload.length <= CHUNK_CHAR_LIMIT;
+            const chunks = inline ? [] : splitPayload(payload);
+            const batch = writeBatch(db);
+            batch.set(saveDocRef, { ...metadata, payload: inline ? payload : null, payloadChunks: chunks.length });
+            chunks.forEach((data, index) => {
+                batch.set(doc(chunksCollection(uid, slotId), String(index)), { index, data });
+            });
+            for (let stale = chunks.length; stale < previousChunkCount; stale++) {
+                batch.delete(doc(chunksCollection(uid, slotId), String(stale)));
+            }
+            await batch.commit();
+        }
+
+        console.log(`Cloud save successful: ${slotId} (${payload.length} chars${payload.length > CHUNK_CHAR_LIMIT ? ', chunked' : ''})`);
         return true;
     } catch (e) {
         console.error("Cloud save failed:", e);
+        if (e?.code === 'permission-denied') {
+            console.error(
+                "Cloud save hint: large saves are stored in a `chunks` subcollection. " +
+                "If this campaign recently grew past one document, your Firebase project's " +
+                "firestore.rules predate that — redeploy the repo's firestore.rules " +
+                "(match /users/{userId}/saves/{saveId}/chunks/{chunkId})."
+            );
+        }
         return false;
     }
 }
@@ -99,12 +132,30 @@ export async function loadGameFromCloud(uid, slotId) {
         const saveDocRef = doc(userSavesRef, cloudDocId(slotId));
 
         const docSnap = await getDoc(saveDocRef);
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            if (data.payload) {
-                console.log(`Cloud load successful: ${slotId}`);
-                return JSON.parse(data.payload);
+        if (!docSnap.exists()) return null;
+        const data = docSnap.data();
+
+        if (data.payloadChunks > 0) {
+            const snapshot = await getDocs(chunksCollection(uid, slotId));
+            const chunks = [];
+            snapshot.forEach((chunkDoc) => {
+                const chunk = chunkDoc.data();
+                if (Number.isInteger(chunk?.index) && typeof chunk?.data === 'string') {
+                    chunks[chunk.index] = chunk.data;
+                }
+            });
+            for (let i = 0; i < data.payloadChunks; i++) {
+                if (typeof chunks[i] !== 'string') {
+                    throw new Error(`Cloud save ${slotId} is missing chunk ${i} of ${data.payloadChunks}.`);
+                }
             }
+            console.log(`Cloud load successful: ${slotId} (${data.payloadChunks} chunks)`);
+            return JSON.parse(chunks.slice(0, data.payloadChunks).join(''));
+        }
+
+        if (data.payload) {
+            console.log(`Cloud load successful: ${slotId}`);
+            return JSON.parse(data.payload);
         }
         return null;
     } catch (e) {
@@ -125,6 +176,7 @@ export async function listCloudSaves(uid) {
             const data = doc.data();
             // Don't include the massive payload string in the list view
             delete data.payload;
+            delete data.payloadChunks;
             // Exclude the autosave doc from the manual-saves list (match by doc ID too,
             // since the stored slotId field is the legacy "__autosave__" name)
             if (data.slotId !== AUTOSAVE_SLOT && doc.id !== CLOUD_AUTOSAVE_DOC_ID) {
@@ -145,7 +197,19 @@ export async function deleteGameFromCloud(uid, slotId) {
     try {
         const userSavesRef = collection(db, `users/${uid}/saves`);
         const saveDocRef = doc(userSavesRef, cloudDocId(slotId));
-        await deleteDoc(saveDocRef);
+
+        // Deleting a Firestore document does NOT delete its subcollections —
+        // orphaned chunks would silently linger (and could corrupt a future save
+        // that reuses the slot with a smaller chunk count). Remove them explicitly.
+        const existingSnap = await getDoc(saveDocRef);
+        const chunkCount = existingSnap.exists() ? (existingSnap.data().payloadChunks || 0) : 0;
+        const batch = writeBatch(db);
+        for (let i = 0; i < chunkCount; i++) {
+            batch.delete(doc(chunksCollection(uid, slotId), String(i)));
+        }
+        batch.delete(saveDocRef);
+        await batch.commit();
+
         console.log(`Cloud delete successful: ${slotId}`);
         return true;
     } catch (e) {
@@ -153,4 +217,3 @@ export async function deleteGameFromCloud(uid, slotId) {
         return false;
     }
 }
-

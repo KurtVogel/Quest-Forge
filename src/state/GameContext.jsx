@@ -24,7 +24,7 @@ export function GameProvider({ children }) {
         setSaveToast({ status });
         if (saveToastTimer.current) clearTimeout(saveToastTimer.current);
         // Leave failures up longer so they can actually be read
-        const duration = status === 'cloud-error' ? 5000 : 2500;
+        const duration = status.endsWith('error') ? 5000 : 2500;
         saveToastTimer.current = setTimeout(() => setSaveToast(null), duration);
     }, []);
 
@@ -66,20 +66,42 @@ export function GameProvider({ children }) {
             };
         }
 
-        await autoSave({
+        const saved = await autoSave({
             ...current,
             session: {
                 ...current.session,
                 updatedAt: new Date().toISOString(),
             },
         });
-        showSaveToast('local');
+        showSaveToast(saved ? 'local' : 'save-error');
     }, [showSaveToast]);
 
     // Auto-save settings when they change
     useEffect(() => {
         saveSettings(state.settings);
     }, [state.settings]);
+
+    // Flush the debounced autosave when the tab is backgrounded or closed. On phones
+    // especially, the browser can kill the page inside the 2s debounce window and
+    // silently lose the last turn. pagehide also reports visibilityState 'hidden',
+    // so one handler covers both signals.
+    useEffect(() => {
+        const flushOnHide = () => {
+            if (document.visibilityState !== 'hidden') return;
+            const current = stateRef.current;
+            if (!current?.session?.id || !current.character) return;
+            autoSave({
+                ...current,
+                session: { ...current.session, updatedAt: new Date().toISOString() },
+            });
+        };
+        document.addEventListener('visibilitychange', flushOnHide);
+        window.addEventListener('pagehide', flushOnHide);
+        return () => {
+            document.removeEventListener('visibilitychange', flushOnHide);
+            window.removeEventListener('pagehide', flushOnHide);
+        };
+    }, []);
 
     // Grandfather legacy NPC records from long-running saves without requiring a reload.
     useEffect(() => {
@@ -131,8 +153,9 @@ export function GameProvider({ children }) {
 
                 // Autosaves are deliberately local-per-device: each browser keeps its own
                 // "Continue" session. Only manual saves sync to the cloud (SettingsModal).
-                autoSave(timestampedState);
-                showSaveToast('local');
+                // The toast must reflect reality: a quota error or broken IndexedDB
+                // otherwise means silent progress loss behind a green checkmark.
+                autoSave(timestampedState).then(saved => showSaveToast(saved ? 'local' : 'save-error'));
             }, 2000);
             return () => clearTimeout(timer);
         }

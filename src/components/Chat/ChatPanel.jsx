@@ -35,6 +35,9 @@ export default function ChatPanel() {
     const [roleplayChallenge, setRoleplayChallenge] = useState('');
     const [showRoleplayChallenge, setShowRoleplayChallenge] = useState(false);
     const messagesEndRef = useRef(null);
+    const messagesContainerRef = useRef(null);
+    const stickToBottomRef = useRef(true); // Follow new content only while the reader is at the bottom
+    const [showJumpToLatest, setShowJumpToLatest] = useState(false);
     const abortControllerRef = useRef(null);
     const inputRef = useRef(null);
     const lastSummarizedRef = useRef(state.session?.prunedMessageCount || 0);
@@ -49,8 +52,12 @@ export default function ChatPanel() {
     const stateRef = useRef(state);
     stateRef.current = state;
 
+    const summarizeInFlightRef = useRef(false); // One summarize pass at a time — overlapping runs would double-journal the same range
+
     const runAutoSummarize = async (waitsForResolution = false) => {
         if (waitsForResolution) return;
+        if (summarizeInFlightRef.current) return;
+        summarizeInFlightRef.current = true;
         try {
             const result = await maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current);
             lastSummarizedRef.current = result.index;
@@ -62,11 +69,38 @@ export default function ChatPanel() {
             }
         } catch (e) {
             console.error('[Journal RAG Seeding] Failed:', e);
+        } finally {
+            summarizeInFlightRef.current = false;
         }
     };
 
-    useEffect(() => {
+    /**
+     * Sticky-bottom scrolling: follow the feed only while the reader is already at
+     * the bottom. A reader who scrolled up to re-read earlier beats (opening combat
+     * rolls, an unresolved cliffhanger) must never be yanked down — not by streaming
+     * chunks, not by the finished message, and not by trailing system lines. The
+     * floating "Latest" button is the way back down.
+     */
+    const handleMessagesScroll = () => {
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 140;
+        stickToBottomRef.current = nearBottom;
+        setShowJumpToLatest(!nearBottom);
+    };
+
+    const jumpToLatest = () => {
+        stickToBottomRef.current = true;
+        setShowJumpToLatest(false);
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    useEffect(() => {
+        // Instant (not smooth) keeps the follow reliable during streaming: a smooth
+        // animation still in flight reads as "not at bottom" and would break the stick.
+        if (stickToBottomRef.current) {
+            messagesEndRef.current?.scrollIntoView();
+        }
     }, [state.messages, streamingMessage]);
 
     /**
@@ -274,28 +308,6 @@ Translate the player's committed action into the single bounded combat_exchange 
         const narrative = parsed.narrative;
         let events = opts.narrationOnly ? null : parsed.events;
         opts.onNarrative?.(narrative);
-
-        if (!opts.narrationOnly && opts.pendingLoot) {
-            if (!events) {
-                events = normalizeEvents({});
-            }
-            events.goldFound = (events.goldFound || 0) + (opts.pendingLoot.goldFound || 0);
-            events.silverFound = (events.silverFound || 0) + (opts.pendingLoot.silverFound || 0);
-            events.copperFound = (events.copperFound || 0) + (opts.pendingLoot.copperFound || 0);
-
-            const existingItemNames = new Set((events.itemsFound || []).map(item => {
-                return typeof item === 'string' ? item.toLowerCase().trim() : (item?.name || '').toLowerCase().trim();
-            }));
-
-            for (const item of opts.pendingLoot.itemsFound || []) {
-                const itemName = typeof item === 'string' ? item : item?.name || '';
-                if (itemName && !existingItemNames.has(itemName.toLowerCase().trim())) {
-                    events.itemsFound = events.itemsFound || [];
-                    events.itemsFound.push(item);
-                }
-            }
-            console.log('[ChatPanel] Merged pending roll-setup loot into outcome events:', opts.pendingLoot);
-        }
 
         // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text
         if (!opts.narrationOnly && (!events || !events.requestedRolls?.length) && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
@@ -568,7 +580,9 @@ Translate the player's committed action into the single bounded combat_exchange 
                 playerAction: proposal.playerAction,
                 preNarrated: proposal.preNarrated,
                 onFollowUpRolls: (rolls, meta) => {
-                    stagedFollowUp = stageRoleplayCheck(rolls, meta.playerAction || proposal.playerAction, false, meta.preNarrated);
+                    // Carry declared-but-unapplied loot into the re-staged proposal so the
+                    // eventual roll-free outcome still gets the grant-or-deny reminder.
+                    stagedFollowUp = stageRoleplayCheck(rolls, meta.playerAction || proposal.playerAction, false, meta.preNarrated, meta.pendingLoot || null);
                 },
                 pendingLoot: proposal.loot,
             });
@@ -595,8 +609,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         try {
             const events = await sendToLLM(
                 buildRoleplayChallengePrompt(proposal, challenge),
-                proposal.playerAction,
-                { pendingLoot: proposal.loot }
+                proposal.playerAction
             );
             if (events?.requestedRolls?.length > 0) {
                 stageRoleplayCheck(events.requestedRolls, proposal.playerAction, true, events._preNarratedOutcome, proposal.loot);
@@ -792,7 +805,7 @@ Translate the player's committed action into the single bounded combat_exchange 
 
     return (
         <div className="chat-panel">
-            <div className="chat-messages">
+            <div className="chat-messages" ref={messagesContainerRef} onScroll={handleMessagesScroll}>
                 {state.messages.length === 0 && (
                     <div className="chat-empty">
                         <div className="chat-empty-icon" aria-hidden="true" />
@@ -834,6 +847,12 @@ Translate the player's committed action into the single bounded combat_exchange 
 
                 <div ref={messagesEndRef} />
             </div>
+
+            {showJumpToLatest && (
+                <button className="chat-jump-latest" onClick={jumpToLatest} title="Jump to the latest message">
+                    ↓ Latest
+                </button>
+            )}
 
             {state.combat?.active && <CombatPanel />}
 

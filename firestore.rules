@@ -5,6 +5,11 @@ service cloud.firestore {
     // Each user can only read/write their own save data
     match /users/{userId}/saves/{saveId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // Large saves overflow into a chunks subcollection (see cloudSync.js).
+      match /chunks/{chunkId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
     // Deny everything else by default

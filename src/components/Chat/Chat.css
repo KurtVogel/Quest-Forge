@@ -1,4 +1,5 @@
 .chat-panel {
+  position: relative; /* anchors the floating jump-to-latest button */
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -19,6 +20,26 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+/* Floating return-to-feed control shown while the reader has scrolled up */
+.chat-jump-latest {
+  position: absolute;
+  right: 1.25rem;
+  bottom: 5.5rem;
+  z-index: 5;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--border-primary);
+  border-radius: 999px;
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.chat-jump-latest:hover {
+  border-color: var(--accent-primary, var(--border-primary));
 }
 
 .chat-empty {

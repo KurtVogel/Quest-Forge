@@ -402,6 +402,30 @@ export function formatRollSummary(rollResults) {
 }
 
 /**
+ * A withheld roll-setup response sometimes declared loot alongside the check it
+ * proposed. Those events were deliberately dropped (setup mutations defer to the
+ * outcome), so the outcome narration gets an explicit reminder to re-emit them —
+ * gated on the dice. The engine never grants this loot directly: a failed roll
+ * must be able to deny it, and the Scribe loot audit remains the backstop when
+ * the DM narrates a grant without emitting the events.
+ */
+function formatPendingLootNote(pendingLoot) {
+    if (!pendingLoot) return '';
+    const parts = [
+        pendingLoot.goldFound > 0 ? `${pendingLoot.goldFound} gold` : null,
+        pendingLoot.silverFound > 0 ? `${pendingLoot.silverFound} silver` : null,
+        pendingLoot.copperFound > 0 ? `${pendingLoot.copperFound} copper` : null,
+        ...(pendingLoot.itemsFound || []).map(item => {
+            if (typeof item === 'string') return item;
+            if (!item?.name) return null;
+            return item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name;
+        }),
+    ].filter(Boolean);
+    if (parts.length === 0) return '';
+    return ` (6) Your withheld setup declared potential loot (${parts.join(', ')}) which was NOT applied. If this outcome genuinely awards any of it, narrate the acquisition and emit the matching items_found/X_found events in THIS response. If the dice deny it, neither narrate nor emit those gains.`;
+}
+
+/**
  * Handle the full roll → follow-up → recursive roll cycle with depth limiting.
  * @param {Array} requestedRolls - Initial roll requests
  * @param {object} options - Configuration
@@ -526,18 +550,22 @@ export async function handleRequestedRolls(requestedRolls, {
                 ? ` Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken, damage_dealt, or enemy_updates for them.`
                 : '';
 
+            const lootNote = formatPendingLootNote(pendingLoot);
             const followUpEvents = await sendToLLM(
-                `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) Never narrate a result that is not supported by the rolls below. (5) If the result starts combat, declare combat_start; active combat actions use combat_exchange rather than requested_rolls.]${correctionNote}\n\n${summary}`,
+                `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) Never narrate a result that is not supported by the rolls below. (5) If the result starts combat, declare combat_start; active combat actions use combat_exchange rather than requested_rolls.${lootNote}]${correctionNote}\n\n${summary}`,
                 undefined,
-                { suppressHpEvents: appliedHp, pendingLoot }
+                { suppressHpEvents: appliedHp }
             );
 
             // Handle any genuinely new outside-combat follow-up roll (e.g. a triggered save).
+            // A follow-up response is itself a withheld setup, so any declared loot is still
+            // unapplied — carry the pending-loot reminder until a roll-free outcome lands.
             if (followUpEvents?.requestedRolls?.length > 0) {
                 if (onFollowUpRolls) {
                     onFollowUpRolls(followUpEvents.requestedRolls, {
                         playerAction,
                         preNarrated: followUpEvents._preNarratedOutcome || false,
+                        pendingLoot,
                     });
                 } else {
                     await handleRequestedRolls(
@@ -548,6 +576,7 @@ export async function handleRequestedRolls(requestedRolls, {
                             sendToLLM,
                             preNarrated: followUpEvents._preNarratedOutcome || false,
                             enemyAttackersSeen: canonicalBatch.enemyAttackersSeen,
+                            pendingLoot,
                         },
                         depth + 1
                     );

@@ -108,6 +108,40 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         expect(loaded.session.prunedMessageCount).toBe(1);
     });
 
+    // Regression for the lost-fronts bug: the old field whitelist silently dropped
+    // fronts and pendingRoleplayCheck, killing the hidden-fronts system on reload.
+    it('persists fronts, pendingRoleplayCheck, and appliedLootSourceIds', async () => {
+        await saveGame('slot-1', makeGameState({
+            fronts: [{ id: 'front-1', title: 'The Withering Tide', goal: 'Drown the coast', stakes: 'The port falls', clock: 3, grimPortents: ['a', 'b', 'c'] }],
+            pendingRoleplayCheck: {
+                id: 'check-1',
+                rolls: [{ type: 'skill_check', skill: 'stealth', dc: 10, description: 'Slip past the guard' }],
+                playerAction: 'I sneak by',
+            },
+            appliedLootSourceIds: ['msg-1'],
+        }));
+        const loaded = await loadGame('slot-1');
+        expect(loaded.fronts).toHaveLength(1);
+        expect(loaded.fronts[0].id).toBe('front-1');
+        expect(loaded.fronts[0].clock).toBe(3);
+        expect(loaded.pendingRoleplayCheck.rolls).toHaveLength(1);
+        expect(loaded.appliedLootSourceIds).toEqual(['msg-1']);
+        expect(loaded.saveVersion).toBe(2);
+    });
+
+    it('persists future top-level state fields by default (spread, not whitelist)', async () => {
+        await saveGame('slot-1', makeGameState({ someFutureSubsystem: { enabled: true } }));
+        const loaded = await loadGame('slot-1');
+        expect(loaded.someFutureSubsystem).toEqual({ enabled: true });
+    });
+
+    it('never persists live auth or transient ui state', async () => {
+        await saveGame('slot-1', makeGameState({ user: { uid: 'u1' }, ui: { settingsOpen: true } }));
+        const loaded = await loadGame('slot-1');
+        expect(loaded.user).toBeUndefined();
+        expect(loaded.ui).toBeUndefined();
+    });
+
     it('re-saving the same slot overwrites the previous entry', async () => {
         await saveGame('slot-1', makeGameState({ currentLocation: 'Oakhaven' }));
         await saveGame('slot-1', makeGameState({ currentLocation: 'Galicia' }));
@@ -183,8 +217,8 @@ describe('character roster', () => {
 });
 
 describe('autoSave / loadAutoSave', () => {
-    it('round-trips through the reserved autosave slot', async () => {
-        await autoSave(makeGameState({ currentLocation: 'Galicia' }));
+    it('round-trips through the reserved autosave slot and reports success', async () => {
+        expect(await autoSave(makeGameState({ currentLocation: 'Galicia' }))).toBe(true);
         const loaded = await loadAutoSave();
         expect(loaded.currentLocation).toBe('Galicia');
     });
@@ -193,7 +227,7 @@ describe('autoSave / loadAutoSave', () => {
         expect(await loadAutoSave()).toBeNull();
     });
 
-    it('autoSave swallows errors instead of throwing', async () => {
-        await expect(autoSave(null)).resolves.toBeUndefined();
+    it('autoSave reports failure instead of throwing, so the UI can warn the player', async () => {
+        await expect(autoSave(null)).resolves.toBe(false);
     });
 });

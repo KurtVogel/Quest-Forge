@@ -54,8 +54,59 @@ function openDB() {
 const MAX_SAVED_ROLLS = 50;
 
 /**
+ * Save-format version stamped into every persisted state payload. Bump it when
+ * the shape changes in a way loaders must branch on; `validateSaveState` keeps
+ * normalizing defensively either way.
+ */
+export const SAVE_VERSION = 2;
+
+/**
+ * Build the persistable snapshot of the game state. Shared by BOTH save paths
+ * (local IndexedDB here, cloud Firestore in cloudSync.js).
+ *
+ * This is deliberately spread-plus-strip, NOT a field whitelist: every new
+ * top-level state field must persist by default. A whitelist here is how
+ * `fronts` and `pendingRoleplayCheck` silently vanished from local saves —
+ * the hidden-fronts system was dead in every reloaded campaign until 2026-07-03.
+ * Excluded on purpose:
+ *  - `user`: live auth session, never restored from a save (LOAD_GAME keeps the live one)
+ *  - `ui`: transient panel/modal state
+ *  - secrets in `settings`: API keys / Firebase config persist separately via saveSettings()
+ */
+export function serializeGameState(gameState) {
+    const { user: _user, ui: _ui, ...persisted } = gameState;
+    return {
+        ...persisted,
+        saveVersion: SAVE_VERSION,
+        rollHistory: (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS),
+        combat: gameState.combat || { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
+        settings: { ...gameState.settings, apiKey: undefined, imageApiKey: undefined, firebaseConfig: undefined },
+    };
+}
+
+/** Shared slot-list metadata for a save (local and cloud add their own savedAt/slot fields). */
+export function buildSaveMetadata(gameState) {
+    return {
+        name: gameState.session?.name || 'Unnamed Save',
+        characterName: gameState.character?.name || 'Unknown',
+        characterLevel: gameState.character?.level || 1,
+        characterClass: gameState.character?.class || 'Unknown',
+        characterHP: gameState.character?.currentHP || 0,
+        characterMaxHP: gameState.character?.maxHP || 0,
+        characterAC: gameState.character?.armorClass || 10,
+        gold: gameState.character?.gold || 0,
+        silver: gameState.character?.silver || 0,
+        copper: gameState.character?.copper || 0,
+        inventoryCount: gameState.inventory?.length || 0,
+        location: gameState.currentLocation || null,
+        questCount: gameState.quests?.filter(q => q.status === 'active')?.length || 0,
+        partySize: gameState.party?.length || 0,
+    };
+}
+
+/**
  * Save game state to a named slot.
- * Trims summarized messages (captured in journal) and caps rollHistory.
+ * Keeps the FULL message history (IndexedDB has no practical size cap) and caps rollHistory.
  */
 export async function saveGame(slotId, gameState) {
     const db = await openDB();
@@ -63,52 +114,19 @@ export async function saveGame(slotId, gameState) {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         const store = tx.objectStore(STORE_NAME);
 
-        // Local saves keep the FULL message history — IndexedDB has no practical size cap,
-        // so readable scrollback survives a reload. Only the cloud path trims summarized
-        // messages (to stay under Firestore's ~1MB doc limit) — see cloudSync.js.
         const savedMessages = gameState.messages || [];
-        // Cap: keep only the most recent rolls
-        const trimmedRolls = (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS);
         // prunedMessageCount indexes into the array we actually persist. Summarized messages
         // are always a contiguous prefix, so their count IS the boundary index.
         const prunedMessageCount = savedMessages.filter(m => m.summarized).length;
 
         const saveData = {
             slotId,
-            name: gameState.session?.name || 'Unnamed Save',
-            characterName: gameState.character?.name || 'Unknown',
-            characterLevel: gameState.character?.level || 1,
-            characterClass: gameState.character?.class || 'Unknown',
-            characterHP: gameState.character?.currentHP || 0,
-            characterMaxHP: gameState.character?.maxHP || 0,
-            characterAC: gameState.character?.armorClass || 10,
-            gold: gameState.character?.gold || 0,
-            silver: gameState.character?.silver || 0,
-            copper: gameState.character?.copper || 0,
-            inventoryCount: gameState.inventory?.length || 0,
-            location: gameState.currentLocation || null,
-            questCount: gameState.quests?.filter(q => q.status === 'active')?.length || 0,
-            partySize: gameState.party?.length || 0,
+            ...buildSaveMetadata(gameState),
             savedAt: Date.now(),
             messageCount: savedMessages.length,
-            // Store the full state minus UI and transient data
             state: {
-                character: gameState.character,
-                inventory: gameState.inventory,
-                messages: savedMessages,
-                rollHistory: trimmedRolls,
-                quests: gameState.quests,
-                journal: gameState.journal || [],
-                npcs: gameState.npcs || [],
-                worldFacts: gameState.worldFacts || [],
-                storyMemory: gameState.storyMemory || [],
-                party: gameState.party || [],
-                currentLocation: gameState.currentLocation || null,
-                combat: gameState.combat || { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
+                ...serializeGameState(gameState),
                 session: { ...gameState.session, prunedMessageCount },
-                appliedLootSourceIds: gameState.appliedLootSourceIds || [],
-                // Strip secrets from local saves — keys are persisted separately via saveSettings()
-                settings: { ...gameState.settings, apiKey: undefined, imageApiKey: undefined, firebaseConfig: undefined },
             },
         };
 
@@ -259,13 +277,16 @@ export async function deleteRosterCharacter(id) {
 }
 
 /**
- * Auto-save (uses a reserved slot).
+ * Auto-save (uses a reserved slot). Returns whether the save actually landed —
+ * callers surface failures to the player instead of showing a false success toast.
  */
 export async function autoSave(gameState) {
     try {
         await saveGame(AUTOSAVE_SLOT, gameState);
+        return true;
     } catch (e) {
         console.warn('Auto-save failed:', e);
+        return false;
     }
 }
 

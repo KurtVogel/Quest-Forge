@@ -39,5 +39,17 @@ describe('roleplay check proposals', () => {
         expect(prompt).toContain('REVISE');
         expect(prompt).toContain('UPHOLD');
         expect(prompt).toContain('Never reveal private chain-of-thought');
+        expect(prompt).not.toContain('declared potential loot');
+    });
+
+    it('reminds a challenged ruling about declared-but-unapplied loot', () => {
+        const proposal = buildRoleplayCheckProposal([roll], 'I pry open the reliquary.', {
+            loot: { goldFound: 15, itemsFound: [{ name: 'Silver Ring', quantity: 2 }] },
+        });
+        const prompt = buildRoleplayChallengePrompt(proposal, 'The lock is already broken.');
+        expect(prompt).toContain('declared potential loot');
+        expect(prompt).toContain('15 gold');
+        expect(prompt).toContain('2x Silver Ring');
+        expect(prompt).toContain('NOT applied');
     });
 });

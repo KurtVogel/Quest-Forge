@@ -128,10 +128,11 @@ export default function AppShell() {
             <JournalPanel isOpen={isJournalOpen} onClose={() => setIsJournalOpen(false)} />
 
             {saveToast && (
-                <div className={`save-toast ${saveToast.status === 'cloud-error' ? 'save-toast-error' : ''}`}>
+                <div className={`save-toast ${saveToast.status.endsWith('error') ? 'save-toast-error' : ''}`}>
                     {saveToast.status === 'cloud' && 'Game saved to cloud'}
                     {saveToast.status === 'local' && 'Game saved locally'}
                     {saveToast.status === 'cloud-error' && 'Cloud sync failed — saved locally only'}
+                    {saveToast.status === 'save-error' && 'Auto-save FAILED — progress is not being saved. Check storage space.'}
                 </div>
             )}
         </div>

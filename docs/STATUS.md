@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-02 (loot persistence hardening)_
+_Last updated: 2026-07-03 (save-layer + loot + provider hardening pass — all four known issues fixed)_
 
 ## Current focus — memory & fronts real-play tuning
 
@@ -22,8 +22,31 @@ feels excellent in live play — casters multiply engine surface area; polish th
 - **Roleplay-check proposals** remaining fair; Scribe roll audit catching bad setups
 - Console clean; autosave intact after front-only or combat changes
 
-## Recently shipped (June 21 – July 2, 2026)
+## Recently shipped (June 21 – July 3, 2026)
 
+- **Save-layer + loot + provider hardening (2026-07-03):** a deep analysis pass found and fixed
+  four issues (see DECISIONS.md 2026-07-03 ×3):
+  1. **P0 fronts persistence bug** — local saves whitelisted state fields and silently dropped
+     `fronts` (hidden-world system dead in every reloaded campaign since fronts v1) and
+     `pendingRoleplayCheck`. Both save paths now share `serializeGameState()` (spread + strip +
+     `saveVersion`); `LOAD_GAME` heals front-less established campaigns with a deterministic
+     reseed and reopens the Settings Dynamic-World upgrade so lost front webs can be rebuilt.
+  2. **Cloud saves chunk past Firestore's 1 MiB doc cap** (atomic batched `chunks` subcollection,
+     full message history now kept in cloud too). **Redeploy `firestore.rules`** on the BYO
+     Firebase project — the chunks subcollection needs its new match block.
+  3. **Roll-proposal loot redesigned** — never granted client-side (the ac190ff merge could pay
+     on failed rolls and double-pay coins); it rides the proposal as metadata and returns as a
+     grant-or-deny reminder in outcome/challenge prompts, carried through chained rolls, with
+     the Scribe loot audit as backstop.
+  4. **Provider + orchestration hardening** — `finishReason`/`finish_reason` checked (truncated
+     or blocked responses now fail loudly instead of silently eating the JSON event block),
+     output caps raised 4096 → 32768 (Gemini) / 16384 (OpenAI), per-task `temperature` (0.2
+     extraction / 0.4 reflection / 0.7 front generation / 0.9 DM), retry-with-backoff for
+     transient background-call failures, a keyword gate that skips the previously *blocking*
+     per-turn semantic roll-detector call on ordinary turns, an in-flight guard against
+     concurrent journal summarizes, honest autosave failure toasts + `pagehide` flush, and
+     sticky-bottom chat scrolling (readers who scroll up are never yanked down; floating
+     "↓ Latest" button returns).
 - **Loot persistence hardening (2026-07-02):** fixes narrated-but-never-applied loot (live bug:
   tomb coins vanished until the player complained). Three layers: (1) the parser now coerces
   string-typed numeric amounts (`"gold_found": "15"` / `"15 gp"`) instead of silently zeroing
@@ -84,7 +107,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **547** tests passing (48 files)
+- `npm test` — **572** tests passing (49 files)
 - `npm run lint` — clean
 - `npm run build` — green (~913 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)

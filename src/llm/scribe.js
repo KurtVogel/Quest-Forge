@@ -203,6 +203,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             apiKey: settings.apiKey,
             model: backgroundModel(settings),
             systemPrompt: lootAudit ? SCRIBE_SYSTEM_PROMPT + LOOT_AUDIT_RULES : SCRIBE_SYSTEM_PROMPT,
+            temperature: 0.2, // faithful extraction — facts and loot amounts must not drift
             messageHistory: [],
             userMessage: [
                 `Player action: ${playerMessage}`,
@@ -364,6 +365,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             apiKey: state.settings.apiKey,
             model: backgroundModel(state.settings),
             systemPrompt: REFLECTION_SYSTEM_PROMPT,
+            temperature: 0.4, // grounded reflection with a little invention for hooks
             messageHistory: [],
             userMessage: JSON.stringify(context, null, 2),
         });

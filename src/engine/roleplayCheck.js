@@ -48,6 +48,23 @@ export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed 
     return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, proposedAt: Date.now() });
 }
 
+/** Grant-or-deny reminder for loot the withheld setup declared but never applied. */
+function pendingLootChallengeNote(loot) {
+    if (!loot) return '';
+    const parts = [
+        loot.goldFound > 0 ? `${loot.goldFound} gold` : null,
+        loot.silverFound > 0 ? `${loot.silverFound} silver` : null,
+        loot.copperFound > 0 ? `${loot.copperFound} copper` : null,
+        ...(loot.itemsFound || []).map(item => {
+            if (typeof item === 'string') return item;
+            if (!item?.name) return null;
+            return item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name;
+        }),
+    ].filter(Boolean);
+    if (parts.length === 0) return '';
+    return `\n\nYour withheld setup declared potential loot (${parts.join(', ')}) which was NOT applied. If you WITHDRAW and your narration awards any of it, emit the matching items_found/X_found events in that same response; otherwise neither narrate nor emit those gains.`;
+}
+
 export function buildRoleplayChallengePrompt(proposal, challenge) {
     const compactRolls = (proposal?.rolls || []).map(roll => ({
         type: roll.type,
@@ -79,5 +96,5 @@ Reconsider using the fiction-first roll gate. Choose exactly one:
 2. REVISE: emit requested_rolls with corrected DC and/or advantage/disadvantage plus complete public adjudication fields.
 3. UPHOLD: emit the same requested_rolls with complete public adjudication fields that directly answer the player's challenge.
 
-For REVISE or UPHOLD, output only the fenced JSON event block with minimal/no prose. This ruling is final for this proposal: do not invite another challenge. Never reveal private chain-of-thought; provide only concise table-facing adjudication.]`;
+For REVISE or UPHOLD, output only the fenced JSON event block with minimal/no prose. This ruling is final for this proposal: do not invite another challenge. Never reveal private chain-of-thought; provide only concise table-facing adjudication.${pendingLootChallengeNote(proposal?.loot)}]`;
 }

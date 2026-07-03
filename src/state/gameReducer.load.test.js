@@ -1,6 +1,66 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
 
+describe('LOAD_GAME fronts heal', () => {
+    const healBase = {
+        character: {
+            name: 'Survivor', race: 'human', class: 'fighter', level: 1, exp: 0,
+            currentHP: 12, maxHP: 12, conditions: [],
+        },
+        inventory: [],
+        messages: [],
+    };
+
+    it('preserves saved fronts exactly when present', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...healBase,
+                fronts: [{ id: 'front-tide', title: 'The Withering Tide', goal: 'Drown the coast', stakes: 'The port falls', clock: 4, grimPortents: ['a', 'b', 'c'] }],
+            },
+        });
+        expect(next.fronts).toHaveLength(1);
+        expect(next.fronts[0].id).toBe('front-tide');
+        expect(next.fronts[0].clock).toBe(4);
+    });
+
+    it('reseeds a deterministic front when a pre-serializer save lost them', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: { ...healBase, currentLocation: 'Oakhaven', session: { id: 's1', premise: 'A smugglers war brews.' } },
+        });
+        expect(next.fronts).toHaveLength(1);
+        expect(next.fronts[0].id).toBe('front-local-pressure');
+        expect(next.fronts[0].title).toContain('Oakhaven');
+    });
+
+    it('reopens the Dynamic World upgrade when healing, keeping cadence watermarks', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...healBase,
+                session: {
+                    id: 's1',
+                    frontDirector: { version: 2, generationVersion: 2, source: 'fresh-campaign', lastCadenceId: 'journal-s1-30', lastJournalEnd: 30 },
+                },
+            },
+        });
+        expect(next.fronts).toHaveLength(1);
+        expect(next.session.frontDirector.generationVersion).toBeUndefined();
+        expect(next.session.frontDirector.source).toBeUndefined();
+        expect(next.session.frontDirector.lastCadenceId).toBe('journal-s1-30');
+        expect(next.session.frontDirector.lastJournalEnd).toBe(30);
+    });
+
+    it('does not seed fronts when the save has no character', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: { character: null, inventory: [], messages: [] },
+        });
+        expect(next.fronts).toEqual([]);
+    });
+});
+
 const baseCharacter = {
     name: 'Survivor',
     race: 'human',

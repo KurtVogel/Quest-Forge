@@ -441,7 +441,25 @@ Settings → Game → "Memory inspector" behind a toggle, or `?debugMemory=1` UR
 **Pair with:** `npm run eval:memory` report JSON for automated regression; manual inspector for
 feel tuning. Why: perfecting memory is the current gate before Wizard/Cleric and public launch.
 
-### Eval harness for the DM prompt — status: `partial` (combat + memory playtests exist)
+### Save-layer hardening pass — status: `shipped` (2026-07-03, same day as proposed)
+Shipped: shared `serializeGameState()` spread-plus-strip serializer for both save paths (fixes
+the P0 fronts/pendingRoleplayCheck loss), `saveVersion` stamp, honest autosave failure toast,
+`pagehide`/`visibilitychange` flush, and chunked cloud saves that remove the Firestore 1 MiB
+ceiling entirely (full message history in cloud too). See DECISIONS.md 2026-07-03.
+Still open (small, non-urgent):
+- **`listSaves()` reads whole records** (full message history per save) just to build the
+  slot list — store metadata separately or use a cursor if save lists ever feel slow.
+- **Cloud overwrite has no conflict check** — a manual save from an older device session
+  silently clobbers a newer cloud save; compare `updatedAt` and warn. (Autosave stays
+  local-per-device by decision; this is only about manual slots.)
+
+### LLM-call efficiency: gate the per-turn semantic text-roll detector — status: `shipped` (2026-07-03)
+Shipped: a cheap roll-language keyword gate skips the previously *blocking* per-turn semantic
+detector call on ordinary narration turns (the DECISIONS.md 2026-06-22 choice was about
+extraction accuracy, not call gating — extraction stays semantic). Also shipped alongside:
+`finishReason`/`finish_reason` truncation checks, output caps 32768/16384, per-task
+temperatures (0.2 extraction / 0.4 reflection / 0.7 front generation / 0.9 DM), and
+retry-with-backoff for transient background-call failures.
 Scripted scenarios against the real LLM ("player is dying — did the DM request a death_save?"),
 scored on JSON behavior. Run before prompt changes. Builds on the vitest fixture corpus
 (shipped 2026-06-11). DEV-mode hook that dumps unparseable LLM responses into fixture files —
