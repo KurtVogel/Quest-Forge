@@ -8,6 +8,18 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-04 · ASIs follow the full 5e cadence (4/8/12/16/19); pending is derived, never stored-trusted.**
+Extends the 2026-06-17 decision from level 4 only to the standard D&D schedule — two ability points
+at levels 4, 8, 12, 16, and 19, uniform across classes (still no feats; no Fighter bonus ASIs at
+6/14 — Fighter identity already comes from the level bonus, Fighting Styles, Champion, Extra
+Attack, and Action Surge). The mechanism is unchanged: a pending sheet choice the player spends in
+the Character Profile, reducer-owned, 20-cap per ability, CON HP/AC recalculated. Migration detail
+that matters: `normalizeAbilityScoreImprovementState` now DERIVES pending as earned − applied
+instead of trusting a stored pending value — there is no way to decline an ASI, and old saves
+recorded `pending: 0` after spending the level-4 improvement, which would have silently swallowed
+the newly added milestones on load. Existing high-level heroes wake up with their missed
+improvements pending.
+
 **2026-07-04 · Character appearance is first-class continuity: injected everywhere, merged never clobbered.**
 Nothing breaks immersion like a white-haired NPC coming back brown-haired. Appearance was captured
 by the Scribe but only scene art ever saw it — the DM's own prose had no idea what anyone looked

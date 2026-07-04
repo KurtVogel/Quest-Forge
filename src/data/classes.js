@@ -24,6 +24,10 @@ export const CLASSES = {
             3: ['Martial Archetype'],
             4: ['Ability Score Improvement'],
             5: ['Extra Attack'],
+            8: ['Ability Score Improvement'],
+            12: ['Ability Score Improvement'],
+            16: ['Ability Score Improvement'],
+            19: ['Ability Score Improvement'],
         },
         fightingStyles: {
             defense: {
@@ -91,6 +95,10 @@ export const CLASSES = {
             3: ['2nd-Level Spells'],
             4: ['Ability Score Improvement'],
             5: ['3rd-Level Spells'],
+            8: ['Ability Score Improvement'],
+            12: ['Ability Score Improvement'],
+            16: ['Ability Score Improvement'],
+            19: ['Ability Score Improvement'],
         },
         resources: {
             arcaneRecovery: {
@@ -124,6 +132,10 @@ export const CLASSES = {
             3: ['Roguish Archetype', 'Sneak Attack (2d6)'],
             4: ['Ability Score Improvement'],
             5: ['Uncanny Dodge', 'Sneak Attack (3d6)'],
+            8: ['Ability Score Improvement'],
+            12: ['Ability Score Improvement'],
+            16: ['Ability Score Improvement'],
+            19: ['Ability Score Improvement'],
         },
         resources: {
             // Sneak Attack and Cunning Action are passive — no resource tracking needed
@@ -152,6 +164,10 @@ export const CLASSES = {
             3: ['2nd-Level Spells'],
             4: ['Ability Score Improvement'],
             5: ['Destroy Undead', '3rd-Level Spells'],
+            8: ['Ability Score Improvement'],
+            12: ['Ability Score Improvement'],
+            16: ['Ability Score Improvement'],
+            19: ['Ability Score Improvement'],
         },
         resources: {
             channelDivinity: {

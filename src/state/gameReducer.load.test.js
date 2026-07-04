@@ -207,6 +207,28 @@ describe('LOAD_GAME progression migrations', () => {
         expect(next.character.abilityScoreImprovementsApplied).toBe(0);
     });
 
+    it('backfills all missed 5e-cadence ASIs (4/8/12/16/19) for a high-level save', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: {
+                    ...baseCharacter,
+                    level: 12,
+                    exp: 0,
+                    maxHP: 90,
+                    currentHP: 90,
+                    abilityScoreImprovementsApplied: 1,
+                    pendingAbilityScoreImprovements: 0,
+                },
+                inventory: [],
+                messages: [],
+            },
+        });
+
+        expect(next.character.pendingAbilityScoreImprovements).toBe(2);
+        expect(next.character.abilityScoreImprovementsApplied).toBe(1);
+    });
+
     it('backfills bonus-action combat state for old active combat saves', () => {
         const next = gameReducer(initialGameState, {
             type: 'LOAD_GAME',

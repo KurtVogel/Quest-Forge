@@ -13,7 +13,10 @@ import { normalizeItem } from '../data/items.js';
 export const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
 
 const STARTING_GOLD_DICE = { count: 2, sides: 20 };
-const ABILITY_SCORE_IMPROVEMENT_LEVELS = [4];
+// Standard 5e ASI cadence, uniform across classes — no feats by design, and no
+// Fighter bonus ASIs (Fighter identity already comes from the level bonus,
+// Fighting Styles, Champion crits, Extra Attack, and Action Surge).
+const ABILITY_SCORE_IMPROVEMENT_LEVELS = [4, 8, 12, 16, 19];
 
 /**
  * Ability score names in standard order.
@@ -125,14 +128,14 @@ export function normalizeAbilityScoreImprovementState(character = {}) {
     const applied = Number.isFinite(rawApplied)
         ? Math.max(0, Math.min(earned, Math.trunc(rawApplied)))
         : 0;
-    const rawPending = Number(character.pendingAbilityScoreImprovements);
-    const pending = Number.isFinite(rawPending)
-        ? Math.max(0, Math.min(earned - applied, Math.trunc(rawPending)))
-        : Math.max(0, earned - applied);
 
+    // Pending is DERIVED, never trusted: there is no way to decline an ASI, so
+    // applied + pending must always equal earned. This is also the migration
+    // path — old saves stored pending 0 after spending the level-4 ASI, and a
+    // stored zero must not swallow improvements added to the cadence later.
     return {
         abilityScoreImprovementsApplied: applied,
-        pendingAbilityScoreImprovements: pending,
+        pendingAbilityScoreImprovements: Math.max(0, earned - applied),
     };
 }
 

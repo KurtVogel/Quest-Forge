@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-04 (appearance continuity: looks injected into DM prompt + RAG, Scribe merges instead of clobbering; earlier today: playtest tuning fixes)_
+_Last updated: 2026-07-04 (ASI cadence 4/8/12/16/19 with derived-pending migration; appearance continuity; playtest tuning fixes)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -142,7 +142,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **612** tests passing (50 files)
+- `npm test` — **615** tests passing (50 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)

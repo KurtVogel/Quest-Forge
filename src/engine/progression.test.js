@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { awardExperience, getExperienceThreshold, isMaxLevel, MAX_CHARACTER_LEVEL } from './progression.js';
+import { normalizeAbilityScoreImprovementState } from './characterUtils.js';
 
 const character = {
     name: 'Veteran',
@@ -87,6 +88,37 @@ describe('D&D 5e XP progression', () => {
         expect(result.character.pendingAbilityScoreImprovements).toBe(1);
         expect(result.character.abilityScoreImprovementsApplied).toBe(0);
         expect(result.character.features).toContain('Ability Score Improvement');
+    });
+
+    it('grants further pending ASIs at the 5e cadence (8, 12, 16, 19)', () => {
+        const result = awardExperience({
+            ...character,
+            level: 7,
+            exp: 0,
+            maxHP: 52,
+            currentHP: 52,
+            abilityScoreImprovementsApplied: 1,
+            pendingAbilityScoreImprovements: 0,
+            features: [],
+            classResources: {},
+            hitDice: { total: 7, remaining: 7, die: 10 },
+        }, 23000);
+
+        expect(result.character.level).toBe(8);
+        expect(result.character.pendingAbilityScoreImprovements).toBe(1);
+        expect(result.character.abilityScoreImprovementsApplied).toBe(1);
+        expect(result.character.features).toContain('Ability Score Improvement');
+    });
+
+    it('backfills every missed ASI for an established high-level character', () => {
+        // A level 12 hero from an old save who only ever spent the level-4 ASI
+        // should wake up with the level-8 and level-12 improvements pending.
+        const state = normalizeAbilityScoreImprovementState({
+            level: 12,
+            abilityScoreImprovementsApplied: 1,
+        });
+        expect(state.pendingAbilityScoreImprovements).toBe(2);
+        expect(state.abilityScoreImprovementsApplied).toBe(1);
     });
 
     it('does not let milestone level-ups exceed level 20', () => {
