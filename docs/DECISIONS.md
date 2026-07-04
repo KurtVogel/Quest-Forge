@@ -8,6 +8,19 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-04 · Character appearance is first-class continuity: injected everywhere, merged never clobbered.**
+Nothing breaks immersion like a white-haired NPC coming back brown-haired. Appearance was captured
+by the Scribe but only scene art ever saw it — the DM's own prose had no idea what anyone looked
+like. Now: (1) `## KNOWN NPCs` carries a `looks:` field with an explicit keep-it-exactly-consistent
+header, and the hero's established appearance is in the PLAYER CHARACTER block; (2) NPC RAG
+embeddings include looks, so an NPC who fell out of the curated top-8 still returns with their
+face intact; (3) the Scribe extraction budget explicitly NEVER applies to appearance/npc_updates —
+visual continuity is always captured; (4) each Scribe call receives KNOWN APPEARANCES (player +
+NPCs named in the turn) and must emit the COMPLETE updated description, merging new details into
+the established look — "a fresh scar on his cheek" can no longer silently erase the white hair,
+because a partial appearance would previously replace the whole stored string. Appearance is
+clamped at 600 chars at the reducer/dispatch boundaries so it cannot grow without bound.
+
 **2026-07-04 · Memory extraction is budgeted and deduped in the engine; front clocks are engine-paced.**
 The live playtest's top tuning finding: the Scribe extracted 109 world facts + 106 story cards in one
 evening, and the deterministic front sprinted 0→6 (max) in a single session. Fixes are engine-owned,

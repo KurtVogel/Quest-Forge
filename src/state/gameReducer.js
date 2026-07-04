@@ -656,6 +656,9 @@ export function archiveNpcBulk(npcs = [], ids = []) {
 function upsertNpc(npcs, payload) {
     if (!payload || (!payload.id && !payload.name)) return npcs;
     const update = pruneBlankFields({ ...payload, lastSeen: Date.now() });
+    if (update.appearance) {
+        update.appearance = String(update.appearance).trim().slice(0, 600);
+    }
 
     const idx = npcs.findIndex(n =>
         (payload.id && n.id === payload.id) ||

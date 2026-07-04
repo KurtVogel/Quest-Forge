@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-04 (playtest tuning fixes: Scribe budget + fact dedupe, front pacing guards, quest emission, lost-fight XP, front title anchor)_
+_Last updated: 2026-07-04 (appearance continuity: looks injected into DM prompt + RAG, Scribe merges instead of clobbering; earlier today: playtest tuning fixes)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -27,6 +27,12 @@ gains per front, softening never throttled); DM prompt gained QUEST TRACKING INS
 `quest_updates` round-trips new|updated|completed|failed (new FAIL_QUEST + panel display); lost/escaped
 fights award XP for genuinely slain foes only; creation-time front titles anchor on a place name
 extracted from the premise, never the raw premise sentence.
+
+**Appearance continuity (2026-07-04, DECISIONS.md):** established looks now reach the DM itself, not
+just scene art — `## KNOWN NPCs` carries `looks:`, the hero's appearance is in the character block,
+NPC RAG embeddings include looks, appearance is exempt from the Scribe extraction budget, and each
+Scribe call gets the KNOWN APPEARANCES so updates emit complete merged descriptions (a new scar can
+no longer erase the white hair).
 
 ## Current focus — memory & fronts real-play tuning
 
@@ -136,7 +142,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **604** tests passing (50 files)
+- `npm test` — **612** tests passing (50 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)

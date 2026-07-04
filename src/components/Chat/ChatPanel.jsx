@@ -7,7 +7,7 @@ import { handleRequestedRolls } from '../../engine/rollResolver.js';
 import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { maybeAutoSummarize } from '../../engine/worldJournal.js';
-import { runScribe } from '../../llm/scribe.js';
+import { buildKnownAppearances, runScribe } from '../../llm/scribe.js';
 import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../engine/vectorMemory.js';
 import { curateStoryMemory } from '../../engine/storyMemory.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
@@ -487,6 +487,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                         dmNarrative: narrative,
                         settings: latest.settings,
                         dispatch,
+                        knownAppearances: buildKnownAppearances(latest, narrative),
                         authoritativeContext: {
                             terminal: result.terminal || 'ongoing',
                             postState: result.postState,
@@ -554,6 +555,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 dmNarrative: finalNarration.content,
                 settings: latest.settings,
                 dispatch,
+                knownAppearances: buildKnownAppearances(latest, playerAction, finalNarration.content),
                 // Post-roll outcomes are where narrated loot most often loses its
                 // events (the withheld setup already dropped them by design).
                 lootAudit: (!latest.combat?.active && finalNarration.id) ? {
@@ -731,6 +733,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                     dmNarrative: finalNarration.content,
                     settings: latest.settings,
                     dispatch,
+                    knownAppearances: buildKnownAppearances(latest, trimmed, finalNarration.content),
                     // Loot persistence audit: recover coins/items the narrative granted
                     // but the DM's structured events missed. Out-of-combat only; keyed
                     // to the narration message so retries/reloads cannot double-grant.

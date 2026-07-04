@@ -517,8 +517,12 @@ function buildCharacterBlock(character, combat = null) {
         ? `${character.exp || 0} XP (max level reached)`
         : `${character.exp || 0} / ${getExperienceThreshold(character.level)} to next level`;
 
+    const appearanceLine = character.appearance?.trim()
+        ? `\n- **Appearance (established canon — keep it exactly consistent in narration):** ${character.appearance.trim().slice(0, 300)}`
+        : '';
+
     return `## PLAYER CHARACTER
-- **Name:** ${character.name}${deathStatus}
+- **Name:** ${character.name}${deathStatus}${appearanceLine}
 - **Race:** ${character.race}
 - **Class:** ${character.class} (Level ${character.level})
 - **HP:** ${character.currentHP}/${character.maxHP}

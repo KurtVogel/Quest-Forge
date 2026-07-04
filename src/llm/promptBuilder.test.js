@@ -59,6 +59,18 @@ describe('buildSystemPrompt top-level assembly', () => {
         expect(text).toContain('## RESPONSE FORMAT');
     });
 
+    it('shows the hero\'s established appearance so DM prose stays visually consistent', () => {
+        const text = prompt({
+            character: makeCharacter({ appearance: 'A scarred human fighter with a shaved head and a notched ear.' }),
+        });
+        expect(text).toContain('**Appearance (established canon — keep it exactly consistent in narration):** A scarred human fighter');
+    });
+
+    it('omits the appearance line until a look is established', () => {
+        const text = prompt();
+        expect(text).not.toContain('Appearance (established canon');
+    });
+
     it('includes the simplified 5e ruleset block when requested', () => {
         const text = prompt({ ruleset: 'simplified5e' });
         expect(text).toContain('## GAME MECHANICS (Simplified D&D 5e)');

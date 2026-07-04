@@ -273,6 +273,9 @@ export function buildJournalContext(journal, npcs, currentLocation) {
             const extras = [
                 n.pinned && 'pinned',
                 n.importance && `importance: ${n.importance}/5`,
+                // Established looks come first: nothing breaks immersion like a
+                // white-haired NPC turning brown-haired three sessions later.
+                n.appearance && `looks: ${briefNpcFieldForPrompt(n.appearance)}`,
                 n.personality && `personality: ${briefNpcFieldForPrompt(n.personality)}`,
                 n.goals && `wants: ${briefNpcFieldForPrompt(n.goals)}`,
                 n.agenda && `agenda: ${briefNpcFieldForPrompt(n.agenda)}`,
@@ -291,7 +294,7 @@ export function buildJournalContext(journal, npcs, currentLocation) {
             ? `\n*(${hiddenCount} other NPCs available via RETRIEVED MEMORIES when relevant)*`
             : '';
 
-        parts.push(`\n## KNOWN NPCs\n${npcList}${overflow}`);
+        parts.push(`\n## KNOWN NPCs (keep names and established looks EXACTLY consistent — never re-invent hair, eyes, build, scars, or clothing that "looks:" already records)\n${npcList}${overflow}`);
     }
 
     return parts.join('\n');

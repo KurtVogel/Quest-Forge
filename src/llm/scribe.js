@@ -64,7 +64,7 @@ Output ONLY valid JSON:
 }
 
 Rules:
-- HARD EXTRACTION BUDGET: at most 2 world_facts and 2 story_memory cards per turn (3 only on a truly pivotal turn). Most ordinary turns — travel, shopping, small talk, routine fights — should produce ZERO of each. When over budget, keep only the most campaign-defining entries and drop the rest.
+- HARD EXTRACTION BUDGET: at most 2 world_facts and 2 story_memory cards per turn (3 only on a truly pivotal turn). Most ordinary turns — travel, shopping, small talk, routine fights — should produce ZERO of each. When over budget, keep only the most campaign-defining entries and drop the rest. This budget NEVER applies to npc_updates, "appearance", "player_appearance", or "location" — visual and positional continuity is always captured in full.
 - World facts are durable, campaign-level truths a DM would still need many sessions later: deaths, alliances, betrayals, discoveries, curses, historical facts revealed
 - Do NOT record transient action descriptions, scene-level detail, prices, purchases, minor chatter, or restatements of anything already implied by an existing fact ("Player attacked goblin" is not a world fact)
 - DO record outcomes: "The goblin captain Rarg is dead", "The village of Millhaven burned to the ground"
@@ -76,7 +76,8 @@ Rules:
 - Only include npc_updates for NPCs that appeared in this specific exchange
 - basedIn is the NPC's current anchor in the world (not permanent): update it when they are reassigned, relocate, or fiction establishes a new base. lastLocation is ephemeral — where they were this turn
 - Use kind "character" and rosterEligible true only for named people worth tracking across sessions (dialogue, rivalry, debt, secrets, recurring villains, quest givers). Use kind "creature" or "ephemeral" with rosterEligible false for nameless combat fodder, generic goblins/guards, or one-line minions that should not enter the durable roster.
-- Capture "appearance"/"player_appearance" only from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation, so accuracy matters.
+- Capture "appearance"/"player_appearance" from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation AND the DM's own long-term visual continuity, so accuracy matters.
+- When KNOWN APPEARANCES lists a character and this turn adds or changes a visual detail, emit their appearance as the COMPLETE updated description: start from the known look and weave in what this turn established. Drop or alter a known detail ONLY when the fiction explicitly changed it (haircut, dye, disguise, wound, healing, new gear). NEVER emit just the new fragment — "a fresh scar on his cheek" alone would erase the white hair, the build, everything else on record. If this turn adds nothing visually new for them, omit the field entirely.
 - Only include fields you have actual information for — omit empty/unknown fields
 - DO NOT alter explicit words or details: copy names, proper nouns, numbers, and specific phrases exactly as the DM wrote them — never rename, paraphrase, translate, or invent. Refer to each NPC by the exact name used in the narrative so their record never forks.
 - If nothing notable happened (pure narration, no new facts), return { "world_facts": [], "npc_updates": [], "story_memory": [], "location": null }
@@ -170,6 +171,28 @@ function applyMissingLoot(missing, lootAudit, dispatch) {
 }
 
 /**
+ * Current canonical looks for the characters likely in this exchange: the player,
+ * plus every tracked NPC whose name appears in the turn's text. Fed to the Scribe
+ * so appearance updates MERGE with the established look instead of replacing it
+ * with this turn's fragment ("a fresh scar" must never erase the white hair).
+ */
+export function buildKnownAppearances({ character, npcs = [] } = {}, ...texts) {
+    const haystack = texts.filter(Boolean).join('\n').toLowerCase();
+    const entries = [];
+    if (character?.appearance?.trim()) {
+        entries.push(`${character.name || 'The player character'} (PLAYER CHARACTER): ${character.appearance.trim().slice(0, 240)}`);
+    }
+    for (const npc of npcs) {
+        if (entries.length >= 8) break;
+        const name = String(npc?.name || '').trim();
+        if (!name || !npc.appearance?.trim()) continue;
+        if (!haystack.includes(name.toLowerCase())) continue;
+        entries.push(`${name}: ${npc.appearance.trim().slice(0, 240)}`);
+    }
+    return entries.length > 0 ? entries.join('\n') : null;
+}
+
+/**
  * Run the Scribe after a DM response to extract world-state updates.
  * Dispatches updates silently — the player never sees this.
  *
@@ -195,7 +218,7 @@ function contradictsAuthoritativeCombat(value, authoritativeContext) {
     });
 }
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null }) {
     if (!settings.apiKey || !dmNarrative) return;
 
     try {
@@ -211,6 +234,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                 `DM narrative: ${dmNarrative}`,
                 authoritativeContext
                     ? `AUTHORITATIVE ENGINE STATE (prose cannot override this): ${JSON.stringify(authoritativeContext)}`
+                    : null,
+                knownAppearances
+                    ? `KNOWN APPEARANCES (established canonical looks — merge new details into these, never contradict or shorten them):\n${knownAppearances}`
                     : null,
                 lootAudit
                     ? `EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN (anything listed here is NOT missing): ${describeAppliedLoot(lootAudit.appliedEvents)}`
@@ -272,7 +298,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         }
 
         if (typeof extracted.player_appearance === 'string' && extracted.player_appearance.trim()) {
-            dispatch({ type: 'UPDATE_CHARACTER', payload: { appearance: extracted.player_appearance.trim() } });
+            dispatch({ type: 'UPDATE_CHARACTER', payload: { appearance: extracted.player_appearance.trim().slice(0, 600) } });
         }
 
         if (extracted.location) {

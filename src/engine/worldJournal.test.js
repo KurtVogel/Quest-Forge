@@ -20,6 +20,20 @@ describe('worldJournal context builder', () => {
         expect(context).toContain('Kaldor');
     });
 
+    it('injects established NPC looks so the DM cannot re-invent hair, eyes, or build', () => {
+        const npcs = [{
+            name: 'Maera',
+            disposition: 'wary',
+            lastNotes: 'Warned the hero off the docks.',
+            appearance: 'A tall woman with close-cropped white hair, storm-grey eyes, and a rope burn around her left wrist.',
+            lastSeen: 1000,
+        }];
+        const context = buildJournalContext([], npcs, 'Brackwater');
+
+        expect(context).toContain('looks: A tall woman with close-cropped white hair');
+        expect(context).toContain('established looks EXACTLY consistent');
+    });
+
     it('identifies and injects the earliest location transition entry', () => {
         const journal = [
             { summary: 'Left the tavern in Millhaven.', location: 'Millhaven' }, // index 0 (Entry 1)

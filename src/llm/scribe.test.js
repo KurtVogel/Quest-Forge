@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe } from './scribe.js';
+import { buildKnownAppearances, composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe } from './scribe.js';
 import { sendMessage } from './adapter.js';
 
 vi.mock('./adapter.js', () => ({
@@ -99,6 +99,26 @@ describe('Scribe story memory extraction', () => {
         ]));
     });
 
+    it('feeds known appearances so updates merge with — never clobber — established looks', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+        }));
+
+        await runScribe({
+            playerMessage: 'I greet Maera at the dock gate.',
+            dmNarrative: 'Maera turns; a fresh cut crosses her cheek since you last met.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch: vi.fn(),
+            knownAppearances: 'Maera: A tall woman with close-cropped white hair and storm-grey eyes.',
+        });
+
+        const request = sendMessage.mock.calls[0][0];
+        expect(request.userMessage).toContain('KNOWN APPEARANCES');
+        expect(request.userMessage).toContain('close-cropped white hair');
+        expect(request.systemPrompt).toContain('COMPLETE updated description');
+        expect(request.systemPrompt).toContain('This budget NEVER applies to npc_updates');
+    });
+
     it('caps world facts at three per turn no matter how chatty the extraction is', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             world_facts: [1, 2, 3, 4, 5, 6].map(i => ({ fact: `Durable truth number ${i}.`, category: 'event' })),
@@ -163,6 +183,34 @@ describe('Scribe story memory extraction', () => {
         expect(sendMessage.mock.calls[0][0].userMessage).toContain('AUTHORITATIVE ENGINE STATE');
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_WORLD_FACTS' }));
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_STORY_MEMORY_CARDS' }));
+    });
+});
+
+describe('buildKnownAppearances', () => {
+    const state = {
+        character: { name: 'Vesa', appearance: 'A scarred human fighter with a shaved head and a notched ear.' },
+        npcs: [
+            { name: 'Maera', appearance: 'Close-cropped white hair, storm-grey eyes.' },
+            { name: 'Odo Ferrin', appearance: 'A stooped man with ink-stained fingers.' },
+            { name: 'Bran', appearance: '' },
+        ],
+    };
+
+    it('includes the player and only the NPCs actually named in the turn text', () => {
+        const context = buildKnownAppearances(state, 'I ask Maera about the ledger.', 'Maera frowns at the mention.');
+        expect(context).toContain('Vesa (PLAYER CHARACTER): A scarred human fighter');
+        expect(context).toContain('Maera: Close-cropped white hair');
+        expect(context).not.toContain('Odo Ferrin');
+    });
+
+    it('matches NPC names case-insensitively and skips NPCs without a recorded look', () => {
+        const context = buildKnownAppearances(state, 'BRAN and odo ferrin wait by the gate.');
+        expect(context).toContain('Odo Ferrin: A stooped man');
+        expect(context).not.toContain('Bran:');
+    });
+
+    it('returns null when nobody in the exchange has a recorded appearance', () => {
+        expect(buildKnownAppearances({ character: { name: 'Vesa' }, npcs: [] }, 'A quiet road.')).toBeNull();
     });
 });
 

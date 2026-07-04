@@ -5,6 +5,7 @@ import {
     classifyNpcCandidate,
     clampNpcDossierField,
     curateNpcsForPrompt,
+    formatNpcEmbeddingText,
     isGenericCreatureName,
     listArchivableFodder,
     locationMatchesPlace,
@@ -13,6 +14,20 @@ import {
     getCoreNpcName,
     namesMatch,
 } from './npcRoster.js';
+
+describe('formatNpcEmbeddingText', () => {
+    it('carries established looks into RAG so retrieval preserves visual continuity', () => {
+        const text = formatNpcEmbeddingText({
+            name: 'Maera',
+            disposition: 'wary',
+            appearance: 'Close-cropped white hair, storm-grey eyes, rope burn on her left wrist.',
+            lastNotes: 'Warned the hero off the docks.',
+        });
+        expect(text).toContain('Maera (wary)');
+        expect(text).toContain('Looks: Close-cropped white hair');
+        expect(text).toContain('Warned the hero off the docks.');
+    });
+});
 
 describe('npcRoster classification', () => {
     it('rejects generic goblin fodder', () => {
