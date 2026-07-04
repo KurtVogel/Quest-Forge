@@ -33,4 +33,30 @@ describe('quest identity', () => {
 
         expect(byName.quests[0].status).toBe('completed');
     });
+
+    it('fails a quest by stable id or normalized name and leaves others untouched', () => {
+        const added = gameReducer(gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { id: 'quest-debt', name: 'Collect the Debt' },
+        }), {
+            type: 'ADD_QUEST',
+            payload: { id: 'quest-rats', name: 'Clear the Cellar Rats' },
+        });
+
+        const failed = gameReducer(added, {
+            type: 'FAIL_QUEST',
+            payload: { name: 'collect the debt' },
+        });
+        expect(failed.quests.find(q => q.id === 'quest-debt').status).toBe('failed');
+        expect(failed.quests.find(q => q.id === 'quest-rats').status).toBe('active');
+    });
+
+    it('ignores a FAIL_QUEST reference that matches nothing', () => {
+        const added = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { id: 'quest-debt', name: 'Collect the Debt' },
+        });
+        const next = gameReducer(added, { type: 'FAIL_QUEST', payload: { name: 'A Quest That Never Was' } });
+        expect(next.quests[0].status).toBe('active');
+    });
 });

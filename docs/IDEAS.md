@@ -419,23 +419,22 @@ Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md
   charge. The reducer now keeps a recent normalized purchase-signature ledger and ignores
   nearby replays unless the player explicitly buys another copy; the prompt also says
   purchase/sale events are one-shot transactions.
-- **Scribe extraction budget** (top memory-tuning item): ~4+ world facts AND story cards
-  per turn → 109 facts/106 cards in one evening; facts inject into the prompt uncompressed.
-  Raise the bar ("durable, campaign-level truths only"), cap per-turn extraction, or add a
-  periodic merge/prune pass for near-duplicate facts.
-- **Front clock pacing:** deterministic front ran 0→6 (max clock) + stage 4 in a single
-  session via cadence movement. Verify the reflection isn't proposing +1 every cadence;
-  consider requiring an explicit fictional trigger for consecutive advances.
-- **Quest emission nudge:** an entire session of clear quest-shaped deals (rat clearing for
-  a room, debt collection, smuggler investigation) produced zero `quest_updates`; the Quests
-  panel stayed empty. Prompt likely needs a concrete "open/update a quest when the hero
-  accepts a job/goal" instruction.
-- **XP for slain enemies in a lost fight:** the player killed the bruiser, then dropped to
-  0 HP; combat ended in capture with no XP. Consider awarding overcome-XP for enemies
-  genuinely defeated before the player falls.
-- **Creation-time front title:** with no location yet, `createInitialFronts` anchors on the
-  premise's first sentence ("Trouble around Kalden Vor, a human fighter and…"). Prefer a
-  location-like anchor or a tighter trim; heals correctly once a location exists.
+- **Scribe extraction budget** — fixed 2026-07-04 (DECISIONS.md). Prompt now states a hard
+  ≤2-facts/≤2-cards budget per turn, the engine slices to 3 regardless, the reflection pass
+  caps cards at 2, and `ADD_WORLD_FACT(S)` reject near-duplicate restatements via token
+  containment. Still open if volume stays high in real play: a periodic LLM merge/prune pass
+  over the accumulated fact store.
+- **Front clock pacing** — fixed 2026-07-04. Engine-owned: one clock gain per cadence total,
+  no consecutive-cadence gains per front, softening never throttled; reflection prompt now
+  demands an explicit fictional trigger and expects most reflections to move nothing.
+- **Quest emission nudge** — fixed 2026-07-04. QUEST TRACKING INSTRUCTIONS added to the DM
+  prompt; `quest_updates` statuses new|updated|completed|failed all round-trip (FAIL_QUEST
+  added; failed quests visible in the panel's finished section).
+- **XP for slain enemies in a lost fight** — fixed 2026-07-04. Defeat/escape combat ends
+  award fallback XP for genuinely slain foes only (`slainXpOnly`), still double-award-guarded.
+- **Creation-time front title** — fixed 2026-07-04. The fallback front anchors on a
+  place-like proper noun extracted from the premise (or "the starting region"), never the
+  raw premise sentence.
 
 ## Tech & Infra
 

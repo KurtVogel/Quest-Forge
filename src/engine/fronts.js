@@ -46,9 +46,30 @@ function normalizeStatus(value, fallback = 'active') {
     return ['active', 'dormant', 'resolved'].includes(status) ? status : fallback;
 }
 
+/**
+ * Pull a location-like proper noun out of the premise ("the smuggler's port of
+ * Brackwater" -> "Brackwater"). Never returns the hero's own name, and never
+ * falls back to embedding a whole premise sentence in a front title.
+ */
+function extractPremisePlace(premise, characterName = '') {
+    const text = cleanText(premise);
+    if (!text) return '';
+    const heroName = cleanText(characterName).toLowerCase();
+    const placeRe = /\b(?:in|at|near|outside|beneath|within|beyond|of|reaches|enters)\s+(?:the\s+)?([A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2})/g;
+    let match;
+    while ((match = placeRe.exec(text)) !== null) {
+        const candidate = cleanText(match[1]).slice(0, 60);
+        if (!candidate) continue;
+        const lower = candidate.toLowerCase();
+        if (heroName && (lower === heroName || heroName.includes(lower) || lower.includes(heroName))) continue;
+        return candidate;
+    }
+    return '';
+}
+
 export function createInitialFronts({ premise = '', character = null, location = null } = {}) {
     const anchor = cleanText(location)
-        || cleanText(premise).split(/[.!?]/)[0]?.slice(0, 90)
+        || extractPremisePlace(premise, character?.name)
         || 'the starting region';
     const name = cleanText(character?.name, 'the hero');
 
@@ -86,6 +107,7 @@ export function normalizeFront(front = {}, existing = null) {
         publicHints: normalizeRecentTextArray(front.publicHints || front.public_hints, existing?.publicHints || []),
         lastAdvancedAt: front.lastAdvancedAt || front.last_advanced_at || existing?.lastAdvancedAt || null,
         lastAdvanceId: cleanText(front.lastAdvanceId || front.last_advance_id, existing?.lastAdvanceId || '') || null,
+        lastAdvanceDelta: clampInt(front.lastAdvanceDelta ?? front.last_advance_delta, -1, 1, existing?.lastAdvanceDelta ?? 0),
         notes: cleanText(front.notes, existing?.notes || ''),
         faction: normalizeFaction(front.faction, existing?.faction || null),
     };
@@ -126,9 +148,15 @@ function normalizeAdvance(advance = {}) {
 /**
  * Apply one private, cadenced living-world batch. Fiction decides whether pressure
  * changes; the engine owns the bounded delta, monotonic portent stage, and identity.
+ *
+ * Pacing guards (fronts must span sessions, not sprint 0->max in one evening):
+ * only ONE front may gain clock per cadence, and a front that gained clock in the
+ * immediately previous cadence sits this one out. Softening (-1) and pure
+ * symptom/notes updates are never throttled — player interference always lands.
  */
 export function applyFrontAdvanceBatch(fronts = [], batch = {}) {
     const cadenceId = cleanText(batch.cadenceId || batch.cadence_id).slice(0, 160);
+    const previousCadenceId = cleanText(batch.previousCadenceId || batch.previous_cadence_id) || null;
     if (!cadenceId || !Array.isArray(batch.advances)) return { fronts, appliedCount: 0 };
 
     const seen = new Set();
@@ -139,11 +167,24 @@ export function applyFrontAdvanceBatch(fronts = [], batch = {}) {
     if (advances.length === 0) return { fronts, appliedCount: 0 };
 
     let appliedCount = 0;
+    let clockGainUsed = false;
     const nextFronts = fronts.map(front => {
         const advance = advances.find(candidate => candidate.id === front.id);
         if (!advance || (front.status || 'active') !== 'active' || front.lastAdvanceId === cadenceId) return front;
 
-        const clock = clampInt((front.clock || 0) + advance.delta, 0, front.maxClock || DEFAULT_MAX_CLOCK, front.clock || 0);
+        let delta = advance.delta;
+        if (delta > 0) {
+            const advancedLastCadence = !!previousCadenceId
+                && front.lastAdvanceId === previousCadenceId
+                && (front.lastAdvanceDelta || 0) > 0;
+            if (clockGainUsed || advancedLastCadence) {
+                delta = 0; // pacing guard: keep the symptom/notes, hold the clock
+            } else {
+                clockGainUsed = true;
+            }
+        }
+
+        const clock = clampInt((front.clock || 0) + delta, 0, front.maxClock || DEFAULT_MAX_CLOCK, front.clock || 0);
         const portentCount = Math.max(0, (front.grimPortents || []).length);
         const derivedStage = portentCount > 0
             ? Math.min(portentCount, Math.floor((clock / (front.maxClock || DEFAULT_MAX_CLOCK)) * portentCount))
@@ -160,6 +201,7 @@ export function applyFrontAdvanceBatch(fronts = [], batch = {}) {
             notes: advance.reason || front.notes,
             lastAdvancedAt: Date.now(),
             lastAdvanceId: cadenceId,
+            lastAdvanceDelta: delta,
         }, front);
     });
 

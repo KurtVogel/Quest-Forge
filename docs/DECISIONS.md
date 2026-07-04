@@ -8,6 +8,36 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-04 · Memory extraction is budgeted and deduped in the engine; front clocks are engine-paced.**
+The live playtest's top tuning finding: the Scribe extracted 109 world facts + 106 story cards in one
+evening, and the deterministic front sprinted 0→6 (max) in a single session. Fixes are engine-owned,
+not prompt-only: (1) the Scribe prompt states a HARD EXTRACTION BUDGET (≤2 facts + ≤2 cards per
+ordinary turn, zero on most) and `runScribe` slices to 3 regardless; the reflection pass caps cards
+at 2. (2) `ADD_WORLD_FACT(S)` reject near-duplicate restatements via stopword-stripped token
+containment (≥0.9 of the smaller set) — "Odo is dead" vs "Odo is now dead, killed at the docks" is
+one fact, not two. (3) `applyFrontAdvanceBatch` allows only ONE front to gain clock per cadence and
+refuses a gain for a front that gained in the immediately previous cadence (`lastAdvanceDelta` +
+`previousCadenceId`); softening (-1) and symptom-only updates are never throttled, so player
+interference always lands. Worst-case pacing is now ~+1 per two cadences per front instead of +1
+every cadence. Why engine-owned: prompt discipline demonstrably failed at both of these in live play.
+
+**2026-07-04 · Lost or escaped fights still pay XP for foes genuinely slain.**
+The playtest hero killed the bruiser, fell at 0 HP, and got nothing — defeat/escape paths passed
+`llmAwardedXp: true` to suppress the fallback entirely. Now they pass `slainXpOnly`: the END_COMBAT
+fallback awards `estimateCombatExperience` for enemies at 0 HP / condition dead only (never fled or
+surrendered foes on a loss), still gated by `combat.xpAwarded` so nothing double-awards. Why: the
+overcome-XP principle says defeating a threat earns the XP; losing the wider fight shouldn't erase
+a kill the dice already granted.
+
+**2026-07-04 · quest_updates now round-trips new|updated|completed|failed, with an explicit DM nudge.**
+A whole session of quest-shaped deals produced zero `quest_updates` — the prompt showed the JSON
+field but never said when to use it. The DM prompt now has QUEST TRACKING INSTRUCTIONS (open on any
+accepted job/deal/debt/investigation, close in the same response that resolves it); the parser routes
+`updated` through the existing ADD_QUEST upsert and `failed` to a new FAIL_QUEST action, and the
+Quests panel shows failed quests in the finished section with a distinct marker. Also cosmetic:
+`createInitialFronts` no longer embeds the premise's first sentence in the fallback front title — it
+extracts a place-like proper noun (or falls back to "the starting region").
+
 **2026-07-04 · Sales share the one-shot transaction ledger; replay guards honor real repeat intent.**
 Review follow-ups to the purchase-replay fix below: (1) `SELL_ITEM` gets a `recentSales` twin of
 `recentPurchases` — a replayed `sell` event must not remove a second copy or pay out twice; (2) the

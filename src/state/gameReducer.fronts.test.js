@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { createInitialFronts } from '../engine/fronts.js';
 
 const character = {
     name: 'Astra',
@@ -11,6 +12,34 @@ const character = {
     abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 },
     conditions: [],
 };
+
+describe('creation-time front anchor', () => {
+    it('anchors on a place name extracted from the premise, never the raw premise sentence', () => {
+        const fronts = createInitialFronts({
+            premise: 'Kalden Vor, a human fighter and disgraced caravan guard, arrives in the smuggler’s port of Brackwater seeking work.',
+            character: { name: 'Kalden Vor' },
+        });
+        expect(fronts[0].title).toBe('Trouble around Brackwater');
+        expect(fronts[0].title).not.toContain('fighter');
+        expect(fronts[0].title).not.toContain('Kalden');
+    });
+
+    it('prefers a known location over the premise', () => {
+        const fronts = createInitialFronts({
+            premise: 'A drifter arrives in the port of Brackwater.',
+            location: 'The Rusty Flagon, Millhaven',
+        });
+        expect(fronts[0].title).toBe('Trouble around The Rusty Flagon, Millhaven');
+    });
+
+    it('falls back to a generic region when the premise offers no place-like name', () => {
+        const fronts = createInitialFronts({
+            premise: 'a wandering sellsword looks for coin and trouble.',
+            character: { name: 'Astra' },
+        });
+        expect(fronts[0].title).toBe('Trouble around the starting region');
+    });
+});
 
 describe('hidden campaign fronts', () => {
     it('seeds an initial hidden front when a campaign session starts', () => {
@@ -139,6 +168,94 @@ describe('hidden campaign fronts', () => {
         });
         expect(advanced.session.frontDirector).toMatchObject({ lastJournalEnd: 20, lastAppliedCount: 1 });
         expect(gameReducer(advanced, action)).toBe(advanced);
+    });
+
+    it('lets only one front gain clock per cadence while other advances keep their symptoms', () => {
+        const makeFront = (id) => ({
+            id, title: id, goal: 'Press.', stakes: 'Pain.',
+            grimPortents: ['One.', 'Two.', 'Three.'],
+            clock: 1, maxClock: 6, stage: 0, status: 'active', publicHints: [],
+        });
+        const state = {
+            ...initialGameState,
+            session: { id: 'campaign', frontDirector: { version: 2, lastJournalEnd: 10 } },
+            fronts: [makeFront('front-a'), makeFront('front-b')],
+        };
+        const advanced = gameReducer(state, {
+            type: 'APPLY_FRONT_ADVANCE_BATCH',
+            payload: {
+                cadenceId: 'cad-20',
+                journalEnd: 20,
+                advances: [
+                    { id: 'front-a', delta: 1, symptom: 'Patrols double.', reason: 'Opportunity.' },
+                    { id: 'front-b', delta: 1, symptom: 'Prices spike.', reason: 'Opportunity.' },
+                ],
+            },
+        });
+        expect(advanced.fronts[0].clock).toBe(2);
+        expect(advanced.fronts[1].clock).toBe(1); // clock held by the pacing guard
+        expect(advanced.fronts[1].publicHints).toContain('Prices spike.'); // symptom still lands
+        expect(advanced.fronts[1].lastAdvanceDelta).toBe(0);
+    });
+
+    it('refuses a clock gain for a front that advanced in the immediately previous cadence', () => {
+        const front = {
+            id: 'front-road', title: 'The Closed Road', goal: 'Choke the road.', stakes: 'Starvation.',
+            grimPortents: ['One.', 'Two.', 'Three.'],
+            clock: 2, maxClock: 6, stage: 1, status: 'active', publicHints: [],
+            lastAdvanceId: 'cad-20', lastAdvanceDelta: 1,
+        };
+        const state = {
+            ...initialGameState,
+            session: { id: 'campaign', frontDirector: { version: 2, lastCadenceId: 'cad-20', lastJournalEnd: 20 } },
+            fronts: [front],
+        };
+        const throttled = gameReducer(state, {
+            type: 'APPLY_FRONT_ADVANCE_BATCH',
+            payload: {
+                cadenceId: 'cad-30',
+                journalEnd: 30,
+                advances: [{ id: 'front-road', delta: 1, symptom: 'Another caravan vanishes.', reason: 'Time passed.' }],
+            },
+        });
+        expect(throttled.fronts[0].clock).toBe(2); // cooldown: no consecutive-cadence gains
+        expect(throttled.fronts[0].lastAdvanceDelta).toBe(0);
+
+        // The cadence after that may advance again.
+        const resumed = gameReducer(throttled, {
+            type: 'APPLY_FRONT_ADVANCE_BATCH',
+            payload: {
+                cadenceId: 'cad-40',
+                journalEnd: 40,
+                advances: [{ id: 'front-road', delta: 1, symptom: 'The road closes.', reason: 'Unopposed.' }],
+            },
+        });
+        expect(resumed.fronts[0].clock).toBe(3);
+        expect(resumed.fronts[0].lastAdvanceDelta).toBe(1);
+    });
+
+    it('never throttles softening — player interference always lands', () => {
+        const front = {
+            id: 'front-road', title: 'The Closed Road', goal: 'Choke the road.', stakes: 'Starvation.',
+            grimPortents: ['One.', 'Two.', 'Three.'],
+            clock: 3, maxClock: 6, stage: 1, status: 'active', publicHints: [],
+            lastAdvanceId: 'cad-20', lastAdvanceDelta: 1,
+        };
+        const state = {
+            ...initialGameState,
+            session: { id: 'campaign', frontDirector: { version: 2, lastCadenceId: 'cad-20', lastJournalEnd: 20 } },
+            fronts: [front],
+        };
+        const softened = gameReducer(state, {
+            type: 'APPLY_FRONT_ADVANCE_BATCH',
+            payload: {
+                cadenceId: 'cad-30',
+                journalEnd: 30,
+                advances: [{ id: 'front-road', delta: -1, symptom: 'The ambush was broken.', reason: 'The hero cleared the pass.' }],
+            },
+        });
+        expect(softened.fronts[0].clock).toBe(2);
+        expect(softened.fronts[0].lastAdvanceDelta).toBe(-1);
     });
 
     it('rejects unknown front updates and bounds direct clock changes to one step', () => {

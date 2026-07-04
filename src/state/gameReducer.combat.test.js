@@ -205,6 +205,68 @@ describe('combat victory finalization', () => {
     });
 });
 
+describe('lost/escaped-fight XP for genuinely slain foes', () => {
+    function makeTerminalState(terminal, enemies) {
+        const base = makeState();
+        return {
+            ...base,
+            character: { ...base.character, exp: 0 },
+            combat: {
+                ...initialGameState.combat,
+                active: true,
+                enemies,
+                turnOrder: [{ type: 'player', name: 'Astra', initiative: 14 }],
+                phase: 'awaiting_narration',
+                xpAwarded: false,
+                lastExchangeResult: { exchangeId: 'ex-1', kind: 'exchange', terminal },
+            },
+        };
+    }
+
+    it('awards XP on defeat for enemies slain before the player fell — and only those', () => {
+        const state = makeTerminalState('defeat', [
+            { id: 'enemy-1', name: 'Bruiser', hp: 0, maxHp: 20, ac: 13, condition: 'dead' },
+            { id: 'enemy-2', name: 'Dockhand', hp: 9, maxHp: 9, ac: 12, condition: 'healthy' },
+        ]);
+        const next = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'ex-1' } });
+        expect(next.combat.active).toBe(false);
+        expect(next.character.exp).toBeGreaterThan(0);
+        const xpMessage = next.messages.find(m => m.content.includes('foes slain before the fight ended'));
+        expect(xpMessage.content).toContain('Bruiser');
+        expect(xpMessage.content).not.toContain('Dockhand');
+    });
+
+    it('awards no XP on defeat when the overcome foes only fled or surrendered', () => {
+        const state = makeTerminalState('defeat', [
+            { id: 'enemy-1', name: 'Cutpurse', hp: 6, maxHp: 6, ac: 12, condition: 'healthy', combatStatus: 'fled' },
+            { id: 'enemy-2', name: 'Enforcer', hp: 14, maxHp: 14, ac: 13, condition: 'healthy' },
+        ]);
+        const next = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'ex-1' } });
+        expect(next.combat.active).toBe(false);
+        expect(next.character.exp).toBe(0);
+    });
+
+    it('awards XP for a slain foe when the player escapes the rest of the fight', () => {
+        const state = makeTerminalState('escaped', [
+            { id: 'enemy-1', name: 'Watchdog', hp: 0, maxHp: 8, ac: 12, condition: 'dead' },
+            { id: 'enemy-2', name: 'Handler', hp: 11, maxHp: 11, ac: 13, condition: 'healthy' },
+        ]);
+        const next = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'ex-1' } });
+        expect(next.combat.active).toBe(false);
+        expect(next.character.exp).toBeGreaterThan(0);
+    });
+
+    it('does not double-award on defeat when XP was already earned during the fight', () => {
+        const state = makeTerminalState('defeat', [
+            { id: 'enemy-1', name: 'Bruiser', hp: 0, maxHp: 20, ac: 13, condition: 'dead' },
+        ]);
+        state.combat.xpAwarded = true;
+        const next = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'ex-1' } });
+        expect(next.combat.active).toBe(false);
+        expect(next.character.exp).toBe(0);
+    });
+});
+
 describe('enemy-stat validation at every entry point', () => {
     it('clamps HP/AC and rejects absurd attack stats at START_COMBAT', () => {
         rollQueue.push(5, 10, 9); // enemy init, player init, companion init

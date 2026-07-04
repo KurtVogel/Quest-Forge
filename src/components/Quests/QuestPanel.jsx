@@ -9,7 +9,7 @@ export default function QuestPanel() {
     const [newQuestName, setNewQuestName] = useState('');
 
     const activeQuests = state.quests.filter(q => q.status === 'active');
-    const completedQuests = state.quests.filter(q => q.status === 'completed');
+    const completedQuests = state.quests.filter(q => q.status === 'completed' || q.status === 'failed');
 
     const handleAddQuest = () => {
         if (!newQuestName.trim()) return;
@@ -104,7 +104,9 @@ export default function QuestPanel() {
                         <div className="quest-list completed">
                             {completedQuests.map(quest => (
                                 <div key={quest.id} className="quest-item completed">
-                                    <div className="quest-item-status done">✦</div>
+                                    <div className="quest-item-status done" title={quest.status === 'failed' ? 'Failed' : 'Completed'}>
+                                        {quest.status === 'failed' ? '✕' : '✦'}
+                                    </div>
                                     <div className="quest-item-info">
                                         <span className="quest-item-name">{quest.name}</span>
                                     </div>

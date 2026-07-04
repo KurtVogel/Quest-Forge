@@ -662,10 +662,14 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     }
 
     for (const quest of events.questUpdates) {
-        if (quest.status === 'new') {
-            dispatch({ type: 'ADD_QUEST', payload: { name: quest.name, description: quest.description } });
+        if (quest.status === 'new' || quest.status === 'updated') {
+            // ADD_QUEST upserts by id/name, so "updated" refreshes the existing entry
+            // (or self-heals into a new one if the DM never opened it).
+            dispatch({ type: 'ADD_QUEST', payload: { ...(quest.id && { id: quest.id }), name: quest.name, description: quest.description } });
         } else if (quest.status === 'completed' && (quest.id || quest.name)) {
             dispatch({ type: 'COMPLETE_QUEST', payload: { id: quest.id, name: quest.name } });
+        } else if (quest.status === 'failed' && (quest.id || quest.name)) {
+            dispatch({ type: 'FAIL_QUEST', payload: { id: quest.id, name: quest.name } });
         }
     }
 

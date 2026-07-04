@@ -695,6 +695,20 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_QUEST', payload: { id: 'q1', name: 'Find the relic' } });
     });
 
+    it('routes updated quests to the ADD_QUEST upsert and failed quests to FAIL_QUEST', () => {
+        const dispatch = run({
+            quest_updates: [
+                { status: 'updated', id: 'q1', name: 'Find the relic', description: 'The trail leads to the sunken vault.' },
+                { status: 'failed', id: 'q2', name: 'Save the caravan' },
+            ],
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'ADD_QUEST',
+            payload: { id: 'q1', name: 'Find the relic', description: 'The trail leads to the sunken vault.' },
+        });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'FAIL_QUEST', payload: { id: 'q2', name: 'Save the caravan' } });
+    });
+
     it('dispatches combat start/end, enemy, and companion updates', () => {
         const dispatch = run({
             combat_start: { enemies: [{ name: 'Goblin', hp: 7, maxHp: 7, ac: 12 }] },

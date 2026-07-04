@@ -11,7 +11,7 @@ describe('Scribe story memory extraction', () => {
         sendMessage.mockReset();
     });
 
-    it('dispatches player-authored canon, promises, wounds, NPC agendas, and companion hooks', async () => {
+    it('dispatches player canon, promises, and wounds while capping cards at the per-turn budget', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             world_facts: [],
             npc_updates: [{
@@ -89,15 +89,33 @@ describe('Scribe story memory extraction', () => {
                 callbackHooks: expect.arrayContaining(['blue ribbon warning']),
             }),
         });
-        expect(dispatch).toHaveBeenCalledWith({
-            type: 'ADD_STORY_MEMORY_CARDS',
-            payload: expect.arrayContaining([
-                expect.objectContaining({ type: 'playerCanon', subject: 'Tanelorn exile' }),
-                expect.objectContaining({ type: 'promise', subject: 'Mira ribbon' }),
-                expect.objectContaining({ type: 'wound', subject: 'black arrow scar' }),
-                expect.objectContaining({ type: 'npcAgenda', subject: 'potential scout companion' }),
-            ]),
+        const cardsCall = dispatch.mock.calls.find(([action]) => action.type === 'ADD_STORY_MEMORY_CARDS');
+        // Four cards extracted, but the engine budget backstop keeps only the first three.
+        expect(cardsCall[0].payload).toHaveLength(3);
+        expect(cardsCall[0].payload).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'playerCanon', subject: 'Tanelorn exile' }),
+            expect.objectContaining({ type: 'promise', subject: 'Mira ribbon' }),
+            expect.objectContaining({ type: 'wound', subject: 'black arrow scar' }),
+        ]));
+    });
+
+    it('caps world facts at three per turn no matter how chatty the extraction is', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [1, 2, 3, 4, 5, 6].map(i => ({ fact: `Durable truth number ${i}.`, category: 'event' })),
+            npc_updates: [],
+            story_memory: [],
+            location: null,
+        }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I end the siege.',
+            dmNarrative: 'The siege ends; six things change forever.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
         });
+        const factsCall = dispatch.mock.calls.find(([action]) => action.type === 'ADD_WORLD_FACTS');
+        expect(factsCall[0].payload).toHaveLength(3);
+        expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('HARD EXTRACTION BUDGET');
     });
 
     it('instructs the Scribe not to canonize unsupported external player assertions', async () => {
@@ -181,6 +199,28 @@ describe('cadenced living-world reflection', () => {
             },
         });
         expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('A journal cadence is not itself a reason');
+        expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('Advance at most ONE front per reflection');
+    });
+
+    it('caps reflection story-memory cards at two per cadence', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            npc_updates: [],
+            front_advances: [],
+            story_memory: [1, 2, 3].map(i => ({ type: 'foreshadow', text: `Hook ${i}`, subject: `hook-${i}`, source: 'reflection' })),
+        }));
+        const dispatch = vi.fn();
+        await runNpcFrontReflection({
+            state: {
+                settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+                session: { id: 'campaign' },
+                fronts: [{ id: 'front-road', status: 'active' }],
+                npcs: [], journal: [], worldFacts: [], party: [],
+            },
+            dispatch,
+            cadence: { id: 'journal-campaign-30', journalEnd: 30, summary: 'Quiet days.' },
+        });
+        const cardsCall = dispatch.mock.calls.find(([action]) => action.type === 'ADD_STORY_MEMORY_CARDS');
+        expect(cardsCall[0].payload).toHaveLength(2);
     });
 });
 

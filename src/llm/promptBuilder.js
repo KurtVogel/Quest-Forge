@@ -277,7 +277,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "conditions_removed": [],
   "resources_used": [],
   "healing": 0,
-  "quest_updates": [{ "status": "new", "name": "Quest Name", "description": "Quest description" }],
+  "quest_updates": [{ "status": "new|updated|completed|failed", "name": "Quest Name", "description": "Quest description" }],
   "location": "",
   "world_facts": [
     { "fact": "The bandit captain Rarg is dead, killed by the player at the crossroads.", "category": "event" },
@@ -329,7 +329,10 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - It is only for concrete portable belongings the CAMPAIGN PREMISE explicitly establishes as already owned/carried by the player character and that are missing from INVENTORY. Do not grant merely mentioned, desired, NPC-owned, location-owned, or future items.
 - Supply a descriptive name, optional known catalog itemKey, brief premise-grounded description, and equipped true only when explicitly worn/wielded at the opening. Never provide prices, bonuses, damage, armor, healing, magic, or other mechanics; the engine owns recognized catalog stats and rejects duplicates.
 
-## WORLD FACTS INSTRUCTIONS
+## QUEST TRACKING INSTRUCTIONS
+- The Quests panel only shows what you emit — whenever the hero ACCEPTS a job, deal, debt, errand, hunt, or investigation (even an informal handshake like "clear the rats and the room is yours"), emit \`quest_updates\` with \`status: "new"\`, a short name, and what was agreed (task, payment/stakes, who asked).
+- When an objective meaningfully changes, emit \`status: "updated"\` with the new situation; when it is fulfilled or becomes impossible, emit \`status: "completed"\` or \`status: "failed"\` in the same response that narrates it.
+- One quest per actual agreement — don't open quests for vague rumors, mere invitations, or things the hero declined.
 - Use \`world_facts\` to canonize important outcomes: deaths, alliances, discoveries, betrayals, destroyed places, established lore
 - Write facts as definitive statements: "X is dead", "The treaty between A and B is broken", "The artifact is sealed in the vault"
 - Do NOT record trivial actions — only durable truths

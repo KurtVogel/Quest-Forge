@@ -179,6 +179,40 @@ function normalizeRefToken(value) {
     return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+// --- World-fact near-duplicate detection (Scribe over-extraction guard) ---
+const FACT_STOP_WORDS = new Set([
+    'the', 'a', 'an', 'of', 'to', 'in', 'is', 'are', 'was', 'were', 'and', 'or',
+    'that', 'this', 'it', 'its', 'their', 'his', 'her', 'has', 'have', 'had',
+    'by', 'for', 'with', 'at', 'on', 'as', 'be', 'been', 'from', 'now', 'not', 'no',
+]);
+
+function factTokenSet(text) {
+    const normalized = String(text || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return new Set(normalized.split(' ').filter(token => token && !FACT_STOP_WORDS.has(token)));
+}
+
+// A fact whose meaningful tokens are ~all contained in an existing fact (or vice
+// versa) is a restatement — "Odo is dead" vs "Odo is dead, killed at the docks".
+function isNearDuplicateFact(candidate, existingSets) {
+    const tokens = factTokenSet(candidate);
+    if (tokens.size === 0) return true;
+    for (const existing of existingSets) {
+        if (existing.size === 0) continue;
+        const small = tokens.size <= existing.size ? tokens : existing;
+        const large = tokens.size <= existing.size ? existing : tokens;
+        let overlap = 0;
+        for (const token of small) {
+            if (large.has(token)) overlap += 1;
+        }
+        if (overlap / small.size >= 0.9) return true;
+    }
+    return false;
+}
+
 const RECENT_TRANSACTION_LIMIT = 20;
 const RECENT_TRANSACTION_MESSAGE_WINDOW = 8;
 const PURCHASE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|pay|pays|paying|paid|order|orders|ordering|ordered|take|takes|taking|grab|grabs|grabbing|get|gets|getting)\b/i;
@@ -1604,6 +1638,21 @@ export function gameReducer(state, action) {
             };
         }
 
+        case 'FAIL_QUEST': {
+            const ref = action.payload || '';
+            const refId = typeof ref === 'object' ? ref.id : ref;
+            const refName = typeof ref === 'object' ? ref.name : ref;
+            const nameToken = normalizeRefToken(refName);
+            return {
+                ...state,
+                quests: state.quests.map(q =>
+                    q.id === refId || (nameToken && normalizeRefToken(q.name) === nameToken)
+                        ? { ...q, status: 'failed' }
+                        : q
+                ),
+            };
+        }
+
         case 'REMOVE_QUEST':
             return {
                 ...state,
@@ -1618,23 +1667,26 @@ export function gameReducer(state, action) {
                 category: 'general',
                 ...action.payload,
             };
-            // Deduplicate — skip if an identical fact string already exists
-            const alreadyExists = state.worldFacts.some(f => f.fact === fact.fact);
-            if (alreadyExists) return state;
+            const existingSets = state.worldFacts.map(f => factTokenSet(f.fact));
+            if (isNearDuplicateFact(fact.fact, existingSets)) return state;
             return { ...state, worldFacts: [...state.worldFacts, fact] };
         }
 
         case 'ADD_WORLD_FACTS': {
-            // Bulk add, filtering duplicates
-            const existing = new Set(state.worldFacts.map(f => f.fact));
-            const newFacts = (action.payload || [])
-                .filter(f => f.fact && !existing.has(f.fact))
-                .map(f => ({
+            // Bulk add, rejecting exact and near-duplicate restatements of known facts
+            // (the Scribe tends to re-canonize the same truth with slight rewording).
+            const existingSets = state.worldFacts.map(f => factTokenSet(f.fact));
+            const newFacts = [];
+            for (const f of action.payload || []) {
+                if (!f?.fact || isNearDuplicateFact(f.fact, existingSets)) continue;
+                existingSets.push(factTokenSet(f.fact));
+                newFacts.push({
                     id: `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                     timestamp: Date.now(),
                     category: 'general',
                     ...f,
-                }));
+                });
+            }
             if (newFacts.length === 0) return state;
             return { ...state, worldFacts: [...state.worldFacts, ...newFacts] };
         }
@@ -1838,6 +1890,7 @@ export function gameReducer(state, action) {
             if (!cadenceId || journalEnd <= previousEnd) return state;
             const result = applyFrontAdvanceBatch(state.fronts || [], {
                 cadenceId,
+                previousCadenceId: state.session?.frontDirector?.lastCadenceId || null,
                 advances: action.payload?.advances,
             });
             return {
@@ -2066,6 +2119,10 @@ export function gameReducer(state, action) {
 
         case 'END_COMBAT': {
             const llmAwardedXp = action.payload?.llmAwardedXp || false;
+            // Lost/abandoned fights still earn XP, but only for foes genuinely slain
+            // before the end — never for enemies who fled or accepted a surrender
+            // while the player ultimately went down or ran.
+            const slainXpOnly = !!action.payload?.slainXpOnly;
             let newState = {
                 ...state,
                 combat: { ...initialGameState.combat },
@@ -2075,13 +2132,17 @@ export function gameReducer(state, action) {
             // neither by the DM this turn (llmAwardedXp) nor at any point during it
             // (combat.xpAwarded). Prevents the manual "End Combat" button double-awarding.
             if (!llmAwardedXp && !state.combat.xpAwarded && state.character) {
-                const defeatedEnemies = (state.combat.enemies || []).filter(e => !isEnemyActive(e));
+                const defeatedEnemies = (state.combat.enemies || []).filter(e => slainXpOnly
+                    ? ((e.hp ?? 0) <= 0 || e.condition === 'dead')
+                    : !isEnemyActive(e));
                 const fallbackXp = estimateCombatExperience(defeatedEnemies);
 
                 if (fallbackXp > 0) {
                     const enemyNames = defeatedEnemies.map(e => e.name).join(', ');
                     const result = awardExperience(newState.character, fallbackXp, {
-                        reason: `battle complete: ${enemyNames || 'enemies'}`,
+                        reason: slainXpOnly
+                            ? `foes slain before the fight ended: ${enemyNames || 'enemies'}`
+                            : `battle complete: ${enemyNames || 'enemies'}`,
                     });
                     newState = {
                         ...newState,
@@ -2162,10 +2223,10 @@ export function gameReducer(state, action) {
                 return gameReducer(state, { type: 'END_COMBAT', payload: { autoVictory: true } });
             }
             if (result.terminal === 'defeat') {
-                return gameReducer(state, { type: 'END_COMBAT', payload: { defeat: true, llmAwardedXp: true } });
+                return gameReducer(state, { type: 'END_COMBAT', payload: { defeat: true, slainXpOnly: true } });
             }
             if (result.terminal === 'escaped') {
-                return gameReducer(state, { type: 'END_COMBAT', payload: { escaped: true, llmAwardedXp: true } });
+                return gameReducer(state, { type: 'END_COMBAT', payload: { escaped: true, slainXpOnly: true } });
             }
             const playerIdx = state.combat.turnOrder.findIndex(actor => actor.type === 'player');
             const completedOpening = result.kind === 'opening';

@@ -64,10 +64,11 @@ Output ONLY valid JSON:
 }
 
 Rules:
-- World facts are durable truths: deaths, alliances, betrayals, discoveries, curses, historical facts revealed
-- Do NOT record transient action descriptions as facts ("Player attacked goblin" is not a world fact)
+- HARD EXTRACTION BUDGET: at most 2 world_facts and 2 story_memory cards per turn (3 only on a truly pivotal turn). Most ordinary turns — travel, shopping, small talk, routine fights — should produce ZERO of each. When over budget, keep only the most campaign-defining entries and drop the rest.
+- World facts are durable, campaign-level truths a DM would still need many sessions later: deaths, alliances, betrayals, discoveries, curses, historical facts revealed
+- Do NOT record transient action descriptions, scene-level detail, prices, purchases, minor chatter, or restatements of anything already implied by an existing fact ("Player attacked goblin" is not a world fact)
 - DO record outcomes: "The goblin captain Rarg is dead", "The village of Millhaven burned to the ground"
-- Story memory is for emotionally or dramatically useful callbacks: promises, debts, named objects, scars, injuries, insults, flirtation, fears, private vows, unresolved clues, player-authored proper nouns, foreshadowing, NPC agendas, and relationship tension.
+- Story memory is for emotionally or dramatically useful callbacks: promises, debts, named objects, scars, injuries, insults, flirtation, fears, private vows, unresolved clues, player-authored proper nouns, foreshadowing, NPC agendas, and relationship tension. A card must earn its slot: if you cannot picture the DM paying it off in a later scene, do not write it.
 - Capture player-authored canon from the player's action when it concerns their own compatible backstory, vows, names, and personal attachments the DM should remember later.
 - A player message is not authoritative evidence about external reality. Do not turn player-asserted creatures, objects, exits, relationships, events, enemy behavior, or outcomes into world_facts, NPC updates, or playerCanon unless the DM narrative explicitly accepts or establishes them.
 - When AUTHORITATIVE ENGINE STATE is provided, it overrides the prose. Never record a combatant dead, alive, fled, surrendered, victorious, or defeated contrary to that state.
@@ -233,9 +234,11 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             }
         }
 
-        const worldFacts = Array.isArray(extracted.world_facts)
+        // Engine-owned budget backstop: the prompt caps extraction at 2-3 per turn,
+        // but a chatty model must not be able to flood the fact/card stores anyway.
+        const worldFacts = (Array.isArray(extracted.world_facts)
             ? extracted.world_facts.filter(fact => !contradictsAuthoritativeCombat(fact?.fact, authoritativeContext))
-            : [];
+            : []).slice(0, 3);
         if (worldFacts.length > 0) {
             dispatch({ type: 'ADD_WORLD_FACTS', payload: worldFacts });
             console.log(`[Scribe] Added ${worldFacts.length} world fact(s)`);
@@ -260,9 +263,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             }
         }
 
-        const storyMemory = Array.isArray(extracted.story_memory)
+        const storyMemory = (Array.isArray(extracted.story_memory)
             ? extracted.story_memory.filter(memory => !contradictsAuthoritativeCombat(memory?.text, authoritativeContext))
-            : [];
+            : []).slice(0, 3);
         if (storyMemory.length > 0) {
             dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: storyMemory });
             console.log(`[Scribe] Added ${storyMemory.length} story memory card(s)`);
@@ -328,7 +331,9 @@ Rules:
 - Do not contradict the authoritative combat state of any character or NPC (e.g. do not record agendas, goals, or callback hooks for a character who is dead/defeated in the engine state).
 - Hidden fronts must remain private; symptoms are fiction only, never clock/stage/title exposition.
 - Front delta is strictly -1, 0, or +1. Advance only when meaningful fictional time passed, the hero ignored a pressure to pursue something else, or an off-screen faction gained a concrete opportunity. Soften only when canonical player action hindered it. Use 0 when only its symptoms or posture evolve.
+- PACING: fronts are campaign clocks that should take many sessions to fill, not one evening. Advance at most ONE front per reflection, and only with an explicit fictional trigger you can name in "reason". The engine also refuses clock gains for a front that advanced in the previous reflection — the default and most common outcome is that nothing moves.
 - A journal cadence is not itself a reason to move a front. Omit fronts with no meaningful change. Never jump multiple steps, resolve a front, or undo an established grim portent here.
+- Emit at most 2 story_memory cards per reflection, and only for hooks with real future payoff.
 - Potential companions may be seeded as hooks, but never add them to the party.
 - Intriguing NPCs should emerge from agenda, competence, danger, secrets, attraction, rivalry, vulnerability, or leverage, not default sexualization.
 - Keep everything compact. Omit empty arrays when nothing changes.`;
@@ -408,7 +413,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             });
         }
         if (Array.isArray(reflected.story_memory) && reflected.story_memory.length > 0) {
-            dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: reflected.story_memory });
+            dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: reflected.story_memory.slice(0, 2) });
         }
     } catch (e) {
         console.warn('[Reflection] NPC/front reflection failed:', e.message || e);

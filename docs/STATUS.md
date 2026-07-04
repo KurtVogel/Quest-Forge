@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-04 (transaction-guard review follow-ups: recentSales twin, repeat phrasing, post-roll context)_
+_Last updated: 2026-07-04 (playtest tuning fixes: Scribe budget + fact dedupe, front pacing guards, quest emission, lost-fight XP, front title anchor)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -20,9 +20,13 @@ re-emitted next response → two daggers, 4 gp) now has a reducer-level recent-p
 **Review follow-ups (2026-07-04, DECISIONS.md):** sales got the same replay ledger (`recentSales`),
 repeat-intent phrasing broadened ("two more", "a few more of those", "again"), and post-roll
 outcome responses carry the player's action context so explicit rebuys after dice stay honored.
-**Top tuning finding:** Scribe over-extraction — 109 world facts + 106 story cards in ~25 turns; world facts inject uncompressed. Also:
-front clock ran 0→6 in one session (pacing), no quest_updates emitted all session, no XP
-from a lost fight's slain enemy, creation-time front title embeds the premise sentence.
+**All five tuning findings fixed (2026-07-04, DECISIONS.md ×3):** Scribe extraction hard-budgeted
+(≤2 facts/≤2 cards per turn in-prompt, engine cap 3, reflection cap 2) with near-duplicate world-fact
+rejection in the reducer; front clocks engine-paced (one gain per cadence, no consecutive-cadence
+gains per front, softening never throttled); DM prompt gained QUEST TRACKING INSTRUCTIONS and
+`quest_updates` round-trips new|updated|completed|failed (new FAIL_QUEST + panel display); lost/escaped
+fights award XP for genuinely slain foes only; creation-time front titles anchor on a place name
+extracted from the premise, never the raw premise sentence.
 
 ## Current focus — memory & fronts real-play tuning
 
@@ -132,7 +136,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **577** tests passing (49 files)
+- `npm test` — **604** tests passing (50 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)
