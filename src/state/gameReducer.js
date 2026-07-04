@@ -89,7 +89,8 @@ function validateSaveState(payload) {
         currentLocation: payload.currentLocation || null,
         pendingRoleplayCheck: sanitizePendingRoleplayCheck(payload.pendingRoleplayCheck),
         appliedLootSourceIds: Array.isArray(payload.appliedLootSourceIds) ? payload.appliedLootSourceIds : [],
-        recentPurchases: normalizeRecentPurchases(payload.recentPurchases),
+        recentPurchases: normalizeRecentTransactions(payload.recentPurchases),
+        recentSales: normalizeRecentTransactions(payload.recentSales),
         combat: (() => {
             const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)
                 ? payload.combat
@@ -178,12 +179,14 @@ function normalizeRefToken(value) {
     return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-const RECENT_PURCHASE_LIMIT = 20;
-const RECENT_PURCHASE_MESSAGE_WINDOW = 8;
+const RECENT_TRANSACTION_LIMIT = 20;
+const RECENT_TRANSACTION_MESSAGE_WINDOW = 8;
 const PURCHASE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|pay|pays|paying|paid|order|orders|ordering|ordered|take|takes|taking|grab|grabs|grabbing|get|gets|getting)\b/i;
-const REPEAT_PURCHASE_RE = /\b(another|one more|second|same)\b/i;
+const SALE_VERB_RE = /\b(sell|sells|selling|sold|pawn|pawns|pawning|pawned|trade|trades|trading|traded|offer|offers|offering|offered|unload|unloads|unloading|fence|fences|fencing|fenced)\b/i;
+// Explicit repeat-intent phrasing: "another", "one/two/a few more", "more of those", etc.
+const REPEAT_TRANSACTION_RE = /\b(another|second|same|again|(?:one|two|three|four|five|six|a couple(?: of)?|a few|several|some)\s+more|more of (?:those|these|them))\b/i;
 
-function sanitizeRecentPurchase(entry) {
+function sanitizeRecentTransaction(entry) {
     if (!entry || typeof entry !== 'object') return null;
     const signature = String(entry.signature || '').slice(0, 200);
     if (!signature) return null;
@@ -200,11 +203,11 @@ function sanitizeRecentPurchase(entry) {
     };
 }
 
-function normalizeRecentPurchases(entries) {
+function normalizeRecentTransactions(entries) {
     return (Array.isArray(entries) ? entries : [])
-        .map(sanitizeRecentPurchase)
+        .map(sanitizeRecentTransaction)
         .filter(Boolean)
-        .slice(-RECENT_PURCHASE_LIMIT);
+        .slice(-RECENT_TRANSACTION_LIMIT);
 }
 
 function buildPurchaseTransaction(payload = {}) {
@@ -243,41 +246,40 @@ function currentMessageIndex(state) {
     return Math.max(0, (state.messages || []).length - 1);
 }
 
-function findRecentPurchaseDuplicate(state, transaction, sourceId) {
-    const currentIndex = currentMessageIndex(state);
-    return normalizeRecentPurchases(state.recentPurchases)
+function findRecentTransactionDuplicate(entries, transaction, sourceId, currentIndex) {
+    return normalizeRecentTransactions(entries)
         .slice()
         .reverse()
         .find(entry => {
             if (entry.signature !== transaction.signature) return false;
             if (sourceId && entry.sourceId === sourceId) return true;
             const distance = currentIndex - entry.messageIndex;
-            return distance >= 0 && distance <= RECENT_PURCHASE_MESSAGE_WINDOW;
+            return distance >= 0 && distance <= RECENT_TRANSACTION_MESSAGE_WINDOW;
         }) || null;
 }
 
-function rememberPurchase(state, transaction, sourceId, status = 'applied') {
-    const record = sanitizeRecentPurchase({
+function rememberTransaction(entries, transaction, sourceId, messageIndex, status = 'applied') {
+    const record = sanitizeRecentTransaction({
         signature: transaction.signature,
         itemKey: transaction.item.itemKey,
         name: transaction.item.name,
         quantity: transaction.quantity,
         priceCp: transaction.priceCp,
         sourceId,
-        messageIndex: currentMessageIndex(state),
+        messageIndex,
         timestamp: Date.now(),
         status,
     });
-    if (!record) return normalizeRecentPurchases(state.recentPurchases);
-    const previous = normalizeRecentPurchases(state.recentPurchases)
+    if (!record) return normalizeRecentTransactions(entries);
+    const previous = normalizeRecentTransactions(entries)
         .filter(entry => !(entry.signature === record.signature && entry.sourceId === record.sourceId));
-    return [...previous, record].slice(-RECENT_PURCHASE_LIMIT);
+    return [...previous, record].slice(-RECENT_TRANSACTION_LIMIT);
 }
 
-function playerMessageSupportsRepeatPurchase(item, playerMessage) {
+function playerMessageSupportsRepeatTransaction(item, playerMessage, verbRe) {
     const text = String(playerMessage || '');
     if (!text.trim()) return false;
-    if (!PURCHASE_VERB_RE.test(text) && !REPEAT_PURCHASE_RE.test(text)) return false;
+    if (!verbRe.test(text) && !REPEAT_TRANSACTION_RE.test(text)) return false;
 
     const compactText = normalizeRefToken(text);
     const tokens = [item.itemKey, item.name]
@@ -289,7 +291,7 @@ function playerMessageSupportsRepeatPurchase(item, playerMessage) {
     const nameWords = String(item.name || '').toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
     if (nameWords.length > 0 && nameWords.every(word => text.toLowerCase().includes(word))) return true;
 
-    return REPEAT_PURCHASE_RE.test(text) && /\b(one|it|that|same)\b/i.test(text);
+    return REPEAT_TRANSACTION_RE.test(text) && /\b(one|it|that|those|these|them|same)\b/i.test(text);
 }
 
 function equipmentKindMatches(item, kind) {
@@ -454,6 +456,7 @@ export const initialGameState = {
     pendingRoleplayCheck: null, // Reload-safe out-of-combat check proposal; no dice exist yet
     appliedLootSourceIds: [], // Message IDs whose gold/item loot has already been applied — prevents double-grant
     recentPurchases: [], // Recent one-shot purchase signatures — prevents cross-turn LLM replays from double-charging
+    recentSales: [], // Sale twin of recentPurchases — prevents replayed sells from double-removing/double-paying
     combat: {
         active: false,
         enemies: [],
@@ -1277,12 +1280,12 @@ export function gameReducer(state, action) {
             const { item, quantity, priceCp } = transaction;
             const meta = action.payload?._meta || {};
             const sourceId = String(meta.sourceId || '').slice(0, 160);
-            const duplicate = findRecentPurchaseDuplicate(state, transaction, sourceId);
+            const duplicate = findRecentTransactionDuplicate(state.recentPurchases, transaction, sourceId, currentMessageIndex(state));
             const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
-            if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatPurchase(item, meta.playerMessage))) {
+            if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatTransaction(item, meta.playerMessage, PURCHASE_VERB_RE))) {
                 return {
                     ...state,
-                    recentPurchases: rememberPurchase(state, transaction, sourceId, 'ignored'),
+                    recentPurchases: rememberTransaction(state.recentPurchases, transaction, sourceId, currentMessageIndex(state), 'ignored'),
                     messages: [
                         ...state.messages,
                         systemMessage(`Duplicate purchase ignored — ${item.name} was already bought recently.`),
@@ -1310,7 +1313,7 @@ export function gameReducer(state, action) {
             const nextState = {
                 ...state,
                 character: payment.character,
-                recentPurchases: rememberPurchase(state, transaction, sourceId),
+                recentPurchases: rememberTransaction(state.recentPurchases, transaction, sourceId, currentMessageIndex(state)),
                 messages: [
                     ...state.messages,
                     systemMessage(`Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)}.`),
@@ -1421,9 +1424,33 @@ export function gameReducer(state, action) {
                 ? Math.max(0, Math.trunc(payload.priceCp))
                 : Math.floor((item.valueCp || 0) / 2) * quantity;
 
+            // Sales get the same one-shot replay protection as purchases: a re-emitted
+            // sell event must not remove the item twice or pay out twice.
+            const saleTransaction = {
+                item: { itemKey: item.itemKey, name: item.name },
+                quantity,
+                priceCp: proceedsCp,
+                signature: `${normalizeItemKey(item.itemKey || item.name) || normalizeRefToken(item.name)}|${quantity}|${proceedsCp}`,
+            };
+            const saleMeta = payload._meta || {};
+            const saleSourceId = String(saleMeta.sourceId || '').slice(0, 160);
+            const saleDuplicate = findRecentTransactionDuplicate(state.recentSales, saleTransaction, saleSourceId, currentMessageIndex(state));
+            const exactSaleReplay = !!saleSourceId && saleDuplicate?.sourceId === saleSourceId;
+            if (saleDuplicate && (exactSaleReplay || !playerMessageSupportsRepeatTransaction(item, saleMeta.playerMessage, SALE_VERB_RE))) {
+                return {
+                    ...state,
+                    recentSales: rememberTransaction(state.recentSales, saleTransaction, saleSourceId, currentMessageIndex(state), 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`Duplicate sale ignored — ${item.name} was already sold recently.`),
+                    ],
+                };
+            }
+
             const nextState = {
                 ...state,
                 character: addCurrency(state.character, { copper: proceedsCp }),
+                recentSales: rememberTransaction(state.recentSales, saleTransaction, saleSourceId, currentMessageIndex(state)),
                 messages: [
                     ...state.messages,
                     systemMessage(`Sold ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(proceedsCp)}.`),

@@ -601,7 +601,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     }
 
     for (const sale of events.sells) {
-        dispatch({ type: 'SELL_ITEM', payload: sale });
+        dispatch({ type: 'SELL_ITEM', payload: withTransactionMeta(sale) });
     }
 
     for (const itemName of itemsLost) {

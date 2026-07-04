@@ -588,6 +588,25 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'REMOVE_ITEM_BY_NAME' }));
     });
 
+    it('passes source and player-message metadata to sell transactions when available', () => {
+        const { events } = parseResponse(fence({ sell: { itemKey: 'dagger' } }));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({ character: {}, party: [] }), {
+            lootSourceId: 'msg-sell-1',
+            playerMessage: 'I sell my dagger.',
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'SELL_ITEM',
+            payload: {
+                itemKey: 'dagger',
+                _meta: {
+                    sourceId: 'msg-sell-1',
+                    playerMessage: 'I sell my dagger.',
+                },
+            },
+        });
+    });
+
     it('passes source and player-message metadata to purchase transactions when available', () => {
         const { events } = parseResponse(fence({ purchase: { itemKey: 'dagger' } }));
         const dispatch = vi.fn();

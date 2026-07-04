@@ -8,6 +8,15 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-04 · Sales share the one-shot transaction ledger; replay guards honor real repeat intent.**
+Review follow-ups to the purchase-replay fix below: (1) `SELL_ITEM` gets a `recentSales` twin of
+`recentPurchases` — a replayed `sell` event must not remove a second copy or pay out twice; (2) the
+repeat-intent phrasing now covers quantified forms ("two more", "a few more of those", "again"), so
+a genuine rebuy phrased that way is charged instead of blocked; (3) post-roll outcome responses
+carry the player's original action as transaction context (`playerActionContext`), so an explicit
+"I buy another one" still authorizes a repeat when the purchase lands after dice. All guards keep
+failing conservatively: blocked replays cost nothing and announce themselves with a system line.
+
 **2026-07-03 · Purchase events are one-shot transactions with reducer-level replay protection.**
 The live production playtest caught a real economy bug: after a dagger purchase was completed, the
 DM re-emitted the same `purchase` event on the next response, producing a second dagger and another

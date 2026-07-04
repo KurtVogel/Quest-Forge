@@ -364,10 +364,14 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
             // On a withheld roll-setup turn, defer outcome mutations to the post-roll
             // narration (see applyEvents) so the DM can't double-apply state across the split.
+            // playerActionContext carries the original player intent into follow-up
+            // calls (post-roll outcomes) where originalPlayerMessage is deliberately
+            // absent — so the transaction replay guard can still honor an explicit
+            // "I buy another one" when the purchase lands after dice.
             applyEvents(events, dispatch, () => stateRef.current, {
                 setupPhase: hideSetup,
                 lootSourceId: msgId,
-                playerMessage: originalPlayerMessage,
+                playerMessage: originalPlayerMessage || opts.playerActionContext,
             });
             if (events.location && !s.combat?.active && !events.combatExchange) {
                 dispatch({ type: 'SET_LOCATION', payload: events.location });

@@ -120,6 +120,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
             },
             appliedLootSourceIds: ['msg-1'],
             recentPurchases: [{ signature: 'dagger|1|200', itemKey: 'dagger', name: 'Dagger', quantity: 1, priceCp: 200, sourceId: 'msg-buy-1', messageIndex: 4 }],
+            recentSales: [{ signature: 'torch|2|1', itemKey: 'torch', name: 'Torch', quantity: 2, priceCp: 1, sourceId: 'msg-sell-1', messageIndex: 5 }],
         }));
         const loaded = await loadGame('slot-1');
         expect(loaded.fronts).toHaveLength(1);
@@ -128,6 +129,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         expect(loaded.pendingRoleplayCheck.rolls).toHaveLength(1);
         expect(loaded.appliedLootSourceIds).toEqual(['msg-1']);
         expect(loaded.recentPurchases).toEqual([expect.objectContaining({ signature: 'dagger|1|200', itemKey: 'dagger' })]);
+        expect(loaded.recentSales).toEqual([expect.objectContaining({ signature: 'torch|2|1', itemKey: 'torch' })]);
         expect(loaded.saveVersion).toBe(2);
     });
 

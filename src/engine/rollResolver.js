@@ -554,7 +554,7 @@ export async function handleRequestedRolls(requestedRolls, {
             const followUpEvents = await sendToLLM(
                 `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) Never narrate a result that is not supported by the rolls below. (5) If the result starts combat, declare combat_start; active combat actions use combat_exchange rather than requested_rolls.${lootNote}]${correctionNote}\n\n${summary}`,
                 undefined,
-                { suppressHpEvents: appliedHp }
+                { suppressHpEvents: appliedHp, playerActionContext: playerAction }
             );
 
             // Handle any genuinely new outside-combat follow-up roll (e.g. a triggered save).

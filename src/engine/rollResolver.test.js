@@ -775,3 +775,23 @@ describe('pending declared loot rides the outcome prompt, never the engine', () 
         expect(sendToLLM.mock.calls[0][0]).not.toContain('declared potential loot');
     });
 });
+
+describe('post-roll outcome carries player-action context', () => {
+    it('passes playerActionContext so transaction guards can honor explicit rebuy intent', async () => {
+        rollQueue.push(10);
+        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [] });
+
+        await handleRequestedRolls(
+            [{ type: 'skill_check', skill: 'persuasion', dc: 10, description: 'Haggle' }],
+            {
+                getState: () => ({ character: makeCharacter(), inventory: [], combat: { active: false, enemies: [] }, party: [] }),
+                dispatch: vi.fn(),
+                sendToLLM,
+                playerAction: 'I buy another dagger.',
+            }
+        );
+
+        const [, , opts] = sendToLLM.mock.calls[0];
+        expect(opts.playerActionContext).toBe('I buy another dagger.');
+    });
+});

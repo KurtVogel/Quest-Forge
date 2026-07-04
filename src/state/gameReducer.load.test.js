@@ -292,6 +292,7 @@ describe('LOAD_GAME progression migrations', () => {
             itemKey: 'dagger',
             priceCp: 200,
         })]);
+        expect(withIds.recentSales).toEqual([]);
 
         const withoutIds = gameReducer(initialGameState, {
             type: 'LOAD_GAME',
@@ -303,5 +304,6 @@ describe('LOAD_GAME progression migrations', () => {
         });
         expect(withoutIds.appliedLootSourceIds).toEqual([]);
         expect(withoutIds.recentPurchases).toEqual([]);
+        expect(withoutIds.recentSales).toEqual([]);
     });
 });

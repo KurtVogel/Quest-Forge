@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-03 (duplicate-purchase guard shipped after live playtest finding)_
+_Last updated: 2026-07-04 (transaction-guard review follow-ups: recentSales twin, repeat phrasing, post-roll context)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -17,6 +17,9 @@ coin math, loot audit (one clean recovery, zero double-grants), low-level solo c
 instead of death, equipment-fiction sync, Short Rest at 0 HP. Zero console/page errors.
 **Follow-up fixed same day:** cross-turn duplicate purchase (one dagger requested, purchase event
 re-emitted next response → two daggers, 4 gp) now has a reducer-level recent-purchase guard.
+**Review follow-ups (2026-07-04, DECISIONS.md):** sales got the same replay ledger (`recentSales`),
+repeat-intent phrasing broadened ("two more", "a few more of those", "again"), and post-roll
+outcome responses carry the player's action context so explicit rebuys after dice stay honored.
 **Top tuning finding:** Scribe over-extraction — 109 world facts + 106 story cards in ~25 turns; world facts inject uncompressed. Also:
 front clock ran 0→6 in one session (pacing), no quest_updates emitted all session, no XP
 from a lost fight's slain enemy, creation-time front title embeds the premise sentence.

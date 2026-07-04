@@ -197,6 +197,75 @@ describe('SELL_ITEM', () => {
         });
         expect(next.character.gold).toBe(10); // 5gp + 5gp override
     });
+
+    it('ignores an identical nearby sale replay when the player did not ask to sell again', () => {
+        const twoDaggers = [
+            { id: 'd1', itemKey: 'dagger', name: 'Dagger', type: 'weapon', valueCp: 200, quantity: 1 },
+            { id: 'd2', itemKey: 'dagger', name: 'Dagger', type: 'weapon', valueCp: 200, quantity: 1 },
+        ];
+        const state = makeState({ inventory: twoDaggers });
+        const sold = gameReducer(state, {
+            type: 'SELL_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-sell-1', playerMessage: 'I sell my dagger.' } },
+        });
+        expect(sold.character.gold).toBe(6);
+        const nextAssistant = gameReducer(sold, {
+            type: 'ADD_MESSAGE',
+            payload: { id: 'msg-sell-2', role: 'assistant', content: 'The fence pockets the blade.' },
+        });
+        const replayed = gameReducer(nextAssistant, {
+            type: 'SELL_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-sell-2', playerMessage: 'I leave the shop.' } },
+        });
+
+        expect(replayed.character.gold).toBe(6); // not paid twice
+        expect(replayed.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(1); // second dagger kept
+        expect(replayed.messages.at(-1).content).toMatch(/Duplicate sale ignored/);
+    });
+
+    it('allows a nearby repeat sale when the player explicitly sells the other copy', () => {
+        const twoDaggers = [
+            { id: 'd1', itemKey: 'dagger', name: 'Dagger', type: 'weapon', valueCp: 200, quantity: 1 },
+            { id: 'd2', itemKey: 'dagger', name: 'Dagger', type: 'weapon', valueCp: 200, quantity: 1 },
+        ];
+        const state = makeState({ inventory: twoDaggers });
+        const sold = gameReducer(state, {
+            type: 'SELL_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-sell-1', playerMessage: 'I sell my dagger.' } },
+        });
+        const nextAssistant = gameReducer(sold, {
+            type: 'ADD_MESSAGE',
+            payload: { id: 'msg-sell-2', role: 'assistant', content: 'The fence waits.' },
+        });
+        const second = gameReducer(nextAssistant, {
+            type: 'SELL_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-sell-2', playerMessage: 'I sell the other dagger too.' } },
+        });
+
+        expect(second.character.gold).toBe(7);
+        expect(second.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(0);
+    });
+});
+
+describe('transaction replay phrasing', () => {
+    it('honors quantified repeat phrasing like "a few more of those"', () => {
+        const state = makeState();
+        const bought = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-buy-1', playerMessage: 'I buy a dagger.' } },
+        });
+        const nextAssistant = gameReducer(bought, {
+            type: 'ADD_MESSAGE',
+            payload: { id: 'msg-buy-2', role: 'assistant', content: 'The smith raises an eyebrow.' },
+        });
+        const second = gameReducer(nextAssistant, {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-buy-2', playerMessage: 'A few more of those, please.' } },
+        });
+
+        expect(second.character.gold).toBe(1); // both purchases charged
+        expect(second.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(2);
+    });
 });
 
 describe('CLAIM_LOOT_SOURCE', () => {
