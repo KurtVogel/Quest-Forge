@@ -100,6 +100,7 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
         existingRecord: {
             disposition: npc.disposition,
             lastNotes: npc.lastNotes || npc.notes,
+            appearance: npc.appearance,
             personality: npc.personality,
             goals: npc.goals,
             agenda: npc.agenda,
@@ -130,6 +131,7 @@ Output ONLY valid JSON:
   "relationshipTension": "compact note on rivalry, humiliation, debt, attraction, resentment, fear, or unresolved conflict with the hero",
   "stanceToPlayer": "how this NPC personally regards the HERO right now — affection, attraction, romantic feeling, friendship, gratitude, respect, amusement, resentment, fear, obligation — written from the NPC's side and grounded in what actually passed between them",
   "bondMoments": ["up to 3 one-line records of significant personal moments between the hero and this NPC that the context establishes — flirtation, confession, shared danger, gift, promise, betrayal, deep insult"],
+  "appearance": "the NPC's COMPLETE physical/visual description — build, body proportions, face, hair, clothing, distinguishing and intimate features — merging the existing record with any concrete visual details the recent conversation states. Omit unless the context actually establishes looks",
   "personality": "stable traits and how they present, only if grounded in context",
   "goals": "longer-term wants if established",
   "privateNotes": "hidden intent, blind spots, or unrevealed motive useful for DM consistency",
@@ -145,6 +147,7 @@ Rules:
 - If the hero publicly defied this NPC's authority, capture that grudge precisely.
 - Agenda and relationshipTension are required when context supports them; stanceToPlayer is required whenever the hero and this NPC have directly interacted. Be specific, not generic.
 - bondMoments must be actual moments the context establishes, each naming what happened between them; omit the field when none exist. Do not restate moments already listed in the existing record.
+- appearance: emit ONLY if the premise/journal/facts/conversation actually describe how this NPC looks. When you do, output the COMPLETE merged description — start from the existing record's appearance and weave in any new concrete visual details the context states, dropping or altering an established detail only when the fiction explicitly changed it. This is an adult game: body proportions and intimate, sensual, or unflattering details the fiction establishes are canonical continuity exactly like a scar — record them frankly and unvarnished, never sanitized, euphemized, or omitted, and never launder a detail already on record. Never invent looks the context does not state.
 - callbackHooks: 1-3 items max, each under 200 characters, complete thoughts.
 - trust is 0-100 if inferable, else omit.
 - basedIn and lastLocation are living fields — set or update them when premise/journal/facts support it; omit when unknown.
@@ -187,6 +190,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
     const jsonMatch = extractBalancedJson(response, 'agenda')
         || extractBalancedJson(response, 'relationshipTension')
         || extractBalancedJson(response, 'stanceToPlayer')
+        || extractBalancedJson(response, 'appearance')
         || extractBalancedJson(response, 'callbackHooks')
         || extractBalancedJson(response, 'basedIn');
     if (!jsonMatch) {
@@ -217,6 +221,9 @@ export async function enrichNpcProfile({ state, npc, settings }) {
         // rejection — enrichment can only add moments, never rewrite history.
         if (moments.length > 0) update.bondMoments = moments;
     }
+    // Appearance replaces at the reducer boundary, so enrichment must emit the
+    // COMPLETE merged look (600-char clamp mirrors the per-turn Scribe path).
+    if (cleanText(parsed.appearance)) update.appearance = clampNpcDossierField(parsed.appearance);
     if (cleanText(parsed.personality)) update.personality = clampNpcDossierField(parsed.personality);
     if (cleanText(parsed.goals)) update.goals = clampNpcDossierField(parsed.goals);
     if (cleanText(parsed.privateNotes)) update.privateNotes = clampNpcDossierField(parsed.privateNotes);
@@ -235,7 +242,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
 
     if (!update.agenda && !update.relationshipTension && !update.stanceToPlayer
         && !update.bondMoments?.length && !update.callbackHooks?.length
-        && !update.basedIn && !update.lastLocation) {
+        && !update.appearance && !update.basedIn && !update.lastLocation) {
         throw new Error('Enrichment returned no usable depth for this NPC.');
     }
 

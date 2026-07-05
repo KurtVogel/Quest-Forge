@@ -153,4 +153,23 @@ describe('enrichNpcProfile relationship synthesis', () => {
         });
         expect(update.stanceToPlayer).toContain('Quietly fond');
     });
+
+    it('captures a merged physical appearance from conversation, unvarnished', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            appearance: 'A scrawny goblin with large bat-like ears, yellow-slitted eyes, an oddly cute face, and a surprisingly thick, plump backside under grimy leather.',
+        }));
+
+        const update = await enrichNpcProfile({
+            state,
+            npc: { id: 'npc-wit', name: 'Wit', appearance: 'A scrawny goblin with large bat-like ears and yellow-slitted eyes.' },
+            settings,
+        });
+
+        expect(update.appearance).toContain('plump backside');
+        expect(update.appearance).toContain('bat-like ears');
+        const request = sendMessage.mock.calls[0][0];
+        expect(request.systemPrompt).toContain('COMPLETE merged description');
+        expect(request.systemPrompt).toContain('unvarnished');
+        expect(request.userMessage).toContain('appearance');
+    });
 });

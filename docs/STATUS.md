@@ -71,7 +71,10 @@ feels excellent in live play — casters multiply engine surface area; polish th
   honest grounded stance for a never-met NPC instead of inventing romance. **Same-day follow-up:**
   appearance capture made shame-free (DECISIONS.md) — body proportions and intimate/unflattering
   details are canon like any scar; the Scribe records them frankly, merges never launder the record,
-  and the DM prompt forbids quietly tidying up an established body.
+  and the DM prompt forbids quietly tidying up an established body. **Card now shows a "Looks"
+  block** (the `appearance` field was captured for the DM + scene art but never surfaced in the
+  Journal), and **Deepen memory also merges physical appearance** from recent conversation — so the
+  one button surfaces relationship *and* body continuity retroactively.
 - **Scheduled strengthening audit (2026-07-05, DECISIONS.md):** a daily 6:00 AM (Finnish time)
   Claude Code scheduled task audits two features per day — registry-rotated (no repeats within
   6 entries, local ∪ origin), coverage-biased (weekly snapshot), lap-angled (correctness →

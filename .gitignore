@@ -40,3 +40,9 @@ test-results/
 claudeception/
 ANTIGRAVITY_FINDINGS.md
 
+
+# Generated coverage reports (one-time local runs, not tracked)
+coverage/
+
+# Local Claude Code settings
+.claude/settings.local.json

@@ -399,6 +399,25 @@
     gap: 0.35rem 0.75rem;
 }
 
+/* Established physical look — visual continuity the DM and scene art both use. */
+.journal-npc-looks {
+    margin: 0.4rem 0 0;
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.journal-npc-looks-label {
+    display: block;
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.2rem;
+}
+
 /* The NPC's personal stance toward the hero — the headline of the card. */
 .journal-npc-stance {
     margin: 0.4rem 0 0;

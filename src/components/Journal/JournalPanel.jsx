@@ -294,6 +294,12 @@ function NPCTab({
                                 {npc.disposition || 'unknown'}
                             </span>
                         </div>
+                        {npc.appearance && (
+                            <p className="journal-npc-looks">
+                                <span className="journal-npc-looks-label">Looks</span>
+                                {npc.appearance}
+                            </p>
+                        )}
                         {npc.stanceToPlayer && (
                             <p className="journal-npc-stance">
                                 <span className="journal-npc-stance-label">Toward you</span>
