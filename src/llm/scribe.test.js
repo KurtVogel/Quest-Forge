@@ -122,6 +122,9 @@ describe('Scribe story memory extraction', () => {
         expect(request.systemPrompt).toContain('never sanitize, euphemize');
         expect(request.systemPrompt).toContain('never launder the record');
         expect(request.systemPrompt).toContain('UNVARNISHED');
+        // Register fidelity: crude anatomical words are preserved, not softened.
+        expect(request.systemPrompt).toContain('MATCH THE REGISTER');
+        expect(request.systemPrompt).toContain('Call a spade a spade');
     });
 
     it('passes personal stance and bond moments through to the NPC record', async () => {

@@ -20,7 +20,14 @@ the record" (an intimate detail on record stays word-for-word until fiction chan
 prompt's introduce-with-visual-details rule asks for body proportions up front and forbids quietly
 slimming down or tidying up an established body; the KNOWN NPCs header forbids laundering alongside
 re-inventing. No engine changes — this is purely extraction/prompt policy, gated as always by the
-player-controlled adult-content settings and what the fiction itself establishes. Same-day
+player-controlled adult-content settings and what the fiction itself establishes. Register
+fidelity is part of the contract: the Scribe/DM/enrichment must keep the exact anatomical
+vocabulary the fiction used ("ass" stays "ass", never softened to "rear"/"backside") — swapping in
+a politer synonym is laundering. The merge step also now reconciles into clean prose (drops
+duplicate adjectives, resolves contradictions like "scrawny ... big rear") without losing a
+distinct established detail. The `appearance` field, long captured for the DM's `looks:` line and
+scene art, is also finally shown on the Journal card ("Looks" block), and Deepen memory now merges
+appearance from recent conversation too. Same-day
 follow-up: every Scribe-family prompt (per-turn extraction, cadence reflection, art director,
 Deepen-memory enrichment) now demands **"unvarnished"** output — Vesa's field-tested steering word
 that reliably keeps LLM outputs from drifting into tasteful paraphrase; use it when adding any new
