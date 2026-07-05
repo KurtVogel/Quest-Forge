@@ -24,6 +24,11 @@ export function sanitizePendingRoleplayCheck(value) {
         playerAction: text(value.playerAction, 4000),
         challengeUsed: value.challengeUsed === true,
         preNarrated: value.preNarrated === true,
+        // The DM's withheld setup narration (never shown to the player). Carried on the
+        // proposal so the post-roll outcome prompt can re-weave its fiction, and so
+        // Change Approach can reveal it instead of erasing it. Reload-safe by design.
+        setupNarrative: text(value.setupNarrative, 4000),
+        setupMessageId: text(value.setupMessageId, 160) || null,
         proposedAt: Number.isFinite(value.proposedAt) ? value.proposedAt : Date.now(),
         loot: value.loot ? {
             goldFound: Number.isFinite(value.loot.goldFound) ? Math.max(0, value.loot.goldFound) : 0,
@@ -44,8 +49,66 @@ export function sanitizePendingRoleplayCheck(value) {
     };
 }
 
-export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null } = {}) {
-    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, proposedAt: Date.now() });
+export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null } = {}) {
+    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, proposedAt: Date.now() });
+}
+
+// --- Recent-rulings ledger -------------------------------------------------
+// The one-challenge boundary lives on a single proposal object; once cleared,
+// nothing durable recorded that a ruling ever happened, so the DM would happily
+// re-propose an overruled check a few turns later (live playtest 2026-07-05:
+// same skill/DC reworded after a set-aside, DC-escalated re-adjudication after
+// an upheld ruling was set aside). This small ledger records rulings that ended
+// WITHOUT dice and is injected into the DM prompt as binding table history.
+
+/** Ledger entries expire after this much message growth (~6-10 turns) or a location change. */
+export const RULING_MESSAGE_TTL = 24;
+export const RECENT_RULING_LIMIT = 5;
+
+export function normalizeRollRuling(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const outcome = value.outcome === 'withdrawn' ? 'withdrawn'
+        : value.outcome === 'set_aside' ? 'set_aside'
+            : null;
+    const objective = text(value.objective, 200);
+    if (!outcome || !objective) return null;
+    return {
+        objective,
+        skill: text(value.skill, 80) || null,
+        dc: Number.isFinite(value.dc) ? value.dc : null,
+        outcome,
+        finalRuling: value.finalRuling === true,
+        challenge: text(value.challenge, 300),
+        atMessageCount: Number.isFinite(value.atMessageCount) ? Math.max(0, value.atMessageCount) : 0,
+        location: text(value.location, 120) || null,
+        t: Number.isFinite(value.t) ? value.t : Date.now(),
+    };
+}
+
+export function buildRollRulingRecord(proposal, outcome, { messageCount = 0, location = null, challenge = '' } = {}) {
+    const firstRoll = proposal?.rolls?.[0];
+    if (!firstRoll) return null;
+    return normalizeRollRuling({
+        objective: firstRoll.description || firstRoll.skill || proposal.playerAction,
+        skill: firstRoll.skill,
+        dc: firstRoll.dc,
+        outcome,
+        finalRuling: proposal.challengeUsed === true,
+        challenge,
+        atMessageCount: messageCount,
+        location,
+        t: Date.now(),
+    });
+}
+
+/** Only rulings from the current scene bind the DM: same location, recent turns. */
+export function pruneRecentRulings(rulings, { messageCount = 0, location = null } = {}) {
+    return (Array.isArray(rulings) ? rulings : [])
+        .map(normalizeRollRuling)
+        .filter(Boolean)
+        .filter(r => messageCount - r.atMessageCount <= RULING_MESSAGE_TTL)
+        .filter(r => !r.location || !location || r.location === location)
+        .slice(-RECENT_RULING_LIMIT);
 }
 
 /** Grant-or-deny reminder for loot the withheld setup declared but never applied. */

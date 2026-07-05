@@ -49,8 +49,45 @@ function prompt(overrides = {}) {
         storyMemory: overrides.storyMemory ?? [],
         retrievedMemories: overrides.retrievedMemories ?? [],
         premise: overrides.premise ?? '',
+        recentRulings: overrides.recentRulings ?? [],
     });
 }
+
+describe('recent table rulings block', () => {
+    const baseRuling = {
+        objective: 'Convince Maren to share gossip about Odo',
+        skill: 'persuasion',
+        dc: 12,
+        atMessageCount: 4,
+        location: 'Jewelglade',
+        t: Date.now(),
+    };
+
+    it('is absent when there are no recent rulings', () => {
+        expect(prompt()).not.toContain('RECENT TABLE RULINGS');
+    });
+
+    it('binds a withdrawn ruling to no-dice resolution', () => {
+        const text = prompt({ recentRulings: [{ ...baseRuling, outcome: 'withdrawn', challenge: 'No opposition here', finalRuling: false }] });
+        expect(text).toContain('## RECENT TABLE RULINGS — BINDING');
+        expect(text).toContain('WITHDREW');
+        expect(text).toContain('persuasion DC 12');
+        expect(text).toContain('Convince Maren to share gossip about Odo');
+        expect(text).toContain('without dice');
+    });
+
+    it('demands the identical check when a set-aside proposal is retried', () => {
+        const text = prompt({ recentRulings: [{ ...baseRuling, outcome: 'set_aside', finalRuling: false }] });
+        expect(text).toContain('SET ASIDE');
+        expect(text).toContain('SAME check unchanged');
+    });
+
+    it('keeps an upheld final ruling final after a set-aside', () => {
+        const text = prompt({ recentRulings: [{ ...baseRuling, outcome: 'set_aside', finalRuling: true }] });
+        expect(text).toContain('FINAL post-challenge ruling');
+        expect(text).toContain('challenge is already spent');
+    });
+});
 
 describe('buildSystemPrompt top-level assembly', () => {
     it('always includes the core DM instructions and response format', () => {

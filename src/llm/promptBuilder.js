@@ -18,7 +18,7 @@ import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings }) {
     const parts = [];
 
     // Core DM instructions
@@ -90,6 +90,11 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     // Recent dice rolls (last 5)
     if (rollHistory && rollHistory.length > 0) {
         parts.push(buildRecentRollsBlock(rollHistory.slice(-5)));
+    }
+
+    // Recent no-dice check rulings — table history the DM must not re-litigate.
+    if (recentRulings && recentRulings.length > 0) {
+        parts.push(buildRecentRulingsBlock(recentRulings));
     }
 
     // Canonical world facts — these NEVER get compressed or forgotten
@@ -611,6 +616,29 @@ function buildRecentRollsBlock(rolls) {
 }
 
 /** Max world facts to inject directly into the prompt. Older facts are still in RAG. */
+/**
+ * Recent roleplay-check rulings that ended WITHOUT dice. Each outcome binds the DM
+ * differently: a withdrawal concedes the approach needs no roll; a set-aside of an
+ * ordinary proposal demands consistency (same check, not a reworded/re-priced one)
+ * if the player retries; a set-aside of an upheld FINAL ruling still stands as-is,
+ * so a retry cannot farm a fresh challenge or a re-adjudicated DC.
+ */
+function buildRecentRulingsBlock(recentRulings) {
+    const lines = recentRulings.map(r => {
+        const check = `${r.skill || 'check'}${r.dc != null ? ` DC ${r.dc}` : ''}`;
+        if (r.outcome === 'withdrawn') {
+            return `- You WITHDREW the proposed ${check} for "${r.objective}" after the player's challenge${r.challenge ? ` ("${r.challenge}")` : ''}. That ruling stands: this approach succeeds through roleplay without dice. Do not re-propose a check for the same objective unless the situation has materially changed.`;
+        }
+        if (r.finalRuling) {
+            return `- Your FINAL post-challenge ruling (${check}) for "${r.objective}" was set aside unrolled; the player changed approach. If they retry essentially the same approach, that exact final ruling still applies — same check, same DC, and their one challenge is already spent. Do not re-adjudicate, reword, or re-price it.`;
+        }
+        return `- The player SET ASIDE your proposed ${check} for "${r.objective}" and chose a different approach; no dice were rolled. If they retry essentially the same approach, re-propose that SAME check unchanged — do not reword, escalate, or re-price it without a material change in the fiction.`;
+    });
+    return `## RECENT TABLE RULINGS — BINDING
+These out-of-combat check rulings were settled at this table within the last few scenes. Honor them; do not quietly re-litigate.
+${lines.join('\n')}`;
+}
+
 function buildPremiseBlock(premise) {
     return `## CAMPAIGN PREMISE (the player's authored foundation — permanent canon, never contradict)\n${premise}`;
 }

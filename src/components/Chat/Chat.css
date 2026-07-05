@@ -177,6 +177,13 @@
   margin-bottom: 0.25rem;
 }
 
+.message-setup-note {
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
 .chat-message.assistant .message-role {
   color: var(--gold);
 }

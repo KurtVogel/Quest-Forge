@@ -21,7 +21,7 @@ import {
 } from '../engine/npcRoster.js';
 import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
 import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
-import { sanitizePendingRoleplayCheck } from '../engine/roleplayCheck.js';
+import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck } from '../engine/roleplayCheck.js';
 
 function sanitizeStoredExchangeResult(result) {
     if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
@@ -91,6 +91,8 @@ function validateSaveState(payload) {
         appliedLootSourceIds: Array.isArray(payload.appliedLootSourceIds) ? payload.appliedLootSourceIds : [],
         recentPurchases: normalizeRecentTransactions(payload.recentPurchases),
         recentSales: normalizeRecentTransactions(payload.recentSales),
+        recentRulings: (Array.isArray(payload.recentRulings) ? payload.recentRulings : [])
+            .map(normalizeRollRuling).filter(Boolean).slice(-RECENT_RULING_LIMIT),
         combat: (() => {
             const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)
                 ? payload.combat
@@ -491,6 +493,7 @@ export const initialGameState = {
     appliedLootSourceIds: [], // Message IDs whose gold/item loot has already been applied — prevents double-grant
     recentPurchases: [], // Recent one-shot purchase signatures — prevents cross-turn LLM replays from double-charging
     recentSales: [], // Sale twin of recentPurchases — prevents replayed sells from double-removing/double-paying
+    recentRulings: [], // Roleplay-check rulings that ended without dice — injected so the DM cannot re-propose overruled/set-aside checks from scratch
     combat: {
         active: false,
         enemies: [],
@@ -1585,6 +1588,33 @@ export function gameReducer(state, action) {
 
         case 'CLEAR_ROLEPLAY_CHECK':
             return state.pendingRoleplayCheck ? { ...state, pendingRoleplayCheck: null } : state;
+
+        // Record a roleplay-check ruling that ended without dice (withdrawn after a
+        // challenge, or set aside via Change Approach) so the prompt can bind the DM
+        // to its own recent table history instead of re-adjudicating from scratch.
+        case 'RECORD_ROLL_RULING': {
+            const ruling = normalizeRollRuling(action.payload);
+            if (!ruling) return state;
+            return {
+                ...state,
+                recentRulings: [...(state.recentRulings || []), ruling].slice(-RECENT_RULING_LIMIT),
+            };
+        }
+
+        // Un-hide a withheld roll-setup narration when no dice will ever supersede it
+        // (the player changed approach). Once revealed, the text is player-visible AND
+        // back in the DM's history window, so its fiction stays canon.
+        case 'REVEAL_MESSAGE': {
+            const messageId = action.payload?.id;
+            if (!messageId) return state;
+            let revealed = false;
+            const messages = state.messages.map(msg => {
+                if (msg.id !== messageId || !msg.hidden || !msg.content?.trim()) return msg;
+                revealed = true;
+                return { ...msg, hidden: false, revealedSetup: true };
+            });
+            return revealed ? { ...state, messages } : state;
+        }
 
         // --- Dice Rolls ---
         case 'ADD_ROLL':

@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { buildRoleplayChallengePrompt, buildRoleplayCheckProposal, sanitizePendingRoleplayCheck } from './roleplayCheck.js';
+import {
+    buildRollRulingRecord,
+    buildRoleplayChallengePrompt,
+    buildRoleplayCheckProposal,
+    normalizeRollRuling,
+    pruneRecentRulings,
+    RECENT_RULING_LIMIT,
+    RULING_MESSAGE_TTL,
+    sanitizePendingRoleplayCheck,
+} from './roleplayCheck.js';
 
 const roll = {
     type: 'skill_check',
@@ -30,6 +39,22 @@ describe('roleplay check proposals', () => {
         expect(sanitizePendingRoleplayCheck({ rolls: [] })).toBeNull();
     });
 
+    it('carries the withheld setup narration and message id, clamped and reload-safe', () => {
+        const proposal = buildRoleplayCheckProposal([roll], 'I sprint for the archway.', {
+            setupNarrative: 'The horde pours through the breach as the floor splinters beneath you.',
+            setupMessageId: 'msg-123-abc',
+        });
+        expect(proposal.setupNarrative).toBe('The horde pours through the breach as the floor splinters beneath you.');
+        expect(proposal.setupMessageId).toBe('msg-123-abc');
+
+        const restored = sanitizePendingRoleplayCheck({ ...proposal, setupNarrative: 'x'.repeat(9000) });
+        expect(restored.setupNarrative).toHaveLength(4000);
+
+        const bare = buildRoleplayCheckProposal([roll], 'I sprint for the archway.');
+        expect(bare.setupNarrative).toBe('');
+        expect(bare.setupMessageId).toBeNull();
+    });
+
     it('builds a one-challenge public adjudication request', () => {
         const proposal = buildRoleplayCheckProposal([roll], 'I present the signed writ.');
         const prompt = buildRoleplayChallengePrompt(proposal, 'The signed writ should remove uncertainty.');
@@ -40,6 +65,37 @@ describe('roleplay check proposals', () => {
         expect(prompt).toContain('UPHOLD');
         expect(prompt).toContain('Never reveal private chain-of-thought');
         expect(prompt).not.toContain('declared potential loot');
+    });
+
+    it('records a ruling from a proposal and rejects malformed entries', () => {
+        const proposal = buildRoleplayCheckProposal([roll], 'I present the signed writ.', { challengeUsed: true });
+        const record = buildRollRulingRecord(proposal, 'set_aside', { messageCount: 10, location: 'Gate district' });
+        expect(record).toMatchObject({
+            objective: 'Secure passage through the gate',
+            skill: 'persuasion',
+            dc: 12,
+            outcome: 'set_aside',
+            finalRuling: true,
+            atMessageCount: 10,
+            location: 'Gate district',
+        });
+
+        expect(buildRollRulingRecord(null, 'withdrawn', {})).toBeNull();
+        expect(normalizeRollRuling({ objective: 'x', outcome: 'rolled' })).toBeNull();
+        expect(normalizeRollRuling({ outcome: 'withdrawn' })).toBeNull();
+    });
+
+    it('prunes rulings by message age, location, and cap', () => {
+        const fresh = { objective: 'Ask the keeper', skill: 'persuasion', dc: 10, outcome: 'withdrawn', atMessageCount: 90, location: 'Tavern' };
+        const stale = { ...fresh, objective: 'Old ask', atMessageCount: 90 - RULING_MESSAGE_TTL - 1 };
+        const elsewhere = { ...fresh, objective: 'Dock ask', location: 'Docks' };
+        const noLocation = { ...fresh, objective: 'Anywhere ask', location: null };
+
+        const kept = pruneRecentRulings([stale, elsewhere, fresh, noLocation], { messageCount: 90, location: 'Tavern' });
+        expect(kept.map(r => r.objective)).toEqual(['Ask the keeper', 'Anywhere ask']);
+
+        const many = Array.from({ length: RECENT_RULING_LIMIT + 3 }, (_, i) => ({ ...fresh, objective: `Ask ${i}` }));
+        expect(pruneRecentRulings(many, { messageCount: 90, location: 'Tavern' })).toHaveLength(RECENT_RULING_LIMIT);
     });
 
     it('reminds a challenged ruling about declared-but-unapplied loot', () => {

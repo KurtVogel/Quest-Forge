@@ -12,7 +12,7 @@ import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../
 import { curateStoryMemory } from '../../engine/storyMemory.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
-import { buildRoleplayChallengePrompt, buildRoleplayCheckProposal } from '../../engine/roleplayCheck.js';
+import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../../engine/roleplayCheck.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
 import './Chat.css';
@@ -202,6 +202,10 @@ export default function ChatPanel() {
             storyMemory,
             retrievedMemories,
             premise: s.session?.premise,
+            recentRulings: pruneRecentRulings(s.recentRulings, {
+                messageCount: (s.messages || []).length,
+                location: s.currentLocation,
+            }),
         });
     };
 
@@ -314,7 +318,14 @@ Translate the player's committed action into the single bounded combat_exchange 
             const semanticRolls = await detectSemanticTextRolls(narrative, s.settings);
             if (semanticRolls && semanticRolls.length > 0) {
                 console.warn('[ChatPanel] Scribe detected text-based rolls semantically:', semanticRolls);
-                events = normalizeEvents({ requested_rolls: semanticRolls });
+                // Merge the detected rolls into any existing events — replacing the whole
+                // object would silently drop loot/quest/NPC events the response carried.
+                const detected = normalizeEvents({ requested_rolls: semanticRolls });
+                if (events) {
+                    events.requestedRolls = detected.requestedRolls;
+                } else {
+                    events = detected;
+                }
                 events._textRollDetected = true;
             }
         }
@@ -340,15 +351,31 @@ Translate the player's committed action into the single bounded combat_exchange 
         // attack, a multi-enemy round, a triggered save — not just the player's first
         // action. Keying on pending rolls alone is the fix; the previous condition also
         // required the first-turn `originalPlayerMessage`, so every chained setup stayed
-        // visible and the player saw the beat twice (setup, then outcome). The flag also
-        // drives applyEvents' setupPhase, so deferring outcome mutations to the final
-        // narration likewise extends correctly to chained rolls (no double-application).
-        const hideSetup = events?.requestedRolls?.length > 0
+        // visible and the player saw the beat twice (setup, then outcome).
+        // EXCEPTION: a check the Scribe extracted from natural prose (no JSON) reads like
+        // a real DM asking for a roll mid-scene. That narration is a complete beat, not a
+        // withheld setup — hiding it retroactively erased fiction the player had already
+        // read. Keep it visible and stage the proposal beneath it, unless it pre-narrated
+        // the outcome or the check was rejected as a player-authority override.
+        // setupPhase (defer outcome mutations until dice resolve) still keys on pending
+        // rolls alone — visibility and mutation deferral are separate concerns.
+        const proposalFromProse = !!events?._textRollDetected
+            && !events?._preNarratedOutcome
+            && !events?._playerAuthorityRollRejected
+            && events?.requestedRolls?.length > 0;
+        const setupPhase = events?.requestedRolls?.length > 0
             || !!events?.combatExchange
             || !!events?._playerAuthorityRollRejected;
+        const hideSetup = setupPhase && !proposalFromProse;
         if (hideSetup) setStreamingMessage('');
         // Pre-generate a stable message ID so applyEvents can reference it as a loot source key.
         const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        if (events) {
+            // Let callers staging a roleplay-check proposal recover this response's
+            // narration (the withheld setup) and reveal/reuse it later.
+            events._setupMessageId = msgId;
+            events._setupHidden = hideSetup;
+        }
         dispatch({
             type: 'ADD_MESSAGE',
             payload: { id: msgId, role: 'assistant', content: narrative, events, hidden: hideSetup },
@@ -369,7 +396,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             // absent — so the transaction replay guard can still honor an explicit
             // "I buy another one" when the purchase lands after dice.
             applyEvents(events, dispatch, () => stateRef.current, {
-                setupPhase: hideSetup,
+                setupPhase,
                 lootSourceId: msgId,
                 playerMessage: originalPlayerMessage || opts.playerActionContext,
             });
@@ -381,8 +408,8 @@ Translate the player's committed action into the single bounded combat_exchange 
         // RAG: embed any new world facts the DM emitted this turn (per response).
         // The per-turn Scribe + narrative embedding run once in handleSend on the FINAL
         // narrated outcome, so they capture results rather than withheld setup text.
-        // Skip on a withheld setup turn — those facts ride on the outcome narration.
-        if (!hideSetup && !s.combat?.active && events?.worldFacts?.length > 0 && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
+        // Skip on a setup turn (pending rolls) — those facts ride on the outcome narration.
+        if (!setupPhase && !s.combat?.active && events?.worldFacts?.length > 0 && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
             for (const f of events.worldFacts) {
                 addMemory(s.settings.apiKey, f.fact, f.category || 'world_fact').catch(() => {});
             }
@@ -536,8 +563,8 @@ Translate the player's committed action into the single bounded combat_exchange 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state.combat?.phase, state.combat?.lastExchangeResult?.exchangeId, isLoading, combatNarrationRetry]);
 
-    const stageRoleplayCheck = (rolls, playerAction, challengeUsed = false, preNarrated = false, loot = null) => {
-        const proposal = buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed, preNarrated, loot });
+    const stageRoleplayCheck = (rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null } = {}) => {
+        const proposal = buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed, preNarrated, loot, setupNarrative, setupMessageId });
         if (!proposal) return false;
         dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
         setRoleplayChallenge('');
@@ -589,10 +616,18 @@ Translate the player's committed action into the single bounded combat_exchange 
                 sendToLLM,
                 playerAction: proposal.playerAction,
                 preNarrated: proposal.preNarrated,
+                setupNarrative: proposal.setupNarrative,
                 onFollowUpRolls: (rolls, meta) => {
                     // Carry declared-but-unapplied loot into the re-staged proposal so the
                     // eventual roll-free outcome still gets the grant-or-deny reminder.
-                    stagedFollowUp = stageRoleplayCheck(rolls, meta.playerAction || proposal.playerAction, false, meta.preNarrated, meta.pendingLoot || null);
+                    // A follow-up response is itself a withheld setup — carry its narration
+                    // the same way so chained checks don't erase fiction either.
+                    stagedFollowUp = stageRoleplayCheck(rolls, meta.playerAction || proposal.playerAction, {
+                        preNarrated: meta.preNarrated,
+                        loot: meta.pendingLoot || null,
+                        setupNarrative: meta.setupNarrative || '',
+                        setupMessageId: meta.setupMessageId || null,
+                    });
                 },
                 pendingLoot: proposal.loot,
             });
@@ -622,8 +657,26 @@ Translate the player's committed action into the single bounded combat_exchange 
                 proposal.playerAction
             );
             if (events?.requestedRolls?.length > 0) {
-                stageRoleplayCheck(events.requestedRolls, proposal.playerAction, true, events._preNarratedOutcome, proposal.loot);
+                // Upheld/revised rulings are JSON-only responses; the original withheld
+                // setup is still the scene the player never saw, so carry it forward.
+                stageRoleplayCheck(events.requestedRolls, proposal.playerAction, {
+                    challengeUsed: true,
+                    preNarrated: events._preNarratedOutcome,
+                    loot: proposal.loot,
+                    setupNarrative: proposal.setupNarrative,
+                    setupMessageId: proposal.setupMessageId,
+                });
             } else {
+                // The DM withdrew (or its re-proposal was policy-rejected): this
+                // objective is settled without dice. Record it so the DM cannot
+                // re-propose the same check from scratch a few turns later.
+                const latest = stateRef.current;
+                const ruling = buildRollRulingRecord(proposal, 'withdrawn', {
+                    messageCount: (latest.messages || []).length,
+                    location: latest.currentLocation,
+                    challenge,
+                });
+                if (ruling) dispatch({ type: 'RECORD_ROLL_RULING', payload: ruling });
                 if (events?._playerAuthorityRollRejected) {
                     await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
                 }
@@ -642,8 +695,33 @@ Translate the player's committed action into the single bounded combat_exchange 
     };
 
     const handleChangeRoleplayApproach = () => {
+        // No dice will ever resolve this setup, so reveal it instead of erasing its
+        // fiction — unless it pre-narrated an outcome that never happened.
+        const proposal = stateRef.current.pendingRoleplayCheck;
+        const setupMessage = proposal?.setupMessageId
+            ? stateRef.current.messages.find(m => m.id === proposal.setupMessageId)
+            : null;
+        const revealSetup = !!(setupMessage?.hidden && setupMessage.content?.trim() && !proposal.preNarrated);
+        if (revealSetup) dispatch({ type: 'REVEAL_MESSAGE', payload: { id: proposal.setupMessageId } });
+        if (proposal) {
+            // A set-aside ruling still binds the DM: an ordinary proposal must return
+            // unchanged on a retry, and an upheld final ruling stays final.
+            const ruling = buildRollRulingRecord(proposal, 'set_aside', {
+                messageCount: (stateRef.current.messages || []).length,
+                location: stateRef.current.currentLocation,
+            });
+            if (ruling) dispatch({ type: 'RECORD_ROLL_RULING', payload: ruling });
+        }
         dispatch({ type: 'CLEAR_ROLEPLAY_CHECK' });
-        dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: 'The proposed check is set aside. Describe a different approach; no dice were rolled.' } });
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+                role: 'system',
+                content: revealSetup
+                    ? 'The proposed check is set aside; the scene above stands, but no dice were rolled. Describe a different approach.'
+                    : 'The proposed check is set aside. Describe a different approach; no dice were rolled.',
+            },
+        });
         setRoleplayChallenge('');
         setShowRoleplayChallenge(false);
     };
@@ -682,7 +760,11 @@ Translate the player's committed action into the single bounded combat_exchange 
         setLoadingStatus(startedCombatIntent ? 'Interpreting combat action' : '');
 
         try {
-            const events = await sendToLLM(trimmed, trimmed, { combatIntentOnly: startedCombatIntent });
+            let dmNarrative = '';
+            const events = await sendToLLM(trimmed, trimmed, {
+                combatIntentOnly: startedCombatIntent,
+                onNarrative: text => { dmNarrative = text; },
+            });
 
             const combatWasActive = stateRef.current.combat?.active;
             const combatStartedNow = !!events?.combatStart;
@@ -710,7 +792,15 @@ Translate the player's committed action into the single bounded combat_exchange 
                     copperFound: events.copperFound || 0,
                     itemsFound: events.itemsFound || [],
                 } : null;
-                stageRoleplayCheck(events.requestedRolls, trimmed, false, events._preNarratedOutcome, initialLoot);
+                // A hidden setup rides the proposal so its fiction survives: re-woven into
+                // the post-roll outcome, or revealed if the player changes approach.
+                // Prose-detected checks stay visible, so they carry no setup payload.
+                stageRoleplayCheck(events.requestedRolls, trimmed, {
+                    preNarrated: events._preNarratedOutcome,
+                    loot: initialLoot,
+                    setupNarrative: events._setupHidden ? dmNarrative : '',
+                    setupMessageId: events._setupHidden ? events._setupMessageId : null,
+                });
             } else if (events?._playerAuthorityRollRejected) {
                 await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
             }
@@ -1018,6 +1108,9 @@ function ChatMessage({ message }) {
             <div className="message-avatar">{avatars[message.role]}</div>
             <div className="message-content">
                 <div className="message-role">{roleLabels[message.role]}</div>
+                {message.revealedSetup && (
+                    <div className="message-setup-note">Revealed after the check was set aside — no dice were rolled.</div>
+                )}
                 <div className="message-text">
                     <MarkdownText text={cleanDisplayText(message.content)} />
                 </div>

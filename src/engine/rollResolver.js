@@ -444,6 +444,7 @@ export async function handleRequestedRolls(requestedRolls, {
     enemyAttackersSeen = new Set(),
     onFollowUpRolls = null,
     pendingLoot = null,
+    setupNarrative = '',
 }, depth = 0) {
     if (depth >= MAX_ROLL_DEPTH) {
         console.warn(`[RollResolver] Max roll depth (${MAX_ROLL_DEPTH}) reached — stopping recursive follow-ups.`);
@@ -546,26 +547,44 @@ export async function handleRequestedRolls(requestedRolls, {
                 ? `\n\n[IMPORTANT: Your previous response pre-narrated an outcome before seeing these dice results. The roll result above is the authoritative truth. Narrate the TRUE outcome based solely on these dice — completely discard any outcome you wrote before seeing the roll.]`
                 : '';
 
+            // The withheld setup was stripped from both the player's view and your own
+            // history window, so any fresh fiction it introduced exists nowhere else —
+            // hand it back so the outcome narration can re-establish it.
+            const setupText = String(setupNarrative || '').trim().slice(0, 4000);
+            const setupNote = setupText
+                ? `\n\n[CONTEXT — your own setup narration for this beat, which the player NEVER saw (it was withheld pending these dice): """${setupText}""" Re-establish the scene elements and any new fiction it introduced (arrivals, terrain, discoveries, dialogue) in your outcome narration so nothing is lost — but the ROLL RESULT lines are the sole authority on success or failure.]`
+                : '';
+
             const hpNote = appliedHp
                 ? ` Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken, damage_dealt, or enemy_updates for them.`
                 : '';
 
             const lootNote = formatPendingLootNote(pendingLoot);
+            let followUpNarrative = '';
             const followUpEvents = await sendToLLM(
-                `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) Never narrate a result that is not supported by the rolls below. (5) If the result starts combat, declare combat_start; active combat actions use combat_exchange rather than requested_rolls.${lootNote}]${correctionNote}\n\n${summary}`,
+                `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) Never narrate a result that is not supported by the rolls below. (5) If the result starts combat, declare combat_start; active combat actions use combat_exchange rather than requested_rolls.${lootNote}]${correctionNote}${setupNote}\n\n${summary}`,
                 undefined,
-                { suppressHpEvents: appliedHp, playerActionContext: playerAction }
+                {
+                    suppressHpEvents: appliedHp,
+                    playerActionContext: playerAction,
+                    onNarrative: text => { followUpNarrative = text; },
+                }
             );
 
             // Handle any genuinely new outside-combat follow-up roll (e.g. a triggered save).
             // A follow-up response is itself a withheld setup, so any declared loot is still
             // unapplied — carry the pending-loot reminder until a roll-free outcome lands.
             if (followUpEvents?.requestedRolls?.length > 0) {
+                // The follow-up response is itself a withheld setup when hidden — carry
+                // its narration forward so chained checks can't erase fiction either.
+                const followUpSetup = followUpEvents._setupHidden ? followUpNarrative : '';
                 if (onFollowUpRolls) {
                     onFollowUpRolls(followUpEvents.requestedRolls, {
                         playerAction,
                         preNarrated: followUpEvents._preNarratedOutcome || false,
                         pendingLoot,
+                        setupNarrative: followUpSetup,
+                        setupMessageId: followUpEvents._setupHidden ? followUpEvents._setupMessageId : null,
                     });
                 } else {
                     await handleRequestedRolls(
@@ -577,6 +596,7 @@ export async function handleRequestedRolls(requestedRolls, {
                             preNarrated: followUpEvents._preNarratedOutcome || false,
                             enemyAttackersSeen: canonicalBatch.enemyAttackersSeen,
                             pendingLoot,
+                            setupNarrative: followUpSetup,
                         },
                         depth + 1
                     );

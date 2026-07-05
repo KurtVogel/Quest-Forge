@@ -8,7 +8,37 @@ Format: date · decision · why. Newest first.
 
 ---
 
-**2026-07-04 · ASIs follow the full 5e cadence (4/8/12/16/19); pending is derived, never stored-trusted.**
+**2026-07-05 · Withheld roll-setup narration is preserved fiction, not disposable scaffolding.**
+Live-play bug: a DM narration vanished mid-read the moment a roll proposal appeared, and an
+already-overruled check came back with no memory of the ruling. Root cause analysis showed three
+loss paths: the hidden setup was invisible to the DM's own history (so the outcome narration was
+reconstructed blind and setup-only fiction fell out of canon), **Change approach** erased the setup
+entirely, and the Scribe's prose-roll detector retro-hid complete narrations that were never
+written as setups. Settled fixes: (1) the setup narration rides `pendingRoleplayCheck`
+(`setupNarrative`/`setupMessageId`, reload-safe) and is re-injected into the post-roll outcome
+prompt as explicit context — dice stay the sole authority on outcomes; (2) Change approach
+dispatches `REVEAL_MESSAGE` to un-hide the setup (with a visible marker, and back into DM history)
+since no dice will ever supersede it — skipped when the setup pre-narrated an outcome, which must
+stay buried; (3) prose-detected checks (no JSON) keep their narration visible with the proposal
+staged beneath it — a DM asking for a roll in prose is a complete beat, not a spoiler. Visibility
+(`hideSetup`) and mutation deferral (`setupPhase`) are now separate concepts in `sendToLLM`; the
+semantic detector also merges detected rolls into existing events instead of clobbering them.
+The re-proposal gap was closed the same day by the recent-rulings ledger (next entry).
+
+**2026-07-05 · No-dice check rulings are durable table history; a set-aside binds to the SAME check, not to silence.**
+The live playtest reproduced the reported bug: with no memory of past rulings, the DM re-proposed
+a set-aside check reworded at the same DC, and re-adjudicated a set-aside FINAL ruling at a higher
+DC. Shipped `recentRulings` (the `recentPurchases` pattern): rulings that end without dice —
+withdrawn after a challenge, set aside via Change Approach — are recorded in the reducer and
+injected as a binding `## RECENT TABLE RULINGS` block, expiring after ~24 messages or a location
+change (cap 5). The semantics were the real decision: (1) WITHDRAWN means the DM conceded no dice
+are needed — a retry succeeds through roleplay, never re-proposed; (2) SET-ASIDE of an ordinary
+proposal means a retry gets the IDENTICAL check back — demanding "never re-propose" here would
+let players erase any check by set-aside-and-retry; (3) SET-ASIDE of an upheld final ruling keeps
+that exact ruling in force with the challenge already spent — otherwise set-aside becomes a
+challenge-farming/re-adjudication loophole. Enforcement is prompt-level by design: matching "the
+same objective" is semantic judgment (LLM territory), while the engine owns recording, expiry,
+and the ledger cap.
 Extends the 2026-06-17 decision from level 4 only to the standard D&D schedule — two ability points
 at levels 4, 8, 12, 16, and 19, uniform across classes (still no feats; no Fighter bonus ASIs at
 6/14 — Fighter identity already comes from the level bonus, Fighting Styles, Champion, Extra

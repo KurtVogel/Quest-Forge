@@ -22,6 +22,49 @@ describe('pending roleplay check state', () => {
         expect(gameReducer(combatState, { type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal })).toBe(combatState);
     });
 
+    it('records no-dice rulings, capping the ledger and rejecting malformed entries', () => {
+        const ruling = {
+            objective: 'Convince Maren to share gossip',
+            skill: 'persuasion',
+            dc: 12,
+            outcome: 'set_aside',
+            atMessageCount: 6,
+            location: 'Gilded Eel',
+        };
+        const recorded = gameReducer(initialGameState, { type: 'RECORD_ROLL_RULING', payload: ruling });
+        expect(recorded.recentRulings).toHaveLength(1);
+        expect(recorded.recentRulings[0]).toMatchObject({ objective: 'Convince Maren to share gossip', outcome: 'set_aside' });
+
+        expect(gameReducer(initialGameState, { type: 'RECORD_ROLL_RULING', payload: { outcome: 'set_aside' } })).toBe(initialGameState);
+
+        let state = initialGameState;
+        for (let i = 0; i < 8; i++) {
+            state = gameReducer(state, { type: 'RECORD_ROLL_RULING', payload: { ...ruling, objective: `Objective ${i}` } });
+        }
+        expect(state.recentRulings).toHaveLength(5);
+        expect(state.recentRulings[4].objective).toBe('Objective 7');
+    });
+
+    it('reveals a hidden setup message once, marking it as revealed', () => {
+        const withMessages = {
+            ...initialGameState,
+            messages: [
+                { id: 'msg-1', role: 'assistant', content: 'Visible narration.', hidden: false },
+                { id: 'msg-2', role: 'assistant', content: 'Withheld setup fiction.', hidden: true },
+                { id: 'msg-3', role: 'assistant', content: '', hidden: true },
+            ],
+        };
+
+        const revealed = gameReducer(withMessages, { type: 'REVEAL_MESSAGE', payload: { id: 'msg-2' } });
+        expect(revealed.messages[1]).toMatchObject({ hidden: false, revealedSetup: true, content: 'Withheld setup fiction.' });
+        expect(revealed.messages[0].revealedSetup).toBeUndefined();
+
+        // Non-hidden, empty, and unknown targets are all no-ops.
+        expect(gameReducer(withMessages, { type: 'REVEAL_MESSAGE', payload: { id: 'msg-1' } })).toBe(withMessages);
+        expect(gameReducer(withMessages, { type: 'REVEAL_MESSAGE', payload: { id: 'msg-3' } })).toBe(withMessages);
+        expect(gameReducer(withMessages, { type: 'REVEAL_MESSAGE', payload: { id: 'nope' } })).toBe(withMessages);
+    });
+
     it('stores a proposal containing setup-phase loot and sanitizes it correctly', () => {
         const proposalWithLoot = {
             ...proposal,

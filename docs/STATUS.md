@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-04 (ASI cadence 4/8/12/16/19 with derived-pending migration; appearance continuity; playtest tuning fixes)_
+_Last updated: 2026-07-05 (withheld roll-setup narration preserved: re-injected post-roll, revealed on Change approach, prose-detected checks stay visible)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -50,8 +50,39 @@ feels excellent in live play — casters multiply engine surface area; polish th
 - **Roleplay-check proposals** remaining fair; Scribe roll audit catching bad setups
 - Console clean; autosave intact after front-only or combat changes
 
-## Recently shipped (June 21 – July 3, 2026)
+## Recently shipped (June 21 – July 5, 2026)
 
+- **Withheld roll-setup narration preserved (2026-07-05, DECISIONS.md):** live-play bug — a DM
+  narration vanished the moment a roll proposal appeared, and its fiction was gone for good.
+  **Live-verified same day** with `scripts/playtest_roleplay_checks.cjs` (real Gemini DM against
+  the dev server, 10-turn full pass + 6-turn challenge/change-focused pass, 22/22 focused
+  findings passed, zero console/page errors): setup rides every proposal, post-roll outcomes
+  re-establish withheld fiction (59–100% distinctive-token overlap), challenges produce genuine
+  REVISE (DC 10→8 + advantage) and UPHOLD rulings marked final, Change approach reveals the
+  setup with its marker even after an upheld challenge, and combat correctly suppresses
+  proposals. Re-proposal probes reproduced the known ledger gap: a set-aside objective retried
+  next turn drew a same-skill/same-DC reworded check (and once a DC-escalated one).
+- **Recent-rulings ledger (2026-07-05, DECISIONS.md):** closed that reproduced gap the same day.
+  `recentRulings` records no-dice rulings (withdrawn after challenge, set aside via Change
+  Approach) with objective/skill/DC/finalRuling/message-stamp/location, reducer-owned (cap 5),
+  pruned after ~24 messages or a location change, injected as a binding `## RECENT TABLE
+  RULINGS` prompt block. Semantics: withdrawn → diceless success on retry; ordinary set-aside →
+  retry gets the IDENTICAL check (consistency, no rewording/re-pricing); set-aside of an upheld
+  final ruling → the same final ruling applies with the challenge already spent (no
+  re-adjudication loophole). Prompt-level enforcement by design — objective matching is
+  semantic; the engine owns recording, expiry, and caps. **Live-verified** (third playtest run,
+  24/24 findings, zero console errors): both re-proposal probes flipped from reworded/DC-escalated
+  re-adjudication to word-for-word IDENTICAL checks on retry, including the set-aside upheld final
+  ruling that had previously come back at a higher DC.
+  Now the setup rides `pendingRoleplayCheck` (`setupNarrative`/`setupMessageId`, reload-safe,
+  carried through challenges and chained follow-ups) and is re-injected into the post-roll
+  outcome prompt so the DM re-establishes its fiction (dice remain the sole outcome authority);
+  **Change approach** dispatches `REVEAL_MESSAGE` to un-hide the setup with a visible marker
+  (skipped if it pre-narrated an outcome); Scribe prose-detected checks keep their narration
+  visible with the proposal beneath it; the semantic detector merges rolls into existing events
+  instead of clobbering loot/quest events; visibility (`hideSetup`) and mutation deferral
+  (`setupPhase`) are now separate concepts in `sendToLLM`. Remaining gap logged in IDEAS.md:
+  a recent-rulings ledger so overruled checks aren't re-proposed turns later.
 - **Duplicate purchase hardening (2026-07-03):** fixed the live playtest bug where a DM
   re-emitted the same `purchase` event on the next response and double-charged the player.
   `PURCHASE_ITEM` now records recent normalized transaction signatures
@@ -142,7 +173,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **615** tests passing (50 files)
+- `npm test` — **624** tests passing (50 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)

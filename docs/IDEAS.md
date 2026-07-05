@@ -125,6 +125,19 @@ embedded into RAG, so it fell through every durable tier once the 20-message win
 
 ## Gameplay & Mechanics
 
+### Recent-rulings ledger for overruled/withdrawn checks — status: `shipped` (2026-07-05)
+Live play: a check the player had already challenged and gotten overruled came back verbatim a
+few turns later; the same-day playtest reproduced it (same-skill/same-DC reworded check after a
+set-aside, DC-escalated re-adjudication after an upheld ruling was set aside). The one-challenge
+"final ruling" boundary lives only on the single proposal object; nothing durable recorded that
+a ruling happened. Shipped as `recentRulings` (mirrors `recentPurchases`): rulings that end
+WITHOUT dice — withdrawn after a challenge, or set aside via Change Approach — are recorded
+(objective, skill/DC, outcome, finalRuling flag, message stamp, location) and injected as a
+binding `## RECENT TABLE RULINGS` prompt block, expiring after ~24 messages or a location change.
+Outcome semantics matter: withdrawn → the approach succeeds without dice; set-aside → a retry
+gets the SAME check unchanged (consistency, not silence); set-aside of an upheld final ruling →
+the final ruling still applies with the challenge spent, so set-aside can't farm re-adjudication.
+
 ### Discussable roleplay check proposals — status: `shipped` (2026-06-22)
 Outside-combat rolls now expose a concise public ruling log—reason, opposition, failure stakes,
 DC basis, and situational advantage/disadvantage—before any dice exist. The player can Roll,
