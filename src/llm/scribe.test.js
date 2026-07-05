@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildKnownAppearances, composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe } from './scribe.js';
+import { buildKnownAppearances, buildKnownStances, composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe } from './scribe.js';
 import { sendMessage } from './adapter.js';
 
 vi.mock('./adapter.js', () => ({
@@ -117,6 +117,65 @@ describe('Scribe story memory extraction', () => {
         expect(request.userMessage).toContain('close-cropped white hair');
         expect(request.systemPrompt).toContain('COMPLETE updated description');
         expect(request.systemPrompt).toContain('This budget NEVER applies to npc_updates');
+        // Shame-free capture: proportions and intimate details are canon, and merges
+        // may never launder what the record already holds.
+        expect(request.systemPrompt).toContain('never sanitize, euphemize');
+        expect(request.systemPrompt).toContain('never launder the record');
+        expect(request.systemPrompt).toContain('UNVARNISHED');
+    });
+
+    it('passes personal stance and bond moments through to the NPC record', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [],
+            npc_updates: [{
+                name: 'Maren',
+                disposition: 'friendly',
+                lastNotes: 'Shared wine with the hero at the Gilded Fern.',
+                stanceToPlayer: 'Amused and privately flattered by the hero\'s flirtation, though she keeps him at arm\'s length in public.',
+                bondMoment: 'The hero flirted with Maren over wine; she laughed and let her hand linger.',
+            }],
+            story_memory: [],
+            location: null,
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I lean in and tell Maren her laugh is the best thing in this town.',
+            dmNarrative: 'Maren laughs despite herself, and her hand stays on yours a beat longer than it needs to.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+        });
+
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'UPDATE_NPC',
+            payload: expect.objectContaining({
+                name: 'Maren',
+                stanceToPlayer: expect.stringContaining('privately flattered'),
+                bondMoment: expect.stringContaining('hand linger'),
+            }),
+        });
+        const request = sendMessage.mock.calls[0][0];
+        expect(request.systemPrompt).toContain('stanceToPlayer');
+        expect(request.systemPrompt).toContain('bondMoment');
+    });
+
+    it('feeds known stances so relationship updates merge with — never clobber — the record', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+        }));
+
+        await runScribe({
+            playerMessage: 'I ask Maren about the caravan.',
+            dmNarrative: 'Maren answers curtly, distracted by the ledger.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch: vi.fn(),
+            knownStances: 'Maren: Amused and privately flattered by the hero\'s flirtation.',
+        });
+
+        const request = sendMessage.mock.calls[0][0];
+        expect(request.userMessage).toContain('KNOWN PLAYER-RELATIONSHIP STANCES');
+        expect(request.userMessage).toContain('privately flattered');
+        expect(request.systemPrompt).toContain('COMPLETE updated stance');
     });
 
     it('caps world facts at three per turn no matter how chatty the extraction is', async () => {
@@ -211,6 +270,27 @@ describe('buildKnownAppearances', () => {
 
     it('returns null when nobody in the exchange has a recorded appearance', () => {
         expect(buildKnownAppearances({ character: { name: 'Vesa' }, npcs: [] }, 'A quiet road.')).toBeNull();
+    });
+});
+
+describe('buildKnownStances', () => {
+    const state = {
+        npcs: [
+            { name: 'Maren', stanceToPlayer: 'Amused and privately flattered by the hero\'s flirtation.' },
+            { name: 'Odo Ferrin', stanceToPlayer: 'Resents the hero for the ledger incident.' },
+            { name: 'Bran', stanceToPlayer: '' },
+        ],
+    };
+
+    it('includes only NPCs named in the turn text who have a recorded stance', () => {
+        const context = buildKnownStances(state, 'I wave to Maren and BRAN across the room.');
+        expect(context).toContain('Maren: Amused and privately flattered');
+        expect(context).not.toContain('Odo Ferrin');
+        expect(context).not.toContain('Bran:');
+    });
+
+    it('returns null when nobody in the exchange has a recorded stance', () => {
+        expect(buildKnownStances(state, 'A quiet road with strangers.')).toBeNull();
     });
 });
 

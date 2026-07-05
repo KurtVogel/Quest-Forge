@@ -289,11 +289,27 @@ function NPCTab({
                             <span className="journal-npc-mark">{DISPOSITION_MARK[npc.disposition] || 'Unknown'}</span>
                             <span className="journal-npc-name">{npc.name}</span>
                             {npc.pinned && <span className="journal-npc-pin-badge" title="Pinned for long-term recall">Pinned</span>}
-                            {thin && <span className="journal-npc-thin-badge" title="Agenda/mind not yet synthesized from campaign history">Thin record</span>}
+                            {thin && <span className="journal-npc-thin-badge" title="Agenda, inner life, or personal stance toward you not yet synthesized — Deepen memory fills them from campaign history and your conversations">Thin record</span>}
                             <span className={`journal-npc-disposition ${npc.disposition}`}>
                                 {npc.disposition || 'unknown'}
                             </span>
                         </div>
+                        {npc.stanceToPlayer && (
+                            <p className="journal-npc-stance">
+                                <span className="journal-npc-stance-label">Toward you</span>
+                                {npc.stanceToPlayer}
+                            </p>
+                        )}
+                        {npc.bondMoments?.length > 0 && (
+                            <div className="journal-npc-bonds">
+                                <span className="journal-npc-bonds-label">Moments between you</span>
+                                <ul className="journal-npc-bonds-list">
+                                    {[...npc.bondMoments].reverse().slice(0, 4).map((moment, i) => (
+                                        <li key={i} title={moment.text}>{moment.text}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                         {(npc.basedIn || npc.lastLocation) && (
                             <p className="journal-npc-where">
                                 {npc.basedIn && <span>Based in: <strong>{npc.basedIn}</strong></span>}

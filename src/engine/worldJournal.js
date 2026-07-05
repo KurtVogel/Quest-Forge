@@ -281,6 +281,11 @@ export function buildJournalContext(journal, npcs, currentLocation) {
                 n.agenda && `agenda: ${briefNpcFieldForPrompt(n.agenda)}`,
                 n.secrets && `secret: ${briefNpcFieldForPrompt(n.secrets)}`,
                 n.relationshipTension && `tension: ${briefNpcFieldForPrompt(n.relationshipTension)}`,
+                // The personal bond with the hero — flirtation, gratitude, grudges —
+                // is the beat players remember most; the DM must play it consistently.
+                n.stanceToPlayer && `toward the hero: ${briefNpcFieldForPrompt(n.stanceToPlayer)}`,
+                Array.isArray(n.bondMoments) && n.bondMoments.length > 0
+                    && `personal history with the hero: ${briefNpcFieldForPrompt(n.bondMoments.slice(-2).map(m => m.text).join('; '), 240)}`,
                 Number.isFinite(n.trust) && `trust: ${n.trust}/100`,
                 n.basedIn && `based in: ${n.basedIn}`,
                 n.lastLocation && `last seen: ${n.lastLocation}`,
@@ -294,7 +299,7 @@ export function buildJournalContext(journal, npcs, currentLocation) {
             ? `\n*(${hiddenCount} other NPCs available via RETRIEVED MEMORIES when relevant)*`
             : '';
 
-        parts.push(`\n## KNOWN NPCs (keep names and established looks EXACTLY consistent — never re-invent hair, eyes, build, scars, or clothing that "looks:" already records)\n${npcList}${overflow}`);
+        parts.push(`\n## KNOWN NPCs (keep names and established looks EXACTLY consistent — never re-invent or launder hair, eyes, build, body proportions, scars, intimate details, or clothing that "looks:" already records)\n${npcList}${overflow}`);
     }
 
     return parts.join('\n');

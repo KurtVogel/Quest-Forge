@@ -399,6 +399,57 @@
     gap: 0.35rem 0.75rem;
 }
 
+/* The NPC's personal stance toward the hero — the headline of the card. */
+.journal-npc-stance {
+    margin: 0.4rem 0 0;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    background: rgba(215, 180, 90, 0.08);
+    border-left: 2px solid rgba(215, 180, 90, 0.55);
+    border-radius: 0 4px 4px 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.journal-npc-stance-label {
+    display: block;
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gold);
+    margin-bottom: 0.2rem;
+}
+
+.journal-npc-bonds {
+    margin: 0.35rem 0 0;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.journal-npc-bonds-label {
+    display: block;
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gold);
+    margin-bottom: 0.2rem;
+}
+
+.journal-npc-bonds-list {
+    margin: 0;
+    padding-left: 1.1rem;
+    list-style: disc;
+}
+
+.journal-npc-bonds-list li {
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+}
+
 .journal-npc-meta {
     margin: 0.35rem 0 0;
     font-size: 0.74rem;

@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-05 (withheld roll-setup narration preserved: re-injected post-roll, revealed on Change approach, prose-detected checks stay visible)_
+_Last updated: 2026-07-05 (player↔NPC relationship memory: stanceToPlayer + bondMoments, live-verified 10/10; earlier same day: scheduled strengthening audit, withheld roll-setup narration preserved)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -52,6 +52,32 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Recently shipped (June 21 – July 5, 2026)
 
+- **Player↔NPC relationship memory (2026-07-05, DECISIONS.md):** live-play finding — character cards
+  described an NPC's role and plot actions but nothing about her personal stance toward the *player*
+  (flirtation, warmth, grudges), and "Deepen memory" only added more plot. Two durable NPC fields, both
+  filled by the existing per-turn Scribe call (zero added LLM cost): `stanceToPlayer` (complete personal
+  stance toward the hero, appearance-style merge-not-clobber via a KNOWN PLAYER-RELATIONSHIP STANCES
+  block that also lists recorded moments so the Scribe never re-reports a beat in new words) and
+  `bondMoments` (append-only, capped at 8, token-containment deduped — flirtation, confessions, gifts,
+  promises). Consumed by `## KNOWN NPCs` (`toward the hero:` + `personal history with the hero:`), NPC
+  RAG embeddings, prompt-curation scoring, story-memory promotion, and a prominent "Toward you" +
+  "Moments between you" block on the character card. "Deepen memory" now reads recent chat messages
+  mentioning the NPC (verbatim conversations the journal prunes) and synthesizes stance + moments —
+  the retro path for existing campaigns; pre-stance records re-flag as Thin. Persistence automatic via
+  `serializeGameState()` spread (local + cloud). **Live-verified same day** with
+  `scripts/playtest_relationship_memory.cjs` (real Gemini DM, 10/10 findings, zero console errors):
+  flirtation → stance + bond moment on turn 1, a plot-only turn didn't erase them, an invitation
+  appended a new moment, everything survived reload + Continue, and Deepen memory synthesized an
+  honest grounded stance for a never-met NPC instead of inventing romance. **Same-day follow-up:**
+  appearance capture made shame-free (DECISIONS.md) — body proportions and intimate/unflattering
+  details are canon like any scar; the Scribe records them frankly, merges never launder the record,
+  and the DM prompt forbids quietly tidying up an established body.
+- **Scheduled strengthening audit (2026-07-05, DECISIONS.md):** a daily 6:00 AM (Finnish time)
+  Claude Code scheduled task audits two features per day — registry-rotated (no repeats within
+  6 entries, local ∪ origin), coverage-biased (weekly snapshot), lap-angled (correctness →
+  robustness → perf/tokens → simplification) — and logs severity-tagged findings to
+  `docs/SCHEDULED_STRENGTHENING.md`. Report-only, never commits. Its **Open Findings Queue** is
+  the hardening backlog: skim it when picking hardening work, tick items when fixed.
 - **Withheld roll-setup narration preserved (2026-07-05, DECISIONS.md):** live-play bug — a DM
   narration vanished the moment a roll proposal appeared, and its fiction was gone for good.
   **Live-verified same day** with `scripts/playtest_roleplay_checks.cjs` (real Gemini DM against

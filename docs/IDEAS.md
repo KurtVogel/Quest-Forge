@@ -11,6 +11,29 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### Player↔NPC relationship memory (stance + bond moments) — status: `shipped` (2026-07-05)
+Character cards described role and plot but nothing about the NPC's personal stance toward the
+player — the beat players actually reopen the card for after a flirtation or a confession.
+Shipped `stanceToPlayer` (merged complete stance, appearance-style contract) + `bondMoments`
+(append-only capped deduped history), Scribe-captured per turn at zero added cost, DM-prompt
+injected, RAG-embedded, card-displayed ("Toward you" / "Moments between you"), and retroactively
+synthesizable via Deepen memory reading recent conversation. See DECISIONS.md 2026-07-05.
+Follow-up ideas below.
+
+### Companions deserve the same relationship memory as roster NPCs — status: `idea`
+Party members (`party`, `add_companions`) carry only `affinity` (0–100) and notes — thinner
+relationship state than roster NPCs now have. A companion who traveled with you for thirty
+sessions should have a richer "toward you" record than a tavern keeper. Options: mirror
+`stanceToPlayer`/`bondMoments` onto companions (Scribe already sees them in narrative), or
+promote companions into the NPC roster with a `companion` flag so one system owns all bonds.
+Why: the party is the most sustained relationship surface in the game.
+
+### Relationship timeline view — status: `idea`
+`bondMoments` is capped at 8 for prompt economy, but the full history could be archived (e.g.
+oldest moments folded into a compact "relationship chronicle" paragraph on overflow instead of
+dropped) and shown as a scrollable timeline in the Journal card. Why: long romances/rivalries
+lose their earliest beats exactly when they've become the most meaningful.
+
 ### Escape the Elara/Silas/Thorne naming basin — status: `shipped` (2026-06-22)
 Live campaigns repeatedly converged on the same high-probability LLM fantasy names; the response
 schema itself also primed Mira and Garrick. A shared `nameGuidance.js` now steers both the DM and

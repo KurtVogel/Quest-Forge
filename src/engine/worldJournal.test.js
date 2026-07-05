@@ -34,6 +34,25 @@ describe('worldJournal context builder', () => {
         expect(context).toContain('established looks EXACTLY consistent');
     });
 
+    it('injects the NPC\'s personal stance toward the hero and their shared history', () => {
+        const npcs = [{
+            name: 'Maren',
+            disposition: 'friendly',
+            lastNotes: 'Poured the hero an extra measure of wine.',
+            stanceToPlayer: 'Amused and privately flattered by the hero\'s flirtation, though she keeps him at arm\'s length in public.',
+            bondMoments: [
+                { text: 'The hero flirted with Maren over wine; she laughed and let her hand linger.', at: 1000 },
+                { text: 'Maren confessed her sister vanished with the northbound caravan.', at: 2000 },
+            ],
+            lastSeen: 1000,
+        }];
+        const context = buildJournalContext([], npcs, 'Brackwater');
+
+        expect(context).toContain('toward the hero: Amused and privately flattered');
+        expect(context).toContain('personal history with the hero:');
+        expect(context).toContain('sister vanished');
+    });
+
     it('identifies and injects the earliest location transition entry', () => {
         const journal = [
             { summary: 'Left the tavern in Millhaven.', location: 'Millhaven' }, // index 0 (Entry 1)

@@ -5,6 +5,7 @@
  */
 
 import {
+    NPC_BOND_MOMENT_MAX,
     NPC_DOSSIER_FIELD_MAX,
     NPC_HOOK_FIELD_MAX,
     NPC_PLACE_FIELD_MAX,
@@ -79,8 +80,22 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
         .slice(-6)
         .map(card => ({ type: card.type, text: card.text, subject: card.subject }));
 
+    // The live transcript is where the hero's actual exchanges with this NPC exist
+    // verbatim — flirtation, warmth, friction — before the journal compresses them
+    // into event summaries. Without it, "Deepen memory" can only see plot, not bond.
+    const recentConversation = (state.messages || [])
+        .filter(message => !message.hidden
+            && (message.role === 'user' || message.role === 'assistant')
+            && mentionsName(message.content, name))
+        .slice(-8)
+        .map(message => ({
+            speaker: message.role === 'user' ? 'HERO (the player character)' : 'DM',
+            text: cleanText(message.content).slice(0, 450),
+        }));
+
     return {
         name,
+        heroName: cleanText(state.character?.name) || 'the hero',
         currentLocation: state.currentLocation || null,
         existingRecord: {
             disposition: npc.disposition,
@@ -90,6 +105,8 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
             agenda: npc.agenda,
             secrets: npc.secrets,
             relationshipTension: npc.relationshipTension,
+            stanceToPlayer: npc.stanceToPlayer,
+            bondMoments: (npc.bondMoments || []).map(moment => moment?.text || moment).filter(Boolean),
             trust: npc.trust,
             callbackHooks: npc.callbackHooks || [],
             basedIn: npc.basedIn,
@@ -101,15 +118,18 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
         journalTail,
         worldFacts,
         storyCards,
+        recentConversation,
     };
 }
 
-const ENRICH_SYSTEM_PROMPT = `You are the private continuity archivist for a single-player RPG. Given durable campaign context about ONE NPC, infer their current agenda, inner pressure, and callback hooks for future scenes.
+const ENRICH_SYSTEM_PROMPT = `You are the private continuity archivist for a single-player RPG. Given durable campaign context about ONE NPC, infer their current agenda, inner pressure, personal relationship with the hero, and callback hooks for future scenes. Every field you output is an UNVARNISHED record: plain truth in the fiction's own terms — desire, resentment, awkwardness, and bodily or intimate canon named plainly, never softened into a tasteful paraphrase.
 
 Output ONLY valid JSON:
 {
   "agenda": "what this NPC is actively trying to accomplish next, from their point of view",
   "relationshipTension": "compact note on rivalry, humiliation, debt, attraction, resentment, fear, or unresolved conflict with the hero",
+  "stanceToPlayer": "how this NPC personally regards the HERO right now — affection, attraction, romantic feeling, friendship, gratitude, respect, amusement, resentment, fear, obligation — written from the NPC's side and grounded in what actually passed between them",
+  "bondMoments": ["up to 3 one-line records of significant personal moments between the hero and this NPC that the context establishes — flirtation, confession, shared danger, gift, promise, betrayal, deep insult"],
   "personality": "stable traits and how they present, only if grounded in context",
   "goals": "longer-term wants if established",
   "privateNotes": "hidden intent, blind spots, or unrevealed motive useful for DM consistency",
@@ -120,13 +140,15 @@ Output ONLY valid JSON:
 }
 
 Rules:
-- Use ONLY established premise, journal, facts, story cards, and the existing NPC record. Do not invent new plot.
+- Use ONLY established premise, journal, facts, story cards, recent conversation, and the existing NPC record. Do not invent new plot.
+- The NPC's personal relationship with the hero is a PRIMARY output, not an afterthought. The recentConversation excerpts show their exchanges verbatim — read them closely for flirtation, warmth, teasing, friction, unspoken feeling, and how this NPC responded, and capture that in stanceToPlayer and bondMoments. Never invent romance or affection the context does not support; absence of feeling, wariness, or polite distance is also a valid stance.
 - If the hero publicly defied this NPC's authority, capture that grudge precisely.
-- Agenda and relationshipTension are required when context supports them; be specific, not generic.
+- Agenda and relationshipTension are required when context supports them; stanceToPlayer is required whenever the hero and this NPC have directly interacted. Be specific, not generic.
+- bondMoments must be actual moments the context establishes, each naming what happened between them; omit the field when none exist. Do not restate moments already listed in the existing record.
 - callbackHooks: 1-3 items max, each under 200 characters, complete thoughts.
 - trust is 0-100 if inferable, else omit.
 - basedIn and lastLocation are living fields — set or update them when premise/journal/facts support it; omit when unknown.
-- agenda, relationshipTension, privateNotes, personality, and goals may be substantive (up to ${NPC_DOSSIER_FIELD_MAX} characters each) when context warrants it.
+- agenda, relationshipTension, stanceToPlayer, privateNotes, personality, and goals may be substantive (up to ${NPC_DOSSIER_FIELD_MAX} characters each) when context warrants it.
 - Finish every string at a natural sentence end — never stop mid-word.
 - Output ONLY JSON.`;
 
@@ -134,7 +156,11 @@ export function needsNpcEnrichment(npc = {}) {
     if (npc.rosterTier === 'archived_creature') return false;
     const name = cleanText(npc.name);
     if (!name) return false;
-    const hasDepth = cleanText(npc.agenda) && cleanText(npc.relationshipTension);
+    // A record without a personal stance toward the hero is still thin — the bond is
+    // the dimension players actually come back to the card for. Pre-stance records
+    // from existing campaigns re-flag as thin so "Deepen memory" upgrades them.
+    const hasDepth = cleanText(npc.agenda) && cleanText(npc.relationshipTension)
+        && cleanText(npc.stanceToPlayer);
     if (hasDepth) return false;
     const hasSignal = cleanText(npc.lastNotes || npc.notes)
         || cleanText(npc.personality)
@@ -160,6 +186,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
 
     const jsonMatch = extractBalancedJson(response, 'agenda')
         || extractBalancedJson(response, 'relationshipTension')
+        || extractBalancedJson(response, 'stanceToPlayer')
         || extractBalancedJson(response, 'callbackHooks')
         || extractBalancedJson(response, 'basedIn');
     if (!jsonMatch) {
@@ -178,6 +205,18 @@ export async function enrichNpcProfile({ state, npc, settings }) {
     if (cleanText(parsed.relationshipTension)) {
         update.relationshipTension = clampNpcDossierField(parsed.relationshipTension);
     }
+    if (cleanText(parsed.stanceToPlayer)) {
+        update.stanceToPlayer = clampNpcDossierField(parsed.stanceToPlayer);
+    }
+    if (Array.isArray(parsed.bondMoments)) {
+        const moments = parsed.bondMoments
+            .map(moment => clampNpcDossierField(moment, NPC_BOND_MOMENT_MAX))
+            .filter(Boolean)
+            .slice(0, 3);
+        // The reducer appends these into the existing record with near-duplicate
+        // rejection — enrichment can only add moments, never rewrite history.
+        if (moments.length > 0) update.bondMoments = moments;
+    }
     if (cleanText(parsed.personality)) update.personality = clampNpcDossierField(parsed.personality);
     if (cleanText(parsed.goals)) update.goals = clampNpcDossierField(parsed.goals);
     if (cleanText(parsed.privateNotes)) update.privateNotes = clampNpcDossierField(parsed.privateNotes);
@@ -194,7 +233,8 @@ export async function enrichNpcProfile({ state, npc, settings }) {
         update.lastLocation = clampNpcDossierField(parsed.lastLocation, NPC_PLACE_FIELD_MAX);
     }
 
-    if (!update.agenda && !update.relationshipTension && !update.callbackHooks?.length
+    if (!update.agenda && !update.relationshipTension && !update.stanceToPlayer
+        && !update.bondMoments?.length && !update.callbackHooks?.length
         && !update.basedIn && !update.lastLocation) {
         throw new Error('Enrichment returned no usable depth for this NPC.');
     }

@@ -19,7 +19,7 @@ function backgroundModel(settings) {
     return settings?.llmProvider === 'gemini' ? SCRIBE_MODEL : settings?.model;
 }
 
-const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Given a DM's narrative response and the player's action that prompted it, extract any new canonical facts about the game world.
+const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Given a DM's narrative response and the player's action that prompted it, extract any new canonical facts about the game world. Every field you output is an UNVARNISHED record: the fiction's own words and facts, never a cleaned-up, softened, or tasteful paraphrase.
 
 Output ONLY valid JSON:
 {
@@ -36,11 +36,13 @@ Output ONLY valid JSON:
       "personality": "trait observed (only if newly revealed)",
       "goals": "what they want (only if newly revealed)",
       "secrets": "hidden info (only if newly hinted at or revealed)",
-      "appearance": "concrete physical/visual description — build, face, hair, clothing, distinguishing features (only if newly described)",
+      "appearance": "concrete physical/visual description — build, body proportions, face, hair, clothing, distinguishing features (only if newly described)",
       "basedIn": "place they are currently rooted — town they command, post they hold, territory they haunt. Update when fiction relocates or reassigns them; omit if unknown",
       "lastLocation": "where they were in this specific exchange (only if mentioned)",
       "agenda": "what this NPC is likely trying to accomplish next (only if implied or revealed)",
       "relationshipTension": "compact note about attraction, rivalry, resentment, debt, loyalty, fear, or trust strain",
+      "stanceToPlayer": "how this NPC personally regards the HERO right now — affection, attraction, romantic interest, friendship, gratitude, respect, amusement, resentment, fear, obligation, rivalry. Written from the NPC's side, complete and current (only when this exchange establishes or shifts it)",
+      "bondMoment": "one-line record of a significant personal moment between the hero and this NPC THIS turn — flirtation, confession, kiss, shared secret, gift, rescue, promise, betrayal, deep insult. Omit for ordinary interaction",
       "trust": 0,
       "privateNotes": "hidden NPC intent or unrevealed motive useful for future consistency",
       "callbackHooks": ["short hooks this NPC could later bring back naturally"]
@@ -75,9 +77,12 @@ Rules:
 - Keep story_memory compact; do not duplicate ordinary world_facts unless the memory has callback value.
 - Only include npc_updates for NPCs that appeared in this specific exchange
 - basedIn is the NPC's current anchor in the world (not permanent): update it when they are reassigned, relocate, or fiction establishes a new base. lastLocation is ephemeral — where they were this turn
+- stanceToPlayer is about the personal relationship between this NPC and the HERO specifically — their feelings toward the hero, not their role or plot function. Update it whenever an exchange genuinely shifts how they regard the hero: a flirtation received warmly or coldly, gratitude after a rescue, trust broken, growing attraction or contempt. Write it unvarnished — desire, resentment, and awkwardness named plainly. When KNOWN PLAYER-RELATIONSHIP STANCES lists this NPC, emit the COMPLETE updated stance: start from the known stance and weave in what this turn changed — never a fragment that would erase the rest. If nothing shifted for them personally, omit the field.
+- bondMoment must be an actual NEW event from THIS exchange, stated concretely with both parties ("The hero flirted with Maren over the map table; she laughed and let her hand linger"). At most one per NPC per turn; interpersonal continuity is exempt from the extraction budget. If KNOWN PLAYER-RELATIONSHIP STANCES already lists a moment covering this beat, omit bondMoment entirely — never re-report or paraphrase a recorded moment.
 - Use kind "character" and rosterEligible true only for named people worth tracking across sessions (dialogue, rivalry, debt, secrets, recurring villains, quest givers). Use kind "creature" or "ephemeral" with rosterEligible false for nameless combat fodder, generic goblins/guards, or one-line minions that should not enter the durable roster.
 - Capture "appearance"/"player_appearance" from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation AND the DM's own long-term visual continuity, so accuracy matters.
-- When KNOWN APPEARANCES lists a character and this turn adds or changes a visual detail, emit their appearance as the COMPLETE updated description: start from the known look and weave in what this turn established. Drop or alter a known detail ONLY when the fiction explicitly changed it (haircut, dye, disguise, wound, healing, new gear). NEVER emit just the new fragment — "a fresh scar on his cheek" alone would erase the white hair, the build, everything else on record. If this turn adds nothing visually new for them, omit the field entirely.
+- This is an adult game: body proportions and intimate, sensual, unflattering, or even embarrassing anatomical details the fiction establishes (wide hips, a heavy backside, a soft belly, body hair anywhere) are canonical visual continuity exactly like a scar or white hair. Record them frankly and unvarnished in the narrative's own words — never sanitize, euphemize, tone down, or silently omit them. For many players this continuity IS the point.
+- When KNOWN APPEARANCES lists a character and this turn adds or changes a visual detail, emit their appearance as the COMPLETE updated description: start from the known look and weave in what this turn established. Drop or alter a known detail ONLY when the fiction explicitly changed it (haircut, dye, disguise, wound, healing, new gear). NEVER emit just the new fragment — "a fresh scar on his cheek" alone would erase the white hair, the build, everything else on record. When merging, never launder the record: an intimate, crude, or unflattering detail already in KNOWN APPEARANCES stays in the merged description word-for-word until the fiction explicitly changes it. If this turn adds nothing visually new for them, omit the field entirely.
 - Only include fields you have actual information for — omit empty/unknown fields
 - DO NOT alter explicit words or details: copy names, proper nouns, numbers, and specific phrases exactly as the DM wrote them — never rename, paraphrase, translate, or invent. Refer to each NPC by the exact name used in the narrative so their record never forks.
 - If nothing notable happened (pure narration, no new facts), return { "world_facts": [], "npc_updates": [], "story_memory": [], "location": null }
@@ -193,6 +198,35 @@ export function buildKnownAppearances({ character, npcs = [] } = {}, ...texts) {
 }
 
 /**
+ * Established personal stances toward the hero for the NPCs in this exchange.
+ * Same merge contract as appearances: the Scribe must emit the complete updated
+ * stance, so one turn's cold reply can't erase months of recorded warmth. The
+ * already-recorded bond moments ride along so the Scribe never re-reports an old
+ * beat in new words — the reducer's token dedupe can't catch paraphrases.
+ */
+export function buildKnownStances({ npcs = [] } = {}, ...texts) {
+    const haystack = texts.filter(Boolean).join('\n').toLowerCase();
+    const entries = [];
+    for (const npc of npcs) {
+        if (entries.length >= 8) break;
+        const name = String(npc?.name || '').trim();
+        const stance = String(npc?.stanceToPlayer || '').trim();
+        const moments = (Array.isArray(npc?.bondMoments) ? npc.bondMoments : [])
+            .map(moment => String(moment?.text || '').trim())
+            .filter(Boolean);
+        if (!name || (!stance && moments.length === 0)) continue;
+        if (!haystack.includes(name.toLowerCase())) continue;
+        const lines = [];
+        if (stance) lines.push(`${name}: ${stance.slice(0, 240)}`);
+        if (moments.length > 0) {
+            lines.push(`${name} — moments already on record (do NOT re-report or paraphrase these): ${moments.slice(-3).map(m => `"${m.slice(0, 140)}"`).join('; ')}`);
+        }
+        entries.push(lines.join('\n'));
+    }
+    return entries.length > 0 ? entries.join('\n') : null;
+}
+
+/**
  * Run the Scribe after a DM response to extract world-state updates.
  * Dispatches updates silently — the player never sees this.
  *
@@ -218,7 +252,7 @@ function contradictsAuthoritativeCombat(value, authoritativeContext) {
     });
 }
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null }) {
     if (!settings.apiKey || !dmNarrative) return;
 
     try {
@@ -237,6 +271,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     : null,
                 knownAppearances
                     ? `KNOWN APPEARANCES (established canonical looks — merge new details into these, never contradict or shorten them):\n${knownAppearances}`
+                    : null,
+                knownStances
+                    ? `KNOWN PLAYER-RELATIONSHIP STANCES (each NPC's established personal stance toward the hero — stanceToPlayer updates must merge with these, never shrink them to this turn's fragment):\n${knownStances}`
                     : null,
                 lootAudit
                     ? `EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN (anything listed here is NOT missing): ${describeAppliedLoot(lootAudit.appliedEvents)}`
@@ -324,6 +361,7 @@ Output ONLY valid JSON:
       "basedIn": "current anchor — command post, town, territory. Update when they relocate; omit if unknown",
       "agenda": "what they likely try next",
       "relationshipTension": "attraction, rivalry, fear, debt, loyalty, distrust, or leverage",
+      "stanceToPlayer": "their current personal stance toward the hero — affection, attraction, respect, resentment, obligation — complete, written from the NPC's side",
       "trust": 50,
       "privateNotes": "hidden intent or secret pressure",
       "callbackHooks": ["one or two details they could naturally bring back later"]
@@ -362,6 +400,8 @@ Rules:
 - Emit at most 2 story_memory cards per reflection, and only for hooks with real future payoff.
 - Potential companions may be seeded as hooks, but never add them to the party.
 - Intriguing NPCs should emerge from agenda, competence, danger, secrets, attraction, rivalry, vulnerability, or leverage, not default sexualization.
+- Keep every field unvarnished: record attraction, resentment, and bodily or intimate canon plainly in the fiction's own terms, never softened or euphemized.
+- stanceToPlayer evolves slowly off-screen: refine or drift it only when established events support it, and emit the complete stance (it replaces the record). Never invent romance or hostility the canon does not support.
 - Keep everything compact. Omit empty arrays when nothing changes.`;
 
 export async function runNpcFrontReflection({ state, dispatch, cadence = null }) {
@@ -455,7 +495,7 @@ Rules:
 - Do not add generic party members, soldiers, bystanders, creatures, or props that are not supported by the supplied situation and entity details.
 - Make the player character the visual anchor when present. State other subjects' spatial relationship to them so the image model cannot quietly omit half the scene.
 - Use the EXACT appearance details provided for each named character so they look consistent across scenes. If a character has no given appearance, infer modestly from their race/class/equipment — do not contradict known details.
-- Depict only what the situation supports. This is an adult, gritty world: render violence, grime, and mature/sensual content frankly when the scene calls for it, but keep it grounded, never gratuitous.
+- Depict only what the situation supports. This is an adult, gritty world: render violence, grime, and mature/sensual content frankly and unvarnished when the scene calls for it — bodies as established, not idealized — but keep it grounded, never gratuitous.
 - End with this quality direction: "grounded cinematic dark-fantasy realism, professional concept art, anatomically coherent figures, detailed materials, dramatic natural lighting, not cartoonish or childlike".
 - Do NOT include any on-image text, captions, watermarks, UI, or speech bubbles.`;
 

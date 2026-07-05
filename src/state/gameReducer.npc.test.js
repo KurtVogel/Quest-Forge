@@ -120,6 +120,112 @@ describe('gameReducer NPC roster gating', () => {
     });
 });
 
+describe('gameReducer player-relationship memory', () => {
+    it('records a bondMoment as durable append-only history on the NPC', () => {
+        const met = gameReducer(initialGameState, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Maren Duskvale',
+                disposition: 'friendly',
+                lastNotes: 'Shared a table at the Gilded Fern.',
+                stanceToPlayer: 'Amused and privately flattered by the hero\'s attention.',
+                bondMoment: 'The hero flirted with Maren over wine; she laughed and let her hand linger.',
+            },
+        });
+        expect(met.npcs).toHaveLength(1);
+        expect(met.npcs[0].stanceToPlayer).toContain('privately flattered');
+        expect(met.npcs[0].bondMoments).toHaveLength(1);
+        expect(met.npcs[0].bondMoment).toBeUndefined();
+
+        // A later thin update must not erase the personal record.
+        const later = gameReducer(met, {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Maren Duskvale', lastNotes: 'Waved from across the market.' },
+        });
+        expect(later.npcs[0].stanceToPlayer).toContain('privately flattered');
+        expect(later.npcs[0].bondMoments).toHaveLength(1);
+    });
+
+    it('rejects a near-duplicate bondMoment replayed on a later turn', () => {
+        const met = gameReducer(initialGameState, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Maren Duskvale',
+                bondMoment: 'The hero flirted with Maren over wine; she laughed and let her hand linger.',
+            },
+        });
+        const replay = gameReducer(met, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Maren Duskvale',
+                bondMoment: 'The hero flirted with Maren over wine and she laughed.',
+            },
+        });
+        expect(replay.npcs[0].bondMoments).toHaveLength(1);
+    });
+
+    it('merges an enrichment bondMoments batch into the existing record', () => {
+        const met = gameReducer(initialGameState, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Maren Duskvale',
+                bondMoment: 'The hero flirted with Maren over wine; she laughed and let her hand linger.',
+            },
+        });
+        const enriched = gameReducer(met, {
+            type: 'UPDATE_NPC',
+            payload: {
+                id: met.npcs[0].id,
+                name: 'Maren Duskvale',
+                stanceToPlayer: 'Charmed but guarded; she has been burned by charming strangers before.',
+                bondMoments: [
+                    'The hero flirted with Maren over wine; she laughed.',
+                    'Maren confessed her sister vanished with the northbound caravan.',
+                ],
+            },
+        });
+        expect(enriched.npcs[0].bondMoments).toHaveLength(2);
+        expect(enriched.npcs[0].bondMoments[1].text).toContain('sister vanished');
+        expect(enriched.npcs[0].stanceToPlayer).toContain('Charmed but guarded');
+    });
+
+    it('promotes the personal stance into a relationship story-memory card', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Maren Duskvale',
+                disposition: 'friendly',
+                stanceToPlayer: 'Quietly charmed by the hero.',
+            },
+        });
+        const card = next.storyMemory.find(c => c.type === 'relationship');
+        expect(card).toBeTruthy();
+        expect(card.text).toContain('Toward the hero');
+    });
+
+    it('round-trips stance and bond moments through LOAD_GAME', () => {
+        const loaded = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...initialGameState,
+                character: initialGameState.character,
+                inventory: initialGameState.inventory,
+                messages: [],
+                npcs: [{
+                    id: 'npc-maren',
+                    name: 'Maren Duskvale',
+                    rosterTier: 'character',
+                    kind: 'character',
+                    stanceToPlayer: 'Amused and privately flattered by the hero\'s attention.',
+                    bondMoments: [{ text: 'The hero flirted with Maren over wine.', at: 1000 }],
+                }],
+            },
+        });
+        expect(loaded.npcs[0].stanceToPlayer).toContain('privately flattered');
+        expect(loaded.npcs[0].bondMoments).toEqual([{ text: 'The hero flirted with Maren over wine.', at: 1000 }]);
+    });
+});
+
 describe('gameReducer NPC archive/migration actions', () => {
     it('ARCHIVE_NPC demotes a single NPC to an archived creature and unpins it', () => {
         const state = {

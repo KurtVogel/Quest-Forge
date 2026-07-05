@@ -8,6 +8,58 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-05 · Appearance capture is shame-free: body proportions and intimate details are canon, and merges may never launder the record.**
+The appearance continuity system worked, but a background extraction model left to its own judgment
+will quietly bowdlerize — keep the white hair, drop the wide hips or the embarrassing anatomical
+detail as "inappropriate" or "unimportant". In an adult game those details are exactly the
+continuity many players care most about. Settled: the Scribe's appearance rules now state explicitly
+that proportions and intimate/sensual/unflattering/embarrassing bodily details established by the
+fiction are canonical continuity "exactly like a scar", recorded frankly in the narrative's own
+words, never sanitized/euphemized/omitted; the KNOWN APPEARANCES merge contract adds "never launder
+the record" (an intimate detail on record stays word-for-word until fiction changes it); the DM
+prompt's introduce-with-visual-details rule asks for body proportions up front and forbids quietly
+slimming down or tidying up an established body; the KNOWN NPCs header forbids laundering alongside
+re-inventing. No engine changes — this is purely extraction/prompt policy, gated as always by the
+player-controlled adult-content settings and what the fiction itself establishes. Same-day
+follow-up: every Scribe-family prompt (per-turn extraction, cadence reflection, art director,
+Deepen-memory enrichment) now demands **"unvarnished"** output — Vesa's field-tested steering word
+that reliably keeps LLM outputs from drifting into tasteful paraphrase; use it when adding any new
+Scribe output surface.
+
+**2026-07-05 · NPC↔player relationships are first-class memory: a merged stance plus append-only bond moments, not one disposition word.**
+Live-play finding: after romantic/significant personal exchanges, the character card showed role and
+plot function but nothing about how she regarded the *player* — and "Deepen memory" only added more
+plot. Settled design: two durable NPC fields with different write semantics, both filled by the
+existing per-turn Scribe call (zero added LLM cost). (1) `stanceToPlayer` is a rolling COMPLETE
+description of the NPC's personal stance toward the hero (attraction, gratitude, resentment,
+obligation…), with the same merge-not-clobber contract as `appearance`: the Scribe receives KNOWN
+PLAYER-RELATIONSHIP STANCES for the NPCs in the exchange and must emit the full updated stance, so
+one curt turn can't erase months of recorded warmth. (2) `bondMoments` is append-only capped history
+(8 max, oldest out) of significant personal beats — flirtation, confession, gift, rescue, betrayal —
+deduped by the same token-containment heuristic as world facts, because *what happened between you*
+must never be rewritten by a later summary. Consumption: `## KNOWN NPCs` carries `toward the hero:`
++ recent `personal history with the hero:` (the DM plays the bond consistently), RAG embeddings
+include the stance ("does she like me?" retrieves), prompt-curation scoring weights bonded NPCs up,
+and the card shows a prominent "Toward you" block + "Moments between you" list. Retro path for
+existing campaigns: "Deepen memory" now feeds the LLM the recent chat messages that mention the NPC
+(the verbatim conversations journal pruning destroys) plus the hero's name, requires stanceToPlayer
+whenever they've interacted, and pre-stance records re-flag as "Thin record" so players are nudged
+to upgrade. Persistence is automatic — NPCs ride `serializeGameState()`'s spread into both local
+IndexedDB and cloud Firestore saves; `migrateLegacyNpc` backfills empty defaults on load.
+
+**2026-07-05 · Scheduled strengthening audit is report-only, registry-rotated, and lap-angled.**
+A Claude Code scheduled task (`daily-feature-strengthening-audit`, 6:00 AM Finnish time) audits two
+features daily and logs to `docs/SCHEDULED_STRENGTHENING.md`. Settled design: (1) **report-only,
+never commits** — an unattended 6 AM agent must not change production code or create commits;
+fixes happen in reviewed sessions pulling from the log's Open Findings Queue; (2) rotation runs on
+a **canonical Feature Registry in the log file itself** (not ad-hoc feature naming), with a hard
+no-repeat window of 6 entries computed over the **union of local and origin** copies because the
+repo lives on multiple machines; (3) repetition is handled by **lap angles** (correctness →
+hostile-input robustness → performance/token budget → simplification), not by thinning the daily
+cadence Vesa chose; (4) coverage bias comes from a **weekly** snapshot, not a per-run coverage
+pass — daily coverage runs cost minutes and change slowly; (5) findings are severity-tagged
+P0/P1/P2 and a red `npm test` becomes the day's lead finding, diagnosis-only.
+
 **2026-07-05 · Withheld roll-setup narration is preserved fiction, not disposable scaffolding.**
 Live-play bug: a DM narration vanished mid-read the moment a roll proposal appeared, and an
 already-overruled check came back with no memory of the ruling. Root cause analysis showed three

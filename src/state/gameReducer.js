@@ -12,7 +12,9 @@ import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js
 import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
 import {
+    appendBondMoments,
     buildStoryMemoryPromotion,
+    clampNpcDossierField,
     classifyNpcCandidate,
     listArchivableFodder,
     migrateLegacyNpc,
@@ -662,6 +664,20 @@ function upsertNpc(npcs, payload) {
     if (update.appearance) {
         update.appearance = String(update.appearance).trim().slice(0, 600);
     }
+    if (update.stanceToPlayer) {
+        update.stanceToPlayer = clampNpcDossierField(update.stanceToPlayer);
+    }
+    // Bond moments are append-only history: a turn's `bondMoment` (or an enrichment
+    // batch of `bondMoments`) joins the existing record — it can never replace it.
+    const bondAdditions = [];
+    if (update.bondMoment) {
+        bondAdditions.push(update.bondMoment);
+        delete update.bondMoment;
+    }
+    if (update.bondMoments) {
+        if (Array.isArray(update.bondMoments)) bondAdditions.push(...update.bondMoments);
+        delete update.bondMoments;
+    }
 
     const idx = npcs.findIndex(n =>
         (payload.id && n.id === payload.id) ||
@@ -688,6 +704,9 @@ function upsertNpc(npcs, payload) {
                 { from: existing.disposition, to: update.disposition, at: Date.now(), note: update.lastNotes || '' },
             ].slice(-MAX_NPC_HISTORY);
         }
+        if (bondAdditions.length > 0) {
+            update.bondMoments = appendBondMoments(existing.bondMoments, bondAdditions);
+        }
         const nameToKeep = (update.name && update.name.length > (existing.name || '').length) ? update.name : existing.name;
         const merged = normalizeNpcRecord({
             ...existing,
@@ -703,6 +722,9 @@ function upsertNpc(npcs, payload) {
 
     // No match — only create roster-worthy characters.
     if (!payload.name || !classified.allowRoster) return npcs;
+    if (bondAdditions.length > 0) {
+        update.bondMoments = appendBondMoments([], bondAdditions);
+    }
     return [...npcs, normalizeNpcRecord({
         id: `npc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
         firstMet: Date.now(),
@@ -716,6 +738,8 @@ function upsertNpc(npcs, payload) {
         relationshipHistory: [],
         agenda: '',
         relationshipTension: '',
+        stanceToPlayer: '',
+        bondMoments: [],
         trust: null,
         privateNotes: '',
         callbackHooks: [],

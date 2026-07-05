@@ -42,6 +42,68 @@ export const NPC_PROMPT_FIELD_MAX = 180;
 export const NPC_HOOK_FIELD_MAX = 200;
 export const NPC_PLACE_FIELD_MAX = 120;
 
+/** One recorded personal beat between the hero and an NPC. */
+export const NPC_BOND_MOMENT_MAX = 220;
+export const MAX_NPC_BOND_MOMENTS = 8;
+
+const BOND_STOP_WORDS = new Set([
+    'the', 'a', 'an', 'of', 'to', 'in', 'is', 'are', 'was', 'were', 'and', 'or',
+    'that', 'this', 'it', 'its', 'their', 'his', 'her', 'has', 'have', 'had',
+    'by', 'for', 'with', 'at', 'on', 'as', 'be', 'been', 'from', 'now', 'not', 'no',
+    'hero', 'player',
+]);
+
+function bondMomentTokens(text) {
+    const normalized = String(text || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return new Set(normalized.split(' ').filter(token => token && !BOND_STOP_WORDS.has(token)));
+}
+
+/** Same containment heuristic as the world-fact dedupe: a moment whose meaningful
+ * tokens are ~all inside an existing one is a restatement, not a new beat. */
+function isNearDuplicateBondMoment(candidate, existingText) {
+    const tokens = bondMomentTokens(candidate);
+    const existing = bondMomentTokens(existingText);
+    if (tokens.size === 0) return true;
+    if (existing.size === 0) return false;
+    const small = tokens.size <= existing.size ? tokens : existing;
+    const large = tokens.size <= existing.size ? existing : tokens;
+    let overlap = 0;
+    for (const token of small) {
+        if (large.has(token)) overlap += 1;
+    }
+    return overlap / small.size >= 0.9;
+}
+
+export function normalizeBondMoments(list = []) {
+    return (Array.isArray(list) ? list : [])
+        .map(entry => {
+            const text = clampNpcDossierField(
+                typeof entry === 'string' ? entry : entry?.text,
+                NPC_BOND_MOMENT_MAX,
+            );
+            if (!text) return null;
+            const at = Number.isFinite(entry?.at) ? entry.at : Date.now();
+            return { text, at };
+        })
+        .filter(Boolean)
+        .slice(-MAX_NPC_BOND_MOMENTS);
+}
+
+/** Append-only merge: new beats join the record, restatements are dropped,
+ * and the list never exceeds its cap (oldest fall off first). */
+export function appendBondMoments(existing = [], additions = []) {
+    let next = normalizeBondMoments(existing);
+    for (const addition of normalizeBondMoments(additions)) {
+        if (next.some(moment => isNearDuplicateBondMoment(addition.text, moment.text))) continue;
+        next = [...next, addition];
+    }
+    return next.slice(-MAX_NPC_BOND_MOMENTS);
+}
+
 export function clampNpcDossierField(value, max = NPC_DOSSIER_FIELD_MAX) {
     const cleaned = cleanText(value);
     if (!cleaned || cleaned.length <= max) return cleaned;
@@ -139,6 +201,8 @@ export function isGenericCreatureName(name) {
 export function blocksFodderArchive(npc = {}) {
     if (npc.pinned) return true;
     if (cleanText(npc.agenda) || cleanText(npc.relationshipTension)) return true;
+    if (cleanText(npc.stanceToPlayer)) return true;
+    if (Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0) return true;
     if (cleanText(npc.personality) || cleanText(npc.goals) || cleanText(npc.secrets)) return true;
     if (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0) return true;
     if (Number.isFinite(npc.trust)) return true;
@@ -157,6 +221,8 @@ export function hasNpcNarrativeWeight(npc = {}) {
         || cleanText(npc.agenda)
         || cleanText(npc.secrets)
         || cleanText(npc.relationshipTension)
+        || cleanText(npc.stanceToPlayer)
+        || (Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0)
         || cleanText(npc.privateNotes)
         || (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0)
         || (Array.isArray(npc.relationshipHistory) && npc.relationshipHistory.length > 0)
@@ -246,6 +312,9 @@ export function computeNpcImportance(npc = {}) {
     if (npc.rosterTier === 'character') score += 1;
     if (cleanText(npc.agenda)) score += 1;
     if (cleanText(npc.relationshipTension)) score += 2;
+    // A personal bond with the hero is exactly what should keep an NPC in memory.
+    if (cleanText(npc.stanceToPlayer)) score += 2;
+    if (Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0) score += 1;
     if (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0) score += 1;
     if (Array.isArray(npc.relationshipHistory) && npc.relationshipHistory.length > 0) score += 1;
     if (Number.isFinite(npc.trust)) score += 0.5;
@@ -277,11 +346,14 @@ export function migrateLegacyNpc(npc = {}) {
         relationshipHistory: [],
         agenda: '',
         relationshipTension: '',
+        stanceToPlayer: '',
+        bondMoments: [],
         trust: null,
         privateNotes: '',
         callbackHooks: [],
         ...npc,
     };
+    merged.bondMoments = normalizeBondMoments(merged.bondMoments);
     if (!NPC_ROSTER_TIERS.has(merged.rosterTier)) {
         merged.rosterTier = 'character';
     }
@@ -328,6 +400,8 @@ export function scoreNpcForPrompt(npc = {}, { location = '', now = Date.now() } 
         score += 2;
     }
     if (cleanText(npc.relationshipTension)) score += 6;
+    if (cleanText(npc.stanceToPlayer)) score += 6;
+    if (Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0) score += 2;
     if (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0) score += 4;
     if (Array.isArray(npc.relationshipHistory) && npc.relationshipHistory.length > 0) score += 3;
     if (cleanText(npc.agenda)) score += 2;
@@ -362,6 +436,7 @@ export function formatNpcEmbeddingText(npc = {}) {
     if (!name) return '';
     const notes = cleanText(npc.lastNotes || npc.notes);
     const tension = cleanText(npc.relationshipTension);
+    const stance = cleanText(npc.stanceToPlayer);
     const agenda = cleanText(npc.agenda);
     const basedIn = cleanText(npc.basedIn);
     const lastLocation = cleanText(npc.lastLocation);
@@ -371,6 +446,7 @@ export function formatNpcEmbeddingText(npc = {}) {
     if (basedIn) parts.push(`Based in: ${basedIn}`);
     if (lastLocation) parts.push(`Last seen: ${lastLocation}`);
     if (notes) parts.push(notes);
+    if (stance) parts.push(`Toward the hero: ${stance.slice(0, 160)}`);
     if (tension) parts.push(`Tension: ${tension}`);
     if (agenda) parts.push(`Agenda: ${agenda}`);
     return parts.join(' | ').slice(0, 500);
@@ -391,13 +467,15 @@ export function buildStoryMemoryPromotion(npc = {}) {
     if (!name) return null;
 
     const tension = cleanText(npc.relationshipTension);
+    const stance = cleanText(npc.stanceToPlayer);
     const hooks = Array.isArray(npc.callbackHooks) ? npc.callbackHooks.filter(Boolean) : [];
     const agenda = cleanText(npc.agenda);
     const notes = cleanText(npc.lastNotes || npc.notes);
 
-    if (!tension && hooks.length === 0 && !agenda) return null;
+    if (!tension && !stance && hooks.length === 0 && !agenda) return null;
 
     const textParts = [];
+    if (stance) textParts.push(`Toward the hero: ${stance}`);
     if (tension) textParts.push(tension);
     if (agenda) textParts.push(`Agenda: ${agenda}`);
     if (hooks.length > 0) textParts.push(`Hooks: ${hooks.slice(0, 2).join('; ')}`);
@@ -406,11 +484,11 @@ export function buildStoryMemoryPromotion(npc = {}) {
     const text = textParts.join(' ').slice(0, 260);
     if (!text) return null;
 
-    const emotionalCharge = tension ? 4 : (hooks.length > 0 ? 3 : 2);
-    const salience = npc.pinned ? 5 : (tension ? 4 : 3);
+    const emotionalCharge = (tension || stance) ? 4 : (hooks.length > 0 ? 3 : 2);
+    const salience = npc.pinned ? 5 : ((tension || stance) ? 4 : 3);
 
     return {
-        type: tension ? 'relationship' : (agenda ? 'npcAgenda' : 'callback'),
+        type: (tension || stance) ? 'relationship' : (agenda ? 'npcAgenda' : 'callback'),
         text,
         subject: name,
         tags: ['npc', 'roster'],

@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+    appendBondMoments,
     blocksFodderArchive,
     briefNpcFieldForPrompt,
+    buildStoryMemoryPromotion,
     classifyNpcCandidate,
     clampNpcDossierField,
     curateNpcsForPrompt,
     formatNpcEmbeddingText,
+    hasNpcNarrativeWeight,
     isGenericCreatureName,
     listArchivableFodder,
     locationMatchesPlace,
+    MAX_NPC_BOND_MOMENTS,
     migrateLegacyNpc,
+    normalizeBondMoments,
     scoreNpcForPrompt,
     getCoreNpcName,
     namesMatch,
@@ -26,6 +31,85 @@ describe('formatNpcEmbeddingText', () => {
         expect(text).toContain('Maera (wary)');
         expect(text).toContain('Looks: Close-cropped white hair');
         expect(text).toContain('Warned the hero off the docks.');
+    });
+});
+
+describe('player-relationship memory (stanceToPlayer + bondMoments)', () => {
+    it('appends new bond moments and rejects near-duplicate restatements', () => {
+        const first = appendBondMoments([], ['The hero flirted with Maren over the map table; she laughed and let her hand linger.']);
+        expect(first).toHaveLength(1);
+
+        const restated = appendBondMoments(first, ['The hero flirted with Maren over the map table and she laughed.']);
+        expect(restated).toHaveLength(1);
+
+        const genuinelyNew = appendBondMoments(first, ['Maren confessed she has never trusted anyone with her real name before.']);
+        expect(genuinelyNew).toHaveLength(2);
+        expect(genuinelyNew[0].text).toContain('flirted');
+        expect(genuinelyNew[1].text).toContain('real name');
+    });
+
+    it('caps bond moments and drops the oldest first', () => {
+        let moments = [];
+        for (let i = 0; i < MAX_NPC_BOND_MOMENTS + 3; i++) {
+            moments = appendBondMoments(moments, [`Distinct shared beat number ${i} about ${['ribbons', 'wine', 'scars', 'letters', 'oaths', 'daggers', 'songs', 'maps', 'storms', 'debts', 'graves'][i]}.`]);
+        }
+        expect(moments).toHaveLength(MAX_NPC_BOND_MOMENTS);
+        expect(moments[0].text).not.toContain('number 0');
+    });
+
+    it('normalizes string and object entries with timestamps', () => {
+        const normalized = normalizeBondMoments([
+            'A plain string beat.',
+            { text: 'An object beat.', at: 12345 },
+            { text: '' },
+            null,
+        ]);
+        expect(normalized).toHaveLength(2);
+        expect(normalized[0].at).toBeGreaterThan(0);
+        expect(normalized[1]).toEqual({ text: 'An object beat.', at: 12345 });
+    });
+
+    it('counts a personal stance as narrative weight and blocks fodder archive', () => {
+        expect(hasNpcNarrativeWeight({ name: 'Maren', stanceToPlayer: 'Quietly charmed by the hero.' })).toBe(true);
+        expect(blocksFodderArchive({ name: 'Maren', stanceToPlayer: 'Quietly charmed by the hero.' })).toBe(true);
+        expect(blocksFodderArchive({ name: 'Maren', bondMoments: [{ text: 'Shared a rooftop sunrise.', at: 1 }] })).toBe(true);
+    });
+
+    it('scores stance-bearing NPCs higher for prompt recall', () => {
+        const plain = scoreNpcForPrompt({ name: 'Odo', rosterTier: 'character' });
+        const bonded = scoreNpcForPrompt({
+            name: 'Maren',
+            rosterTier: 'character',
+            stanceToPlayer: 'Quietly charmed by the hero.',
+            bondMoments: [{ text: 'Shared a rooftop sunrise.', at: 1 }],
+        });
+        expect(bonded).toBeGreaterThan(plain);
+    });
+
+    it('migrates legacy records with empty stance and bond defaults', () => {
+        const migrated = migrateLegacyNpc({ name: 'Old Captain', disposition: 'hostile' });
+        expect(migrated.stanceToPlayer).toBe('');
+        expect(migrated.bondMoments).toEqual([]);
+    });
+
+    it('carries the stance into RAG embedding text', () => {
+        const text = formatNpcEmbeddingText({
+            name: 'Maren',
+            disposition: 'friendly',
+            stanceToPlayer: 'Quietly charmed by the hero, though she hides it behind teasing.',
+        });
+        expect(text).toContain('Toward the hero: Quietly charmed');
+    });
+
+    it('promotes the stance into a relationship story-memory card', () => {
+        const promotion = buildStoryMemoryPromotion({
+            name: 'Maren',
+            rosterTier: 'character',
+            stanceToPlayer: 'Quietly charmed by the hero.',
+        });
+        expect(promotion.type).toBe('relationship');
+        expect(promotion.text).toContain('Toward the hero: Quietly charmed');
+        expect(promotion.salience).toBe(4);
     });
 });
 
