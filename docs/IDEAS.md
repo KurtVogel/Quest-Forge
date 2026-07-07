@@ -474,6 +474,44 @@ Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md
 
 ## Tech & Infra
 
+### xAI (Grok) as a DM provider — status: `designed` (2026-07-07)
+Sometimes xAI's tone is what a campaign wants. xAI's chat API is OpenAI-compatible
+(`https://api.x.ai/v1/chat/completions`, Bearer auth, same SSE stream format and
+`finish_reason` semantics), so the provider itself is a near-copy of
+`src/llm/providers/openai.js`. The deployed CSP already allows `https://api.x.ai` in
+`connect-src` (scene art required it), and `normalizeXaiApiKey` (`xai-` prefix repair)
+already exists in `imageGen.js` — export and reuse it.
+
+**The real work is NOT the provider — it's decoupling background/memory tasks from the DM
+provider.** Today one `settings.llmProvider` + `settings.apiKey` runs everything:
+- ~9 background call sites use `backgroundModel(settings)` = Gemini Flash *only when the DM
+  provider is Gemini*, otherwise they silently run on the DM model at DM prices: `scribe.js`
+  (×3), `worldJournal.js`, `outOfCombatRollPolicy.js`, `responseParser.js` (text-roll
+  detector), `npcEnrichment.js`, `npcFodderReview.js`, `frontDirector.js`, `frontUpgrade.js`,
+  `frontMigration.js`.
+- All RAG/embedding paths in `ChatPanel.jsx` gate on `llmProvider === 'gemini'` and pass
+  the main `apiKey` — choosing a non-Gemini DM silently disables vector memory entirely.
+  (This already hurts OpenAI-DM users today; the fix benefits them too.)
+
+**Design:** add `settings.geminiUtilityKey` — a Gemini key for the memory stack, used by the
+Scribe, journal, roll policy, fronts, and embeddings whenever the DM provider isn't Gemini
+(when it is, the main key doubles as it, as today). One helper, e.g.
+`getBackgroundConfig(settings) → {provider, apiKey, model}`, replaces the copy-pasted
+`backgroundModel()` pattern at every call site; RAG gates become "is a Gemini key available".
+Strip the new key in `serializeGameState()` (`persistence.js`) like `apiKey`/`imageApiKey`.
+Settings UI: xAI in the provider dropdown + a "Gemini key for memory/Scribe" field shown for
+non-Gemini DM providers. Optional nicety: one xAI key works for both chat and scene art, so
+offer to reuse `imageApiKey` when the DM provider is xAI.
+
+**Models (verify at docs.x.ai when implementing — IDs move fast):** as of mid-2026 the
+flagship is `grok-4.3` (~$1.25/M in, $2.50/M out, reasoning-first); `grok-4.1-fast` was the
+cheap tier (~$0.20/$0.50, 2M context) but sources conflict on whether it's retired and
+aliased to grok-4.3. Reasoning-first models mean slower TTFT — watch the combat-intent
+timing logs after switching.
+
+**Risks:** Grok's JSON-block discipline is unproven against `responseParser.js` — playtest
+and add golden fixtures for any new failure modes before calling it done.
+
 ### NPC roster promotion / character vs fodder — status: `shipped` (2026-06-23)
 Generic goblins/guards no longer pollute the durable NPC roster, prompt, or RAG. Legacy saves
 grandfather all pre-existing NPCs as characters so long-running campaigns keep early antagonists.
