@@ -80,7 +80,7 @@ export function serializeGameState(gameState) {
         saveVersion: SAVE_VERSION,
         rollHistory: (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS),
         combat: gameState.combat || { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
-        settings: { ...gameState.settings, apiKey: undefined, imageApiKey: undefined, firebaseConfig: undefined },
+        settings: { ...gameState.settings, apiKey: undefined, geminiApiKey: undefined, imageApiKey: undefined, firebaseConfig: undefined },
     };
 }
 

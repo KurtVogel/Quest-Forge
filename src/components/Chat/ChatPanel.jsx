@@ -9,6 +9,7 @@ import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningEx
 import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownStances, runScribe } from '../../llm/scribe.js';
 import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../engine/vectorMemory.js';
+import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { curateStoryMemory } from '../../engine/storyMemory.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
@@ -61,11 +62,12 @@ export default function ChatPanel() {
         try {
             const result = await maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current);
             lastSummarizedRef.current = result.index;
-            if (result.journalEntry && stateRef.current.settings.apiKey && stateRef.current.settings.llmProvider === 'gemini') {
+            const machineryKey = getMachineryGeminiKey(stateRef.current.settings);
+            if (result.journalEntry && machineryKey) {
                 const journalText = result.journalEntry.location
                     ? `[Location: ${result.journalEntry.location}] ${result.journalEntry.summary}`
                     : result.journalEntry.summary;
-                await addMemory(stateRef.current.settings.apiKey, journalText, 'journal').catch(() => {});
+                await addMemory(machineryKey, journalText, 'journal').catch(() => {});
             }
         } catch (e) {
             console.error('[Journal RAG Seeding] Failed:', e);
@@ -152,8 +154,8 @@ export default function ChatPanel() {
      */
     useEffect(() => {
         const s = stateRef.current;
-        if (!s.settings.apiKey || memorySeededRef.current) return;
-        if (s.settings.llmProvider !== 'gemini') return; // Embeddings only available for Gemini
+        const machineryKey = getMachineryGeminiKey(s.settings);
+        if (!machineryKey || memorySeededRef.current) return;
 
         memorySeededRef.current = true; // Prevent concurrent attempts
         clearMemories();
@@ -172,7 +174,7 @@ export default function ChatPanel() {
         ];
 
         if (items.length > 0) {
-            seedMemories(s.settings.apiKey, items).catch((e) => {
+            seedMemories(machineryKey, items).catch((e) => {
                 console.error('[RAG] Memory seeding failed — will retry next mount:', e);
                 memorySeededRef.current = false; // Allow retry on next mount
             });
@@ -241,17 +243,19 @@ export default function ChatPanel() {
     const sendToLLM = async (userMessage, originalPlayerMessage, opts = {}) => {
         const s = stateRef.current;
 
-        // RAG: retrieve memories relevant to the current scene (Gemini only)
+        // RAG: retrieve memories relevant to the current scene (machinery key —
+        // embeddings are Gemini-only regardless of the DM provider).
         // Include location and combat context for better retrieval relevance
+        const machineryKey = getMachineryGeminiKey(s.settings);
         let retrievedMemories = [];
         let dramaticMemories = [];
-        if (originalPlayerMessage && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
+        if (originalPlayerMessage && machineryKey) {
             const sceneContext = [
                 originalPlayerMessage,
                 s.currentLocation && `Location: ${s.currentLocation}`,
                 s.combat?.active && `In combat with: ${s.combat.enemies.map(e => e.name).join(', ')}`,
             ].filter(Boolean).join('. ');
-            retrievedMemories = await retrieveRelevant(s.settings.apiKey, sceneContext).catch(() => []);
+            retrievedMemories = await retrieveRelevant(machineryKey, sceneContext).catch(() => []);
             dramaticMemories = curateStoryMemory({
                 memories: s.storyMemory || [],
                 query: sceneContext,
@@ -409,9 +413,9 @@ Translate the player's committed action into the single bounded combat_exchange 
         // The per-turn Scribe + narrative embedding run once in handleSend on the FINAL
         // narrated outcome, so they capture results rather than withheld setup text.
         // Skip on a setup turn (pending rolls) — those facts ride on the outcome narration.
-        if (!setupPhase && !s.combat?.active && events?.worldFacts?.length > 0 && s.settings.apiKey && s.settings.llmProvider === 'gemini') {
+        if (!setupPhase && !s.combat?.active && events?.worldFacts?.length > 0 && machineryKey) {
             for (const f of events.worldFacts) {
-                addMemory(s.settings.apiKey, f.fact, f.category || 'world_fact').catch(() => {});
+                addMemory(machineryKey, f.fact, f.category || 'world_fact').catch(() => {});
             }
         }
 
@@ -533,13 +537,13 @@ Translate the player's committed action into the single bounded combat_exchange 
                     // Ordinary combat beats are transient and the engine snapshot, not prose,
                     // owns their truth. Persist only terminal combat narration to RAG so a
                     // model wording mistake cannot become a long-lived semantic memory.
-                    if (['victory', 'defeat', 'escaped'].includes(result.terminal)
-                        && latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
+                    const machineryKey = getMachineryGeminiKey(latest.settings);
+                    if (['victory', 'defeat', 'escaped'].includes(result.terminal) && machineryKey) {
                         const loc = latest.currentLocation;
                         const narrativeText = loc
                             ? `[Location: ${loc}] ${narrative.slice(0, 500)}`
                             : narrative.slice(0, 500);
-                        addMemory(latest.settings.apiKey, narrativeText, 'narrative').catch(() => {});
+                        addMemory(machineryKey, narrativeText, 'narrative').catch(() => {});
                     }
                 }
                 runAutoSummarize();
@@ -593,12 +597,13 @@ Translate the player's committed action into the single bounded combat_exchange 
                     getState: () => stateRef.current,
                 } : null,
             }).catch(() => {});
-            if (latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
+            const machineryKey = getMachineryGeminiKey(latest.settings);
+            if (machineryKey) {
                 const loc = latest.currentLocation;
                 const narrativeText = loc
                     ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
                     : finalNarration.content.slice(0, 500);
-                addMemory(latest.settings.apiKey, narrativeText, 'narrative').catch(() => {});
+                addMemory(machineryKey, narrativeText, 'narrative').catch(() => {});
             }
         }
         runAutoSummarize();
@@ -749,12 +754,13 @@ Translate the player's committed action into the single bounded combat_exchange 
             type: 'ADD_MESSAGE',
             payload: { role: 'user', content: trimmed },
         });
-        if (stateRef.current.settings.apiKey && stateRef.current.settings.llmProvider === 'gemini') {
+        const playerMachineryKey = getMachineryGeminiKey(stateRef.current.settings);
+        if (playerMachineryKey) {
             const loc = stateRef.current.currentLocation;
             const playerText = loc
                 ? `[Location: ${loc}] ${trimmed.slice(0, 500)}`
                 : trimmed.slice(0, 500);
-            addMemory(stateRef.current.settings.apiKey, playerText, 'player').catch(() => {});
+            addMemory(playerMachineryKey, playerText, 'player').catch(() => {});
         }
 
         setIsLoading(true);
@@ -836,12 +842,13 @@ Translate the player's committed action into the single bounded combat_exchange 
                         getState: () => stateRef.current,
                     } : null,
                 }).catch(() => {});
-                if (latest.settings.apiKey && latest.settings.llmProvider === 'gemini') {
+                const machineryKey = getMachineryGeminiKey(latest.settings);
+                if (machineryKey) {
                     const loc = latest.currentLocation;
                     const narrativeText = loc
                         ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
                         : finalNarration.content.slice(0, 500);
-                    addMemory(latest.settings.apiKey, narrativeText, 'narrative').catch(() => {});
+                    addMemory(machineryKey, narrativeText, 'narrative').catch(() => {});
                 }
             }
 
@@ -900,7 +907,14 @@ Translate the player's committed action into the single bounded combat_exchange 
         setCombatNarrationRetry(value => value + 1);
     };
 
+    // Playing without the Gemini machinery (RAG, Scribe, journal, loot audit)
+    // isn't a degraded mode — it quietly rots a campaign. Both keys or no play.
     const hasApiKey = !!state.settings.apiKey;
+    const machineryReady = isMachineryReady(state.settings);
+    const readyToPlay = hasApiKey && machineryReady;
+    const missingKeyHint = !hasApiKey
+        ? 'Set your DM API key in Settings to begin your quest.'
+        : 'Set your Gemini API key in Settings — the game’s memory (Scribe, journal, RAG) requires it.';
     const awaitingCombatNarration = state.combat?.phase === COMBAT_PHASES.AWAITING_NARRATION;
     const pendingRoleplayCheck = state.pendingRoleplayCheck;
     const combatInputLocked = state.combat?.active && (
@@ -915,9 +929,9 @@ Translate the player's committed action into the single bounded combat_exchange 
                         <div className="chat-empty-icon" aria-hidden="true" />
                         <h3>Your Adventure Awaits</h3>
                         <p>
-                            {hasApiKey
+                            {readyToPlay
                                 ? 'Send a message to begin your quest. The Dungeon Master is ready.'
-                                : 'Set your API key in Settings to begin your quest.'}
+                                : missingKeyHint}
                         </p>
                     </div>
                 )}
@@ -981,12 +995,12 @@ Translate the player's committed action into the single bounded combat_exchange 
                     value={input}
                     onInput={handleInput}
                     onKeyDown={handleKeyDown}
-                    placeholder={!hasApiKey
-                        ? 'Set your API key in Settings first...'
+                    placeholder={!readyToPlay
+                        ? missingKeyHint
                         : state.combat?.active
                             ? 'Describe your combat action (e.g., attack the goblin)...'
                             : 'What do you do?'}
-                    disabled={!hasApiKey || isLoading || combatInputLocked || !!pendingRoleplayCheck}
+                    disabled={!readyToPlay || isLoading || combatInputLocked || !!pendingRoleplayCheck}
                     maxLength={4000}
                     rows={1}
                 />
@@ -998,7 +1012,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                     <button
                         className="chat-send-btn"
                         onClick={handleRetryCombatNarration}
-                        disabled={!hasApiKey}
+                        disabled={!readyToPlay}
                         title="Retry combat narration without rerolling"
                     >
                         Retry narration
@@ -1007,7 +1021,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                     <button
                         className="chat-send-btn"
                         onClick={handleSend}
-                        disabled={!input.trim() || !hasApiKey || combatInputLocked || !!pendingRoleplayCheck}
+                        disabled={!input.trim() || !readyToPlay || combatInputLocked || !!pendingRoleplayCheck}
                         title="Send message"
                     >
                         Send

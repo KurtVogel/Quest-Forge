@@ -8,18 +8,14 @@
  * free, no-auth provider (lower quality) so scene art still appears.
  */
 
+import { normalizeXaiApiKey } from './xaiKey.js';
+
 const IMAGE_CACHE = new Map();
 const IMAGE_CACHE_MAX = 10;
 
 const XAI_IMAGE_ENDPOINT = 'https://api.x.ai/v1/images/generations';
 // Recommended model as of 2026 (grok-imagine-image-pro is deprecated May 2026).
 const XAI_IMAGE_MODEL = 'grok-imagine-image-quality';
-
-function normalizeXaiApiKey(apiKey) {
-    const trimmed = apiKey?.trim();
-    if (!trimmed) return '';
-    return trimmed.startsWith('xai-') ? trimmed : `xai-${trimmed}`;
-}
 
 /**
  * Insert or update a cache entry with LRU eviction (max IMAGE_CACHE_MAX entries).

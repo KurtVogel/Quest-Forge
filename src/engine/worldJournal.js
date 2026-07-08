@@ -9,6 +9,7 @@
  */
 
 import { sendMessage } from '../llm/adapter.js';
+import { getBackgroundConfig } from '../llm/machinery.js';
 import {
     briefNpcFieldForPrompt,
     classifyNpcCandidate,
@@ -26,7 +27,6 @@ export function normalizeLocationName(loc) {
 }
 
 const SUMMARIZE_EVERY = 10; // Summarize every N new messages
-const SCRIBE_MODEL = 'gemini-2.5-flash'; // Cheap & fast — good enough for extraction
 
 const JOURNAL_SYSTEM_PROMPT = `You are a meticulous chronicler summarizing RPG game events. Given recent conversation between a player and DM, produce a JSON summary.
 
@@ -81,7 +81,8 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         return { index: lastSummarizedIndex, journalEntry: null };
     }
 
-    if (!state.settings.apiKey) return { index: lastSummarizedIndex, journalEntry: null };
+    const background = getBackgroundConfig(state.settings);
+    if (!background.apiKey) return { index: lastSummarizedIndex, journalEntry: null };
 
     try {
         // Get the unsummarized messages
@@ -92,9 +93,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             .join('\n\n');
 
         const response = await sendMessage({
-            provider: state.settings.llmProvider,
-            apiKey: state.settings.apiKey,
-            model: state.settings.llmProvider === 'gemini' ? SCRIBE_MODEL : state.settings.model,
+            ...background,
             systemPrompt: JOURNAL_SYSTEM_PROMPT,
             messageHistory: [],
             userMessage: `Summarize these recent game events:\n\n${recentMessages}`,

@@ -4,15 +4,18 @@
  */
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 
-const { sendGeminiMessage, streamGeminiMessage, sendOpenAIMessage, streamOpenAIMessage } = vi.hoisted(() => ({
+const { sendGeminiMessage, streamGeminiMessage, sendOpenAIMessage, streamOpenAIMessage, sendXaiMessage, streamXaiMessage } = vi.hoisted(() => ({
     sendGeminiMessage: vi.fn(),
     streamGeminiMessage: vi.fn(),
     sendOpenAIMessage: vi.fn(),
     streamOpenAIMessage: vi.fn(),
+    sendXaiMessage: vi.fn(),
+    streamXaiMessage: vi.fn(),
 }));
 
 vi.mock('./providers/gemini.js', () => ({ sendGeminiMessage, streamGeminiMessage }));
 vi.mock('./providers/openai.js', () => ({ sendOpenAIMessage, streamOpenAIMessage }));
+vi.mock('./providers/xai.js', () => ({ sendXaiMessage, streamXaiMessage }));
 
 const { sendMessage, streamMessage, PROVIDERS, PROVIDER_LIST } = await import('./adapter.js');
 
@@ -21,6 +24,8 @@ beforeEach(() => {
     streamGeminiMessage.mockReset();
     sendOpenAIMessage.mockReset();
     streamOpenAIMessage.mockReset();
+    sendXaiMessage.mockReset();
+    streamXaiMessage.mockReset();
 });
 
 const baseOptions = {
@@ -45,6 +50,14 @@ describe('sendMessage', () => {
         const result = await sendMessage({ ...baseOptions, provider: 'openai', model: 'gpt-4o-mini' });
         expect(result).toBe('narration');
         expect(sendOpenAIMessage).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-4o-mini' }));
+        expect(sendGeminiMessage).not.toHaveBeenCalled();
+    });
+
+    it('routes to the xai provider', async () => {
+        sendXaiMessage.mockResolvedValue('narration');
+        const result = await sendMessage({ ...baseOptions, provider: 'xai', model: 'grok-4.3' });
+        expect(result).toBe('narration');
+        expect(sendXaiMessage).toHaveBeenCalledWith(expect.objectContaining({ model: 'grok-4.3' }));
         expect(sendGeminiMessage).not.toHaveBeenCalled();
     });
 
@@ -73,6 +86,13 @@ describe('streamMessage', () => {
         const result = await streamMessage({ ...baseOptions, provider: 'openai' });
         expect(result).toBe('full response');
         expect(streamOpenAIMessage).toHaveBeenCalled();
+    });
+
+    it('routes to the xai provider', async () => {
+        streamXaiMessage.mockResolvedValue('full response');
+        const result = await streamMessage({ ...baseOptions, provider: 'xai', model: 'grok-4.3' });
+        expect(result).toBe('full response');
+        expect(streamXaiMessage).toHaveBeenCalled();
     });
 
     it('throws for an unknown provider', async () => {
@@ -126,10 +146,11 @@ describe('sendMessage retry/backoff', () => {
 });
 
 describe('PROVIDERS / PROVIDER_LIST', () => {
-    it('lists gemini and openai with at least one model each', () => {
-        expect(PROVIDER_LIST).toEqual(['gemini', 'openai']);
+    it('lists gemini, openai, and xai with at least one model each', () => {
+        expect(PROVIDER_LIST).toEqual(['gemini', 'openai', 'xai']);
         expect(PROVIDERS.gemini.models.length).toBeGreaterThan(0);
         expect(PROVIDERS.openai.models.length).toBeGreaterThan(0);
+        expect(PROVIDERS.xai.models.length).toBeGreaterThan(0);
     });
 
     it('gives every model an id and a name', () => {

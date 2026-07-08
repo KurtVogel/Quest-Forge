@@ -8,6 +8,26 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-08 · The Gemini machinery is mandatory and provider-independent; the DM narrator is swappable (Gemini/OpenAI/xAI).**
+The DM provider used to drive everything: with a non-Gemini DM, RAG silently turned off
+(embeddings gated on `llmProvider === 'gemini'`) and every background task (Scribe, journal,
+roll audits, NPC enrichment) quietly ran on the DM model at DM prices. Settled: the memory
+machinery always runs on Gemini Flash via `llm/machinery.js` (`getBackgroundConfig()` /
+`getMachineryGeminiKey()`) — the main key doubles as the machinery key when the DM is Gemini;
+any other DM provider requires a dedicated `settings.geminiApiKey` (stripped from saves like
+every key). **Playing without the machinery is blocked, not degraded** (Vesa: "like playing
+tennis without the rackets and the net — could even break a campaign"): ChatPanel disables
+input until both keys exist, with honest hints about which one is missing. Two deliberate
+carve-outs: front *generation* (`frontDirector`/`frontUpgrade`/`frontMigration`) stays on the
+DM model — it's creative invention at temp 0.7, not extraction, and should carry the DM's
+voice; and the no-key fallbacks inside `outOfCombatRollPolicy`/`detectSemanticTextRolls`
+(sync regex rules / skip) remain as unreachable-in-play safety nets. xAI DM narration is a
+near-copy of the OpenAI provider (`providers/xai.js`, OpenAI-compatible API at `api.x.ai`,
+shared `xai-` key normalization in `providers/xaiKey.js`); model IDs (`grok-4.3`,
+`grok-4.1-fast`) were web-researched 2026-07 — verify at console.x.ai if they error, and
+watch combat-intent TTFT logs (Grok 4.3 is reasoning-first). Grok's JSON-block discipline
+is unproven against `responseParser.js`: playtest and add golden fixtures for new quirks.
+
 **2026-07-05 · Appearance capture is shame-free: body proportions and intimate details are canon, and merges may never launder the record.**
 The appearance continuity system worked, but a background extraction model left to its own judgment
 will quietly bowdlerize — keep the white hair, drop the wide hips or the embarrassing anatomical

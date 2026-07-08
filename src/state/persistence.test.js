@@ -67,7 +67,7 @@ function makeGameState(overrides = {}) {
         party: [{ id: 'c1' }],
         currentLocation: 'Oakhaven',
         combat: { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
-        settings: { llmProvider: 'gemini', apiKey: 'secret-key', imageApiKey: 'xai-secret', firebaseConfig: { apiKey: 'fb-secret' } },
+        settings: { llmProvider: 'gemini', apiKey: 'secret-key', geminiApiKey: 'machinery-secret', imageApiKey: 'xai-secret', firebaseConfig: { apiKey: 'fb-secret' } },
         ...overrides,
     };
 }
@@ -85,10 +85,11 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         expect(await loadGame('never-saved')).toBeNull();
     });
 
-    it('strips secrets (apiKey, imageApiKey, firebaseConfig) from the persisted settings', async () => {
+    it('strips secrets (apiKey, geminiApiKey, imageApiKey, firebaseConfig) from the persisted settings', async () => {
         await saveGame('slot-1', makeGameState());
         const loaded = await loadGame('slot-1');
         expect(loaded.settings.apiKey).toBeUndefined();
+        expect(loaded.settings.geminiApiKey).toBeUndefined();
         expect(loaded.settings.imageApiKey).toBeUndefined();
         expect(loaded.settings.firebaseConfig).toBeUndefined();
         expect(loaded.settings.llmProvider).toBe('gemini');

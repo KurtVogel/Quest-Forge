@@ -1,4 +1,5 @@
 import { sendMessage } from '../llm/adapter.js';
+import { getBackgroundConfig } from '../llm/machinery.js';
 import { extractBalancedJson } from '../llm/utils/jsonExtractor.js';
 
 const SOCIAL_SKILLS = new Set(['persuasion', 'deception', 'intimidation', 'charisma']);
@@ -35,13 +36,11 @@ export function reviewOutsideCombatRollsSync(rolls, playerMessage) {
 }
 
 export async function reviewOutsideCombatRolls(rolls, playerMessage, dmNarrative = '', settings = null) {
+    const background = getBackgroundConfig(settings);
     // Fall back to synchronous regex-based rules if settings, API key, or inputs are missing
-    if (!settings?.apiKey || !playerMessage || !rolls || rolls.length === 0) {
+    if (!background.apiKey || !playerMessage || !rolls || rolls.length === 0) {
         return reviewOutsideCombatRollsSync(rolls, playerMessage);
     }
-
-    const SCRIBE_MODEL = 'gemini-2.5-flash';
-    const model = settings.llmProvider === 'gemini' ? SCRIBE_MODEL : settings.model;
 
     const systemPrompt = `You are a game mechanics arbiter for a tabletop RPG. Analyze a player's action, the Dungeon Master's (DM) subsequent narration, and the DM's proposed out-of-combat rolls to determine if they violate the game's core player agency rules.
 
@@ -73,9 +72,7 @@ Output ONLY the JSON, no prose outside the JSON.`;
 
     try {
         const response = await sendMessage({
-            provider: settings.llmProvider,
-            apiKey: settings.apiKey,
-            model,
+            ...background,
             systemPrompt,
             messageHistory: [],
             userMessage,

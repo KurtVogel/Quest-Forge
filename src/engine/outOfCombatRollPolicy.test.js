@@ -167,9 +167,15 @@ describe('reviewOutsideCombatRolls LLM-arbiter path', () => {
         expect(review.acceptedRolls).toEqual([roll]);
     });
 
-    it('uses the OpenAI settings model when the provider is not gemini', async () => {
+    it('runs the audit on the Gemini machinery key when the DM provider is not gemini', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({ rolls_evaluation: [{ index: 0, approved: true }] }));
-        await reviewOutsideCombatRolls([roll], 'I make my case.', 'narrative', { apiKey: 'k', llmProvider: 'openai', model: 'gpt-4o-mini' });
-        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ provider: 'openai', model: 'gpt-4o-mini' }));
+        await reviewOutsideCombatRolls([roll], 'I make my case.', 'narrative', { apiKey: 'k', geminiApiKey: 'gk', llmProvider: 'openai', model: 'gpt-4o-mini' });
+        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ provider: 'gemini', apiKey: 'gk', model: 'gemini-2.5-flash' }));
+    });
+
+    it('falls back to sync rules when a non-gemini DM has no Gemini machinery key', async () => {
+        const review = await reviewOutsideCombatRolls([roll], 'I make my case.', 'narrative', { apiKey: 'k', llmProvider: 'openai', model: 'gpt-4o-mini' });
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(review.acceptedRolls).toEqual([roll]);
     });
 });

@@ -10,14 +10,9 @@
  */
 
 import { sendMessage } from './adapter.js';
+import { getBackgroundConfig } from './machinery.js';
 import { classifyNpcCandidate, curateNpcsForPrompt } from '../engine/npcRoster.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
-
-const SCRIBE_MODEL = 'gemini-2.5-flash';
-
-function backgroundModel(settings) {
-    return settings?.llmProvider === 'gemini' ? SCRIBE_MODEL : settings?.model;
-}
 
 const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Given a DM's narrative response and the player's action that prompted it, extract any new canonical facts about the game world. Every field you output is an UNVARNISHED record: the fiction's own words and facts, never a cleaned-up, softened, or tasteful paraphrase.
 
@@ -254,13 +249,12 @@ function contradictsAuthoritativeCombat(value, authoritativeContext) {
 }
 
 export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null }) {
-    if (!settings.apiKey || !dmNarrative) return;
+    const background = getBackgroundConfig(settings);
+    if (!background.apiKey || !dmNarrative) return;
 
     try {
         const response = await sendMessage({
-            provider: settings.llmProvider,
-            apiKey: settings.apiKey,
-            model: backgroundModel(settings),
+            ...background,
             systemPrompt: lootAudit ? SCRIBE_SYSTEM_PROMPT + LOOT_AUDIT_RULES : SCRIBE_SYSTEM_PROMPT,
             temperature: 0.2, // faithful extraction — facts and loot amounts must not drift
             messageHistory: [],
@@ -406,7 +400,8 @@ Rules:
 - Keep everything compact. Omit empty arrays when nothing changes.`;
 
 export async function runNpcFrontReflection({ state, dispatch, cadence = null }) {
-    if (!state?.settings?.apiKey) return;
+    const background = getBackgroundConfig(state?.settings);
+    if (!background.apiKey) return;
     const npcs = curateNpcsForPrompt(state.npcs || [], {
         location: state.currentLocation,
         limit: 12,
@@ -433,9 +428,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
 
     try {
         const response = await sendMessage({
-            provider: state.settings.llmProvider,
-            apiKey: state.settings.apiKey,
-            model: backgroundModel(state.settings),
+            ...background,
             systemPrompt: REFLECTION_SYSTEM_PROMPT,
             temperature: 0.4, // grounded reflection with a little invention for hooks
             messageHistory: [],
@@ -518,7 +511,8 @@ export function preserveSceneSituation(situation, maxLength = 1800) {
  * @returns {Promise<string|null>} A finished image prompt, or null on failure.
  */
 export async function composeScenePrompt({ situation, character, npcs = [], combat, currentLocation, settings }) {
-    if (!settings?.apiKey) return null;
+    const background = getBackgroundConfig(settings);
+    if (!background.apiKey) return null;
 
     const lines = [];
     if (currentLocation) lines.push(`Location: ${currentLocation}`);
@@ -547,9 +541,7 @@ export async function composeScenePrompt({ situation, character, npcs = [], comb
 
     try {
         const prompt = await sendMessage({
-            provider: settings.llmProvider,
-            apiKey: settings.apiKey,
-            model: backgroundModel(settings),
+            ...background,
             systemPrompt: ART_DIRECTOR_PROMPT,
             messageHistory: [],
             userMessage: lines.join('\n'),

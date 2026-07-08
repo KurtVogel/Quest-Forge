@@ -4,14 +4,10 @@
  */
 
 import { sendMessage } from './adapter.js';
+import { getBackgroundConfig } from './machinery.js';
 import { parseJsonObjectLoose } from './utils/jsonExtractor.js';
 
-const SCRIBE_MODEL = 'gemini-2.5-flash';
 const BATCH_SIZE = 28;
-
-function backgroundModel(settings) {
-    return settings?.llmProvider === 'gemini' ? SCRIBE_MODEL : settings?.model;
-}
 
 function cleanText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
@@ -90,9 +86,7 @@ async function reviewFodderBatch(batch, settings) {
 
     const allowedIds = new Set(batch.map(npc => npc.id));
     const response = await sendMessage({
-        provider: settings.llmProvider,
-        apiKey: settings.apiKey,
-        model: backgroundModel(settings),
+        ...getBackgroundConfig(settings),
         systemPrompt: FODDER_REVIEW_SYSTEM_PROMPT,
         messageHistory: [],
         userMessage: JSON.stringify({ npcs: batch }),

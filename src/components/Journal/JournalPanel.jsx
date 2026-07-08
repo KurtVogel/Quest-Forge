@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { enrichNpcProfile, needsNpcEnrichment, normalizeCallbackHook } from '../../llm/npcEnrichment.js';
 import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
+import { isMachineryReady } from '../../llm/machinery.js';
 import { scoreNpcForPrompt } from '../../engine/npcRoster.js';
 import './Journal.css';
 
@@ -42,8 +43,8 @@ export default function JournalPanel({ isOpen, onClose }) {
     };
 
     const handleSuggestFodder = async () => {
-        if (!state.settings?.apiKey) {
-            setReviewMessage('Add your API key in Settings, then use Suggest fodder — or select entries manually.');
+        if (!isMachineryReady(state.settings)) {
+            setReviewMessage('Add your Gemini API key in Settings, then use Suggest fodder — or select entries manually.');
             return;
         }
         setReviewMessage('');
@@ -78,8 +79,8 @@ export default function JournalPanel({ isOpen, onClose }) {
     };
 
     const handleDeepen = async (npc) => {
-        if (!state.settings?.apiKey) {
-            setEnrichError('Add your API key in Settings before deepening NPC memory.');
+        if (!isMachineryReady(state.settings)) {
+            setEnrichError('Add your Gemini API key in Settings before deepening NPC memory.');
             return;
         }
         setEnrichError('');

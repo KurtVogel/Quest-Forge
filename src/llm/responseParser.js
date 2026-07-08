@@ -14,6 +14,7 @@
 
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { sendMessage } from './adapter.js';
+import { getBackgroundConfig } from './machinery.js';
 import { CLASSES } from '../data/classes.js';
 import { validateEnemyAttackBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
@@ -743,7 +744,8 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
 }
 
 export async function detectSemanticTextRolls(narrative, settings) {
-    if (!settings?.apiKey || !narrative) return null;
+    const background = getBackgroundConfig(settings);
+    if (!background.apiKey || !narrative) return null;
 
     // Cheap gate: prose that requests a roll essentially always names one of these.
     // Without it, EVERY ordinary no-roll narration pays a blocking LLM round-trip
@@ -751,9 +753,6 @@ export async function detectSemanticTextRolls(narrative, settings) {
     // rejected regex *extraction* — this only decides whether to make the semantic
     // call at all; false positives merely cost one call.)
     if (!/\b(roll|check|saving throw|save|dc\s*\d|d20)\b/i.test(narrative)) return null;
-
-    const SCRIBE_MODEL = 'gemini-2.5-flash';
-    const model = settings.llmProvider === 'gemini' ? SCRIBE_MODEL : settings.model;
 
     const systemPrompt = `You are a parser assistant for a tabletop RPG. Analyze the Dungeon Master's (DM) narrative text to determine if they requested the player to make a non-combat check or saving throw in the text (which violates the system's structured event schema).
 
@@ -780,9 +779,7 @@ Output ONLY the JSON, no prose outside the JSON.`;
 
     try {
         const response = await sendMessage({
-            provider: settings.llmProvider,
-            apiKey: settings.apiKey,
-            model,
+            ...background,
             systemPrompt,
             messageHistory: [],
             userMessage: `DM narrative: ${narrative}`,

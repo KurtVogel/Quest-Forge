@@ -4,7 +4,7 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-05 (player↔NPC relationship memory: stanceToPlayer + bondMoments, live-verified 10/10; earlier same day: scheduled strengthening audit, withheld roll-setup narration preserved)_
+_Last updated: 2026-07-08 (xAI DM provider + mandatory Gemini machinery key split)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -50,8 +50,19 @@ feels excellent in live play — casters multiply engine surface area; polish th
 - **Roleplay-check proposals** remaining fair; Scribe roll audit catching bad setups
 - Console clean; autosave intact after front-only or combat changes
 
-## Recently shipped (June 21 – July 5, 2026)
+## Recently shipped (June 21 – July 8, 2026)
 
+- **xAI (Grok) DM provider + machinery key split (2026-07-08, DECISIONS.md):** the DM narrator
+  is now swappable (Gemini / OpenAI / xAI `grok-4.3` via OpenAI-compatible `providers/xai.js`;
+  CSP + `xai-` key normalization already existed from scene art, now shared via
+  `providers/xaiKey.js`). The real work: the memory machinery (RAG embeddings, Scribe, journal,
+  roll audits, NPC enrichment/fodder review, scene-prompt composition) is decoupled from the DM
+  provider and **always runs on Gemini Flash** through `llm/machinery.js` — new
+  `settings.geminiApiKey` (stripped from saves) when the DM isn't Gemini, and **play is blocked
+  (not degraded) without it**. This also fixes the pre-existing OpenAI-DM hole where RAG silently
+  turned off and the Scribe ran at gpt-4o prices. Front generation deliberately stays on the DM
+  model. **Not yet playtested with a real xAI key** — watch for Grok JSON-block quirks (add
+  parser fixtures) and verify model IDs at console.x.ai if they error.
 - **Player↔NPC relationship memory (2026-07-05, DECISIONS.md):** live-play finding — character cards
   described an NPC's role and plot actions but nothing about her personal stance toward the *player*
   (flirtation, warmth, grudges), and "Deepen memory" only added more plot. Two durable NPC fields, both
@@ -202,7 +213,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **624** tests passing (50 files)
+- `npm test` — **658** tests passing (51 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)

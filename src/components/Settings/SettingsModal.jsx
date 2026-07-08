@@ -355,9 +355,31 @@ export default function SettingsModal() {
                                 <p className="setting-hint">
                                     {state.settings.llmProvider === 'gemini'
                                         ? 'Get a free key at aistudio.google.com'
-                                        : 'Get a key at platform.openai.com'}
+                                        : state.settings.llmProvider === 'xai'
+                                            ? 'Get a key at console.x.ai — the same kind of key as scene art below. Keys pasted without the xai- prefix are normalized automatically.'
+                                            : 'Get a key at platform.openai.com'}
                                 </p>
                             </div>
+
+                            {state.settings.llmProvider !== 'gemini' && (
+                                <div className="setting-group">
+                                    <label className="setting-label">Gemini API Key (game memory — required)</label>
+                                    <input
+                                        type="password"
+                                        className="setting-input"
+                                        value={state.settings.geminiApiKey || ''}
+                                        onChange={(e) => updateSetting('geminiApiKey', e.target.value)}
+                                        placeholder="Enter your Gemini API key..."
+                                    />
+                                    <p className="setting-hint">
+                                        The campaign machinery — long-term vector memory (RAG), the Scribe world-state
+                                        extractor, journal summaries, loot audits, and roll-policy checks — always runs
+                                        on Gemini Flash regardless of your DM provider. Playing without it would quietly
+                                        break long campaigns, so the game will not start until this key is set. Get a
+                                        free key at aistudio.google.com.
+                                    </p>
+                                </div>
+                            )}
 
                             <div className="setting-group">
                                 <label className="setting-label">Model</label>

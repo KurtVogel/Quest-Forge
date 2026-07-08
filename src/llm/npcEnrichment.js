@@ -12,13 +12,8 @@ import {
     clampNpcDossierField,
 } from '../engine/npcRoster.js';
 import { sendMessage } from './adapter.js';
+import { getBackgroundConfig } from './machinery.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
-
-const SCRIBE_MODEL = 'gemini-2.5-flash';
-
-function backgroundModel(settings) {
-    return settings?.llmProvider === 'gemini' ? SCRIBE_MODEL : settings?.model;
-}
 
 function cleanText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
@@ -172,15 +167,14 @@ export function needsNpcEnrichment(npc = {}) {
 }
 
 export async function enrichNpcProfile({ state, npc, settings }) {
-    if (!settings?.apiKey || !npc?.name) {
-        throw new Error('API key and NPC name are required to deepen memory.');
+    const background = getBackgroundConfig(settings);
+    if (!background.apiKey || !npc?.name) {
+        throw new Error('A Gemini API key and NPC name are required to deepen memory.');
     }
 
     const context = gatherNpcEnrichmentContext(state, npc);
     const response = await sendMessage({
-        provider: settings.llmProvider,
-        apiKey: settings.apiKey,
-        model: backgroundModel(settings),
+        ...background,
         systemPrompt: ENRICH_SYSTEM_PROMPT,
         messageHistory: [],
         userMessage: JSON.stringify(context, null, 2),

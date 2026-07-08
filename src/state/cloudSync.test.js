@@ -54,7 +54,7 @@ function makeGameState(overrides = {}) {
         party: [],
         currentLocation: 'Oakhaven',
         combat: { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
-        settings: { llmProvider: 'gemini', apiKey: 'secret-key', imageApiKey: 'xai-secret', firebaseConfig: { apiKey: 'fb' } },
+        settings: { llmProvider: 'gemini', apiKey: 'secret-key', geminiApiKey: 'machinery-secret', imageApiKey: 'xai-secret', firebaseConfig: { apiKey: 'fb' } },
         user: { uid: 'u1' },
         ui: { settingsOpen: true },
         ...overrides,
@@ -87,6 +87,7 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         expect(loaded.fronts).toHaveLength(1);
         expect(loaded.messages).toHaveLength(2); // summarized messages are no longer trimmed
         expect(loaded.settings.apiKey).toBeUndefined();
+        expect(loaded.settings.geminiApiKey).toBeUndefined();
         expect(loaded.user).toBeUndefined();
         expect(loaded.saveVersion).toBe(2);
     });

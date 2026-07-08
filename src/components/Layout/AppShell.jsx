@@ -10,6 +10,7 @@ import JournalPanel from '../Journal/JournalPanel.jsx';
 import SceneArt from '../SceneArt/SceneArt.jsx';
 import AmbientControls from '../AmbientAudio/AmbientControls.jsx';
 import CompanionsPanel from '../Companions/CompanionsPanel.jsx';
+import { isMachineryReady } from '../../llm/machinery.js';
 import './Layout.css';
 
 export default function AppShell() {
@@ -40,8 +41,10 @@ export default function AppShell() {
                     <span className="session-name">{state.session.name || 'New Adventure'}</span>
                 </div>
                 <div className="header-right">
-                    {!state.settings.apiKey && (
+                    {!state.settings.apiKey ? (
                         <span className="api-warning" onClick={handleOpenSettings}>Set API Key</span>
+                    ) : !isMachineryReady(state.settings) && (
+                        <span className="api-warning" onClick={handleOpenSettings}>Set Gemini Key</span>
                     )}
                     <button
                         className="header-btn desktop-only-btn"

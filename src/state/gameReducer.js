@@ -528,6 +528,7 @@ export const initialGameState = {
     settings: {
         llmProvider: 'gemini',
         apiKey: '',
+        geminiApiKey: '', // Gemini machinery key (RAG/Scribe/journal) — required when the DM provider is not Gemini
         imageApiKey: '', // xAI (Grok) key for scene-art image generation — separate from the chat key
         model: 'gemini-3.1-pro-preview',
         preset: 'classicFantasy',

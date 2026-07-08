@@ -4,10 +4,12 @@
  */
 import { sendGeminiMessage, streamGeminiMessage } from './providers/gemini.js';
 import { sendOpenAIMessage, streamOpenAIMessage } from './providers/openai.js';
+import { sendXaiMessage, streamXaiMessage } from './providers/xai.js';
 
 const providers = {
     gemini: { send: sendGeminiMessage, stream: streamGeminiMessage },
     openai: { send: sendOpenAIMessage, stream: streamOpenAIMessage },
+    xai: { send: sendXaiMessage, stream: streamXaiMessage },
 };
 
 /** Transient failures worth retrying: rate limits, server hiccups, dropped connections. */
@@ -99,6 +101,15 @@ export const PROVIDERS = {
         models: [
             { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Recommended)', description: 'Fast and affordable' },
             { id: 'gpt-4o', name: 'GPT-4o', description: 'Highest quality' },
+        ],
+    },
+    // DM narration only — the memory machinery (RAG, Scribe & co.) always runs
+    // on Gemini via the dedicated machinery key (see llm/machinery.js).
+    xai: {
+        name: 'xAI (Grok)',
+        models: [
+            { id: 'grok-4.3', name: 'Grok 4.3 (Recommended)', description: 'xAI flagship, reasoning-first — strong prose, slower to first token' },
+            { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', description: 'Budget tier; xAI aliases retired IDs forward to the current model' },
         ],
     },
 };

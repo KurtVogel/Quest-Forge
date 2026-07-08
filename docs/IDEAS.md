@@ -474,7 +474,12 @@ Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md
 
 ## Tech & Infra
 
-### xAI (Grok) as a DM provider — status: `designed` (2026-07-07)
+### xAI (Grok) as a DM provider — status: `shipped` (2026-07-08)
+Shipped same-day with one design change from the notes below: no graceful degradation —
+the Gemini machinery key is a **hard requirement** for play (see DECISIONS.md 2026-07-08).
+Still open: a real xAI-DM playtest to catch Grok JSON-block quirks (add parser fixtures)
+and to confirm the `grok-4.3` / `grok-4.1-fast` model IDs against console.x.ai.
+Original research notes:
 Sometimes xAI's tone is what a campaign wants. xAI's chat API is OpenAI-compatible
 (`https://api.x.ai/v1/chat/completions`, Bearer auth, same SSE stream format and
 `finish_reason` semantics), so the provider itself is a near-copy of
