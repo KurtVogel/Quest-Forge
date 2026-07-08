@@ -4,7 +4,11 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-08 (xAI DM provider + mandatory Gemini machinery key split)_
+_Last updated: 2026-07-08 (xAI DM provider + mandatory Gemini machinery key split; **deployed
+to https://quest-forge-99ab1.web.app same day** — 658 tests + lint green. Note: a parallel local
+implementation of the same feature was discarded in favor of the merged one, kept on branch
+`backup/local-xai-backgroundllm-variant`; see DECISIONS.md 2026-07-08 before touching provider
+routing.)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 

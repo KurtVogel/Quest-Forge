@@ -8,6 +8,19 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-08 · Parallel xAI implementations reconciled: the merged machinery.js version stands; the local backgroundLLM.js variant is discarded (kept on `backup/local-xai-backgroundllm-variant`).**
+Two sessions implemented the xAI-narrator idea the same day on different machines: the branch
+session shipped `llm/machinery.js` + `providers/xai.js`/`xaiKey.js` with hard input-blocking when
+the Gemini machinery key is missing (merged to master, entry below), while a local session built
+an uncommitted variant (`backgroundLLM.js` router + shared `providers/openaiCompat.js` core,
+graceful degradation instead of blocking). Vesa chose the merged version as-is. The variant
+survives unpushed on the backup branch for reference — do not resurrect it; if any of its pieces
+look worth porting later (shared OpenAI-compatible provider core; its model research finding that
+xAI retired all cheap tiers 2026-05, so `grok-4.1-fast` may alias to flagship pricing and
+`grok-4.20-0309-non-reasoning` is the faster-not-cheaper variant), argue them explicitly against
+the entry below first. Lesson repeated: fetch before starting feature work — this collision cost
+a full parallel implementation.
+
 **2026-07-08 · The Gemini machinery is mandatory and provider-independent; the DM narrator is swappable (Gemini/OpenAI/xAI).**
 The DM provider used to drive everything: with a non-Gemini DM, RAG silently turned off
 (embeddings gated on `llmProvider === 'gemini'`) and every background task (Scribe, journal,

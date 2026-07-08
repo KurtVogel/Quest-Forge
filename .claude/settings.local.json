@@ -75,7 +75,17 @@
       "Bash(npm list:*)",
       "WebFetch(domain:quest-forge-99ab1.web.app)",
       "WebSearch",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git fetch *)",
+      "Bash(git show *)",
+      "Read(//tmp/**)",
+      "Bash(npm.cmd install *)",
+      "Bash(grep -n \"engine\" /tmp/cov_full.txt | head -5; echo \"---\"; sed -n '1,60p' /tmp/cov_full.txt | grep -n \"src/engine\" )",
+      "Bash(sed -n '40,65p' /tmp/cov_full.txt)",
+      "Bash(awk '/^export async function detectSemanticTextRolls/,0' src/llm/responseParser.js)",
+      "Bash(awk '/^export async function reviewOutsideCombatRolls/,0' src/engine/outOfCombatRollPolicy.js)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(npm.cmd test *)"
     ]
   }
 }

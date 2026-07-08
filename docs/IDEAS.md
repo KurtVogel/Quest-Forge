@@ -129,6 +129,29 @@ alone missed immediate pre-arrival events after the 20-message window slid. Pair
 ### Campaign milestone XP tied to front/act completion — status: `idea`
 Milestone XP on resolving a front beat, complementing per-combat XP.
 
+### Campaign Chronicle — chapter-close retelling as one continuous story — status: `idea` (2026-07-06)
+When the player closes a major chapter (player-initiated "close chapter", or offered when a
+front resolves / a major quest completes), a chronicler pass writes that span of play as a
+single naturally flowing narrative — a readable saga chapter, accumulated into a "Chronicle"
+view in the Journal and exportable as markdown. Key insight: the verbatim source already
+exists — messages are never deleted (only marked summarized and pruned from the LLM window;
+chunked cloud saves keep full history), and journal entries store `messageRange`, so the
+chronicler can retell from the *actual* play messages, not just compressed summaries. For long
+chapters, draft per-journal-entry batch then stitch, or use the summary skeleton + selected
+verbatim excerpts.
+- **Strictly player-facing.** The chronicle is NEVER injected into the DM prompt or RAG — the
+  structured memory layers (facts/journal/cards/vectors) stay the retrieval format; flowing
+  prose is token-expensive, unscoreable, and detail-laundering as memory. Chronicler drift is
+  therefore cosmetic, not canon corruption.
+- Chronicler prompt must carry "unvarnished" and the shame-free canon register
+  (DECISIONS.md 2026-07-05) — a retelling is exactly the surface an LLM bowdlerizes into
+  beige heroics.
+- Pairs naturally with milestone XP on front resolution (above) as a chapter-close ceremony,
+  and with scene art (a chapter illustration).
+- Why: it's the visible payoff of the whole memory stack — the moment the player *sees* the
+  game remembered everything — and the most shareable artifact the game can produce (fits the
+  make-the-most-of-the-LLM north star and the marketing angle).
+
 ### Durable player-authored canon — status: premise `shipped` (2026-06-14), backstop `shipped` (2026-06-17)
 The memory pipeline faithfully chronicles *what the DM establishes during play* but had no
 guaranteed path for *what the player asserts as canon* (premise, backstory, the proper nouns
