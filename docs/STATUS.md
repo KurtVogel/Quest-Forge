@@ -63,6 +63,12 @@ feels excellent in live play — casters multiply engine surface area; polish th
   turned off and the Scribe ran at gpt-4o prices. Front generation deliberately stays on the DM
   model. **Not yet playtested with a real xAI key** — watch for Grok JSON-block quirks (add
   parser fixtures) and verify model IDs at console.x.ai if they error.
+- **Dice UI trim + mobile roleplay-check fix (2026-07-08):** the manual "throw a d6" buttons and
+  modifier controls are gone — every gameplay die is engine-rolled, so the panel is now a read-only
+  **Dice Log** of real rolls. The roleplay-check proposal panel could shove its Roll button (and the
+  chat input) below a phone viewport with no way to scroll to it (Vesa had to switch Android Chrome
+  to "desktop site"); it now shrinks inside the chat column (`max-height: min(65dvh, 560px)`,
+  internal scroll) with the Roll/Challenge/Change actions row sticky at its bottom, always visible.
 - **Player↔NPC relationship memory (2026-07-05, DECISIONS.md):** live-play finding — character cards
   described an NPC's role and plot actions but nothing about her personal stance toward the *player*
   (flirtation, warmth, grudges), and "Deepen memory" only added more plot. Two durable NPC fields, both

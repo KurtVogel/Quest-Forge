@@ -84,7 +84,7 @@ export default function AppShell() {
                     </aside>
 
                     <aside className="sidebar sidebar-right">
-                        <ErrorBoundary label="Dice Roller">
+                        <ErrorBoundary label="Dice Log">
                             <DicePanel />
                         </ErrorBoundary>
                         <ErrorBoundary label="Quests">
