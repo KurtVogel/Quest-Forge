@@ -53,7 +53,7 @@ const BOND_STOP_WORDS = new Set([
     'hero', 'player',
 ]);
 
-function bondMomentTokens(text) {
+function meaningfulTokens(text) {
     const normalized = String(text || '')
         .toLowerCase()
         .replace(/[^\p{L}\p{N}\s]/gu, ' ')
@@ -62,20 +62,27 @@ function bondMomentTokens(text) {
     return new Set(normalized.split(' ').filter(token => token && !BOND_STOP_WORDS.has(token)));
 }
 
-/** Same containment heuristic as the world-fact dedupe: a moment whose meaningful
- * tokens are ~all inside an existing one is a restatement, not a new beat. */
-function isNearDuplicateBondMoment(candidate, existingText) {
-    const tokens = bondMomentTokens(candidate);
-    const existing = bondMomentTokens(existingText);
+/** True when `container` holds at least `threshold` of `contained`'s meaningful tokens. */
+function coversTokens(container, contained, threshold) {
+    if (contained.size === 0) return true;
+    if (container.size === 0) return false;
+    let overlap = 0;
+    for (const token of contained) {
+        if (container.has(token)) overlap += 1;
+    }
+    return overlap / contained.size >= threshold;
+}
+
+/** Same containment heuristic as the world-fact dedupe: a text whose meaningful
+ * tokens are ~all inside an existing one is a restatement, not new material. */
+function isNearDuplicateText(candidate, existingText) {
+    const tokens = meaningfulTokens(candidate);
+    const existing = meaningfulTokens(existingText);
     if (tokens.size === 0) return true;
     if (existing.size === 0) return false;
     const small = tokens.size <= existing.size ? tokens : existing;
     const large = tokens.size <= existing.size ? existing : tokens;
-    let overlap = 0;
-    for (const token of small) {
-        if (large.has(token)) overlap += 1;
-    }
-    return overlap / small.size >= 0.9;
+    return coversTokens(large, small, 0.9);
 }
 
 export function normalizeBondMoments(list = []) {
@@ -98,10 +105,65 @@ export function normalizeBondMoments(list = []) {
 export function appendBondMoments(existing = [], additions = []) {
     let next = normalizeBondMoments(existing);
     for (const addition of normalizeBondMoments(additions)) {
-        if (next.some(moment => isNearDuplicateBondMoment(addition.text, moment.text))) continue;
+        if (next.some(moment => isNearDuplicateText(addition.text, moment.text))) continue;
         next = [...next, addition];
     }
     return next.slice(-MAX_NPC_BOND_MOMENTS);
+}
+
+/**
+ * Durable dossier prose (personality, goals, secrets, stance toward the hero)
+ * ACCUMULATES — live play showed per-turn Scribe/DM fragments ("impressed by the
+ * hero's swordplay just now") wholesale replacing a rich record and erasing the
+ * relationship's history every exchange. Deterministic merge policy:
+ * - incoming covers the known record's tokens → a complete rewrite; replace
+ * - known record covers the incoming tokens → a restatement; keep the record
+ * - otherwise genuinely new material → append chronologically
+ * When an append exceeds the cap, the OLDEST sentences fall off first so the
+ * newest canon always survives.
+ */
+export const NPC_DURABLE_TEXT_FIELDS = ['personality', 'goals', 'secrets', 'stanceToPlayer'];
+
+function dropLeadingSentence(text) {
+    const match = text.match(/^[^.!?…]*[.!?…]+["')\]]*\s+/);
+    if (!match || match[0].length >= text.length) return null;
+    return text.slice(match[0].length).trim();
+}
+
+export function mergeNpcDossierText(existingText, incomingText, max = NPC_DOSSIER_FIELD_MAX) {
+    const prev = clampNpcDossierField(existingText, max);
+    const next = clampNpcDossierField(incomingText, max);
+    if (!prev) return next;
+    if (!next) return prev;
+
+    const prevTokens = meaningfulTokens(prev);
+    const nextTokens = meaningfulTokens(next);
+    if (coversTokens(nextTokens, prevTokens, 0.85)) return next;
+    if (coversTokens(prevTokens, nextTokens, 0.85)) return prev;
+
+    let merged = /[.!?…]["')\]]*$/.test(prev) ? `${prev} ${next}` : `${prev}; ${next}`;
+    while (merged.length > max) {
+        const shorter = dropLeadingSentence(merged);
+        if (!shorter) return clampNpcDossierField(merged, max);
+        merged = shorter;
+    }
+    return merged;
+}
+
+/** Callback hooks are a rolling shortlist, not a per-turn scratchpad: new hooks
+ * join the record, restatements are dropped, and the oldest fall off at the cap. */
+export const MAX_NPC_CALLBACK_HOOKS = 5;
+
+export function appendCallbackHooks(existing = [], additions = []) {
+    const clean = list => (Array.isArray(list) ? list : [])
+        .map(hook => clampNpcDossierField(typeof hook === 'string' ? hook : hook?.text, NPC_HOOK_FIELD_MAX))
+        .filter(Boolean);
+    let next = clean(existing);
+    for (const hook of clean(additions)) {
+        if (next.some(existingHook => isNearDuplicateText(hook, existingHook))) continue;
+        next = [...next, hook];
+    }
+    return next.slice(-MAX_NPC_CALLBACK_HOOKS);
 }
 
 export function clampNpcDossierField(value, max = NPC_DOSSIER_FIELD_MAX) {

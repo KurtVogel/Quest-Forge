@@ -96,6 +96,12 @@ describe('buildSystemPrompt top-level assembly', () => {
         expect(text).toContain('## RESPONSE FORMAT');
     });
 
+    it('always includes the out-of-character table-talk rule', () => {
+        const text = prompt();
+        expect(text).toContain('## OUT-OF-CHARACTER TABLE TALK');
+        expect(text).toMatch(/never as character actions/i);
+    });
+
     it('shows the hero\'s established appearance so DM prose stays visually consistent', () => {
         const text = prompt({
             character: makeCharacter({ appearance: 'A scarred human fighter with a shaved head and a notched ear.' }),

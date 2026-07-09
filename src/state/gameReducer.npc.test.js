@@ -226,6 +226,104 @@ describe('gameReducer player-relationship memory', () => {
     });
 });
 
+describe('gameReducer NPC dossier durability (live-play finding 2026-07-09)', () => {
+    const wit = () => gameReducer(initialGameState, {
+        type: 'UPDATE_NPC',
+        payload: {
+            name: 'Wit',
+            disposition: 'friendly',
+            personality: 'Wry and quick-tongued, hides worry behind jokes, fiercely protective of her sister.',
+            goals: 'Find her sister who vanished with the northbound caravan.',
+            secrets: 'She once informed on smugglers to the harbor watch.',
+            stanceToPlayer: 'Warm and openly flirtatious with the hero; she trusts him with her worry about her sister.',
+            callbackHooks: ['Her sister\'s carved whalebone comb, still in Wit\'s pocket.'],
+        },
+    });
+
+    it('a per-turn fragment appends to personality instead of replacing the record', () => {
+        const later = gameReducer(wit(), {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', personality: 'Flustered when complimented directly.' },
+        });
+        const record = later.npcs[0].personality;
+        expect(record).toContain('fiercely protective of her sister');
+        expect(record).toContain('Flustered when complimented');
+    });
+
+    it('a current-scene stance fragment never erases the relationship history', () => {
+        const later = gameReducer(wit(), {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', stanceToPlayer: 'Impressed by the hero\'s swordplay in the alley.' },
+        });
+        const stance = later.npcs[0].stanceToPlayer;
+        expect(stance).toContain('openly flirtatious');
+        expect(stance).toContain('Impressed by the hero\'s swordplay');
+    });
+
+    it('a restatement of the known record is dropped, not duplicated', () => {
+        const later = gameReducer(wit(), {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', goals: 'Find her vanished sister from the northbound caravan.' },
+        });
+        expect(later.npcs[0].goals).toBe('Find her sister who vanished with the northbound caravan.');
+    });
+
+    it('a complete rewrite that carries the known record replaces it cleanly', () => {
+        const later = gameReducer(wit(), {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Wit',
+                goals: 'Find her sister who vanished with the northbound caravan, and now also repay the hero\'s help.',
+            },
+        });
+        expect(later.npcs[0].goals).toBe('Find her sister who vanished with the northbound caravan, and now also repay the hero\'s help.');
+    });
+
+    it('secrets accumulate across turns', () => {
+        const later = gameReducer(wit(), {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', secrets: 'She keeps a stolen customs ledger under the floorboard.' },
+        });
+        const secrets = later.npcs[0].secrets;
+        expect(secrets).toContain('informed on smugglers');
+        expect(secrets).toContain('customs ledger');
+    });
+
+    it('callback hooks accumulate with near-duplicate rejection and a cap', () => {
+        let state = wit();
+        state = gameReducer(state, {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', callbackHooks: ['The carved whalebone comb of her sister, still in Wit\'s pocket.'] },
+        });
+        expect(state.npcs[0].callbackHooks).toHaveLength(1);
+        state = gameReducer(state, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Wit',
+                callbackHooks: [
+                    'The harbor watch sergeant still owes Wit a favor.',
+                    'A northbound caravan master recognized the sister\'s description.',
+                ],
+            },
+        });
+        expect(state.npcs[0].callbackHooks).toHaveLength(3);
+        state = gameReducer(state, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Wit',
+                callbackHooks: [
+                    'Wit hums an old lighthouse song when nervous.',
+                    'The smugglers she betrayed are back in port.',
+                    'Her rent on the loft over the chandlery is overdue.',
+                ],
+            },
+        });
+        expect(state.npcs[0].callbackHooks).toHaveLength(5);
+        // Oldest hook fell off; the newest canon survived.
+        expect(state.npcs[0].callbackHooks.at(-1)).toContain('chandlery');
+    });
+});
+
 describe('gameReducer NPC archive/migration actions', () => {
     it('ARCHIVE_NPC demotes a single NPC to an archived creature and unpins it', () => {
         const state = {

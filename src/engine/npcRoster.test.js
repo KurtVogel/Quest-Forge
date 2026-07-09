@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     appendBondMoments,
+    appendCallbackHooks,
     blocksFodderArchive,
     briefNpcFieldForPrompt,
     buildStoryMemoryPromotion,
@@ -13,6 +14,8 @@ import {
     listArchivableFodder,
     locationMatchesPlace,
     MAX_NPC_BOND_MOMENTS,
+    MAX_NPC_CALLBACK_HOOKS,
+    mergeNpcDossierText,
     migrateLegacyNpc,
     normalizeBondMoments,
     scoreNpcForPrompt,
@@ -278,5 +281,61 @@ describe('npcRoster classification', () => {
         expect(namesMatch('Magister Galdric', 'Galdric')).toBe(true);
         expect(namesMatch('John Smith', 'Jane Smith')).toBe(false);
         expect(namesMatch('Lannis', 'Lannis')).toBe(true);
+    });
+});
+
+describe('mergeNpcDossierText', () => {
+    const record = 'Wry and quick-tongued, hides worry behind jokes, fiercely protective of her sister.';
+
+    it('passes through when only one side exists', () => {
+        expect(mergeNpcDossierText('', 'New trait.')).toBe('New trait.');
+        expect(mergeNpcDossierText(record, '')).toBe(record);
+        expect(mergeNpcDossierText(null, null)).toBe('');
+    });
+
+    it('appends a genuinely new fragment after the known record', () => {
+        const merged = mergeNpcDossierText(record, 'Flustered when complimented directly.');
+        expect(merged.startsWith(record)).toBe(true);
+        expect(merged).toContain('Flustered when complimented directly.');
+    });
+
+    it('drops a reworded restatement of the record', () => {
+        expect(mergeNpcDossierText(record, 'Quick-tongued and wry, protective of her sister.')).toBe(record);
+    });
+
+    it('accepts a complete rewrite that carries the record', () => {
+        const rewrite = `${record.slice(0, -1)}, and lately unable to hide that worry from the hero.`;
+        expect(mergeNpcDossierText(record, rewrite)).toBe(rewrite);
+    });
+
+    it('drops the OLDEST sentences first when an append overflows the cap', () => {
+        const oldest = 'She grew up on the lighthouse rock and hates deep water.';
+        const kept = 'She informed on the smugglers and still watches the harbor for their return.';
+        const incoming = 'Now she owes the hero her life after the fire at the chandlery.';
+        const merged = mergeNpcDossierText(`${oldest} ${kept}`, incoming, 130);
+        expect(merged.length).toBeLessThanOrEqual(130);
+        expect(merged).not.toContain('lighthouse rock');
+        expect(merged).toContain('owes the hero her life');
+    });
+});
+
+describe('appendCallbackHooks', () => {
+    it('accumulates hooks, rejects restatements, and enforces the cap', () => {
+        const first = appendCallbackHooks([], ['The carved whalebone comb, still in her pocket.']);
+        expect(first).toHaveLength(1);
+
+        const withDup = appendCallbackHooks(first, ['The whalebone comb, carved, still in her pocket.']);
+        expect(withDup).toHaveLength(1);
+
+        const many = appendCallbackHooks(withDup, [
+            'The harbor sergeant owes her a favor.',
+            'A caravan master recognized her sister.',
+            'She hums a lighthouse song when nervous.',
+            'The smugglers she betrayed are back in port.',
+            'Her rent over the chandlery is overdue.',
+        ]);
+        expect(many).toHaveLength(MAX_NPC_CALLBACK_HOOKS);
+        expect(many.at(-1)).toContain('chandlery');
+        expect(many).not.toContain('The carved whalebone comb, still in her pocket.');
     });
 });

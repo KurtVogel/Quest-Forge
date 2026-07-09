@@ -13,13 +13,16 @@ import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeF
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
 import {
     appendBondMoments,
+    appendCallbackHooks,
     buildStoryMemoryPromotion,
     clampNpcDossierField,
     classifyNpcCandidate,
     listArchivableFodder,
+    mergeNpcDossierText,
     migrateLegacyNpc,
     normalizeNpcRecord,
     namesMatch,
+    NPC_DURABLE_TEXT_FIELDS,
 } from '../engine/npcRoster.js';
 import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
 import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
@@ -708,6 +711,18 @@ function upsertNpc(npcs, payload) {
         if (bondAdditions.length > 0) {
             update.bondMoments = appendBondMoments(existing.bondMoments, bondAdditions);
         }
+        // Durable dossier prose accumulates: a per-turn fragment appends to the
+        // record, a restatement is dropped, and only a complete rewrite that carries
+        // the known record may replace it. The immediate scene can never erase an
+        // NPC's personality, goals, secrets, or their history with the hero.
+        for (const field of NPC_DURABLE_TEXT_FIELDS) {
+            if (update[field]) {
+                update[field] = mergeNpcDossierText(existing[field], update[field]);
+            }
+        }
+        if (update.callbackHooks) {
+            update.callbackHooks = appendCallbackHooks(existing.callbackHooks, update.callbackHooks);
+        }
         const nameToKeep = (update.name && update.name.length > (existing.name || '').length) ? update.name : existing.name;
         const merged = normalizeNpcRecord({
             ...existing,
@@ -725,6 +740,9 @@ function upsertNpc(npcs, payload) {
     if (!payload.name || !classified.allowRoster) return npcs;
     if (bondAdditions.length > 0) {
         update.bondMoments = appendBondMoments([], bondAdditions);
+    }
+    if (update.callbackHooks) {
+        update.callbackHooks = appendCallbackHooks([], update.callbackHooks);
     }
     return [...npcs, normalizeNpcRecord({
         id: `npc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,

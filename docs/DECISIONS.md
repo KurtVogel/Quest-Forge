@@ -8,6 +8,44 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-09 · Out-of-character table talk is a first-class response mode, enforced client-side — never provider goodwill.**
+First live Grok-DM playtest: "DM, ..." and "OOC: DM, ..." messages were steamrolled into scene
+narration. Gemini had only ever handled these because it breaks character graciously on its own —
+there was zero OOC handling in the codebase. Settled: `llm/tableTalk.js` owns a deterministic
+prefix detector (`OOC:`, `(OOC)`, `[ooc]`, `/ooc`, `DM,`/`GM:`/`Dungeon Master:` at message
+start) plus two prompt contracts — a standing `## OUT-OF-CHARACTER TABLE TALK` rule in every
+system prompt (best-effort coverage for unprefixed meta questions) and a
+`## CURRENT RESPONSE MODE — OUT-OF-CHARACTER TABLE TALK` block appended on detected turns
+(mirrors the combat-intent-only mode). On a detected table-talk turn the world is paused:
+the message never enters the combat-intent machine (an OOC question during combat costs
+nothing and stays in `awaiting_player`), parsed events are force-nulled (a disobedient DM
+cannot mutate state, request rolls, or grant loot from meta chat), and the exchange is kept
+out of memory entirely — no player/narrative RAG embeds, no Scribe extraction (canonizing
+table talk as fiction would rot the record). The DM may recap and adjust tone/pacing but is
+told to never reveal hidden state (fronts, secret motives, private notes).
+
+**2026-07-09 · Durable NPC dossier prose merges engine-side; a turn's fragment can never erase the record.**
+Live-play finding (first Grok campaign): almost everything on an NPC's character card was
+replaced by the hero's immediate, current actions each exchange — personality, goals, stance
+churned into "impressed by the swordplay just now". Root cause: `upsertNpc` merged
+`{...existing, ...update}`, so any non-blank field wholesale replaced the stored value; only
+appearance/stance had a *prompt-level* merge contract (2026-07-05), which fragments from a less
+compliant DM (or a Scribe miss) bypassed entirely. Settled: the engine owns the merge, matching
+the project's "engine owns reliability" split. `mergeNpcDossierText` in `npcRoster.js` applies
+token-containment policy to `personality`, `goals`, `secrets`, and `stanceToPlayer`
+(`NPC_DURABLE_TEXT_FIELDS`): an incoming text covering ~85% of the record's meaningful tokens is
+a complete rewrite and replaces; a record covering the incoming tokens makes it a restatement and
+drops it; anything else is genuinely new and appends chronologically, with the OLDEST sentences
+falling off first when the 600-char cap overflows (newest canon always survives).
+`callbackHooks` became a rolling shortlist (`appendCallbackHooks`: near-duplicate rejection,
+cap 5, oldest out) instead of a per-turn wholesale replace. Deliberately NOT merged this way:
+`appearance` (its prompt contract explicitly supports dropping details on haircut/disguise/wound
+— an engine append would resurrect the old look), and `lastNotes`/`agenda`/
+`relationshipTension`/`privateNotes`/`basedIn`/`lastLocation`, which are current-state by design.
+The Scribe's KNOWN APPEARANCES / KNOWN STANCES complete-merge contracts stay — a compliant
+complete rewrite passes the containment check and still replaces cleanly; the engine is the
+backstop, not a replacement for the contract.
+
 **2026-07-08 · Parallel xAI implementations reconciled: the merged machinery.js version stands; the local backgroundLLM.js variant is discarded (kept on `backup/local-xai-backgroundllm-variant`).**
 Two sessions implemented the xAI-narrator idea the same day on different machines: the branch
 session shipped `llm/machinery.js` + `providers/xai.js`/`xaiKey.js` with hard input-blocking when
