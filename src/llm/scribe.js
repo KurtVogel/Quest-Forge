@@ -96,7 +96,24 @@ Loot audit rules:
 - Never report offers, prices, rewards merely promised, goods only seen or described, another character's possessions, or attempts/intentions.
 - Exact amounts only. If the narrative gives no specific number ("a handful of coins"), omit that coin field entirely — never estimate.
 - Purchases and sales are engine transactions handled elsewhere; never report coins or goods exchanged in a purchase or sale.
+- The HERO'S CURRENT INVENTORY line lists what the hero already owns. Using, drawing, lighting, striking, wearing, or retrieving an owned item is NOT an acquisition — "she takes out her flint and steel and strikes a spark" grants nothing. Report an item the hero already owns ONLY when the narrative explicitly completes acquiring an ADDITIONAL copy (a second rope, another potion).
 - When in doubt, omit. Omit "missing_loot" entirely when nothing is missing.`;
+
+/** Compact owned-inventory summary so the audit can tell "using" from "acquiring".
+ * Live Grok finding 2026-07-09: "takes out her flint and steel" read as a completed
+ * take and re-granted gear the hero already owned. */
+function describeOwnedInventory(state) {
+    const summary = (state?.inventory || [])
+        .map(item => {
+            const name = String(item?.name || '').trim();
+            if (!name) return null;
+            const qty = Number.isFinite(item?.quantity) && item.quantity > 1 ? ` x${item.quantity}` : '';
+            return `${name}${qty}`;
+        })
+        .filter(Boolean)
+        .join('; ');
+    return summary ? summary.slice(0, 800) : null;
+}
 
 /** Compact human-readable summary of the loot-relevant events the engine applied. */
 function describeAppliedLoot(events) {
@@ -252,6 +269,10 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
 
+    const ownedInventory = (lootAudit && typeof lootAudit.getState === 'function')
+        ? describeOwnedInventory(lootAudit.getState())
+        : null;
+
     try {
         const response = await sendMessage({
             ...background,
@@ -272,6 +293,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     : null,
                 lootAudit
                     ? `EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN (anything listed here is NOT missing): ${describeAppliedLoot(lootAudit.appliedEvents)}`
+                    : null,
+                ownedInventory
+                    ? `HERO'S CURRENT INVENTORY (already owned — using, drawing, or lighting these is NOT an acquisition): ${ownedInventory}`
                     : null,
             ].filter(Boolean).join('\n\n'),
         });

@@ -445,6 +445,49 @@ describe('Scribe loot persistence audit', () => {
         expect(sendMessage.mock.calls[0][0].systemPrompt).not.toContain('LOOT PERSISTENCE AUDIT');
     });
 
+    it('tells the audit what the hero already owns so using gear is never re-granted', async () => {
+        sendMessage.mockResolvedValue(scribeResponse());
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I light a fire for the night.',
+            dmNarrative: 'You take out your flint and steel and strike a spark into the kindling.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                getState: () => ({
+                    appliedLootSourceIds: [],
+                    inventory: [
+                        { name: 'Flint and Steel', quantity: 1 },
+                        { name: 'Rations (1 day)', quantity: 3 },
+                        { name: '', quantity: 2 },
+                    ],
+                }),
+            }),
+        });
+
+        const call = sendMessage.mock.calls[0][0];
+        expect(call.systemPrompt).toContain('NOT an acquisition');
+        expect(call.userMessage).toContain("HERO'S CURRENT INVENTORY");
+        expect(call.userMessage).toContain('Flint and Steel');
+        expect(call.userMessage).toContain('Rations (1 day) x3');
+    });
+
+    it('omits the inventory line when the hero owns nothing', async () => {
+        sendMessage.mockResolvedValue(scribeResponse());
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I search the tomb.',
+            dmNarrative: 'Dust and bones.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit(),
+        });
+
+        expect(sendMessage.mock.calls[0][0].userMessage).not.toContain("HERO'S CURRENT INVENTORY");
+    });
+
     it('grants missing coins and items once, claims the source, and announces it', async () => {
         sendMessage.mockResolvedValue(scribeResponse({
             gold: 23,

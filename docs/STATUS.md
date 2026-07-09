@@ -4,10 +4,11 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-09 (first real Grok-DM playtest findings fixed: OOC table talk is now a
-first-class response mode, and durable NPC dossier fields merge engine-side so a turn's fragment
-can never erase an NPC's personality/history — see DECISIONS.md 2026-07-09 ×2. 694 tests + lint
-green, on branch `claude/grok-narrator-ooc-chat-zfmmwv`.)_
+_Last updated: 2026-07-09 (first real Grok-DM playtest findings fixed and merged: OOC table talk
+is now a first-class response mode, durable NPC dossier fields merge engine-side, and — from
+continued live play — using an owned item can no longer be re-granted as loot (inverse economy
+rule for the DM + the Scribe loot audit now receives the hero's current inventory). See
+DECISIONS.md 2026-07-09 ×2. 697 tests + lint green.)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -67,6 +68,12 @@ feels excellent in live play — casters multiply engine surface area; polish th
   complete rewrite replaces; cap drops oldest sentences first) and `callbackHooks` is a capped
   rolling shortlist. Appearance keeps its prompt-contract replace (haircut/disguise must be able
   to drop details); `lastNotes`/`agenda`/`tension`/`privateNotes` stay current-state by design.
+  **Same-day follow-up from continued live play:** Grok re-granted the hero's own flint and steel
+  when she *used* it (owned items duplicated). The ECONOMY prompt gains the inverse rule
+  (items_found is ONLY for items newly entering possession; using/drawing/lighting owned gear
+  grants nothing), and the Scribe loot audit now receives the HERO'S CURRENT INVENTORY with a
+  matching owned-items-are-not-acquisitions rule, so neither granting path can duplicate gear the
+  hero merely handles.
 - **xAI (Grok) DM provider + machinery key split (2026-07-08, DECISIONS.md):** the DM narrator
   is now swappable (Gemini / OpenAI / xAI `grok-4.3` via OpenAI-compatible `providers/xai.js`;
   CSP + `xai-` key normalization already existed from scene art, now shared via

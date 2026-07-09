@@ -502,6 +502,33 @@ Shipped same-day with one design change from the notes below: no graceful degrad
 the Gemini machinery key is a **hard requirement** for play (see DECISIONS.md 2026-07-08).
 Still open: a real xAI-DM playtest to catch Grok JSON-block quirks (add parser fixtures)
 and to confirm the `grok-4.3` / `grok-4.1-fast` model IDs against console.x.ai.
+
+**First live playtest observations (Vesa, 2026-07-09 — deliberately NOT acted on yet; could
+be model version/settings, don't over-fit the shared prompt to one provider):**
+- Grok works as narrator and handles explicit adult scenes Gemini would refuse — for some
+  campaigns that IS the reason to pick it.
+- Overall DM quality clearly below Gemini ("Gemini was almost perfect in these").
+- **Narration often very short.** The pacing rules ask for brevity (1-2 short paragraphs,
+  leave space for the player) — Grok may be over-obeying where Gemini calibrates. If it
+  persists, candidates: per-provider narration-length hint, temperature check in
+  `providers/xai.js`, or trying another model ID. Not fixed by design — gather more play first.
+- The flint-and-steel duplicate looked like a Grok bug but the screenshots pin it on the
+  **Scribe loot audit** (Gemini Flash) misreading Grok's "you take out your flint and steel"
+  phrasing as an acquisition — fixed provider-neutrally same day (owned-inventory context).
+- **Combat went surprisingly well** — the engine-owned exchange machine held up with Grok
+  intents; no malformed-envelope rejections reported. One miss: the party flanked a foe from
+  all sides and Grok never granted `situational_ruling` advantage. The rule is deliberately
+  conservative ("the player's claim alone does not make the reason true") and Grok declines
+  discretionary calls it isn't pushed to make — same temperament as the short narration.
+  Candidate provider-neutral nudge if it persists: "a lone foe genuinely surrounded across
+  established turns IS a supported flank — grant it." Player-side workaround today: state
+  the established flank explicitly in the committed action, or impose `prone` via a Check
+  slot for engine-owned advantage.
+- Next: extensive AI-driven provider-comparison playtest (Vesa, planned 2026-07-10). Note
+  the eval harness (`eval:combat`, `eval:memory`) currently speaks Gemini/OpenAI only — xAI
+  support would need adding if the comparison should run scripted rather than by hand, and
+  the deployed site must carry the 2026-07-09 fixes first or the comparison inherits
+  known-fixed bugs (loot re-grant, OOC steamrolling).
 Original research notes:
 Sometimes xAI's tone is what a campaign wants. xAI's chat API is OpenAI-compatible
 (`https://api.x.ai/v1/chat/completions`, Bearer auth, same SSE stream format and
