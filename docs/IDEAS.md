@@ -502,6 +502,21 @@ Shipped same-day with one design change from the notes below: no graceful degrad
 the Gemini machinery key is a **hard requirement** for play (see DECISIONS.md 2026-07-08).
 Still open: a real xAI-DM playtest to catch Grok JSON-block quirks (add parser fixtures)
 and to confirm the `grok-4.3` / `grok-4.1-fast` model IDs against console.x.ai.
+
+**First live playtest observations (Vesa, 2026-07-09 — deliberately NOT acted on yet; could
+be model version/settings, don't over-fit the shared prompt to one provider):**
+- Grok works as narrator and handles explicit adult scenes Gemini would refuse — for some
+  campaigns that IS the reason to pick it.
+- Overall DM quality clearly below Gemini ("Gemini was almost perfect in these").
+- **Narration often very short.** The pacing rules ask for brevity (1-2 short paragraphs,
+  leave space for the player) — Grok may be over-obeying where Gemini calibrates. If it
+  persists, candidates: per-provider narration-length hint, temperature check in
+  `providers/xai.js`, or trying another model ID. Not fixed by design — gather more play first.
+- The flint-and-steel duplicate looked like a Grok bug but the screenshots pin it on the
+  **Scribe loot audit** (Gemini Flash) misreading Grok's "you take out your flint and steel"
+  phrasing as an acquisition — fixed provider-neutrally same day (owned-inventory context).
+- Combat not yet reached in play; watch for malformed `combat_exchange` envelopes
+  (visible rejection messages) and add parser fixtures from real failures.
 Original research notes:
 Sometimes xAI's tone is what a campaign wants. xAI's chat API is OpenAI-compatible
 (`https://api.x.ai/v1/chat/completions`, Bearer auth, same SSE stream format and
