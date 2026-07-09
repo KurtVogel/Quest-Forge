@@ -102,6 +102,12 @@ describe('buildSystemPrompt top-level assembly', () => {
         expect(text).toMatch(/never as character actions/i);
     });
 
+    it('forbids re-granting items the hero already owns and merely uses', () => {
+        const text = prompt();
+        expect(text).toContain('items_found is ONLY for items NEWLY entering the hero\'s possession');
+        expect(text).toMatch(/flint and steel, torch, or rope grants NOTHING/i);
+    });
+
     it('shows the hero\'s established appearance so DM prose stays visually consistent', () => {
         const text = prompt({
             character: makeCharacter({ appearance: 'A scarred human fighter with a shaved head and a notched ear.' }),
