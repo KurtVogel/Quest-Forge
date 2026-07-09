@@ -4,11 +4,10 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-08 (xAI DM provider + mandatory Gemini machinery key split; **deployed
-to https://quest-forge-99ab1.web.app same day** — 658 tests + lint green. Note: a parallel local
-implementation of the same feature was discarded in favor of the merged one, kept on branch
-`backup/local-xai-backgroundllm-variant`; see DECISIONS.md 2026-07-08 before touching provider
-routing.)_
+_Last updated: 2026-07-09 (first real Grok-DM playtest findings fixed: OOC table talk is now a
+first-class response mode, and durable NPC dossier fields merge engine-side so a turn's fragment
+can never erase an NPC's personality/history — see DECISIONS.md 2026-07-09 ×2. 694 tests + lint
+green, on branch `claude/grok-narrator-ooc-chat-zfmmwv`.)_
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -54,8 +53,20 @@ feels excellent in live play — casters multiply engine surface area; polish th
 - **Roleplay-check proposals** remaining fair; Scribe roll audit catching bad setups
 - Console clean; autosave intact after front-only or combat changes
 
-## Recently shipped (June 21 – July 8, 2026)
+## Recently shipped (June 21 – July 9, 2026)
 
+- **OOC table talk + NPC dossier durability (2026-07-09, DECISIONS.md ×2):** first real
+  Grok-DM playtest confirmed xAI works as narrator and surfaced two fixes. (1) "DM, ..." /
+  "OOC: ..." messages got steamrolled into scene prose — there was NO OOC handling anywhere;
+  Gemini just breaks character graciously. New `llm/tableTalk.js`: deterministic prefix
+  detector + standing DM rule + per-turn response-mode block; detected table-talk turns pause
+  the world (no combat intent, events force-nulled, no RAG embeds, no Scribe) and hidden DM
+  state stays hidden. (2) NPC character cards were being rewritten by the immediate scene each
+  exchange: `upsertNpc` wholesale-replaced any supplied field. Now `personality`/`goals`/
+  `secrets`/`stanceToPlayer` merge via token containment (fragment appends, restatement drops,
+  complete rewrite replaces; cap drops oldest sentences first) and `callbackHooks` is a capped
+  rolling shortlist. Appearance keeps its prompt-contract replace (haircut/disguise must be able
+  to drop details); `lastNotes`/`agenda`/`tension`/`privateNotes` stay current-state by design.
 - **xAI (Grok) DM provider + machinery key split (2026-07-08, DECISIONS.md):** the DM narrator
   is now swappable (Gemini / OpenAI / xAI `grok-4.3` via OpenAI-compatible `providers/xai.js`;
   CSP + `xai-` key normalization already existed from scene art, now shared via
@@ -65,8 +76,9 @@ feels excellent in live play — casters multiply engine surface area; polish th
   `settings.geminiApiKey` (stripped from saves) when the DM isn't Gemini, and **play is blocked
   (not degraded) without it**. This also fixes the pre-existing OpenAI-DM hole where RAG silently
   turned off and the Scribe ran at gpt-4o prices. Front generation deliberately stays on the DM
-  model. **Not yet playtested with a real xAI key** — watch for Grok JSON-block quirks (add
-  parser fixtures) and verify model IDs at console.x.ai if they error.
+  model. **Live-verified 2026-07-09 with a real xAI key: Grok works as narrator.** Playtest
+  findings (OOC chat ignored, NPC card churn) fixed same day — see the entry above. Still
+  watch for Grok JSON-block quirks (add parser fixtures).
 - **Dice UI trim + mobile roleplay-check fix (2026-07-08):** the manual "throw a d6" buttons and
   modifier controls are gone — every gameplay die is engine-rolled, so the panel is now a read-only
   **Dice Log** of real rolls. The roleplay-check proposal panel could shove its Roll button (and the
@@ -223,7 +235,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **658** tests passing (51 files)
+- `npm test` — **694** tests passing (52 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)
