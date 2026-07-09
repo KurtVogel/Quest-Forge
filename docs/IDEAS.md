@@ -515,8 +515,20 @@ be model version/settings, don't over-fit the shared prompt to one provider):**
 - The flint-and-steel duplicate looked like a Grok bug but the screenshots pin it on the
   **Scribe loot audit** (Gemini Flash) misreading Grok's "you take out your flint and steel"
   phrasing as an acquisition — fixed provider-neutrally same day (owned-inventory context).
-- Combat not yet reached in play; watch for malformed `combat_exchange` envelopes
-  (visible rejection messages) and add parser fixtures from real failures.
+- **Combat went surprisingly well** — the engine-owned exchange machine held up with Grok
+  intents; no malformed-envelope rejections reported. One miss: the party flanked a foe from
+  all sides and Grok never granted `situational_ruling` advantage. The rule is deliberately
+  conservative ("the player's claim alone does not make the reason true") and Grok declines
+  discretionary calls it isn't pushed to make — same temperament as the short narration.
+  Candidate provider-neutral nudge if it persists: "a lone foe genuinely surrounded across
+  established turns IS a supported flank — grant it." Player-side workaround today: state
+  the established flank explicitly in the committed action, or impose `prone` via a Check
+  slot for engine-owned advantage.
+- Next: extensive AI-driven provider-comparison playtest (Vesa, planned 2026-07-10). Note
+  the eval harness (`eval:combat`, `eval:memory`) currently speaks Gemini/OpenAI only — xAI
+  support would need adding if the comparison should run scripted rather than by hand, and
+  the deployed site must carry the 2026-07-09 fixes first or the comparison inherits
+  known-fixed bugs (loot re-grant, OOC steamrolling).
 Original research notes:
 Sometimes xAI's tone is what a campaign wants. xAI's chat API is OpenAI-compatible
 (`https://api.x.ai/v1/chat/completions`, Bearer auth, same SSE stream format and
