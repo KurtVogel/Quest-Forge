@@ -8,6 +8,7 @@ import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '.
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownStances, runScribe } from '../../llm/scribe.js';
+import { isTableTalkMessage, TABLE_TALK_RESPONSE_MODE } from '../../llm/tableTalk.js';
 import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { curateStoryMemory } from '../../engine/storyMemory.js';
@@ -272,10 +273,15 @@ export default function ChatPanel() {
         }
 
         const baseSystemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories);
-        const systemPrompt = opts.combatIntentOnly
-            ? `${baseSystemPrompt}\n\n## CURRENT RESPONSE MODE — COMBAT INTENT ONLY
-Translate the player's committed action into the single bounded combat_exchange required by the live combat rules. Return ONLY the trailing fenced JSON event block: no narrative, setup, outcome, commentary, or prose outside the JSON. Keep descriptions brief. The engine will resolve mechanics and make a separate narration-only request from the authoritative result.`
-            : baseSystemPrompt;
+        let systemPrompt = baseSystemPrompt;
+        if (opts.combatIntentOnly) {
+            systemPrompt = `${baseSystemPrompt}\n\n## CURRENT RESPONSE MODE — COMBAT INTENT ONLY
+Translate the player's committed action into the single bounded combat_exchange required by the live combat rules. Return ONLY the trailing fenced JSON event block: no narrative, setup, outcome, commentary, or prose outside the JSON. Keep descriptions brief. The engine will resolve mechanics and make a separate narration-only request from the authoritative result.`;
+        } else if (opts.tableTalk) {
+            // Deterministic OOC contract: some DM providers (Grok in live play) never
+            // break character on their own and steamroll "DM, ..." into scene prose.
+            systemPrompt = `${baseSystemPrompt}\n\n${TABLE_TALK_RESPONSE_MODE}`;
+        }
         const messageHistory = buildMessageHistory();
 
         abortControllerRef.current = new AbortController();
@@ -314,11 +320,13 @@ Translate the player's committed action into the single bounded combat_exchange 
 
         const parsed = parseResponse(fullResponse);
         const narrative = parsed.narrative;
-        let events = opts.narrationOnly ? null : parsed.events;
+        // Table talk pauses the world: whatever a disobedient DM appends, no events
+        // exist on an OOC turn — no rolls, loot, quests, or NPC/state mutations.
+        let events = (opts.narrationOnly || opts.tableTalk) ? null : parsed.events;
         opts.onNarrative?.(narrative);
 
         // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text
-        if (!opts.narrationOnly && (!events || !events.requestedRolls?.length) && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
+        if (!opts.narrationOnly && !opts.tableTalk && (!events || !events.requestedRolls?.length) && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
             const semanticRolls = await detectSemanticTextRolls(narrative, s.settings);
             if (semanticRolls && semanticRolls.length > 0) {
                 console.warn('[ChatPanel] Scribe detected text-based rolls semantically:', semanticRolls);
@@ -740,7 +748,12 @@ Translate the player's committed action into the single bounded combat_exchange 
         const trimmed = input.trim();
         if (!trimmed || isLoading) return;
 
-        const startedCombatIntent = stateRef.current.combat?.active
+        // Explicit OOC table talk ("OOC: ...", "DM, ...") is a question to the DM,
+        // never a character action: it must not enter the combat-intent machine,
+        // seed memory, or run the Scribe — the world is paused for one exchange.
+        const tableTalkTurn = isTableTalkMessage(trimmed);
+        const startedCombatIntent = !tableTalkTurn
+            && stateRef.current.combat?.active
             && stateRef.current.combat.phase === COMBAT_PHASES.AWAITING_PLAYER;
         if (startedCombatIntent) dispatch({ type: 'BEGIN_COMBAT_INTENT' });
 
@@ -755,7 +768,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             payload: { role: 'user', content: trimmed },
         });
         const playerMachineryKey = getMachineryGeminiKey(stateRef.current.settings);
-        if (playerMachineryKey) {
+        if (playerMachineryKey && !tableTalkTurn) {
             const loc = stateRef.current.currentLocation;
             const playerText = loc
                 ? `[Location: ${loc}] ${trimmed.slice(0, 500)}`
@@ -765,12 +778,13 @@ Translate the player's committed action into the single bounded combat_exchange 
 
         setIsLoading(true);
         setStreamingMessage('');
-        setLoadingStatus(startedCombatIntent ? 'Interpreting combat action' : '');
+        setLoadingStatus(startedCombatIntent ? 'Interpreting combat action' : (tableTalkTurn ? 'Table talk with the DM' : ''));
 
         try {
             let dmNarrative = '';
             const events = await sendToLLM(trimmed, trimmed, {
                 combatIntentOnly: startedCombatIntent,
+                tableTalk: tableTalkTurn,
                 onNarrative: text => { dmNarrative = text; },
             });
 
@@ -823,7 +837,9 @@ Translate the player's committed action into the single bounded combat_exchange 
             const waitsForResolution = !!events?.combatExchange
                 || combatStartedNow
                 || !!events?.requestedRolls?.length;
-            const finalNarration = waitsForResolution ? null : [...latest.messages].reverse()
+            // An OOC exchange is meta conversation, not fiction: extracting facts,
+            // NPC updates, or memories from it would canonize table talk.
+            const finalNarration = (waitsForResolution || tableTalkTurn) ? null : [...latest.messages].reverse()
                 .find(m => m.role === 'assistant' && !m.hidden && m.content?.trim());
             if (finalNarration) {
                 runScribe({

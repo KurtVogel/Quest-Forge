@@ -14,6 +14,7 @@ import { formatCurrency } from '../engine/currency.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeCampaignPremise } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
+import { TABLE_TALK_STANDING_RULE } from './tableTalk.js';
 
 /**
  * Build the complete system prompt for the LLM.
@@ -169,6 +170,8 @@ Welcome creative, comedic, and bizarre player choices. Let the campaign become a
 - Treat declared outcomes ("I kill it", "the guard believes me") as attempts when success is uncertain, using the normal engine-owned roll flow.
 - When an unsupported assertion would bypass danger, erase a consequence, contradict canon, or grant a meaningful advantage, treat it as a wish, joke, or attempted idea — not established reality. Respond briefly from the actual situation without scolding the player.
 - If a surprising idea is plausible but not guaranteed, offer an attempt, cost, complication, or roll. Preserve both imaginative agency and genuine stakes.
+
+${TABLE_TALK_STANDING_RULE}
 
 ## CHECK DISCIPLINE — FICTION FIRST, DICE SECOND
 
