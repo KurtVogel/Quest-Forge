@@ -45,20 +45,20 @@ it under Process notes.
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | — |
 | prompt-building | `llm/promptBuilder.js` | — |
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-07-08 |
-| combat-exchange | `engine/combatExchange.js`, reducer combat phases, opening initiative | — |
+| combat-exchange | `engine/combatExchange.js`, reducer combat phases, opening initiative | 2026-07-09 |
 | enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | — |
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-07-07 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-07-07 |
 | memory-journal | `engine/worldJournal.js` | 2026-07-05 |
 | story-memory | `engine/storyMemory.js` | — |
 | vector-memory-rag | `engine/vectorMemory.js` | — |
-| persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | — |
-| cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | — |
-| character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | — |
+| persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-07-12 |
+| cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-07-09 |
+| character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-07-12 |
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | — |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-07-08 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-07-06 |
-| providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js` | — |
+| providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | — |
 | chat-orchestration | `components/Chat/ChatPanel.jsx` (`sendToLLM`, `applyEvents`, message window) | 2026-07-06 |
 
 ## Coverage Snapshot
@@ -67,21 +67,21 @@ Refreshed by the audit **at most weekly** (when older than 7 days), via:
 `npm.cmd install --no-save @vitest/coverage-v8 && npx.cmd vitest run --coverage --coverage.all --coverage.include='src/**/*.{js,jsx,ts}'`
 Used only to bias feature picking toward weak spots; per-file statement % for registry files.
 
-**2026-07-05** (646 tests / 50 files passing). % Statements per registry file:
+**2026-07-12** (658 tests / 51 files passing). % Statements per registry file:
 
 | Feature ID | File | % Stmts |
 |---|---|---|
 | dice-engine | `engine/dice.ts` | 74.07 |
 | rules-math | `engine/rules.js` | 88.57 |
 | progression | `engine/progression.js` | 97.91 |
-| response-parsing | `responseParser.js` / `jsonExtractor.js` | 96.16 / 89.83 |
+| response-parsing | `responseParser.js` / `jsonExtractor.js` | 96.15 / 89.83 |
 | prompt-building | `promptBuilder.js` | 98.15 |
 | roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 76.23 / 100 |
 | combat-exchange | `combatExchange.js` | 84.05 |
 | enemy-stats-conditions | `enemyStats.js` | 88.40 |
 | hidden-fronts | `fronts.js` / `frontDirector.js` / `frontUpgrade.js` | 87.09 / 74.41 / 81.03 |
-| scribe | `scribe.js` | 78.77 |
-| memory-journal | `worldJournal.js` | 56.84 (lowest in registry) |
+| scribe | `scribe.js` | 78.87 |
+| memory-journal | `worldJournal.js` | 55.78 (lowest in registry) |
 | story-memory | `storyMemory.js` | 92.10 |
 | vector-memory-rag | `vectorMemory.js` | 95.57 |
 | persistence | `persistence.js` | 85.29 |
@@ -89,8 +89,8 @@ Used only to bias feature picking toward weak spots; per-file statement % for re
 | character-vault | `characterVault.js` / `characterUtils.js` | 86.84 / 89.15 |
 | inventory-economy | `items.js` / `equipment.js` | 96.49 / 100 (currency.js absent from v8 report — tooling quirk, has its own passing test file) |
 | quests | (part of `gameReducer.js`, 83.27 overall) | — |
-| scene-art | `imageGen.js` | 58.24 |
-| providers-adapter | `adapter.js` / `gemini.js` / `openai.js` | 100 / 25.27 / 3.70 (network boundary, expected low) |
+| scene-art | `imageGen.js` | 56.32 |
+| providers-adapter | `adapter.js` / `gemini.js` / `openai.js` / `xai.js` | 100 / 25.27 / 3.70 / 3.70 (network boundary, expected low) |
 | chat-orchestration | `ChatPanel.jsx` | 0 (no component test file exists) |
 
 ## Open Findings Queue
@@ -121,6 +121,14 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P1** (roll-resolution, 2026-07-08): the try/catch around the post-roll follow-up `sendToLLM` call (`engine/rollResolver.js:545-607`) swallows a rejected/thrown call with only `console.warn` — the dice roll and hidden roll-result message still land, but the outcome narration never arrives and the player sees no error. `ChatPanel.jsx`'s own user-facing `Error: ${error.message}` system message (line 859-868) never fires because the exception never escapes `handleRequestedRolls`. No test simulates `sendToLLM` rejecting in this path (existing tests only mock resolved outcomes).
 - [ ] **P1** (roll-resolution, 2026-07-08): the enemy-attacks-a-companion inline-damage branch (`resolveRolls`, `engine/rollResolver.js:255-267`) has zero test coverage — every `npc_attack` test in `rollResolver.test.js` targets the player, so a regression in the companion HP update or result shape would go undetected.
 - [ ] **P2** (roll-resolution, 2026-07-08): `MAX_ROLL_DEPTH` recursion guard (`engine/rollResolver.js:449-459`) and `resolveDamageRoll`'s malformed-notation catch (`engine/rollResolver.js:789-822`, returns `null` and silently drops the result vs. `rollAndShowDamage`'s catch which at least falls back to a 1d4 roll) are both untested.
+- [ ] **P1** (combat-exchange, 2026-07-09): Uncanny Dodge's once-per-turn guard is a `{ used: false }` object created fresh *inside* `resolveEnemies()` (`engine/combatExchange.js:897`), correctly shared across all foes when `planCombatExchange` makes one `resolveEnemies` call for the whole enemy phase — but `planOpeningExchange` calls `resolveEnemies` separately **per enemy actor** (`engine/combatExchange.js:1075-1082`, one call per `turnOrder` entry), so each enemy gets its own fresh guard. A level-5+ Rogue facing 2+ enemies who win Opening Initiative — including any "player surprised" ambush, which per `gameReducer.js:2142-2143` grants **every** enemy an opening slot regardless of their individual initiative roll — gets damage halved on every qualifying hit that round instead of just the first. No test exercises 2+ enemies in the opening phase (`combatExchange.test.js:527-549` uses exactly one enemy actor).
+- [ ] **P1** (cloud-sync, 2026-07-09): the `!db`/`!uid` early-return guards and the catch/error branches (permission-denied hint in `saveGameToCloud`, `loadGameFromCloud`'s swallow-to-null, `listCloudSaves`'s re-throw, `deleteGameFromCloud`'s swallow-to-false) have zero test coverage across all four `state/cloudSync.js` functions — `cloudSync.test.js` only exercises the Firestore-succeeds happy paths, so a regression in any failure-surfacing behavior (the exact thing a bring-your-own-Firebase feature depends on to fail comprehensibly) would go undetected.
+- [ ] **P2** (cloud-sync, 2026-07-09): `saveGameToCloud` reads `previousChunkCount` via a plain `getDoc` (`state/cloudSync.js:89-90`) before its `batch.commit()`, not inside a Firestore transaction — two near-simultaneous overwrites of the *same* slot from two devices/tabs (plausible given Vesa's multi-machine workflow) could both read the same stale `previousChunkCount` and race on which stale chunks get cleared, potentially leaving an orphaned or mismatched chunk. Low likelihood (cloud saves are manual-only and `SettingsModal.jsx:95` already guards same-tab double-clicks) but untested and unguarded cross-device.
+- [ ] **P1** (persistence, 2026-07-12): `openDB()` (`state/persistence.js:36-51`) never attaches `request.onblocked` — if `DB_VERSION` is ever bumped while another tab holds an older connection open (plausible: Vesa multi-machine/multi-tab, and Hosting is configured for immediate no-store deploys), `indexedDB.open` fires `blocked` instead of resolving, and `await openDB()` hangs forever with no timeout or error. Every save/load call — including autosave — silently stalls; this bypasses the "autosave failures surface as an error toast" guarantee entirely because a hang is neither a resolve nor a reject.
+- [ ] **P1** (persistence, 2026-07-12): `loadGame`, `listSaves`, and `listRosterCharacters` (`state/persistence.js:147-159`, `164-198`, `250-262`) never attach `tx.onabort`, unlike every write path in the same file (`saveGame`/`deleteSave`/`saveRosterCharacter`/`deleteRosterCharacter`, which all do `tx.onabort = () => { db.close(); reject(...) }`). On a read-request error the transaction aborts but `db.close()` is never called, leaking the IndexedDB connection open indefinitely — and repeated leaks compound the `onblocked` hang above. No test in `persistence.test.js` forces an IDB request error on any function, so this asymmetry has no regression coverage.
+- [ ] **P1** (persistence, 2026-07-12): `saveSettings` (`state/persistence.js:14-22`) swallows a thrown `localStorage.setItem` (quota exceeded, private browsing, disabled storage) with only `console.warn` and no return value. `GameContext.jsx:90` calls it fire-and-forget on every settings change with zero error surfacing — unlike the sibling autosave effect four lines above it (`GameContext.jsx:78-85`), which explicitly checks `autoSave`'s boolean result and calls `showSaveToast('save-error')`. Since Settings carries the player's LLM API key, a silent failure here means the player believes they configured a key (the modal just closes) but it never persisted, with no toast connecting the dots. Untested.
+- [ ] **P1** (character-vault, 2026-07-12): `sanitizeCharacter`'s maxHP clamp band (`engine/characterVault.js:104-110`, `perLevelMax + (level-1)` .. `perLevelMax * level`) is a legitimate grandfather accommodation for pre-2026-06-15 exports with randomly-rolled level-up HP (DECISIONS.md), but `EXPORT_VERSION` was never bumped at that boundary, so post-decision exports get the same wide band instead of the single deterministic value `getMaxHitPoints` now always produces. Concrete: L5 dwarf fighter, CON 16 (+3) — true maxHP is 49, but the band accepts 17–65; hand-editing an exported JSON's `maxHP` to 65 and reimporting grants +16 free max HP undetected, contradicting this file's own "engine owns the math" principle. Not proposing to reverse the fixed-average-HP decision — flagging that the grandfather clamp silently reopened the exploit that decision was meant to close for current-era exports.
+- [ ] **P2** (character-vault, 2026-07-12): `sanitizeCharacter(null)`/`sanitizeCharacter(undefined)` guard (`engine/characterVault.js:82-83`, confirmed uncovered by the v8 report) has no test — reachable via `parseCharacterExport(JSON.stringify({ format, version, character: null }))`, a correctly-shaped-but-empty export file. Likely fine (throws the intended player-readable message) but unverified.
 
 ## Entry template
 
@@ -144,6 +152,56 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-12 — persistence + character-vault (Lap 1: correctness & test depth)
+
+`npm test`: 658 passing / 51 files. Rotation excluded (last 6 entries, local ∪ origin — local is a strict superset; origin's copy still ends at 2026-07-08): combat-exchange, cloud-sync (2026-07-09), roll-resolution, quests (2026-07-08), hidden-fronts, scribe (2026-07-07). All remaining registry features were never-audited (tied); coverage snapshot refreshed this run (was exactly 7 days old) tie-broke toward the two lowest genuine (non-network-boundary) numbers: `persistence.js` (85.29%) and `characterVault.js` (86.84%, `characterUtils.js` 89.15%).
+
+### persistence (`state/persistence.js`)
+- **Scope examined:** full file (304 lines) end to end — `openDB`, `serializeGameState`, `saveGame`/`loadGame`/`listSaves`/`deleteSave`, roster CRUD, `autoSave`/`loadAutoSave`; `persistence.test.js` (all tests); call sites in `GameContext.jsx` (settings-save effect, autosave debounce + flush) and `CharacterSheet.jsx`/`CharacterCreation.jsx` (roster).
+- **Findings:**
+  - **P1:** `openDB()` (lines 36-51) has no `request.onblocked` handler. A future `DB_VERSION` bump while another tab holds an older connection open (realistic for Vesa's multi-machine/multi-tab workflow, and Hosting is deliberately configured for immediate no-store deploys) makes `indexedDB.open` fire `blocked` instead of resolving — `await openDB()` hangs forever with no timeout, so every save/load, including autosave, silently stalls. This bypasses the "autosave failures surface as an error toast" guarantee outright, since a hang is neither a resolve nor a reject.
+  - **P1:** `loadGame`, `listSaves`, `listRosterCharacters` (147-159, 164-198, 250-262) never attach `tx.onabort`, unlike every write path in the same file which does `tx.onabort = () => { db.close(); reject(...) }`. On a read-request error the transaction aborts but the connection is never closed — a leak that compounds the `onblocked` risk above. Zero tests force an IDB error anywhere in this file.
+  - **P1:** `saveSettings` (14-22) swallows a thrown `localStorage.setItem` with only `console.warn`, no return value. `GameContext.jsx:90` calls it fire-and-forget on every settings change with no error surfacing — unlike the autosave effect four lines above (78-85), which checks `autoSave`'s boolean and toasts `save-error`. Settings carries the player's LLM API key, so a silent quota/private-browsing failure means the key never actually persisted, with nothing telling the player why.
+  - Verified strong: `serializeGameState`'s spread-not-whitelist contract (the fix for the 2026-07-03 lost-fronts bug), secret-stripping, rollHistory capping, and `prunedMessageCount` derivation are all deliberately tested; `LOAD_GAME` independently re-derives `prunedMessageCount` from `validated.messages` (gameReducer.js:2447), so a stale/corrupt persisted value self-heals on load regardless of the save-time computation.
+- **Suggested improvements:** (1) add `request.onblocked` to `openDB` (at minimum log loudly; ideally a timeout that rejects so a hang is diagnosable instead of silent); (2) add matching `tx.onabort` to the three read functions; (3) have `saveSettings` return a boolean like `autoSave` and wire the `GameContext` settings effect to `showSaveToast` on failure; (4) add tests forcing an IDB request error and a `localStorage.setItem` throw.
+
+### character-vault (`engine/characterVault.js`, `engine/characterUtils.js`)
+- **Scope examined:** both files end to end — `sanitizeCharacter`, `sanitizeInventory`, `parseCharacterExport`, `buildCharacterExport`, `createCharacter`/`createStartingInventory`; `characterVault.test.js` (full); cross-checked `START_CHARACTER` in `gameReducer.js:781-797` (confirmed it centrally recomputes `armorClass` via `computeACFromInventory` for both freshly-created and imported/roster heroes, so the omission of `armorClass` from `sanitizeCharacter`'s rebuilt object is *not* a bug); cross-checked `getMaxHitPoints` (`rules.js:372-381`) and `progression.js`'s level-up formula against DECISIONS.md's 2026-06-15 "fixed average HP" entry.
+- **Findings:**
+  - **P1:** `sanitizeCharacter`'s maxHP clamp band (104-110) is a legitimate grandfather accommodation for pre-2026-06-15 exports (when level-up HP really was randomly rolled), but `EXPORT_VERSION` (still 1) was never bumped at that decision boundary, so current-era exports — which the engine now computes deterministically — get the same wide band. Concrete: L5 dwarf fighter, CON 16 (+3): true maxHP is 49, the band accepts 17-65. Hand-editing an exported JSON's `maxHP` to 65 and reimporting grants +16 free max HP, silently. This is the one derived field this file's own header comment says should be "rebuilt … instead of trusted" that in practice is trust-with-a-very-wide-clamp. Touches a settled decision (2026-06-15) — not proposing to reverse fixed-average HP, just flagging that the grandfather band reopened the exploit that decision closed, for files created after it.
+  - **P2:** `sanitizeCharacter(null)` (82-83, confirmed uncovered in the v8 report) has no direct test, though it's reachable via a correctly-shaped export file with a null `character` key.
+  - Verified strong: race/class rejection, ability-score/name presence checks, level/coin/exp clamping, full derived-field rebuild (proficiency, saves, features, fighting style, martial archetype, ASI state), skill re-filtering, portrait URL allowlisting, and inventory equip-slot normalization (including the two-handed-weapon-vs-shield exclusion) all have deliberate, well-targeted tests.
+- **Suggested improvements:** (1) import `getMaxHitPoints` (already used elsewhere in the engine) and use `createdAt`/`exportedAt` as a cutoff: post-2026-06-15 exports get the exact deterministic value with no band, pre-decision/missing-timestamp exports keep the legacy band; (2) add a `sanitizeCharacter(null)`/malformed-`character`-key test.
+
+### Process notes
+- Amended the Feature Registry: `providers-adapter`'s scope now lists `llm/providers/xai.js` (added alongside the recent xAI/Grok DM provider work; previously only gemini.js/openai.js were listed, and the coverage snapshot already had a `xai.js` row with nothing pointing to it).
+- Coverage snapshot was exactly 7 days old (2026-07-05 → 2026-07-12) — refreshed per the "at most weekly" rule rather than reusing the stale numbers.
+- Spot-verified two older open-queue items not yet re-checked by a prior run (still present/unfixed, left open): the quests `new`/`updated` missing-id/name guard (`llm/responseParser.js:666-669`, still no `(quest.id || quest.name)` guard on that branch) and the roll-resolution follow-up-narration swallow (`engine/rollResolver.js:605-607`, still `console.warn`-only with no re-throw or dispatch).
+
+## 2026-07-09 — combat-exchange + cloud-sync (Lap 1: correctness & test depth)
+
+`npm test`: 658 passing / 51 files. Rotation excluded (last 6 entries, local ∪ origin — identical, confirmed via `git show origin/master:docs/SCHEDULED_STRENGTHENING.md`): roll-resolution, quests (2026-07-08), hidden-fronts, scribe (2026-07-07), chat-orchestration, scene-art (2026-07-06). All remaining registry features were never-audited (tied); coverage snapshot (2026-07-05, within the 7-day window) tie-broke toward the two lowest genuine (non-network-boundary) coverage numbers: `combatExchange.js` (84.05%) and `cloudSync.js` (84.40%, excluding `auth.js`'s noted thin-wrapper exception).
+
+### combat-exchange (`engine/combatExchange.js`, reducer combat phases, opening initiative)
+- **Scope examined:** full file (1153 lines) end to end — `normalizeCombatExchange`, `reconcileStartingCombatExchange`, `validatePlayerSlots`, `resolvePlayerSlots`, `resolveCompanions`/`resolveEnemies`, `terminalState`, `planCombatExchange`, `planOpeningExchange`; `combatExchange.test.js` (691 lines) and the combat-phase reducer cases (`START_COMBAT`, `APPLY_COMBAT_EXCHANGE`, `COMPLETE_COMBAT_NARRATION`, `gameReducer.js:2111-2303`) plus `gameReducer.combat.test.js` (510 lines).
+- **Findings:**
+  - **P1:** Uncanny Dodge's once-per-turn state (`uncannyDodgeState = { used: false }`, line 897) is scoped *inside* `resolveEnemies()`. `planCombatExchange` calls it once for the whole enemy phase (correct — verified by the existing 2-enemy test at line 643). `planOpeningExchange` instead calls `resolveEnemies` once **per enemy actor** in a loop (lines 1075-1082), so each enemy gets its own fresh guard. Combined with `gameReducer.js:2142-2143` — a "player surprised" combat start grants *every* enemy an Opening Initiative slot regardless of individual initiative — a level-5+ Rogue ambushed by 2+ enemies gets damage halved on every qualifying hit that round, not just the first. No test covers 2+ enemies in the opening phase.
+  - **P2:** `resolveCompanions`/`resolveEnemies` being called per-actor in `planOpeningExchange` (rather than once for the whole opening batch) is itself the root cause above; worth consolidating to a single call with an `onlyIds` union instead of one call per actor, both for this bug and to stop future per-call-scoped state from reintroducing it.
+  - Verified strong: player-slot validation (Cunning Action gating, Action Surge slot counts, flee-must-be-last), Sneak Attack, Champion crits, flanking-ruling propagation to companions, and the terminal-state ladder (victory/defeat/dying/escaped/low-level-solo) all have deliberate, thorough coverage.
+- **Suggested improvements:** (1) hoist a single `uncannyDodgeState` in `planOpeningExchange` and pass it into each `resolveEnemies` call (mirroring `planCombatExchange`), or restructure the opening loop to make one `resolveEnemies` call covering all opening-phase enemies; (2) add a test with 2+ enemies in the opening phase against a level-5+ Rogue asserting only the first hit is halved.
+
+### cloud-sync (`state/cloudSync.js`, `state/auth.js`, chunked Firestore saves)
+- **Scope examined:** `cloudSync.js` full file (219 lines) — chunked save/load/list/delete, `splitPayload`'s surrogate-pair safety, stale-chunk cleanup; `auth.js` (57 lines, thin Firebase wrapper); `cloudSync.test.js` (164 lines); call sites in `SettingsModal.jsx` (double-click guard via `isSaving`) and `App.jsx`.
+- **Findings:**
+  - **P1:** zero test coverage for the `!db`/`!uid` early-return guards and every catch/error branch across all four exported functions — `saveGameToCloud`'s permission-denied hint, `loadGameFromCloud`'s swallow-to-`null`, `listCloudSaves`'s re-throw (inconsistent with the other three, which swallow), and `deleteGameFromCloud`'s swallow-to-`false`. `cloudSync.test.js` only drives the Firestore-succeeds paths.
+  - **P2:** `saveGameToCloud` reads `previousChunkCount` via a non-transactional `getDoc` (lines 89-90) before its batch commit — two near-simultaneous overwrites of the same slot from different devices/tabs could race on stale-chunk cleanup and leave an orphaned or mismatched chunk. Narrow (manual saves only, same-tab double-clicks already guarded by `SettingsModal.jsx:95`) but genuinely reachable given Vesa's documented multi-machine workflow, and untested.
+  - Verified strong: the chunking/reassembly contract itself — surrogate-pair-safe splitting, oversized-save round-trip, shrink-back-to-inline stale-chunk clearing, missing-chunk load failing loudly instead of returning a truncated campaign, and `__autosave__` doc-id mapping — is deeply and deliberately tested.
+- **Suggested improvements:** (1) add tests for the `!db`/`!uid` guards on all four functions; (2) add a test that forces a Firestore rejection (e.g. throwing `getDoc`/`batch.commit`) and asserts each function's documented failure behavior; (3) consider whether `listCloudSaves`'s throw-instead-of-swallow is intentional (its one caller in `App.jsx` does catch it) or should match the other three for consistency — not urgent, just noted.
+
+### Process notes
+- Verified two of the oldest still-open queue items against current code (not the two already checked last run): the scene-art `IMAGE_CACHE` session-scoping gap (`clearImageCache` still only called from its own test — `imageGen.js:194`, grep confirms no production call site) and `downscaleDataUrl`'s missing test coverage (still no `maxWidth`/`maxHeight` test in `imageGen.test.js`) are both still present/unfixed — left open, no checkbox change.
+- Coverage snapshot (2026-07-05) is 4 days old, within the 7-day window; not refreshed this run.
 
 ## 2026-07-08 — roll-resolution + quests (Lap 1: correctness & test depth)
 

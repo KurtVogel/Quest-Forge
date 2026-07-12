@@ -40,6 +40,10 @@ test-results/
 claudeception/
 ANTIGRAVITY_FINDINGS.md
 
+# Cowork "corner office" — local Cowork-session deliverables (reports, docs,
+# analyses) that aren't part of the app or needed by remote sessions.
+cowork/
+
 
 # Generated coverage reports (one-time local runs, not tracked)
 coverage/
