@@ -108,8 +108,8 @@ export const PROVIDERS = {
     xai: {
         name: 'xAI (Grok)',
         models: [
-            { id: 'grok-4.3', name: 'Grok 4.3 (Recommended)', description: 'xAI flagship, reasoning-first — strong prose, slower to first token' },
-            { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', description: 'Budget tier; xAI aliases retired IDs forward to the current model' },
+            { id: 'grok-4.3', name: 'Grok 4.3 (Recommended)', description: 'xAI flagship — fast, strong prose, but weaker game-event compliance: quests, loot, and coin may need the built-in audits to keep up' },
+            { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', description: 'Budget tier; xAI aliases retired IDs forward to the current model. Same event-compliance caveat as Grok 4.3' },
         ],
     },
 };

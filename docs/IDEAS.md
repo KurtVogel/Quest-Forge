@@ -500,8 +500,14 @@ Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md
 ### xAI (Grok) as a DM provider — status: `shipped` (2026-07-08)
 Shipped same-day with one design change from the notes below: no graceful degradation —
 the Gemini machinery key is a **hard requirement** for play (see DECISIONS.md 2026-07-08).
-Still open: a real xAI-DM playtest to catch Grok JSON-block quirks (add parser fixtures)
-and to confirm the `grok-4.3` / `grok-4.1-fast` model IDs against console.x.ai.
+~~Still open: a real xAI-DM playtest to catch Grok JSON-block quirks (add parser fixtures)
+and to confirm the `grok-4.3` / `grok-4.1-fast` model IDs against console.x.ai.~~
+**Playtest done 2026-07-11** (see STATUS.md): `grok-4.3` works end-to-end, is 2–3× faster than
+Gemini 3.1 Pro, and is mechanically clean inside `combat_exchange` — but under-emits *event*
+JSON outside combat: skipped the opening `starting_items` block, never opened a quest on an
+accepted job, and narrated coin payments with no coin events (loot audit backfilled the grant;
+narrated *spending* fixed 2026-07-12 via the payment audit). Also drifts into third-person
+narration. See the missing-events nudge idea below.
 
 **First live playtest observations (Vesa, 2026-07-09 — deliberately NOT acted on yet; could
 be model version/settings, don't over-fit the shared prompt to one provider):**
@@ -524,11 +530,42 @@ be model version/settings, don't over-fit the shared prompt to one provider):**
   established turns IS a supported flank — grant it." Player-side workaround today: state
   the established flank explicitly in the committed action, or impose `prone` via a Check
   slot for engine-owned advantage.
-- Next: extensive AI-driven provider-comparison playtest (Vesa, planned 2026-07-10). Note
-  the eval harness (`eval:combat`, `eval:memory`) currently speaks Gemini/OpenAI only — xAI
-  support would need adding if the comparison should run scripted rather than by hand, and
-  the deployed site must carry the 2026-07-09 fixes first or the comparison inherits
-  known-fixed bugs (loot re-grant, OOC steamrolling).
+- ~~Next: extensive AI-driven provider-comparison playtest (Vesa, planned 2026-07-10).~~
+  Done 2026-07-11 by an AI-driven A/B session (see STATUS.md). Note the eval harness
+  (`eval:combat`, `eval:memory`) still speaks Gemini/OpenAI only — xAI support would need
+  adding if a future comparison should run scripted rather than by hand.
+
+### Missing-events nudge for weak-JSON DM providers — status: `open` (2026-07-11 playtest)
+Grok (and plausibly other non-Gemini DMs) returns pure-prose responses at moments the contract
+expects events: the premise opening (`starting_items`), job acceptance (`quest_updates`),
+narrated coin/loot. The parser already detects "no JSON block at all" — when that happens on a
+turn whose *player message or response text* matches high-signal cues (opening scene pending,
+"deal/agreed/hired", numerals + coin words), send one cheap follow-up asking the DM to emit the
+missing event block only (or route the cue set through the Scribe, which already reads every
+turn). Keeps Gemini behavior untouched; makes provider choice safe.
+
+### Gold-grant replay ledger (like recentPurchases, for rewards) — status: `implemented 2026-07-12` (`recentCoinGrants` + `ADD_COIN_GRANT` in gameReducer; 4-message window, repeat-phrasing escape, audit path routed through it)
+The duplicate-purchase/sale replay guards don't cover plain `gold_gained`: a 20 gp quest reward was
+correctly evented on the payment turn, then re-emitted next turn when the player narrated splitting
+the pouch with a companion ("ten for Nerys" → DM sent +20 −10 again; purse 55 gp vs fiction's 35).
+Add a `recentGoldGrants`-style ledger (amount + source + message window) that suppresses a repeat
+grant of the same amount within a few turns unless the player's own message clearly earns new coin —
+mirror the existing `recentPurchases` design and honor-repeat phrasing rules.
+
+### Loot-audit hospitality filter — status: `implemented 2026-07-12` (prompt rules in LOOT_AUDIT_RULES: on-the-spot hospitality never becomes inventory; re-recalled earlier-scene loot never re-reported)
+The Scribe loot audit granted "cheap, dark ale" as an inventory item because an NPC poured the hero
+a cup in narration. Consumed-in-scene hospitality (drinks poured, meals shared, pipes passed) is not
+loot; the audit prompt should exclude items consumed or enjoyed within the same scene and only grant
+durable take-away goods/coin the narrative says the hero *keeps*.
+
+### Narrated-payment (coin-loss) audit — status: `implemented 2026-07-12` (Scribe `missing_payment` + `AUDIT_COIN_PAYMENT`, auto-deduct clamped to purse with visible system line — chose auto-deduct over one-click confirm since amounts must be exact-only and the line is visible)
+The loot audit only *grants* shortfalls, never deducts, so a DM that narrates "you hand over
+twelve silver" without a `gold_lost`/`purchase` event silently inflates the purse (observed with
+Grok: wage backfilled by the audit, debt payment never deducted → net +12 sp phantom coin).
+Extend the per-turn Scribe audit to flag narrated payments; either auto-deduct clamped to purse,
+or (safer, spirit of DECISIONS.md 2026-07-02) surface a visible system line proposing the
+deduction for one-click player confirmation.
+
 Original research notes:
 Sometimes xAI's tone is what a campaign wants. xAI's chat API is OpenAI-compatible
 (`https://api.x.ai/v1/chat/completions`, Bearer auth, same SSE stream format and
@@ -627,6 +664,42 @@ Anonymous auth is **disabled** in the Firebase project (`ADMIN_ONLY_OPERATION`, 
 2026-06-10), so the Guest button errors. Either enable anonymous auth in the console or
 drop the button. Note: guest UIDs are per-device, so guest cloud saves would never sync
 across devices anyway — removal is probably right.
+
+---
+
+## Launch & Monetization (pre-public engineering, from Cowork research 2026-07-09)
+
+Cost basis (verified API prices + call inventory measured from the codebase; full analysis in the
+local Cowork research folder, conclusions in docs/PRODUCT.md): an ordinary turn ≈ 1 DM call
+(~14k in / ~1.1k out) + 1 Scribe Flash call + 3 embeddings; combat exchanges are 2 DM calls.
+Today's stack (Gemini 3.1 Pro uncached, machinery on Flash) ≈ **$0.06/turn**; efficient stack
+(cached grok-4.3 or Pro + Flash-Lite machinery) ≈ **$0.02/turn**. At a hypothetical $15/mo hosted
+tier, a 300-turn/mo player costs $19 on the current stack (loss) vs $6.40 efficient (59% blended
+margin). These three items are what make a hosted tier economically viable:
+
+### Context caching for the DM system prompt — status: `idea`, high value pre-launch
+The static prompt blocks (CORE_INSTRUCTIONS + RESPONSE_FORMAT + ruleset, ~5–7k tokens) are
+rebuilt and re-billed at full input price on every DM call (main, combat intent, combat
+narration, post-mechanic cue). Gemini and xAI both offer cached-input pricing at ~90% off
+($0.20 vs $2.00 per 1M on Gemini Pro; $0.20 vs $1.25 on grok-4.3). Restructure prompt assembly
+so the static prefix is stable and cache-eligible (order: static blocks first, dynamic state
+after) and wire provider cache params. Cuts DM input cost ~30–45%. Benefits BYOK players too —
+their key, their savings.
+
+### Machinery model upgrade: gemini-2.5-flash → current Flash-Lite — status: `idea`
+`llm/machinery.js` pins MACHINERY_MODEL to legacy `gemini-2.5-flash`. Current-gen
+Gemini 3.1 Flash-Lite is $0.25/$1.50 per 1M (vs 3.5 Flash $1.50/$9.00) — cuts the ~$0.014/turn
+machinery overhead to ~$0.003. Needs an extraction-quality check before switching (Scribe
+appearance/stance merging and roll audits are the sensitive consumers — run the golden
+fixtures + a keyed eval:memory pass on the new model). Also: legacy-model deprecation risk
+makes this worth doing regardless of cost.
+
+### Hosted-tier key proxy (server-side) — status: `idea`, blocks hosted monetization only
+BYOK launch needs none of this. A hosted paid tier requires a thin server-side proxy so
+provider keys never reach the browser: per-user auth + metering, rate limits, fair-use
+enforcement, model routing (standard vs premium-model turns). This is where the unit economics
+get enforced; it is deliberately NOT part of the client architecture (no backend stays true
+for BYOK). Scope it as its own project when the public-launch gate opens (STATUS "Up next" #5).
 
 ---
 

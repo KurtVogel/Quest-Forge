@@ -85,7 +85,7 @@ export function getCombatStatus({ character = {}, combat = {}, party = [] } = {}
         return {
             variant: 'player',
             title: 'Your turn',
-            detail: `Describe your fighter action in chat. Bonus action: ${combat.bonusActionUsed ? 'used' : 'available'}.`,
+            detail: `Describe your ${character?.class || 'character'} action in chat. Bonus action: ${combat.bonusActionUsed ? 'used' : 'available'}.`,
         };
     }
 

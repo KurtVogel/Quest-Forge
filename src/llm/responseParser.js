@@ -635,11 +635,22 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         goldFound = silverFound = copperFound = 0;
     }
 
-    if (!lootAlreadyClaimed && goldFound > 0) dispatch({ type: 'ADD_GOLD', payload: goldFound });
+    // Coin gains travel as ONE replay-guarded grant: the recentCoinGrants ledger in the
+    // reducer suppresses an identical grant re-emitted within a few messages (a reward
+    // narrated again while the pouch is counted/split must not pay twice).
+    if (!lootAlreadyClaimed && (goldFound > 0 || silverFound > 0 || copperFound > 0)) {
+        dispatch({
+            type: 'ADD_COIN_GRANT',
+            payload: {
+                gold: goldFound,
+                silver: silverFound,
+                copper: copperFound,
+                _meta: transactionMeta,
+            },
+        });
+    }
     if (goldLost > 0) dispatch({ type: 'REMOVE_GOLD', payload: goldLost });
-    if (!lootAlreadyClaimed && silverFound > 0) dispatch({ type: 'ADD_SILVER', payload: silverFound });
     if (silverLost > 0) dispatch({ type: 'REMOVE_SILVER', payload: silverLost });
-    if (!lootAlreadyClaimed && copperFound > 0) dispatch({ type: 'ADD_COPPER', payload: copperFound });
     if (copperLost > 0) dispatch({ type: 'REMOVE_COPPER', payload: copperLost });
 
     if (events.levelUp) {

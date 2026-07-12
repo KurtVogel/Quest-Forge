@@ -108,7 +108,7 @@ function cosineSimilarity(a, b) {
  * @param {string} text - The memory text
  * @param {string} [category] - e.g. 'world_fact', 'journal', 'npc', 'event'
  */
-export async function addMemory(apiKey, text, category = 'general') {
+export async function addMemory(apiKey, text, category = 'general', location = null) {
     if (!apiKey || !text?.trim()) return;
 
     // Deduplicate by exact text
@@ -124,6 +124,10 @@ export async function addMemory(apiKey, text, category = 'general') {
         text,
         vector,
         category,
+        // Where the hero was when this memory was recorded — lets retrieval label
+        // memories from elsewhere so the DM doesn't transplant local color across
+        // the map. Optional; older cached embeddings simply have no tag.
+        ...(typeof location === 'string' && location.trim() && { location: location.trim().slice(0, 80) }),
         schema: GEMINI_EMBED_SCHEMA,
         timestamp: Date.now(),
     };
@@ -154,7 +158,7 @@ export async function seedMemories(apiKey, items) {
             const BATCH = 5;
             for (let i = 0; i < newItems.length; i += BATCH) {
                 const batch = newItems.slice(i, i + BATCH);
-                await Promise.all(batch.map(item => addMemory(apiKey, item.text, item.category)));
+                await Promise.all(batch.map(item => addMemory(apiKey, item.text, item.category, item.location)));
             }
         }
         return;
@@ -164,7 +168,7 @@ export async function seedMemories(apiKey, items) {
     const BATCH = 5;
     for (let i = 0; i < items.length; i += BATCH) {
         const batch = items.slice(i, i + BATCH);
-        await Promise.all(batch.map(item => addMemory(apiKey, item.text, item.category)));
+        await Promise.all(batch.map(item => addMemory(apiKey, item.text, item.category, item.location)));
     }
     console.log(`[VectorMemory] Seeded ${memoryStore.length} memories (fresh embeddings)`);
 }
@@ -205,7 +209,7 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55)
         .sort((a, b) => b.score - a.score)
         .slice(0, topN);
 
-    return scored.map(m => ({ text: m.text, category: m.category, score: m.score }));
+    return scored.map(m => ({ text: m.text, category: m.category, score: m.score, ...(m.location && { location: m.location }) }));
 }
 
 /**
@@ -234,7 +238,8 @@ export function buildRetrievedMemoriesBlock(memories) {
         const label = m.category === 'player'
             ? 'player statement/attempt — not automatically canon'
             : m.category;
-        return `- [${label}] ${m.text}`;
+        const locationTag = m.location ? ` — recorded at: ${m.location}` : '';
+        return `- [${label}${locationTag}] ${m.text}`;
     }).join('\n');
-    return `## RETRIEVED MEMORIES (most relevant to current scene)\nUse canonical world facts and DM-established memories normally. An entry labeled "player statement/attempt" records something the player said, wanted, or tried; it is not proof that an external claim became true unless the established fiction corroborates it.\n${lines}`;
+    return `## RETRIEVED MEMORIES (most relevant to current scene)\nUse canonical world facts and DM-established memories normally. An entry labeled "player statement/attempt" records something the player said, wanted, or tried; it is not proof that an external claim became true unless the established fiction corroborates it.\nThese are memories, not the current scene. An entry recorded at a DIFFERENT place than where the hero now stands is context from elsewhere — never transplant its creatures, factions, or local color into the present location unless the fiction has actually moved them here. Distant places stay distinct: give each region its own dangers.\n${lines}`;
 }

@@ -429,7 +429,7 @@ describe('Scribe loot persistence audit', () => {
             }),
         });
         expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
-            systemPrompt: expect.stringContaining('LOOT PERSISTENCE AUDIT'),
+            systemPrompt: expect.stringContaining('LOOT & PAYMENT PERSISTENCE AUDIT'),
             userMessage: expect.stringContaining('EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN'),
         }));
         expect(sendMessage.mock.calls[0][0].userMessage).toContain('gold +23');
@@ -442,7 +442,7 @@ describe('Scribe loot persistence audit', () => {
             settings,
             dispatch,
         });
-        expect(sendMessage.mock.calls[0][0].systemPrompt).not.toContain('LOOT PERSISTENCE AUDIT');
+        expect(sendMessage.mock.calls[0][0].systemPrompt).not.toContain('LOOT & PAYMENT PERSISTENCE AUDIT');
     });
 
     it('tells the audit what the hero already owns so using gear is never re-granted', async () => {
@@ -505,8 +505,14 @@ describe('Scribe loot persistence audit', () => {
         });
 
         expect(dispatch).toHaveBeenCalledWith({ type: 'CLAIM_LOOT_SOURCE', payload: 'msg-1:scribe-loot' });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_GOLD', payload: 23 });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_COPPER', payload: 4 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'ADD_COIN_GRANT',
+            payload: expect.objectContaining({
+                gold: 23,
+                copper: 4,
+                _meta: expect.objectContaining({ sourceId: 'msg-1:scribe-loot', announce: 'audit' }),
+            }),
+        }));
         expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_ITEM', payload: { name: 'Jeweled circlet', quantity: 1 } });
         expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
             type: 'ADD_MESSAGE',
@@ -529,7 +535,7 @@ describe('Scribe loot persistence audit', () => {
             lootAudit: makeLootAudit({ getState: () => ({ appliedLootSourceIds: ['msg-1:scribe-loot'] }) }),
         });
 
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'CLAIM_LOOT_SOURCE' }));
     });
 
@@ -585,12 +591,50 @@ describe('Scribe loot persistence audit', () => {
             lootAudit: makeLootAudit(),
         });
 
-        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_GOLD', payload: 10000 });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_SILVER', payload: 12 });
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COPPER' }));
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'ADD_COIN_GRANT',
+            payload: expect.objectContaining({ gold: 10000, silver: 12, copper: 0 }),
+        }));
         const addItemCalls = dispatch.mock.calls.filter(([action]) => action.type === 'ADD_ITEM');
         expect(addItemCalls).toHaveLength(4);
         expect(addItemCalls[0][0].payload.quantity).toBe(20);
+    });
+
+    it('settles a narrated payment via AUDIT_COIN_PAYMENT with its own claimed source', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            missing_payment: { gold: 5 },
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I pay the ferryman.',
+            dmNarrative: 'You count five gold pieces into his palm and he waves you aboard.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit(),
+        });
+
+        expect(dispatch).toHaveBeenCalledWith({ type: 'CLAIM_LOOT_SOURCE', payload: 'msg-1:scribe-loot:payment' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'AUDIT_COIN_PAYMENT', payload: { gold: 5, silver: 0, copper: 0 } });
+    });
+
+    it('skips an already-claimed payment audit so retries cannot double-deduct', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            missing_payment: { gold: 5 },
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I pay the ferryman.',
+            dmNarrative: 'You count five gold pieces into his palm.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({ getState: () => ({ appliedLootSourceIds: ['msg-1:scribe-loot:payment'] }) }),
+        });
+
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'AUDIT_COIN_PAYMENT' }));
     });
 
     it('skips the audit entirely when no sourceId is available', async () => {
@@ -605,6 +649,6 @@ describe('Scribe loot persistence audit', () => {
             lootAudit: makeLootAudit({ sourceId: null }),
         });
 
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
     });
 });

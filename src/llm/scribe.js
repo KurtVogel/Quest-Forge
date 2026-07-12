@@ -86,18 +86,27 @@ Rules:
 
 const LOOT_AUDIT_RULES = `
 
-ADDITIONAL TASK — LOOT PERSISTENCE AUDIT:
+ADDITIONAL TASK — LOOT & PAYMENT PERSISTENCE AUDIT:
 The game engine persists coins and items ONLY from structured events; anything narrated but not emitted as an event silently vanishes. Compare the DM narrative against the EVENTS ALREADY APPLIED section of the user message and report acquisitions the narrative established that the engine did not apply, as one extra top-level field:
 "missing_loot": { "gold": 0, "silver": 0, "copper": 0, "items": [{ "name": "exact item name from the narrative", "quantity": 1 }] }
+Also report coins the narrative shows the hero PAYING OUT that the engine never deducted, as another top-level field:
+"missing_payment": { "gold": 0, "silver": 0, "copper": 0 }
 
 Loot audit rules:
 - Report ONLY acquisitions the DM NARRATIVE explicitly completes for the hero: taken, pocketed, looted, claimed, received, handed over. The player's own message is never sufficient evidence — the DM narrative must confirm the acquisition happened.
 - Anything listed under EVENTS ALREADY APPLIED is NOT missing. Report only the shortfall (narrative grants coins and a ring, events applied only the coins -> report only the ring).
 - Never report offers, prices, rewards merely promised, goods only seen or described, another character's possessions, or attempts/intentions.
+- Never report coins or items the narrative merely recalls, recounts, splits, or admires from an EARLIER scene — only acquisitions completed for the first time in THIS narrative. A reward being counted, divided, or mentioned again was already granted when it was first handed over.
+- Hospitality consumed on the spot is not an acquisition: a poured drink, a served meal, food and ale enjoyed at the table never become inventory. Report provisions only when the narrative has the hero pack, pocket, or carry them away.
 - Exact amounts only. If the narrative gives no specific number ("a handful of coins"), omit that coin field entirely — never estimate.
-- Purchases and sales are engine transactions handled elsewhere; never report coins or goods exchanged in a purchase or sale.
+- Purchases and sales are engine transactions handled elsewhere; never report coins or goods exchanged in a purchase or sale — in either direction.
 - The HERO'S CURRENT INVENTORY line lists what the hero already owns. Using, drawing, lighting, striking, wearing, or retrieving an owned item is NOT an acquisition — "she takes out her flint and steel and strikes a spark" grants nothing. Report an item the hero already owns ONLY when the narrative explicitly completes acquiring an ADDITIONAL copy (a second rope, another potion).
-- When in doubt, omit. Omit "missing_loot" entirely when nothing is missing.`;
+
+Payment audit rules:
+- Report a payment ONLY when the DM narrative explicitly completes it: the hero counts out, hands over, or drops the coins and the other party takes them. Intentions, promises, IOUs, haggling, and prices merely quoted are never payments.
+- Anything listed under EVENTS ALREADY APPLIED as a coin loss or purchase is NOT missing.
+- Exact amounts only; never estimate. A wrongly deducted coin is worse than a missed one — certainty is required.
+- When in doubt, omit. Omit "missing_loot" and "missing_payment" entirely when nothing is missing.`;
 
 /** Compact owned-inventory summary so the audit can tell "using" from "acquiring".
  * Live Grok finding 2026-07-09: "takes out her flint and steel" read as a completed
@@ -122,6 +131,9 @@ function describeAppliedLoot(events) {
     if (events.goldFound > 0) parts.push(`gold +${events.goldFound}`);
     if (events.silverFound > 0) parts.push(`silver +${events.silverFound}`);
     if (events.copperFound > 0) parts.push(`copper +${events.copperFound}`);
+    if (events.goldLost > 0) parts.push(`gold -${events.goldLost}`);
+    if (events.silverLost > 0) parts.push(`silver -${events.silverLost}`);
+    if (events.copperLost > 0) parts.push(`copper -${events.copperLost}`);
     for (const item of events.itemsFound || []) {
         parts.push(`item: ${typeof item === 'string' ? item : item?.name || item?.itemKey || 'unknown'}`);
     }
@@ -142,7 +154,7 @@ function coerceLootAmount(value, max = 10000) {
  * CLAIM_LOOT_SOURCE, clamped by the engine, and announced with a visible system
  * message so both the player and the DM's future context see the correction.
  */
-function applyMissingLoot(missing, lootAudit, dispatch) {
+function applyMissingLoot(missing, lootAudit, dispatch, playerMessage = '') {
     if (!missing || typeof missing !== 'object') return;
     const gold = coerceLootAmount(missing.gold);
     const silver = coerceLootAmount(missing.silver);
@@ -167,25 +179,55 @@ function applyMissingLoot(missing, lootAudit, dispatch) {
     }
     dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: sourceId });
 
-    if (gold > 0) dispatch({ type: 'ADD_GOLD', payload: gold });
-    if (silver > 0) dispatch({ type: 'ADD_SILVER', payload: silver });
-    if (copper > 0) dispatch({ type: 'ADD_COPPER', payload: copper });
+    // Coins route through the replay-guarded grant so a reward the DM re-narrates on a
+    // later turn (already suppressed on the event path) cannot re-enter via the audit.
+    // The reducer announces the recovery (or the suppression) itself.
+    if (gold > 0 || silver > 0 || copper > 0) {
+        dispatch({
+            type: 'ADD_COIN_GRANT',
+            payload: {
+                gold, silver, copper,
+                _meta: { sourceId, announce: 'audit', ...(playerMessage && { playerMessage }) },
+            },
+        });
+    }
     for (const item of items) dispatch({ type: 'ADD_ITEM', payload: item });
 
-    const parts = [
-        gold > 0 ? `${gold} gp` : null,
-        silver > 0 ? `${silver} sp` : null,
-        copper > 0 ? `${copper} cp` : null,
-        ...items.map(item => (item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name)),
-    ].filter(Boolean);
-    dispatch({
-        type: 'ADD_MESSAGE',
-        payload: {
-            role: 'system',
-            content: `**Loot recovered from narration:** ${parts.join(', ')} added to your possessions.`,
-        },
-    });
-    console.log(`[Scribe] Loot audit recovered: ${parts.join(', ')}`);
+    if (items.length > 0) {
+        const parts = items.map(item => (item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name));
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+                role: 'system',
+                content: `**Loot recovered from narration:** ${parts.join(', ')} added to your possessions.`,
+            },
+        });
+    }
+    console.log(`[Scribe] Loot audit recovered: gold ${gold}, silver ${silver}, copper ${copper}, items ${items.length}`);
+}
+
+/**
+ * Scribe payment audit twin: coins the narrative shows the hero paying out that never
+ * became a coin-loss event. The reducer clamps the deduction to the purse and posts a
+ * visible system line; idempotency is a claimed per-message sourceId, like loot recovery.
+ */
+function applyMissingPayment(missing, lootAudit, dispatch) {
+    if (!missing || typeof missing !== 'object') return;
+    const gold = coerceLootAmount(missing.gold);
+    const silver = coerceLootAmount(missing.silver);
+    const copper = coerceLootAmount(missing.copper);
+    if (gold <= 0 && silver <= 0 && copper <= 0) return;
+
+    const { sourceId, getState } = lootAudit;
+    if (!sourceId) return;
+    const paymentSourceId = `${sourceId}:payment`;
+    if ((getState?.()?.appliedLootSourceIds || []).includes(paymentSourceId)) {
+        console.warn(`[Scribe] Payment audit for ${paymentSourceId} already applied; skipping.`);
+        return;
+    }
+    dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: paymentSourceId });
+    dispatch({ type: 'AUDIT_COIN_PAYMENT', payload: { gold, silver, copper } });
+    console.log(`[Scribe] Payment audit settled: gold ${gold}, silver ${silver}, copper ${copper}`);
 }
 
 /**
@@ -362,7 +404,8 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         }
 
         if (lootAudit) {
-            applyMissingLoot(extracted.missing_loot, lootAudit, dispatch);
+            applyMissingLoot(extracted.missing_loot, lootAudit, dispatch, playerMessage);
+            applyMissingPayment(extracted.missing_payment, lootAudit, dispatch);
         }
     } catch (e) {
         // Scribe failures must never block the main game loop, but log clearly

@@ -4,11 +4,111 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-09 (first real Grok-DM playtest findings fixed and merged: OOC table talk
-is now a first-class response mode, durable NPC dossier fields merge engine-side, and — from
-continued live play — using an owned item can no longer be re-granted as loot (inverse economy
-rule for the DM + the Scribe loot audit now receives the hero's current inventory). See
-DECISIONS.md 2026-07-09 ×2. 697 tests + lint green.)_
+_Last updated: 2026-07-12 (all playtest action points implemented: coin-grant replay ledger, narrated-payment audit, RAG location tagging, hospitality filter, defeat-line ordering, success-must-matter prompt nudge)_
+
+## Playtest action points — implemented (2026-07-12)
+
+All six fixes from the 2026-07-11 playtest findings shipped in one pass:
+
+1. **Coin-grant replay ledger** — `recentCoinGrants` in `gameReducer.js` mirrors `recentPurchases`:
+   coin gains now travel as one `ADD_COIN_GRANT` action; an identical grant re-emitted within 4
+   messages is suppressed with a visible "Duplicate coin grant ignored" line unless the player
+   explicitly asked for more coin. The Scribe loot audit routes its coin recoveries through the
+   same action (with `announce: 'audit'`), so a re-narrated reward can't re-enter via the backstop.
+2. **Narrated-payment audit** — the Scribe loot audit is now a loot & payment audit: a new
+   `missing_payment` field detects payments the narrative completed but the DM never evented;
+   `AUDIT_COIN_PAYMENT` deducts clamped-to-purse (never below zero) with a visible system line,
+   idempotent via a claimed `:payment` sourceId. `describeAppliedLoot` now also lists coin losses.
+3. **Loot-audit hospitality filter** — prompt rules: consumed-on-the-spot hospitality is never an
+   acquisition; re-recalled/re-counted/split coins from an earlier scene are never re-reported.
+4. **RAG location tagging (anti-transplant)** — `addMemory` stores the location a memory was
+   recorded at; retrieved lines render `[category — recorded at: X]` and the block instructs the
+   DM never to transplant creatures/factions/local color across the map. The fronts block got a
+   matching "fronts are pressures, not portable set-dressing" rule (the ichor-ghoul finding).
+5. **Defeat-line ordering** — `APPLY_COMBAT_EXCHANGE` now renders the exchange roll summary
+   *before* the falls/defeat status lines the inner TAKE_DAMAGE/DEATH_SAVE dispatches append.
+6. **Prompt + Settings copy** — "Success must change the situation" roll-discipline rule (both in
+   check discipline and ROLL REQUEST RULES); xAI model descriptions now warn about weaker
+   game-event compliance.
+
+673 tests + lint green (15 new tests: coin ledger, payment audit, location tags, defeat ordering).
+
+## Live playtest #2 — Elf Wizard folk-horror campaign, Gemini DM (2026-07-11, dev build)
+
+~15-turn full arc ("The Quiet Neighbors": fen-village drowning mystery) exercising the paths the
+Fighter A/B run couldn't: wizard spell combat, companions, death saves, level-up, rests, journal
+cadence, fronts in live play. Zero console errors; 658 tests + lint green after the session.
+
+**Everything that worked (a lot):** premise `starting_items` (scrying-lens merged, spellbook/staff
+deduped); quest opened→completed with a real 20 gp coin event and +150 XP; investigation checks at
+sane DCs with advantage granted for fictional positioning, and careful observation correctly resolved
+*diceless*; `add_companions` fired organically (Nerys: full stat block, own AC/HP/attack); companion
+combat end-to-end — she took verbal target direction into her slot, was targeted by enemy intents
+via canonical companion id, killed the boss while the player was down, went down herself, and
+recovered to HEALTHY through a narrated multi-day rest; **death-save machine** engaged (non-solo
+0 HP) with nat-20 revive-at-1-HP handled correctly and enemies barred from re-attacking the downed
+player; DM used enemy-side `situational_ruling` *against its own mob* (disadvantage for the player's
+reed-stack cover); combat closed via mass `flee` intents after an in-combat intimidation the DM
+granted advantage; +183 XP → **level 2** with correct average-HP formula and feature unlock; Long
+Rest honored the elf Trance trait in narration; Scribe emitted evolving `stanceToPlayer`/`bondMoment`
+for Nerys; the epilogue hook (a Collegium informant posing as a peat-merchant) was an actual hidden
+front move (clock+1 with publicHints). The system produced a genuinely dramatic, coherent arc.
+
+**Findings (all minor, none crashing):**
+1. **Gold re-grant on the reward-split turn** — after the 20 gp quest payment (correctly evented),
+   the next turn's "I split the pouch — ten for Nerys" made the DM re-emit the +20 grant alongside
+   the −10, leaving the purse at 55 gp where fiction says 35. Same class as the fixed duplicate-
+   purchase bug, but for plain `gold_gained`: no ledger guards reward re-emission. (IDEAS.md entry.)
+2. **Loot-audit false positive** — a splash of hospitality ale Ostra poured became an inventory item
+   ("Loot recovered from narration: cheap, dark ale"). Harmless but immersion-denting; the audit
+   should ignore consumed-in-scene hospitality. (IDEAS.md entry.)
+3. **Fixed in-session:** `combatStatus.js` hardcoded "Describe your fighter action" for every class —
+   now uses `character.class` (runtime-verified for wizard/fighter/fallback; tests+lint green).
+4. Cosmetic: the "X is defeated" system line renders *above* the attack lines that caused it
+   (both playtests); reads as a spoiler before the dice.
+
+## Live A/B playtest — Gemini 3.1 Pro vs Grok 4.3 as DM (2026-07-11, dev build)
+
+Two parallel ~10-turn campaigns with an identical premise ("The Tollhouse Debt": debt deadline,
+smugglers vs toll-reeve). Both providers exercised: premise opening, roleplay-check proposals,
+check discipline, quest tracking, coin/loot events, full combat (opening initiative, exchanges,
+crits, Second Wind, defeat/victory XP), Scribe/fronts machinery. Zero console errors, zero parser
+repairs needed in either run. Key deltas (details in the session report):
+
+- **Gemini: near-perfect event emission.** `starting_items` reconciled from the premise, quest
+  opened on job acceptance, even an off-hand 2 gp theft emitted `gold_lost`. Slow: standard-turn
+  TTFT 10–22 s, full combat round ~20–25 s.
+- **Grok: strong pace, weak JSON discipline.** ~2–3× faster (standard TTFT 3.5–7.7 s, combat round
+  ~10–12 s) and mechanically clean *inside* `combat_exchange`, but **omitted the opening
+  `starting_items` block entirely** (premise battleaxe never entered inventory → narration kept
+  saying "axe" while the engine rolled the longsword), **never opened a quest** despite an
+  accepted paid job, and **narrated a 12-silver wage without any coin event** — the Scribe loot
+  audit backfilled it one turn late (visible system line, worked as designed), but the later
+  debt *payment* was also narration-only, so the purse drifted player-favorably. Also drifts
+  into third-person narration and double-narrated the queued opening strike before its dice existed.
+- **Both providers run the roleplay-check proposal machinery correctly** (public adjudication,
+  Roll/Challenge/Change approach). Gemini's adjudications were richer (chainmail → disadvantage;
+  diceless success for a credible truthful plea; in-combat intimidation granted situational
+  advantage with a stated reason). Grok rolls more readily and with flatter DC reasoning.
+- **Possible hardening ideas:** provider-agnostic nudge (retry or system reminder) when a
+  DM response that *should* carry events (opening scene, job acceptance, narrated coin) has no
+  JSON block at all; extend the loot-audit concept to narrated *payments* (coin loss) or at least
+  surface the mismatch; person-voice guard for non-Gemini DMs.
+- **New dev tool:** `src/dev/devSettingsSeed.js` (DEV-only, invoked from `main.jsx`) seeds
+  provider/keys into `rpg-client-settings` from git-ignored `.env.local` (`VITE_GEMINI_API_KEY`,
+  `VITE_XAI_API_KEY`); flip DM with `localStorage['qf-dev-dm-provider']='xai'|'gemini'` + reload.
+  No-op in production builds; keys never travel through the UI.
+
+_Previous entry (2026-07-09, merged from origin): first real Grok-DM playtest findings fixed —
+OOC table talk is a first-class response mode, durable NPC dossier fields merge engine-side, and
+using an owned item can no longer be re-granted as loot (inverse economy rule + the Scribe loot
+audit receives the hero's current inventory). See DECISIONS.md 2026-07-09 ×2._
+
+_Previous entry (2026-07-08): xAI DM provider + mandatory Gemini machinery key split; **deployed
+to https://quest-forge-99ab1.web.app same day** — 658 tests + lint green. Note: a parallel local
+implementation of the same feature was discarded in favor of the merged one, kept on branch
+`backup/local-xai-backgroundllm-variant`; see DECISIONS.md 2026-07-08 before touching provider
+routing._
 
 ## Live playtest (2026-07-03, production build, real Gemini DM)
 
@@ -254,4 +354,8 @@ feels excellent in live play — casters multiply engine surface area; polish th
    fronts clocks (normally hidden). See IDEAS.md. High interest for perfecting the memory layer.
 3. **Rogue real-play feedback** — light pass after memory tuning; Sneak Attack/Cunning Action feel
 4. **Wizard/Cleric spellcasting** — after memory layer is proven in live campaigns
-5. **PWA + public launch** — separate project (API keys, Firebase, payments); not now
+5. **PWA + public launch** — separate project (API keys, Firebase, payments); not now.
+   Business groundwork started 2026-07-09 (Cowork): product north star in `docs/PRODUCT.md`,
+   pre-launch cost/monetization engineering items in IDEAS.md → "Launch & Monetization"
+   (context caching, machinery Flash-Lite upgrade, hosted-tier key proxy). Candidate model:
+   free BYOK tier + hosted ~$15/mo; per-turn compute $0.02–0.06 depending on stack.

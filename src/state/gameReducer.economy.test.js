@@ -341,3 +341,138 @@ describe('LEVEL_UP', () => {
         expect(next.combat.xpAwarded).toBe(true);
     });
 });
+
+describe('ADD_COIN_GRANT', () => {
+    function addMessages(state, count, prefix = 'msg') {
+        let next = state;
+        for (let i = 0; i < count; i++) {
+            next = gameReducer(next, {
+                type: 'ADD_MESSAGE',
+                payload: { id: `${prefix}-${i}`, role: 'assistant', content: `Filler line ${i}.` },
+            });
+        }
+        return next;
+    }
+
+    it('applies a coin grant and remembers it in the ledger', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, silver: 5, _meta: { sourceId: 'msg-reward-1' } },
+        });
+        expect(next.character.gold).toBe(25);
+        expect(next.character.silver).toBe(5);
+        expect(next.recentCoinGrants).toHaveLength(1);
+        expect(next.recentCoinGrants[0].status).toBe('applied');
+    });
+
+    it('suppresses an identical grant re-emitted within the replay window', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-reward-1', playerMessage: 'I accept the reward.' } },
+        });
+        const later = addMessages(granted, 2);
+        const replayed = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-reward-2', playerMessage: 'I count the coins and split them.' } },
+        });
+        expect(replayed.character.gold).toBe(25); // 5 base + one 20gp grant, not two
+        expect(replayed.messages.at(-1).content).toMatch(/Duplicate coin grant ignored/);
+        expect(replayed.recentCoinGrants.at(-1).status).toBe('ignored');
+    });
+
+    it('allows the identical grant when the player explicitly asked for more coin', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-reward-1' } },
+        });
+        const later = addMessages(granted, 2);
+        const repeat = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-reward-2', playerMessage: 'I demand another 20 gold for the second wagon.' } },
+        });
+        expect(repeat.character.gold).toBe(45);
+    });
+
+    it('always suppresses an exact same-source replay, even with repeat phrasing', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-reward-1' } },
+        });
+        const replayed = gameReducer(granted, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-reward-1', playerMessage: 'Give me another 20 gold coins.' } },
+        });
+        expect(replayed.character.gold).toBe(25);
+    });
+
+    it('applies an identical grant again once outside the replay window', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 10, _meta: { sourceId: 'msg-loot-1' } },
+        });
+        const later = addMessages(granted, 6);
+        const second = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 10, _meta: { sourceId: 'msg-loot-2' } },
+        });
+        expect(second.character.gold).toBe(25);
+    });
+
+    it('announces audit-recovered coins with a visible system line', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 15, _meta: { sourceId: 'msg-1:scribe-loot', announce: 'audit' } },
+        });
+        expect(next.character.gold).toBe(20);
+        expect(next.messages.at(-1).content).toMatch(/Coins recovered from narration/);
+    });
+
+    it('ignores empty and negative grants', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: -5, silver: 0 },
+        });
+        expect(next).toBe(state);
+    });
+});
+
+describe('AUDIT_COIN_PAYMENT', () => {
+    it('deducts a narrated payment the engine missed and says so', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { gold: 2 },
+        });
+        expect(next.character.gold).toBe(3);
+        expect(next.messages.at(-1).content).toMatch(/Payment settled from narration/);
+    });
+
+    it('clamps the deduction to the purse when funds fall short', () => {
+        const state = makeState({ character: { gold: 1, silver: 0, copper: 0 } });
+        const next = gameReducer(state, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { gold: 5 },
+        });
+        expect(next.character.gold).toBe(0);
+        expect(next.character.silver).toBe(0);
+        expect(next.character.copper).toBe(0);
+        expect(next.messages.at(-1).content).toMatch(/purse emptied/);
+    });
+
+    it('deducts nothing from an empty purse but leaves a visible note', () => {
+        const state = makeState({ character: { gold: 0, silver: 0, copper: 0 } });
+        const next = gameReducer(state, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { gold: 3 },
+        });
+        expect(next.character.gold).toBe(0);
+        expect(next.messages.at(-1).content).toMatch(/purse is empty/);
+    });
+});

@@ -96,6 +96,7 @@ function validateSaveState(payload) {
         appliedLootSourceIds: Array.isArray(payload.appliedLootSourceIds) ? payload.appliedLootSourceIds : [],
         recentPurchases: normalizeRecentTransactions(payload.recentPurchases),
         recentSales: normalizeRecentTransactions(payload.recentSales),
+        recentCoinGrants: normalizeRecentTransactions(payload.recentCoinGrants),
         recentRulings: (Array.isArray(payload.recentRulings) ? payload.recentRulings : [])
             .map(normalizeRollRuling).filter(Boolean).slice(-RECENT_RULING_LIMIT),
         combat: (() => {
@@ -287,7 +288,7 @@ function currentMessageIndex(state) {
     return Math.max(0, (state.messages || []).length - 1);
 }
 
-function findRecentTransactionDuplicate(entries, transaction, sourceId, currentIndex) {
+function findRecentTransactionDuplicate(entries, transaction, sourceId, currentIndex, window = RECENT_TRANSACTION_MESSAGE_WINDOW) {
     return normalizeRecentTransactions(entries)
         .slice()
         .reverse()
@@ -295,7 +296,7 @@ function findRecentTransactionDuplicate(entries, transaction, sourceId, currentI
             if (entry.signature !== transaction.signature) return false;
             if (sourceId && entry.sourceId === sourceId) return true;
             const distance = currentIndex - entry.messageIndex;
-            return distance >= 0 && distance <= RECENT_TRANSACTION_MESSAGE_WINDOW;
+            return distance >= 0 && distance <= window;
         }) || null;
 }
 
@@ -315,6 +316,33 @@ function rememberTransaction(entries, transaction, sourceId, messageIndex, statu
     const previous = normalizeRecentTransactions(entries)
         .filter(entry => !(entry.signature === record.signature && entry.sourceId === record.sourceId));
     return [...previous, record].slice(-RECENT_TRANSACTION_LIMIT);
+}
+
+// Coin grants replay in a tighter window than purchases: the observed failure is the DM
+// re-emitting a reward on the very next turn while narrating the pouch being counted or
+// split. Two identical legitimate finds four+ messages apart stay untouched.
+const RECENT_COIN_GRANT_MESSAGE_WINDOW = 4;
+const COIN_WORD_RE = /\b(gold|silver|copper|coins?|gp|sp|cp|payment|reward|wages?|bounty|purse)\b/i;
+
+function clampCoinAmount(value) {
+    return Number.isFinite(value) ? Math.max(0, Math.min(10000, Math.trunc(value))) : 0;
+}
+
+function buildCoinGrantTransaction(gold, silver, copper) {
+    const totalCp = gold * 100 + silver * 10 + copper;
+    return {
+        signature: `coins|${gold}g|${silver}s|${copper}c`,
+        item: { itemKey: 'coin-grant', name: formatCurrency(totalCp) },
+        quantity: 1,
+        priceCp: totalCp,
+    };
+}
+
+function playerMessageSupportsRepeatCoinGrant(playerMessage) {
+    const text = String(playerMessage || '');
+    if (!text.trim()) return false;
+    // "another 20 gold", "the rest of my payment" — explicit repeat intent naming coin.
+    return REPEAT_TRANSACTION_RE.test(text) && COIN_WORD_RE.test(text);
 }
 
 function playerMessageSupportsRepeatTransaction(item, playerMessage, verbRe) {
@@ -498,6 +526,7 @@ export const initialGameState = {
     appliedLootSourceIds: [], // Message IDs whose gold/item loot has already been applied — prevents double-grant
     recentPurchases: [], // Recent one-shot purchase signatures — prevents cross-turn LLM replays from double-charging
     recentSales: [], // Sale twin of recentPurchases — prevents replayed sells from double-removing/double-paying
+    recentCoinGrants: [], // Coin twin of recentPurchases — prevents a reward re-emitted on a later turn from paying twice
     recentRulings: [], // Roleplay-check rulings that ended without dice — injected so the DM cannot re-propose overruled/set-aside checks from scratch
     combat: {
         active: false,
@@ -914,6 +943,88 @@ export function gameReducer(state, action) {
             return {
                 ...state,
                 character: result.character,
+            };
+        }
+
+        // One narrative coin grant (found/received coins) as a single replay-guarded unit.
+        // The DM sometimes re-emits an already-paid reward on a later turn while narrating
+        // the pouch being counted or split — the recentCoinGrants ledger suppresses an
+        // identical grant inside a short message window unless the player explicitly asked
+        // for more coin. The Scribe loot audit routes its coin recoveries through here too,
+        // so a re-narrated reward cannot sneak back in through the audit backstop.
+        case 'ADD_COIN_GRANT': {
+            const meta = action.payload?._meta || {};
+            const gold = clampCoinAmount(action.payload?.gold);
+            const silver = clampCoinAmount(action.payload?.silver);
+            const copper = clampCoinAmount(action.payload?.copper);
+            if (gold <= 0 && silver <= 0 && copper <= 0) return state;
+            const transaction = buildCoinGrantTransaction(gold, silver, copper);
+            const sourceId = String(meta.sourceId || '').slice(0, 160);
+            const messageIndex = currentMessageIndex(state);
+            const duplicate = findRecentTransactionDuplicate(
+                state.recentCoinGrants, transaction, sourceId, messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW
+            );
+            const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
+            if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatCoinGrant(meta.playerMessage))) {
+                return {
+                    ...state,
+                    recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`Duplicate coin grant ignored — ${transaction.item.name} was already received moments ago.`),
+                    ],
+                };
+            }
+            const messages = meta.announce === 'audit'
+                ? [...state.messages, systemMessage(`**Coins recovered from narration:** ${transaction.item.name} added to your purse.`)]
+                : state.messages;
+            return {
+                ...state,
+                character: addCurrency(state.character, { gold, silver, copper }),
+                recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex),
+                messages,
+            };
+        }
+
+        // Scribe payment audit: the narrative showed the hero completing a payment that the
+        // DM never emitted as a coin-loss event. Deduct it, clamped to the purse — never
+        // below zero — and say so visibly. Idempotency is owned by the caller via a
+        // CLAIM_LOOT_SOURCE-claimed sourceId, mirroring the loot-recovery path.
+        case 'AUDIT_COIN_PAYMENT': {
+            const gold = clampCoinAmount(action.payload?.gold);
+            const silver = clampCoinAmount(action.payload?.silver);
+            const copper = clampCoinAmount(action.payload?.copper);
+            const costCp = gold * 100 + silver * 10 + copper;
+            if (costCp <= 0) return state;
+            const result = spendCurrency(state.character, { gold, silver, copper });
+            if (result.paid) {
+                return {
+                    ...state,
+                    character: result.character,
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`**Payment settled from narration:** ${formatCurrency(costCp)} deducted from your purse.`),
+                    ],
+                };
+            }
+            const availableCp = costCp - result.missingCp;
+            if (availableCp <= 0) {
+                return {
+                    ...state,
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`**Payment noted from narration:** ${formatCurrency(costCp)} was owed, but your purse is empty — nothing deducted.`),
+                    ],
+                };
+            }
+            const partial = spendCurrency(state.character, { copper: availableCp });
+            return {
+                ...state,
+                character: partial.character,
+                messages: [
+                    ...state.messages,
+                    systemMessage(`**Payment settled from narration:** ${formatCurrency(availableCp)} deducted (purse emptied; ${formatCurrency(result.missingCp)} short of the narrated ${formatCurrency(costCp)}).`),
+                ],
             };
         }
 
@@ -2256,6 +2367,7 @@ export function gameReducer(state, action) {
             if ([COMBAT_PHASES.AWAITING_PLAYER, COMBAT_PHASES.AWAITING_INTENT].includes(state.combat.phase) && payload.result.kind !== 'exchange') return state;
 
             let next = state;
+            const preExchangeMessageCount = state.messages.length;
             if (Number.isInteger(payload.deathSaveNatural)) {
                 next = gameReducer(next, { type: 'DEATH_SAVE_RESULT', payload: { die: payload.deathSaveNatural } });
             }
@@ -2268,6 +2380,10 @@ export function gameReducer(state, action) {
                 .map(line => line.trim())
                 .filter(Boolean)
                 .map(line => systemMessage(line));
+            // The inner DEATH_SAVE_RESULT / TAKE_DAMAGE dispatches append their own status
+            // lines ("X is defeated", "X falls!"). Those must render AFTER the exchange's
+            // roll summary — the dice caused the defeat, so the reader sees them first.
+            const statusMessages = next.messages.slice(preExchangeMessageCount);
             const playerIdx = state.combat.turnOrder.findIndex(actor => actor.type === 'player');
             const character = payload.consumeActionSurge && next.character?.pendingActionSurge
                 ? { ...next.character, pendingActionSurge: false }
@@ -2277,7 +2393,7 @@ export function gameReducer(state, action) {
                 character,
                 party: Array.isArray(payload.party) ? payload.party : next.party,
                 rollHistory: [...next.rollHistory, ...(Array.isArray(payload.rolls) ? payload.rolls : [])],
-                messages: [...next.messages, ...resultMessages],
+                messages: [...next.messages.slice(0, preExchangeMessageCount), ...resultMessages, ...statusMessages],
                 combat: {
                     ...next.combat,
                     enemies: Array.isArray(payload.enemies) ? payload.enemies : next.combat.enemies,

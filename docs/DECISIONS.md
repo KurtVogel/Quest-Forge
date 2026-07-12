@@ -8,6 +8,20 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-12 · Narrated payments auto-deduct (clamped, visible), not one-click confirm; coin gains are replay-guarded like purchases.**
+The Scribe loot audit became a loot & payment audit: `missing_payment` detects payments the
+narrative completed but the DM never evented, and `AUDIT_COIN_PAYMENT` deducts immediately —
+clamped to the purse, never below zero, always announced with a visible system line. The IDEAS
+entry had floated a "safer" one-click confirmation instead; settled on auto-deduct because the
+audit's rules demand exact narrated amounts only (never estimates), the deduction is clamped and
+visible, and a confirmation prompt would let players decline payments their own fiction completed
+(the same player-favorable drift the audit exists to stop). Symmetry argument: narrated *grants*
+already auto-apply. Coin *gains* now ride a `recentCoinGrants` ledger (twin of `recentPurchases`,
+4-message window): the DM re-emitting a reward while the pouch is counted/split is suppressed
+visibly; the audit's coin recoveries route through the same guarded action so the backstop can't
+re-grant what the ledger suppressed. Only explicit player repeat-phrasing naming coin re-opens an
+identical grant inside the window.
+
 **2026-07-09 · Out-of-character table talk is a first-class response mode, enforced client-side — never provider goodwill.**
 First live Grok-DM playtest: "DM, ..." and "OOC: DM, ..." messages were steamrolled into scene
 narration. Gemini had only ever handled these because it breaks character graciously on its own —

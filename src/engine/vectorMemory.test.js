@@ -97,6 +97,31 @@ describe('VectorMemory embedding roles', () => {
         expect(block).toContain('[world_fact] The goblin camp gate is barred.');
     });
 
+    it('tags memories recorded at a known location and warns against transplanting them', () => {
+        const block = buildRetrievedMemoriesBlock([
+            { category: 'world_fact', text: 'Ichor ghouls haunt the lower stacks.', location: 'The Underway of Karst' },
+            { category: 'journal', text: 'The party reached the coast.' },
+        ]);
+
+        expect(block).toContain('[world_fact — recorded at: The Underway of Karst] Ichor ghouls haunt the lower stacks.');
+        expect(block).toContain('[journal] The party reached the coast.');
+        expect(block).toContain('never transplant its creatures, factions, or local color');
+    });
+
+    it('stores and returns the location a memory was recorded at', async () => {
+        const vector = Array(768).fill(0);
+        vector[0] = 1;
+        embedTextMock.mockResolvedValue(vector);
+
+        await addMemory('test-key', 'The salt mine collapsed.', 'world_fact', '  Graven Deep  ');
+        const matches = await retrieveRelevant('test-key', 'What happened at the mine?', 1, 0.5);
+
+        expect(matches).toEqual([expect.objectContaining({
+            text: 'The salt mine collapsed.',
+            location: 'Graven Deep',
+        })]);
+    });
+
     it('buildRetrievedMemoriesBlock returns an empty string for no memories', () => {
         expect(buildRetrievedMemoriesBlock([])).toBe('');
         expect(buildRetrievedMemoriesBlock(null)).toBe('');

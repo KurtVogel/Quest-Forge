@@ -639,14 +639,16 @@ describe('applyEvents dispatch coverage', () => {
 
     it('suppresses a loose coin gain emitted alongside an atomic sale', () => {
         const dispatch = run({ sell: { itemKey: 'torch' }, gold_found: 5 });
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
     });
 
     it('dispatches loose gold/silver/copper found and lost independently of trades', () => {
         const dispatch = run({ gold_found: 3, silver_lost: 2, copper_found: 7 });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_GOLD', payload: 3 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'ADD_COIN_GRANT',
+            payload: expect.objectContaining({ gold: 3, silver: 0, copper: 7 }),
+        }));
         expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_SILVER', payload: 2 });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_COPPER', payload: 7 });
     });
 
     it('skips loot dispatch when the loot source was already claimed', () => {
@@ -655,7 +657,7 @@ describe('applyEvents dispatch coverage', () => {
         const dispatch = vi.fn();
         applyEvents(events, dispatch, () => state, { lootSourceId: 'msg-1' });
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ITEM' }));
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'CLAIM_LOOT_SOURCE' }));
     });
 
@@ -664,7 +666,10 @@ describe('applyEvents dispatch coverage', () => {
         const dispatch = vi.fn();
         applyEvents(events, dispatch, () => ({ character: {}, party: [], appliedLootSourceIds: [] }), { lootSourceId: 'msg-2' });
         expect(dispatch).toHaveBeenCalledWith({ type: 'CLAIM_LOOT_SOURCE', payload: 'msg-2' });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_GOLD', payload: 10 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'ADD_COIN_GRANT',
+            payload: expect.objectContaining({ gold: 10, _meta: expect.objectContaining({ sourceId: 'msg-2' }) }),
+        }));
     });
 
     it('dispatches an explicit LEVEL_UP without also awarding raw exp', () => {
@@ -772,7 +777,7 @@ describe('applyEvents dispatch coverage', () => {
         const dispatch = vi.fn();
         applyEvents(events, dispatch, () => ({ character: {}, party: [] }), { setupPhase: true });
         expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'START_COMBAT' }));
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_GOLD' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
         expect(dispatch).toHaveBeenCalledTimes(1);
     });
 });

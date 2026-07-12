@@ -409,6 +409,25 @@ describe('atomic combat exchange lifecycle', () => {
         expect(duplicate.rollHistory).toHaveLength(1);
     });
 
+    it('renders the exchange roll summary before the falls/defeat status line it caused', () => {
+        const payload = {
+            exchangeId: 'exchange-fatal',
+            enemies: [{ id: 'e1', name: 'Goblin', hp: 7, maxHp: 7, ac: 12, condition: 'healthy', combatStatus: 'active' }],
+            party: makeState().party,
+            playerDamage: 12, // drops the hero to 0 HP → "falls!" status line
+            deathSaveNatural: null,
+            rolls: [],
+            consumeActionSurge: false,
+            result: { exchangeId: 'exchange-fatal', kind: 'exchange', round: 2, terminal: 'dying', summary: '**Goblin attacks Astra** — Hit for 12 damage.' },
+        };
+        const committed = gameReducer(activeState(), { type: 'APPLY_COMBAT_EXCHANGE', payload });
+        const contents = committed.messages.map(m => m.content);
+        const rollIdx = contents.findIndex(c => c.includes('Goblin attacks Astra'));
+        const statusIdx = contents.findIndex(c => c.includes('falls!'));
+        expect(rollIdx).toBeGreaterThanOrEqual(0);
+        expect(statusIdx).toBeGreaterThan(rollIdx);
+    });
+
     it('locks an in-flight intent and safely unlocks it without committing mechanics', () => {
         const start = activeState();
         const locked = gameReducer(start, { type: 'BEGIN_COMBAT_INTENT' });

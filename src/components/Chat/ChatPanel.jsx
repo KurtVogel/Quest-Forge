@@ -68,7 +68,7 @@ export default function ChatPanel() {
                 const journalText = result.journalEntry.location
                     ? `[Location: ${result.journalEntry.location}] ${result.journalEntry.summary}`
                     : result.journalEntry.summary;
-                await addMemory(machineryKey, journalText, 'journal').catch(() => {});
+                await addMemory(machineryKey, journalText, 'journal', result.journalEntry.location).catch(() => {});
             }
         } catch (e) {
             console.error('[Journal RAG Seeding] Failed:', e);
@@ -163,14 +163,16 @@ export default function ChatPanel() {
 
         const items = [
             ...(s.worldFacts || []).map(f => ({ text: f.fact, category: f.category || 'world_fact' })),
-            ...(s.journal || []).map(j => ({ text: j.summary, category: 'journal' })),
+            ...(s.journal || []).map(j => ({ text: j.summary, category: 'journal', location: j.location })),
             ...(s.npcs || []).filter(n => n.lastNotes || n.notes).map(n => ({
                 text: `${n.name} (${n.disposition || 'unknown'}): ${n.lastNotes || n.notes}`,
                 category: 'npc',
+                location: n.basedIn || n.lastLocation,
             })),
             ...(s.storyMemory || []).map(m => ({
                 text: `${m.subject ? `${m.subject}: ` : ''}${m.text}`,
                 category: `story_${m.type || 'callback'}`,
+                location: m.location,
             })),
         ];
 
@@ -423,7 +425,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         // Skip on a setup turn (pending rolls) — those facts ride on the outcome narration.
         if (!setupPhase && !s.combat?.active && events?.worldFacts?.length > 0 && machineryKey) {
             for (const f of events.worldFacts) {
-                addMemory(machineryKey, f.fact, f.category || 'world_fact').catch(() => {});
+                addMemory(machineryKey, f.fact, f.category || 'world_fact', events?.location || s.currentLocation).catch(() => {});
             }
         }
 
@@ -551,7 +553,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                         const narrativeText = loc
                             ? `[Location: ${loc}] ${narrative.slice(0, 500)}`
                             : narrative.slice(0, 500);
-                        addMemory(machineryKey, narrativeText, 'narrative').catch(() => {});
+                        addMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
                     }
                 }
                 runAutoSummarize();
@@ -611,7 +613,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 const narrativeText = loc
                     ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
                     : finalNarration.content.slice(0, 500);
-                addMemory(machineryKey, narrativeText, 'narrative').catch(() => {});
+                addMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
             }
         }
         runAutoSummarize();
@@ -773,7 +775,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             const playerText = loc
                 ? `[Location: ${loc}] ${trimmed.slice(0, 500)}`
                 : trimmed.slice(0, 500);
-            addMemory(playerMachineryKey, playerText, 'player').catch(() => {});
+            addMemory(playerMachineryKey, playerText, 'player', loc).catch(() => {});
         }
 
         setIsLoading(true);
@@ -864,7 +866,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                     const narrativeText = loc
                         ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
                         : finalNarration.content.slice(0, 500);
-                    addMemory(machineryKey, narrativeText, 'narrative').catch(() => {});
+                    addMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
                 }
             }
 
