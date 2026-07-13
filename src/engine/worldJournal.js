@@ -10,6 +10,7 @@
 
 import { sendMessage } from '../llm/adapter.js';
 import { getBackgroundConfig } from '../llm/machinery.js';
+import { parseJsonObjectLoose } from '../llm/utils/jsonExtractor.js';
 import {
     briefNpcFieldForPrompt,
     classifyNpcCandidate,
@@ -27,6 +28,9 @@ export function normalizeLocationName(loc) {
 }
 
 const SUMMARIZE_EVERY = 10; // Summarize every N new messages
+// One journal batch may not flood the never-pruned world-facts store. The per-turn
+// Scribe is budgeted at 3; a 10-message batch gets a slightly larger allowance.
+const MAX_FACTS_PER_BATCH = 5;
 
 const JOURNAL_SYSTEM_PROMPT = `You are a meticulous chronicler summarizing RPG game events. Given recent conversation between a player and DM, produce a JSON summary.
 
@@ -92,6 +96,14 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             .map(m => `[${m.role.toUpperCase()}]: ${m.content}`)
             .join('\n\n');
 
+        // An all-hidden batch (e.g. withheld roll-setup narration) would send the LLM
+        // an empty transcript and risk a hallucinated summary being written into the
+        // journal permanently. Wait for visible messages; the batch retries next turn.
+        if (!recentMessages.trim()) {
+            console.warn('[Journal] Batch contains no visible messages — deferring summarization');
+            return { index: lastSummarizedIndex, journalEntry: null };
+        }
+
         const response = await sendMessage({
             ...background,
             systemPrompt: JOURNAL_SYSTEM_PROMPT,
@@ -100,13 +112,16 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             temperature: 0.2, // faithful extraction — proper nouns and numbers must survive verbatim
         });
 
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
+        // Shared repair-capable extractor (same path as responseParser/scribe): a
+        // trailing comma or trailing prose from the Flash model must not silently
+        // cost this batch its one shot at compression.
+        // Anchor on quoted JSON keys — bare "summary" also appears in the model's
+        // conversational prose ("Here is the summary:") and would misanchor.
+        const summary = parseJsonObjectLoose(response, ['"summary"', '"npcs_encountered"']);
+        if (!summary) {
             console.warn('[Journal] Could not parse summary response — messages NOT marked as summarized');
             return { index: lastSummarizedIndex, journalEntry: null }; // Don't advance — retry next time
         }
-
-        const summary = JSON.parse(jsonMatch[0]);
 
         const journalId = `journal-${Date.now()}`;
         const journalTimestamp = Date.now();
@@ -162,9 +177,11 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             }
         }
 
-        // Add world facts extracted from this batch
+        // Add world facts extracted from this batch, capped like the Scribe's budget —
+        // the world-facts block is never pruned, so an over-eager summary must not
+        // quietly bloat every future prompt.
         if (Array.isArray(summary.world_facts) && summary.world_facts.length > 0) {
-            dispatch({ type: 'ADD_WORLD_FACTS', payload: summary.world_facts });
+            dispatch({ type: 'ADD_WORLD_FACTS', payload: summary.world_facts.slice(0, MAX_FACTS_PER_BATCH) });
         }
 
         // Update location

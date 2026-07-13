@@ -714,6 +714,19 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'FAIL_QUEST', payload: { id: 'q2', name: 'Save the caravan' } });
     });
 
+    it('drops quest updates missing both id and name instead of creating ghost quests', () => {
+        const dispatch = run({
+            quest_updates: [
+                { status: 'new', description: 'A quest with no identity.' },
+                { status: 'updated', name: '   ' },
+                { status: 'new', name: 'Real Quest', description: 'Has a name.' },
+            ],
+        });
+        const questCalls = dispatch.mock.calls.filter(([action]) => action.type === 'ADD_QUEST');
+        expect(questCalls).toHaveLength(1);
+        expect(questCalls[0][0].payload.name).toBe('Real Quest');
+    });
+
     it('dispatches combat start/end, enemy, and companion updates', () => {
         const dispatch = run({
             combat_start: { enemies: [{ name: 'Goblin', hp: 7, maxHp: 7, ac: 12 }] },

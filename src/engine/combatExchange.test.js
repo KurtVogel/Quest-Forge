@@ -546,6 +546,37 @@ describe('Opening Initiative', () => {
         expect(plan.payload.result.events.map(event => event.actor)).toEqual(['Fast', 'Ally']);
         expect(plan.payload.result.events.some(event => event.actor === 'Slow')).toBe(false);
     });
+
+    it('shares one Uncanny Dodge across all opening enemies against a level 5+ Rogue', () => {
+        // Ambush: both enemies won initiative, each resolved by its own per-actor
+        // resolveEnemies call — the once-per-turn reaction must still fire only once.
+        const openingState = state({
+            character: { class: 'rogue', level: 5, maxHP: 35, currentHP: 35 },
+            enemies: [enemy('G1'), enemy('G2')],
+            combat: {
+                phase: COMBAT_PHASES.OPENING,
+                openingActorIds: ['G1', 'G2'],
+                turnOrder: [
+                    { type: 'enemy', id: 'G1', name: 'G1', initiative: 19 },
+                    { type: 'enemy', id: 'G2', name: 'G2', initiative: 17 },
+                    { type: 'player', name: 'Vesa', initiative: 15 },
+                ],
+            },
+        });
+        rollQueue.push(15); // G1 to-hit
+        rollQueue.push(2);  // G1 damage: 2 + 2 = 4, halved to 2
+        rollQueue.push(15); // G2 to-hit
+        rollQueue.push(2);  // G2 damage: 2 + 2 = 4, NOT halved
+
+        const plan = planOpeningExchange(openingState);
+        expect(plan.ok).toBe(true);
+
+        const attacks = plan.payload.result.events.filter(e => e.type === 'attack' && e.target === 'Vesa');
+        expect(attacks.length).toBe(2);
+        expect(attacks[0]).toMatchObject({ actor: 'G1', hit: true, damage: 2, uncannyDodgeApplied: true });
+        expect(attacks[1]).toMatchObject({ actor: 'G2', hit: true, damage: 4, uncannyDodgeApplied: false });
+        expect(plan.payload.playerDamage).toBe(6);
+    });
 });
 
 describe('Rogue Combat Features', () => {

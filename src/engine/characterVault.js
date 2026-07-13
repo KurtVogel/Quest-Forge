@@ -10,7 +10,7 @@
 import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
-import { getModifier, getProficiencyBonus } from './rules.js';
+import { getMaxHitPoints, getModifier, getProficiencyBonus } from './rules.js';
 import { ABILITY_NAMES, SKILL_LABELS, buildClassResources, getAllFeaturesUpToLevel, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 import { normalizeEquippedSlots } from './equipment.js';
@@ -19,6 +19,12 @@ export const EXPORT_FORMAT = 'quest-forge-character';
 export const EXPORT_VERSION = 1;
 
 const MAX_COIN = 1_000_000;
+// DECISIONS.md 2026-06-15: level-up HP became fixed-average (deterministic). Heroes
+// created after that boundary have exactly ONE legitimate maxHP for their class/CON/
+// level — the wide legacy clamp band exists only for pre-decision heroes whose
+// level-ups genuinely rolled HP. Applying the band to modern heroes reopened a
+// hand-edit exploit (e.g. +16 free max HP on an L5 fighter).
+const FIXED_AVERAGE_HP_SINCE = Date.UTC(2026, 5, 15);
 const MAX_INVENTORY_ITEMS = 200;
 const MAX_APPEARANCE_LENGTH = 2000;
 const MAX_PORTRAIT_URL_LENGTH = 2_500_000;
@@ -101,13 +107,21 @@ export function sanitizeCharacter(raw) {
     const level = clampInt(raw.level, 1, MAX_CHARACTER_LEVEL, 1);
     const exp = clampInt(raw.exp, 0, getExperienceThreshold(level) - 1, 0);
 
-    // Old exports may have random rolled HP. Preserve plausible values, but clamp
-    // to the broad range historically reachable by this class/CON/level.
+    // Heroes created since the fixed-average-HP decision have exactly one correct
+    // maxHP — recompute it and ignore whatever the (hand-editable) file claims.
+    // Only pre-decision heroes (or files without a creation timestamp) keep the
+    // broad legacy clamp band, because their level-ups genuinely rolled HP.
     const conMod = getModifier(abilityScores.constitution);
-    const perLevelMax = Math.max(1, charClass.hitDie + conMod);
-    const minPossibleHP = perLevelMax + (level - 1);
-    const maxPossibleHP = perLevelMax * level;
-    const maxHP = clampInt(raw.maxHP, minPossibleHP, maxPossibleHP, minPossibleHP);
+    const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : null;
+    let maxHP;
+    if (createdAt && createdAt >= FIXED_AVERAGE_HP_SINCE) {
+        maxHP = Math.max(1, getMaxHitPoints(raw.class, level, conMod, charClass));
+    } else {
+        const perLevelMax = Math.max(1, charClass.hitDie + conMod);
+        const minPossibleHP = perLevelMax + (level - 1);
+        const maxPossibleHP = perLevelMax * level;
+        maxHP = clampInt(raw.maxHP, minPossibleHP, maxPossibleHP, minPossibleHP);
+    }
 
     const knownSkills = new Set(Object.keys(SKILL_LABELS));
     const skillProficiencies = [...new Set([

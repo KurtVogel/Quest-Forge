@@ -236,3 +236,101 @@ describe('autoSave / loadAutoSave', () => {
         await expect(autoSave(null)).resolves.toBe(false);
     });
 });
+
+describe('failure surfacing', () => {
+    it('saveSettings returns true on success and false when localStorage throws', async () => {
+        const { vi } = await import('vitest');
+        expect(saveSettings({ llmProvider: 'gemini' })).toBe(true);
+
+        globalThis.localStorage.setItem = vi.fn(() => { throw new Error('QuotaExceededError'); });
+        expect(saveSettings({ llmProvider: 'gemini' })).toBe(false);
+    });
+
+    it('loadGame rejects and closes the connection when the read request errors', async () => {
+        const closed = { value: false };
+        const erroringDb = {
+            close: () => { closed.value = true; },
+            transaction: () => {
+                const request = {};
+                const tx = {
+                    objectStore: () => ({ get: () => request, getAll: () => request }),
+                };
+                queueMicrotask(() => {
+                    const err = new Error('disk failure');
+                    request.error = err;
+                    request.onerror?.();
+                    tx.error = err;
+                    tx.onabort?.();
+                });
+                return tx;
+            },
+        };
+        globalThis.indexedDB = {
+            open: () => {
+                const req = {};
+                queueMicrotask(() => {
+                    req.result = erroringDb;
+                    req.onsuccess?.();
+                });
+                return req;
+            },
+        };
+
+        await expect(loadGame('slot-1')).rejects.toThrow('disk failure');
+        expect(closed.value).toBe(true);
+    });
+
+    it('listSaves rejects and closes the connection when the read request errors', async () => {
+        const closed = { value: false };
+        const erroringDb = {
+            close: () => { closed.value = true; },
+            transaction: () => {
+                const request = {};
+                const tx = {
+                    objectStore: () => ({ get: () => request, getAll: () => request }),
+                };
+                queueMicrotask(() => {
+                    const err = new Error('read failed');
+                    request.error = err;
+                    request.onerror?.();
+                    tx.error = err;
+                    tx.onabort?.();
+                });
+                return tx;
+            },
+        };
+        globalThis.indexedDB = {
+            open: () => {
+                const req = {};
+                queueMicrotask(() => {
+                    req.result = erroringDb;
+                    req.onsuccess?.();
+                });
+                return req;
+            },
+        };
+
+        await expect(listSaves()).rejects.toThrow('read failed');
+        expect(closed.value).toBe(true);
+    });
+
+    it('rejects with a clear message instead of hanging forever when the open stays blocked', async () => {
+        const { vi } = await import('vitest');
+        vi.useFakeTimers();
+        try {
+            globalThis.indexedDB = {
+                open: () => {
+                    const req = {};
+                    queueMicrotask(() => req.onblocked?.());
+                    return req;
+                },
+            };
+            const pending = loadGame('slot-1');
+            const guarded = expect(pending).rejects.toThrow(/blocked by another open tab/);
+            await vi.advanceTimersByTimeAsync(9000);
+            await guarded;
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});

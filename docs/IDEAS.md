@@ -171,6 +171,20 @@ embedded into RAG, so it fell through every durable tier once the 20-message win
 
 ## Gameplay & Mechanics
 
+### [strengthening] Incapacitating conditions don't stop an enemy's own turn — status: `idea`
+`stunned`/`paralyzed`/`unconscious` are valid enemy conditions (`engine/enemyStats.js`
+`SUPPORTED_ENEMY_CONDITIONS`) and the DM can apply them via `enemy_condition_updates`, but
+`CONDITION_EFFECTS` (`engine/rules.js`) only defines the `incomingAttack` half (attackers get
+advantage against them) — there's no `attack` effect, and `resolveEnemies`/`resolveEnemyAttack`
+(`engine/combatExchange.js`) never check whether the acting enemy is itself incapacitated before
+resolving its `attack` intent. A DM-narrated "the ogre is stunned by the spell" has zero effect on
+that ogre's own turn — it still swings normally. Why: this is a silent half-implementation of a
+condition the game explicitly models as applicable to enemies; found during the scheduled
+strengthening audit (2026-07-13). Options: force a skip/defend outcome for these three conditions
+in `resolveEnemies`, or (simpler, if full incapacitation is out of scope) drop them from
+`SUPPORTED_ENEMY_CONDITIONS` so the DM isn't invited to apply a condition that doesn't do what its
+name implies.
+
 ### Recent-rulings ledger for overruled/withdrawn checks — status: `shipped` (2026-07-05)
 Live play: a check the player had already challenged and gotten overruled came back verbatim a
 few turns later; the same-day playtest reproduced it (same-skill/same-DC reworded check after a

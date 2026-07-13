@@ -23,6 +23,11 @@ let rollIdCounter = 0;
  * Roll a single die with the given number of sides using crypto-random.
  */
 export function rollDie(sides: number): number {
+  // `x % 0` is NaN in JS and NaN is sticky through every downstream sum —
+  // a corrupted "1d0" profile must fail loudly here, not poison HP math silently.
+  if (!Number.isInteger(sides) || sides <= 0) {
+    throw new Error(`Invalid die: d${sides}`);
+  }
   const array = new Uint32Array(1);
   crypto.getRandomValues(array);
   return (array[0] % sides) + 1;
@@ -115,9 +120,16 @@ export function parseNotation(notation: string): { count: number; sides: number;
   if (!match) {
     throw new Error(`Invalid dice notation: "${notation}"`);
   }
+  const count = parseInt(match[1], 10);
+  const sides = parseInt(match[2], 10);
+  // The regex accepts "0d6" and "1d0"; both would silently produce empty or NaN
+  // rolls downstream. Reject them like any other malformed notation.
+  if (count < 1 || sides < 1) {
+    throw new Error(`Invalid dice notation: "${notation}"`);
+  }
   return {
-    count: parseInt(match[1], 10),
-    sides: parseInt(match[2], 10),
+    count,
+    sides,
     modifier: match[3] ? parseInt(match[3], 10) : 0,
   };
 }

@@ -85,10 +85,13 @@ export function GameProvider({ children }) {
         showSaveToast(saved ? 'local' : 'save-error');
     }, [showSaveToast]);
 
-    // Auto-save settings when they change
+    // Auto-save settings when they change. Settings carries the LLM API key —
+    // a silent persist failure (quota, private browsing) must not let the player
+    // believe a key was configured when it wasn't.
     useEffect(() => {
-        saveSettings(state.settings);
-    }, [state.settings]);
+        const saved = saveSettings(state.settings);
+        if (!saved) showSaveToast('save-error');
+    }, [state.settings, showSaveToast]);
 
     // Flush the debounced autosave when the tab is backgrounded or closed. On phones
     // especially, the browser can kill the page inside the 2s debounce window and

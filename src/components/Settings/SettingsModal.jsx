@@ -8,6 +8,7 @@ import { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud
 import { getFirebaseConfigError, initializeFirebase } from '../../config/firebase.js';
 import { signInWithGoogle, logOut } from '../../state/auth.js';
 import { upgradeCampaignFrontsV2 } from '../../llm/frontUpgrade.js';
+import { clearImageCache } from '../../llm/providers/imageGen.js';
 import './Settings.css';
 
 export default function SettingsModal() {
@@ -130,6 +131,7 @@ export default function SettingsModal() {
             savedState = await loadGame(slotId);
         }
         if (savedState) {
+            clearImageCache(); // Scene-art cache is per-campaign — never show another campaign's art
             dispatch({ type: 'LOAD_GAME', payload: savedState });
             handleClose();
         }
@@ -179,6 +181,7 @@ export default function SettingsModal() {
 
     const handleNewGame = () => {
         if (confirm('Start a new game? Current unsaved progress will be lost.')) {
+            clearImageCache();
             dispatch({ type: 'NEW_GAME' });
             dispatch({ type: 'SET_UI', payload: { isCharacterCreationOpen: true, isSettingsOpen: false } });
         }

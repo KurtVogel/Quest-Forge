@@ -674,6 +674,9 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     }
 
     for (const quest of events.questUpdates) {
+        // Every branch requires an identity — a malformed update with neither id nor
+        // name would otherwise create a permanent nameless "ghost" quest row.
+        if (!quest || (!quest.id && !String(quest.name || '').trim())) continue;
         if (quest.status === 'new' || quest.status === 'updated') {
             // ADD_QUEST upserts by id/name, so "updated" refreshes the existing entry
             // (or self-heals into a new one if the DM never opened it).

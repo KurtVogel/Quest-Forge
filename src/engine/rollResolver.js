@@ -603,7 +603,17 @@ export async function handleRequestedRolls(requestedRolls, {
                 }
             }
         } catch (e) {
+            // The dice landed but the outcome narration didn't. Say so visibly — the
+            // exception never escapes to ChatPanel's own error surfacing, so without
+            // this line the player just sees a roll followed by silence.
             console.warn('[RollResolver] Follow-up narration failed:', e);
+            dispatch({
+                type: 'ADD_MESSAGE',
+                payload: {
+                    role: 'system',
+                    content: `**Outcome narration failed:** ${e?.message || 'the DM call did not complete'}. Your roll above stands — send any message (even "continue") and the DM will narrate the outcome from it.`,
+                },
+            });
         }
     }
 

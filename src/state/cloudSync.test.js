@@ -9,14 +9,28 @@ vi.mock('../config/firebase.js', () => ({ db: { mock: true } }));
 
 vi.mock('firebase/firestore', () => {
     const store = new Map(); // full doc path -> plain data object
+    // One-shot failure injection: set a key to an Error to make that operation's
+    // NEXT call reject, so each function's catch/error branch is testable.
+    const __fail = { getDoc: null, getDocs: null, setDoc: null, commit: null };
+    const maybeFail = (name) => {
+        if (__fail[name]) {
+            const error = __fail[name];
+            __fail[name] = null;
+            throw error;
+        }
+    };
     const collection = (db, path) => ({ path });
     const doc = (parent, id) => ({ path: `${parent.path}/${id}` });
-    const setDoc = async (ref, data) => { store.set(ref.path, JSON.parse(JSON.stringify(data))); };
-    const getDoc = async (ref) => ({
-        exists: () => store.has(ref.path),
-        data: () => store.get(ref.path),
-    });
+    const setDoc = async (ref, data) => { maybeFail('setDoc'); store.set(ref.path, JSON.parse(JSON.stringify(data))); };
+    const getDoc = async (ref) => {
+        maybeFail('getDoc');
+        return {
+            exists: () => store.has(ref.path),
+            data: () => store.get(ref.path),
+        };
+    };
     const getDocs = async (col) => {
+        maybeFail('getDocs');
         const prefix = `${col.path}/`;
         const docs = [...store.entries()]
             .filter(([path]) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
@@ -29,10 +43,10 @@ vi.mock('firebase/firestore', () => {
         return {
             set: (ref, data) => ops.push(() => store.set(ref.path, JSON.parse(JSON.stringify(data)))),
             delete: (ref) => ops.push(() => store.delete(ref.path)),
-            commit: async () => { ops.forEach(op => op()); },
+            commit: async () => { maybeFail('commit'); ops.forEach(op => op()); },
         };
     };
-    return { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, __store: store };
+    return { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, __store: store, __fail };
 });
 
 const firestore = await import('firebase/firestore');
@@ -160,5 +174,50 @@ describe('listCloudSaves / deleteGameFromCloud', () => {
         expect(chunkPaths().length).toBeGreaterThan(0);
         expect(await deleteGameFromCloud('u1', 'slot-big')).toBe(true);
         expect(firestore.__store.size).toBe(0);
+    });
+});
+
+describe('guards and failure surfacing', () => {
+    it('all four functions refuse a missing uid without touching Firestore', async () => {
+        expect(await saveGameToCloud('', 'slot-1', makeGameState())).toBe(false);
+        expect(await loadGameFromCloud('', 'slot-1')).toBeNull();
+        expect(await listCloudSaves('')).toEqual([]);
+        expect(await deleteGameFromCloud('', 'slot-1')).toBe(false);
+        expect(firestore.__store.size).toBe(0);
+    });
+
+    it('deleteGameFromCloud refuses a missing slotId', async () => {
+        expect(await deleteGameFromCloud('u1', '')).toBe(false);
+    });
+
+    it('saveGameToCloud swallows a Firestore failure to false', async () => {
+        firestore.__fail.getDoc = new Error('unavailable');
+        expect(await saveGameToCloud('u1', 'slot-1', makeGameState())).toBe(false);
+        expect(firestore.__store.size).toBe(0);
+    });
+
+    it('saveGameToCloud returns false on a permission-denied write (rules hint path)', async () => {
+        const denied = new Error('Missing or insufficient permissions.');
+        denied.code = 'permission-denied';
+        firestore.__fail.setDoc = denied;
+        expect(await saveGameToCloud('u1', 'slot-1', makeGameState())).toBe(false);
+    });
+
+    it('loadGameFromCloud swallows a Firestore failure to null', async () => {
+        await saveGameToCloud('u1', 'slot-1', makeGameState());
+        firestore.__fail.getDoc = new Error('unavailable');
+        expect(await loadGameFromCloud('u1', 'slot-1')).toBeNull();
+    });
+
+    it('listCloudSaves re-throws so the caller can show the error', async () => {
+        firestore.__fail.getDocs = new Error('unavailable');
+        await expect(listCloudSaves('u1')).rejects.toThrow('unavailable');
+    });
+
+    it('deleteGameFromCloud swallows a Firestore failure to false and leaves the save intact', async () => {
+        await saveGameToCloud('u1', 'slot-1', makeGameState());
+        firestore.__fail.commit = new Error('unavailable');
+        expect(await deleteGameFromCloud('u1', 'slot-1')).toBe(false);
+        expect(firestore.__store.has('users/u1/saves/slot-1')).toBe(true);
     });
 });

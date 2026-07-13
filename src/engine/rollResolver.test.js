@@ -795,3 +795,32 @@ describe('post-roll outcome carries player-action context', () => {
         expect(opts.playerActionContext).toBe('I buy another dagger.');
     });
 });
+
+describe('follow-up narration failure surfacing', () => {
+    it('posts a visible system error when the outcome narration call fails', async () => {
+        rollQueue.push(15);
+        const dispatch = vi.fn();
+        const sendToLLM = vi.fn().mockRejectedValue(new Error('provider 500'));
+
+        const outcome = await handleRequestedRolls(
+            [{ type: 'skill_check', skill: 'athletics', dc: 10, description: 'Climb the wall' }],
+            {
+                getState: () => ({ character: makeCharacter(), inventory: [], combat: { active: false }, party: [] }),
+                dispatch,
+                sendToLLM,
+                playerAction: 'I climb the wall.',
+            }
+        );
+
+        expect(outcome.resolved).toBe(true);
+        const errorLine = dispatch.mock.calls
+            .map(([action]) => action)
+            .find(a => a.type === 'ADD_MESSAGE'
+                && a.payload?.role === 'system'
+                && !a.payload?.hidden
+                && /Outcome narration failed/.test(a.payload?.content || ''));
+        expect(errorLine).toBeTruthy();
+        expect(errorLine.payload.content).toContain('provider 500');
+        expect(errorLine.payload.content).toContain('Your roll above stands');
+    });
+});

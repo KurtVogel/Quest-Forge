@@ -887,14 +887,17 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
     return { playerHp, playerDamage: targetType === 'player' ? damage : 0 };
 }
 
-function resolveEnemies({ state, exchange, enemies, companions, playerHp, playerDodging, events, rolls, onlyIds = null }) {
+function resolveEnemies({ state, exchange, enemies, companions, playerHp, playerDodging, events, rolls, onlyIds = null, uncannyDodgeState = null }) {
     const intents = new Map();
     for (const intent of exchange?.enemyIntents || []) {
         const enemy = findByRef(enemies, intent.enemyId);
         if (enemy && !intents.has(enemy.id)) intents.set(enemy.id, intent);
     }
     let playerDamage = 0;
-    const uncannyDodgeState = { used: false };
+    // Uncanny Dodge is once per TURN, not once per resolveEnemies call. Callers that
+    // resolve the same turn across multiple calls (planOpeningExchange goes actor by
+    // actor) must pass one shared state object for the whole turn.
+    uncannyDodgeState = uncannyDodgeState || { used: false };
     for (const enemy of enemies) {
         if (!isEnemyActive(enemy)) continue;
         if (onlyIds && !onlyIds.has(enemy.id)) continue;
@@ -1064,6 +1067,9 @@ export function planOpeningExchange(state) {
 
     let playerHp = state.character.currentHP;
     let playerDamage = 0;
+    // One Uncanny Dodge for the entire opening round — the per-actor resolveEnemies
+    // calls below must not each hand the Rogue a fresh reaction.
+    const uncannyDodgeState = { used: false };
     for (const actor of state.combat.turnOrder || []) {
         const actorId = actor.id || actor.name;
         if (!actorIds.has(actorId)) continue;
@@ -1079,6 +1085,7 @@ export function planOpeningExchange(state) {
                 playerDodging: false,
                 events, rolls,
                 onlyIds: new Set([actor.id]),
+                uncannyDodgeState,
             });
             playerHp = resolved.playerHp;
             playerDamage += resolved.playerDamage;

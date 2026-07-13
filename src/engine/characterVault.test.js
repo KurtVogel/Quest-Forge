@@ -136,6 +136,47 @@ describe('sanitizeCharacter clamps and rebuilds', () => {
         expect(sanitizeCharacter({ ...character, maxHP: -5 }).maxHP).toBe(13);
     });
 
+    it('recomputes maxHP exactly for heroes created after the fixed-average-HP decision', () => {
+        const { character } = makeFighter();
+        // L5 fighter, CON 16 (+3): deterministic maxHP is 13 + 9*4 = 49. A hand-edited
+        // 65 sat inside the legacy rolled-HP band and used to import undetected.
+        const modern = sanitizeCharacter({
+            ...character,
+            level: 5,
+            maxHP: 65,
+            createdAt: Date.UTC(2026, 6, 1), // after the 2026-06-15 decision
+        });
+        expect(modern.maxHP).toBe(49);
+        expect(modern.currentHP).toBe(49);
+    });
+
+    it('keeps the legacy rolled-HP band for pre-decision heroes', () => {
+        const { character } = makeFighter();
+        // Created before fixed-average HP: rolled level-ups made 65 genuinely reachable.
+        const legacy = sanitizeCharacter({
+            ...character,
+            level: 5,
+            maxHP: 65,
+            createdAt: Date.UTC(2026, 0, 10),
+        });
+        expect(legacy.maxHP).toBe(65);
+        // Values beyond the band still clamp.
+        const inflated = sanitizeCharacter({
+            ...character,
+            level: 5,
+            maxHP: 999,
+            createdAt: Date.UTC(2026, 0, 10),
+        });
+        expect(inflated.maxHP).toBe(65);
+    });
+
+    it('rejects a correctly-shaped export whose character key is null', () => {
+        const file = JSON.stringify({ format: EXPORT_FORMAT, version: EXPORT_VERSION, character: null, inventory: [] });
+        expect(() => parseCharacterExport(file)).toThrow('No character data found in this file.');
+        expect(() => sanitizeCharacter(null)).toThrow('No character data found in this file.');
+        expect(() => sanitizeCharacter(undefined)).toThrow('No character data found in this file.');
+    });
+
     it('rebuilds derived fields from class data instead of trusting the file', () => {
         const { character } = makeFighter();
         const tampered = sanitizeCharacter({

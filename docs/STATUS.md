@@ -4,7 +4,38 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-12 (all playtest action points implemented: coin-grant replay ledger, narrated-payment audit, RAG location tagging, hospitality filter, defeat-line ordering, success-must-matter prompt nudge)_
+_Last updated: 2026-07-13 (strengthening-queue hardening batch: 13 audit findings fixed — Uncanny Dodge opening bug, quest ghost rows, journal JSON repair path, narration-failure surfacing, scene-art cache scoping, persistence hang/leak/toast trio, dice validation + first real dice tests, cloud-sync failure tests, maxHP import exploit; 753 tests + lint green, deployed)_
+
+## Strengthening-queue hardening batch (2026-07-13, deployed)
+
+All Tier 1–3 items from the SCHEDULED_STRENGTHENING.md Open Findings Queue fixed in one pass
+(the ChatPanel extraction item was deliberately deferred as its own future refactor session):
+
+- **Uncanny Dodge opening-phase bug** — `planOpeningExchange` gave each ambushing enemy its own
+  fresh once-per-turn guard; one shared state now rides the whole opening round (+ 2-enemy test).
+- **Quest ghost rows** — every `quest_updates` branch now requires an id or name.
+- **Journal resilience** — `maybeAutoSummarize` parses through the shared repair-capable
+  `parseJsonObjectLoose` (quoted-key anchors), caps world facts at 5/batch, skips all-hidden
+  batches, and gained its first real test suite (7 tests).
+- **Post-roll narration failure is visible** — a failed outcome-narration call now posts a
+  system line with a recovery hint instead of dying in a console.warn.
+- **Scene-art cache scoped per campaign** — `clearImageCache()` wired at all four
+  NEW_GAME/LOAD_GAME dispatch sites; campaign A's art can no longer appear in campaign B.
+- **Persistence trio** — `openDB` rejects loudly (8 s) when blocked by another tab instead of
+  hanging autosave forever; read paths close the connection on abort; `saveSettings` returns a
+  boolean and GameContext toasts on failure (a silently-unpersisted API key was invisible).
+- **Dice engine** — `rollDie`/`parseNotation` throw on `1d0`/`0d6` instead of yielding sticky
+  NaN, and `dice.test.ts` (16 tests) is the first suite exercising the REAL crypto implementation.
+- **Cloud-sync failure paths** — one-shot failure injection in the Firestore mock covers all
+  guard/catch branches; `!db` guards covered in a separate no-Firebase module graph.
+- **maxHP import exploit closed** — heroes created after the 2026-06-15 fixed-average-HP
+  decision get their maxHP recomputed exactly on import; only genuinely pre-decision heroes
+  keep the legacy rolled-HP clamp band.
+
+753 tests + lint green (80 more than the previous session). Queue items ticked with dates in
+SCHEDULED_STRENGTHENING.md; still open there: scene-art reroll affordance + downscale tests,
+hidden-fronts/scribe guard tests, companion npc_attack test, quests reopen-vs-duplicate P2,
+cloud-sync chunk-cleanup race P2, and the deferred ChatPanel extraction.
 
 ## Playtest action points — implemented (2026-07-12)
 

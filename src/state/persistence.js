@@ -16,8 +16,13 @@ export function saveSettings(settings) {
         // Don't persist API key in plain localStorage in production,
         // but for a personal local tool this is acceptable
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        return true;
     } catch (e) {
+        // Quota exceeded / private browsing / disabled storage. Settings carries the
+        // player's LLM API key — callers must surface this, or the player believes
+        // they configured a key that never actually persisted.
         console.warn('Failed to save settings:', e);
+        return false;
     }
 }
 
@@ -33,11 +38,27 @@ export function loadSettings() {
 
 // === IndexedDB (Game Saves) ===
 
+/** How long a blocked open may stall before we fail loudly instead of hanging forever. */
+const OPEN_BLOCKED_TIMEOUT_MS = 8000;
+
 function openDB() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
+        // A DB_VERSION bump while another tab holds an older connection fires
+        // `blocked` instead of resolving — without this, every save/load (autosave
+        // included) awaits forever with no error to surface. Fail loudly instead.
+        let blockedTimer = null;
+        const clearBlocked = () => { if (blockedTimer) { clearTimeout(blockedTimer); blockedTimer = null; } };
+        request.onblocked = () => {
+            console.error('[Persistence] IndexedDB open is blocked by another tab holding an older connection. Close other Quest Forge tabs.');
+            if (!blockedTimer) {
+                blockedTimer = setTimeout(() => {
+                    reject(new Error('Save storage is blocked by another open tab. Close other Quest Forge tabs and try again.'));
+                }, OPEN_BLOCKED_TIMEOUT_MS);
+            }
+        };
+        request.onerror = () => { clearBlocked(); reject(request.error); };
+        request.onsuccess = () => { clearBlocked(); resolve(request.result); };
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
             if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -155,6 +176,9 @@ export async function loadGame(slotId) {
         };
         request.onerror = () => reject(request.error);
         tx.oncomplete = () => db.close();
+        // Close on abort too — a read error otherwise leaks the connection open,
+        // and leaked connections are what make a future versioned open hang blocked.
+        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
     });
 }
 
@@ -194,6 +218,7 @@ export async function listSaves() {
         };
         request.onerror = () => reject(request.error);
         tx.oncomplete = () => db.close();
+        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
     });
 }
 
@@ -258,6 +283,7 @@ export async function listRosterCharacters() {
         };
         request.onerror = () => reject(request.error);
         tx.oncomplete = () => db.close();
+        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
     });
 }
 
