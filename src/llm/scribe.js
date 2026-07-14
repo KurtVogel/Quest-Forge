@@ -13,6 +13,7 @@ import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { classifyNpcCandidate, curateNpcsForPrompt } from '../engine/npcRoster.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { captureReflection, captureScribePass } from '../dev/memoryInspectorStore.js';
 
 const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Given a DM's narrative response and the player's action that prompted it, extract any new canonical facts about the game world. Every field you output is an UNVARNISHED record: the fiction's own words and facts, never a cleaned-up, softened, or tasteful paraphrase.
 
@@ -368,8 +369,8 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             console.log(`[Scribe] Added ${worldFacts.length} world fact(s)`);
         }
 
+        const rosteredNames = [];
         if (Array.isArray(extracted.npc_updates) && extracted.npc_updates.length > 0) {
-            let rostered = 0;
             for (const npc of extracted.npc_updates) {
                 const classified = classifyNpcCandidate(npc);
                 if (!classified.allowRoster) continue;
@@ -380,10 +381,10 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                         kind: classified.kind,
                     },
                 });
-                rostered += 1;
+                rosteredNames.push(npc?.name || '(unnamed)');
             }
-            if (rostered > 0) {
-                console.log(`[Scribe] Updated ${rostered} roster NPC(s)`);
+            if (rosteredNames.length > 0) {
+                console.log(`[Scribe] Updated ${rosteredNames.length} roster NPC(s)`);
             }
         }
 
@@ -407,6 +408,16 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             applyMissingLoot(extracted.missing_loot, lootAudit, dispatch, playerMessage);
             applyMissingPayment(extracted.missing_payment, lootAudit, dispatch);
         }
+
+        captureScribePass({
+            facts: worldFacts,
+            npcsUpdated: rosteredNames,
+            cards: storyMemory,
+            playerAppearance: typeof extracted.player_appearance === 'string' && !!extracted.player_appearance.trim(),
+            location: extracted.location || null,
+            lootAudited: !!(lootAudit && Array.isArray(extracted.missing_loot) && extracted.missing_loot.length > 0),
+            paymentAudited: !!(lootAudit && Array.isArray(extracted.missing_payment) && extracted.missing_payment.length > 0),
+        });
     } catch (e) {
         // Scribe failures must never block the main game loop, but log clearly
         console.error('[Scribe] Extraction failed:', e.message || e);
@@ -519,6 +530,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             }
         }
 
+        const reflectedNames = [];
         if (Array.isArray(reflected.npc_updates)) {
             for (const npc of reflected.npc_updates) {
                 const classified = classifyNpcCandidate(npc);
@@ -527,6 +539,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
                     type: 'UPDATE_NPC',
                     payload: { ...npc, kind: classified.kind },
                 });
+                reflectedNames.push(npc?.name || '(unnamed)');
             }
         }
         if (cadence?.id && Number.isFinite(cadence.journalEnd)) {
@@ -542,6 +555,13 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         if (Array.isArray(reflected.story_memory) && reflected.story_memory.length > 0) {
             dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: reflected.story_memory.slice(0, 2) });
         }
+
+        captureReflection({
+            cadenceId: cadence?.id || null,
+            npcsUpdated: reflectedNames,
+            frontAdvances: Array.isArray(reflected.front_advances) ? reflected.front_advances : [],
+            cards: Array.isArray(reflected.story_memory) ? reflected.story_memory.slice(0, 2) : [],
+        });
     } catch (e) {
         console.warn('[Reflection] NPC/front reflection failed:', e.message || e);
     }

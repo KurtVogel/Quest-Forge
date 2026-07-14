@@ -10,6 +10,8 @@ import JournalPanel from '../Journal/JournalPanel.jsx';
 import SceneArt from '../SceneArt/SceneArt.jsx';
 import AmbientControls from '../AmbientAudio/AmbientControls.jsx';
 import CompanionsPanel from '../Companions/CompanionsPanel.jsx';
+import MemoryInspector from '../Debug/MemoryInspector.jsx';
+import { isMemoryInspectorEnabled } from '../../dev/memoryInspectorStore.js';
 import { isMachineryReady } from '../../llm/machinery.js';
 import './Layout.css';
 
@@ -17,7 +19,9 @@ export default function AppShell() {
     const { state, dispatch } = useGame();
     const saveToast = useSaveToast();
     const [isJournalOpen, setIsJournalOpen] = useState(false);
+    const [isInspectorOpen, setIsInspectorOpen] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const inspectorEnabled = isMemoryInspectorEnabled(state.settings);
 
     const handleOpenSettings = () => {
         dispatch({ type: 'SET_UI', payload: { isSettingsOpen: true } });
@@ -53,6 +57,15 @@ export default function AppShell() {
                     >
                         Journal
                     </button>
+                    {inspectorEnabled && (
+                        <button
+                            className="header-btn desktop-only-btn"
+                            onClick={() => setIsInspectorOpen(true)}
+                            title="Memory Inspector (dev)"
+                        >
+                            Memory
+                        </button>
+                    )}
                     <div className="desktop-audio-controls">
                         <AmbientControls />
                     </div>
@@ -102,6 +115,14 @@ export default function AppShell() {
                             >
                                 World Journal
                             </button>
+                            {inspectorEnabled && (
+                                <button
+                                    className="mobile-drawer-btn"
+                                    onClick={() => { setIsInspectorOpen(true); setIsMobileMenuOpen(false); }}
+                                >
+                                    Memory Inspector
+                                </button>
+                            )}
                             <button
                                 className="mobile-drawer-btn"
                                 onClick={() => { handleOpenSettings(); setIsMobileMenuOpen(false); }}
@@ -129,6 +150,9 @@ export default function AppShell() {
             </div>
 
             <JournalPanel isOpen={isJournalOpen} onClose={() => setIsJournalOpen(false)} />
+            {inspectorEnabled && (
+                <MemoryInspector isOpen={isInspectorOpen} onClose={() => setIsInspectorOpen(false)} />
+            )}
 
             {saveToast && (
                 <div className={`save-toast ${saveToast.status.endsWith('error') ? 'save-toast-error' : ''}`}>

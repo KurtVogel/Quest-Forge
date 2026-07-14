@@ -517,6 +517,25 @@ export default function SettingsModal() {
                             </div>
 
                             <div className="setting-group">
+                                <div className="setting-label-row">
+                                    <label className="setting-label">Memory Inspector (dev)</label>
+                                    <button
+                                        type="button"
+                                        className="setting-inline-btn"
+                                        onClick={() => updateSetting('memoryInspector', !state.settings.memoryInspector)}
+                                    >
+                                        {state.settings.memoryInspector ? 'Enabled — click to disable' : 'Disabled — click to enable'}
+                                    </button>
+                                </div>
+                                <p className="setting-hint">
+                                    Adds a read-only "Memory" panel to the header showing what the DM
+                                    actually received: curated callback cards with scores, RAG retrievals,
+                                    the story-memory ledger, and the Scribe's last pass. <strong>Spoilers:</strong> it
+                                    also reveals the hidden campaign fronts and their clocks.
+                                </p>
+                            </div>
+
+                            <div className="setting-group">
                                 <button className="btn btn-danger" onClick={handleNewGame}>
                                     New Game
                                 </button>

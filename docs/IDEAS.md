@@ -678,7 +678,15 @@ New entries pass engine heuristics + Scribe `kind`/`rosterEligible`; prompt show
 importance (pins, tension, location) not recency; Journal has Pin/Archive. Remaining: optional
 bulk archive pass for obvious legacy fodder entries the player no longer wants visible.
 
-### Memory debug inspector — status: `designed`, priority: HIGH (2026-06-23)
+### Memory debug inspector — status: v1 `shipped` (2026-07-14; was designed 2026-06-23)
+Shipped v1: `dev/memoryInspectorStore.js` (module-level capture store, never in game state or
+saves) + `components/Debug/MemoryInspector.jsx` (read-only Journal-style overlay). ChatPanel
+captures each turn's curated cards + RAG hits WITH scores at the point they were previously
+discarded; the Scribe captures its extraction and reflection passes. Gated by Settings → Game
+toggle (`settings.memoryInspector`) or `?debugMemory=1`. Live-verified same day: fresh campaign
+showed 2 generated fronts (the race fix working), curation scores, RAG similarities, and the
+Scribe pass. Original design below; remaining ideas: token-size estimates per prompt block, and
+the world-tempo directive/heat/timing-die readouts once that system exists.
 Dev/settings panel to make the invisible memory stack inspectable during real-play tuning.
 Motivation: callbacks, RAG hits, and front symptoms are engine-curated but player-invisible —
 hard to tune salience without seeing what the DM actually received.

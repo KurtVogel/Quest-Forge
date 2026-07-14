@@ -12,6 +12,7 @@ import { isTableTalkMessage, TABLE_TALK_RESPONSE_MODE } from '../../llm/tableTal
 import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { curateStoryMemory } from '../../engine/storyMemory.js';
+import { captureInjection } from '../../dev/memoryInspectorStore.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../../engine/roleplayCheck.js';
@@ -271,6 +272,16 @@ export default function ChatPanel() {
                 query: originalPlayerMessage,
                 location: s.currentLocation || '',
                 npcs: s.npcs || [],
+            });
+        }
+        if (originalPlayerMessage) {
+            // Scores/similarities are dropped once the prompt string is built —
+            // keep the latest copy for the read-only Memory Inspector panel.
+            captureInjection({
+                playerMessage: originalPlayerMessage,
+                location: s.currentLocation,
+                retrieved: retrievedMemories,
+                curated: dramaticMemories,
             });
         }
 

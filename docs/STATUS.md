@@ -4,10 +4,25 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-14 evening (first keyed `eval:memory` pass ran — twice — and its findings
-are fixed; see the section below. 814 tests + lint green, **deployed to
-https://quest-forge-99ab1.web.app** — the front-install race fix matters for any live campaign
-started at a fast pace.)_
+_Last updated: 2026-07-14 night (memory debug inspector v1 shipped + deployed; earlier the same
+day: first keyed `eval:memory` pass ran twice and its findings were fixed and deployed, and the
+world-tempo pacing architecture was settled in DECISIONS.md. 820 tests + lint green, live at
+https://quest-forge-99ab1.web.app.)_
+
+## Memory debug inspector v1 (2026-07-14, deployed)
+
+The tuning instrument for the whole memory/pacing effort (IDEAS.md design from 2026-06-23,
+integration notes same file). `dev/memoryInspectorStore.js` captures what was previously
+computed and thrown away every turn — curated story cards WITH curation scores and RAG hits
+WITH cosine similarity (ChatPanel `sendToLLM`), plus the Scribe's extraction and reflection
+passes — into a module-level store that never touches game state or saves.
+`components/Debug/MemoryInspector.jsx` is a read-only Journal-style overlay: last-turn
+injection, full story-memory ledger with type counts, hidden fronts (clocks/portents/symptoms/
+notes — spoilers by design), world-state counts, journal location trail, Scribe last passes.
+Gated by Settings → Game → Memory Inspector toggle or `?debugMemory=1`. **Live-verified**: a
+fresh fast-typed campaign showed 2 premise-grounded fronts (the same-day race fix visibly
+working — that exact flow used to strand campaigns on the fallback front), scored curation,
+0.767-similarity RAG hit, Scribe extraction; toggle persists; zero console errors.
 
 ## Memory/fronts tuning pass #1 — two keyed 30-turn runs (2026-07-14)
 
@@ -431,7 +446,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **814** tests passing (57 files)
+- `npm test` — **820** tests passing (58 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)
@@ -440,10 +455,9 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 1. **Keyed memory/fronts tuning pass** — pass #1 done 2026-07-14 (two 30-turn runs, findings
    fixed; see above). Repeat after the next batch of memory-layer changes.
-2. **Memory debug inspector** — NEXT UP (integration explored 2026-07-14, notes in IDEAS.md:
-   capture point is ChatPanel's `sendToLLM` where curation/RAG scores are computed and
-   discarded; DEV-gated store + JournalPanel-style drawer). The tuning instrument for #3.
-3. **World-tempo pacing system** — designed 2026-07-14 (DECISIONS.md + IDEAS.md): location
+2. **Memory debug inspector** — v1 SHIPPED + deployed 2026-07-14 (see above). Extend with
+   tempo/heat/timing-die readouts when #3 lands.
+3. **World-tempo pacing system** — NEXT UP, designed 2026-07-14 (DECISIONS.md + IDEAS.md): location
    profiles/gazetteer, stage-bound symptom intensity, cadence-time tempo directive replacing
    the always-visible fronts block, timing die, tension meter + pace dial, encounter ledger,
    BG1 openings, emergent front promotion. Root cause of "every campaign is violent by turn 7."
