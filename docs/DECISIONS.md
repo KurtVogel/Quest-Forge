@@ -8,6 +8,14 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-14 · Git workflow: master only — no feature branches, no PRs.**
+Vesa: features are worked one at a time in this project, so branch/PR ceremony adds nothing.
+Every session (human, Claude, Codex, hosted) pulls latest `origin/master` before starting and
+pushes results straight to `origin master`. Hosted agent sessions that are forced onto a
+working branch land their result with `git push origin HEAD:master`; leftover remote
+`claude/*` branches are inert (the remote git proxy blocks deletion) and get pruned from the
+GitHub UI. The daily strengthening audit already commits its findings to master directly.
+
 **2026-07-12 · Narrated payments auto-deduct (clamped, visible), not one-click confirm; coin gains are replay-guarded like purchases.**
 The Scribe loot audit became a loot & payment audit: `missing_payment` detects payments the
 narrative completed but the DM never evented, and `AUDIT_COIN_PAYMENT` deducts immediately —

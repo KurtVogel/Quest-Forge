@@ -107,6 +107,7 @@ src/
 
 ## Conventions & gotchas
 
+- **Git workflow — master only (Vesa, 2026-07-14):** features are worked one at a time; no feature branches, no PRs. Start every session by pulling latest `origin/master`, commit on `master`, push to `origin master`. If a hosted/agent session is forced to start on a working branch, land the result on master anyway (`git push origin HEAD:master`); stale remote `claude/*` branches are harmless leftovers (the remote-session git proxy blocks branch deletion — prune them from the GitHub UI).
 - 4-space indent, ES modules, function components + hooks. Match the surrounding file's style.
 - `dice.ts` is the only TypeScript file; everything else is JS/JSX. `tsconfig.json` exists but the app is **not** type-checked in CI.
 - Player-facing dice must stay crypto-random (`crypto.getRandomValues`, via `dice.ts`) — never `Math.random()`. This is the project's "the LLM can't cheat the dice" guarantee.
