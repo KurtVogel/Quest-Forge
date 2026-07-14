@@ -199,6 +199,8 @@ non-registrable. Also: directive `where` should probably only grow a theater whe
 to an existing record (else attach to the front's proposal location by name once the Scribe
 establishes it). Why: theaters, danger profiles, and tempo gating all key off these records —
 noise here quietly degrades the whole pacing system on long campaigns (cap is 60 records).
+Playtest #2 (same day) added the definitive exhibit: **"deep snow"** registered as a location
+record (wilderness, moderate), alongside "mountain" and "the town".
 
 ### Heat is blind to narratively hot no-combat scenes — status: `idea` (playtest 2026-07-14)
 A whole action-movie escort/chase/heist arc read as heat 0/10 ("calm") because heat only counts

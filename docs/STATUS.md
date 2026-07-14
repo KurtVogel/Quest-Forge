@@ -4,12 +4,52 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-14 late night #2 (hands-on browser playtest of world-tempo passed the
-feel test; its two found bugs — location-registry alias chaining + Scribe coin denomination —
-fixed same session. Earlier today: world-tempo v1 shipped + eval-verified, inspector shipped,
-eval pass #1 fixes. 865 tests + lint green, live at https://quest-forge-99ab1.web.app.)_
+_Last updated: 2026-07-14 late night #3 (second hands-on playtest — combat-heavy fighter on
+breakneck with an in-medias-res premise — passed; found + fixed the pouch-recount coin
+re-grant and biased the reflection toward granting windows on an under-heated pace dial.
+Earlier: playtest #1 + its fixes, world-tempo v1, inspector. 865 tests + lint green, live at
+https://quest-forge-99ab1.web.app.)_
 
-## Hands-on engaged-play playtest + fixes (2026-07-14, late night)
+## Playtest #2: combat + breakneck + in-medias-res (2026-07-14, late night)
+
+Second engaged-play browser run from the opposite angle: half-orc fighter caravan guard,
+breakneck pace, premise that opens mid-ambush ("Red Snow on the Varga Pass"). **Everything
+playtest #1 couldn't exercise, verified in real play:**
+
+- **Premise-sovereign opening**: the campaign booted STRAIGHT into `START_COMBAT` — initiative
+  rolled, the two raiders who beat the player took their Opening Initiative slots (both missed
+  vs AC 19), combat panel live from message one. The BG1 rule correctly yielded to the premise.
+- **Combat machine end-to-end**: exchanges resolved player → enemy in initiative order; an
+  in-combat Intimidation check slot succeeded (with a situational-ruling advantage) and broke
+  enemy morale; the close was player Pass + both enemies taking `flee` intents → END_COMBAT,
+  +135 XP for all three overcome foes, encounter ledger entry "2× Starving Raider, Wagon Thief
+  (mountain, victory)", heat lively 3/10 → decayed back to calm as the fight aged out.
+- **Challenge-ruling flow**: challenged a blizzard-drive check; the DM REVISED (granted
+  advantage for professional background, downgraded failure stakes from "stranded" to "arrive
+  late, drained"), marked FINAL RULING, challenge spent. Textbook one-challenge boundary.
+- **Front generation from a violent premise**: 3 interacting fronts (starving Dunmarch
+  scavengers, a debt-bleeding toll-lord who burned Dunmarch, the haunted silver mine), theater
+  Varga Pass, and the tavern-gossip layer connected them coherently in play.
+
+Found and fixed same session (verified live, deployed):
+
+1. **P1 pouch-recount coin re-grant** — the DM narrated "leaving you with fourteen gold" and
+   emitted that invented restatement as a fresh +14 gp grant (plus change granted separately);
+   the recentCoinGrants replay guard can't catch re-grants whose amount drifted. Fix: explicit
+   DM ECONOMY rule — restating wealth is NEVER a coin event; payment change is netted into one
+   event. Live re-test: the DM counted the pouch and narrated the engine's exact purse total
+   (67 gp 2 sp) with zero coin events — the exact pre-fix failure mode, now clean.
+2. **P2 reflection under-serves breakneck** — two consecutive quiet directives on a breakneck
+   campaign with heat calm (the DM compensated through fiction, but the dial should matter).
+   Fix: reflection rule — when heat sits below the pace's appetite and the table has had air,
+   lean toward granting a window; consecutive breakneck quiets need an explicit arc reason.
+   Prompt-level; watch the next real breakneck session.
+
+More granularity ammo for IDEAS.md's location entry: this run registered **"deep snow"** as a
+classified location record (wilderness, moderate). Still unexercised: companions in combat,
+death saves, defeat/escaped encounter outcomes.
+
+## Playtest #1: engaged rogue, standard pace + fixes (2026-07-14, late night)
 
 A real 12-turn browser playtest (level-1 rogue courier, fresh "Salt Road Ledger" river-port
 premise, standard pace, Gemini DM) — the ENGAGED-player feel check the eval script can't do.
