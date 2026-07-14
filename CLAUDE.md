@@ -31,7 +31,7 @@ npm run eval:combat # optional real-provider combat pacing eval; requires GEMINI
 npm run eval:memory # optional 20-turn memory/fronts tuning playtest; requires GEMINI_API_KEY + dev server
 ```
 
-Deploy hosting (build first): `npx firebase deploy --only hosting --project quest-forge-99ab1`
+Deploy hosting (build first): `npx firebase deploy --only hosting --project quest-forge-99ab1`. Remote/hosted agent sessions CAN deploy: the environment carries a `FIREBASE_TOKEN` (check `env`) — run `npm install --no-save firebase-tools` first (it is not a repo dependency), and don't be fooled by the egress proxy 403ing a verification `curl` of the live site; the Firebase CLI's own "release complete" is the confirmation.
 
 On **Windows PowerShell**, prefer `npm.cmd` / `npx.cmd` to avoid `npm.ps1` execution-policy errors.
 

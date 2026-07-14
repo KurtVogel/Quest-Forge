@@ -11,7 +11,7 @@ JSON with `requested_rolls` after an `npc_updates` object silently extracted the
 object and DROPPED the roll request across ~10 call sites; fixed with close-count anchoring +
 a nesting-ordered string-aware `repairJson` upgrade + dedicated extractor suite. Story-memory:
 `normalizeStoryMemoryUpdate` tested, raw `lastUsedAt` cooldown-bypass pass-through dropped.
-807 tests + lint green.)_
+807 tests + lint green, **deployed to https://quest-forge-99ab1.web.app** — everything this week is now live for the provider-comparison playtest.)_
 
 ## Strengthening-queue batch 2 (2026-07-14)
 
