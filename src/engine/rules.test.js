@@ -8,14 +8,17 @@ import {
     getProficiencyBonus,
     getSavingThrowModifier,
     getConditionRollEffects,
+    getIncapacitatingCondition,
     combineRollModifiers,
     getSkillModifier,
     getLevelBonus,
     getArmorClass,
     computeACFromInventory,
+    getMaxHitPoints,
     getWeaponAttackBonus,
     getWeaponDamageNotation,
     getSneakAttackDice,
+    isProficientWithWeapon,
 } from './rules.js';
 
 const fighter = {
@@ -218,5 +221,95 @@ describe('getSneakAttackDice', () => {
 
     it('returns 0 if neither advantage nor companion is active', () => {
         expect(getSneakAttackDice(rogueL1, finesseWeapon, false, false, false)).toBe(0);
+    });
+});
+
+describe('isProficientWithWeapon', () => {
+    const wizard = {
+        class: 'wizard',
+        level: 1,
+        abilityScores: { strength: 8, dexterity: 14, constitution: 12, intelligence: 16, wisdom: 10, charisma: 10 },
+        skillProficiencies: [],
+    };
+
+    it('matches broad category proficiency (fighter: simple + martial)', () => {
+        expect(isProficientWithWeapon(fighter, { name: 'Greatsword', category: 'martialMelee' })).toBe(true);
+        expect(isProficientWithWeapon(fighter, { name: 'Club', category: 'simpleMelee' })).toBe(true);
+    });
+
+    it('matches specific pluralized weapon names singular or plural', () => {
+        expect(isProficientWithWeapon(wizard, { name: 'Dagger', category: 'simpleMelee' })).toBe(true);
+        expect(isProficientWithWeapon(wizard, { name: 'Light Crossbow', category: 'simpleRanged' })).toBe(true);
+        expect(isProficientWithWeapon({ class: 'rogue' }, { name: 'Rapier', category: 'martialMelee' })).toBe(true);
+    });
+
+    it('ignores magic-bonus suffixes when matching names', () => {
+        expect(isProficientWithWeapon(wizard, { name: 'Dagger +2', category: 'simpleMelee' })).toBe(true);
+    });
+
+    it('denies categorized weapons outside the class list', () => {
+        expect(isProficientWithWeapon(wizard, { name: 'Longsword', category: 'martialMelee' })).toBe(false);
+        expect(isProficientWithWeapon(wizard, { name: 'Mace', category: 'simpleMelee' })).toBe(false);
+        expect(isProficientWithWeapon({ class: 'cleric' }, { name: 'Longbow', category: 'martialRanged' })).toBe(false);
+    });
+
+    it('gives unarmed and uncategorized story weapons the benefit of the doubt', () => {
+        expect(isProficientWithWeapon(wizard, null)).toBe(true);
+        expect(isProficientWithWeapon(wizard, { name: 'Shard of the Broken Bell' })).toBe(true);
+    });
+
+    it('subtracts proficiency from the attack bonus end-to-end', () => {
+        // Wizard with an equipped longsword: STR -1, NO proficiency bonus.
+        const longsword = [{ name: 'Longsword', type: 'weapon', category: 'martialMelee', damage: '1d8', equipped: true }];
+        expect(getWeaponAttackBonus(wizard, longsword)).toBe(-1);
+        // Same wizard with a dagger: finesse takes DEX +2, proficiency +2 applies.
+        const dagger = [{ name: 'Dagger', type: 'weapon', category: 'simpleMelee', damage: '1d4', finesse: true, equipped: true }];
+        expect(getWeaponAttackBonus(wizard, dagger)).toBe(4);
+    });
+});
+
+describe('getProficiencyBonus level boundaries', () => {
+    it('steps exactly at 5, 9, 13, and 17, capping at +6', () => {
+        expect(getProficiencyBonus(1)).toBe(2);
+        expect(getProficiencyBonus(4)).toBe(2);
+        expect(getProficiencyBonus(5)).toBe(3);
+        expect(getProficiencyBonus(8)).toBe(3);
+        expect(getProficiencyBonus(9)).toBe(4);
+        expect(getProficiencyBonus(12)).toBe(4);
+        expect(getProficiencyBonus(13)).toBe(5);
+        expect(getProficiencyBonus(16)).toBe(5);
+        expect(getProficiencyBonus(17)).toBe(6);
+        expect(getProficiencyBonus(20)).toBe(6);
+    });
+});
+
+describe('getMaxHitPoints', () => {
+    it('computes level-1 and multi-level HP for ordinary scores', () => {
+        expect(getMaxHitPoints('fighter', 1, 2, { hitDie: 10 })).toBe(12);
+        expect(getMaxHitPoints('fighter', 4, 2, { hitDie: 10 })).toBe(36); // 12 + 3×8
+    });
+
+    it('floors each level at 1 HP so very low CON never shrinks the pool', () => {
+        // CON mod -5 with a d6 hit die: without the floor this would be negative.
+        expect(getMaxHitPoints('wizard', 5, -5, { hitDie: 6 })).toBe(5);
+        expect(getMaxHitPoints('wizard', 1, -5, { hitDie: 6 })).toBe(1);
+    });
+
+    it('falls back gracefully without class data', () => {
+        expect(getMaxHitPoints('fighter', 1, 3, null)).toBe(13);
+    });
+});
+
+describe('getIncapacitatingCondition', () => {
+    it('detects the three incapacitating conditions case- and whitespace-insensitively', () => {
+        expect(getIncapacitatingCondition(['Stunned '])).toBe('stunned');
+        expect(getIncapacitatingCondition(['prone', 'PARALYZED'])).toBe('paralyzed');
+        expect(getIncapacitatingCondition(['unconscious'])).toBe('unconscious');
+    });
+
+    it('returns null for act-capable creatures', () => {
+        expect(getIncapacitatingCondition(['poisoned', 'prone'])).toBe(null);
+        expect(getIncapacitatingCondition([])).toBe(null);
+        expect(getIncapacitatingCondition(null)).toBe(null);
     });
 });

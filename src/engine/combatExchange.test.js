@@ -243,6 +243,37 @@ describe('engine-owned exchange resolution', () => {
         expect(plan.payload.result.postState.enemies[0].conditions).toContain('prone');
     });
 
+    it('a stunned foe loses its action entirely instead of attacking at full effectiveness', () => {
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        });
+        const plan = planCombatExchange(state({
+            enemies: [enemy('Goblin', { conditions: ['stunned'] })],
+        }), intent);
+
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.result.events.some(event => event.type === 'attack')).toBe(false);
+        const note = plan.payload.result.events.find(event => event.type === 'note' && /cannot act/.test(event.text));
+        expect(note.text).toContain('Goblin is stunned and cannot act');
+        expect(plan.payload.playerDamage).toBe(0);
+    });
+
+    it('remove_conditions immediately before the action lets a recovered foe act again', () => {
+        rollQueue.push(15, 2); // to-hit 15+4 vs AC 11; damage 2+2
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player', remove_conditions: ['stunned'] }],
+        });
+        const plan = planCombatExchange(state({
+            enemies: [enemy('Goblin', { conditions: ['stunned'] })],
+        }), intent);
+
+        const attack = plan.payload.result.events.find(event => event.type === 'attack');
+        expect(attack).toMatchObject({ actor: 'Goblin', hit: true, damage: 4 });
+        expect(plan.payload.result.postState.enemies[0].conditions).not.toContain('stunned');
+    });
+
     it('applies and exposes a DM-approved situational advantage ruling', () => {
         rollQueue.push(4, 12, 2);
         const intent = normalizeCombatExchange({
@@ -545,6 +576,30 @@ describe('Opening Initiative', () => {
         expect(plan.ok).toBe(true);
         expect(plan.payload.result.events.map(event => event.actor)).toEqual(['Fast', 'Ally']);
         expect(plan.payload.result.events.some(event => event.actor === 'Slow')).toBe(false);
+    });
+
+    it('a paralyzed ambusher loses its opening slot while the other enemy still acts', () => {
+        const openingState = state({
+            enemies: [enemy('Frozen', { conditions: ['paralyzed'] }), enemy('Loose')],
+            combat: {
+                phase: COMBAT_PHASES.OPENING,
+                openingActorIds: ['Frozen', 'Loose'],
+                turnOrder: [
+                    { type: 'enemy', id: 'Frozen', name: 'Frozen', initiative: 19 },
+                    { type: 'enemy', id: 'Loose', name: 'Loose', initiative: 17 },
+                    { type: 'player', name: 'Vesa', initiative: 15 },
+                ],
+            },
+        });
+        rollQueue.push(15, 2); // Loose only: to-hit, damage
+
+        const plan = planOpeningExchange(openingState);
+        expect(plan.ok).toBe(true);
+        const attacks = plan.payload.result.events.filter(event => event.type === 'attack');
+        expect(attacks.map(event => event.actor)).toEqual(['Loose']);
+        expect(plan.payload.result.events.some(event =>
+            event.type === 'note' && event.text.includes('Frozen is paralyzed and cannot act')
+        )).toBe(true);
     });
 
     it('shares one Uncanny Dodge across all opening enemies against a level 5+ Rogue', () => {

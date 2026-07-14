@@ -11,6 +11,7 @@ import {
     computeACFromInventory,
     getConditionRollEffects,
     getEquippedWeapon,
+    getIncapacitatingCondition,
     getLevelBonus,
     getModifier,
     getProficiencyBonus,
@@ -904,6 +905,15 @@ function resolveEnemies({ state, exchange, enemies, companions, playerHp, player
         const intent = intents.get(enemy.id) || { action: 'attack', target: 'player' };
         if (intent.removeConditions?.length) {
             applyEnemyConditionDelta(enemy, { remove: intent.removeConditions, add: [] }, events);
+        }
+        // An incapacitated foe loses its action entirely — stunned/paralyzed/
+        // unconscious would otherwise attack at full effectiveness. The DM's escape
+        // hatch is remove_conditions, applied above, immediately before the action.
+        const incapacitated = getIncapacitatingCondition(enemy.conditions);
+        if (incapacitated) {
+            enemy.defending = false;
+            events.push({ type: 'note', text: `${enemy.name} is ${incapacitated} and cannot act.` });
+            continue;
         }
         if (intent.action === 'defend') {
             enemy.defending = true;

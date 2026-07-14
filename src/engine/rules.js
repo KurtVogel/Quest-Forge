@@ -279,6 +279,23 @@ export const CONDITION_EFFECTS = {
 };
 
 /**
+ * Conditions that deny a creature its own action entirely. These three carry an
+ * incomingAttack advantage in CONDITION_EFFECTS, but their defining effect is that
+ * the afflicted creature cannot act — a stunned ogre attacking at full
+ * effectiveness on its own turn was a silent half-implementation (2026-07-13 audit).
+ */
+export const INCAPACITATING_CONDITIONS = ['stunned', 'paralyzed', 'unconscious'];
+
+/** First incapacitating condition on the list, or null when the creature can act. */
+export function getIncapacitatingCondition(conditions) {
+    for (const raw of conditions || []) {
+        const name = String(raw).toLowerCase().trim();
+        if (INCAPACITATING_CONDITIONS.includes(name)) return name;
+    }
+    return null;
+}
+
+/**
  * Collect condition-driven advantage/disadvantage for a roll kind.
  * @param {string[]} conditions - Active condition names (any casing)
  * @param {'attack'|'check'|'save'|'incomingAttack'} kind
@@ -347,21 +364,6 @@ export function getSneakAttackDice(character, weapon, advantage, disadvantage, h
 }
 
 /**
- * Resolve a check against a difficulty class.
- * @param {number} roll - The d20 roll (before modifiers)
- * @param {number} total - Total result (roll + modifiers)
- * @param {number} dc - Difficulty Class
- * @returns {{ success: boolean, critical: boolean, critFail: boolean }}
- */
-export function resolveCheck(roll, total, dc) {
-    return {
-        success: total >= dc,
-        critical: roll === 20,
-        critFail: roll === 1,
-    };
-}
-
-/**
  * Calculate max hit points.
  * @param {string} className - Character class name
  * @param {number} level - Character level
@@ -373,10 +375,12 @@ export function getMaxHitPoints(className, level, conMod, classData) {
     if (!classData) return 10 + conMod;
 
     // Level 1: max hit die + CON mod
-    // Subsequent levels: average hit die + CON mod per level
+    // Subsequent levels: average hit die + CON mod per level.
+    // Both terms floor at 1 — matching progression.js's level-up formula — so a
+    // very low CON can never produce zero or negative HP growth.
     const hitDie = classData.hitDie;
-    const firstLevel = hitDie + conMod;
-    const perLevel = Math.floor(hitDie / 2) + 1 + conMod;
+    const firstLevel = Math.max(1, hitDie + conMod);
+    const perLevel = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
     return firstLevel + perLevel * (level - 1);
 }
 

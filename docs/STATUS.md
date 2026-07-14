@@ -4,7 +4,22 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-13 (strengthening-queue hardening batch: 13 audit findings fixed — Uncanny Dodge opening bug, quest ghost rows, journal JSON repair path, narration-failure surfacing, scene-art cache scoping, persistence hang/leak/toast trio, dice validation + first real dice tests, cloud-sync failure tests, maxHP import exploit; 753 tests + lint green, deployed)_
+_Last updated: 2026-07-14 (2026-07-13 audit batch fixed: incapacitated enemies — stunned/
+paralyzed/unconscious foes now lose their action with a visible "cannot act" note and a
+`remove_conditions` recovery path; `getMaxHitPoints` per-level floor; dead `resolveCheck`
+deleted; `isProficientWithWeapon` + `enemyStats.js` boundary suites. 787 tests + lint green.)_
+
+## Strengthening-queue batch 2 (2026-07-14)
+
+The five 2026-07-13 audit findings (rules-math + enemy-stats-conditions) fixed:
+
+- **Incapacitated-enemy half-implementation (P1)** — a DM-applied `stunned`/`paralyzed`/
+  `unconscious` condition only helped attacks *against* the foe; the foe itself still attacked
+  at full effectiveness. `resolveEnemies` now skips the action (after `remove_conditions`, the
+  DM's documented recovery path) in both regular exchanges and Opening Initiative.
+- `getMaxHitPoints` gained the `Math.max(1, …)` floor `progression.js` already had; dead
+  `resolveCheck` export deleted; `isProficientWithWeapon` tested incl. the penalty branch
+  end-to-end; direct `enemyStats.test.js` boundary suite (19 tests).
 
 ## Strengthening-queue hardening batch (2026-07-13, deployed)
 

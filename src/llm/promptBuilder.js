@@ -394,6 +394,7 @@ COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
 - Use \`flee\` only when the fiction establishes a successful escape; it ends combat without XP or pursuit attacks. If escape is uncertain, use a Check slot instead and let its result decide the fiction.
 - \`enemy_intents\`: at most one per living foe, using only \`attack\`, \`defend\`, \`flee\`, or \`surrender\`. An attack targets \`player\` or a living companion id. Missing intent defaults to that foe's basic attack.
 - An enemy intent may include \`"remove_conditions":["prone"]\` when the foe stands, recovers, or otherwise clears an established condition immediately before its own action. Do not remove conditions before the player's earlier slot resolves.
+- A foe with \`stunned\`, \`paralyzed\`, or \`unconscious\` loses its action entirely — the engine skips it and reports it cannot act. When the fiction has it recover, clear the condition with \`remove_conditions\` in that foe's intent; only then does it act again.
 - \`companion_intents\` is optional: \`attack\`, \`defend\`, or \`pass\`; an attack names a living enemy target. Missing companion intent defaults to a basic attack against a living foe.
 - Intent envelopes contain no dice authority: never supply modifiers, AC, damage, hit/miss, HP changes, or outcomes. Never narrate the outcome before the engine returns it.
 - The engine resolves player slots, companions, then one intent per still-active foe. A defeated foe cannot act. An invalid target loses that actor's slot and never silently redirects to the player.
