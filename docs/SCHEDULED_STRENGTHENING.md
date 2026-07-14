@@ -42,7 +42,7 @@ it under Process notes.
 | dice-engine | `engine/dice.ts` | 2026-07-05 |
 | rules-math | `engine/rules.js` | 2026-07-13 |
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | — |
-| response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | — |
+| response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-07-14 |
 | prompt-building | `llm/promptBuilder.js` | — |
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-07-08 |
 | combat-exchange | `engine/combatExchange.js`, reducer combat phases, opening initiative | 2026-07-09 |
@@ -50,7 +50,7 @@ it under Process notes.
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-07-07 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-07-07 |
 | memory-journal | `engine/worldJournal.js` | 2026-07-05 |
-| story-memory | `engine/storyMemory.js` | — |
+| story-memory | `engine/storyMemory.js` | 2026-07-14 |
 | vector-memory-rag | `engine/vectorMemory.js` | — |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-07-12 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-07-09 |
@@ -134,6 +134,10 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (rules-math, 2026-07-13): `resolveCheck` (`engine/rules.js:356-362`) is exported but has zero call sites anywhere in `src/` — dead code.
 - [ ] **P1** (enemy-stats-conditions, 2026-07-13): `stunned`/`paralyzed`/`unconscious` are valid enemy conditions (`engine/enemyStats.js:23-26`) but `CONDITION_EFFECTS` (`engine/rules.js:267-279`) only gives them an `incomingAttack` effect, not `attack` — `resolveEnemies`/`resolveEnemyAttack` (`engine/combatExchange.js:890-909,825-887`) never checks whether the acting enemy itself is incapacitated before resolving its `attack` intent at full effectiveness. A DM-narrated "stunned ogre" still attacks normally on its own turn. Zero test coverage.
 - [ ] **P1** (enemy-stats-conditions, 2026-07-13): `engine/enemyStats.js` — its own header calls it "the single source of truth" for sanitizing LLM-hallucinated enemy stats — has no direct unit test file; all coverage is incidental via `gameReducer.combat.test.js`/`responseParser.test.js`, which don't systematically hit every boundary (`DAMAGE_DICE_MAX`/`DAMAGE_MOD_MIN/MAX` exact edges, `normalizeEnemyConditions`'s dedup-and-cap-at-10, case/whitespace handling in damage notation).
+- [ ] **P0** (response-parsing, 2026-07-14): `extractBalancedJson`'s backward brace-walk (`llm/utils/jsonExtractor.js:56-61`) anchors on the *nearest* preceding `{` instead of the outermost enclosing one — a keyword appearing anywhere after an earlier closed nested object (an object-valued field, or an array-of-objects field) makes it silently extract that unrelated inner object instead of the real top-level one. It then parses successfully as valid-but-wrong JSON with no error/warning path at all. Confirmed reproducible via `responseParser.js:197`'s unfenced-JSON fallback: `{"npc_updates":[{"name":"Guard",...}], "requested_rolls":[...]}` extracts and "successfully" parses to just `{"name":"Guard",...}`, silently dropping the roll request with zero trace. The same buggy function backs ~10 other call sites (`scribe.js`, `frontDirector.js`, `frontUpgrade.js`, `frontMigration.js`, `npcEnrichment.js`, `outOfCombatRollPolicy.js`) — every one inherits the same failure mode whenever their target keyword isn't the JSON's first key.
+- [ ] **P1** (response-parsing, 2026-07-14): `llm/utils/jsonExtractor.js` — the shared, hard-won JSON-repair utility this codebase leans on for LLM-quirk resilience — has no direct unit-test file of its own; its ~89.83% coverage is entirely incidental via callers whose test fixtures happen to make the target keyword the JSON's first/only key, which is exactly why the P0 bug above went undetected by 753 passing tests.
+- [ ] **P1** (story-memory, 2026-07-14): `normalizeStoryMemoryUpdate` (`engine/storyMemory.js:93-117`, dispatched from the DM's `memory_updates` via `UPDATE_STORY_MEMORY`) has zero direct test coverage — `storyMemory.test.js` doesn't even import it. The reducer test file (`gameReducer.storyMemory.test.js`) only exercises the `status`/`markUsed`/no-match/empty-payload branches, leaving the `text`/`subject` rewrite and `tags`/`linkedNpcNames`/`location` update branches completely unverified.
+- [ ] **P2** (story-memory, 2026-07-14): `normalizeStoryMemoryUpdate` accepts an unvalidated, unclamped `lastUsedAt`/`last_used_at` override (`engine/storyMemory.js:105-106`) that silently wins over the `markUsed`-derived `Date.now()` set on the line right before it — undocumented in the DM prompt contract (`promptBuilder.js:364` only specifies `{id, used}`) and unlike `salience`/`emotionalCharge`, not clamped. A hallucinating DM emitting a raw `lastUsedAt` could suppress a callback card from `scoreStoryMemory`'s 8-minute cooldown gate indefinitely, or bypass it entirely.
 
 ## Entry template
 
@@ -157,6 +161,30 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-14 — response-parsing + story-memory (Lap 1: correctness & test depth)
+
+`npm test`: 753 passing / 55 files. Rotation excluded (last 6 entries, local ∪ origin — local is a strict superset; origin trails at 2026-07-08): rules-math, enemy-stats-conditions (2026-07-13), persistence, character-vault (2026-07-12), combat-exchange, cloud-sync (2026-07-09), roll-resolution, quests (2026-07-08), hidden-fronts, scribe (2026-07-07), chat-orchestration, scene-art (2026-07-06). Eligible & never-audited: progression, response-parsing, prompt-building, story-memory, vector-memory-rag, inventory-economy, providers-adapter. Coverage snapshot (2026-07-12, 2 days old, within window — not refreshed) tie-broke toward the two lowest genuine (non-network-boundary) numbers among those: `jsonExtractor.js` (89.83%, response-parsing) and `storyMemory.js` (92.10%).
+
+### response-parsing (`llm/responseParser.js`, `llm/utils/jsonExtractor.js`)
+- **Scope examined:** `jsonExtractor.js` full file (104 lines); `responseParser.js`'s `parseResponse`/`normalizeEvents` end to end; all ~10 call sites of `extractBalancedJson`/`parseJsonObjectLoose`/`repairJson` across `scribe.js`, `frontDirector.js`, `frontUpgrade.js`, `frontMigration.js`, `npcEnrichment.js`, `npcFodderReview.js`, `outOfCombatRollPolicy.js`, `worldJournal.js`; `responseParser.test.js` (all tests); confirmed via grep no file imports `jsonExtractor.js` directly in a test.
+- **Findings:**
+  - **P0:** `extractBalancedJson` walks backward from the keyword to the *nearest* `{`, not the outermost one containing the keyword at the top level. Reproduced live (node REPL): `extractBalancedJson('{"npc_updates":[{"name":"Guard","disposition":"wary"}], "requested_rolls":[{"type":"skill_check",...}]}', 'requested_rolls')` returns just `{"name":"Guard","disposition":"wary"}` — an unrelated inner object — which then parses successfully (`JSON.parse` never throws) with zero warning. In `responseParser.js:197-206`'s unfenced-JSON fallback, this means a real DM roll request following any earlier object-valued/array-of-objects field is silently dropped: no roll happens, no error surfaces, `narrative` is truncated at the wrong index too. Every other caller of `extractBalancedJson` shares the exact same bug whenever their target keyword isn't the response's first key.
+  - **P1:** `jsonExtractor.js` has no dedicated test file; its coverage is 100% incidental through callers whose test fixtures always make the keyword the JSON's first/only key — which is precisely why the P0 above survived 753 green tests.
+  - Verified strong: the fenced-code-block primary path (`parseResponse`'s `/```json.../` regex + `repairJson` trailing-comma/unclosed-brace repair) has deep, deliberate coverage for malformed/truncated/prose-mixed responses — the bug above is specific to the balanced-brace fallback path, not the common case.
+- **Suggested improvements:** (1) fix `extractBalancedJson` to find the outermost enclosing `{` — e.g. scan backward tracking a running close-count so an already-matched nested object is skipped rather than treated as the start; (2) add `jsonExtractor.test.js` with direct cases for a keyword preceded by a sibling object field and by an array-of-objects field; (3) add a `responseParser.test.js` case mirroring the repro above so the unfenced-JSON fallback is protected.
+
+### story-memory (`engine/storyMemory.js`)
+- **Scope examined:** full file (191 lines) end to end; `storyMemory.test.js` (all tests, confirmed it imports `normalizeStoryMemoryCard`/`curateStoryMemory`/`findStoryMemoryMatch`/`buildStoryMemoryPromptBlock` but not `normalizeStoryMemoryUpdate`); reducer cases `ADD_STORY_MEMORY_CARD(S)`/`UPDATE_STORY_MEMORY` (`gameReducer.js:1885-1933`) and `gameReducer.storyMemory.test.js`; the `memory_updates` → `UPDATE_STORY_MEMORY` DM contract (`responseParser.js:734`, `promptBuilder.js:364`).
+- **Findings:**
+  - **P1:** `normalizeStoryMemoryUpdate` (93-117) has no direct unit test — `storyMemory.test.js` never imports it. Indirect coverage via the reducer test only hits `status`/`markUsed`/no-match/empty-payload; the `text`/`subject` rewrite path and `tags`/`linkedNpcNames`/`location` update branches are entirely unexercised.
+  - **P2:** the same function accepts a raw `lastUsedAt`/`last_used_at` override (105-106) that wins over the `markUsed`-derived `Date.now()` set the line before, with no validation/clamping (unlike `salience`/`emotionalCharge`) and no mention in the DM prompt contract, which only documents `{id, used}` (`promptBuilder.js:364`).
+  - **P2:** `cleanText(...).slice(0, MAX_TEXT_LENGTH)` and the subject/location slices (66, 79, 89, 102-103, 115) truncate by UTF-16 code unit, not surrogate-pair-safe, inconsistent with `cloudSync.js`'s explicit surrogate-pair-safe splitting elsewhere in the codebase — low likelihood since this text is Scribe-generated prose, but the same bug class the project has already hardened against once.
+  - Verified strong: `normalizeStoryMemoryCard`'s clamping/dedup, `findStoryMemoryMatch`'s id/subject+type/text matching, and `curateStoryMemory`/`scoreStoryMemory`'s relevance/cooldown/resolved-status scoring all have deliberate, well-targeted tests.
+- **Suggested improvements:** (1) add direct `normalizeStoryMemoryUpdate` tests for the text/subject/tags/linkedNpcNames/location branches; (2) either document `lastUsedAt` override in the prompt contract or drop the unvalidated pass-through since only `{id, used}` is ever emitted by the DM; (3) low priority — surrogate-pair-safe slicing if this ever surfaces in practice.
+
+### Process notes
+- Re-verified two older open-queue items, both still present/unfixed (left open, no checkbox change): `frontDirector.test.js` still has only its original 3 tests, none covering the `parseJsonResponse` malformed-JSON throw branches (hidden-fronts, 2026-07-07); `scribe.test.js` still has no test asserting `SET_LOCATION` or exercising the `apiKey`/`sendMessage`-rejection short-circuits (scribe, 2026-07-07).
 
 ## 2026-07-13 — rules-math + enemy-stats-conditions (Lap 1: correctness & test depth)
 
