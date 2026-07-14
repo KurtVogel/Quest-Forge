@@ -5,8 +5,9 @@ session. **Update this at the end of any session that ships or decides something
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
 _Last updated: 2026-07-14 evening (first keyed `eval:memory` pass ran — twice — and its findings
-are fixed; see the section below. 814 tests + lint green. Not yet deployed; the morning's audit
-fixes are live at https://quest-forge-99ab1.web.app.)_
+are fixed; see the section below. 814 tests + lint green, **deployed to
+https://quest-forge-99ab1.web.app** — the front-install race fix matters for any live campaign
+started at a fast pace.)_
 
 ## Memory/fronts tuning pass #1 — two keyed 30-turn runs (2026-07-14)
 
