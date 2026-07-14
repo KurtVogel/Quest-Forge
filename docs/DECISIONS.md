@@ -8,7 +8,39 @@ Format: date · decision · why. Newest first.
 
 ---
 
-**2026-07-14 · Late-arriving generated fronts install as long as the fallback front is untouched.**
+**2026-07-14 · World-tempo pacing architecture settled (design; implementation pending, inspector first).**
+Vesa + the first keyed memory eval both confirmed the same failure: campaigns escalate to open
+violence within ~7 turns regardless of premise — slow burn is ignored, and safe places aren't.
+Root causes named: (a) narrative symptom intensity is unbounded by clock state (a clock-1 front
+can narrate raiders on-screen), and (b) the DM sees the full `## HIDDEN CAMPAIGN FRONTS` block
+every turn, and an LLM told "don't use this yet" while shown it loses that fight — **hiding
+beats instructing**. Settled direction, in one arc: canonical **location records with
+profiles** (haven/settlement/wilderness/hostile site + intrinsic danger + front-theater
+membership; requires a small gazetteer since DM location strings drift); **stage-bound symptom
+intensity** (clock/stage derives an allowed band: rumors → indirect contact → presence →
+confrontation); **theater gating with news-travel** (fronts manifest in person only in their
+theater; elsewhere only secondhand signals — off-screen fronts still advance and arrive as
+consequences); the always-visible fronts block is replaced by a compact **world-tempo
+directive** produced on the existing journal-cadence Scribe reflection (which front may
+surface, where, at what max intensity, what stays silent) — engine supplies deterministic
+inputs, Scribe supplies judgment, DM only ever sees the directive; an **engine-rolled timing
+die** (crypto, hidden) jitters WHEN a permitted symptom lands by 0–4 scenes — arc reasoning
+decides what/where, dice only decide timing, because an LLM cannot be unpredictable on its own;
+**tension meter + pace dial, both** (thermostat: Settings dial slow-burn/standard/breakneck is
+the setpoint, an engine-computed rolling heat score from recent combats/wounds/symptoms is the
+thermometer; one prompt line "target vs actual" — bidirectional, also fixes flat narrators, cf.
+Grok's "you walk down more stairs"); a **recent-encounters ledger** (enemy types + locations of
+last N fights) so variety fatigue is visible and cleared areas stay cleared; **openings
+establish normal life** BG1-style (pressure at most atmosphere) unless the premise explicitly
+demands in medias res; **player-sought danger is always exempt** — gating constrains only
+unprovoked front intrusions, "I go hunt goblins" always works; **emergent front promotion** —
+a Scribe-proposed, engine-bounded cadence path for a played-up small threat (the goblin den) to
+become a real front with clock and theater, which today has no mechanism; and **side quests get
+no new machinery** — quiet-world tempo plus a "local color and minor troubles welcome" line
+lets the LLM do what it's already good at, and the quest tracker already round-trips them.
+Sequencing: the **memory debug inspector ships first** — every mechanism above is a tuning
+problem, and we are currently tuning blind (this eval's findings required excavating a
+1,800-line report JSON).
 The first keyed `eval:memory` pass caught a silent race: `generateCampaignFronts` runs on the
 slow DM model while play continues, and `INSTALL_GENERATED_FRONTS` dropped any result arriving
 after 2 visible messages — a fast-typing player got the generic fallback front for the whole

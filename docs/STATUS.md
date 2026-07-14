@@ -440,11 +440,16 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 1. **Keyed memory/fronts tuning pass** — pass #1 done 2026-07-14 (two 30-turn runs, findings
    fixed; see above). Repeat after the next batch of memory-layer changes.
-2. **Memory debug inspector** — dev/settings panel for story cards, RAG hits, curated injection,
-   fronts clocks (normally hidden). See IDEAS.md. High interest for perfecting the memory layer.
-3. **Rogue real-play feedback** — light pass after memory tuning; Sneak Attack/Cunning Action feel
-4. **Wizard/Cleric spellcasting** — after memory layer is proven in live campaigns
-5. **PWA + public launch** — separate project (API keys, Firebase, payments); not now.
+2. **Memory debug inspector** — NEXT UP (integration explored 2026-07-14, notes in IDEAS.md:
+   capture point is ChatPanel's `sendToLLM` where curation/RAG scores are computed and
+   discarded; DEV-gated store + JournalPanel-style drawer). The tuning instrument for #3.
+3. **World-tempo pacing system** — designed 2026-07-14 (DECISIONS.md + IDEAS.md): location
+   profiles/gazetteer, stage-bound symptom intensity, cadence-time tempo directive replacing
+   the always-visible fronts block, timing die, tension meter + pace dial, encounter ledger,
+   BG1 openings, emergent front promotion. Root cause of "every campaign is violent by turn 7."
+4. **Rogue real-play feedback** — light pass after memory tuning; Sneak Attack/Cunning Action feel
+5. **Wizard/Cleric spellcasting** — after memory layer is proven in live campaigns
+6. **PWA + public launch** — separate project (API keys, Firebase, payments); not now.
    Business groundwork started 2026-07-09 (Cowork): product north star in `docs/PRODUCT.md`,
    pre-launch cost/monetization engineering items in IDEAS.md → "Launch & Monetization"
    (context caching, machinery Flash-Lite upgrade, hosted-tier key proxy). Candidate model:

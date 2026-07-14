@@ -130,6 +130,48 @@ with escalation steps and a "grim portent" (what happens if nobody interferes).
 - Why: player agency stays absolute, but the world is *up to something* — the "behind the
   scenes goings-on" feel. Vesa considers this the killer feature for going public.
 
+### World-tempo pacing system — status: `designed` (2026-07-14), priority: HIGH, after inspector
+Full rationale + settled sub-decisions in DECISIONS.md 2026-07-14 ("World-tempo pacing
+architecture"). The problem: every campaign escalates to violence in ~7 turns (both keyed eval
+runs AND Vesa's live play); slow-burn, quiet scenes, and safe places don't exist because
+(a) symptom intensity is unbounded by clock state and (b) the DM sees the full fronts block
+every turn — hiding beats instructing. Components, in rough build order:
+1. **Canonical location records + profiles** — gazetteer with aliases (DM location strings
+   drift: "Clockwork Tower" / "Library landing, Clockwork Tower"), each with type
+   (haven/settlement/wilderness/frontier/hostile site), intrinsic danger, front-theater
+   membership. Scribe classifies on first establishment. Prereq for everything below; also
+   sharpens shipped RAG location tags + journal transitions.
+2. **Stage-bound symptom intensity** — engine derives an allowed band per front from
+   clock/stage (rumors → indirect → presence → confrontation); rendered as a hard cap, and a
+   haven violation must be high-clock + Scribe-reasoned (the walls failing IS the story event).
+3. **World-tempo directive** — replaces the always-visible `## HIDDEN CAMPAIGN FRONTS` block.
+   Produced on the existing journal-cadence reflection (zero new LLM cost): which front may
+   surface, where, max intensity, what stays silent, plus heat guidance. Engine supplies
+   deterministic inputs; Scribe supplies "what would make sense here"; DM sees only the
+   directive (~3 lines) instead of raw clocks/portents.
+4. **Timing die** — engine-rolled (crypto, hidden) 0–4-scene jitter on WHEN a permitted
+   symptom lands. Arc decides what/where; dice decide when (LLMs surface permitted content
+   immediately and predictably; only the engine can be genuinely unpredictable).
+5. **Tension meter + pace dial (both — thermostat)** — Settings dial
+   slow-burn/standard/breakneck (default standard) is the setpoint; engine-computed rolling
+   heat from recent combats/wounds/symptoms/deaths (~15 messages) is the thermometer; one
+   prompt line "target vs actual". Bidirectional: cools Gemini's drama-maximizing, heats
+   Grok-style flatline narration.
+6. **Recent-encounters ledger** — last N fights (enemy types, location) shown to the DM:
+   vary or escalate, cleared areas stay cleared (the endless 1–2-ghoul corridor).
+7. **BG1 opening rule** — opening establishes normal life, pressure at most atmosphere,
+   unless the premise explicitly starts in medias res (premise remains sovereign).
+8. **Emergent front promotion** — Scribe-proposed, engine-bounded cadence path for a
+   played-up small threat (goblin den) to become a real front with clock/theater; today
+   front birth happens only at campaign creation/upgrade.
+9. **Regional front seeding** — a genuinely new distant region (the icy continent) gets its
+   own premise-of-place-grounded fronts on arrival; home fronts keep ticking off-screen and
+   greet the player as consequences on return.
+Guardrails: player-sought danger ("I go hunt goblins") is always exempt — gating constrains
+only unprovoked intrusions; side quests get NO new machinery (quiet tempo + "local color
+welcome" line; quest tracker already round-trips them; the promotion path gives the good ones
+teeth). Build after the memory debug inspector — every component here is a tuning problem.
+
 ### Location-transition recall ledger — status: `shipped` (2026-06-23)
 Journal entries now store `location`; the DM prompt receives a deterministic
 `## LOCATION TRANSITION HISTORY` block for chronological "what happened right before I arrived?"
@@ -652,6 +694,24 @@ hard to tune salience without seeing what the DM actually received.
 **Conventions to borrow:** MemGPT-style tier visibility; asymmetric retrieval roles already used
 in `vectorMemory.js`; cooldown/salience scoring from `storyMemory.js`. Not a player feature —
 Settings → Game → "Memory inspector" behind a toggle, or `?debugMemory=1` URL flag.
+
+**Integration notes (explored 2026-07-14 — confirmed feasible, next up):**
+- **The scores already exist and are discarded one line before usefulness**: `sendToLLM` in
+  `ChatPanel.jsx` (~:253-277) computes `retrievedMemories` (cosine `score` from
+  `retrieveRelevant`) and `dramaticMemories` (curation `score` from `curateStoryMemory`),
+  passes them into the prompt string, drops them. That call site is the capture point.
+- **Capture store**: a small DEV-gated module-level store (pattern: `dev/devSettingsSeed.js`
+  `import.meta.env.DEV` guard + `GameContext.jsx` `?debugState=1` sanitized-window hook) —
+  NOT game state, never persisted, no-op when disabled.
+- **Scribe passes are fire-and-forget** (`runScribe`/`runNpcFrontReflection` dispatch and
+  `console.log` counts, return nothing) — the "Scribe last pass" surface observes the
+  dispatches (or diffs state before/after), it cannot read a return value.
+- **UI**: mirror the `JournalPanel` overlay/drawer pattern in `AppShell.jsx` (local
+  `useState` toggle + `isOpen`/`onClose`); read state via `useGame()`; one CSS file per
+  component folder. Ledger surfaces (cards/fronts/facts/NPCs) read live state directly —
+  only last-turn injection + Scribe pass need capture.
+- When the world-tempo pacing system (above) lands, its directive, heat score, and timing-die
+  state join the panel — the inspector is its tuning instrument.
 
 **Pair with:** `npm run eval:memory` report JSON for automated regression; manual inspector for
 feel tuning. Why: perfecting memory is the current gate before Wizard/Cleric and public launch.
