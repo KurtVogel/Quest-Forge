@@ -102,8 +102,11 @@ export function normalizeStoryMemoryUpdate(update = {}) {
     if (subject) out.subject = subject.slice(0, MAX_SUBJECT_LENGTH);
     if (text) out.text = text.slice(0, MAX_TEXT_LENGTH);
     if (update.status && ALLOWED_STATUS.has(update.status)) out.status = update.status;
+    // The engine owns the clock: `used: true` stamps Date.now(). A raw
+    // lastUsedAt pass-through was never part of the DM contract ({id, used})
+    // and would let a hallucinated timestamp pin a card outside — or forever
+    // inside — scoreStoryMemory's callback-cooldown gate (2026-07-14 audit).
     if (update.used || update.markUsed || update.mark_used) out.lastUsedAt = Date.now();
-    if (update.lastUsedAt || update.last_used_at) out.lastUsedAt = update.lastUsedAt || update.last_used_at;
     if (update.salience !== undefined) out.salience = clampNumber(update.salience, 1, 5, 3);
     if (update.emotionalCharge !== undefined || update.emotional_charge !== undefined) {
         out.emotionalCharge = clampNumber(update.emotionalCharge ?? update.emotional_charge, 0, 5, 2);

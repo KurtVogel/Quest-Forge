@@ -4,10 +4,14 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-14 (2026-07-13 audit batch fixed: incapacitated enemies — stunned/
-paralyzed/unconscious foes now lose their action with a visible "cannot act" note and a
-`remove_conditions` recovery path; `getMaxHitPoints` per-level floor; dead `resolveCheck`
-deleted; `isProficientWithWeapon` + `enemyStats.js` boundary suites. 787 tests + lint green.)_
+_Last updated: 2026-07-14 (both audit batches fixed same day. Batch 2: incapacitated enemies
+lose their action + rules-math floors/tests/dead-code. Batch 3 — the 2026-07-14 audit's P0:
+`extractBalancedJson` anchored on the nearest `{` instead of the enclosing one, so unfenced DM
+JSON with `requested_rolls` after an `npc_updates` object silently extracted the wrong inner
+object and DROPPED the roll request across ~10 call sites; fixed with close-count anchoring +
+a nesting-ordered string-aware `repairJson` upgrade + dedicated extractor suite. Story-memory:
+`normalizeStoryMemoryUpdate` tested, raw `lastUsedAt` cooldown-bypass pass-through dropped.
+807 tests + lint green.)_
 
 ## Strengthening-queue batch 2 (2026-07-14)
 

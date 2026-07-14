@@ -4,6 +4,7 @@ import {
     curateStoryMemory,
     findStoryMemoryMatch,
     normalizeStoryMemoryCard,
+    normalizeStoryMemoryUpdate,
 } from './storyMemory.js';
 
 describe('story memory normalization', () => {
@@ -108,5 +109,47 @@ describe('story memory curation', () => {
         expect(block).toContain('Use at most ONE naturally');
         expect(block).toContain('Callback 0');
         expect(block).not.toContain('Callback 6');
+    });
+});
+
+describe('normalizeStoryMemoryUpdate', () => {
+    it('normalizes the full rewrite branches: text, subject, tags, linked NPCs, location', () => {
+        const out = normalizeStoryMemoryUpdate({
+            id: ' mem-1 ',
+            text: '  Maren now knows the hero lied about Tanelorn.  ',
+            subject: 'Tanelorn lie',
+            tags: ['tanelorn', 'lie', 'tanelorn'],
+            linked_npc_names: ['Maren'],
+            location: 'Millhaven',
+        });
+        expect(out.id).toBe('mem-1');
+        expect(out.text).toBe('Maren now knows the hero lied about Tanelorn.');
+        expect(out.subject).toBe('Tanelorn lie');
+        expect(out.tags).toContain('lie');
+        expect(out.linkedNpcNames).toEqual(['Maren']);
+        expect(out.location).toBe('Millhaven');
+    });
+
+    it('stamps lastUsedAt from used:true and clamps salience/emotionalCharge', () => {
+        const before = Date.now();
+        const out = normalizeStoryMemoryUpdate({ id: 'mem-1', used: true, salience: 99, emotional_charge: -4 });
+        expect(out.lastUsedAt).toBeGreaterThanOrEqual(before);
+        expect(out.salience).toBe(5);
+        expect(out.emotionalCharge).toBe(0);
+    });
+
+    it('ignores a raw lastUsedAt override — the engine owns the cooldown clock', () => {
+        const farFuture = Date.now() + 1000 * 60 * 60 * 24 * 365;
+        const withUsed = normalizeStoryMemoryUpdate({ id: 'mem-1', used: true, lastUsedAt: farFuture });
+        expect(withUsed.lastUsedAt).toBeLessThan(farFuture);
+        const withoutUsed = normalizeStoryMemoryUpdate({ id: 'mem-1', last_used_at: farFuture, status: 'active' });
+        expect(withoutUsed.lastUsedAt).toBeUndefined();
+    });
+
+    it('drops unknown statuses and returns null without any identity', () => {
+        expect(normalizeStoryMemoryUpdate({ id: 'mem-1', status: 'exploded' }).status).toBeUndefined();
+        expect(normalizeStoryMemoryUpdate({ status: 'resolved' })).toBe(null);
+        expect(normalizeStoryMemoryUpdate(null)).toBe(null);
+        expect(normalizeStoryMemoryUpdate('mem-1')).toBe(null);
     });
 });

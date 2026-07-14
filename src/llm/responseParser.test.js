@@ -207,6 +207,17 @@ describe('defenses against LLM misbehavior', () => {
         expect(narrative).not.toContain('requested_rolls');
     });
 
+    it('P0 regression: unfenced JSON where requested_rolls follows an npc_updates object keeps the roll', () => {
+        // The old extractor anchored on the nearest '{' — the closed Guard object —
+        // parsed it "successfully", and silently dropped the roll request.
+        const raw = 'The guard eyes you.\n{ "npc_updates": [ { "name": "Guard", "disposition": "wary" } ], "requested_rolls": [ { "type": "skill_check", "skill": "deception", "dc": 12 } ] }';
+        const { narrative, events } = parseResponse(raw);
+        expect(events?.requestedRolls).toHaveLength(1);
+        expect(events.requestedRolls[0]).toMatchObject({ skill: 'deception', dc: 12 });
+        expect(events?.npcUpdates?.[0]?.name).toBe('Guard');
+        expect(narrative).toBe('The guard eyes you.');
+    });
+
     it('detects prose roll requests the DM wrote as text', () => {
         const { events } = parseResponse('The shadows shift around you. Make a Perception check (DC 12) to spot the danger.');
         expect(events?.requestedRolls?.length).toBeGreaterThan(0);

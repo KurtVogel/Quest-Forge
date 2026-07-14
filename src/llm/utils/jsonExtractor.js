@@ -53,10 +53,22 @@ export function extractBalancedJson(text, keyword) {
     const keyIdx = text.indexOf(keyword);
     if (keyIdx === -1) return null;
 
-    // Walk backwards to find the opening brace
+    // Walk backwards to the innermost brace that actually ENCLOSES the keyword,
+    // tracking a running close-count so an already-closed earlier object is
+    // skipped over. The old nearest-'{' walk anchored on unrelated nested
+    // objects whenever the keyword wasn't the JSON's first key — e.g. in
+    // {"npc_updates":[{...}], "requested_rolls":[...]} it silently extracted
+    // the inner NPC object and dropped the roll request (P0, 2026-07-14 audit).
     let startIdx = -1;
+    let closeCount = 0;
     for (let i = keyIdx; i >= 0; i--) {
-        if (text[i] === '{') { startIdx = i; break; }
+        const ch = text[i];
+        if (ch === '}') {
+            closeCount++;
+        } else if (ch === '{') {
+            if (closeCount === 0) { startIdx = i; break; }
+            closeCount--;
+        }
     }
     if (startIdx === -1) return null;
 
@@ -92,12 +104,27 @@ export function extractBalancedJson(text, keyword) {
 export function repairJson(str) {
     // Remove trailing commas before } or ]
     let repaired = str.replace(/,\s*([}\]])/g, '$1');
-    // Count open vs close braces/brackets and close unclosed ones
-    const openBraces = (repaired.match(/\{/g) || []).length;
-    const closeBraces = (repaired.match(/\}/g) || []).length;
-    const openBrackets = (repaired.match(/\[/g) || []).length;
-    const closeBrackets = (repaired.match(/\]/g) || []).length;
-    if (openBrackets > closeBrackets) repaired += ']'.repeat(openBrackets - closeBrackets);
-    if (openBraces > closeBraces) repaired += '}'.repeat(openBraces - closeBraces);
+    // A truncated response often ends mid-list, right after a comma
+    repaired = repaired.replace(/,\s*$/, '');
+
+    // Close unclosed strings/braces/brackets in correct NESTING order. The old
+    // count-and-append (all ']' then all '}') produced invalid closings for any
+    // truncation inside an object nested in an array — e.g. `[{"a":1` needs `}]`,
+    // not `]}` — and counted braces inside string values.
+    const stack = [];
+    let inString = false;
+    let escape = false;
+    for (const ch of repaired) {
+        if (escape) { escape = false; continue; }
+        if (ch === '\\' && inString) { escape = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === '{' || ch === '[') stack.push(ch);
+        else if (ch === '}' || ch === ']') stack.pop();
+    }
+    if (inString) repaired += '"';
+    while (stack.length > 0) {
+        repaired += stack.pop() === '{' ? '}' : ']';
+    }
     return repaired;
 }
