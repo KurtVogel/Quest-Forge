@@ -4,10 +4,45 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-14 night (memory debug inspector v1 shipped + deployed; earlier the same
-day: first keyed `eval:memory` pass ran twice and its findings were fixed and deployed, and the
-world-tempo pacing architecture was settled in DECISIONS.md. 820 tests + lint green, live at
+_Last updated: 2026-07-14 late night (world-tempo pacing system v1 shipped, eval-verified, and
+deployed — the same day it was designed. Earlier today: eval pass #1 findings fixed + deployed,
+pacing architecture settled, memory debug inspector shipped. 860 tests + lint green, live at
 https://quest-forge-99ab1.web.app.)_
+
+## World-tempo pacing system v1 (2026-07-14, deployed)
+
+The full DECISIONS.md architecture, built and verified in one autonomous session (components
+1–8; regional front seeding deferred to v2 per the design):
+
+- **`engine/worldTempo.js`** — clock-derived intensity bands (whispers → indirect → presence →
+  confrontation), deterministic recent-heat score, pace-dial thermostat guidance, directive
+  validation (invalid always degrades to QUIET), and the `## WORLD TEMPO` prompt block that
+  **replaces the always-visible fronts dossier** — the DM now sees pace guidance, front stubs
+  (id + faction only), and at most ONE permitted symptom card. Hiding beats instructing.
+- **`engine/locationRegistry.js`** — canonical places with containment alias folding
+  ("Library landing, Clockwork Tower" = "Clockwork Tower"), Scribe-classified profiles
+  (`location_profile`: haven/settlement/wilderness/frontier/hostile_site + intrinsic danger),
+  and organically growing front theaters (a directive placing a symptom somewhere makes that
+  place the front's home; away from a known home, fronts reach the player as news only).
+- **Cadence reflection** now emits a `tempo_directive` (validated, cadence-deduped,
+  same-front/slow-burn alternation) whose window opens after an **engine-rolled crypto timing
+  die** (0–4 scenes), plus rare `front_proposals` — emergent front promotion for player-engaged
+  durable threats (`ADD_EMERGENT_FRONT`, complete-or-nothing, max 4 active, clock 0).
+- **`recentEncounters` ledger** (END_COMBAT, cap 6) feeds heat + a vary-or-escalate line;
+  **Settings → Game → Campaign Pace** dial (slow-burn/standard/breakneck); **BG1 opening rule**
+  (normal life first, premise pressure at most atmosphere, in-medias-res premise exempt);
+  inspector gained tempo/heat/timing-die/places readouts.
+
+**Verification (all same evening):** 860 tests + lint green. Live A/B on the identical
+Aldermill premise: pre-tempo opening had Bram urgently recruiting the hero; post-tempo opening
+is frost, thin porridge, and the missing barges as a grumbled rumor before Bram turns back to
+his work. Full 30-turn `eval:memory` run: **zero fights** (the same oblivious-scholar script
+that pre-tempo ended beaten unconscious in a burning tower), front clocks paced at 2/6 after
+~9 cadences (was 6/6), 8 locations registered with sane profiles, theaters grown for
+front-v2-2, the last directive a fail-safe QUIET degrade, recall 80%, zero console
+errors/warnings. Watch in real play: whether standard pace feels too quiet for an ENGAGED
+player (the script ignores every hook), and whether the reflection emits front *ids* vs titles
+in directives (degrade-to-quiet handles it safely either way).
 
 ## Memory debug inspector v1 (2026-07-14, deployed)
 
@@ -446,7 +481,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **820** tests passing (58 files)
+- `npm test` — **860** tests passing (61 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)
@@ -457,10 +492,9 @@ feels excellent in live play — casters multiply engine surface area; polish th
    fixed; see above). Repeat after the next batch of memory-layer changes.
 2. **Memory debug inspector** — v1 SHIPPED + deployed 2026-07-14 (see above). Extend with
    tempo/heat/timing-die readouts when #3 lands.
-3. **World-tempo pacing system** — NEXT UP, designed 2026-07-14 (DECISIONS.md + IDEAS.md): location
-   profiles/gazetteer, stage-bound symptom intensity, cadence-time tempo directive replacing
-   the always-visible fronts block, timing die, tension meter + pace dial, encounter ledger,
-   BG1 openings, emergent front promotion. Root cause of "every campaign is violent by turn 7."
+3. **World-tempo pacing system** — v1 SHIPPED + eval-verified + deployed 2026-07-14 (see above).
+   Next: real engaged-play feel check (the eval script ignores hooks — does standard pace feel
+   right when the player bites?), then v2 regional front seeding for distant new regions.
 4. **Rogue real-play feedback** — light pass after memory tuning; Sneak Attack/Cunning Action feel
 5. **Wizard/Cleric spellcasting** — after memory layer is proven in live campaigns
 6. **PWA + public launch** — separate project (API keys, Firebase, payments); not now.

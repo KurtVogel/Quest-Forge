@@ -454,6 +454,24 @@ export default function SettingsModal() {
                                 </select>
                             </div>
 
+                            <div className="setting-group">
+                                <label className="setting-label">Campaign Pace</label>
+                                <select
+                                    className="setting-select"
+                                    value={state.settings.paceDial || 'standard'}
+                                    onChange={(e) => updateSetting('paceDial', e.target.value)}
+                                >
+                                    <option value="slow-burn">Slow burn — long quiet stretches, pressure builds patiently</option>
+                                    <option value="standard">Standard — quiet and tension in waves</option>
+                                    <option value="breakneck">Breakneck — the world pushes hard and often</option>
+                                </select>
+                                <p className="setting-hint">
+                                    Sets how often the hidden world intrudes on its own. The engine measures
+                                    recent tension and steers the DM toward this pace either way — danger you
+                                    seek out yourself is never limited.
+                                </p>
+                            </div>
+
                             <div className="setting-group living-world-migration">
                                 <div className="setting-label-row">
                                     <label className="setting-label">Living World</label>

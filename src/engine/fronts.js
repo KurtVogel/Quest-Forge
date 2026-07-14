@@ -88,6 +88,46 @@ export function createInitialFronts({ premise = '', character = null, location =
     })];
 }
 
+/**
+ * Emergent front promotion (DECISIONS.md 2026-07-14): the cadence reflection
+ * may propose that a player-engaged recurring threat (the goblin den that
+ * kept mattering) becomes a real front. Strictly validated — a complete
+ * proposal or nothing — deduped against existing fronts by title/faction,
+ * always born at clock 0/stage 0.
+ */
+export function normalizeEmergentFront(proposal, existingFronts = []) {
+    if (!proposal || typeof proposal !== 'object') return null;
+    const title = cleanText(proposal.title || proposal.name).slice(0, 90);
+    const goal = cleanText(proposal.goal).slice(0, 280);
+    const stakes = cleanText(proposal.stakes).slice(0, 280);
+    const grimPortents = normalizeTextArray(proposal.grimPortents || proposal.grim_portents)
+        .map(portent => portent.slice(0, 240));
+    const faction = normalizeFaction(proposal.faction);
+    if (!title || !goal || !stakes || grimPortents.length < 3 || !faction || !faction.goal) return null;
+
+    const titleLower = title.toLowerCase();
+    const factionLower = faction.name.toLowerCase();
+    const duplicate = (existingFronts || []).some(front =>
+        front?.title?.toLowerCase() === titleLower
+        || front?.faction?.name?.toLowerCase() === factionLower);
+    if (duplicate) return null;
+
+    return normalizeFront({
+        id: `front-em-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        title,
+        goal,
+        stakes,
+        grimPortents,
+        clock: 0,
+        maxClock: DEFAULT_MAX_CLOCK,
+        stage: 0,
+        status: 'active',
+        publicHints: [],
+        notes: cleanText(proposal.reason || proposal.notes).slice(0, 500),
+        faction,
+    });
+}
+
 export function normalizeFront(front = {}, existing = null) {
     const maxClock = clampInt(front.maxClock ?? front.max_clock, 3, 12, existing?.maxClock || DEFAULT_MAX_CLOCK);
     const clock = clampInt(front.clock, 0, maxClock, existing?.clock || 0);

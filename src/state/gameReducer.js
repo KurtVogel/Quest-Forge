@@ -9,7 +9,9 @@ import { ABILITY_NAMES, buildClassResources, normalizeAbilityScoreImprovementSta
 import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js';
-import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
+import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeEmergentFront, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
+import { appendRecentEncounter, buildEncounterEntry, MAX_ACTIVE_FRONTS, MAX_RECENT_ENCOUNTERS, normalizeTempoDirective } from '../engine/worldTempo.js';
+import { normalizeLocationRecord, upsertLocation } from '../engine/locationRegistry.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate, pickMergedCardText } from '../engine/storyMemory.js';
 import {
     appendBondMoments,
@@ -92,6 +94,15 @@ function validateSaveState(payload) {
         fronts: Array.isArray(payload.fronts) ? payload.fronts.map(f => normalizeFront(f)) : [],
         party: Array.isArray(payload.party) ? payload.party : [],
         currentLocation: payload.currentLocation || null,
+        locations: Array.isArray(payload.locations)
+            ? payload.locations.map(record => normalizeLocationRecord(record)).filter(Boolean)
+            : [],
+        recentEncounters: Array.isArray(payload.recentEncounters)
+            ? payload.recentEncounters.slice(-MAX_RECENT_ENCOUNTERS)
+            : [],
+        worldTempo: payload.worldTempo && typeof payload.worldTempo === 'object' && !Array.isArray(payload.worldTempo)
+            ? payload.worldTempo
+            : null,
         pendingRoleplayCheck: sanitizePendingRoleplayCheck(payload.pendingRoleplayCheck),
         appliedLootSourceIds: Array.isArray(payload.appliedLootSourceIds) ? payload.appliedLootSourceIds : [],
         recentPurchases: normalizeRecentTransactions(payload.recentPurchases),
@@ -522,6 +533,9 @@ export const initialGameState = {
     fronts: [], // Hidden campaign clocks/threats — injected into the DM prompt, never shown directly to the player
     party: [], // Companions currently traveling with the player
     currentLocation: null,
+    locations: [], // Canonical location records (alias-folded) — profiles + front-theater membership for the tempo system
+    recentEncounters: [], // Last few closed fights (enemies/location/outcome) — variety fatigue + heat input
+    worldTempo: null, // Engine-owned pacing state: the current cadence tempo directive (window, intensity, timing die)
     pendingRoleplayCheck: null, // Reload-safe out-of-combat check proposal; no dice exist yet
     appliedLootSourceIds: [], // Message IDs whose gold/item loot has already been applied — prevents double-grant
     recentPurchases: [], // Recent one-shot purchase signatures — prevents cross-turn LLM replays from double-charging
@@ -565,6 +579,7 @@ export const initialGameState = {
         model: 'gemini-3.1-pro-preview',
         preset: 'classicFantasy',
         ruleset: 'simplified5e',
+        paceDial: 'standard', // Campaign pace setpoint: slow-burn | standard | breakneck (world-tempo thermostat)
         customSystemPrompt: `
 Run a gritty, mature, low-fantasy RPG for an adult player with adult tastes. The world is dangerous, morally complex, and grounded. Use vivid, sensory narration for violence, fear, injury, intimacy, poverty, power, and consequence. Prioritize the narrative's depth over conventional social pleasantries or emotional comfort.
 
@@ -1978,6 +1993,54 @@ export function gameReducer(state, action) {
             };
         }
 
+        case 'APPLY_TEMPO_DIRECTIVE': {
+            const payload = action.payload || {};
+            const cadenceId = payload.cadenceId || null;
+            // One directive per cadence; a replayed reflection cannot re-roll the timing die.
+            if (cadenceId && state.worldTempo?.lastCadenceId === cadenceId) return state;
+            const directive = normalizeTempoDirective(payload.directive, {
+                fronts: state.fronts || [],
+                messageCount: (state.messages || []).length,
+                previousDirective: state.worldTempo?.directive || null,
+                paceDial: state.settings?.paceDial,
+                timingDelay: payload.timingDelay,
+                locations: state.locations || [],
+                currentLocation: state.currentLocation,
+            });
+            // Theaters grow organically: placing a front's symptom somewhere
+            // records that place as part of the front's home territory.
+            const locations = directive.frontId && directive.where
+                ? upsertLocation(state.locations || [], directive.where, { theaterFrontIds: [directive.frontId] })
+                : state.locations || [];
+            return {
+                ...state,
+                locations,
+                worldTempo: { directive, lastCadenceId: cadenceId, updatedAt: Date.now() },
+            };
+        }
+
+        case 'ADD_EMERGENT_FRONT': {
+            const payload = action.payload || {};
+            const cadenceId = payload.cadenceId || null;
+            if (cadenceId && state.session?.frontDirector?.lastEmergentCadenceId === cadenceId) return state;
+            const fronts = state.fronts || [];
+            if (fronts.filter(f => (f.status || 'active') === 'active').length >= MAX_ACTIVE_FRONTS) return state;
+            const front = normalizeEmergentFront(payload.proposal, fronts);
+            if (!front) return state;
+            // Private, like every front: no system line — the player only ever feels it.
+            return {
+                ...state,
+                fronts: [...fronts, front],
+                session: {
+                    ...state.session,
+                    frontDirector: {
+                        ...state.session?.frontDirector,
+                        lastEmergentCadenceId: cadenceId,
+                    },
+                },
+            };
+        }
+
         case 'MIGRATE_FRONTS': {
             if (state.session?.frontMigration?.version >= 1 || !Array.isArray(action.payload?.fronts) || action.payload.fronts.length === 0) {
                 return state;
@@ -2211,8 +2274,24 @@ export function gameReducer(state, action) {
             };
         }
 
-        case 'SET_LOCATION':
-            return { ...state, currentLocation: action.payload };
+        case 'SET_LOCATION': {
+            const rawPayload = action.payload;
+            const name = typeof rawPayload === 'string' ? rawPayload : rawPayload?.name;
+            if (!name || typeof name !== 'string') return state;
+            const profile = rawPayload && typeof rawPayload === 'object' ? rawPayload.profile : null;
+            return {
+                ...state,
+                currentLocation: name,
+                locations: upsertLocation(state.locations || [], name, profile || null),
+            };
+        }
+
+        // Scribe-classified profile for an already-known place (type/danger/theater).
+        case 'UPDATE_LOCATION_PROFILE': {
+            const { name, profile } = action.payload || {};
+            if (!name || !profile || typeof profile !== 'object') return state;
+            return { ...state, locations: upsertLocation(state.locations || [], name, profile) };
+        }
 
         // --- Party / Companions ---
         case 'ADD_COMPANION': {
@@ -2325,6 +2404,11 @@ export function gameReducer(state, action) {
             let newState = {
                 ...state,
                 combat: { ...initialGameState.combat },
+                // Variety-fatigue ledger: what was fought, where, and how it ended.
+                recentEncounters: appendRecentEncounter(
+                    state.recentEncounters,
+                    buildEncounterEntry(state, action.payload || {}),
+                ),
             };
 
             // Client-side XP fallback — only when NO XP was earned for this fight at all:

@@ -129,6 +129,15 @@ function summarizeState(save) {
             notes: String(front.notes || '').slice(0, 220) || null,
         })),
         frontGenerationVersion: state.session?.frontDirector?.generationVersion || null,
+        worldTempo: state.worldTempo || null,
+        recentEncounters: state.recentEncounters || [],
+        locations: (state.locations || []).map(record => ({
+            name: record.name,
+            type: record.type,
+            danger: record.danger,
+            theaterFrontIds: record.theaterFrontIds,
+            aliases: record.aliases,
+        })),
         questsActive: (state.quests || []).filter(q => q.status === 'active').length,
     };
 }

@@ -80,7 +80,7 @@ export function captureScribePass({ facts = [], npcsUpdated = [], cards = [], pl
 }
 
 /** Summary of the last journal-cadence NPC/front reflection pass. */
-export function captureReflection({ cadenceId = null, npcsUpdated = [], frontAdvances = [], cards = [] } = {}) {
+export function captureReflection({ cadenceId = null, npcsUpdated = [], frontAdvances = [], cards = [], tempoDirective = null, frontProposal = null } = {}) {
     publish({
         lastReflection: {
             at: Date.now(),
@@ -93,6 +93,15 @@ export function captureReflection({ cadenceId = null, npcsUpdated = [], frontAdv
                 symptom: clip(advance?.symptom),
             })),
             cards: (cards || []).map(card => ({ type: card?.type || 'callback', subject: clip(card?.subject, 80), text: clip(card?.text) })),
+            tempoDirective: tempoDirective && typeof tempoDirective === 'object'
+                ? {
+                    frontId: clip(tempoDirective.front_id || tempoDirective.frontId, 60) || null,
+                    maxIntensity: clip(tempoDirective.max_intensity || tempoDirective.maxIntensity, 20) || null,
+                    where: clip(tempoDirective.where, 120) || null,
+                    rationale: clip(tempoDirective.rationale) || null,
+                }
+                : null,
+            frontProposal: clip(frontProposal, 90) || null,
         },
     });
 }

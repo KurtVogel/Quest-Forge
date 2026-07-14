@@ -14,6 +14,8 @@ import { getBackgroundConfig } from './machinery.js';
 import { classifyNpcCandidate, curateNpcsForPrompt } from '../engine/npcRoster.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { captureReflection, captureScribePass } from '../dev/memoryInspectorStore.js';
+import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
+import { rollDie } from '../engine/dice.ts';
 
 const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Given a DM's narrative response and the player's action that prompted it, extract any new canonical facts about the game world. Every field you output is an UNVARNISHED record: the fiction's own words and facts, never a cleaned-up, softened, or tasteful paraphrase.
 
@@ -58,7 +60,8 @@ Output ONLY valid JSON:
     }
   ],
   "player_appearance": "concrete physical/visual description of the PLAYER's character, only if newly described this turn — otherwise omit",
-  "location": "Current location if changed, or null"
+  "location": "Current location if changed, or null",
+  "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly" }
 }
 
 Rules:
@@ -80,6 +83,7 @@ Rules:
 - This is an adult game: body proportions and intimate, sensual, unflattering, or even embarrassing anatomical details the fiction establishes (a big ass, wide hips, a soft belly, body hair anywhere) are canonical visual continuity exactly like a scar or white hair. Record them frankly and unvarnished in the narrative's own words — never sanitize, euphemize, tone down, or silently omit them. For many players this continuity IS the point.
 - MATCH THE REGISTER, do not soften it: use the exact anatomical vocabulary the player or DM used. If the fiction says "ass", write "ass" — never upgrade it to "rear", "backside", "behind", "posterior", or "bottom". The same goes for any blunt, crude, coarse, or vulgar word for a body part or feature: preserve that word verbatim. Swapping in a politer or more clinical synonym IS laundering the record and is forbidden. Call a spade a spade.
 - When KNOWN APPEARANCES lists a character and this turn adds or changes a visual detail, emit their appearance as the COMPLETE updated description: start from the known look and weave in what this turn established. Drop or alter a known detail ONLY when the fiction explicitly changed it (haircut, dye, disguise, wound, healing, new gear). NEVER emit just the new fragment — "a fresh scar on his cheek" alone would erase the white hair, the build, everything else on record. When merging, never launder the record: an intimate, crude, or unflattering detail already in KNOWN APPEARANCES stays in the merged description word-for-word (same blunt wording, no politer synonym) until the fiction explicitly changes it. As you merge, reconcile the description into clean prose: drop duplicate adjectives and resolve contradictions rather than stacking them ("scrawny ... scrawny ... big rear" should become one coherent line like "a scrawny goblin with a surprisingly big ass"), but never lose a distinct established detail in the process. If this turn adds nothing visually new for them, omit the field entirely.
+- location_profile classifies what KIND of place the current location is, from what the narrative itself establishes: a haven is genuinely safe (a defended town, a temple sanctuary), a settlement is ordinary inhabited civilization, wilderness is uninhabited country, a frontier is contested or lawless ground, a hostile_site is intrinsically dangerous by nature (a ghoul-warren, a bandit camp). "danger" is the place's own intrinsic danger, independent of any current plot. Emit it when a location is first meaningfully established or when the fiction changes a place's fundamental nature (the town falls, the warren is cleared) — omit otherwise. Positional continuity, like appearance, is exempt from the extraction budget.
 - Only include fields you have actual information for — omit empty/unknown fields
 - DO NOT alter explicit words or details: copy names, proper nouns, numbers, and specific phrases exactly as the DM wrote them — never rename, paraphrase, translate, or invent. Refer to each NPC by the exact name used in the narrative so their record never forks.
 - If nothing notable happened (pure narration, no new facts), return { "world_facts": [], "npc_updates": [], "story_memory": [], "location": null }
@@ -404,6 +408,17 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             dispatch({ type: 'SET_LOCATION', payload: extracted.location });
         }
 
+        const locationProfile = extracted.location_profile;
+        if (locationProfile && typeof locationProfile === 'object' && locationProfile.name) {
+            dispatch({
+                type: 'UPDATE_LOCATION_PROFILE',
+                payload: {
+                    name: locationProfile.name,
+                    profile: { type: locationProfile.type, danger: locationProfile.danger },
+                },
+            });
+        }
+
         if (lootAudit) {
             applyMissingLoot(extracted.missing_loot, lootAudit, dispatch, playerMessage);
             applyMissingPayment(extracted.missing_payment, lootAudit, dispatch);
@@ -448,6 +463,24 @@ Output ONLY valid JSON:
       "reason": "private canonical reason for -1, 0, or +1 movement"
     }
   ],
+  "tempo_directive": {
+    "front_id": "ONE front id that may surface a symptom in the coming scenes, or null for a quiet stretch",
+    "max_intensity": "whispers|indirect|presence|confrontation",
+    "where": "the place its symptom would naturally surface",
+    "suggested_symptom": "one natural in-world expression of the pressure",
+    "rationale": "private: why this makes sense in the arc RIGHT NOW",
+    "quiet_hook": "when front_id is null: an optional small NON-threatening local hook or piece of daily life"
+  },
+  "front_proposals": [
+    {
+      "title": "short private name for a NEW pressure",
+      "goal": "what it wants",
+      "stakes": "what changes if nobody interferes",
+      "grim_portents": ["3-5 escalating off-screen steps"],
+      "faction": { "name": "driving force", "goal": "its goal", "stance": "stance toward the hero" },
+      "reason": "why this player-engaged threat has EARNED promotion to a real campaign pressure"
+    }
+  ],
   "story_memory": [
     {
       "type": "callback|promise|wound|relationship|mystery|playerCanon|foreshadow|npcAgenda",
@@ -471,6 +504,9 @@ Rules:
 - PACING: fronts are campaign clocks that should take many sessions to fill, not one evening. Advance at most ONE front per reflection, and only with an explicit fictional trigger you can name in "reason". The engine also refuses clock gains for a front that advanced in the previous reflection — the default and most common outcome is that nothing moves.
 - A journal cadence is not itself a reason to move a front. Omit fronts with no meaningful change. Never jump multiple steps, resolve a front, or undo an established grim portent here.
 - Emit at most 2 story_memory cards per reflection, and only for hooks with real future payoff.
+- TEMPO DIRECTIVE (always include it): decide whether the coming scenes get a pressure symptom or stay quiet. Quiet (front_id null) is a normal, common, and GOOD answer — slow-burn is a feature. Respect the campaign pace in the context: slow-burn means most reflections stay quiet; standard roughly every other; breakneck may grant most. Ground the choice in the arc: what would make sense given where the hero is, what just happened, and each pressure's reach — a pressure far from its home territory reaches the hero only as news. The engine independently caps intensity to what the clocks justify and delays the landing with its own dice; your job is only what/where would make sense.
+- If RECENT HEAT in the context is high, strongly prefer a quiet directive with a restorative quiet_hook — the table needs air after violence.
+- FRONT PROPOSALS: only when the PLAYER has repeatedly and deliberately engaged a concrete recurring threat that existing fronts do not cover and it has proven durable across scenes (a raided den that keeps mattering, a rival who keeps returning). At most one, complete or omitted entirely. This is rare — most reflections propose nothing.
 - Potential companions may be seeded as hooks, but never add them to the party.
 - Intriguing NPCs should emerge from agenda, competence, danger, secrets, attraction, rivalry, vulnerability, or leverage, not default sexualization.
 - Keep every field unvarnished: record attraction, resentment, and bodily or intimate canon plainly in the fiction's own terms, never softened or euphemized.
@@ -487,6 +523,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
     const fronts = state.fronts || [];
     if (npcs.length === 0 && fronts.length === 0) return;
 
+    const heat = computeRecentHeat(state);
     const context = {
         location: state.currentLocation,
         premise: state.session?.premise,
@@ -495,6 +532,18 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         npcs,
         fronts,
         partySize: (state.party || []).length,
+        campaignPace: normalizePaceDial(state.settings?.paceDial),
+        recentHeat: { level: heat.level, reasons: heat.reasons },
+        recentEncounters: (state.recentEncounters || []).slice(-4),
+        knownLocations: (state.locations || []).slice(-12).map(record => ({
+            name: record.name,
+            type: record.type,
+            danger: record.danger,
+            homeOfFronts: record.theaterFrontIds,
+        })),
+        previousTempoDirective: state.worldTempo?.directive
+            ? { frontId: state.worldTempo.directive.frontId, maxIntensity: state.worldTempo.directive.maxIntensity }
+            : null,
         cadence: cadence ? {
             id: cadence.id,
             journalEnd: cadence.journalEnd,
@@ -556,11 +605,33 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: reflected.story_memory.slice(0, 2) });
         }
 
+        if (cadence?.id && 'tempo_directive' in reflected) {
+            // Engine-rolled timing die: the reflection decides WHAT may surface
+            // and WHERE; crypto dice alone decide WHEN it lands (0–4 scenes).
+            dispatch({
+                type: 'APPLY_TEMPO_DIRECTIVE',
+                payload: {
+                    cadenceId: cadence.id,
+                    directive: reflected.tempo_directive,
+                    timingDelay: rollDie(TEMPO_TIMING_DIE_SIDES) - 1,
+                },
+            });
+        }
+
+        if (cadence?.id && Array.isArray(reflected.front_proposals) && reflected.front_proposals.length > 0) {
+            dispatch({
+                type: 'ADD_EMERGENT_FRONT',
+                payload: { cadenceId: cadence.id, proposal: reflected.front_proposals[0] },
+            });
+        }
+
         captureReflection({
             cadenceId: cadence?.id || null,
             npcsUpdated: reflectedNames,
             frontAdvances: Array.isArray(reflected.front_advances) ? reflected.front_advances : [],
             cards: Array.isArray(reflected.story_memory) ? reflected.story_memory.slice(0, 2) : [],
+            tempoDirective: reflected.tempo_directive || null,
+            frontProposal: reflected.front_proposals?.[0]?.title || null,
         });
     } catch (e) {
         console.warn('[Reflection] NPC/front reflection failed:', e.message || e);

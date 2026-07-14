@@ -8,6 +8,20 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-14 · World-tempo v1 shipped same evening; theaters grow organically from directive placements.**
+Implementation notes on the entry below, all engine-tested: intensity bands derive from
+clock/maxClock thirds + stage; the timing die is `rollDie(5)-1` scenes rolled in the reflection
+caller (crypto, DM never sees it); directives dedupe by cadenceId so a replayed reflection
+cannot re-roll timing; the same front never gets two consecutive windows and slow-burn forces a
+quiet cadence after ANY window; invalid/unknown directives always degrade to QUIET, never to
+more permission. One design refinement made during implementation: front theaters aren't
+declared up front — **placing a directive's symptom at a location records that place as the
+front's home territory**, and once a front has ANY known home it manifests in person only
+there (elsewhere: news/whispers). A front with no recorded theater stays permissive until one
+grows. Verified live: the identical Aldermill premise that opened with an urgent recruitment
+hook at noon opened with frost, thin porridge, and the missing barges as a grumbled rumor in
+the evening build. Component 9 (regional front seeding) deliberately deferred to v2.
+
 **2026-07-14 · World-tempo pacing architecture settled (design; implementation pending, inspector first).**
 Vesa + the first keyed memory eval both confirmed the same failure: campaigns escalate to open
 violence within ~7 turns regardless of premise — slow burn is ignored, and safe places aren't.

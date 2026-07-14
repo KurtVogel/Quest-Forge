@@ -130,7 +130,19 @@ with escalation steps and a "grim portent" (what happens if nobody interferes).
 - Why: player agency stays absolute, but the world is *up to something* — the "behind the
   scenes goings-on" feel. Vesa considers this the killer feature for going public.
 
-### World-tempo pacing system — status: `designed` (2026-07-14), priority: HIGH, after inspector
+### World-tempo pacing system — status: v1 `shipped` (2026-07-14, same day as designed)
+Shipped v1 covers components 1–8 below: `engine/worldTempo.js` (bands/heat/thermostat/directive
+validation + the WORLD TEMPO prompt block), `engine/locationRegistry.js` (canonical places,
+containment alias folding, Scribe `location_profile` classification), reducer wiring
+(`APPLY_TEMPO_DIRECTIVE` with crypto timing die, `ADD_EMERGENT_FRONT`, END_COMBAT encounter
+ledger, save-heal defaults), the cadence-reflection `tempo_directive`/`front_proposals` schema,
+the Settings pace dial, the BG1 opening rule, and inspector readouts. Theaters grow organically:
+placing a directive symptom somewhere records that place as the front's home; away from a known
+home a front reaches the player as news only. Verified same day: identical Aldermill premise
+opened with an urgent recruitment hook before vs. frost/porridge/rumor-as-atmosphere after.
+**Component 9 (regional front seeding for genuinely new distant regions) is the deliberate
+v2 leftover** — needs "new region" detection; theater/news-travel covers immersion meanwhile.
+Original design notes below.
 Full rationale + settled sub-decisions in DECISIONS.md 2026-07-14 ("World-tempo pacing
 architecture"). The problem: every campaign escalates to violence in ~7 turns (both keyed eval
 runs AND Vesa's live play); slow-burn, quiet scenes, and safe places don't exist because

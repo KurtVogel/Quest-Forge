@@ -12,6 +12,7 @@
 import { useSyncExternalStore } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getInspectorSnapshot, subscribeInspector } from '../../dev/memoryInspectorStore.js';
+import { computeRecentHeat, isTempoWindowActive, normalizePaceDial } from '../../engine/worldTempo.js';
 import './Debug.css';
 
 function formatAgo(timestamp) {
@@ -50,6 +51,10 @@ export default function MemoryInspector({ isOpen, onClose }) {
     if (!isOpen) return null;
 
     const { lastInjection, lastScribePass, lastReflection } = captured;
+    const messageCount = (state.messages || []).length;
+    const heat = computeRecentHeat(state);
+    const directive = state.worldTempo?.directive || null;
+    const windowActive = isTempoWindowActive(directive, messageCount);
     const cards = state.storyMemory || [];
     const cardCounts = cards.reduce((acc, card) => {
         acc[card.type] = (acc[card.type] || 0) + 1;
@@ -114,6 +119,48 @@ export default function MemoryInspector({ isOpen, onClose }) {
                             <ul className="mi-list">
                                 {cards.map(card => <CardRow key={card.id} card={card} />)}
                             </ul>
+                        </div>
+                    </details>
+
+                    <details>
+                        <summary>World tempo — pace {normalizePaceDial(state.settings?.paceDial)}, heat {heat.level} ({heat.score}/10)</summary>
+                        <div className="mi-section">
+                            <div className="mi-kv"><span>Heat reasons:</span> {heat.reasons.join('; ') || 'nothing recent'}</div>
+                            {directive ? (
+                                <>
+                                    <div className="mi-kv">
+                                        <span>Directive:</span>{' '}
+                                        {directive.frontId
+                                            ? `${directive.frontId} may surface at ${directive.maxIntensity}${directive.where ? ` near ${directive.where}` : ''}`
+                                            : 'quiet stretch (no front window)'}
+                                    </div>
+                                    {directive.frontId && (
+                                        <div className="mi-kv">
+                                            <span>Timing die:</span>{' '}
+                                            {windowActive
+                                                ? `window OPEN (messages ${directive.activatesAtMessage}–${directive.expiresAtMessage}, now ${messageCount})`
+                                                : messageCount < directive.activatesAtMessage
+                                                    ? `counting down — opens at message ${directive.activatesAtMessage} (now ${messageCount})`
+                                                    : `window expired at message ${directive.expiresAtMessage}`}
+                                        </div>
+                                    )}
+                                    {directive.suggestedSymptom && <div className="mi-kv"><span>Suggested symptom:</span> {directive.suggestedSymptom}</div>}
+                                    {directive.rationale && <div className="mi-kv"><span>Rationale:</span> {directive.rationale}</div>}
+                                    {directive.quietHook && <div className="mi-kv"><span>Quiet hook:</span> {directive.quietHook}</div>}
+                                </>
+                            ) : <p className="mi-empty">No tempo directive yet — the first journal cadence creates one.</p>}
+                            {(state.recentEncounters || []).length > 0 && (
+                                <div className="mi-kv">
+                                    <span>Recent fights:</span>{' '}
+                                    {state.recentEncounters.map(entry => `${entry.enemies} (${entry.location || '?'}, ${entry.outcome})`).join('; ')}
+                                </div>
+                            )}
+                            {(state.locations || []).length > 0 && (
+                                <div className="mi-kv">
+                                    <span>Known places:</span>{' '}
+                                    {state.locations.map(record => `${record.name}${record.type ? ` [${record.type}${record.danger ? `, ${record.danger}` : ''}]` : ''}${record.theaterFrontIds?.length ? ` ⟵ ${record.theaterFrontIds.join(', ')}` : ''}`).join(' · ')}
+                                </div>
+                            )}
                         </div>
                     </details>
 
@@ -196,6 +243,18 @@ export default function MemoryInspector({ isOpen, onClose }) {
                                     </div>
                                     <div className="mi-kv"><span>NPCs updated:</span> {lastReflection.npcsUpdated.join(', ') || 'none'}</div>
                                     <div className="mi-kv"><span>Cards added:</span> {lastReflection.cards.length ? lastReflection.cards.map(c => `[${c.type}] ${c.subject || c.text}`).join(' | ') : 'none'}</div>
+                                    {lastReflection.tempoDirective && (
+                                        <div className="mi-kv">
+                                            <span>Tempo proposed:</span>{' '}
+                                            {lastReflection.tempoDirective.frontId
+                                                ? `${lastReflection.tempoDirective.frontId} at ${lastReflection.tempoDirective.maxIntensity || '?'}${lastReflection.tempoDirective.where ? ` near ${lastReflection.tempoDirective.where}` : ''}`
+                                                : 'quiet stretch'}
+                                            {lastReflection.tempoDirective.rationale ? ` — ${lastReflection.tempoDirective.rationale}` : ''}
+                                        </div>
+                                    )}
+                                    {lastReflection.frontProposal && (
+                                        <div className="mi-kv"><span>Front proposed:</span> {lastReflection.frontProposal}</div>
+                                    )}
                                 </>
                             )}
                         </div>

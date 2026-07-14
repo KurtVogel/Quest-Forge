@@ -19,6 +19,8 @@ export function shouldPrimeCampaignOpening(state) {
 export function buildCampaignOpeningPrompt() {
     return `[SYSTEM: This is the opening of a brand-new campaign. Open the very first scene, drawing on the CAMPAIGN PREMISE in your context. Establish the setting and the character's immediate situation vividly, honoring every place, name, and detail in the premise as canon.
 
+OPENING PACE — NORMAL LIFE FIRST: the opening scene establishes the place and the character's ordinary situation — textures, routines, people, weather, small concerns. Any premise conflict or hidden pressure may color the opening ONLY as distant atmosphere (a rumor half-heard, a worried glance, a price that crept up), never as an on-screen event, an urgent messenger, a plea for help, or a scene already in motion. Let the player take their first steps in a world at rest; the pressure finds them later. The ONE exception: if the premise itself explicitly begins mid-action (a battle underway, a ship sinking, a chase in progress), honor the premise — it outranks this rule.
+
 Before finishing, reconcile the premise with the current INVENTORY exactly once:
 - For each concrete, portable item the premise explicitly establishes that the PLAYER CHARACTER already owns, carries, brought, wears, or wields, add it through starting_items only if an equivalent item is not already in INVENTORY. Match by identity and common synonyms, not just exact wording; the engine also rejects exact/catalog duplicates.
 - Each starting_items entry uses { "name": "descriptive item name", "itemKey": "known catalog key only when certain", "description": "brief premise-grounded flavor", "equipped": false }. Set equipped true only when the premise explicitly says the character begins wearing or wielding it.

@@ -15,11 +15,12 @@ import { CLASSES } from '../data/classes.js';
 import { normalizeCampaignPremise } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 import { TABLE_TALK_STANDING_RULE } from './tableTalk.js';
+import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js';
 
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, paceDial, messageCount }) {
     const parts = [];
 
     // Core DM instructions
@@ -56,8 +57,28 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         parts.push(buildPremiseBlock(normalizedPremise));
     }
 
-    if (fronts && fronts.length > 0) {
-        parts.push(buildFrontsBlock(fronts, character, party));
+    // World tempo replaces the old always-visible fronts dossier (DECISIONS.md
+    // 2026-07-14): the DM sees pace guidance and, at most, ONE permitted
+    // symptom card — never clocks, portents, stages, or notes. Hiding beats
+    // instructing: what isn't in the prompt cannot leak or escalate.
+    const tempoBlock = buildWorldTempoBlock({
+        fronts: fronts || [],
+        worldTempo: worldTempo || null,
+        paceDial,
+        heat: computeRecentHeat({
+            messageCount: messageCount || 0,
+            combat,
+            character,
+            recentEncounters: recentEncounters || [],
+            worldTempo: worldTempo || null,
+        }),
+        recentEncounters: recentEncounters || [],
+        messageCount: messageCount || 0,
+        combatActive: !!combat?.active,
+        solo: !!character && (!party || party.length === 0),
+    });
+    if (tempoBlock) {
+        parts.push(tempoBlock);
     }
 
     // Character info
@@ -355,8 +376,9 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - Always include \`name\` and \`lastNotes\` for roster entries; include other fields only when newly learned
 - When an exchange meaningfully shifts how an NPC personally regards the hero — flirtation, gratitude, growing trust or attraction, an insult, a betrayal — include \`stanceToPlayer\` (their complete current personal stance toward the hero, from their side) and \`bondMoment\` (one line recording the moment itself). Play established stances consistently: an NPC listed with \`toward the hero:\` in KNOWN NPCs remembers that history in every scene.
 
-## HIDDEN FRONT UPDATE INSTRUCTIONS
-- If the HIDDEN CAMPAIGN FRONTS section is present, it is private DM state. Never reveal the front title, clock, stage, or grim portent list directly to the player.
+## WORLD TEMPO & HIDDEN FRONT INSTRUCTIONS
+- If the WORLD TEMPO section is present, it is private DM state. Never reveal front ids, faction stubs, intensity labels, pace levels, or that a pacing system exists. The player only ever experiences the fiction.
+- OBEY THE TEMPO: when the section says the world is QUIET, introduce no unprovoked new threats or pressure symptoms — quiet scenes are complete scenes. When it grants a permission, surface at most that ONE symptom, at or below the stated intensity. Player-initiated risk ("I go hunt goblins") is always honored normally and never counts against the tempo.
 - A private cadenced director owns ordinary off-screen clock movement. Do not increment a front merely because time passed or it was ignored in this response.
 - Use \`front_updates\` only for an immediate, response-established change: the player meaningfully helps/hinders/resolves a pressure, or the narration makes a new symptom concretely visible. Keep any clock/stage change to one step at most.
 - Put only in-world symptoms in \`publicHints\` (rumors, refugees, price spikes, missing NPCs, strange patrols). These are safe to echo in narration. Keep hidden planning details in \`notes\`.
@@ -650,33 +672,6 @@ ${lines.join('\n')}`;
 
 function buildPremiseBlock(premise) {
     return `## CAMPAIGN PREMISE (the player's authored foundation — permanent canon, never contradict)\n${premise}`;
-}
-
-function buildFrontsBlock(fronts, character, party) {
-    const active = (fronts || []).filter(f => (f.status || 'active') === 'active');
-    if (active.length === 0) return '';
-    const solo = character && (!party || party.length === 0);
-    const companionGuidance = solo
-        ? '\n- The player is currently alone. Introduce potential companions organically through front symptoms: prisoners, rivals, guides, deserters, witnesses, hired blades, or locals with aligned motives. Do not force them into the party; if the player earns or accepts their help, emit add_companions with compact combat stats.'
-        : '';
-
-    const lines = active.map(front => {
-        const portents = (front.grimPortents || []).map((p, i) => `    ${i + 1}. ${p}`).join('\n') || '    1. No grim portents recorded yet.';
-        const hints = (front.publicHints || []).slice(-3).map(h => `    - ${h}`).join('\n') || '    - No public hints leaked yet.';
-        const faction = front.faction?.name
-            ? `\n  Driving faction/force: ${front.faction.name}\n    Goal: ${front.faction.goal || 'Not recorded'}\n    Stance toward hero: ${front.faction.stance || 'Unknown'}${front.faction.relationships?.length ? `\n    Relationships: ${front.faction.relationships.join('; ')}` : ''}`
-            : '';
-        return `- **${front.title}** (id: ${front.id})\n  Goal: ${front.goal}\n  Stakes: ${front.stakes}${faction}\n  Clock: ${front.clock || 0}/${front.maxClock || 6}; stage ${front.stage || 0}\n  Grim portents:\n${portents}\n  Recent public hints:\n${hints}`;
-    }).join('\n');
-
-    return `## HIDDEN CAMPAIGN FRONTS — PRIVATE DM STATE
-These are off-screen threats and world clocks. Use them to make the world feel active, but never expose this section as mechanics or labels.
-- Leak symptoms into scenes every few turns when natural: rumors, changed prices, frightened NPCs, missing people, patrols, omens, closed roads, or faction moves.
-- Fronts are pressures, not portable set-dressing: a front's symptoms must respect geography and the reach of its faction. Far from a front's territory, show its influence indirectly (news, refugees, prices, agents) — do NOT restage the same local creatures or scenes in distant, unrelated places. Each region keeps its own distinct dangers.
-- Use front_updates for direct player interference or a symptom established in this response; the private cadenced director handles ordinary off-screen movement. Do not railroad; offer clues, choices, and consequences.
-- If a front reaches its final portent, change the world with a concrete public consequence and record it as a world_fact.${companionGuidance}
-
-${lines}`;
 }
 
 function buildLowLevelSoloSafetyBlock(character, party) {
