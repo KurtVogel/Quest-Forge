@@ -8,6 +8,28 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-14 · Late-arriving generated fronts install as long as the fallback front is untouched.**
+The first keyed `eval:memory` pass caught a silent race: `generateCampaignFronts` runs on the
+slow DM model while play continues, and `INSTALL_GENERATED_FRONTS` dropped any result arriving
+after 2 visible messages — a fast-typing player got the generic fallback front for the whole
+campaign, with ChatPanel logging success. The reducer now accepts a late install whenever the
+existing fronts are still the untouched deterministic fallback (`front-local-pressure`, clock 0,
+stage 0) — nothing to clobber until the fallback has cadence history, at which point the old
+refusal stands. Generation still only *starts* at campaign open (≤2 visible messages).
+
+**2026-07-14 · Story-memory cards get near-duplicate containment merging; fragments never clobber richer text.**
+Same eval: 77 cards after 30 turns, with one promise recorded 4× under differently-worded
+subjects ("Sundial, Oren, Jack" / "Oren and the sundial" / …) because `findStoryMemoryMatch`
+only matched exact subject+type or exact text. Same-type cards whose meaningful-token sets
+largely contain each other (≥0.75 text containment, or ≥0.8 subject containment with ≥0.5 text
+overlap, possessives folded) now merge into the existing card — the world-fact/bond-moment
+heuristic family. On merge the newest framing wins ("promise" → "broken promise") *unless* the
+incoming text is a mere fragment (≥0.8 contained and shorter), which can never erase a richer
+record. Verified by rerun: one sundial-promise card instead of four. Related prompt fix from
+the same eval: the DM must decline unsupported player assertions IN-FICTION (dream, failed
+grasp, NPC reaction), never in unprefixed OOC counseling voice ("It sounds like you really
+want…") — that voice is reserved for actual OOC input.
+
 **2026-07-14 · Git workflow: master only — no feature branches, no PRs.**
 Vesa: features are worked one at a time in this project, so branch/PR ceremony adds nothing.
 Every session (human, Claude, Codex, hosted) pulls latest `origin/master` before starting and

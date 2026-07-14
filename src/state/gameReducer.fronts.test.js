@@ -133,6 +133,48 @@ describe('hidden campaign fronts', () => {
         expect(installed.session.frontDirector).toMatchObject({ version: 2, source: 'campaign-creation' });
     });
 
+    it('installs a late-arriving generation while the fallback front is untouched (2026-07-14 eval race)', () => {
+        // Generation runs on the slow DM model; a fast player reaches turn 2+
+        // before it resolves. The old > 2 visible-message guard silently
+        // discarded the result and stranded the campaign on the fallback front.
+        const state = {
+            ...initialGameState,
+            character,
+            session: { id: 'fresh-session', createdAt: 1 },
+            messages: [
+                { role: 'assistant', content: 'Opening scene.' },
+                { role: 'user', content: 'Turn 1.' },
+                { role: 'assistant', content: 'Turn 1 reply.' },
+                { role: 'user', content: 'Turn 2.' },
+            ],
+            fronts: [{ id: 'front-local-pressure', title: 'Fallback', clock: 0, stage: 0 }],
+        };
+        const generated = [1, 2].map(index => ({
+            id: `front-v2-${index}`,
+            title: `Pressure ${index}`,
+            goal: `Goal ${index}`,
+            stakes: `Stakes ${index}`,
+            grimPortents: ['One', 'Two', 'Three'],
+            faction: { name: `Faction ${index}`, goal: 'Gain leverage.' },
+        }));
+
+        const installed = gameReducer(state, {
+            type: 'INSTALL_GENERATED_FRONTS',
+            payload: { sessionId: 'fresh-session', fronts: generated },
+        });
+        expect(installed.fronts).toHaveLength(2);
+        expect(installed.session.frontDirector).toMatchObject({ version: 2 });
+
+        const movedFallback = {
+            ...state,
+            fronts: [{ id: 'front-local-pressure', title: 'Fallback', clock: 2, stage: 1 }],
+        };
+        expect(gameReducer(movedFallback, {
+            type: 'INSTALL_GENERATED_FRONTS',
+            payload: { sessionId: 'fresh-session', fronts: generated },
+        })).toBe(movedFallback);
+    });
+
     it('applies a bounded cadenced advance once and derives portent stage in the engine', () => {
         const state = {
             ...initialGameState,

@@ -125,8 +125,10 @@ function summarizeState(save) {
             clock: front.clock,
             stage: front.stage,
             portentStage: front.portentStage,
-            lastMovementReason: front.lastMovementReason || null,
+            lastAdvanceId: front.lastAdvanceId || null,
+            notes: String(front.notes || '').slice(0, 220) || null,
         })),
+        frontGenerationVersion: state.session?.frontDirector?.generationVersion || null,
         questsActive: (state.quests || []).filter(q => q.status === 'active').length,
     };
 }
@@ -281,6 +283,7 @@ const RECALL_QUESTIONS = [
 let browser = null;
 let page = null;
 const consoleErrors = [];
+const consoleWarnings = [];
 const turnLog = [];
 
 async function run() {
@@ -300,6 +303,12 @@ async function run() {
             const text = msg.text();
             consoleErrors.push(text);
             console.log('[Browser ERROR]', text);
+        } else if (msg.type() === 'warning') {
+            // Front-generation and Scribe failures surface as warnings, not
+            // errors — invisible to the 2026-07-14 run's report until captured.
+            const text = msg.text();
+            consoleWarnings.push(text);
+            console.log('[Browser WARN]', text);
         }
     });
 
@@ -436,6 +445,8 @@ async function run() {
         recallQuestions: recallResults,
         consoleErrorCount: consoleErrors.length,
         consoleErrors: consoleErrors.slice(0, 20),
+        consoleWarningCount: consoleWarnings.length,
+        consoleWarnings: consoleWarnings.slice(0, 40),
         stateAfterTurns: midSummary,
         stateAfterRecall: finalSummary,
         turnLog,

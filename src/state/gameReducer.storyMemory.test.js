@@ -24,6 +24,51 @@ describe('ADD_STORY_MEMORY_CARD', () => {
         expect(next).toBe(initialGameState);
     });
 
+    it('merges a reworded restatement of the same beat instead of duplicating (2026-07-14 eval)', () => {
+        const first = gameReducer(initialGameState, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: {
+                type: 'promise',
+                subject: 'Sundial, Oren, Jack',
+                text: "Jack's promise to Oren to mend the cracked sundial before the harvest.",
+                salience: 3,
+            },
+        });
+        const second = gameReducer(first, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: {
+                type: 'promise',
+                subject: 'Oren and the sundial',
+                text: "Jack's broken promise to Oren to mend the cracked sundial, now amidst the valley's collapse.",
+                salience: 4,
+            },
+        });
+        expect(second.storyMemory).toHaveLength(1);
+        expect(second.storyMemory[0].text).toMatch(/broken promise/);
+        expect(second.storyMemory[0].salience).toBe(4);
+    });
+
+    it('keeps the richer text when a near-duplicate fragment arrives', () => {
+        const first = gameReducer(initialGameState, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: {
+                type: 'npcAgenda',
+                subject: 'Greenhouse Raider',
+                text: 'The Greenhouse Raider intends to finish the job his crew started hours ago and secure the conservatory.',
+            },
+        });
+        const second = gameReducer(first, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: {
+                type: 'npcAgenda',
+                subject: 'Greenhouse Raider',
+                text: 'Raider intends to finish the job his crew started.',
+            },
+        });
+        expect(second.storyMemory).toHaveLength(1);
+        expect(second.storyMemory[0].text).toMatch(/secure the conservatory/);
+    });
+
     it('merges into an existing card with the same subject and type instead of duplicating', () => {
         const first = gameReducer(initialGameState, {
             type: 'ADD_STORY_MEMORY_CARD',

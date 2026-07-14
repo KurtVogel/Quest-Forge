@@ -10,7 +10,7 @@ import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js';
 import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
-import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate } from '../engine/storyMemory.js';
+import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate, pickMergedCardText } from '../engine/storyMemory.js';
 import {
     appendBondMoments,
     appendCallbackHooks,
@@ -1896,6 +1896,7 @@ export function gameReducer(state, action) {
                     ? normalizeStoryMemoryCard({
                         ...existing,
                         ...card,
+                        text: pickMergedCardText(existing.text, card.text),
                         firstSeenAt: existing.firstSeenAt,
                         lastSeenAt: Date.now(),
                         salience: Math.max(existing.salience || 1, card.salience || 1),
@@ -1946,8 +1947,19 @@ export function gameReducer(state, action) {
         case 'INSTALL_GENERATED_FRONTS': {
             if (action.payload?.sessionId !== state.session?.id
                 || state.session?.frontDirector?.version >= FRONTS_VERSION
-                || !Array.isArray(action.payload?.fronts)
-                || (state.messages || []).filter(message => !message.hidden).length > 2) return state;
+                || !Array.isArray(action.payload?.fronts)) return state;
+            // Generation runs on the slow DM model while play continues, so the
+            // result routinely lands after the opening exchange. A late install is
+            // safe as long as the deterministic fallback front hasn't started
+            // moving — once it has clock/stage history, keep it (2026-07-14 eval).
+            const visibleCount = (state.messages || []).filter(message => !message.hidden).length;
+            const existingFronts = state.fronts || [];
+            const untouchedFallback = existingFronts.length === 0
+                || (existingFronts.length === 1
+                    && existingFronts[0].id === 'front-local-pressure'
+                    && !(existingFronts[0].clock > 0)
+                    && !(existingFronts[0].stage > 0));
+            if (visibleCount > 2 && !untouchedFallback) return state;
             const fronts = action.payload.fronts.slice(0, 3).map(front => normalizeFront(front));
             if (fronts.length < 2) return state;
             return {

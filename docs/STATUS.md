@@ -4,14 +4,52 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-14 (both audit batches fixed same day. Batch 2: incapacitated enemies
-lose their action + rules-math floors/tests/dead-code. Batch 3 — the 2026-07-14 audit's P0:
-`extractBalancedJson` anchored on the nearest `{` instead of the enclosing one, so unfenced DM
-JSON with `requested_rolls` after an `npc_updates` object silently extracted the wrong inner
-object and DROPPED the roll request across ~10 call sites; fixed with close-count anchoring +
-a nesting-ordered string-aware `repairJson` upgrade + dedicated extractor suite. Story-memory:
-`normalizeStoryMemoryUpdate` tested, raw `lastUsedAt` cooldown-bypass pass-through dropped.
-807 tests + lint green, **deployed to https://quest-forge-99ab1.web.app** — everything this week is now live for the provider-comparison playtest.)_
+_Last updated: 2026-07-14 evening (first keyed `eval:memory` pass ran — twice — and its findings
+are fixed; see the section below. 814 tests + lint green. Not yet deployed; the morning's audit
+fixes are live at https://quest-forge-99ab1.web.app.)_
+
+## Memory/fronts tuning pass #1 — two keyed 30-turn runs (2026-07-14)
+
+The agreed next gate ran: `npm run eval:memory` against a real Gemini DM (Jack the Scholar,
+four-location Eldoria premise). Both runs: **zero console errors, recall 93% / 80%** (the 80%
+was needle-phrasing variance — every answer was substantively correct), journal location
+tracking clean, and the DM turned the scripted "peaceful scholar ignores everything" inputs
+into a coherent tragic raid arc — player-authority handling at its best (delusion framing,
+dream sequences, an NPC muffling the babbling hero). Run-1 findings, all fixed and verified by
+the run-2 rerun:
+
+1. **P1 front-generation race** — generated premise fronts were silently discarded whenever the
+   player passed 2 visible messages before the slow DM-model generation resolved; run 1 played
+   its whole campaign on the generic fallback front. Reducer now accepts a late install while
+   the fallback is untouched (DECISIONS.md). Run 2: `frontGenerationVersion: 2`, two
+   premise-grounded fronts installed and moving.
+2. **P1 story-memory restatement flooding** — 77 cards/30 turns, the sundial promise recorded
+   4× under reworded subjects. Token-containment near-dup merging added to
+   `findStoryMemoryMatch` + fragment-never-clobbers-richer-text merge rule (DECISIONS.md).
+   Run 2: exactly one promise card for the same beat.
+3. **Prompt: no unprefixed counseling voice** — the DM sometimes declined reality-rewrites with
+   OOC therapy-speak ("It sounds like you really want…") instead of its otherwise excellent
+   in-fiction framing; new PLAYER AUTHORITY bullet pins declines to the fiction.
+4. **Eval script instrumentation** — fronts summary read a nonexistent field (now
+   `notes`/`lastAdvanceId`/`frontGenerationVersion`) and only console *errors* were captured;
+   warnings (where front-generation/Scribe failures surface) are now recorded. Reports:
+   `test-results/memory-tuning/` (gitignored), run 1 archived as `report-run1-preflix.json`.
+
+Still-open observations for the next pass: the story-card pool is large even deduped (68 —
+consider dormancy/pruning for high-churn campaigns), and both runs escalated the premise's
+hidden pressure into open violence by ~turn 7 — dramatic and coherent, but worth watching
+whether a player who *engages* (rather than the script's deliberate ignoring) gets gentler
+pacing.
+
+## Strengthening-queue batch 2 & 3 (2026-07-14 morning, deployed)
+
+Batch 2: incapacitated enemies lose their action + rules-math floors/tests/dead-code.
+Batch 3 — the 2026-07-14 audit's P0: `extractBalancedJson` anchored on the nearest `{` instead
+of the enclosing one, so unfenced DM JSON with `requested_rolls` after an `npc_updates` object
+silently extracted the wrong inner object and DROPPED the roll request across ~10 call sites;
+fixed with close-count anchoring + a nesting-ordered string-aware `repairJson` upgrade +
+dedicated extractor suite. Story-memory: `normalizeStoryMemoryUpdate` tested, raw `lastUsedAt`
+cooldown-bypass pass-through dropped. **Deployed to https://quest-forge-99ab1.web.app.**
 
 ## Strengthening-queue batch 2 (2026-07-14)
 
@@ -392,14 +430,15 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **694** tests passing (52 files)
+- `npm test` — **814** tests passing (57 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)
 
 ## Up next (agreed order)
 
-1. **Keyed memory/fronts tuning pass** — run `eval:memory`, note failures, tune salience/symptoms
+1. **Keyed memory/fronts tuning pass** — pass #1 done 2026-07-14 (two 30-turn runs, findings
+   fixed; see above). Repeat after the next batch of memory-layer changes.
 2. **Memory debug inspector** — dev/settings panel for story cards, RAG hits, curated injection,
    fronts clocks (normally hidden). See IDEAS.md. High interest for perfecting the memory layer.
 3. **Rogue real-play feedback** — light pass after memory tuning; Sneak Attack/Cunning Action feel

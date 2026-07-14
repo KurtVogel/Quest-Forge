@@ -3,8 +3,10 @@ import {
     buildStoryMemoryPromptBlock,
     curateStoryMemory,
     findStoryMemoryMatch,
+    isNearDuplicateStoryCard,
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
+    pickMergedCardText,
 } from './storyMemory.js';
 
 describe('story memory normalization', () => {
@@ -39,6 +41,67 @@ describe('story memory normalization', () => {
         ];
         expect(findStoryMemoryMatch(existing, { type: 'wound', subject: 'black arrow scar', text: 'Different wording.' })).toBe(0);
         expect(findStoryMemoryMatch(existing, { type: 'callback', subject: 'other', text: 'The black arrow left a scar.' })).toBe(0);
+    });
+});
+
+describe('near-duplicate restatement detection (2026-07-14 eval flooding)', () => {
+    // Real duplicate quartet from the 30-turn memory playtest: one promise,
+    // four cards, every subject and text worded differently.
+    const sundialA = {
+        type: 'promise',
+        subject: 'Sundial, Oren, Jack',
+        text: "Jack's promise to Oren to mend the cracked sundial before the harvest.",
+    };
+    const sundialB = {
+        type: 'promise',
+        subject: 'Oren and the sundial',
+        text: "Jack's promise to Oren to mend the cracked sundial, now amidst the escalating violence and Jack's abandonment of the orchard.",
+    };
+    const sundialC = {
+        type: 'promise',
+        subject: 'Oren, Jack, the sundial',
+        text: "Jack's broken promise to Oren to mend the cracked sundial, now amidst the valley's collapse.",
+    };
+
+    it('recognizes the same promise restated with fresh framing', () => {
+        expect(isNearDuplicateStoryCard(sundialA, sundialB)).toBe(true);
+        expect(isNearDuplicateStoryCard(sundialB, sundialC)).toBe(true);
+        expect(findStoryMemoryMatch([normalizeStoryMemoryCard(sundialA)], sundialB)).toBe(0);
+    });
+
+    it('recognizes a text-containment restatement with unrelated subjects', () => {
+        const verbose = {
+            type: 'npcAgenda',
+            subject: 'barricade',
+            text: 'The Rusted Raider explicitly stated he needs the player character alive to drop the barricade.',
+        };
+        const terse = {
+            type: 'npcAgenda',
+            subject: "raider's agenda",
+            text: 'The raider needs the hero alive to drop the barricade.',
+        };
+        expect(isNearDuplicateStoryCard(verbose, terse)).toBe(true);
+    });
+
+    it('never merges across card types or genuinely different beats', () => {
+        expect(isNearDuplicateStoryCard(sundialA, { ...sundialA, type: 'playerCanon' })).toBe(false);
+        expect(isNearDuplicateStoryCard(
+            { type: 'wound', subject: "hero's shoulder wound", text: 'The hero suffered a vicious axe wound to the shoulder, bleeding heavily.' },
+            { type: 'wound', subject: "player's arm", text: 'The player suffered a brutal bite to the arm from the Scarred Hound.' },
+        )).toBe(false);
+        expect(isNearDuplicateStoryCard(
+            { type: 'mystery', subject: 'Oren', text: 'The unseen archivist believes Oren is likely dead.' },
+            { type: 'mystery', subject: 'orchard incident', text: 'Oren called out Jack’s name in disbelief just before hounds began baying.' },
+        )).toBe(false);
+    });
+
+    it('keeps the richer text when a fragment restates an existing card', () => {
+        const rich = 'The Greenhouse Raider intends to finish the job his crew started hours ago and secure the conservatory.';
+        expect(pickMergedCardText(rich, 'Hooks: finish the job his crew started hours ago')).toBe(rich);
+        expect(pickMergedCardText(rich, 'The raider now plans to torch the conservatory at dawn instead.'))
+            .toBe('The raider now plans to torch the conservatory at dawn instead.');
+        expect(pickMergedCardText('', 'anything')).toBe('anything');
+        expect(pickMergedCardText(rich, '')).toBe(rich);
     });
 });
 

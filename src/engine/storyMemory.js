@@ -61,6 +61,50 @@ function overlapScore(a, b) {
     return hits;
 }
 
+/** tokenSet with possessives folded ("jack's" → "jack") so subject phrasings
+ * like "Jack's promise" and "Jack, the promise" compare as the same entity. */
+function meaningTokens(text) {
+    return new Set([...tokenSet(text)].map(token => token.replace(/'s$/, '')));
+}
+
+/** Fraction of the SMALLER set's tokens found in the larger one (0..1). */
+function tokenContainment(a, b) {
+    if (!a.size || !b.size) return 0;
+    const small = a.size <= b.size ? a : b;
+    const large = a.size <= b.size ? b : a;
+    return overlapScore(small, large) / small.size;
+}
+
+/** The Scribe re-reports the same durable beat with fresh framing each turn
+ * ("Jack's promise to Oren…" / "Jack's broken promise to Oren, now amidst…"),
+ * defeating the exact-subject/exact-text dedupe and flooding the card pool.
+ * Same-type cards whose text token sets largely contain each other — or whose
+ * subjects name the same entities with substantial text overlap — are the same
+ * card being restated, not new material. */
+export function isNearDuplicateStoryCard(a = {}, b = {}) {
+    if (!a || !b || a.type !== b.type) return false;
+    const textA = meaningTokens(a.text);
+    const textB = meaningTokens(b.text);
+    const textScore = tokenContainment(textA, textB);
+    if (Math.min(textA.size, textB.size) >= 3 && textScore >= 0.75) return true;
+    const subjectA = meaningTokens(a.subject);
+    const subjectB = meaningTokens(b.subject);
+    if (!subjectA.size || !subjectB.size) return false;
+    return tokenContainment(subjectA, subjectB) >= 0.8 && textScore >= 0.5;
+}
+
+/** On a near-duplicate merge the newest framing usually wins, but a bare
+ * fragment must never clobber a strictly richer record of the same beat. */
+export function pickMergedCardText(existingText = '', incomingText = '') {
+    if (!existingText) return incomingText;
+    if (!incomingText) return existingText;
+    const existing = meaningTokens(existingText);
+    const incoming = meaningTokens(incomingText);
+    const fragment = incoming.size < existing.size
+        && overlapScore(incoming, existing) / (incoming.size || 1) >= 0.8;
+    return fragment ? existingText : incomingText;
+}
+
 export function normalizeStoryMemoryCard(card = {}, existing = null) {
     const now = Date.now();
     const text = cleanText(card.text || card.memory || card.note, existing?.text || '').slice(0, MAX_TEXT_LENGTH);
@@ -125,7 +169,8 @@ export function findStoryMemoryMatch(memories = [], card = {}) {
     return memories.findIndex(m => {
         if (card.id && m.id === card.id) return true;
         if (subject && m.subject?.toLowerCase() === subject && m.type === card.type) return true;
-        return text && m.text?.toLowerCase() === text;
+        if (text && m.text?.toLowerCase() === text) return true;
+        return isNearDuplicateStoryCard(m, card);
     });
 }
 

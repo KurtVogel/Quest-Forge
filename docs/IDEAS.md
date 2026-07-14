@@ -81,7 +81,18 @@ flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NP
 - Remaining ideas: real-provider eval for "natural old detail recall without exposition",
   salience tuning after real play, and the memory debug inspector (below).
 
-### Fronts / hidden world clocks — status: v2 `shipped` (2026-06-21), priority: HIGH
+### Story-memory pool dormancy/pruning for high-churn campaigns — status: `idea` (2026-07-14)
+The first keyed `eval:memory` pass (30 turns, violent arc) ended with ~68 active cards even
+after the new near-duplicate containment merge shipped (DECISIONS.md 2026-07-14 collapsed
+reworded restatements — one promise had been recorded 4×). Most survivors are legitimate but
+transient scene texture (single-scene wounds, one-off NPC threats, ambient foreshadow) at
+salience 1 that will never win curation once the arc moves on. Curation already caps prompt
+injection, so this is a pool-hygiene/storage concern, not a token-budget bug — but a long
+campaign accumulating thousands of salience-1 cards makes `scoreStoryMemory` scans and the
+Journal view noisier. Idea: an age-out pass on the journal cadence — salience-1/2 cards
+unseen and unused for N journal cycles decay to `dormant` (still in saves, skipped by
+curation/UI by default), with wounds auto-dormant once healed and promise/playerCanon types
+exempt. Revisit after the memory debug inspector exists to observe the pool live first.
 The flagship feature. Instead of generic LLM "three acts": 2–3 **fronts** (threats that
 *want* something — à la Dungeon World fronts / Blades in the Dark faction clocks), each
 with escalation steps and a "grim portent" (what happens if nobody interferes).
