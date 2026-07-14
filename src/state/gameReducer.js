@@ -11,7 +11,7 @@ import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.j
 import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js';
 import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeEmergentFront, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 import { appendRecentEncounter, buildEncounterEntry, MAX_ACTIVE_FRONTS, MAX_RECENT_ENCOUNTERS, normalizeTempoDirective } from '../engine/worldTempo.js';
-import { normalizeLocationRecord, upsertLocation } from '../engine/locationRegistry.js';
+import { dedupeLocationRecords, normalizeLocationRecord, upsertLocation } from '../engine/locationRegistry.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate, pickMergedCardText } from '../engine/storyMemory.js';
 import {
     appendBondMoments,
@@ -95,7 +95,7 @@ function validateSaveState(payload) {
         party: Array.isArray(payload.party) ? payload.party : [],
         currentLocation: payload.currentLocation || null,
         locations: Array.isArray(payload.locations)
-            ? payload.locations.map(record => normalizeLocationRecord(record)).filter(Boolean)
+            ? dedupeLocationRecords(payload.locations.map(record => normalizeLocationRecord(record)).filter(Boolean))
             : [],
         recentEncounters: Array.isArray(payload.recentEncounters)
             ? payload.recentEncounters.slice(-MAX_RECENT_ENCOUNTERS)

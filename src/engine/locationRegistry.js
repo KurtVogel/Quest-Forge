@@ -76,18 +76,26 @@ export function normalizeLocationRecord(record = {}, existing = null) {
     };
 }
 
-/** Find the registry record a free-text location string belongs to (or -1). */
+/**
+ * Find the registry record a free-text location string belongs to (or -1).
+ *
+ * Exact name/alias equality anywhere in the list beats fuzzy containment on an
+ * earlier record, and containment compares against record NAMES only — matching
+ * against alias token sets chains places together transitively ("Gilded Eel
+ * tavern, Harrowmere" as an alias must never make the tavern claim a later
+ * lookup of "Harrowmere"; the 2026-07-14 playtest found the tavern record
+ * swallowing the whole town that way, shadowing the real town record forever).
+ */
 export function findLocationRecord(locations = [], name) {
     const target = cleanText(name, 120);
     if (!target) return -1;
+    const list = locations || [];
     const lower = target.toLowerCase();
-    return (locations || []).findIndex(record => {
-        if (!record) return false;
-        if (record.name?.toLowerCase() === lower) return true;
-        if ((record.aliases || []).some(alias => alias.toLowerCase() === lower)) return true;
-        return isSameLocation(record.name, target)
-            || (record.aliases || []).some(alias => isSameLocation(alias, target));
-    });
+    const exact = list.findIndex(record => record
+        && (record.name?.toLowerCase() === lower
+            || (record.aliases || []).some(alias => alias.toLowerCase() === lower)));
+    if (exact !== -1) return exact;
+    return list.findIndex(record => record && isSameLocation(record.name, target));
 }
 
 /**
@@ -109,7 +117,13 @@ export function upsertLocation(locations = [], name, profile = null) {
     const existing = list[idx];
     // The shorter phrasing is the better canonical name ("Clockwork Tower"
     // over "Library landing, Clockwork Tower"); the longer becomes an alias.
-    const keepExistingName = existing.name.length <= target.length;
+    // But only a NAME-level match may rename the record — a variant that only
+    // matched via a stored alias keeps the existing canonical name, otherwise
+    // a composite alias ("Gilded Eel tavern, Harrowmere") lets the town name
+    // rename the tavern record out from under itself.
+    const nameLevelMatch = existing.name.toLowerCase() === target.toLowerCase()
+        || isSameLocation(existing.name, target);
+    const keepExistingName = !nameLevelMatch || existing.name.length <= target.length;
     const merged = normalizeLocationRecord({
         ...(profile || {}),
         name: keepExistingName ? existing.name : target,
@@ -125,4 +139,43 @@ export function upsertLocation(locations = [], name, profile = null) {
 export function getCurrentLocationRecord(locations = [], currentLocation) {
     const idx = findLocationRecord(locations, currentLocation);
     return idx === -1 ? null : locations[idx];
+}
+
+/**
+ * Save-load heal: fold records that ended up with the same canonical name
+ * (pre-fix saves could grow a shadowed duplicate — see findLocationRecord).
+ * Keeps the earliest record's id/firstSeenAt, merges aliases and theaters,
+ * prefers known type/danger over null, and keeps the latest lastVisitedAt.
+ * Then strips any alias that exactly equals ANOTHER record's canonical name —
+ * pre-fix alias chaining could leave "Harrowmere" as an alias of the tavern,
+ * shadowing the real town record on every exact lookup.
+ */
+export function dedupeLocationRecords(locations = []) {
+    const byName = new Map();
+    for (const record of locations || []) {
+        if (!record?.name) continue;
+        const key = record.name.toLowerCase();
+        const kept = byName.get(key);
+        if (!kept) {
+            byName.set(key, record);
+            continue;
+        }
+        byName.set(key, normalizeLocationRecord({
+            aliases: record.aliases,
+            type: kept.type || record.type,
+            danger: kept.danger || record.danger,
+            theaterFrontIds: record.theaterFrontIds,
+            lastVisitedAt: Math.max(kept.lastVisitedAt || 0, record.lastVisitedAt || 0),
+        }, kept));
+    }
+    const names = new Set(byName.keys());
+    return [...byName.values()].map(record => {
+        const cleaned = (record.aliases || []).filter(alias => {
+            const lower = alias.toLowerCase();
+            return lower === record.name.toLowerCase() || !names.has(lower);
+        });
+        return cleaned.length === (record.aliases || []).length
+            ? record
+            : { ...record, aliases: cleaned };
+    });
 }

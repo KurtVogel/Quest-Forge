@@ -4,10 +4,50 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-14 late night (world-tempo pacing system v1 shipped, eval-verified, and
-deployed — the same day it was designed. Earlier today: eval pass #1 findings fixed + deployed,
-pacing architecture settled, memory debug inspector shipped. 860 tests + lint green, live at
-https://quest-forge-99ab1.web.app.)_
+_Last updated: 2026-07-14 late night #2 (hands-on browser playtest of world-tempo passed the
+feel test; its two found bugs — location-registry alias chaining + Scribe coin denomination —
+fixed same session. Earlier today: world-tempo v1 shipped + eval-verified, inspector shipped,
+eval pass #1 fixes. 865 tests + lint green, live at https://quest-forge-99ab1.web.app.)_
+
+## Hands-on engaged-play playtest + fixes (2026-07-14, late night)
+
+A real 12-turn browser playtest (level-1 rogue courier, fresh "Salt Road Ledger" river-port
+premise, standard pace, Gemini DM) — the ENGAGED-player feel check the eval script can't do.
+**The tempo system passed**: BG1-quality normal-life opening; a full delivery → escort →
+quiet-night → investigation → heist arc with zero forced combat; the quiet inn scene stayed
+genuinely quiet with front pressure surfacing only as overheard gossip (whispers band);
+player-sought danger honored instantly and generously (went hunting the syndicate → enforcer
+name, counting-house location, a heist); the reflection softened the syndicate clock −1 TWICE
+because the player kept foiling them, granted an indirect window at the exact place the player
+went, and the alternation guard correctly forced a quiet cadence between same-front windows.
+Check discipline was consistently excellent (clever positioning → advantage/DC 10, theft under
+an enforcer's nose → DC 15+advantage, routine escapes diceless). Standard pace did NOT feel too
+quiet for an engaged player — hooks arrived through fiction, not intrusion (watch item closed).
+
+Found and fixed same session (865 tests + lint green, deployed):
+
+1. **P1 location-registry alias chaining** — containment matching against stored *aliases* let
+   composite strings chain places transitively: "Gilded Eel tavern, Harrowmere" made the tavern
+   record swallow "Harrowmere", then "The Tar and Tallow, Harrowmere" and the north locks, until
+   four distinct places were ONE record named "salthouse" and a shadowed duplicate town record
+   could never merge. Fix in `locationRegistry.js`: exact name/alias match anywhere in the list
+   now beats fuzzy containment, containment compares record NAMES only, a variant that matched
+   via alias can never rename the record, and `dedupeLocationRecords` heals polluted saves on
+   load (folds same-named duplicates, strips aliases that shadow another record's name).
+   Verified live on the poisoned playtest save.
+2. **P1 Scribe loot-audit coin denomination** — "thirty silver pieces" recovered as **30 gp**
+   (10× inflation; the audit prompt never mentioned denominations). Added an explicit
+   denominations-are-sacred rule to LOOT_AUDIT_RULES (never convert, copy the narrated unit).
+   Prompt-level fix — worth watching in the next real session.
+
+Watch items from the playtest (not fixed, see IDEAS.md): Scribe location granularity registers
+micro-rooms ("taproom", "kitchen") and fragments one dock area into 3-4 records; directive
+`where` free-text creates junk theater records; heat is blind to narratively hot no-combat
+chases (worked fine here — the DM followed fiction — but the thermostat under-reads action
+scenes); with front details hidden the DM invented a cross-faction relation ("Osklers let the
+fen-runners off the leash") that contradicts the private front designs — reflection notes can
+absorb it, but it's the cost of hiding. Also unexercised in this run: actual combat under the
+tempo system (unit-tested, not yet felt in play).
 
 ## World-tempo pacing system v1 (2026-07-14, deployed)
 

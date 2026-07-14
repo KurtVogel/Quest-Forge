@@ -184,6 +184,42 @@ only unprovoked intrusions; side quests get NO new machinery (quiet tempo + "loc
 welcome" line; quest tracker already round-trips them; the promotion path gives the good ones
 teeth). Build after the memory debug inspector — every component here is a tuning problem.
 
+### Location registry granularity: rooms are not places — status: `idea` (playtest 2026-07-14)
+The first engaged-play playtest left the registry with "taproom" and "kitchen" as world-global
+location records (any future kitchen anywhere folds into that one), one dock area fragmented
+across 3-4 records ("canal between warehouses" / "High dock with a cargo crane" / "Industrial
+Docks"), and a junk record created verbatim from a directive's free-text `where` ("the canal,
+near the loading platform with the crane") — with a theater attached. The alias-chaining bug
+found alongside these is fixed (exact-beats-fuzzy, name-only containment, save heal), but
+granularity is a design question: the Scribe's `location` string is scene-scoped while the
+registry wants place-scoped records. Options: teach the Scribe to emit "specific place,
+locality" consistently and register only the locality + notable named sites; a `parent` field
+so rooms nest under their building; or have `location_profile` mark sub-scope strings as
+non-registrable. Also: directive `where` should probably only grow a theater when it resolves
+to an existing record (else attach to the front's proposal location by name once the Scribe
+establishes it). Why: theaters, danger profiles, and tempo gating all key off these records —
+noise here quietly degrades the whole pacing system on long campaigns (cap is 60 records).
+
+### Heat is blind to narratively hot no-combat scenes — status: `idea` (playtest 2026-07-14)
+A whole action-movie escort/chase/heist arc read as heat 0/10 ("calm") because heat only counts
+mechanical combat, wounds, and permitted symptoms. It worked fine in play — the DM follows
+fiction, and the thermostat only steers unprovoked intrusions — but slow-burn campaigns would
+get "a small hook may land well" guidance in the middle of a rooftop chase. Cheap deterministic
+signal candidates: recent roleplay-check density/DC (proposals are engine state), or
+failure-stakes keywords from accepted checks. Don't LLM-score it; the thermometer's value is
+being deterministic. Low urgency — revisit if real play shows the DM stacking hooks onto
+already-tense diceless stretches.
+
+### DM invents cross-faction relations that contradict hidden front designs — status: `idea` (playtest 2026-07-14)
+With the fronts dossier hidden (correctly), the DM sees only front stubs (id + faction name).
+In the playtest an NPC asserted "the Syndicate let the fen-runners off the leash" — but the
+private front design has the Fen-Runners as the Syndicate's *rivals* who raid their barges.
+Narrated fiction is canon, so the reflection's front notes can absorb the drift (fronts should
+adapt to play), but a cheap guard is possible: include each front stub's one-line *goal* (not
+clocks/portents) in the WORLD TEMPO block, or add a reflection rule that reconciles narrated
+faction relations against front `relationships` and updates them explicitly. Watch whether
+real campaigns accumulate contradictory faction lore before adding anything.
+
 ### Location-transition recall ledger — status: `shipped` (2026-06-23)
 Journal entries now store `location`; the DM prompt receives a deterministic
 `## LOCATION TRANSITION HISTORY` block for chronological "what happened right before I arrived?"
