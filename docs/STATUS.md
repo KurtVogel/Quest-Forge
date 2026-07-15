@@ -4,11 +4,46 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-14 late night #3 (second hands-on playtest — combat-heavy fighter on
-breakneck with an in-medias-res premise — passed; found + fixed the pouch-recount coin
-re-grant and biased the reflection toward granting windows on an under-heated pace dial.
-Earlier: playtest #1 + its fixes, world-tempo v1, inspector. 865 tests + lint green, live at
-https://quest-forge-99ab1.web.app.)_
+_Last updated: 2026-07-15 (grand playtest #3 — instrumented cleric/slow-burn/companion run —
+verified death saves, companion combat, OOC table talk, scene art, and reload safety end to
+end; fixed location-registry scene-description records + a theater-gate whispers clamp at a
+front's own home. 869 tests + lint green, live at https://quest-forge-99ab1.web.app.)_
+
+## Playtest #3 (grand, instrumented): cleric + slow-burn + companion (2026-07-15)
+
+The most instrumented run yet: a dev-only reducer audit (action log + ~20 state invariants
+checked after every transition + per-turn HP/purse/XP/tempo telemetry + prompt/event tracing)
+rode along a full campaign — dwarf cleric Sister Maren, slow-burn pace, fen-pilgrimage premise
+with an established companion. Instrumentation was session-local and is NOT committed (archived
+in the session scratchpad). **Zero engine invariant violations across the entire run** (118
+actions; the only two alarms were bugs in the audit itself). Systems verified live for the
+first time: `add_companions` at the narratively right moment with sane stats; companion combat
+slots; the Dodge action (disadvantage visibly applied); cleric Sacred Flame; **the full dying
+arc** — player at 0 HP, engine-rolled death save (nat 16), companion kills the foe, +XP, then
+`rest_taken: short` + Unconscious cleared + hit-dice healing, all correct; OOC table talk
+(world paused, events force-nulled, gracious mechanical answers); scene art via xAI (864×1152,
+no fallback label); reload safety mid-proposal AND post-death-save; slow-burn tempo (a night
+camped in monster territory passed untouched — "just frogs and bubbles"; the one window granted
+was at the front's home with an arc reason). Economy stayed copper-exact the whole run — the
+2026-07-14 coin fixes held. Front generation from a quiet premise was outstanding: the
+scratching pilgrim became his own incubation front.
+
+Found and fixed (869 tests + lint, deployed):
+
+1. **P1 scene-description location records + theater mis-clamp** — SET_LOCATION strings like
+   "a miserable but solid patch of raised earth beneath the sprawling, dead limbs of a drowned
+   willow tree" minted registry records; renames left husk records ("the plague-shrine at a
+   ring of drowned alders" next to "the shrine"); and the REAL harm: the tempo window at the
+   front's own home clamped to whispers because the hero's drifted location record wasn't the
+   theater record. Fixes in `locationRegistry.js`/`worldTempo.js`: sentence-length strings
+   (>48 chars or >5 meaningful tokens) never mint records (still match existing ones); the
+   load heal also folds name-level containment fragments and drops junk-description records
+   (verified live: 13 records → 10 on the playtest save); theater gating accepts a directive
+   whose `where` resolves to the theater even when `currentLocation` drifted.
+2. Formally still unexercised in live play (unit-tested): the `escaped`/`defeat` encounter
+   ledger outcomes — the DM resolved our shrine retreat narratively without entering combat,
+   which is correct fiction. Prompt-size observation for the token budget backlog: a fresh
+   campaign's system prompt is already ~52k chars.
 
 ## Playtest #2: combat + breakneck + in-medias-res (2026-07-14, late night)
 

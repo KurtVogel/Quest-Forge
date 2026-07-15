@@ -37,6 +37,20 @@ function locationTokens(name) {
     return new Set(normalized.split(' ').filter(token => token.length >= 3 && !STOP_WORDS.has(token)));
 }
 
+// A place NAME is short ("Candlemire", "the old salthouse"); a scene DESCRIPTION
+// is a sentence ("a miserable but solid patch of raised earth beneath the
+// sprawling, dead limbs of a drowned willow tree" — a real record from the
+// 2026-07-15 playtest). Descriptions may still MATCH existing records, but they
+// must never mint one: the place registers when a nameable name arrives.
+const MAX_NAME_CHARS = 48;
+const MAX_NAME_TOKENS = 5;
+
+export function isRegistrableLocationName(name) {
+    const cleaned = cleanText(name, 200);
+    if (!cleaned) return false;
+    return cleaned.length <= MAX_NAME_CHARS && locationTokens(cleaned).size <= MAX_NAME_TOKENS;
+}
+
 /** "Library landing, Clockwork Tower" names the same place as "Clockwork Tower". */
 export function isSameLocation(a, b) {
     const ta = locationTokens(a);
@@ -110,6 +124,8 @@ export function upsertLocation(locations = [], name, profile = null) {
     const idx = findLocationRecord(list, target);
 
     if (idx === -1) {
+        // Scene descriptions never mint records — wait for a nameable name.
+        if (!isRegistrableLocationName(target)) return list;
         const record = normalizeLocationRecord({ name: target, ...(profile || {}) });
         return [...list, record].slice(-MAX_LOCATIONS);
     }
@@ -151,25 +167,44 @@ export function getCurrentLocationRecord(locations = [], currentLocation) {
  * shadowing the real town record on every exact lookup.
  */
 export function dedupeLocationRecords(locations = []) {
+    const mergeInto = (kept, record) => normalizeLocationRecord({
+        aliases: [record.name, ...(record.aliases || [])].filter(a => isRegistrableLocationName(a)),
+        type: kept.type || record.type,
+        danger: kept.danger || record.danger,
+        theaterFrontIds: record.theaterFrontIds,
+        lastVisitedAt: Math.max(kept.lastVisitedAt || 0, record.lastVisitedAt || 0),
+    }, kept);
+
+    // Pass 1: fold exact same-named duplicates.
     const byName = new Map();
     for (const record of locations || []) {
         if (!record?.name) continue;
         const key = record.name.toLowerCase();
         const kept = byName.get(key);
-        if (!kept) {
-            byName.set(key, record);
+        byName.set(key, kept ? mergeInto(kept, record) : record);
+    }
+
+    // Pass 2: fold name-level containment fragments ("the plague-shrine at a
+    // ring of drowned alders" is "the shrine" — 2026-07-15 playtest husks left
+    // behind by renames), then drop scene-description records that match
+    // nothing: they were junk the moment they were minted.
+    const kept = [];
+    for (const record of byName.values()) {
+        const matchIdx = kept.findIndex(other => isSameLocation(other.name, record.name));
+        if (matchIdx !== -1) {
+            // Keep the shorter (better canonical) name of the pair.
+            const other = kept[matchIdx];
+            const keeper = other.name.length <= record.name.length ? other : record;
+            const folded = keeper === other ? record : other;
+            kept[matchIdx] = mergeInto(keeper, folded);
             continue;
         }
-        byName.set(key, normalizeLocationRecord({
-            aliases: record.aliases,
-            type: kept.type || record.type,
-            danger: kept.danger || record.danger,
-            theaterFrontIds: record.theaterFrontIds,
-            lastVisitedAt: Math.max(kept.lastVisitedAt || 0, record.lastVisitedAt || 0),
-        }, kept));
+        if (!isRegistrableLocationName(record.name)) continue;
+        kept.push(record);
     }
-    const names = new Set(byName.keys());
-    return [...byName.values()].map(record => {
+
+    const names = new Set(kept.map(record => record.name.toLowerCase()));
+    return kept.map(record => {
         const cleaned = (record.aliases || []).filter(alias => {
             const lower = alias.toLowerCase();
             return lower === record.name.toLowerCase() || !names.has(lower);

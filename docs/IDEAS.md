@@ -184,7 +184,17 @@ only unprovoked intrusions; side quests get NO new machinery (quiet tempo + "loc
 welcome" line; quest tracker already round-trips them; the promotion path gives the good ones
 teeth). Build after the memory debug inspector — every component here is a tuning problem.
 
-### Location registry granularity: rooms are not places — status: `idea` (playtest 2026-07-14)
+### Location registry granularity: rooms are not places — status: partially `shipped` (2026-07-15)
+**Shipped from playtest #3**: sentence-length scene descriptions (>48 chars / >5 meaningful
+tokens) never mint registry records (they still match existing ones); the load heal folds
+name-level containment fragments and drops junk-description records; theater gating accepts a
+directive whose `where` resolves to the theater even when the hero's `currentLocation` string
+drifted (playtest #3 found a window clamped to whispers AT the front's own home because of
+exactly that). **Still open** (the original idea below): micro-rooms ("taproom", "kitchen",
+"deep snow") as world-global records, and dock-area fragmentation — the parent/nesting or
+"place, locality" Scribe-contract design questions remain.
+
+Original notes (playtest 2026-07-14):
 The first engaged-play playtest left the registry with "taproom" and "kitchen" as world-global
 location records (any future kitchen anywhere folds into that one), one dock area fragmented
 across 3-4 records ("canal between warehouses" / "High dock with a cargo crane" / "Industrial

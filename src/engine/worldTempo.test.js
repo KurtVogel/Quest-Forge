@@ -167,6 +167,28 @@ describe('tempo directive normalization', () => {
         expect(unhomed.maxIntensity).toBe('presence');
     });
 
+    it('honors a directive whose `where` resolves to the theater even when the current location string drifted', () => {
+        // 2026-07-15 playtest: hero stood at "the shrine" (a drifted record),
+        // theater was "Candlemire" — the window wrongly clamped to whispers at
+        // the front's own home.
+        const locations = [
+            { name: 'Candlemire', aliases: ['Candlemire shrine'], theaterFrontIds: ['front-v2-1'] },
+            { name: 'the shrine', aliases: [], theaterFrontIds: [] },
+        ];
+        const atHome = normalizeTempoDirective(
+            { front_id: 'front-v2-1', max_intensity: 'indirect', where: 'Candlemire shrine' },
+            { ...ctx, locations, currentLocation: 'the shrine' },
+        );
+        expect(atHome.maxIntensity).toBe('indirect');
+
+        // But a `where` that resolves nowhere near a theater still clamps.
+        const elsewhere = normalizeTempoDirective(
+            { front_id: 'front-v2-1', max_intensity: 'indirect', where: 'Distant Icefield' },
+            { ...ctx, locations: [...locations, { name: 'Distant Icefield', aliases: [], theaterFrontIds: [] }], currentLocation: 'the shrine' },
+        );
+        expect(elsewhere.maxIntensity).toBe('whispers');
+    });
+
     it('window activity respects activation and expiry', () => {
         const directive = normalizeTempoDirective({ front_id: 'front-v2-1' }, ctx);
         expect(isTempoWindowActive(directive, 33)).toBe(false); // die still counting down

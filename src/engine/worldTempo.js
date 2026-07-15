@@ -21,7 +21,7 @@
  * instructing). Player-sought danger is never gated by any of this.
  */
 
-import { getCurrentLocationRecord } from './locationRegistry.js';
+import { findLocationRecord, getCurrentLocationRecord } from './locationRegistry.js';
 
 export const INTENSITY_LEVELS = ['whispers', 'indirect', 'presence', 'confrontation'];
 export const PACE_DIALS = ['slow-burn', 'standard', 'breakneck'];
@@ -221,11 +221,19 @@ export function normalizeTempoDirective(raw, {
     // it manifests in person ONLY there — everywhere else it is news
     // (whispers). Pressures are not portable set-dressing; a front with no
     // recorded theater yet stays permissive until one grows.
+    // In-theater when EITHER the hero's current location is a theater record
+    // OR the directive's own `where` resolves to one — DM location strings
+    // drift ("the shrine" vs "Candlemire"), and the 2026-07-15 playtest showed
+    // a window clamped to whispers at the front's own home because of it. The
+    // DM only weaves the symptom where the fiction allows anyway.
     const registry = Array.isArray(locations) ? locations : [];
     const frontHasTheater = registry.some(record => (record?.theaterFrontIds || []).includes(frontId));
     if (frontHasTheater) {
         const here = getCurrentLocationRecord(registry, currentLocation);
-        const inTheater = !!here && (here.theaterFrontIds || []).includes(frontId);
+        const whereIdx = findLocationRecord(registry, cleanText(raw.where, 120));
+        const whereRecord = whereIdx === -1 ? null : registry[whereIdx];
+        const inTheater = (!!here && (here.theaterFrontIds || []).includes(frontId))
+            || (!!whereRecord && (whereRecord.theaterFrontIds || []).includes(frontId));
         if (!inTheater) maxIntensity = 'whispers';
     }
 

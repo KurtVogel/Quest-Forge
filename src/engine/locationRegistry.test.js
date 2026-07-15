@@ -3,6 +3,7 @@ import {
     dedupeLocationRecords,
     findLocationRecord,
     getCurrentLocationRecord,
+    isRegistrableLocationName,
     isSameLocation,
     normalizeLocationRecord,
     upsertLocation,
@@ -53,6 +54,19 @@ describe('upsertLocation', () => {
 
         locations = upsertLocation(locations, 'Aldermill', { theaterFrontIds: ['front-v2-1'] });
         expect(locations[0].theaterFrontIds).toEqual(['front-v2-1']);
+    });
+
+    it('never mints a record from a scene-description string', () => {
+        const description = 'a miserable but solid patch of raised earth beneath the sprawling, dead limbs of a drowned willow tree';
+        expect(isRegistrableLocationName(description)).toBe(false);
+        expect(isRegistrableLocationName('Candlemire')).toBe(true);
+        expect(isRegistrableLocationName('the old salthouse by the north locks')).toBe(true);
+        expect(upsertLocation([], description)).toEqual([]);
+        // But descriptions still MATCH an existing record instead of vanishing.
+        let locations = upsertLocation([], 'drowned willow tree');
+        locations = upsertLocation(locations, description, { type: 'wilderness' });
+        expect(locations).toHaveLength(1);
+        expect(locations[0]).toMatchObject({ name: 'drowned willow tree', type: 'wilderness' });
     });
 
     it('caps the registry and ignores empty names', () => {
@@ -127,6 +141,32 @@ describe('dedupeLocationRecords', () => {
         const a = normalizeLocationRecord({ name: 'Harrowmere' });
         const b = normalizeLocationRecord({ name: 'Tanelorn' });
         expect(dedupeLocationRecords([a, b])).toHaveLength(2);
+    });
+
+    it('folds name-level containment fragments into the shorter canonical record', () => {
+        // 2026-07-15 playtest: a rename left "the plague-shrine at a ring of
+        // drowned alders" stranded next to "the shrine".
+        const shrine = normalizeLocationRecord({
+            name: 'the shrine', type: 'hostile_site', danger: 'deadly',
+        });
+        const husk = normalizeLocationRecord({
+            name: 'the plague-shrine at a ring of drowned alders', theaterFrontIds: ['front-v2-1'],
+        });
+        const healed = dedupeLocationRecords([shrine, husk]);
+        expect(healed).toHaveLength(1);
+        expect(healed[0].name).toBe('the shrine');
+        expect(healed[0].theaterFrontIds).toEqual(['front-v2-1']);
+        expect(healed[0]).toMatchObject({ type: 'hostile_site', danger: 'deadly' });
+    });
+
+    it('drops scene-description records that match nothing', () => {
+        const junk = normalizeLocationRecord({
+            name: 'a miserable but solid patch of raised earth beneath the sprawling, dead limbs of a drowned willow tree',
+        });
+        const town = normalizeLocationRecord({ name: 'Vellastad' });
+        const healed = dedupeLocationRecords([junk, town]);
+        expect(healed).toHaveLength(1);
+        expect(healed[0].name).toBe('Vellastad');
     });
 
     it('strips aliases that shadow another record\'s canonical name', () => {
