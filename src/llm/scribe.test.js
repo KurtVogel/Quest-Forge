@@ -122,9 +122,12 @@ describe('Scribe story memory extraction', () => {
         expect(request.systemPrompt).toContain('never sanitize, euphemize');
         expect(request.systemPrompt).toContain('never launder the record');
         expect(request.systemPrompt).toContain('UNVARNISHED');
-        // Register fidelity: crude anatomical words are preserved, not softened.
-        expect(request.systemPrompt).toContain('MATCH THE REGISTER');
-        expect(request.systemPrompt).toContain('Call a spade a spade');
+        // Clinical register: content stays complete, but vocabulary is neutral
+        // anatomical wording — crude slang never enters durable records
+        // (Gemini machinery safety, DECISIONS.md 2026-07-15).
+        expect(request.systemPrompt).toContain('REGISTER');
+        expect(request.systemPrompt).toContain('neutral anatomical language');
+        expect(request.systemPrompt).toContain('never in profanity or crude slang');
     });
 
     it('passes personal stance and bond moments through to the NPC record', async () => {

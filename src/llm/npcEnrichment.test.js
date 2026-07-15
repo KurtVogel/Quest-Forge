@@ -170,6 +170,9 @@ describe('enrichNpcProfile relationship synthesis', () => {
         const request = sendMessage.mock.calls[0][0];
         expect(request.systemPrompt).toContain('COMPLETE merged description');
         expect(request.systemPrompt).toContain('unvarnished');
+        // Clinical register: frank content, neutral anatomical vocabulary.
+        expect(request.systemPrompt).toContain('neutral anatomical vocabulary');
+        expect(request.systemPrompt).toContain('never profanity or crude slang');
         expect(request.userMessage).toContain('appearance');
     });
 });

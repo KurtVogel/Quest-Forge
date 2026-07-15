@@ -4,10 +4,22 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-15 (grand playtest #3 — instrumented cleric/slow-burn/companion run —
-verified death saves, companion combat, OOC table talk, scene art, and reload safety end to
-end; fixed location-registry scene-description records + a theater-gate whispers clamp at a
-front's own home. 869 tests + lint green, live at https://quest-forge-99ab1.web.app.)_
+_Last updated: 2026-07-15 (grand playtest #3 shipped, then a clinical-register pass: durable
+records — Scribe/reflection/enrichment/art-director — now keep full frank content but in
+neutral anatomical vocabulary, never crude slang, because verbatim crude words re-injected
+into every Gemini machinery call were starting to trip Gemini API safety guidelines. See
+DECISIONS.md 2026-07-15. 869 tests + lint green, live at https://quest-forge-99ab1.web.app.)_
+
+## Clinical register for durable records (2026-07-15)
+
+The "MATCH THE REGISTER / call a spade a spade" rules (Scribe, NPC enrichment, DM rule 4)
+copied crude body words verbatim into appearances/stances/facts/cards, which then re-entered
+every future Gemini call and risked safety flags on the mandatory machinery layer. Replaced
+with **frank in content, clinical in register**: neutral anatomical wording at full
+specificity, laundering-by-omission still forbidden, merges restate old crude records
+neutrally (self-cleaning), DM narration explicitness left to the player-editable custom
+prompt. Watch item: confirm in real play that Gemini Flash extraction no longer flags AND
+that records don't get vaguer (the "curvy is forbidden" clause is the guard).
 
 ## Playtest #3 (grand, instrumented): cleric + slow-burn + companion (2026-07-15)
 

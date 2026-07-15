@@ -8,6 +8,21 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-15 · Durable records are frank in content, clinical in register: neutral anatomical vocabulary, never crude slang.**
+The old "MATCH THE REGISTER / call a spade a spade" rules made the Scribe family copy crude
+body words ("ass" etc.) verbatim into world facts, appearances, stances, and story cards —
+and those records re-enter EVERY future Gemini call (Scribe, embeddings, enrichment,
+reflection, art prompts), which started tripping Gemini API safety guidelines. The fix is a
+register translation, not censorship: all record-keeping prompts (Scribe extraction +
+reflection, NPC enrichment, art director) now demand plain anatomical wording
+(backside/buttocks, breasts, genitals) at FULL specificity — "notably large buttocks"
+preserves a crude description completely; "curvy" or omission remains forbidden laundering.
+Merge rules restate old crude wording into neutral terms so poisoned records self-clean over
+time. The DM's hardcoded rule 4 dropped its crude-word mandate too; narration explicitness
+remains the player's choice via the editable custom DM prompt (the default still allows it).
+Shame-free capture (2026-07-05) is unchanged in substance — nothing may be omitted, blurred,
+or slimmed down; only the vocabulary of the record is fixed to neutral.
+
 **2026-07-14 · World-tempo v1 shipped same evening; theaters grow organically from directive placements.**
 Implementation notes on the entry below, all engine-tested: intensity bands derive from
 clock/maxClock thirds + stage; the timing die is `rollDie(5)-1` scenes rolled in the reflection
