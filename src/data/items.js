@@ -140,6 +140,12 @@ function applyMagicName(item) {
     return { ...item, name: `${baseName} +${bonus}` };
 }
 
+// Hostile-input bounds at the DM-JSON trust boundary: a hallucinated event must not
+// mint an absurd stack or a fortune-valued trinket. The value ceiling mirrors the
+// coin-grant clamp (10,000 gp) so no single item outweighs the largest legal payout.
+const MAX_ITEM_QUANTITY = 999;
+const MAX_ITEM_VALUE_CP = 1000000;
+
 export function normalizeItem(raw = {}) {
     const source = typeof raw === 'string' ? { name: raw } : { ...raw };
     const itemKey = normalizeItemKey(source.itemKey || source.key || source.name);
@@ -147,7 +153,9 @@ export function normalizeItem(raw = {}) {
     const parsedBonus = parseMagicBonusFromName(source.name || base.name);
     const magicBonus = clampMagicBonus(source.magicBonus ?? source.enhancement ?? source.bonus ?? parsedBonus);
     const hasExplicitValue = Number.isFinite(source.valueCp) || Number.isFinite(source.priceCp);
-    const quantity = Number.isFinite(source.quantity) && source.quantity > 0 ? Math.trunc(source.quantity) : (base.quantity || 1);
+    const quantity = Number.isFinite(source.quantity) && source.quantity > 0
+        ? Math.min(MAX_ITEM_QUANTITY, Math.trunc(source.quantity))
+        : (base.quantity || 1);
     const itemType = base.type || source.type || 'gear';
     const isWeapon = itemType === 'weapon';
     const isArmorLike = itemType === 'armor' || itemType === 'shield' || source.isShield || base.isShield;
@@ -171,6 +179,12 @@ export function normalizeItem(raw = {}) {
         rarity: source.rarity || base.rarity || (magicBonus ? MAGIC_ITEM_RARITY[magicBonus] : undefined),
         quantity,
     };
+
+    // Non-catalog values come straight from the LLM; a sold item pays out half its
+    // valueCp, so an unbounded value is an unbounded mint.
+    if (Number.isFinite(normalized.valueCp)) {
+        normalized.valueCp = Math.max(0, Math.min(MAX_ITEM_VALUE_CP, Math.trunc(normalized.valueCp)));
+    }
 
     if (normalized.type === 'shield') {
         normalized.isShield = true;

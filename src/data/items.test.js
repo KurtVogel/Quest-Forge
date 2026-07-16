@@ -30,4 +30,15 @@ describe('item catalog normalization', () => {
             valueCp: 1500,
         });
     });
+
+    it('clamps hostile quantity and valueCp at the normalize boundary', () => {
+        const item = normalizeItem({ name: 'Glass Beads', quantity: 999999999, valueCp: 99999999 });
+        expect(item.quantity).toBe(999);
+        expect(item.valueCp).toBe(1000000);
+    });
+
+    it('zeroes a negative valueCp instead of letting it poison price math', () => {
+        const item = normalizeItem({ name: 'Debt Token', valueCp: -500 });
+        expect(item.valueCp).toBe(0);
+    });
 });

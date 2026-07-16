@@ -234,6 +234,11 @@ function isNearDuplicateFact(candidate, existingSets) {
 
 const RECENT_TRANSACTION_LIMIT = 20;
 const RECENT_TRANSACTION_MESSAGE_WINDOW = 8;
+// One transaction event is bounded like coin grants are: quantity so a flat priceCp
+// cannot mint an arbitrary stack, sale proceeds to the same 10,000 gp ceiling as
+// clampCoinAmount — a hallucinated "motivated buyer" must not inject a fortune.
+const MAX_PURCHASE_QUANTITY = 100;
+const MAX_SALE_PROCEEDS_CP = 1000000;
 const PURCHASE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|pay|pays|paying|paid|order|orders|ordering|ordered|take|takes|taking|grab|grabs|grabbing|get|gets|getting)\b/i;
 const SALE_VERB_RE = /\b(sell|sells|selling|sold|pawn|pawns|pawning|pawned|trade|trades|trading|traded|offer|offers|offering|offered|unload|unloads|unloading|fence|fences|fencing|fenced)\b/i;
 // Explicit repeat-intent phrasing: "another", "one/two/a few more", "more of those", etc.
@@ -279,12 +284,16 @@ function buildPurchaseTransaction(payload = {}) {
         name: raw.name || root.name,
         quantity: root.quantity || raw.quantity || 1,
     });
-    const quantity = item.quantity || 1;
-    const priceCp = Number.isFinite(root.priceCp)
+    // priceCp is a flat total the DM supplies, independent of quantity — an unbounded
+    // quantity would mint an arbitrary stack for a trivial fixed price. Negative or
+    // fractional prices are hostile input on the same boundary.
+    const quantity = Math.max(1, Math.min(MAX_PURCHASE_QUANTITY, Math.trunc(item.quantity || 1)));
+    const rawPriceCp = Number.isFinite(root.priceCp)
         ? root.priceCp
         : Number.isFinite(item.valueCp)
             ? item.valueCp * quantity
             : 0;
+    const priceCp = Math.max(0, Math.trunc(rawPriceCp));
     const identity = normalizeItemKey(item.itemKey || item.key || item.name)
         || normalizeRefToken(item.itemKey || item.name);
     return {
@@ -1629,9 +1638,12 @@ export function gameReducer(state, action) {
             }
 
             const quantity = Math.max(1, Math.min(item.quantity || 1, payload.quantity || 1));
-            const proceedsCp = Number.isFinite(payload.priceCp)
+            // Proceeds share the coin-grant ceiling whichever path priced them: the DM's
+            // override is unbounded LLM input, and legacy save items may carry an
+            // unclamped valueCp.
+            const proceedsCp = Math.min(MAX_SALE_PROCEEDS_CP, Number.isFinite(payload.priceCp)
                 ? Math.max(0, Math.trunc(payload.priceCp))
-                : Math.floor((item.valueCp || 0) / 2) * quantity;
+                : Math.floor((item.valueCp || 0) / 2) * quantity);
 
             // Sales get the same one-shot replay protection as purchases: a re-emitted
             // sell event must not remove the item twice or pay out twice.

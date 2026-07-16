@@ -59,6 +59,29 @@ describe('PURCHASE_ITEM', () => {
         expect(torch.quantity).toBe(3);
     });
 
+    it('clamps an absurd quantity so a flat priceCp cannot mint an unbounded stack', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'dagger', quantity: 999999999, priceCp: 1 },
+        });
+        const dagger = next.inventory.find(i => i.itemKey === 'dagger');
+        expect(dagger.quantity).toBe(100);
+        expect(next.messages.at(-1).content).toMatch(/Bought 100x/);
+    });
+
+    it('treats a negative priceCp as free rather than paying the buyer', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'dagger', priceCp: -5000 },
+        });
+        expect(next.character.gold).toBe(5);
+        expect(next.character.silver).toBe(0);
+        expect(next.character.copper).toBe(0);
+        expect(next.inventory.some(i => i.itemKey === 'dagger')).toBe(true);
+    });
+
     it('keeps transaction metadata out of inventory and treats nested custom price as per-unit', () => {
         const state = makeState();
         const next = gameReducer(state, {
@@ -196,6 +219,28 @@ describe('SELL_ITEM', () => {
             payload: { itemId: 'dagger-1', priceCp: 500 },
         });
         expect(next.character.gold).toBe(10); // 5gp + 5gp override
+    });
+
+    it('caps the priceCp override at the 10,000 gp coin ceiling', () => {
+        const state = makeState({
+            inventory: [{ id: 'gem-1', name: 'Kingsgem', type: 'treasure', valueCp: 200, quantity: 1 }],
+        });
+        const next = gameReducer(state, {
+            type: 'SELL_ITEM',
+            payload: { itemId: 'gem-1', priceCp: 99999999999 },
+        });
+        expect(next.character.gold).toBe(10005); // 5gp + capped 1,000,000 cp
+    });
+
+    it('caps default half-value proceeds from a legacy item with an unclamped valueCp', () => {
+        const state = makeState({
+            inventory: [{ id: 'relic-1', name: 'Hoard Relic', type: 'treasure', valueCp: 90000000, quantity: 1 }],
+        });
+        const next = gameReducer(state, {
+            type: 'SELL_ITEM',
+            payload: { itemId: 'relic-1' },
+        });
+        expect(next.character.gold).toBe(10005);
     });
 
     it('ignores an identical nearby sale replay when the player did not ask to sell again', () => {
