@@ -28,7 +28,7 @@ import {
 } from '../engine/npcRoster.js';
 import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
 import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
-import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck } from '../engine/roleplayCheck.js';
+import { appendRecentCheck, buildRecentCheckEntry, normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../engine/roleplayCheck.js';
 
 function sanitizeStoredExchangeResult(result) {
     if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
@@ -110,6 +110,7 @@ function validateSaveState(payload) {
         recentCoinGrants: normalizeRecentTransactions(payload.recentCoinGrants),
         recentRulings: (Array.isArray(payload.recentRulings) ? payload.recentRulings : [])
             .map(normalizeRollRuling).filter(Boolean).slice(-RECENT_RULING_LIMIT),
+        recentChecks: sanitizeRecentChecks(payload.recentChecks),
         combat: (() => {
             const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)
                 ? payload.combat
@@ -551,6 +552,7 @@ export const initialGameState = {
     recentSales: [], // Sale twin of recentPurchases — prevents replayed sells from double-removing/double-paying
     recentCoinGrants: [], // Coin twin of recentPurchases — prevents a reward re-emitted on a later turn from paying twice
     recentRulings: [], // Roleplay-check rulings that ended without dice — injected so the DM cannot re-propose overruled/set-aside checks from scratch
+    recentChecks: [], // Compact out-of-combat check-proposal ledger — heat input for diceless-but-tense arcs (chases, heists)
     combat: {
         active: false,
         enemies: [],
@@ -1764,7 +1766,17 @@ export function gameReducer(state, action) {
         case 'PROPOSE_ROLEPLAY_CHECK': {
             if (state.combat?.active) return state;
             const pendingRoleplayCheck = sanitizePendingRoleplayCheck(action.payload);
-            return pendingRoleplayCheck ? { ...state, pendingRoleplayCheck } : state;
+            if (!pendingRoleplayCheck) return state;
+            return {
+                ...state,
+                pendingRoleplayCheck,
+                // Heat ledger: a proposed check is engine evidence the scene has
+                // opposition and stakes, whatever the player or dice do with it.
+                recentChecks: appendRecentCheck(
+                    state.recentChecks,
+                    buildRecentCheckEntry(pendingRoleplayCheck, (state.messages || []).length),
+                ),
+            };
         }
 
         case 'CLEAR_ROLEPLAY_CHECK':

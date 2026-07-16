@@ -207,6 +207,7 @@ export default function ChatPanel() {
             fronts: s.fronts || [],
             worldTempo: s.worldTempo || null,
             recentEncounters: s.recentEncounters || [],
+            recentChecks: s.recentChecks || [],
             paceDial: s.settings.paceDial,
             messageCount: (s.messages || []).length,
             storyMemory,

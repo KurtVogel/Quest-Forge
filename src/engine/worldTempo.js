@@ -145,6 +145,19 @@ export function computeRecentHeat(state, { window = 15 } = {}) {
         }
     }
 
+    // Roleplay-check pressure: out-of-combat dice only exist when the fiction has
+    // genuine opposition and stakes, so a dense stretch of proposals marks a hot
+    // diceless arc (a chase, heist, interrogation) the combat inputs cannot see.
+    // One check is routine and scores nothing; the contribution caps below the
+    // combat weights so diceless tension alone never reads as post-battle heat.
+    const recentChecks = (state.recentChecks || [])
+        .filter(entry => Number.isFinite(entry?.messageIndex) && entry.messageIndex >= messageCount - window);
+    if (recentChecks.length >= 2) {
+        const hardestDc = Math.max(...recentChecks.map(entry => entry.dc || 0));
+        score += Math.min(3, recentChecks.length - 1) + (hardestDc >= 15 ? 1 : 0);
+        reasons.push(`${recentChecks.length} checks under pressure in the last scenes${hardestDc >= 15 ? ', some against strong opposition' : ''}`);
+    }
+
     const directive = state.worldTempo?.directive;
     if (directive?.frontId && Number.isFinite(directive.activatesAtMessage)
         && directive.activatesAtMessage >= messageCount - window

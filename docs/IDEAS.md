@@ -212,15 +212,16 @@ noise here quietly degrades the whole pacing system on long campaigns (cap is 60
 Playtest #2 (same day) added the definitive exhibit: **"deep snow"** registered as a location
 record (wilderness, moderate), alongside "mountain" and "the town".
 
-### Heat is blind to narratively hot no-combat scenes — status: `idea` (playtest 2026-07-14)
+### Heat is blind to narratively hot no-combat scenes — status: `shipped` (2026-07-15)
 A whole action-movie escort/chase/heist arc read as heat 0/10 ("calm") because heat only counts
-mechanical combat, wounds, and permitted symptoms. It worked fine in play — the DM follows
-fiction, and the thermostat only steers unprovoked intrusions — but slow-burn campaigns would
-get "a small hook may land well" guidance in the middle of a rooftop chase. Cheap deterministic
-signal candidates: recent roleplay-check density/DC (proposals are engine state), or
-failure-stakes keywords from accepted checks. Don't LLM-score it; the thermometer's value is
-being deterministic. Low urgency — revisit if real play shows the DM stacking hooks onto
-already-tense diceless stretches.
+mechanical combat, wounds, and permitted symptoms. Shipped as designed here (deterministic, no
+LLM scoring): `PROPOSE_ROLEPLAY_CHECK` appends a compact `recentChecks` ledger entry
+(messageIndex + hardest DC + skill, cap 8, same-message re-proposals replace so a challenge
+REVISE never double-counts), and `computeRecentHeat` scores check density in the window —
+one check is routine (0), 2/3/4+ checks add +1/+2/+3, any DC ≥ 15 adds +1 more, capped at +4
+total so a diceless arc can reach "lively" but never reads as post-battle "high" on its own.
+Reload-safe (sanitized on LOAD_GAME). Remaining thought: failure-stakes keyword weighting was
+considered and skipped — density × DC proved enough signal, keywords would add brittleness.
 
 ### DM invents cross-faction relations that contradict hidden front designs — status: `idea` (playtest 2026-07-14)
 With the fronts dossier hidden (correctly), the DM sees only front stubs (id + faction name).

@@ -22,6 +22,22 @@ describe('pending roleplay check state', () => {
         expect(gameReducer(combatState, { type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal })).toBe(combatState);
     });
 
+    it('appends a heat-ledger entry per proposal, replacing a same-message re-proposal', () => {
+        const withMessages = {
+            ...initialGameState,
+            messages: Array.from({ length: 6 }, () => ({ role: 'user', content: 'x' })),
+        };
+        const proposed = gameReducer(withMessages, { type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
+        expect(proposed.recentChecks).toEqual([{ messageIndex: 6, dc: 10, skill: 'insight' }]);
+
+        // A challenge REVISE re-proposes at the same message count — no double-count.
+        const revised = gameReducer(proposed, {
+            type: 'PROPOSE_ROLEPLAY_CHECK',
+            payload: { ...proposal, rolls: [{ type: 'skill_check', skill: 'insight', dc: 8 }] },
+        });
+        expect(revised.recentChecks).toEqual([{ messageIndex: 6, dc: 8, skill: 'insight' }]);
+    });
+
     it('records no-dice rulings, capping the ledger and rejecting malformed entries', () => {
         const ruling = {
             objective: 'Convince Maren to share gossip',

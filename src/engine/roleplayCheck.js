@@ -53,6 +53,46 @@ export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed 
     return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, proposedAt: Date.now() });
 }
 
+// --- Recent-checks ledger (heat input) ---------------------------------------
+// Out-of-combat dice only exist when the fiction has genuine opposition and
+// stakes, so a dense stretch of check proposals is deterministic engine
+// evidence of a hot diceless arc — a chase, heist, or interrogation the
+// combat-only heat inputs cannot see (IDEAS.md 2026-07-14). Proposal time is
+// the hook: even a later-withdrawn check marked a scene under pressure.
+
+export const RECENT_CHECK_LIMIT = 8;
+
+export function buildRecentCheckEntry(proposal, messageCount = 0) {
+    const rolls = proposal?.rolls || [];
+    if (rolls.length === 0) return null;
+    const dc = Math.max(...rolls.map(roll => (Number.isFinite(roll.dc) ? roll.dc : 0)));
+    return {
+        messageIndex: Number.isFinite(messageCount) ? Math.max(0, messageCount) : 0,
+        dc: dc > 0 ? Math.min(30, dc) : null,
+        skill: text(rolls[0].skill, 80) || null,
+    };
+}
+
+export function appendRecentCheck(list = [], entry) {
+    const entries = Array.isArray(list) ? list : [];
+    if (!entry) return entries;
+    // A challenge REVISE re-proposes the same moment — replace, don't double-count.
+    const last = entries[entries.length - 1];
+    const base = last?.messageIndex === entry.messageIndex ? entries.slice(0, -1) : entries;
+    return [...base, entry].slice(-RECENT_CHECK_LIMIT);
+}
+
+export function sanitizeRecentChecks(list) {
+    return (Array.isArray(list) ? list : [])
+        .filter(entry => entry && typeof entry === 'object' && Number.isFinite(entry.messageIndex))
+        .map(entry => ({
+            messageIndex: Math.max(0, entry.messageIndex),
+            dc: Number.isFinite(entry.dc) ? Math.min(30, Math.max(0, entry.dc)) : null,
+            skill: text(entry.skill, 80) || null,
+        }))
+        .slice(-RECENT_CHECK_LIMIT);
+}
+
 // --- Recent-rulings ledger -------------------------------------------------
 // The one-challenge boundary lives on a single proposal object; once cleared,
 // nothing durable recorded that a ruling ever happened, so the DM would happily

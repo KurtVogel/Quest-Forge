@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+    appendRecentCheck,
+    buildRecentCheckEntry,
     buildRollRulingRecord,
     buildRoleplayChallengePrompt,
     buildRoleplayCheckProposal,
     normalizeRollRuling,
     pruneRecentRulings,
+    RECENT_CHECK_LIMIT,
     RECENT_RULING_LIMIT,
     RULING_MESSAGE_TTL,
     sanitizePendingRoleplayCheck,
+    sanitizeRecentChecks,
 } from './roleplayCheck.js';
 
 const roll = {
@@ -107,5 +111,43 @@ describe('roleplay check proposals', () => {
         expect(prompt).toContain('15 gold');
         expect(prompt).toContain('2x Silver Ring');
         expect(prompt).toContain('NOT applied');
+    });
+});
+
+describe('recent-checks heat ledger', () => {
+    it('builds an entry from the hardest roll and clamps a wild DC', () => {
+        const proposal = buildRoleplayCheckProposal(
+            [{ ...roll, dc: 10 }, { ...roll, skill: 'athletics', dc: 99 }],
+            'I leap the gap while arguing.',
+        );
+        expect(buildRecentCheckEntry(proposal, 12)).toEqual({ messageIndex: 12, dc: 30, skill: 'persuasion' });
+        expect(buildRecentCheckEntry(null, 12)).toBeNull();
+    });
+
+    it('caps the ledger and replaces a same-message re-proposal instead of double-counting', () => {
+        let list = [];
+        for (let i = 0; i < 12; i++) {
+            list = appendRecentCheck(list, { messageIndex: i, dc: 10, skill: null });
+        }
+        expect(list).toHaveLength(RECENT_CHECK_LIMIT);
+        expect(list[0].messageIndex).toBe(12 - RECENT_CHECK_LIMIT);
+
+        const replaced = appendRecentCheck(list, { messageIndex: 11, dc: 15, skill: 'stealth' });
+        expect(replaced).toHaveLength(RECENT_CHECK_LIMIT);
+        expect(replaced.at(-1)).toEqual({ messageIndex: 11, dc: 15, skill: 'stealth' });
+    });
+
+    it('sanitizes hostile save payloads', () => {
+        const cleaned = sanitizeRecentChecks([
+            { messageIndex: 4, dc: 12, skill: 'insight' },
+            { messageIndex: 'NaN', dc: 12 },
+            'garbage',
+            { messageIndex: -3, dc: 500, skill: 42 },
+        ]);
+        expect(cleaned).toEqual([
+            { messageIndex: 4, dc: 12, skill: 'insight' },
+            { messageIndex: 0, dc: 30, skill: '42' },
+        ]);
+        expect(sanitizeRecentChecks(null)).toEqual([]);
     });
 });

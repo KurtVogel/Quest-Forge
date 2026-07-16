@@ -20,7 +20,7 @@ import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, paceDial, messageCount }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount }) {
     const parts = [];
 
     // Core DM instructions
@@ -70,6 +70,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
             combat,
             character,
             recentEncounters: recentEncounters || [],
+            recentChecks: recentChecks || [],
             worldTempo: worldTempo || null,
         }),
         recentEncounters: recentEncounters || [],

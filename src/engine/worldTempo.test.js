@@ -81,6 +81,49 @@ describe('recent heat', () => {
         });
         expect(heat.score).toBe(0);
     });
+
+    it('treats a single recent check as routine, not heat', () => {
+        const heat = computeRecentHeat({
+            ...baseState,
+            recentChecks: [{ messageIndex: 28, dc: 12 }],
+        });
+        expect(heat.score).toBe(0);
+    });
+
+    it('scores a dense diceless pressure arc from check proposals', () => {
+        const heat = computeRecentHeat({
+            ...baseState,
+            recentChecks: [
+                { messageIndex: 20, dc: 12 },
+                { messageIndex: 24, dc: 15 },
+                { messageIndex: 26, dc: 12 },
+                { messageIndex: 29, dc: 15 },
+            ],
+        });
+        // 4 checks (+3) with strong opposition (+1) → lively without any combat.
+        expect(heat.score).toBe(4);
+        expect(heat.level).toBe('lively');
+        expect(heat.reasons.join(' ')).toMatch(/4 checks under pressure/);
+        expect(heat.reasons.join(' ')).toMatch(/strong opposition/);
+    });
+
+    it('ignores checks outside the window and caps the diceless contribution below combat weight', () => {
+        const outside = computeRecentHeat({
+            ...baseState,
+            recentChecks: [
+                { messageIndex: 1, dc: 18 },
+                { messageIndex: 3, dc: 18 },
+            ],
+        });
+        expect(outside.score).toBe(0);
+
+        const stacked = computeRecentHeat({
+            ...baseState,
+            recentChecks: Array.from({ length: 8 }, (_, i) => ({ messageIndex: 20 + i, dc: 18 })),
+        });
+        expect(stacked.score).toBe(4); // 3 cap + 1 hard-DC bonus — never "high" alone
+        expect(stacked.level).toBe('lively');
+    });
 });
 
 describe('pace guidance thermostat', () => {
