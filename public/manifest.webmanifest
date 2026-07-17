@@ -1,0 +1,32 @@
+{
+    "name": "Quest Forge — AI-Powered Tabletop RPG",
+    "short_name": "Quest Forge",
+    "description": "A single-player tabletop RPG where an AI plays the Dungeon Master and a real rules engine owns the dice.",
+    "id": "/",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "orientation": "any",
+    "background_color": "#17171f",
+    "theme_color": "#17171f",
+    "icons": [
+        {
+            "src": "/icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/icons/icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}

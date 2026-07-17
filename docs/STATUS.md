@@ -4,10 +4,12 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-17 (backlog blitz: strengthening P0 economy clamps shipped; tempo heat
-now sees diceless pressure via a recentChecks ledger; and the big one — **Wizard/Cleric
-spellcasting v1** shipped from the rpg-balance-master spec and verified live end to end on the
-playtest #3 cleric save. 917 tests + lint green, live at https://quest-forge-99ab1.web.app.)_
+_Last updated: 2026-07-17 (backlog blitz, five features shipped in one day: strengthening P0
+economy clamps; tempo heat sees diceless pressure (recentChecks ledger); **Wizard/Cleric
+spellcasting v1** from the rpg-balance-master spec, verified live end to end; the full
+character screen (color-coded skills grid, ⛶ from the Character Profile header); and the PWA
++ mobile pass (manifest + icons + safe areas, deliberately no service worker — DECISIONS.md).
+917 tests + lint green, live at https://quest-forge-99ab1.web.app.)_
 
 ## Spellcasting v1 (2026-07-17)
 

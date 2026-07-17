@@ -581,10 +581,14 @@ chosen audio blobs in IndexedDB (a `music` store via `persistence.js`) and rehyd
 mount. Weigh against state size — audio files are multi-MB. Only worth it if re-picking each
 session proves annoying in real use.
 
-### PWA + mobile pass — status: `idea`, do before going public
-Manifest + service worker + Add-to-Home-Screen → fullscreen app icon on phone, instant cache
-loads. Pairs naturally with local-per-device autosaves. ~1 day. Do once, just before showing
-the game to other people (avoids repeated cache-versioning headaches).
+### PWA + mobile pass — status: `shipped` (2026-07-17), deliberately without a service worker
+Shipped: `public/manifest.webmanifest` (standalone display, app id, 192/512 + maskable icons),
+generated icon set (`scripts/generate-pwa-icons.mjs`, zero-dep PNG writer), theme-color +
+apple-touch/status-bar meta, `viewport-fit=cover` with safe-area insets on the shell and
+header, and hosting cache headers for the manifest (revalidate) and icons (1 day). Mobile
+audit at 375px: no horizontal overflow on the main view, drawer, or the new character screen.
+**No service worker by decision** (DECISIONS.md 2026-07-17): the game is online-only (LLM
+turns) and the no-store index contract must never gain a second cache layer.
 
 ### Save management polish — status: partially `shipped` (2026-06-10)
 Shipped: overwrite button, cloud delete, honest cloud-status toast/messages.
