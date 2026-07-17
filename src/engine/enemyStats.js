@@ -41,6 +41,17 @@ export function validateEnemyAttackBonus(n) {
     return (r >= ATTACK_BONUS_MIN && r <= ATTACK_BONUS_MAX) ? r : undefined;
 }
 
+/**
+ * A saving-throw bonus within the same band as attack bonuses, or undefined
+ * (→ engine default +2) when absurd. One flat number per enemy — spell saves
+ * deliberately do not model six per-ability scores (spellcasting v1 spec).
+ */
+export function validateEnemySaveBonus(n) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return undefined;
+    const r = Math.round(n);
+    return (r >= ATTACK_BONUS_MIN && r <= ATTACK_BONUS_MAX) ? r : undefined;
+}
+
 /** A bounded NdM(+/-K) weapon-damage notation, or undefined (→ engine default) if invalid/out-of-range. */
 export function sanitizeEnemyDamage(notation) {
     if (typeof notation !== 'string') return undefined;
@@ -112,10 +123,13 @@ export function sanitizeLoadedEnemy(enemy) {
         conditions: normalizeEnemyConditions(enemy.conditions),
         combatStatus: ['active', 'fled', 'surrendered'].includes(enemy.combatStatus) ? enemy.combatStatus : 'active',
         defending: !!enemy.defending,
+        isUndead: !!enemy.isUndead,
     };
     const ab = validateEnemyAttackBonus(enemy.attackBonus);
     const dmg = sanitizeEnemyDamage(enemy.damage);
+    const sb = validateEnemySaveBonus(enemy.saveBonus);
     if (ab === undefined) delete cleaned.attackBonus; else cleaned.attackBonus = ab;
     if (dmg === undefined) delete cleaned.damage; else cleaned.damage = dmg;
+    if (sb === undefined) delete cleaned.saveBonus; else cleaned.saveBonus = sb;
     return cleaned;
 }

@@ -4,11 +4,25 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-15 (grand playtest #3 shipped, then a clinical-register pass: durable
-records — Scribe/reflection/enrichment/art-director — now keep full frank content but in
-neutral anatomical vocabulary, never crude slang, because verbatim crude words re-injected
-into every Gemini machinery call were starting to trip Gemini API safety guidelines. See
-DECISIONS.md 2026-07-15. 869 tests + lint green, live at https://quest-forge-99ab1.web.app.)_
+_Last updated: 2026-07-17 (backlog blitz: strengthening P0 economy clamps shipped; tempo heat
+now sees diceless pressure via a recentChecks ledger; and the big one — **Wizard/Cleric
+spellcasting v1** shipped from the rpg-balance-master spec and verified live end to end on the
+playtest #3 cleric save. 917 tests + lint green, live at https://quest-forge-99ab1.web.app.)_
+
+## Spellcasting v1 (2026-07-17)
+
+Shipped per the balance spec (DECISIONS.md 2026-07-17): `src/data/spells.js` (29 curated
+spells), `src/engine/spellcasting.js` (slot table, DC/attack math, upcast/cantrip notation,
+Arcane Recovery), full combat-exchange integration (attack/save/auto resolutions, up-to-3
+named targets sharing one damage roll, ally/self support spells healing companions mid-
+exchange, sustained buffs visible to same-exchange enemy attacks, Cleric bonus-heal lane,
+`channel` Turn/Destroy Undead), out-of-combat `spell_cast` with replay guard, rest slot
+recovery, LOAD_GAME caster healing, DM prompt SPELLCASTING contract, and a character-sheet
+Spellcasting panel. Live-verified: loading the pre-spellcasting Maren save minted her slots,
+and "I cast Shield of Faith on Jorun" produced the DM spell_cast → engine spend → +2 AC on
+the companion → sheet showing "Sustaining: Shield of Faith". **Watch items:** first real
+wizard campaign (damage pacing at L5 fireball), whether the DM upcasts sensibly, whether
+control-condition lifting (Sleep/Hold Person) happens at the right pace, Death Ward deferred.
 
 ## Clinical register for durable records (2026-07-15)
 

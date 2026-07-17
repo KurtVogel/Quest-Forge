@@ -568,6 +568,20 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'HEAL', payload: 3 });
     });
 
+    it('dispatches CAST_SPELL for a spell_cast event with bounded fields', () => {
+        const dispatch = run({ spell_cast: { spell: 'Cure Wounds', slot_level: 99, target: 'Jorun' } });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'CAST_SPELL',
+            payload: expect.objectContaining({ spell: 'Cure Wounds', slotLevel: 5, target: 'Jorun' }),
+        });
+
+        const bare = run({ spell_cast: 'detect magic' });
+        expect(bare).toHaveBeenCalledWith({
+            type: 'CAST_SPELL',
+            payload: expect.objectContaining({ spell: 'detect magic', slotLevel: null, target: null }),
+        });
+    });
+
     it('dispatches USE_RESOURCE for a resource the class catalog does not own', () => {
         // Rogue has no UI-tracked class resources, so any resource the DM names
         // falls through to the generic (non-UI) dispatch path.

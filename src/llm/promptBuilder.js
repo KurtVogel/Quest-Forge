@@ -16,6 +16,7 @@ import { normalizeCampaignPremise } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 import { TABLE_TALK_STANDING_RULE } from './tableTalk.js';
 import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js';
+import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
 
 /**
  * Build the complete system prompt for the LLM.
@@ -327,9 +328,10 @@ When game events occur, include a structured JSON block at the END of your respo
   "combat_start": {
     "surprise": "none",
     "enemies": [
-      { "id": "goblin-1", "name": "Goblin", "hp": 15, "ac": 13, "attack_bonus": 4, "damage": "1d6+2" }
+      { "id": "goblin-1", "name": "Goblin", "hp": 15, "ac": 13, "attack_bonus": 4, "damage": "1d6+2", "save_bonus": 2, "is_undead": false }
     ]
   },
+  "spell_cast": { "spell": "cure wounds", "slot_level": 1, "target": "self" },
   "combat_exchange": {
     "player_slots": [
       { "action": "attack", "strikes": [{ "target": "enemy-id" }], "situational_ruling": { "mode": "advantage", "reason": "accepted fictional positioning" } }
@@ -404,13 +406,25 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - Outside combat, player checks use "skill_check" or "saving_throw" with a DC. Saving throws name the ability; the engine applies proficiency.
 - A response containing outside-combat \`requested_rolls\` carries no outcome mutations. The post-roll response narrates the result once.
 
+## SPELLCASTING INSTRUCTIONS (Wizard / Cleric only)
+- The character block's SPELLCASTING section lists every spell that mechanically exists for this hero, with remaining slots. Spells not on that list have no engine support: when the player asks for one, offer the closest listed spell or adjudicate a purely narrative effect that changes no mechanics.
+- The ENGINE owns slots, dice, save DCs, and effects. You never report a slot as spent, roll spell damage, or decide a save — declare the cast and narrate from the engine's returned result.
+- IN COMBAT: cast through a \`combat_exchange\` player slot (\`"action":"cast"\`). Never use spell_cast during a fight.
+- OUT OF COMBAT: when the player casts a spell marked usable out of combat, emit \`spell_cast\` with the spell name, optional \`slot_level\` to upcast, and \`target\` ("self" or a companion's name). The engine validates, spends the slot, rolls healing, and posts a system line — narrate from that. Emit each casting exactly ONCE; never re-emit it while narrating the aftermath.
+- Utility spells (Detect Magic, Knock, Guidance) are narrative-gated: the engine only spends the slot; you honestly adjudicate what the magic reveals, opens, or aids — magic succeeds at what the spell does, but only the fiction present can be revealed.
+- Control-spell conditions (unconscious from Sleep, paralyzed from Hold Person, frightened, prone) are not permanent: lift them through the existing \`remove_conditions\` / \`enemy_condition_updates\` channels when the fiction moves on — a sleeper wakes the moment it takes damage; a held foe shakes free after about a round of struggle.
+- A sustained spell (Mage Armor, Shield of Faith, Invisibility) lasts until the caster sustains a different spell, rests, or the fight ends — the engine tracks this; narrate accordingly.
+- Out-of-combat healing has no roll gate: casting Cure Wounds on a wounded ally simply works. Genuine uncertainty about ANOTHER objective still uses requested_rolls as usual.
+
 COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
-- Use "combat_start" when combat begins and list every foe 1:1 with a unique stable "id", plus "name", "hp", "ac", "attack_bonus", and "damage". Never silently add or drop combatants. If the same response also contains "combat_exchange", every player/companion/enemy reference must use one of those exact combat_start ids.
+- Use "combat_start" when combat begins and list every foe 1:1 with a unique stable "id", plus "name", "hp", "ac", "attack_bonus", and "damage". Mark skeletons, zombies, ghouls, and other undead with "is_undead": true, and optionally give tough foes a flat "save_bonus" (-5..15, default +2) used for spell saving throws. Never silently add or drop combatants. If the same response also contains "combat_exchange", every player/companion/enemy reference must use one of those exact combat_start ids.
 - Set combat_start "surprise" to "player" only when the player is genuinely caught unaware, "enemies" only when the foes are caught unaware, otherwise "none". The engine converts this into Opening Initiative; never grant surprise attacks in narration yourself.
 - Every committed player turn includes exactly one \`combat_exchange\`. A question or clarification includes none, so nobody acts.
-- \`player_slots\`: normally exactly one; when ACTION SURGE ACTIVE is shown, exactly two. Each slot is independently \`attack\`, \`cast\`, \`check\`, \`save\`, \`dodge\`, \`dash\`, \`disengage\`, \`flee\`, \`interact\`, \`pass\`, or \`death_save\`.
+- \`player_slots\`: normally exactly one; when ACTION SURGE ACTIVE is shown, exactly two. Each slot is independently \`attack\`, \`cast\`, \`channel\`, \`check\`, \`save\`, \`dodge\`, \`dash\`, \`disengage\`, \`flee\`, \`interact\`, \`pass\`, or \`death_save\`.
 - An Attack slot uses \`strikes: [{"target":"<living enemy id>"}]\`. A Fighter with Extra Attack may name two strikes in one Attack slot, including different targets. Action Surge grants another action slot, not automatically another attack.
-- A Cast slot uses \`{"action":"cast","spell":"fire bolt|arcane bolt|sacred flame|divine bolt","target":"<living enemy id>"}\`. These bounded Wizard/Cleric basic spell attacks use engine-owned class stats; unsupported spells must be clarified rather than assigned invented mechanics.
+- A Cast slot uses \`{"action":"cast","spell":"<spell name from the SPELLCASTING list>","target":"<living enemy id, companion name, or self>","targets":["<up to 3 ids for multi-target spells>"],"slot_level":<optional upcast level>}\`. Only spells on the character's SPELLCASTING list exist; the engine owns every roll, save DC, slot cost, and effect. Unsupported spells must be clarified rather than assigned invented mechanics.
+- A Wizard/Cleric may add ONE bonus-action spell (marked "bonus action" in their list, e.g. Healing Word) as a second player slot alongside one normal action — the caster's equivalent of Cunning Action. Never two bonus spells, never two action spells.
+- A \`channel\` slot is the Cleric's Turn Undead (level 2+): no target field; the engine rolls a save for every active undead foe. Declare it only when undead are actually present.
 - A Check/Save slot uses \`{"action":"check|save","skill":"<skill or ability>","dc":<5-30>}\` for a genuinely uncertain non-attack action committed during combat. The engine rolls it before companion/enemy intents; do not also use requested_rolls.
 - A Check intended to impose a condition may include \`"on_success":{"target":"<living enemy id>","add":["prone"]}\`. The engine applies the bounded condition only if the check succeeds. Supported enemy conditions are poisoned, blinded, frightened, restrained, prone, invisible, stunned, paralyzed, and unconscious.
 - **Situational rulings preserve table negotiation.** Any player slot, companion intent, or enemy attack intent may include \`"situational_ruling":{"mode":"advantage|disadvantage","reason":"<brief established fictional reason>"}\`. Use this only when you, as DM, accept that current established fiction or a plausible tactical setup warrants it (for example, a genuinely established flank). The player's claim alone does not make the reason true. If it is unsupported, omit the ruling and briefly adjudicate from the actual situation. Never supply numerical modifiers or dice. The engine combines an accepted ruling with conditions and normal advantage/disadvantage cancellation, and shows the reason beside the roll.
@@ -559,6 +573,11 @@ function buildCharacterBlock(character, combat = null) {
         ? `\n- **Appearance (established canon — keep it exactly consistent in narration):** ${character.appearance.trim().slice(0, 300)}`
         : '';
 
+    const spellcasting = describeSpellcastingForPrompt(character);
+    const spellcastingBlock = spellcasting
+        ? `\n- **SPELLCASTING (engine-owned — only these spells exist mechanically):**\n${spellcasting}${character.sustainedSpell ? `\n- **Sustained spell active:** ${character.sustainedSpell.name || character.sustainedSpell.key} on ${character.sustainedSpell.targetType === 'companion' ? (character.sustainedSpell.targetName || 'a companion') : 'the hero'} (ends on another sustained cast, any rest, or combat's end)` : ''}`
+        : '';
+
     return `## PLAYER CHARACTER
 - **Name:** ${character.name}${deathStatus}${appearanceLine}
 - **Race:** ${character.race}
@@ -572,7 +591,7 @@ function buildCharacterBlock(character, combat = null) {
 - **Saving Throws:** ${saves} (* = proficient; applied automatically by the system)
 - **Skill Proficiencies:** ${skillProfs}${character.expertiseSkills?.length ? `\n- **Expertise Skills:** ${character.expertiseSkills.join(', ')} (applied automatically by the system)` : ''}
 - **Speed:** ${character.speed} ft
-- **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}${fightingStyleLine}${martialArchetypeLine}${asiLine}${resourceLines}${bonusActionLine}${hitDiceLine}
+- **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}${fightingStyleLine}${martialArchetypeLine}${asiLine}${resourceLines}${bonusActionLine}${hitDiceLine}${spellcastingBlock}
 ${character.traits?.length ? `- **Traits:** ${character.traits.join(', ')}` : ''}
 ${character.features?.length ? `- **Features:** ${character.features.map(f => {
         if (f === 'Fighting Style' && fightingStyle) return `Fighting Style: ${fightingStyle}`;

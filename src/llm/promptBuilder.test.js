@@ -397,3 +397,30 @@ describe('loot persistence contract', () => {
         expect(text).toContain('Purchases and sales are one-shot transaction events');
     });
 });
+
+describe(`spellcasting prompt contract`, () => {
+    it(`injects the SPELLCASTING block with slots and spells for casters`, () => {
+        const cleric = makeCharacter({
+            class: `cleric`, level: 3,
+            abilityScores: { strength: 12, dexterity: 10, constitution: 14, intelligence: 10, wisdom: 16, charisma: 12 },
+            spellSlots: { 1: { used: 1, max: 4 }, 2: { used: 0, max: 2 } },
+        });
+        const text = prompt({ character: cleric });
+        expect(text).toContain(`SPELLCASTING (engine-owned`);
+        expect(text).toContain(`Spell slots remaining: L1 3/4`);
+        expect(text).toContain(`Healing Word`);
+        expect(text).toContain(`Spell save DC 13`); // 8 + prof 2 + WIS 3
+        expect(text).toContain(`## SPELLCASTING INSTRUCTIONS`);
+        expect(text).toContain(`"spell_cast"`);
+    });
+
+    it(`shows the active sustained spell and omits the block for non-casters`, () => {
+        const sustained = makeCharacter({
+            class: `wizard`, level: 1,
+            spellSlots: { 1: { used: 0, max: 2 } },
+            sustainedSpell: { key: `mageArmor`, name: `Mage Armor`, acBonus: 3, targetType: `self` },
+        });
+        expect(prompt({ character: sustained })).toContain(`Sustained spell active:`);
+        expect(prompt()).not.toContain(`SPELLCASTING (engine-owned`);
+    });
+});

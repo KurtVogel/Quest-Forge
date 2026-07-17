@@ -86,7 +86,13 @@ export function computeACFromInventory(inventory, character) {
         ? 1
         : 0;
 
-    return getArmorClass(dexMod, equippedArmor, equippedShield) + styleBonus;
+    // Sustained self-buff (Mage Armor / Shield of Faith on self). Computed here so
+    // the character sheet, the DM prompt, and enemy attack rolls all see one AC.
+    const spellBonus = character.sustainedSpell?.targetType !== 'companion'
+        ? (character.sustainedSpell?.acBonus || 0)
+        : 0;
+
+    return getArmorClass(dexMod, equippedArmor, equippedShield) + styleBonus + spellBonus;
 }
 
 export function getEquippedWeapon(inventory = []) {

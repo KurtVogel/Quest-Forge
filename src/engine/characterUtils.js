@@ -6,6 +6,7 @@ import { rollDice } from './dice.ts';
 import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
+import { buildSpellSlots, isSpellcaster } from './spellcasting.js';
 
 /**
  * Standard array for ability score assignment.
@@ -216,6 +217,7 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         traits: [...(race.traits || [])],
         features: [...(charClass.features?.['1'] || [])],
         classResources: buildClassResources(className, 1),
+        ...(isSpellcaster(className) && { spellSlots: buildSpellSlots(1), sustainedSpell: null }),
         hitDice: { total: 1, remaining: 1, die: charClass.hitDie },
         conditions: [],
         notes: '',

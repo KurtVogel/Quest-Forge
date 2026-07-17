@@ -7,6 +7,7 @@ import {
     planOpeningExchange,
     reconcileStartingCombatExchange,
 } from './combatExchange.js';
+import { buildSpellSlots } from './spellcasting.js';
 
 const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
 
@@ -516,7 +517,7 @@ describe('engine-owned exchange resolution', () => {
         const unsupported = normalizeCombatExchange({
             player_slots: [{ action: 'cast', spell: 'meteor swarm', target: 'Goblin' }],
         });
-        expect(planCombatExchange(wizard, unsupported)).toMatchObject({ ok: false, error: expect.stringContaining('no engine-owned') });
+        expect(planCombatExchange(wizard, unsupported)).toMatchObject({ ok: false, error: expect.stringContaining('not on this character\'s engine-owned spell list') });
     });
 
     it('keeps an unresolved death-save state in combat and lets a natural 20 resume play', () => {
@@ -773,5 +774,155 @@ describe('Rogue Combat Features', () => {
         });
 
         expect(plan.payload.result.summary).toContain('halved by Uncanny Dodge');
+    });
+});
+
+describe('spellcasting v1 combat exchanges', () => {
+    const wizardState = ({ character: charOverrides, ...rest } = {}) => state({
+        character: {
+            class: `wizard`, level: 5,
+            abilityScores: { strength: 8, dexterity: 12, constitution: 12, intelligence: 16, wisdom: 10, charisma: 10 },
+            spellSlots: buildSpellSlots(charOverrides?.level || 5),
+            ...(charOverrides || {}),
+        },
+        ...rest,
+    });
+
+    const clericState = ({ character: charOverrides, ...rest } = {}) => state({
+        character: {
+            class: `cleric`, level: 5,
+            abilityScores: { strength: 12, dexterity: 10, constitution: 14, intelligence: 10, wisdom: 16, charisma: 12 },
+            spellSlots: buildSpellSlots(charOverrides?.level || 5),
+            classResources: { channelDivinity: { used: 0, max: 1 } },
+            ...(charOverrides || {}),
+        },
+        ...rest,
+    });
+
+    it('resolves a multi-target save spell with one shared damage roll, half on success', () => {
+        // Damage 6d6 first (queue 6x3=18), then two saves: 4 (+2=6, fail) and 18 (+2=20, save).
+        rollQueue.push(3, 3, 3, 3, 3, 3, 4, 18);
+        const plan = planCombatExchange(
+            wizardState({ enemies: [enemy(`A`, { hp: 30, maxHp: 30 }), enemy(`B`, { hp: 30, maxHp: 30 })] }),
+            normalizeCombatExchange({
+                player_slots: [{ action: `cast`, spell: `fireball`, targets: [`A`, `B`] }],
+                enemy_intents: [],
+            })
+        );
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.characterUpdates.spellSlots[3]).toEqual({ used: 1, max: 2 });
+        const [a, b] = plan.payload.enemies;
+        expect(a.hp).toBe(12); // failed save: full 18
+        expect(b.hp).toBe(21); // saved: half of 18 = 9
+        expect(plan.payload.result.summary).toContain(`save vs Fireball`);
+    });
+
+    it('applies a control condition on a failed save and rejects casts with no slots left', () => {
+        rollQueue.push(2); // save 2 + 2 = 4 vs DC 14 — fail
+        const drained = { 1: { used: 4, max: 4 }, 2: { used: 3, max: 3 }, 3: { used: 2, max: 2 } };
+        const okPlan = planCombatExchange(wizardState(), normalizeCombatExchange({
+            player_slots: [{ action: `cast`, spell: `sleep`, target: `Goblin` }],
+            enemy_intents: [],
+        }));
+        expect(okPlan.ok).toBe(true);
+        expect(okPlan.payload.enemies[0].conditions).toContain(`unconscious`);
+
+        const noSlots = planCombatExchange(
+            wizardState({ character: { spellSlots: drained } }),
+            normalizeCombatExchange({ player_slots: [{ action: `cast`, spell: `sleep`, target: `Goblin` }] })
+        );
+        expect(noSlots).toMatchObject({ ok: false, error: expect.stringContaining(`No spell slot remains`) });
+    });
+
+    it('lets a cleric pair a bonus-action heal with a normal action, but never two action spells', () => {
+        // Sacred flame attack roll 15 (+6=21 hits), damage 2d8 (4,4), healing word 1d4 (3).
+        rollQueue.push(15, 4, 4, 3);
+        const hurt = clericState({ character: { currentHP: 10 } });
+        const plan = planCombatExchange(hurt, normalizeCombatExchange({
+            player_slots: [
+                { action: `cast`, spell: `sacred flame`, target: `Goblin` },
+                { action: `cast`, spell: `healing word`, target: `self` },
+            ],
+            enemy_intents: [],
+        }));
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.playerHealing).toBe(6); // 1d4(3) + WIS 3
+        expect(plan.payload.characterUpdates.spellSlots[2]).toEqual({ used: 1, max: 3 });
+
+        const twoActions = planCombatExchange(clericState(), normalizeCombatExchange({
+            player_slots: [
+                { action: `cast`, spell: `sacred flame`, target: `Goblin` },
+                { action: `cast`, spell: `cure wounds`, target: `self` },
+            ],
+        }));
+        expect(twoActions.ok).toBe(false);
+    });
+
+    it('heals a downed companion back to their feet mid-exchange', () => {
+        rollQueue.push(2); // 1d4 = 2, +3 WIS = 5
+        const withCompanion = clericState({
+            party: [{ id: `jorun`, name: `Jorun`, hp: 0, maxHp: 12, ac: 14, status: `downed`, conditions: [] }],
+        });
+        const plan = planCombatExchange(withCompanion, normalizeCombatExchange({
+            player_slots: [{ action: `cast`, spell: `healing word`, target: `Jorun` }],
+            enemy_intents: [],
+        }));
+        expect(plan.ok).toBe(true);
+        const jorun = plan.payload.party.find(c => c.id === `jorun`);
+        expect(jorun.hp).toBe(5);
+        expect(jorun.status).toBe(`bloodied`); // 5/12 HP — up, but still hurt
+    });
+
+    it('sustains Mage Armor: +3 AC applies to enemy attacks in the same exchange', () => {
+        // Enemy attack draw 9: 9+4=13 vs unarmored AC 11+3=14 — miss because of the buff.
+        rollQueue.push(9);
+        const unarmored = wizardState();
+        unarmored.inventory = [];
+        const plan = planCombatExchange(unarmored, normalizeCombatExchange({
+            player_slots: [{ action: `cast`, spell: `mage armor` }],
+            enemy_intents: [{ enemy_id: `Goblin`, action: `attack`, target: `player` }],
+        }));
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.characterUpdates.sustainedSpell).toMatchObject({ key: `mageArmor`, acBonus: 3, targetType: `self` });
+        expect(plan.payload.playerDamage).toBe(0);
+        const attackEvent = plan.payload.result.events.find(e => e.type === `attack`);
+        expect(attackEvent).toMatchObject({ hit: false, dc: 14 });
+    });
+
+    it('turns undead: destroys weak undead at cleric 5, frightens the strong, spends Channel Divinity', () => {
+        rollQueue.push(3, 3); // both saves fail (3+2=5 vs DC 14)
+        const undeadFight = clericState({
+            enemies: [
+                enemy(`Skeleton`, { hp: 13, maxHp: 13, isUndead: true }),
+                enemy(`Wight`, { hp: 45, maxHp: 45, isUndead: true }),
+            ],
+        });
+        const plan = planCombatExchange(undeadFight, normalizeCombatExchange({
+            player_slots: [{ action: `channel` }],
+            enemy_intents: [],
+        }));
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.characterUpdates.classResources.channelDivinity.used).toBe(1);
+        const [skeleton, wight] = plan.payload.enemies;
+        expect(skeleton.condition).toBe(`dead`);
+        expect(wight.conditions).toContain(`frightened`);
+
+        const noUndead = planCombatExchange(clericState(), normalizeCombatExchange({
+            player_slots: [{ action: `channel` }],
+        }));
+        expect(noUndead).toMatchObject({ ok: false, error: expect.stringContaining(`no undead`) });
+    });
+
+    it('rejects spells from the wrong class list and out-of-combat-only spells', () => {
+        const wrongClass = planCombatExchange(clericState(), normalizeCombatExchange({
+            player_slots: [{ action: `cast`, spell: `fireball`, target: `Goblin` }],
+        }));
+        expect(wrongClass.ok).toBe(false);
+
+        // Knock is a 4th-level spell — use a wizard high enough to know it.
+        const utility = planCombatExchange(wizardState({ character: { level: 9 } }), normalizeCombatExchange({
+            player_slots: [{ action: `cast`, spell: `knock` }],
+        }));
+        expect(utility).toMatchObject({ ok: false, error: expect.stringContaining(`no combat effect`) });
     });
 });

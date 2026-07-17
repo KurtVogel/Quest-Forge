@@ -8,6 +8,7 @@ import { getExperienceThreshold, isMaxLevel } from '../../engine/progression.js'
 import { generatePortraitImage } from '../../llm/providers/imageGen.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
+import { getKnownSpells, getSpellAttackBonus, getSpellSaveDC, isSpellcaster } from '../../engine/spellcasting.js';
 import './CharacterSheet.css';
 
 function buildPortraitPrompt(character, appearance, equippedItems = []) {
@@ -25,6 +26,7 @@ export default function CharacterSheet() {
     const { character } = state;
     const [isExpanded, setIsExpanded] = useState(false);
     const [showSkills, setShowSkills] = useState(false);
+    const [showSpells, setShowSpells] = useState(false);
     const [portraitDraft, setPortraitDraft] = useState('');
     const [isGeneratingPortrait, setIsGeneratingPortrait] = useState(false);
     const [portraitError, setPortraitError] = useState('');
@@ -77,6 +79,15 @@ export default function CharacterSheet() {
     const activeResources = Object.entries(resourceDefs).filter(
         ([key, def]) => character.level >= (def.minLevel || 1) && classResources[key]
     );
+
+    // Spellcasting (wizard/cleric)
+    const caster = isSpellcaster(character.class);
+    const spellSlots = caster ? (character.spellSlots || {}) : {};
+    const knownSpells = caster ? getKnownSpells(character) : [];
+    const spellsByLevel = knownSpells.reduce((acc, spell) => {
+        (acc[spell.level] = acc[spell.level] || []).push(spell);
+        return acc;
+    }, {});
 
     // Hit dice
     const hitDice = character.hitDice || { total: character.level, remaining: character.level, die: charClass?.hitDie || 8 };
@@ -402,6 +413,55 @@ export default function CharacterSheet() {
                                         Long Rest
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Spellcasting (wizard/cleric) */}
+                    {caster && (
+                        <div className="cs-section">
+                            <h4 className="cs-section-title">Spellcasting</h4>
+                            <div className="cs-resources">
+                                <div className="cs-spell-meta">
+                                    Save DC {getSpellSaveDC(character)} · Spell attack {formatModifier(getSpellAttackBonus(character))}
+                                    {character.sustainedSpell && (
+                                        <span className="cs-sustained"> · Sustaining: {character.sustainedSpell.name || character.sustainedSpell.key}{character.sustainedSpell.targetName ? ` (on ${character.sustainedSpell.targetName})` : ''}</span>
+                                    )}
+                                </div>
+                                {Object.entries(spellSlots).map(([lvl, slot]) => (
+                                    <div key={lvl} className="cs-resource-row">
+                                        <span className="cs-resource-name">Level {lvl} slots</span>
+                                        <span className="cs-resource-pips">
+                                            {Array.from({ length: slot.max }, (_, i) => (
+                                                <span key={i} className={`cs-pip ${i < slot.max - slot.used ? 'available' : 'spent'}`} />
+                                            ))}
+                                        </span>
+                                        <span className="cs-resource-reset">long rest</span>
+                                    </div>
+                                ))}
+                                <button className="cs-skills-toggle" onClick={() => setShowSpells(!showSpells)}>
+                                    <span className="cs-resource-name" style={{ margin: 0 }}>Known spells ({knownSpells.length})</span>
+                                    <span className="cs-dropdown-icon">{showSpells ? '▲' : '▼'}</span>
+                                </button>
+                                {showSpells && (
+                                    <div className="cs-spell-list">
+                                        {Object.entries(spellsByLevel).map(([lvl, spells]) => (
+                                            <div key={lvl} className="cs-spell-group">
+                                                <div className="cs-spell-group-title">{lvl === '0' ? 'Cantrips (at will)' : `Level ${lvl}`}</div>
+                                                {spells.map(spell => (
+                                                    <div key={spell.key} className="cs-spell-row" title={spell.summary}>
+                                                        <span className="cs-spell-name">
+                                                            {spell.name}
+                                                            {spell.castTime === 'bonus' && <span className="cs-resource-tag">Bonus</span>}
+                                                        </span>
+                                                        <span className="cs-spell-summary">{spell.summary}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ))}
+                                        <div className="cs-spell-hint">Cast by saying so in the story — the engine owns slots, dice, and effects.</div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

@@ -14,14 +14,24 @@ import {
     getIncapacitatingCondition,
     getLevelBonus,
     getModifier,
-    getProficiencyBonus,
     getSavingThrowModifier,
     getSkillModifier,
     getWeaponAttackBonus,
     getWeaponDamageNotation,
     getSneakAttackDice,
 } from './rules.js';
-import { sanitizeEnemyDamage, validateEnemyAttackBonus, enemyHealthCondition, normalizeEnemyConditions } from './enemyStats.js';
+import { sanitizeEnemyDamage, validateEnemyAttackBonus, validateEnemySaveBonus, enemyHealthCondition, normalizeEnemyConditions } from './enemyStats.js';
+import {
+    chooseSlotLevel,
+    getSpellAttackBonus,
+    getSpellSaveDC,
+    isSpellcaster,
+    resolveSpellForCharacter,
+    spellDamageNotation,
+    spellHealingNotation,
+    spendSpellSlot,
+    summarizeSpellSlots,
+} from './spellcasting.js';
 
 export const COMBAT_PHASES = Object.freeze({
     OPENING: 'opening',
@@ -30,7 +40,7 @@ export const COMBAT_PHASES = Object.freeze({
     AWAITING_NARRATION: 'awaiting_narration',
 });
 
-const PLAYER_ACTIONS = new Set(['attack', 'cast', 'check', 'save', 'dodge', 'dash', 'disengage', 'flee', 'interact', 'pass', 'death_save']);
+const PLAYER_ACTIONS = new Set(['attack', 'cast', 'channel', 'check', 'save', 'dodge', 'dash', 'disengage', 'flee', 'interact', 'pass', 'death_save']);
 const ENEMY_ACTIONS = new Set(['attack', 'defend', 'flee', 'surrender']);
 const COMPANION_ACTIONS = new Set(['attack', 'defend', 'pass']);
 const ABILITIES = new Set(['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']);
@@ -41,6 +51,7 @@ const SKILLS = new Set([
 ]);
 const DEFAULT_ENEMY_ATTACK_BONUS = 3;
 const DEFAULT_ENEMY_DAMAGE = '1d6';
+const DEFAULT_ENEMY_SAVE_BONUS = 2;
 
 const text = (value, max = 120) => String(value || '').trim().slice(0, max);
 const ref = value => text(value, 100) || null;
@@ -56,6 +67,16 @@ function normalizeStrikes(slot) {
         ? slot.strikes
         : (slot?.target ? [{ target: slot.target }] : []);
     return raw.slice(0, 4).map(strike => ({ target: ref(strike?.target || strike) })).filter(s => s.target);
+}
+
+/** Up to 3 deduped target refs for a cast slot ("targets" array or single "target"). */
+function normalizeCastTargets(slot) {
+    const raw = Array.isArray(slot?.targets)
+        ? slot.targets
+        : (slot?.target != null ? [slot.target] : []);
+    return [...new Set(raw.slice(0, 3)
+        .map(value => ref(value?.target ?? value))
+        .filter(Boolean))];
 }
 
 function normalizeConditionDelta(raw, targetValue) {
@@ -96,7 +117,14 @@ export function normalizeCombatExchange(raw) {
                 action,
                 description: text(slot.description, 180),
                 ...(action === 'attack' && { strikes: normalizeStrikes(slot), weaponId: ref(slot.weapon_id || slot.weaponId) }),
-                ...(action === 'cast' && { target: ref(slot.target), spell: ref(slot.spell) }),
+                ...(action === 'cast' && {
+                    target: ref(slot.target),
+                    targets: normalizeCastTargets(slot),
+                    spell: ref(slot.spell),
+                    slotLevel: Number.isFinite(slot.slot_level ?? slot.slotLevel)
+                        ? Math.max(1, Math.min(5, Math.round(slot.slot_level ?? slot.slotLevel)))
+                        : null,
+                }),
                 ...((action === 'check' || action === 'save') && {
                     skill: normalizeSkillRef(slot.skill || slot.ability),
                     dc: Number.isFinite(slot.dc) ? Math.max(5, Math.min(30, Math.round(slot.dc))) : 15,
@@ -204,7 +232,10 @@ export function reconcileStartingCombatExchange(rawExchange, enemies = []) {
             ...(slot.action === 'attack' && {
                 strikes: slot.strikes.map(strike => ({ ...strike, target: resolveEnemy(strike.target) })),
             }),
-            ...(slot.action === 'cast' && { target: resolveEnemy(slot.target) }),
+            ...(slot.action === 'cast' && {
+                target: slot.target ? resolveEnemy(slot.target) : slot.target,
+                targets: (slot.targets || []).map(resolveEnemy),
+            }),
             ...(slot.onSuccess && {
                 onSuccess: { ...slot.onSuccess, target: resolveEnemy(slot.onSuccess.target) },
             }),
@@ -487,17 +518,32 @@ function expectedStrikes(character) {
     return character?.class === 'fighter' && (character.level || 1) >= 5 ? 2 : 1;
 }
 
-function basicSpellProfile(character, spellRef) {
-    const level = character?.level || 1;
-    const dice = level >= 17 ? 4 : level >= 11 ? 3 : level >= 5 ? 2 : 1;
-    const requested = String(spellRef || '').toLowerCase().replace(/[^a-z]/g, '');
-    if (character?.class === 'wizard' && (!requested || ['arcanebolt', 'firebolt', 'rayoffrost'].includes(requested))) {
-        return { name: spellRef || 'Arcane Bolt', ability: 'intelligence', damage: `${dice}d10` };
+/** Backward compatibility: a bare "cast" with no spell name means the class's attack cantrip. */
+function resolveCastSpell(character, slot) {
+    const fallback = character?.class === 'wizard' ? 'fireBolt' : character?.class === 'cleric' ? 'sacredFlame' : null;
+    return resolveSpellForCharacter(character, slot?.spell || fallback);
+}
+
+/** An ally target for support spells: the hero ('self'/name/'player') or a living companion. */
+function resolveAllyTarget(character, companions, targetRef) {
+    const raw = String(targetRef || '').trim().toLowerCase();
+    if (!raw || raw === 'self' || raw === 'me' || raw === 'player'
+        || raw === String(character?.name || '').trim().toLowerCase()) {
+        return { type: 'player' };
     }
-    if (character?.class === 'cleric' && (!requested || ['divinebolt', 'sacredflame', 'radiantbolt'].includes(requested))) {
-        return { name: spellRef || 'Divine Bolt', ability: 'wisdom', damage: `${dice}d8` };
-    }
+    const companion = findByRef(companions, targetRef);
+    if (companion && companion.status !== 'dead') return { type: 'companion', companion };
     return null;
+}
+
+function isBonusCastSlot(character, slot) {
+    if (slot?.action !== 'cast') return false;
+    return resolveCastSpell(character, slot)?.castTime === 'bonus';
+}
+
+function castTargetRefs(slot, fallback = []) {
+    if (slot.targets?.length) return slot.targets;
+    return slot.target ? [slot.target] : fallback;
 }
 
 function validatePlayerSlots(exchange, state) {
@@ -505,8 +551,13 @@ function validatePlayerSlots(exchange, state) {
     const surge = !!state.character?.pendingActionSurge;
     const isRogue = state.character?.class === 'rogue';
     const hasCunningActionFeature = isRogue && (state.character?.level >= 2);
+    // Cleric bonus-spell lane (spellcasting v1): exactly one bonus-time cast may
+    // ride alongside one normal action — the caster's "do two things" lever,
+    // parallel to Rogue Cunning Action and Fighter Action Surge.
+    const bonusCastCount = slots.filter(slot => isBonusCastSlot(state.character, slot)).length;
+    const casterBonusTurn = isSpellcaster(state.character?.class) && bonusCastCount === 1;
 
-    const maxSlots = hasCunningActionFeature ? 2 : (surge ? 2 : 1);
+    const maxSlots = hasCunningActionFeature || surge || casterBonusTurn ? 2 : 1;
 
     if (slots.length > maxSlots || slots.length === 0) {
         return {
@@ -537,6 +588,9 @@ function validatePlayerSlots(exchange, state) {
             }
         } else if (surge) {
             // Fighter Action Surge
+        } else if (casterBonusTurn) {
+            // One bonus-time cast + one normal action; bonusCastCount === 1
+            // already guarantees the pair cannot be two bonus spells.
         } else {
             return {
                 ok: false,
@@ -581,11 +635,50 @@ function validatePlayerSlots(exchange, state) {
             return { ok: false, error: `Check condition target "${slot.onSuccess.target}" is not an active enemy in this fight.` };
         }
         if (slot.action === 'cast') {
-            if (!basicSpellProfile(state.character, slot.spell)) {
-                return { ok: false, error: 'That spell has no engine-owned combat profile yet; choose a basic class attack spell or another action.' };
+            const spell = resolveCastSpell(state.character, slot);
+            if (!spell) {
+                return { ok: false, error: 'That spell is not on this character\'s engine-owned spell list; choose a known class spell or another action.' };
             }
-            if (!findByRef(living, slot.target)) {
-                return { ok: false, error: `Spell target "${slot.target || ''}" is not an active enemy in this fight.` };
+            if (!spell.combatAvailable) {
+                return { ok: false, error: `${spell.name} has no combat effect; it belongs outside battle.` };
+            }
+            if (spell.level > 0 && chooseSlotLevel(state.character.spellSlots, spell, slot.slotLevel) === null) {
+                return { ok: false, error: `No spell slot remains to cast ${spell.name} (needs a level ${spell.level}+ slot).` };
+            }
+            if (spell.targeting.side === 'enemy') {
+                const targets = castTargetRefs(slot);
+                if (targets.length === 0) return { ok: false, error: `${spell.name} needs a living enemy target.` };
+                if (spell.targeting.mode === 'single' && targets.length > 1) {
+                    return { ok: false, error: `${spell.name} affects a single target.` };
+                }
+                for (const target of targets) {
+                    if (!findByRef(living, target)) {
+                        return { ok: false, error: `Spell target "${target}" is not an active enemy in this fight.` };
+                    }
+                }
+            } else if (spell.targeting.side === 'ally') {
+                const targets = castTargetRefs(slot, ['self']);
+                if (spell.targeting.mode === 'single' && targets.length > 1) {
+                    return { ok: false, error: `${spell.name} affects a single ally.` };
+                }
+                for (const target of targets) {
+                    if (!resolveAllyTarget(state.character, state.party || [], target)) {
+                        return { ok: false, error: `Spell target "${target}" is not the hero or a living companion.` };
+                    }
+                }
+            }
+            continue;
+        }
+        if (slot.action === 'channel') {
+            if (state.character?.class !== 'cleric' || (state.character.level || 1) < 2) {
+                return { ok: false, error: 'Channel Divinity requires a Cleric of level 2 or higher.' };
+            }
+            const channel = state.character.classResources?.channelDivinity;
+            if (!channel || channel.used >= channel.max) {
+                return { ok: false, error: 'Channel Divinity is already spent; it recharges on a rest.' };
+            }
+            if (!living.some(enemy => enemy.isUndead)) {
+                return { ok: false, error: 'Turn Undead has no undead foes to affect in this fight.' };
             }
             continue;
         }
@@ -606,13 +699,235 @@ function validatePlayerSlots(exchange, state) {
     return { ok: true };
 }
 
-function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
+/** Resolve an enemy-side spell (attack rolls, engine-rolled saves, auto damage). */
+function resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events, rolls }) {
+    const targetLimit = spell.targeting.mode === 'upTo3' ? 3 : 1;
+    const named = castTargetRefs(slot)
+        .map(target => findByRef(enemies, target))
+        .filter(isEnemyActive);
+    const targets = [...new Map(named.map(enemy => [enemy.id, enemy])).values()].slice(0, targetLimit);
+    if (targets.length === 0) {
+        events.push({ type: 'note', text: `${spell.name} has no valid target and is not redirected.` });
+        return;
+    }
+
+    if (spell.resolution === 'attack') {
+        for (const enemy of targets) {
+            const ruling = rulingFlags(slot.situationalRuling);
+            const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, ruling.advantage, ruling.disadvantage || !!enemy.defending);
+            const attack = rollD20(getSpellAttackBonus(character), `${character.name || 'Player'} casts ${spell.name} at ${enemy.name}`, modifiers.advantage, modifiers.disadvantage);
+            rolls.push(attack.roll);
+            const critical = attack.natural === 20;
+            const hit = attack.natural !== 1 && (critical || attack.roll.total >= enemy.ac);
+            let damage = 0;
+            if (hit) {
+                const damageRoll = rollDamage(spellDamageNotation(spell, character, slotLevel), `${spell.name} damage`, { critical });
+                rolls.push(damageRoll.roll);
+                damage = damageRoll.total;
+                enemy.hp = Math.max(0, enemy.hp - damage);
+                enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
+                if (spell.condition && isEnemyActive(enemy)) {
+                    applyEnemyConditionDelta(enemy, { add: [spell.condition], remove: [] }, events);
+                }
+            }
+            events.push({
+                type: 'attack', actor: character.name || 'Player', target: enemy.name,
+                rolled: attack.roll.total, natural: attack.natural, dc: enemy.ac,
+                mode: rollModeLabel(attack, modifiers, slot.situationalRuling),
+                hit, critical, damage, remainingHp: enemy.hp, maxHp: enemy.maxHp,
+            });
+        }
+        return;
+    }
+
+    if (spell.resolution === 'save') {
+        const dc = getSpellSaveDC(character);
+        const notation = spellDamageNotation(spell, character, slotLevel);
+        let damageRoll = null;
+        if (notation) {
+            // One damage roll shared by every target, 5e-style.
+            damageRoll = rollDamage(notation, `${spell.name} damage`, {});
+            rolls.push(damageRoll.roll);
+        }
+        for (const enemy of targets) {
+            const save = rollD20(validateEnemySaveBonus(enemy.saveBonus) ?? DEFAULT_ENEMY_SAVE_BONUS, `${enemy.name} saves vs ${spell.name}`);
+            rolls.push(save.roll);
+            const success = save.roll.total >= dc;
+            events.push({
+                type: 'save', actor: enemy.name, description: `save vs ${spell.name}`,
+                rolled: save.roll.total, natural: save.natural, dc, success,
+            });
+            if (damageRoll) {
+                const damage = success
+                    ? (spell.saveEffect === 'half' ? Math.floor(damageRoll.total / 2) : 0)
+                    : damageRoll.total;
+                if (damage > 0) {
+                    enemy.hp = Math.max(0, enemy.hp - damage);
+                    enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
+                    events.push({
+                        type: 'note',
+                        text: `**${spell.name}** ${success ? 'grazes' : 'strikes'} ${enemy.name} for **${damage}** damage${success ? ' (half on the save)' : ''}. ${enemy.hp <= 0 ? `${enemy.name} is down.` : `${enemy.name} remains alive at ${enemy.hp}/${enemy.maxHp} HP.`}`,
+                    });
+                }
+            }
+            if (!success && spell.condition && isEnemyActive(enemy)) {
+                applyEnemyConditionDelta(enemy, { add: [spell.condition], remove: [] }, events);
+            }
+        }
+        return;
+    }
+
+    // Auto-hit damage (Magic Missile): no roll to hit, only the effect dice.
+    for (const enemy of targets) {
+        const damageRoll = rollDamage(spellDamageNotation(spell, character, slotLevel), `${spell.name} damage`, {});
+        rolls.push(damageRoll.roll);
+        enemy.hp = Math.max(0, enemy.hp - damageRoll.total);
+        enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
+        events.push({
+            type: 'note',
+            text: `**${spell.name}** strikes ${enemy.name} unerringly for **${damageRoll.total}** damage. ${enemy.hp <= 0 ? `${enemy.name} is down.` : `${enemy.name} remains alive at ${enemy.hp}/${enemy.maxHp} HP.`}`,
+        });
+    }
+}
+
+function stripConditionList(conditions, toRemove) {
+    if (toRemove === 'any') return { kept: [], removed: [...(conditions || [])] };
+    const removable = new Set(toRemove.map(condition => condition.toLowerCase()));
+    const kept = [];
+    const removed = [];
+    for (const condition of conditions || []) {
+        (removable.has(String(condition).toLowerCase()) ? removed : kept).push(condition);
+    }
+    return { kept, removed };
+}
+
+/**
+ * Resolve a self/ally-side spell: healing, stabilizing, condition removal, and
+ * sustained buffs. Mutates companion copies in place; player-side changes go
+ * through `support.playerHealing` and `support.characterUpdates` so the reducer
+ * applies them atomically with the exchange.
+ */
+function resolveSupportSpell({ spell, slotLevel, slot, character, companions, events, rolls, support }) {
+    const updates = support.characterUpdates;
+    const targetLimit = spell.targeting.mode === 'upTo3' ? 3 : 1;
+    const refs = spell.targeting.side === 'self' ? ['self'] : castTargetRefs(slot, ['self']);
+    const resolved = [];
+    for (const targetRef of refs.slice(0, targetLimit)) {
+        const ally = resolveAllyTarget(character, companions, targetRef);
+        if (ally && !resolved.some(existing => existing.type === ally.type && existing.companion?.id === ally.companion?.id)) {
+            resolved.push(ally);
+        }
+    }
+    if (resolved.length === 0) {
+        events.push({ type: 'note', text: `${spell.name} has no valid recipient.` });
+        return;
+    }
+
+    for (const ally of resolved) {
+        const allyName = ally.type === 'player' ? (character.name || 'the hero') : ally.companion.name;
+
+        if (spell.healing) {
+            const healRoll = rollDamage(spellHealingNotation(spell, character, slotLevel), `${spell.name} healing`, {});
+            rolls.push(healRoll.roll);
+            if (ally.type === 'player') {
+                support.playerHealing += healRoll.total;
+                const preview = Math.min(character.maxHP, (character.currentHP || 0) + support.playerHealing);
+                events.push({ type: 'note', text: `**${spell.name}** — ${allyName} recovers **${healRoll.total}** HP (now ${preview}/${character.maxHP}).` });
+            } else {
+                const companion = ally.companion;
+                const wasDown = (companion.hp ?? 0) <= 0;
+                companion.hp = Math.min(companion.maxHp || companion.hp || 1, (companion.hp || 0) + healRoll.total);
+                companion.status = companionHealthStatus(companion);
+                events.push({ type: 'note', text: `**${spell.name}** — ${allyName} recovers **${healRoll.total}** HP (now ${companion.hp}/${companion.maxHp})${wasDown ? ' and is back on their feet' : ''}.` });
+            }
+            continue;
+        }
+
+        if (spell.stabilizes) {
+            if (ally.type === 'companion' && (ally.companion.hp ?? 0) <= 0) {
+                events.push({ type: 'note', text: `**${spell.name}** — ${allyName} is stabilized at death's door (no HP restored).` });
+            } else {
+                events.push({ type: 'note', text: `**${spell.name}** — ${allyName} is not dying; the spell has no effect.` });
+            }
+            continue;
+        }
+
+        if (spell.removeConditions) {
+            if (ally.type === 'player') {
+                const { removed } = stripConditionList(character.conditions, spell.removeConditions);
+                if (removed.length > 0) {
+                    updates.removeConditions = [...(updates.removeConditions || []), ...removed];
+                    events.push({ type: 'note', text: `**${spell.name}** — ${allyName} is cleansed of: ${removed.join(', ')}.` });
+                } else {
+                    events.push({ type: 'note', text: `**${spell.name}** — ${allyName} has no affliction it can lift.` });
+                }
+            } else {
+                const { kept, removed } = stripConditionList(ally.companion.conditions, spell.removeConditions);
+                ally.companion.conditions = kept;
+                events.push({
+                    type: 'note',
+                    text: removed.length > 0
+                        ? `**${spell.name}** — ${allyName} is cleansed of: ${removed.join(', ')}.`
+                        : `**${spell.name}** — ${allyName} has no affliction it can lift.`,
+                });
+            }
+            continue;
+        }
+
+        if (spell.sustained) {
+            clearPreviousSustained({ character, companions, updates, events });
+            const sustained = {
+                key: spell.key,
+                name: spell.name,
+                ...(spell.acBonus && { acBonus: spell.acBonus }),
+                ...(spell.condition && { condition: spell.condition }),
+                targetType: ally.type === 'player' ? 'self' : 'companion',
+                ...(ally.type === 'companion' && { targetId: ally.companion.id, targetName: ally.companion.name }),
+            };
+            updates.sustainedSpell = sustained;
+            if (ally.type === 'companion') {
+                if (spell.acBonus) ally.companion.spellAcBonus = spell.acBonus;
+                if (spell.condition) {
+                    ally.companion.conditions = normalizeEnemyConditions([...(ally.companion.conditions || []), spell.condition]);
+                }
+            } else if (spell.condition) {
+                updates.addConditions = [...(updates.addConditions || []), spell.condition];
+            }
+            events.push({ type: 'note', text: `**${spell.name}** settles over ${allyName}${spell.acBonus ? ` (+${spell.acBonus} AC)` : ''} — it holds until ${character.name || 'the caster'} sustains something else, rests, or the fight ends.` });
+            continue;
+        }
+
+        events.push({ type: 'note', text: `**${spell.name}** is cast; its effect plays out in the fiction.` });
+    }
+}
+
+/** End the caster's previous sustained spell (one sustained effect at a time). */
+function clearPreviousSustained({ character, companions, updates, events }) {
+    const previous = updates.sustainedSpell !== undefined ? updates.sustainedSpell : character.sustainedSpell;
+    if (!previous) return;
+    if (previous.targetType === 'companion') {
+        const companion = companions.find(c => c.id === previous.targetId);
+        if (companion) {
+            delete companion.spellAcBonus;
+            if (previous.condition) {
+                companion.conditions = (companion.conditions || []).filter(c => String(c).toLowerCase() !== String(previous.condition).toLowerCase());
+            }
+        }
+    } else if (previous.condition) {
+        updates.removeConditions = [...(updates.removeConditions || []), previous.condition];
+    }
+    events.push({ type: 'note', text: `${previous.name || previous.key} fades as the new spell takes hold.` });
+}
+
+function resolvePlayerSlots({ state, exchange, enemies, companions, events, rolls }) {
     const character = state.character;
     const inventory = state.inventory || [];
     let dodging = false;
     let fled = false;
     let deathSaveNatural = null;
     const strikeLimit = expectedStrikes(character);
+    const support = { playerHealing: 0, characterUpdates: {} };
+    let workingSlots = character.spellSlots || null;
 
     for (const slot of exchange.playerSlots) {
         if (slot.action === 'dodge') {
@@ -633,33 +948,62 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
             continue;
         }
         if (slot.action === 'cast') {
-            const enemy = findByRef(enemies, slot.target);
-            const profile = basicSpellProfile(character, slot.spell);
-            if (!profile || !isEnemyActive(enemy)) {
-                events.push({ type: 'note', text: `${slot.spell || 'The spell'} has no valid target and is not redirected.` });
+            const spell = resolveCastSpell(character, slot);
+            if (!spell) {
+                events.push({ type: 'note', text: `${slot.spell || 'The spell'} is not on the engine-owned spell list; nothing happens.` });
                 continue;
             }
-            const ruling = rulingFlags(slot.situationalRuling);
-            const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, ruling.advantage, ruling.disadvantage || !!enemy.defending);
-            const spellMod = getModifier(character.abilityScores?.[profile.ability] || 10) + getProficiencyBonus(character.level || 1);
-            const attack = rollD20(spellMod, `${character.name || 'Player'} casts ${profile.name} at ${enemy.name}`, modifiers.advantage, modifiers.disadvantage);
-            rolls.push(attack.roll);
-            const critical = attack.natural === 20;
-            const hit = attack.natural !== 1 && (critical || attack.roll.total >= enemy.ac);
-            let damage = 0;
-            if (hit) {
-                const damageRoll = rollDamage(profile.damage, `${profile.name} damage`, { critical });
-                rolls.push(damageRoll.roll);
-                damage = damageRoll.total;
-                enemy.hp = Math.max(0, enemy.hp - damage);
-                enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
+            let slotLevel = 0;
+            if (spell.level > 0) {
+                slotLevel = chooseSlotLevel(workingSlots, spell, slot.slotLevel);
+                if (slotLevel === null) {
+                    events.push({ type: 'note', text: `${spell.name} fizzles — no spell slot remains to pay for it.` });
+                    continue;
+                }
+                workingSlots = spendSpellSlot(workingSlots, slotLevel);
+                support.characterUpdates.spellSlots = workingSlots;
+                events.push({
+                    type: 'note',
+                    text: `**${character.name || 'Player'} casts ${spell.name}**${slotLevel > spell.level ? ` using a level ${slotLevel} slot` : ''} (slots left: ${summarizeSpellSlots(workingSlots)}).`,
+                });
             }
-            events.push({
-                type: 'attack', actor: character.name || 'Player', target: enemy.name,
-                rolled: attack.roll.total, natural: attack.natural, dc: enemy.ac,
-                mode: rollModeLabel(attack, modifiers, slot.situationalRuling),
-                hit, critical, damage, remainingHp: enemy.hp, maxHp: enemy.maxHp,
-            });
+            if (spell.targeting.side === 'enemy') {
+                resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events, rolls });
+            } else {
+                resolveSupportSpell({ spell, slotLevel, slot, character, companions, events, rolls, support });
+            }
+            continue;
+        }
+        if (slot.action === 'channel') {
+            const channel = character.classResources?.channelDivinity;
+            if (!channel || channel.used >= channel.max) {
+                events.push({ type: 'note', text: 'Channel Divinity is already spent; nothing happens.' });
+                continue;
+            }
+            support.characterUpdates.classResources = {
+                ...character.classResources,
+                channelDivinity: { ...channel, used: channel.used + 1 },
+            };
+            const dc = getSpellSaveDC(character);
+            events.push({ type: 'note', text: `**${character.name || 'Player'} presents their holy symbol — Turn Undead** (save DC ${dc}).` });
+            for (const enemy of enemies) {
+                if (!isEnemyActive(enemy) || !enemy.isUndead) continue;
+                const save = rollD20(validateEnemySaveBonus(enemy.saveBonus) ?? DEFAULT_ENEMY_SAVE_BONUS, `${enemy.name} saves vs Turn Undead`);
+                rolls.push(save.roll);
+                const success = save.roll.total >= dc;
+                events.push({
+                    type: 'save', actor: enemy.name, description: 'save vs Turn Undead',
+                    rolled: save.roll.total, natural: save.natural, dc, success,
+                });
+                if (success) continue;
+                if ((character.level || 1) >= 5 && (enemy.maxHp || 0) <= 20) {
+                    enemy.hp = 0;
+                    enemy.condition = 'dead';
+                    events.push({ type: 'note', text: `**${enemy.name} is destroyed outright by the divine radiance.**` });
+                } else {
+                    applyEnemyConditionDelta(enemy, { add: ['frightened'], remove: [] }, events);
+                }
+            }
             continue;
         }
         if (slot.action === 'check' || slot.action === 'save') {
@@ -755,7 +1099,14 @@ function resolvePlayerSlots({ state, exchange, enemies, events, rolls }) {
             });
         }
     }
-    return { dodging, fled, deathSaveNatural };
+    const hasCharacterUpdates = Object.keys(support.characterUpdates).length > 0;
+    return {
+        dodging,
+        fled,
+        deathSaveNatural,
+        playerHealing: support.playerHealing,
+        characterUpdates: hasCharacterUpdates ? support.characterUpdates : null,
+    };
 }
 
 function resolveCompanionAttack(companion, target, events, rolls, situationalRuling = null, flankingEnemyIds = null) {
@@ -840,7 +1191,7 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
         targetType = 'companion';
         target = companion;
         targetName = companion.name;
-        targetAc = companion.ac ?? 10;
+        targetAc = (companion.ac ?? 10) + (companion.spellAcBonus || 0);
         targetDisadvantage = !!companion.defending;
         targetConditions = companion.conditions;
     } else if (playerHp <= 0 || character.isDead || character.lowLevelDefeat) {
@@ -974,6 +1325,28 @@ function terminalState(enemies, playerHp, character, deathSaveNatural = null, pa
     return lowLevelSolo ? 'defeat' : 'dying';
 }
 
+/**
+ * Merge a cast's character updates (spell slots, sustained spell, resources,
+ * condition deltas) into a character object. Shared by the exchange planner
+ * (same-turn preview so enemy attacks see the new AC/conditions) and the
+ * reducer's APPLY_COMBAT_EXCHANGE commit.
+ */
+export function mergeCharacterUpdates(character, updates) {
+    if (!updates) return character;
+    const { addConditions = [], removeConditions = [], ...direct } = updates;
+    const next = { ...character, ...direct };
+    let conditions = next.conditions || [];
+    if (removeConditions.length > 0) {
+        const removable = new Set(removeConditions.map(c => String(c).toLowerCase()));
+        conditions = conditions.filter(c => !removable.has(String(c).toLowerCase()));
+    }
+    if (addConditions.length > 0) {
+        const existing = new Set(conditions.map(c => String(c).toLowerCase()));
+        conditions = [...conditions, ...addConditions.filter(c => !existing.has(String(c).toLowerCase()))];
+    }
+    return { ...next, conditions };
+}
+
 /** Validate and resolve a committed player-centered combat exchange. */
 export function planCombatExchange(state, exchange) {
     if (!state.combat?.active || ![COMBAT_PHASES.AWAITING_PLAYER, COMBAT_PHASES.AWAITING_INTENT].includes(state.combat.phase)) {
@@ -992,14 +1365,20 @@ export function planCombatExchange(state, exchange) {
         const enemy = findByRef(enemies, update.target);
         if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, update, events);
     }
-    const player = resolvePlayerSlots({ state, exchange, enemies, events, rolls });
+    const player = resolvePlayerSlots({ state, exchange, enemies, companions, events, rolls });
+    // Casting changes the character mid-exchange (AC buffs, invisibility, spent
+    // slots); enemies acting later in this same exchange must see that state.
+    const castCharacter = mergeCharacterUpdates(state.character, player.characterUpdates);
+    const healedBaseHp = player.playerHealing > 0
+        ? Math.min(state.character.maxHP, state.character.currentHP + player.playerHealing)
+        : state.character.currentHP;
 
     if (player.fled) {
         const result = makeResult('exchange', exchangeId, state.combat.round, events, 'escaped', {
             enemies,
             companions,
             character: state.character,
-            playerHp: state.character.currentHP,
+            playerHp: healedBaseHp,
         });
         return {
             ok: true,
@@ -1008,6 +1387,8 @@ export function planCombatExchange(state, exchange) {
                 enemies,
                 party: companions,
                 playerDamage: 0,
+                playerHealing: player.playerHealing,
+                characterUpdates: player.characterUpdates,
                 deathSaveNatural: player.deathSaveNatural,
                 rolls,
                 result,
@@ -1034,12 +1415,13 @@ export function planCombatExchange(state, exchange) {
     // attacks, then expires before foes choose their new actions.
     for (const enemy of enemies) enemy.defending = false;
     const enemyResult = resolveEnemies({
-        state, exchange, enemies, companions,
-        playerHp: state.character.currentHP,
+        state: castCharacter === state.character ? state : { ...state, character: castCharacter },
+        exchange, enemies, companions,
+        playerHp: healedBaseHp,
         playerDodging: player.dodging,
         events, rolls,
     });
-    const terminal = terminalState(enemies, enemyResult.playerHp, state.character, player.deathSaveNatural, companions);
+    const terminal = terminalState(enemies, enemyResult.playerHp, castCharacter, player.deathSaveNatural, companions);
     const playerHp = player.deathSaveNatural === 20 ? Math.max(1, enemyResult.playerHp) : enemyResult.playerHp;
     const result = makeResult('exchange', exchangeId, state.combat.round, events, terminal, {
         enemies,
@@ -1055,6 +1437,8 @@ export function planCombatExchange(state, exchange) {
             enemies,
             party: companions,
             playerDamage: enemyResult.playerDamage,
+            playerHealing: player.playerHealing,
+            characterUpdates: player.characterUpdates,
             deathSaveNatural: player.deathSaveNatural,
             rolls,
             result,

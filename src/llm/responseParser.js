@@ -16,7 +16,7 @@ import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { CLASSES } from '../data/classes.js';
-import { validateEnemyAttackBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
+import { validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 import { normalizeItem } from '../data/items.js';
 
@@ -98,6 +98,9 @@ function validateCombatStart(combatStart) {
                 typeof e.attack_bonus === 'number' ? e.attack_bonus : e.attackBonus
             );
             const damage = sanitizeEnemyDamage(e.damage);
+            const saveBonus = validateEnemySaveBonus(
+                typeof e.save_bonus === 'number' ? e.save_bonus : e.saveBonus
+            );
             return {
                 id: canonicalEnemyId(e, index, usedIds),
                 name: e.name.trim().slice(0, 100),
@@ -107,6 +110,8 @@ function validateCombatStart(combatStart) {
                 initiative: (typeof e.initiative === 'number') ? e.initiative : cryptoRandInt(1, 20),
                 ...(attackBonus !== undefined && { attackBonus }),
                 ...(damage !== undefined && { damage }),
+                ...(saveBonus !== undefined && { saveBonus }),
+                isUndead: e.is_undead === true || e.isUndead === true,
             };
         });
 
@@ -264,6 +269,25 @@ export function parseResponse(response) {
     return { narrative, events };
 }
 
+/** Bounded spell_cast entries: a single object, a bare name, or an array of up to 3. */
+function normalizeSpellCasts(raw) {
+    const list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+    return list.slice(0, 3)
+        .map(entry => {
+            if (typeof entry === 'string') return entry.trim() ? { spell: entry.trim().slice(0, 80), slotLevel: null, target: null } : null;
+            if (!entry || typeof entry !== 'object') return null;
+            const spell = String(entry.spell || entry.name || entry.key || '').trim().slice(0, 80);
+            if (!spell) return null;
+            const rawLevel = entry.slot_level ?? entry.slotLevel;
+            return {
+                spell,
+                slotLevel: Number.isFinite(rawLevel) ? Math.max(1, Math.min(5, Math.round(rawLevel))) : null,
+                target: entry.target ? String(entry.target).trim().slice(0, 100) : null,
+            };
+        })
+        .filter(Boolean);
+}
+
 /**
  * Normalize and validate event data from the LLM.
  */
@@ -351,6 +375,8 @@ export function normalizeEvents(raw) {
         copperLost: clamp(raw.copper_lost, 0, 10000),
         expAwarded: clamp(raw.exp_awarded, 0, 10000),
         restTaken: typeof raw.rest_taken === 'string' ? raw.rest_taken : null,
+        // Out-of-combat casting: the engine validates the spell and spends the slot.
+        spellCasts: normalizeSpellCasts(raw.spell_cast ?? raw.spells_cast ?? raw.spell_casts),
         conditionsGained: Array.isArray(raw.conditions_gained) ? raw.conditions_gained : [],
         conditionsRemoved: Array.isArray(raw.conditions_removed) ? raw.conditions_removed : [],
         // Limited class abilities the player spent this turn (e.g. ["secondWind"]).
@@ -664,6 +690,10 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
 
     if (events.restTaken === 'short' || events.restTaken === 'long') {
         dispatch({ type: 'TAKE_REST', payload: events.restTaken });
+    }
+
+    for (const cast of events.spellCasts || []) {
+        dispatch({ type: 'CAST_SPELL', payload: withTransactionMeta(cast) });
     }
 
     for (const condition of events.conditionsGained) {

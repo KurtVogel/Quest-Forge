@@ -8,7 +8,24 @@ Format: date · decision · why. Newest first.
 
 ---
 
-**2026-07-15 · Durable records are frank in content, clinical in register: neutral anatomical vocabulary, never crude slang.**
+**2026-07-17 · Spellcasting v1: targets not shapes, real 5e slots capped at 5th-level spells, one sustained spell instead of concentration.**
+Implemented verbatim from the rpg-balance-master spec (saved in that agent's memory). Key
+settled choices: spell levels cap at 5 forever (5e's own 1st–5th slot growth stops at
+character level 10 — everything later feeds slots we cut, so the table is REAL 5e numbers,
+not inventions); AoE is always "up to 3 named targets, one shared damage roll, engine-rolled
+save per target" (flat per-enemy `saveBonus`, default +2 — never six ability scores);
+concentration is replaced by a single `character.sustainedSpell` (casting another sustained
+spell replaces it; any rest or combat's end clears it); Cleric's identity lever is the
+bonus-action heal lane (Healing Word + a normal action in one exchange turn — the caster
+parallel to Cunning Action/Action Surge); Sacred Flame is deliberately an attack roll, not a
+save (reuses the Fire Bolt path); Sleep is single-target (solo-game defanging); heal spells
+revive `dying` but NEVER `isDead` — Revivify/Raise Dead are cut permanently; utility spells
+are narrative-gated (engine spends the slot, DM adjudicates fiction); out-of-combat casting
+is the DM-emitted `spell_cast` event with a sourceId replay guard so a re-parsed cast can't
+double-spend. Death Ward deferred (the spec's own "cut first under scope pressure" flag).
+Slot state lives at `character.spellSlots` (NOT inside classResources — every classResources
+consumer assumes flat {used,max} entries; a nested per-level object would break the sheet UI
+and prompt lines).
 The old "MATCH THE REGISTER / call a spade a spade" rules made the Scribe family copy crude
 body words ("ass" etc.) verbatim into world facts, appearances, stances, and story cards —
 and those records re-enter EVERY future Gemini call (Scribe, embeddings, enrichment,

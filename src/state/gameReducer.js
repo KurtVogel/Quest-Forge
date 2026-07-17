@@ -26,9 +26,20 @@ import {
     namesMatch,
     NPC_DURABLE_TEXT_FIELDS,
 } from '../engine/npcRoster.js';
-import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../engine/enemyStats.js';
-import { COMBAT_PHASES, isEnemyActive, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
+import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy, validateEnemySaveBonus } from '../engine/enemyStats.js';
+import { COMBAT_PHASES, isEnemyActive, mergeCharacterUpdates, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 import { appendRecentCheck, buildRecentCheckEntry, normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../engine/roleplayCheck.js';
+import {
+    applyArcaneRecovery,
+    chooseSlotLevel,
+    isSpellcaster,
+    refillSpellSlots,
+    resolveSpellForCharacter,
+    sanitizeSpellSlots,
+    spellHealingNotation,
+    spendSpellSlot,
+    summarizeSpellSlots,
+} from '../engine/spellcasting.js';
 
 function sanitizeStoredExchangeResult(result) {
     if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
@@ -67,10 +78,24 @@ function sanitizeStoredExchangeResult(result) {
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
  * Protects against corrupted or old-format saves.
  */
+/** Casters loaded from any-era saves get an authoritative slot table and a sane sustained spell. */
+function healLoadedCharacter(character) {
+    if (!character || typeof character !== 'object') return null;
+    if (!isSpellcaster(character.class)) return character;
+    const sustained = character.sustainedSpell && typeof character.sustainedSpell === 'object' && character.sustainedSpell.key
+        ? character.sustainedSpell
+        : null;
+    return {
+        ...character,
+        spellSlots: sanitizeSpellSlots(character.level || 1, character.spellSlots),
+        sustainedSpell: sustained,
+    };
+}
+
 function validateSaveState(payload) {
     return {
         ...payload,
-        character: payload.character || null,
+        character: healLoadedCharacter(payload.character),
         inventory: Array.isArray(payload.inventory) ? payload.inventory : [],
         // narrationCue is an ephemeral request created by a player-triggered mechanic
         // (Second Wind / healing potion). Its visible system result belongs in the save,
@@ -111,6 +136,9 @@ function validateSaveState(payload) {
         recentRulings: (Array.isArray(payload.recentRulings) ? payload.recentRulings : [])
             .map(normalizeRollRuling).filter(Boolean).slice(-RECENT_RULING_LIMIT),
         recentChecks: sanitizeRecentChecks(payload.recentChecks),
+        recentSpellCasts: Array.isArray(payload.recentSpellCasts)
+            ? payload.recentSpellCasts.filter(entry => typeof entry === 'string').slice(-8)
+            : [],
         combat: (() => {
             const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)
                 ? payload.combat
@@ -473,9 +501,10 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
     // though the parser already ran); otherwise the roll resolver fills flat defaults at roll
     // time, so older saves whose enemies lack these fields still work.
     const attackProfile = normalizeEnemyAttackProfile(enemy);
-    // Drop the raw attackBonus/damage before spreading so an out-of-range value can't survive
-    // when the validated profile omits it; re-add only the sanitized fields.
-    const { attackBonus: _rawAb, damage: _rawDmg, ...rest } = enemy || {};
+    // Drop the raw attackBonus/damage/saveBonus before spreading so an out-of-range value
+    // can't survive when the validated profile omits it; re-add only the sanitized fields.
+    const { attackBonus: _rawAb, damage: _rawDmg, saveBonus: _rawSb, ...rest } = enemy || {};
+    const saveBonus = validateEnemySaveBonus(enemy?.saveBonus);
 
     return {
         ...rest,
@@ -485,11 +514,13 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
         hp,
         ac,
         ...attackProfile,
+        ...(saveBonus !== undefined && { saveBonus }),
         initiative,
         condition: enemyHealthCondition(hp, hp),
         conditions: normalizeEnemyConditions(enemy?.conditions),
         combatStatus: 'active',
         defending: false,
+        isUndead: !!enemy?.isUndead,
     };
 }
 
@@ -517,6 +548,31 @@ function applyEarlyDefeat(character) {
         lowLevelDefeat: true,
         deathSaves: { successes: 0, failures: 0 },
     }, 'Unconscious');
+}
+
+/**
+ * End the caster's sustained spell (combat over, rest taken): drop the buff,
+ * strip its condition from whoever carried it, and recompute AC without it.
+ */
+function clearSustainedSpellState(character, party, inventory) {
+    const sustained = character?.sustainedSpell;
+    if (!sustained) return { character, party };
+    let nextCharacter = { ...character, sustainedSpell: null };
+    if (sustained.condition && sustained.targetType !== 'companion') {
+        nextCharacter.conditions = (nextCharacter.conditions || [])
+            .filter(c => String(c).toLowerCase() !== String(sustained.condition).toLowerCase());
+    }
+    nextCharacter = { ...nextCharacter, armorClass: computeACFromInventory(inventory || [], nextCharacter) };
+    const nextParty = (party || []).map(companion => {
+        if (companion.id !== sustained.targetId) return companion;
+        const { spellAcBonus: _droppedBonus, ...cleaned } = companion;
+        if (sustained.condition) {
+            cleaned.conditions = (cleaned.conditions || [])
+                .filter(c => String(c).toLowerCase() !== String(sustained.condition).toLowerCase());
+        }
+        return cleaned;
+    });
+    return { character: nextCharacter, party: nextParty };
 }
 
 /** Bring a dying/stable character back to consciousness (healing or a nat-20 death save). */
@@ -553,6 +609,7 @@ export const initialGameState = {
     recentCoinGrants: [], // Coin twin of recentPurchases — prevents a reward re-emitted on a later turn from paying twice
     recentRulings: [], // Roleplay-check rulings that ended without dice — injected so the DM cannot re-propose overruled/set-aside checks from scratch
     recentChecks: [], // Compact out-of-combat check-proposal ledger — heat input for diceless-but-tense arcs (chases, heists)
+    recentSpellCasts: [], // "sourceId|spellKey" replay guard so a re-parsed spell_cast never double-spends a slot
     combat: {
         active: false,
         enemies: [],
@@ -1164,6 +1221,126 @@ export function gameReducer(state, action) {
             };
         }
 
+        case 'CAST_SPELL': {
+            // Out-of-combat casting (DM-emitted spell_cast event). The engine
+            // validates the spell, spends the slot, and rolls any dice; active
+            // combat casting goes through the combat exchange instead.
+            const payload = action.payload || {};
+            const character = state.character;
+            if (!character) return state;
+            if (state.combat?.active) {
+                return { ...state, messages: [...state.messages, systemMessage('Combat spells are cast through the combat exchange — the spell_cast event is ignored during a fight.')] };
+            }
+            const spell = resolveSpellForCharacter(character, payload.spell);
+            if (!spell) {
+                return { ...state, messages: [...state.messages, systemMessage(`"${String(payload.spell || '').slice(0, 60)}" is not on ${character.name || 'the hero'}'s engine-owned spell list — nothing was spent or applied.`)] };
+            }
+            if (!spell.outOfCombatAvailable) {
+                return { ...state, messages: [...state.messages, systemMessage(`${spell.name} only has a combat effect; outside battle no slot was spent.`)] };
+            }
+            const meta = payload._meta || {};
+            const sourceId = String(meta.sourceId || '').slice(0, 160);
+            const castKey = sourceId ? `${sourceId}|${spell.key}` : null;
+            if (castKey && (state.recentSpellCasts || []).includes(castKey)) return state;
+
+            let spellSlots = character.spellSlots || null;
+            let slotLevel = 0;
+            if (spell.level > 0) {
+                slotLevel = chooseSlotLevel(spellSlots, spell, payload.slotLevel ?? payload.slot_level);
+                if (slotLevel === null) {
+                    return { ...state, messages: [...state.messages, systemMessage(`${spell.name} fails — no level ${spell.level}+ spell slot remains. Rest to recover slots.`)] };
+                }
+                spellSlots = spendSpellSlot(spellSlots, slotLevel);
+            }
+
+            // Recipient: the hero by default, or a named living companion.
+            const targetRef = String(payload.target || '').trim();
+            const lcTarget = targetRef.toLowerCase();
+            const targetsSelf = !targetRef || ['self', 'me', 'player'].includes(lcTarget)
+                || lcTarget === String(character.name || '').toLowerCase();
+            const companion = !targetsSelf
+                ? (state.party || []).find(c => c.id === targetRef || c.name?.toLowerCase() === lcTarget)
+                : null;
+            if (!targetsSelf && spell.targeting.side === 'ally' && (!companion || companion.status === 'dead')) {
+                return { ...state, messages: [...state.messages, systemMessage(`${spell.name} has no valid recipient "${targetRef}" — nothing was spent or applied.`)] };
+            }
+
+            let nextCharacter = { ...character, ...(spell.level > 0 && { spellSlots }) };
+            let nextParty = state.party || [];
+            const lines = [`**${character.name || 'The hero'} casts ${spell.name}**${slotLevel > spell.level ? ` using a level ${slotLevel} slot` : ''}${spell.level > 0 ? ` (slots left: ${summarizeSpellSlots(spellSlots)})` : ''}.`];
+
+            if (spell.healing) {
+                const roll = rollNotation(spellHealingNotation(spell, character, slotLevel), spell.name);
+                if (companion) {
+                    const maxHp = companion.maxHp || companion.hp || 1;
+                    const hp = Math.min(maxHp, (companion.hp || 0) + roll.total);
+                    nextParty = nextParty.map(c => c.id === companion.id
+                        ? normalizeCompanion({ hp, status: companionStatus(hp, maxHp) }, c)
+                        : c);
+                    lines.push(`${companion.name} recovers **${roll.total}** HP (now ${hp}/${maxHp}). Rolled: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}.`);
+                } else {
+                    const healed = Math.min(character.maxHP, character.currentHP + roll.total);
+                    const gained = healed - character.currentHP;
+                    nextCharacter = gained > 0
+                        ? reviveCharacter({ ...nextCharacter, currentHP: healed })
+                        : nextCharacter;
+                    lines.push(`${character.name || 'The hero'} recovers **${gained}** HP (now ${healed}/${character.maxHP}). Rolled: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}.`);
+                }
+            } else if (spell.removeConditions) {
+                const matches = condition => spell.removeConditions === 'any'
+                    || spell.removeConditions.includes(String(condition).toLowerCase());
+                if (companion) {
+                    const removed = (companion.conditions || []).filter(matches);
+                    nextParty = nextParty.map(c => c.id === companion.id
+                        ? { ...c, conditions: (c.conditions || []).filter(condition => !matches(condition)) }
+                        : c);
+                    lines.push(removed.length > 0 ? `${companion.name} is cleansed of: ${removed.join(', ')}.` : `${companion.name} has no affliction the spell can lift.`);
+                } else {
+                    const removed = (character.conditions || []).filter(matches);
+                    nextCharacter = { ...nextCharacter, conditions: (nextCharacter.conditions || []).filter(condition => !matches(condition)) };
+                    lines.push(removed.length > 0 ? `${character.name || 'The hero'} is cleansed of: ${removed.join(', ')}.` : 'There is no affliction the spell can lift.');
+                }
+            } else if (spell.sustained) {
+                const released = clearSustainedSpellState(nextCharacter, nextParty, state.inventory);
+                nextCharacter = released.character;
+                nextParty = released.party;
+                const sustained = {
+                    key: spell.key,
+                    name: spell.name,
+                    ...(spell.acBonus && { acBonus: spell.acBonus }),
+                    ...(spell.condition && { condition: spell.condition }),
+                    targetType: companion ? 'companion' : 'self',
+                    ...(companion && { targetId: companion.id, targetName: companion.name }),
+                };
+                nextCharacter = { ...nextCharacter, sustainedSpell: sustained };
+                if (companion) {
+                    nextParty = nextParty.map(c => {
+                        if (c.id !== companion.id) return c;
+                        const buffed = { ...c };
+                        if (spell.acBonus) buffed.spellAcBonus = spell.acBonus;
+                        if (spell.condition) buffed.conditions = [...new Set([...(c.conditions || []), spell.condition])];
+                        return buffed;
+                    });
+                } else if (spell.condition) {
+                    nextCharacter = withCondition(nextCharacter, spell.condition);
+                }
+                nextCharacter = { ...nextCharacter, armorClass: computeACFromInventory(state.inventory || [], nextCharacter) };
+                lines.push(`It settles over ${companion ? companion.name : (character.name || 'the hero')}${spell.acBonus ? ` (+${spell.acBonus} AC)` : ''} and holds until another sustained spell, a rest, or the end of a fight.`);
+            } else if (spell.stabilizes) {
+                lines.push(`${companion ? companion.name : 'The recipient'} is stabilized if dying — no HP restored.`);
+            } else {
+                lines.push('The magic takes hold — the DM narrates what it reveals, opens, or aids.');
+            }
+
+            return {
+                ...state,
+                character: nextCharacter,
+                party: nextParty,
+                ...(castKey && { recentSpellCasts: [...(state.recentSpellCasts || []), castKey].slice(-8) }),
+                messages: [...state.messages, systemMessage(lines.join(' '))],
+            };
+        }
+
         case 'TAKE_REST': {
             if (state.character.isDead) {
                 return {
@@ -1214,6 +1391,26 @@ export function gameReducer(state, action) {
                 }
             }
 
+            // Spellcasting: a long rest refills every slot; a wizard's first short
+            // rest per long-rest cycle triggers Arcane Recovery automatically.
+            let newSpellSlots = state.character.spellSlots || null;
+            let recoveryNote = '';
+            if (newSpellSlots) {
+                if (isLong) {
+                    newSpellSlots = refillSpellSlots(newSpellSlots);
+                } else if (state.character.class === 'wizard' && (currentResources.arcaneRecovery?.used ?? 1) === 0) {
+                    const recovery = applyArcaneRecovery(newSpellSlots, state.character.level || 1);
+                    if (recovery.recovered > 0) {
+                        newSpellSlots = recovery.spellSlots;
+                        newResources.arcaneRecovery = { ...(currentResources.arcaneRecovery || { max: 1 }), used: 1 };
+                        recoveryNote = ` Arcane Recovery restores ${recovery.recovered} slot level${recovery.recovered === 1 ? '' : 's'} (${summarizeSpellSlots(newSpellSlots)}).`;
+                    }
+                }
+            }
+
+            // Any rest ends a sustained spell (the v1 concentration model).
+            const endedSustained = state.character.sustainedSpell || null;
+
             // Long Rests clear common minor conditions
             let currentConditions = state.character.conditions || [];
             if (isLong) {
@@ -1225,6 +1422,9 @@ export function gameReducer(state, action) {
             if (clearsEarlyDefeat) {
                 currentConditions = currentConditions.filter(c => c.toLowerCase() !== 'unconscious');
             }
+            if (endedSustained?.condition && endedSustained.targetType !== 'companion') {
+                currentConditions = currentConditions.filter(c => String(c).toLowerCase() !== String(endedSustained.condition).toLowerCase());
+            }
 
             // Build rest message
             const healedAmount = healed - state.character.currentHP;
@@ -1233,8 +1433,8 @@ export function gameReducer(state, action) {
                 timestamp: Date.now(),
                 role: 'system',
                 content: isLong
-                    ? `**Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}`
-                    : `**Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.`,
+                    ? `**Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${newSpellSlots ? ' Spell slots restored.' : ''}${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}`
+                    : `**Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.${recoveryNote}`,
                 ...(action.meta?.narrate && {
                     narrationCue: {
                         type: 'player_mechanic',
@@ -1247,36 +1447,51 @@ export function gameReducer(state, action) {
                 }),
             };
 
+            const spellFields = {
+                ...(newSpellSlots && { spellSlots: newSpellSlots }),
+                ...(endedSustained && { sustainedSpell: null }),
+            };
+            const restedBase = {
+                ...state.character,
+                currentHP: healed,
+                conditions: currentConditions,
+                classResources: newResources,
+                hitDice: newHitDice,
+                pendingActionSurge: false,
+                ...spellFields,
+            };
+            // Ending a sustained AC buff (Mage Armor / Shield of Faith) must
+            // immediately reflect in the stored armor class.
+            if (endedSustained?.acBonus && endedSustained.targetType !== 'companion') {
+                restedBase.armorClass = computeACFromInventory(state.inventory || [], restedBase);
+            }
+
             return {
                 ...state,
                 character: healed > 0 ? reviveCharacter({
-                    ...state.character,
-                    currentHP: healed,
+                    ...restedBase,
                     lowLevelDefeat: clearsEarlyDefeat ? false : state.character.lowLevelDefeat,
                     deathSaves: clearsEarlyDefeat ? { successes: 0, failures: 0 } : state.character.deathSaves,
-                    conditions: currentConditions,
-                    classResources: newResources,
-                    hitDice: newHitDice,
-                    pendingActionSurge: false,
-                }) : {
-                    ...state.character,
-                    currentHP: healed,
-                    conditions: currentConditions,
-                    classResources: newResources,
-                    hitDice: newHitDice,
-                    pendingActionSurge: false,
-                },
+                }) : restedBase,
                 party: (state.party || []).map(companion => {
                     if (companion.status === 'dead') return companion;
                     const maxHp = companion.maxHp || companion.hp || 1;
                     const companionHp = isLong
                         ? maxHp
                         : Math.min(maxHp, (companion.hp || 0) + Math.max(1, Math.ceil(maxHp * 0.25)));
-                    return normalizeCompanion({
+                    const restedCompanion = normalizeCompanion({
                         hp: companionHp,
                         conditions: isLong ? [] : companion.conditions,
                         status: companionStatus(companionHp, maxHp),
                     }, companion);
+                    if (endedSustained?.targetId === companion.id) {
+                        delete restedCompanion.spellAcBonus;
+                        if (endedSustained.condition) {
+                            restedCompanion.conditions = (restedCompanion.conditions || [])
+                                .filter(c => String(c).toLowerCase() !== String(endedSustained.condition).toLowerCase());
+                        }
+                    }
+                    return restedCompanion;
                 }),
                 messages: [...state.messages, restMsg],
             };
@@ -2434,6 +2649,11 @@ export function gameReducer(state, action) {
                     buildEncounterEntry(state, action.payload || {}),
                 ),
             };
+            // Combat's end releases the caster's sustained spell (v1 concentration).
+            if (newState.character?.sustainedSpell) {
+                const released = clearSustainedSpellState(newState.character, newState.party, newState.inventory);
+                newState = { ...newState, character: released.character, party: released.party };
+            }
 
             // Client-side XP fallback — only when NO XP was earned for this fight at all:
             // neither by the DM this turn (llmAwardedXp) nor at any point during it
@@ -2491,6 +2711,12 @@ export function gameReducer(state, action) {
             if (Number.isInteger(payload.deathSaveNatural)) {
                 next = gameReducer(next, { type: 'DEATH_SAVE_RESULT', payload: { die: payload.deathSaveNatural } });
             }
+            // Spell healing lands before enemy damage — that is the order the
+            // exchange resolved in (player casts, then foes act on the new HP).
+            if (Number.isFinite(payload.playerHealing) && payload.playerHealing > 0 && next.character) {
+                const healedTo = Math.min(next.character.maxHP, (next.character.currentHP || 0) + payload.playerHealing);
+                next = { ...next, character: reviveCharacter({ ...next.character, currentHP: healedTo }) };
+            }
             if (Number.isFinite(payload.playerDamage) && payload.playerDamage > 0) {
                 next = gameReducer(next, { type: 'TAKE_DAMAGE', payload: payload.playerDamage });
             }
@@ -2505,9 +2731,17 @@ export function gameReducer(state, action) {
             // roll summary — the dice caused the defeat, so the reader sees them first.
             const statusMessages = next.messages.slice(preExchangeMessageCount);
             const playerIdx = state.combat.turnOrder.findIndex(actor => actor.type === 'player');
-            const character = payload.consumeActionSurge && next.character?.pendingActionSurge
+            let character = payload.consumeActionSurge && next.character?.pendingActionSurge
                 ? { ...next.character, pendingActionSurge: false }
                 : next.character;
+            // Casting commits its character changes (spent slots, sustained buff,
+            // Channel Divinity, condition deltas) atomically with the exchange.
+            if (character && payload.characterUpdates) {
+                character = mergeCharacterUpdates(character, payload.characterUpdates);
+                if ('sustainedSpell' in payload.characterUpdates) {
+                    character = { ...character, armorClass: computeACFromInventory(next.inventory || [], character) };
+                }
+            }
             return {
                 ...next,
                 character,
@@ -2685,10 +2919,14 @@ export function gameReducer(state, action) {
                 martialArchetype: normalizeMartialArchetype(loadedCharacter.class, loadedCharacter.level, loadedCharacter.martialArchetype),
                 ...normalizeAbilityScoreImprovementState(loadedCharacter),
             } : loadedCharacter;
-            if (rawBackfilledCharacter) {
-                rawBackfilledCharacter.armorClass = computeACFromInventory(normalizedEquippedInventory, rawBackfilledCharacter);
+            // Casters from any-era saves get an authoritative slot table (and a sane
+            // sustained spell) BEFORE AC recompute and pending level-ups, both of
+            // which read those fields.
+            const spellHealedCharacter = healLoadedCharacter(rawBackfilledCharacter);
+            if (spellHealedCharacter) {
+                spellHealedCharacter.armorClass = computeACFromInventory(normalizedEquippedInventory, spellHealedCharacter);
             }
-            const pendingProgression = applyPendingLevelUpsOnLoad(rawBackfilledCharacter);
+            const pendingProgression = applyPendingLevelUpsOnLoad(spellHealedCharacter);
             const backfilledCharacter = pendingProgression.character;
             // Validate required state shape
             const validated = validateSaveState(action.payload);

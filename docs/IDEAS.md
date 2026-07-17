@@ -472,16 +472,22 @@ Shipped in `combatExchange.js` and character creation:
 Still open after memory tuning: out-of-combat stealth/sleight edge cases, narrative feel of
 Sneak Attack setup, and whether Cunning Action needs UI hints beyond combat validation.
 
-### Spellcasting (Wizard/Cleric) — status: `idea`, deferred until memory layer is proven
-Hard part is NOT geometry — solve theater-of-mind areas by **modeling targets, not shapes**:
-"fireball hits the goblins you name; each makes a DEX save" (saves are engine-owned now).
-The real work is slots + curated spell lists (~15 spells per caster in `src/data/spells.js`),
-tracked like `classResources`. DM emits `spell_cast`; engine validates and decrements.
+### Spellcasting (Wizard/Cleric) — status: v1 `shipped` (2026-07-17)
+Shipped exactly on the "targets, not shapes" design, from the rpg-balance-master spec
+(`.claude/agent-memory/rpg-balance-master/spellcasting_v1_spec.md`): 29 curated spells in
+`src/data/spells.js` (15 wizard damage/control, 14 cleric heal/support/undead), real 5e slot
+table capped at 5th-level spells (frozen after character level 10), engine-owned save DCs and
+enemy saves (flat `saveBonus`, default +2), cantrip scaling, upcast = +1 die per slot level,
+no concentration — one `sustainedSpell` per caster (Mage Armor/Shield of Faith/Invisibility),
+Cleric bonus-action heal lane (Healing Word beside a normal action), Channel Divinity as a
+real `channel` Turn/Destroy Undead action, Arcane Recovery on the wizard's first short rest
+per cycle, out-of-combat `spell_cast` event with sourceId replay guard, LOAD_GAME heals
+pre-spellcasting caster saves, and a Spellcasting panel on the character sheet. Verified live
+end to end on the playtest #3 cleric save.
 
-**Why wait:** Fighter and Rogue combat are now solid; Wizard/Cleric multiply engine profiles,
-save subphases, and slot tracking. The LLM memory stack (fronts, story memory, RAG, journal,
-location ledger) is the differentiator — polish that in live play before opening the caster
-surface area. See DECISIONS.md 2026-06-23.
+**Deferred from the spec:** Death Ward (the spec itself marks it "cut first under scope
+pressure" — needs clamp checks at every damage site). **Still open for v2:** wizard ritual
+flavor, NPC/enemy casters, scroll/wand items, spell-driven scene-art moments.
 
 ### Character portraits — status: player portrait v1 `shipped` (2026-06-15), NPC portraits `idea`
 Shipped v1: the Character Profile has a Portrait section where the player confirms the hero's

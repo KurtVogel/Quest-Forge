@@ -1,6 +1,7 @@
 import { CLASSES } from '../data/classes.js';
 import { getModifier } from './rules.js';
 import { buildClassResources, getFeaturesForLevel, normalizeAbilityScoreImprovementState, normalizeMartialArchetype } from './characterUtils.js';
+import { buildSpellSlots, isSpellcaster } from './spellcasting.js';
 
 export const MAX_CHARACTER_LEVEL = 20;
 
@@ -63,6 +64,9 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
         currentHP: newMaxHP,
         features: updatedFeatures,
         classResources: buildClassResources(character.class, newLevel),
+        // Spent slots carry over — a level-up mid-day grows the slot table but
+        // never silently refills the day's magic.
+        ...(isSpellcaster(character.class) && { spellSlots: buildSpellSlots(newLevel, character.spellSlots) }),
         martialArchetype: normalizeMartialArchetype(character.class, newLevel, character.martialArchetype),
         hitDice: { ...hitDice, total: newLevel, remaining: newLevel },
     };
