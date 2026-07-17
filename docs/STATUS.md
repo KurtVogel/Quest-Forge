@@ -4,10 +4,41 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-17 evening (playtest #4 — a full wizard campaign exercising spellcasting
-v1 live; the whole caster loop held, three P1s found and fixed same session: JSON-only spell_cast
-responses, cross-message cast replay double-spend, and chat autoscroll scrolling the
-overflow-hidden app shell. 919 tests + lint green, deployed.)_
+_Last updated: 2026-07-17 night (playtest #5 — the level-5 wizard tier: level-up-on-load from
+banked XP, the ASI flow, Fireball with engine saves and half damage, honored upcasting, 2d10
+cantrip scaling, the full dying→death-save→stabilize arc at L5, and Arcane Recovery's best-first
+3-level budget. Zero engine bugs, zero console errors. Docs-only session, no deploy needed.)_
+
+## Playtest #5: the level-5 wizard tier (2026-07-17, late)
+
+Continuation of playtest #4's campaign, promoted to level 5 by banking 6,500 XP directly into
+the save and reloading — deliberately exercising the real "old save with unapplied XP" load
+path. **Everything worked; no engine bugs found this session.** Verified live:
+
+- **Level-up-on-load**: four visible Level Up! messages, fixed-average HP to 27, features in
+  order (Arcane Tradition, 2nd-Level Spells, ASI, 3rd-Level Spells), slot table grown to
+  L1 4 / L2 3 / L3 2 **without refilling the two spent L1 slots**, known spells 6 → 11.
+- **ASI flow**: sidebar badge → +/- panel → +2 INT applied → INT 17, Save DC 13 → 14, spell
+  attack +5 → +6, recomputed everywhere.
+- **Fireball**: L3 slot spent, engine-rolled enemy save (16 vs DC 14), **half damage on the
+  save** (10 of 20). The DM sensibly modeled the six-guard escort as one companion actor
+  ("Harelu Guards", 45 HP pool) that fought, took hits, and landed the killing crit.
+- **Upcasting honored**: "Magic Missile through a second-level slot" spent exactly the L2 slot.
+- **Cantrip scaling**: Fire Bolt rolled `2d10` at character level 5.
+- **The L5 dying arc**: the hulk dropped Ilmo at 0 HP → DYING (not the L1 setback — correct
+  tier), three engine-rolled death saves (nat 17/12/18) → stabilized unconscious at 0 HP, the
+  enemy correctly barred from attacking the downed player (switched to the guards), guards
+  finished the fight, +172 XP, encounter ledger "victory", Mage Armor released at combat end.
+- **Arcane Recovery at L5**: short rest rolled all 5 hit dice (25 HP) and the 3-slot-level
+  budget restored the spent L3 slot best-first; once-per-long-rest flag held.
+- The playtest #4 autoscroll fix held all session (app shell never scrolled).
+
+Observations, no action taken: 172 XP for a 65-HP boss against a 7,500 XP level gap reads slow
+if solo bosses are the diet — worth an rpg-balance-master look only if real campaigns feel
+grindy at mid levels. The combat panel's entrance animation froze mid-flight again under the
+occluded dev browser pane (compositor not ticking) — believed pane-artifact, watch on phones.
+Still unexercised live: Hold Person control + condition-lifting pace, Scorching Ray multi-target
+(unit-tested), and the whole cleric half in combat (Healing Word bonus lane, Turn Undead).
 
 ## Playtest #4: wizard campaign — spellcasting v1 live (2026-07-17)
 
