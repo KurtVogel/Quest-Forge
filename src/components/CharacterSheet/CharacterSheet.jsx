@@ -9,6 +9,7 @@ import { generatePortraitImage } from '../../llm/providers/imageGen.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
 import { getKnownSpells, getSpellAttackBonus, getSpellSaveDC, isSpellcaster } from '../../engine/spellcasting.js';
+import CharacterScreen from './CharacterScreen.jsx';
 import './CharacterSheet.css';
 
 function buildPortraitPrompt(character, appearance, equippedItems = []) {
@@ -27,6 +28,7 @@ export default function CharacterSheet() {
     const [isExpanded, setIsExpanded] = useState(false);
     const [showSkills, setShowSkills] = useState(false);
     const [showSpells, setShowSpells] = useState(false);
+    const [showFullScreen, setShowFullScreen] = useState(false);
     const [portraitDraft, setPortraitDraft] = useState('');
     const [isGeneratingPortrait, setIsGeneratingPortrait] = useState(false);
     const [portraitError, setPortraitError] = useState('');
@@ -179,14 +181,29 @@ export default function CharacterSheet() {
 
     return (
         <div className="character-sheet">
-            <button
-                className="cs-dropdown-btn"
-                onClick={() => setIsExpanded(!isExpanded)}
-            >
-                <span className="cs-dropdown-title">Character Profile</span>
-                {pendingAsi > 0 && <span className="cs-dropdown-badge">ASI</span>}
-                <span className="cs-dropdown-icon">{isExpanded ? '▲' : '▼'}</span>
-            </button>
+            <div className="cs-header-row">
+                <button
+                    className="cs-dropdown-btn"
+                    onClick={() => setIsExpanded(!isExpanded)}
+                >
+                    <span className="cs-dropdown-title">Character Profile</span>
+                    {pendingAsi > 0 && <span className="cs-dropdown-badge">ASI</span>}
+                    <span className="cs-dropdown-icon">{isExpanded ? '▲' : '▼'}</span>
+                </button>
+                <button
+                    className="cs-fullscreen-btn"
+                    onClick={() => setShowFullScreen(true)}
+                    title="Open the full character screen"
+                >
+                    ⛶
+                </button>
+            </div>
+            <CharacterScreen
+                character={character}
+                inventory={state.inventory}
+                isOpen={showFullScreen}
+                onClose={() => setShowFullScreen(false)}
+            />
 
             {isExpanded && (
                 <div className="cs-expanded-content">

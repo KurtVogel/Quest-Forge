@@ -538,7 +538,17 @@ attack/defend/flee/surrender. Expand without returning dice authority to the LLM
 
 ## UX & Platform
 
-### Character screen redesign — dedicated, "engine-y" sheet with legible skills — status: `idea` (2026-06-28)
+### Character screen redesign — dedicated, "engine-y" sheet with legible skills — status: v1 `shipped` (2026-07-17)
+Shipped as a full-screen overlay (`CharacterScreen.jsx`, ⛶ button beside the Character Profile
+header): portrait hero band with HP/XP bars, derived-stat chips (AC/initiative/proficiency/
+speed/hit dice/wealth), six ability blocks with save modifiers and proficiency markers, an
+**all-18-skills color-coded grid** (gold expertise / green proficient / muted untrained, with
+legend), resources, full spellcasting state (DC, attack, slots, sustained spell, spell pills),
+features/traits, equipped gear with mechanics, pack, and established appearance. Read-only by
+design — every number engine-computed; mutations (ASI, rests, portrait) stay in the compact
+panel. Rendered via a portal to <body> so the mobile drawer's transform can't trap it; verified
+at 375px and desktop. Remaining ideas below were NOT done: a real route (it's an overlay), and
+the creation-flow "hero reveal" is its own idea (next entry). Original thinking:
 The character view is currently a cascading panel; it should feel like a real game's character
 **screen**, not a side panel. Two parts, both partly inspired by Old Greg's Tavern:
 - **Visible, first-class skills.** Surface all skills with their computed values inline
