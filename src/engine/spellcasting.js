@@ -200,13 +200,20 @@ export function summarizeSpellSlots(spellSlots) {
 export function describeSpellcastingForPrompt(character) {
     if (!isSpellcaster(character?.class) || !character.spellSlots) return '';
     const known = getKnownSpells(character);
+    const targetingTag = targeting => {
+        if (!targeting) return '';
+        if (targeting.side === 'self') return ', self';
+        const noun = targeting.side === 'ally' ? 'ally' : 'foe';
+        if (targeting.mode === 'upTo3') return `, up to 3 ${noun === 'ally' ? 'allies' : 'foes'}`;
+        return `, ONE ${noun}`;
+    };
     const lines = known.map(spell => {
         const cost = spell.level === 0 ? 'cantrip, at will' : `level ${spell.level} slot`;
         const timing = spell.castTime === 'bonus' ? ', bonus action' : '';
         const scope = spell.combatAvailable && spell.outOfCombatAvailable
             ? ''
             : spell.combatAvailable ? ' [combat only]' : ' [out of combat only]';
-        return `- ${spell.name} (${cost}${timing})${scope}: ${spell.summary}`;
+        return `- ${spell.name} (${cost}${timing}${targetingTag(spell.targeting)})${scope}: ${spell.summary}`;
     });
     return [
         `Spell slots remaining: ${summarizeSpellSlots(character.spellSlots)}. Spell save DC ${getSpellSaveDC(character)}, spell attack +${getSpellAttackBonus(character)}.`,

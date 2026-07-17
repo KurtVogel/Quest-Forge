@@ -4,8 +4,52 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-17 (enemy targeting discipline + companion Guard stance — see below;
-earlier same day: playtest #6, the cleric combat half, zero engine bugs.)_
+_Last updated: 2026-07-17 (playtest #7 verified Guard + targeting live and surfaced a P1
+low-level-solo semantic divergence, fixed same session; deployed.)_
+
+## Playtest #7: Guard stance + targeting discipline live (2026-07-17)
+
+Two purpose-built wizard-with-bodyguard campaigns on the dev build (Gemini DM), bracketing
+the same-day Guard/targeting ship. **The headline features work end to end in real play:**
+
+- **Fiction-grounded enemy targeting**: in a 4-foe ambush, the three melee foes fought the
+  charging shieldswoman while only the free fourth man went for the caster — no more
+  everyone-attacks-the-hero. After the companion dropped, foes correctly turned to the live
+  threat (no finishing blows — the new rule holding).
+- **Guard, complete loop**: the player said "Osma — shield me, hold the line"; the DM
+  declared the `guard` intent; the engine announced the stance, redirected BOTH player-aimed
+  attacks into the guardian (rolled vs her AC 16, 8 damage soaked, wizard untouched) with
+  "(guard — X intercepts the blow meant for the hero)" annotations; narration honored it
+  ("refusing to swing, becoming nothing but a living wall just as you ordered"); next round
+  the stance correctly expired and she fought normally. Zero console errors.
+
+Findings fixed same session (931 tests + lint green):
+
+1. **P1 low-level-solo semantic divergence** — the reducer (`isLowLevelSolo`), the prompt's
+   HARD SYSTEM CONSTRAINT block, and its DM reminder all used `party.length === 0`, while the
+   exchange engine's `terminalState` used "no ACTIVE companion". Live result: two crits downed
+   the level-2 bodyguard, then the level-1 wizard dropped — the engine closed combat as a
+   defeat-setback while the reducer simultaneously started death saves, stranding the hero
+   dying outside combat (and the DM had never been shown the solo-safety block that fight).
+   All four sites now share the engine's active-companion semantic (`isCompanionActive`
+   exported from combatExchange.js), and LOAD_GAME heals already-stranded saves (dying +
+   combat inactive + low-level + no battle-ready companion → defeat setback). Heal verified
+   live on the poisoned autosave.
+2. **P1 single-target spell over-targeting wasted turns** — Gemini pattern-matched 5e's AoE
+   Sleep onto our single-target Sleep TWICE in one fight (even after an explicitly
+   single-target player retry); each hard reject cost a dead turn + an LLM round-trip. The
+   validator now lets the resolvers clamp to the spell's real target count (first named
+   targets win) with a visible "affects only one target" note; the SPELLCASTING list gained
+   explicit per-spell targeting tags (", ONE foe" / ", up to 3 foes" / ", self"), and the
+   cast-slot template forbids `targets` arrays for single-target spells.
+3. **P2 downed companion narrated dead** — with the bodyguard mechanically DOWNED
+   (recoverable), the DM narrated her death as a side remark without `remove_companions`,
+   splitting fiction from state. The COMPANIONS prompt block now states a DOWNED companion is
+   unconscious but ALIVE, and deliberate companion death MUST emit `remove_companions` in the
+   same response.
+
+Both playtest campaigns remain in the dev browser's local saves ("The Weir-Toll Road" —
+capture arc in progress, "Grave-Cold Hollow" — mid-fight).
 
 ## Enemy targeting discipline + companion Guard stance (2026-07-17)
 
@@ -25,8 +69,9 @@ rpg-balance-master before shipping. Two halves:
   through), incapacitation-gated, stance flags reset each exchange and at combat start.
   Deliberately no defend-disadvantage stacking (defend and guard keep distinct niches).
   Narration post-state now lists COMPANION ALIVE/DOWN lines so a downed guardian can't be
-  mis-narrated. 6 new tests (925 total) + lint green. **Watch in the next companion playtest:**
-  does the DM actually vary targets now, and does it declare guard when the player commands it.
+  mis-narrated. 6 new tests + lint green. **Both open questions answered same day by
+  playtest #7 (above): the DM varies targets from the fiction, and declares guard on the
+  player's command — full loop verified live.**
 
 ## Playtest #6: cleric combat half (2026-07-17, late night)
 
@@ -753,7 +798,7 @@ memory layer remains the money-maker to keep polishing.
 
 ## Verification
 
-- `npm test` — **925** tests passing (63 files)
+- `npm test` — **931** tests passing (63 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)

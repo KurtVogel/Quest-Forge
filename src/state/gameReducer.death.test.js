@@ -68,6 +68,68 @@ describe('dropping to 0 HP', () => {
         expect(next.character.currentHP).toBe(7);
         expect(next.character.dying).toBeFalsy();
     });
+
+    it('a downed companion does not disable the low-level defeat protection', () => {
+        const state = {
+            ...levelOneSolo(),
+            party: [{ id: 'tor', name: 'Torvald', hp: 0, maxHp: 18, status: 'downed' }],
+        };
+        const next = gameReducer(state, { type: 'TAKE_DAMAGE', payload: 99 });
+        expect(next.character.dying).toBe(false);
+        expect(next.character.lowLevelDefeat).toBe(true);
+        expect(next.messages.some(m => m.content.includes('severe setback'))).toBe(true);
+    });
+
+    it('an active companion engages the real dying machine at low level', () => {
+        const state = {
+            ...levelOneSolo(),
+            party: [{ id: 'tor', name: 'Torvald', hp: 12, maxHp: 18, status: 'healthy' }],
+        };
+        const next = gameReducer(state, { type: 'TAKE_DAMAGE', payload: 99 });
+        expect(next.character.dying).toBe(true);
+        expect(next.character.lowLevelDefeat).toBeFalsy();
+    });
+});
+
+describe('LOAD_GAME dying-outside-combat heal', () => {
+    it('converts a stranded low-level dying save with no battle-ready companion into the defeat setback', () => {
+        const save = {
+            character: {
+                name: 'Aune', race: 'elf', class: 'wizard', level: 1,
+                currentHP: 0, maxHP: 8, armorClass: 12,
+                abilityScores: { strength: 8, dexterity: 13, constitution: 14, intelligence: 15, wisdom: 12, charisma: 10 },
+                dying: true, deathSaves: { successes: 0, failures: 0 }, conditions: ['Unconscious'],
+            },
+            inventory: [],
+            messages: [],
+            party: [{ id: 'tor', name: 'Torvald', hp: 0, maxHp: 18, status: 'downed' }],
+            combat: { active: false },
+            settings: {},
+        };
+        const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: save });
+        expect(next.character.dying).toBe(false);
+        expect(next.character.lowLevelDefeat).toBe(true);
+        expect(next.character.currentHP).toBe(0);
+    });
+
+    it('leaves a genuinely dying higher-level save untouched', () => {
+        const save = {
+            character: {
+                name: 'Veteran', race: 'human', class: 'fighter', level: 5,
+                currentHP: 0, maxHP: 40, armorClass: 16,
+                abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 },
+                dying: true, deathSaves: { successes: 1, failures: 1 }, conditions: ['Unconscious'],
+            },
+            inventory: [],
+            messages: [],
+            party: [],
+            combat: { active: false },
+            settings: {},
+        };
+        const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: save });
+        expect(next.character.dying).toBe(true);
+        expect(next.character.deathSaves).toEqual({ successes: 1, failures: 1 });
+    });
 });
 
 describe('damage while dying', () => {

@@ -265,7 +265,7 @@ export function isEnemyActive(enemy) {
         && enemy.combatStatus !== 'surrendered';
 }
 
-function isCompanionActive(companion) {
+export function isCompanionActive(companion) {
     return !!companion
         && (companion.hp ?? 0) > 0
         && companion.status !== 'downed'
@@ -646,12 +646,14 @@ function validatePlayerSlots(exchange, state) {
             if (spell.level > 0 && chooseSlotLevel(state.character.spellSlots, spell, slot.slotLevel) === null) {
                 return { ok: false, error: `No spell slot remains to cast ${spell.name} (needs a level ${spell.level}+ slot).` };
             }
+            // Over-targeting a limited spell is NOT a rejection: the resolvers clamp to
+            // the spell's real target count (first named targets win) with a visible
+            // note. A hard reject here cost the player a dead turn every time the DM
+            // pattern-matched 5e's AoE Sleep onto our single-target version (2026-07-17
+            // live playtest — it happened twice in one fight).
             if (spell.targeting.side === 'enemy') {
                 const targets = castTargetRefs(slot);
                 if (targets.length === 0) return { ok: false, error: `${spell.name} needs a living enemy target.` };
-                if (spell.targeting.mode === 'single' && targets.length > 1) {
-                    return { ok: false, error: `${spell.name} affects a single target.` };
-                }
                 for (const target of targets) {
                     if (!findByRef(living, target)) {
                         return { ok: false, error: `Spell target "${target}" is not an active enemy in this fight.` };
@@ -659,9 +661,6 @@ function validatePlayerSlots(exchange, state) {
                 }
             } else if (spell.targeting.side === 'ally') {
                 const targets = castTargetRefs(slot, ['self']);
-                if (spell.targeting.mode === 'single' && targets.length > 1) {
-                    return { ok: false, error: `${spell.name} affects a single ally.` };
-                }
                 for (const target of targets) {
                     if (!resolveAllyTarget(state.character, state.party || [], target)) {
                         return { ok: false, error: `Spell target "${target}" is not the hero or a living companion.` };
@@ -706,10 +705,15 @@ function resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events,
     const named = castTargetRefs(slot)
         .map(target => findByRef(enemies, target))
         .filter(isEnemyActive);
-    const targets = [...new Map(named.map(enemy => [enemy.id, enemy])).values()].slice(0, targetLimit);
+    const uniqueNamed = [...new Map(named.map(enemy => [enemy.id, enemy])).values()];
+    const targets = uniqueNamed.slice(0, targetLimit);
     if (targets.length === 0) {
         events.push({ type: 'note', text: `${spell.name} has no valid target and is not redirected.` });
         return;
+    }
+    if (uniqueNamed.length > targets.length) {
+        // The DM over-targeted a limited spell; clamp instead of wasting the turn.
+        events.push({ type: 'note', text: `${spell.name} affects ${targetLimit === 1 ? 'only one target' : `up to ${targetLimit} targets`} — resolved against ${targets.map(enemy => enemy.name).join(', ')}; the others are unaffected.` });
     }
 
     if (spell.resolution === 'attack') {
@@ -812,6 +816,9 @@ function resolveSupportSpell({ spell, slotLevel, slot, character, companions, ev
     const updates = support.characterUpdates;
     const targetLimit = spell.targeting.mode === 'upTo3' ? 3 : 1;
     const refs = spell.targeting.side === 'self' ? ['self'] : castTargetRefs(slot, ['self']);
+    if (refs.length > targetLimit) {
+        events.push({ type: 'note', text: `${spell.name} affects ${targetLimit === 1 ? 'only one recipient' : `up to ${targetLimit} recipients`}; extra targets are unaffected.` });
+    }
     const resolved = [];
     for (const targetRef of refs.slice(0, targetLimit)) {
         const ally = resolveAllyTarget(character, companions, targetRef);

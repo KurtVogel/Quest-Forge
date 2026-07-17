@@ -183,9 +183,14 @@ describe('low-level solo safety block', () => {
         expect(text).not.toContain('HARD SYSTEM CONSTRAINT — LOW-LEVEL SOLO SAFETY');
     });
 
-    it('is omitted when the character has a party even at low level', () => {
-        const text = prompt({ character: makeCharacter({ level: 1 }), party: [{ id: 'c1', name: 'Garrick' }] });
+    it('is omitted when the character has a battle-ready companion even at low level', () => {
+        const text = prompt({ character: makeCharacter({ level: 1 }), party: [{ id: 'c1', name: 'Garrick', hp: 12, maxHp: 18, status: 'healthy' }] });
         expect(text).not.toContain('HARD SYSTEM CONSTRAINT — LOW-LEVEL SOLO SAFETY');
+    });
+
+    it('stays active when the only companion is downed — the hero is effectively solo', () => {
+        const text = prompt({ character: makeCharacter({ level: 1 }), party: [{ id: 'c1', name: 'Garrick', hp: 0, maxHp: 18, status: 'downed' }] });
+        expect(text).toContain('HARD SYSTEM CONSTRAINT — LOW-LEVEL SOLO SAFETY');
     });
 });
 

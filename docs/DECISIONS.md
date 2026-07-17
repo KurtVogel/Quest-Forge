@@ -8,6 +8,28 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-17 · "Low-level solo" means no battle-ready companion — one semantic, four sites.**
+Playtest #7 exposed the divergence live: the exchange engine's `terminalState` treated a
+hero whose only companion was DOWNED as solo (defeat-setback at 0 HP), while the reducer's
+`isLowLevelSolo`, the prompt's HARD SYSTEM CONSTRAINT gate, and its DM reminder all used
+`party.length === 0` (any companion, even downed, disabled the safety). Result: combat
+closed as a setback while death saves started, stranding a level-1 hero dying outside
+combat — and the DM never saw the solo-safety guidance during the fight that did it. Settled:
+the engine's semantic wins everywhere — a companion who cannot fight (downed/dead/0 HP)
+leaves the hero exactly as exposed as having none, so all four sites now share
+`isCompanionActive` (exported from combatExchange.js). LOAD_GAME converts already-stranded
+saves (dying + combat inactive + level ≤2 + no battle-ready companion) into the defeat
+setback. Corollaries settled in the same pass: (a) **over-targeting a limited spell clamps,
+never rejects** — the resolvers take the first named target(s) up to the spell's real count
+with a visible note, because a hard reject costs the player a dead turn + an LLM round-trip
+every time the DM pattern-matches 5e's AoE Sleep onto our single-target version (it happened
+twice in one fight; validators still reject *invalid* targets); the SPELLCASTING list carries
+explicit per-spell targeting tags and the cast template forbids `targets` arrays on
+single-target spells. (b) **A DOWNED companion is alive by contract** — the COMPANIONS block
+tells the DM a downed companion is unconscious but recoverable and that deliberately killing
+one REQUIRES `remove_companions` in that same response, after the DM narrated a downed
+bodyguard's death as a side remark and left fiction and state disagreeing.
+
 **2026-07-17 · Enemy targeting comes from the fiction + companion `guard` stance (engine-owned interception).**
 Playtest observation: enemies attacked the hero every round even with a warrior companion in
 the front line. The engine had supported companion-targeted `enemy_intents` all along — but

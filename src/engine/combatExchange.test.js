@@ -946,6 +946,24 @@ describe('spellcasting v1 combat exchanges', () => {
         expect(noSlots).toMatchObject({ ok: false, error: expect.stringContaining(`No spell slot remains`) });
     });
 
+    it('clamps an over-targeted single-target spell to its first target instead of rejecting the turn', () => {
+        rollQueue.push(2); // one save for the clamped target only — 2 + 2 = 4 vs DC, fail
+        const plan = planCombatExchange(
+            wizardState({ enemies: [enemy(`A`), enemy(`B`), enemy(`C`)] }),
+            normalizeCombatExchange({
+                player_slots: [{ action: `cast`, spell: `sleep`, targets: [`A`, `B`, `C`] }],
+                enemy_intents: [],
+            })
+        );
+        expect(plan.ok).toBe(true);
+        const [a, b, c] = plan.payload.enemies;
+        expect(a.conditions).toContain(`unconscious`);
+        expect(b.conditions || []).not.toContain(`unconscious`);
+        expect(c.conditions || []).not.toContain(`unconscious`);
+        expect(plan.payload.result.summary).toContain(`Sleep affects only one target`);
+        expect(plan.payload.characterUpdates.spellSlots[1].used).toBe(1);
+    });
+
     it('lets a cleric pair a bonus-action heal with a normal action, but never two action spells', () => {
         // Sacred flame attack roll 15 (+6=21 hits), damage 2d8 (4,4), healing word 1d4 (3).
         rollQueue.push(15, 4, 4, 3);

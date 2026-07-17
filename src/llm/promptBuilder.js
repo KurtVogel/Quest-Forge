@@ -17,6 +17,7 @@ import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 import { TABLE_TALK_STANDING_RULE } from './tableTalk.js';
 import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js';
 import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
+import { isCompanionActive } from '../engine/combatExchange.js';
 
 /**
  * Build the complete system prompt for the LLM.
@@ -425,7 +426,7 @@ COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
 - Every committed player turn includes exactly one \`combat_exchange\`. A question or clarification includes none, so nobody acts.
 - \`player_slots\`: normally exactly one; when ACTION SURGE ACTIVE is shown, exactly two. Each slot is independently \`attack\`, \`cast\`, \`channel\`, \`check\`, \`save\`, \`dodge\`, \`dash\`, \`disengage\`, \`flee\`, \`interact\`, \`pass\`, or \`death_save\`.
 - An Attack slot uses \`strikes: [{"target":"<living enemy id>"}]\`. A Fighter with Extra Attack may name two strikes in one Attack slot, including different targets. Action Surge grants another action slot, not automatically another attack.
-- A Cast slot uses \`{"action":"cast","spell":"<spell name from the SPELLCASTING list>","target":"<living enemy id, companion name, or self>","targets":["<up to 3 ids for multi-target spells>"],"slot_level":<optional upcast level>}\`. Only spells on the character's SPELLCASTING list exist; the engine owns every roll, save DC, slot cost, and effect. Unsupported spells must be clarified rather than assigned invented mechanics.
+- A Cast slot uses \`{"action":"cast","spell":"<spell name from the SPELLCASTING list>","target":"<living enemy id, companion name, or self>","slot_level":<optional upcast level>}\`. Respect each spell's target count from its SPELLCASTING entry: a spell tagged "ONE foe/ally" takes a single \`target\` (never a \`targets\` array — the engine resolves only the first and ignores the rest); only spells tagged "up to 3" may use \`"targets":["<id>", ...]\`. Only spells on the character's SPELLCASTING list exist; the engine owns every roll, save DC, slot cost, and effect. Unsupported spells must be clarified rather than assigned invented mechanics.
 - A Wizard/Cleric may add ONE bonus-action spell (marked "bonus action" in their list, e.g. Healing Word) as a second player slot alongside one normal action — the caster's equivalent of Cunning Action. Never two bonus spells, never two action spells.
 - A \`channel\` slot is the Cleric's Turn Undead (level 2+): no target field; the engine rolls a save for every active undead foe. Declare it only when undead are actually present.
 - A Check/Save slot uses \`{"action":"check|save","skill":"<skill or ability>","dc":<5-30>}\` for a genuinely uncertain non-attack action committed during combat. The engine rolls it before companion/enemy intents; do not also use requested_rolls.
@@ -626,7 +627,8 @@ ${party.map(c => {
         const status = c.status || (c.hp <= 0 ? 'downed' : 'healthy');
         const conditions = c.conditions?.length ? ` | Conditions: ${c.conditions.join(', ')}` : '';
         return `- **${c.name}** (id: ${c.id}) | Role: ${c.role || 'ally'} | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Attack: ${c.weapon || 'Unarmed'} ${formatModifier(c.attackBonus ?? 0)} (${c.damage || '1d4+1'}) | Status: ${status} | Affinity: ${c.affinity}/100${conditions}`;
-    }).join('\n')}`;
+    }).join('\n')}
+A DOWNED companion is unconscious but ALIVE and recoverable through healing or rest — never narrate their death as a side remark. If the fiction genuinely, deliberately kills a companion, you MUST emit \`remove_companions\` for them in that same response; while they remain on this list, they are alive.`;
 }
 
 function buildInventoryBlock(inventory, character) {
@@ -701,7 +703,9 @@ function buildPremiseBlock(premise) {
 }
 
 function buildLowLevelSoloSafetyBlock(character, party) {
-    if (!character || (character.level ?? 1) > 2 || (party && party.length > 0)) return '';
+    // "Solo" = no battle-ready companion; a party whose companions are all downed
+    // leaves the hero just as exposed. Matches the reducer and combat engine.
+    if (!character || (character.level ?? 1) > 2 || (party || []).some(isCompanionActive)) return '';
 
     const level = character.level ?? 1;
     const budget = level <= 1
@@ -777,7 +781,7 @@ function buildActiveConstraints(quests, worldFacts, character, party) {
         reminders.push(`THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures). Their only player slot is { "action": "death_save" } inside combat_exchange. They cannot act, speak, or perceive.`);
     }
 
-    const isLowLevelSolo = (character?.level ?? 1) <= 2 && (!party || party.length === 0);
+    const isLowLevelSolo = (character?.level ?? 1) <= 2 && !(party || []).some(isCompanionActive);
     if (isLowLevelSolo) {
         reminders.push(`Low-level solo safety is active: follow the HARD SYSTEM CONSTRAINT above. Keep danger gritty, but avoid unwinnable forced fights and use non-lethal defeat at 0 HP.`);
     }

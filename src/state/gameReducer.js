@@ -27,7 +27,7 @@ import {
     NPC_DURABLE_TEXT_FIELDS,
 } from '../engine/npcRoster.js';
 import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy, validateEnemySaveBonus } from '../engine/enemyStats.js';
-import { COMBAT_PHASES, isEnemyActive, mergeCharacterUpdates, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
+import { COMBAT_PHASES, isCompanionActive, isEnemyActive, mergeCharacterUpdates, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 import { appendRecentCheck, buildRecentCheckEntry, normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../engine/roleplayCheck.js';
 import {
     applyArcaneRecovery,
@@ -546,7 +546,11 @@ function applyDeath(character) {
 }
 
 function isLowLevelSolo(character, party = []) {
-    return !!character && (character.level ?? 1) <= 2 && (!party || party.length === 0);
+    // "Solo" means no companion who can actually fight — a party whose only
+    // companion is downed leaves the hero exactly as exposed as having none.
+    // Must match terminalState's semantic in combatExchange.js, or the exchange
+    // can close combat as a defeat-setback while this reducer starts death saves.
+    return !!character && (character.level ?? 1) <= 2 && !(party || []).some(isCompanionActive);
 }
 
 function withCondition(character, condition) {
@@ -2958,9 +2962,17 @@ export function gameReducer(state, action) {
                 spellHealedCharacter.armorClass = computeACFromInventory(normalizedEquippedInventory, spellHealedCharacter);
             }
             const pendingProgression = applyPendingLevelUpsOnLoad(spellHealedCharacter);
-            const backfilledCharacter = pendingProgression.character;
+            let backfilledCharacter = pendingProgression.character;
             // Validate required state shape
             const validated = validateSaveState(action.payload);
+            // Heal saves stranded by the old reducer/engine low-level-solo divergence:
+            // a level<=2 hero left dying OUTSIDE combat with no battle-ready companion
+            // was owed the defeat-setback, not an unreachable death-save spiral.
+            if (backfilledCharacter?.dying
+                && !action.payload.combat?.active
+                && isLowLevelSolo(backfilledCharacter, validated.party)) {
+                backfilledCharacter = applyEarlyDefeat(backfilledCharacter);
+            }
             const loadedSession = {
                 ...initialGameState.session,
                 ...action.payload.session,
