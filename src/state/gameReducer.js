@@ -394,6 +394,22 @@ function playerMessageSupportsRepeatCoinGrant(playerMessage) {
     return REPEAT_TRANSACTION_RE.test(text) && COIN_WORD_RE.test(text);
 }
 
+// Spell replay window matches the coin-grant one: the observed failure is the DM
+// re-emitting spell_cast on the very next turn while narrating what the spell did.
+const RECENT_SPELL_CAST_MESSAGE_WINDOW = 4;
+
+function playerMessageRecastsSpell(spell, playerMessage) {
+    const text = String(playerMessage || '').toLowerCase();
+    if (!text.trim()) return false;
+    const compact = normalizeRefToken(text);
+    const tokens = [spell.key, spell.name].map(normalizeRefToken).filter(Boolean);
+    if (tokens.some(token => compact.includes(token))) return true;
+    const nameWords = String(spell.name || '').toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
+    if (nameWords.length > 0 && nameWords.every(word => text.includes(word))) return true;
+    // "I cast it again" — explicit repeat intent without naming the spell.
+    return REPEAT_TRANSACTION_RE.test(text) && /\b(cast|spell|it|that)\b/i.test(text);
+}
+
 function playerMessageSupportsRepeatTransaction(item, playerMessage, verbRe) {
     const text = String(playerMessage || '');
     if (!text.trim()) return false;
@@ -1241,7 +1257,22 @@ export function gameReducer(state, action) {
             const meta = payload._meta || {};
             const sourceId = String(meta.sourceId || '').slice(0, 160);
             const castKey = sourceId ? `${sourceId}|${spell.key}` : null;
-            if (castKey && (state.recentSpellCasts || []).includes(castKey)) return state;
+            const recentCasts = state.recentSpellCasts || [];
+            if (castKey && recentCasts.some(entry => entry === castKey || entry.startsWith(`${castKey}|`))) return state;
+            // Cross-message replay: the DM re-emitting the same spell on a later turn
+            // (narrating the aftermath of a cast it already declared) must not spend a
+            // second slot. A nearby same-spell cast only counts as new when the player's
+            // own message casts it again by name (or an explicit "again"-style repeat).
+            const castMessageIndex = currentMessageIndex(state);
+            const nearbyReplay = recentCasts.some(entry => {
+                const parts = entry.split('|');
+                if (parts[1] !== spell.key) return false;
+                const entryIndex = Number(parts[2]);
+                if (!Number.isFinite(entryIndex)) return false;
+                const distance = castMessageIndex - entryIndex;
+                return distance >= 0 && distance <= RECENT_SPELL_CAST_MESSAGE_WINDOW;
+            });
+            if (nearbyReplay && !playerMessageRecastsSpell(spell, meta.playerMessage)) return state;
 
             let spellSlots = character.spellSlots || null;
             let slotLevel = 0;
@@ -1336,7 +1367,7 @@ export function gameReducer(state, action) {
                 ...state,
                 character: nextCharacter,
                 party: nextParty,
-                ...(castKey && { recentSpellCasts: [...(state.recentSpellCasts || []), castKey].slice(-8) }),
+                ...(castKey && { recentSpellCasts: [...recentCasts, `${castKey}|${castMessageIndex}`].slice(-8) }),
                 messages: [...state.messages, systemMessage(lines.join(' '))],
             };
         }

@@ -692,6 +692,13 @@ turn whose *player message or response text* matches high-signal cues (opening s
 missing event block only (or route the cue set through the Scribe, which already reads every
 turn). Keeps Gemini behavior untouched; makes provider choice safe.
 
+**The INVERSE failure shipped a fix 2026-07-17 (playtest #4):** Gemini answered "I cast Detect
+Magic" with ONLY the event block — mechanics applied, empty DM bubble, no fiction. ChatPanel now
+backstops spell_cast specifically (empty narrative + applied casts → narration-only follow-up
+carrying the engine's system lines). If other event types show the same JSON-only failure in
+play (purchases? quest updates?), generalize that backstop into an "events without prose" nudge
+— the mirror of this entry — rather than adding per-event special cases.
+
 ### Gold-grant replay ledger (like recentPurchases, for rewards) — status: `implemented 2026-07-12` (`recentCoinGrants` + `ADD_COIN_GRANT` in gameReducer; 4-message window, repeat-phrasing escape, audit path routed through it)
 The duplicate-purchase/sale replay guards don't cover plain `gold_gained`: a 20 gp quest reward was
 correctly evented on the payment turn, then re-emitted next turn when the player narrated splitting

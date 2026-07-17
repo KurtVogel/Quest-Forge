@@ -4,12 +4,56 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-17 (backlog blitz, five features shipped in one day: strengthening P0
-economy clamps; tempo heat sees diceless pressure (recentChecks ledger); **Wizard/Cleric
-spellcasting v1** from the rpg-balance-master spec, verified live end to end; the full
-character screen (color-coded skills grid, ⛶ from the Character Profile header); and the PWA
-+ mobile pass (manifest + icons + safe areas, deliberately no service worker — DECISIONS.md).
-917 tests + lint green, live at https://quest-forge-99ab1.web.app.)_
+_Last updated: 2026-07-17 evening (playtest #4 — a full wizard campaign exercising spellcasting
+v1 live; the whole caster loop held, three P1s found and fixed same session: JSON-only spell_cast
+responses, cross-message cast replay double-spend, and chat autoscroll scrolling the
+overflow-hidden app shell. 919 tests + lint green, deployed.)_
+
+## Playtest #4: wizard campaign — spellcasting v1 live (2026-07-17)
+
+Fresh elf wizard ("The Salt-Road Lanterns": lantern scholar posted to a marsh town, something
+killing the warding lanterns) played end to end on the dev build with the Gemini DM. **The whole
+wizard loop verified in real play:** slot mint at creation (L1 0/2 + arcaneRecovery resource);
+premise `starting_items` reconciled with zero duplicates; out-of-combat `spell_cast` for Detect
+Magic (level 0, free by design) and Mage Armor (slot spent, sustained, AC 13 → 16, **used by
+enemy attack math in the same fight** — a 16-vs-16 hit that would have missed AC 13's story);
+DM-triggered long rest refilling slots before the cast; combat cast slots for Fire Bolt (attack
+cantrip), Magic Missile (auto 3d4+3, unerring kill), Ray of Frost, and Sleep (engine-rolled
+enemy save 17 vs DC 12, negated — the full save path); sustained release at END_COMBAT (AC back
+to 13); Arcane Recovery on short rest (hit die + "restores 1 slot level (L1 1/2)" + one
+narration-only beat) with the used-flag preventing a second application; the no-slot rejection
+("Mage Armor fails — no level 1+ spell slot remains") narrated by the DM and refused by the
+engine in the same turn; and the **level-1 solo 0-HP setback** — dropped mid-flee by the
+Marsh-Weed Hulk, no XP for the lost fight, woke at 1 HP with narrative costs (staff swallowed
+by the bog, vial shattered) and the quarterstaff correctly removed via items_lost. Roleplay
+checks, Scribe loot audit (recovered a narrated room key), tempo pacing (quiet second-lantern
+scene between fights), and OOC table talk all behaved.
+
+Found and fixed same session (919 tests + lint, deployed):
+
+1. **P1 JSON-only spell_cast → empty DM bubble** — "I cast Detect Magic" drew a response that
+   was ONLY the fenced event block (87 chars, no prose): the engine applied the cast but the
+   player stared at an empty message, never learning what the spell revealed. Gemini
+   pattern-matched combat's two-phase intent flow onto the one-shot out-of-combat event. Fixed
+   twice over: the SPELLCASTING prompt rule now states there is NO second call (narrate in the
+   same response), and ChatPanel gained a backstop — spell casts applied with an empty narrative
+   trigger an explicit narration-only follow-up carrying the engine's system lines.
+2. **P1 cross-message spell_cast replay double-spend** — the next turn's aftermath response
+   re-emitted the same spell_cast; the sourceId guard only dedupes within one message, so the
+   cast re-applied (harmless at level 0, a second slot for anything real). `recentSpellCasts`
+   entries now carry a message index; a same-spell re-emission within 4 messages is suppressed
+   unless the player's own message casts again by name (or an explicit "again" repeat) — the
+   recentPurchases pattern applied to casting.
+3. **P1 chat autoscroll scrolls the app shell** — `scrollIntoView()` walks every scrollable
+   ancestor, including the overflow:hidden `.app-shell` (observed at scrollTop 161 mid-combat:
+   header off-screen, chat input buried under the combat panel, game unplayable until reload).
+   Autoscroll and "↓ Latest" now scroll only the messages container. Live-verified post-fix.
+
+Still-open watch items for the next caster session: DM upcasting sense (needs a level-3+ caster
+with level-2 slots), control-condition lifting pace (the one Sleep cast was saved against),
+fireball damage pacing at L5, and the stuck-mid-animation combat panel seen only under the
+occluded dev browser pane (CSS animation froze at its first keyframe — likely not reproducible
+in a real browser; watch for it on phones).
 
 ## Spellcasting v1 (2026-07-17)
 
@@ -22,9 +66,9 @@ exchange, sustained buffs visible to same-exchange enemy attacks, Cleric bonus-h
 recovery, LOAD_GAME caster healing, DM prompt SPELLCASTING contract, and a character-sheet
 Spellcasting panel. Live-verified: loading the pre-spellcasting Maren save minted her slots,
 and "I cast Shield of Faith on Jorun" produced the DM spell_cast → engine spend → +2 AC on
-the companion → sheet showing "Sustaining: Shield of Faith". **Watch items:** first real
-wizard campaign (damage pacing at L5 fireball), whether the DM upcasts sensibly, whether
-control-condition lifting (Sleep/Hold Person) happens at the right pace, Death Ward deferred.
+the companion → sheet showing "Sustaining: Shield of Faith". **The first real wizard campaign
+happened same day — see Playtest #4 above** (three P1s fixed). Remaining watch items: DM
+upcasting sense, control-condition lifting pace, fireball at L5, Death Ward deferred.
 
 ## Clinical register for durable records (2026-07-15)
 
@@ -422,9 +466,9 @@ no longer erase the white hair).
 
 ## Current focus — memory & fronts real-play tuning
 
-Fighter and Rogue combat mechanics are in good shape. **Wizard/Cleric spellcasting stays
-parked** until the LLM memory layer (fronts, story memory, RAG, journal, location recall)
-feels excellent in live play — casters multiply engine surface area; polish the money-maker first.
+Fighter and Rogue combat mechanics are in good shape. **Wizard/Cleric spellcasting v1 shipped
+2026-07-17** and survived its first live wizard campaign the same day (Playtest #4 above); the
+memory layer remains the money-maker to keep polishing.
 
 **Next gate:** a keyed **20–30 turn** campaign pass with `npm run eval:memory` (requires
 `GEMINI_API_KEY` in the shell and the dev server at `http://localhost:5173`). Watch for:
@@ -624,7 +668,7 @@ feels excellent in live play — casters multiply engine surface area; polish th
 
 ## Verification
 
-- `npm test` — **860** tests passing (61 files)
+- `npm test` — **919** tests passing (63 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)
@@ -639,7 +683,8 @@ feels excellent in live play — casters multiply engine surface area; polish th
    Next: real engaged-play feel check (the eval script ignores hooks — does standard pace feel
    right when the player bites?), then v2 regional front seeding for distant new regions.
 4. **Rogue real-play feedback** — light pass after memory tuning; Sneak Attack/Cunning Action feel
-5. **Wizard/Cleric spellcasting** — after memory layer is proven in live campaigns
+5. **Wizard/Cleric spellcasting** — v1 SHIPPED + live wizard playtest passed 2026-07-17 (see
+   above). Next caster passes: upcasting at level 3+, control-lift pacing, L5 fireball feel
 6. **PWA + public launch** — separate project (API keys, Firebase, payments); not now.
    Business groundwork started 2026-07-09 (Cowork): product north star in `docs/PRODUCT.md`,
    pre-launch cost/monetization engineering items in IDEAS.md → "Launch & Monetization"

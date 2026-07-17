@@ -45,7 +45,7 @@ describe('CAST_SPELL (out of combat)', () => {
         expect(next.character.spellSlots[1]).toEqual({ used: 1, max: 4 });
         expect(next.messages.at(-1).content).toMatch(/casts Cure Wounds/);
         expect(next.messages.at(-1).content).toMatch(/slots left/);
-        expect(next.recentSpellCasts).toEqual(['msg-1|cureWounds']);
+        expect(next.recentSpellCasts).toEqual(['msg-1|cureWounds|0']);
     });
 
     it('ignores an exact replay of the same casting from the same source message', () => {
@@ -59,6 +59,43 @@ describe('CAST_SPELL (out of combat)', () => {
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-1' } },
         });
         expect(twice).toBe(once);
+    });
+
+    it('suppresses a same-spell re-emission on a nearby later message (DM aftermath replay)', () => {
+        const state = clericState();
+        const once = gameReducer(state, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-1', playerMessage: 'I cast Cure Wounds on myself' } },
+        });
+        // Next turn: player asks about the aftermath, DM re-emits the same spell_cast.
+        const withChatter = { ...once, messages: [...once.messages, { role: 'user' }, { role: 'assistant' }] };
+        const replayed = gameReducer(withChatter, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'How do my wounds feel now?' } },
+        });
+        expect(replayed).toBe(withChatter);
+
+        // But the player explicitly casting again by name is honored.
+        const recast = gameReducer(withChatter, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'I cast Cure Wounds again' } },
+        });
+        expect(recast.character.spellSlots[1].used).toBe(2);
+    });
+
+    it('allows the same spell again once the replay window has passed', () => {
+        const state = clericState();
+        const once = gameReducer(state, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-1', playerMessage: 'I cast Cure Wounds' } },
+        });
+        const laterMessages = Array.from({ length: 6 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user' }));
+        const later = { ...once, messages: [...once.messages, ...laterMessages] };
+        const again = gameReducer(later, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-9', playerMessage: 'I pray over the wound' } },
+        });
+        expect(again.character.spellSlots[1].used).toBe(2);
     });
 
     it('rejects unknown spells and empty slot pools visibly, spending nothing', () => {

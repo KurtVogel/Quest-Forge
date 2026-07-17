@@ -37,7 +37,6 @@ export default function ChatPanel() {
     const [combatNarrationRetry, setCombatNarrationRetry] = useState(0);
     const [roleplayChallenge, setRoleplayChallenge] = useState('');
     const [showRoleplayChallenge, setShowRoleplayChallenge] = useState(false);
-    const messagesEndRef = useRef(null);
     const messagesContainerRef = useRef(null);
     const stickToBottomRef = useRef(true); // Follow new content only while the reader is at the bottom
     const [showJumpToLatest, setShowJumpToLatest] = useState(false);
@@ -93,17 +92,27 @@ export default function ChatPanel() {
         setShowJumpToLatest(!nearBottom);
     };
 
+    // Scroll ONLY the messages container. scrollIntoView walks every scrollable
+    // ancestor — including the overflow:hidden .app-shell, which it can leave
+    // permanently scrolled (header off-screen, input buried under the combat panel)
+    // since a hidden-overflow container gives the user no way to scroll back.
+    const scrollMessagesToBottom = (smooth = false) => {
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    };
+
     const jumpToLatest = () => {
         stickToBottomRef.current = true;
         setShowJumpToLatest(false);
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        scrollMessagesToBottom(true);
     };
 
     useEffect(() => {
         // Instant (not smooth) keeps the follow reliable during streaming: a smooth
         // animation still in flight reads as "not at bottom" and would break the stick.
         if (stickToBottomRef.current) {
-            messagesEndRef.current?.scrollIntoView();
+            scrollMessagesToBottom();
         }
     }, [state.messages, streamingMessage]);
 
@@ -848,6 +857,28 @@ Translate the player's committed action into the single bounded combat_exchange 
                 dispatch({ type: 'CANCEL_COMBAT_INTENT' });
             }
 
+            // JSON-only spell_cast backstop: some DMs answer "I cast Detect Magic" with
+            // nothing but the event block (pattern-matching combat's two-phase flow), so
+            // the engine spends the slot while the player stares at an empty message.
+            // Out-of-combat casting has no second engine call — request the missing
+            // narration explicitly. Roll-setup turns defer the cast, so they never land here.
+            if (events?.spellCasts?.length > 0 && !dmNarrative.trim()
+                && !combatIntentHandled && !events?.requestedRolls?.length
+                && !stateRef.current.combat?.active) {
+                const castResults = [...stateRef.current.messages].slice(-1 - events.spellCasts.length)
+                    .filter(m => m.role === 'system' && /casts /i.test(m.content || ''))
+                    .map(m => m.content)
+                    .join(' ');
+                const castNarrationRequest = [
+                    '[SYSTEM: Your previous response declared a spell casting but contained no prose — the player saw nothing.',
+                    'The engine has already resolved the mechanics; do not emit spell_cast again or any JSON.',
+                    'Narrate the casting and what the magic does, reveals, opens, or aids, in 1-3 short paragraphs, unvarnished, continuing the same scene.',
+                    'Do not state healing numbers or slot counts; the system line already reported them.',
+                    castResults ? `Engine result to interpret fictionally: ${castResults}]` : ']',
+                ].join(' ');
+                await sendToLLM(castNarrationRequest, null, { narrationOnly: true });
+            }
+
             // Extract world-state from the FINAL narrated outcome (where the real facts
             // live), now that any roll chain has resolved. Covers no-roll turns too, and
             // skips the withheld pre-roll setup (flagged hidden).
@@ -997,7 +1028,6 @@ Translate the player's committed action into the single bounded combat_exchange 
                     </div>
                 )}
 
-                <div ref={messagesEndRef} />
             </div>
 
             {showJumpToLatest && (
