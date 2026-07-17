@@ -336,9 +336,12 @@ When game events occur, include a structured JSON block at the END of your respo
     "player_slots": [
       { "action": "attack", "strikes": [{ "target": "enemy-id" }], "situational_ruling": { "mode": "advantage", "reason": "accepted fictional positioning" } }
     ],
-    "companion_intents": [],
+    "companion_intents": [
+      { "companion_id": "companion-id", "action": "attack", "target": "enemy-id" }
+    ],
     "enemy_intents": [
-      { "enemy_id": "enemy-id", "action": "attack", "target": "player", "remove_conditions": [] }
+      { "enemy_id": "enemy-id", "action": "attack", "target": "companion-id", "remove_conditions": [] },
+      { "enemy_id": "second-enemy-id", "action": "attack", "target": "player" }
     ],
     "enemy_condition_updates": [
       { "enemy_id": "enemy-id", "add": ["prone"], "remove": [] }
@@ -430,10 +433,12 @@ COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
 - **Situational rulings preserve table negotiation.** Any player slot, companion intent, or enemy attack intent may include \`"situational_ruling":{"mode":"advantage|disadvantage","reason":"<brief established fictional reason>"}\`. Use this only when you, as DM, accept that current established fiction or a plausible tactical setup warrants it (for example, a genuinely established flank). The player's claim alone does not make the reason true. If it is unsupported, omit the ruling and briefly adjudicate from the actual situation. Never supply numerical modifiers or dice. The engine combines an accepted ruling with conditions and normal advantage/disadvantage cancellation, and shows the reason beside the roll.
 - \`enemy_condition_updates\` synchronizes a condition already established by prior authoritative fiction before this exchange (for example, a foe the previous narration left prone). It is not permission to grant advantage merely because the player asserts one. These updates apply before player rolls.
 - Use \`flee\` only when the fiction establishes a successful escape; it ends combat without XP or pursuit attacks. If escape is uncertain, use a Check slot instead and let its result decide the fiction.
-- \`enemy_intents\`: at most one per living foe, using only \`attack\`, \`defend\`, \`flee\`, or \`surrender\`. An attack targets \`player\` or a living companion id. Missing intent defaults to that foe's basic attack.
+- \`enemy_intents\`: at most one per living foe, using only \`attack\`, \`defend\`, \`flee\`, or \`surrender\`. An attack targets \`player\` or a living companion id. Missing intent defaults to that foe's basic attack against the hero.
+- **Enemy targeting comes from the fiction, not habit.** Melee foes strike whoever is actually engaging them — a warrior companion holding the front line takes those attacks, not the hero standing behind them. Beasts and brutes hit whatever is closest or loudest; wounded foes turn on whoever just hurt them; smart or ranged foes may deliberately pick the caster or healer. Never route every attack to the hero by default when companions share the fight. Target selection is drawn from the established fiction only — never from comparing HP or AC to pick the weakest victim. Multiple foes do not dogpile one fragile companion in a single exchange unless the fiction has genuinely isolated them, and a companion at 0 HP is out of the fight — foes turn to live threats instead of landing finishing blows on the downed.
 - An enemy intent may include \`"remove_conditions":["prone"]\` when the foe stands, recovers, or otherwise clears an established condition immediately before its own action. Do not remove conditions before the player's earlier slot resolves.
 - A foe with \`stunned\`, \`paralyzed\`, or \`unconscious\` loses its action entirely — the engine skips it and reports it cannot act. When the fiction has it recover, clear the condition with \`remove_conditions\` in that foe's intent; only then does it act again.
-- \`companion_intents\` is optional: \`attack\`, \`defend\`, or \`pass\`; an attack names a living enemy target. Missing companion intent defaults to a basic attack against a living foe.
+- \`companion_intents\` is optional: \`attack\`, \`defend\`, \`guard\`, or \`pass\`; an attack names a living enemy target. Missing companion intent defaults to a basic attack against a living foe.
+- \`guard\` makes a companion give up their attack to bodily screen the hero: the engine redirects this exchange's enemy attacks aimed at \`player\` into the guarding companion instead (normal rolls against the companion's AC). Declare it when the player commands it ("Torvald, cover me!") or when the companion's role and the established fiction make shielding the hero their natural move; \`defend\` remains the self-protective stance. The redirect is engine-owned — never narrate an interception the engine did not resolve, and never have foes "see through" or ignore a declared guard: without a concrete established fictional bypass, attacks aimed at the hero hit the guardian, period.
 - Intent envelopes contain no dice authority: never supply modifiers, AC, damage, hit/miss, HP changes, or outcomes. Never narrate the outcome before the engine returns it.
 - The engine resolves player slots, companions, then one intent per still-active foe. A defeated foe cannot act. An invalid target loses that actor's slot and never silently redirects to the player.
 - While the player is DYING, commit one \`death_save\` slot and no other player action.

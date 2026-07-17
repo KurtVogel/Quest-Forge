@@ -42,7 +42,7 @@ export const COMBAT_PHASES = Object.freeze({
 
 const PLAYER_ACTIONS = new Set(['attack', 'cast', 'channel', 'check', 'save', 'dodge', 'dash', 'disengage', 'flee', 'interact', 'pass', 'death_save']);
 const ENEMY_ACTIONS = new Set(['attack', 'defend', 'flee', 'surrender']);
-const COMPANION_ACTIONS = new Set(['attack', 'defend', 'pass']);
+const COMPANION_ACTIONS = new Set(['attack', 'defend', 'guard', 'pass']);
 const ABILITIES = new Set(['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']);
 const SKILLS = new Set([
     'acrobatics', 'animalHandling', 'arcana', 'athletics', 'deception', 'history', 'insight',
@@ -433,7 +433,8 @@ function eventMessage(event) {
     const mode = event.mode ? ` (${event.mode})` : '';
     const roll = event.rolled != null ? ` Rolled **${event.rolled}** vs AC ${event.dc}${mode}` : '';
     if (event.type === 'attack') {
-        if (!event.hit) return `**${event.actor} attacks ${event.target}** —${roll}; **Miss.**`;
+        const intercept = event.intercepted ? ` (guard — ${event.target} intercepts the blow meant for the hero)` : '';
+        if (!event.hit) return `**${event.actor} attacks ${event.target}**${intercept} —${roll}; **Miss.**`;
         const crit = event.critical ? ' Critical hit.' : '';
         const sa = event.sneakAttackDetail
             ? ` Includes **${event.sneakAttackDetail.total}** Sneak Attack damage (${event.sneakAttackDetail.diceCount}d6: ${event.sneakAttackDetail.rolls.join(', ')}).`
@@ -442,7 +443,7 @@ function eventMessage(event) {
         const survival = event.remainingHp <= 0
             ? ` ${event.target} is down.`
             : ` ${event.target} remains alive at ${event.remainingHp}/${event.maxHp} HP.`;
-        return `**${event.actor} attacks ${event.target}** —${roll}; **Hit for ${event.damage} damage.**${crit}${sa}${ud}${survival}`;
+        return `**${event.actor} attacks ${event.target}**${intercept} —${roll}; **Hit for ${event.damage} damage.**${crit}${sa}${ud}${survival}`;
     }
     if (event.type === 'check' || event.type === 'save') {
         const checkMode = event.mode ? ` (${event.mode})` : '';
@@ -1160,6 +1161,17 @@ function resolveCompanions({ exchange, enemies, companions, events, rolls, onlyI
             events.push({ type: 'note', text: `${companion.name} takes a defensive stance.` });
             continue;
         }
+        if (intent.action === 'guard') {
+            // An incapacitated companion cannot throw themselves in front of anyone.
+            const guardBlocked = getIncapacitatingCondition(companion.conditions);
+            if (guardBlocked) {
+                events.push({ type: 'note', text: `${companion.name} is ${guardBlocked} and cannot guard the hero.` });
+                continue;
+            }
+            companion.guarding = true;
+            events.push({ type: 'note', text: `${companion.name} gives up their attack to shield the hero — enemy attacks aimed at the hero this exchange strike ${companion.name} instead.` });
+            continue;
+        }
         const targets = activeEnemies(enemies);
         let target = intent.target ? findByRef(targets, intent.target) : targets[0];
         if (!target && intent.target && targets.length > 0) {
@@ -1181,9 +1193,18 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
     let targetAc = computeACFromInventory(inventory, character) ?? character.armorClass ?? 10;
     let targetDisadvantage = playerDodging;
     let targetConditions = character.conditions;
+    let intercepted = false;
 
-    if (targetRef && targetRef !== 'player') {
-        const companion = findByRef(companions, targetRef);
+    const wantsPlayer = !targetRef || targetRef === 'player';
+    // A guarding companion bodily screens the hero: attacks aimed at the player are
+    // redirected into the guardian, re-checked per attack so a guardian who drops
+    // mid-round stops screening and later blows reach the hero again.
+    const guardian = wantsPlayer && playerHp > 0 && !character.isDead && !character.lowLevelDefeat
+        ? companions.find(companion => isCompanionActive(companion) && companion.guarding) || null
+        : null;
+
+    if (!wantsPlayer || guardian) {
+        const companion = guardian || findByRef(companions, targetRef);
         if (!isCompanionActive(companion)) {
             events.push({ type: 'note', text: `${enemy.name}'s declared target is unavailable; its action is dropped rather than silently redirected.` });
             return { playerHp, playerDamage: 0 };
@@ -1194,6 +1215,7 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
         targetAc = (companion.ac ?? 10) + (companion.spellAcBonus || 0);
         targetDisadvantage = !!companion.defending;
         targetConditions = companion.conditions;
+        intercepted = !!guardian;
     } else if (playerHp <= 0 || character.isDead || character.lowLevelDefeat) {
         events.push({ type: 'note', text: `${enemy.name} does not make another attack against the already-defeated player.` });
         return { playerHp, playerDamage: 0 };
@@ -1235,6 +1257,7 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
         remainingHp: targetType === 'player' ? playerHp : target.hp,
         maxHp: targetType === 'player' ? character.maxHP : target.maxHp,
         uncannyDodgeApplied,
+        ...(intercepted && { intercepted: true }),
     });
     return { playerHp, playerDamage: targetType === 'player' ? damage : 0 };
 }
@@ -1358,7 +1381,8 @@ export function planCombatExchange(state, exchange) {
 
     const exchangeId = makeExchangeId('exchange', state.combat);
     const enemies = (state.combat.enemies || []).map(enemy => ({ ...enemy }));
-    const companions = (state.party || []).map(companion => ({ ...companion, defending: false }));
+    // Stances are declared per exchange; stale defend/guard flags must not carry over.
+    const companions = (state.party || []).map(companion => ({ ...companion, defending: false, guarding: false }));
     const events = [];
     const rolls = [];
     for (const update of exchange.enemyConditionUpdates || []) {
@@ -1455,7 +1479,8 @@ export function planOpeningExchange(state) {
     const actorIds = new Set(state.combat.openingActorIds || []);
     const exchangeId = makeExchangeId('opening', state.combat);
     const enemies = (state.combat.enemies || []).map(enemy => ({ ...enemy }));
-    const companions = (state.party || []).map(companion => ({ ...companion }));
+    // A fresh fight starts with no stances; clear any flags persisted from a previous combat.
+    const companions = (state.party || []).map(companion => ({ ...companion, defending: false, guarding: false }));
     const events = [];
     const rolls = [];
 
@@ -1533,7 +1558,10 @@ export function combatNarrationPrompt(result) {
     const playerState = result.postState?.player
         ? `- PLAYER: ${result.postState.player.name} — ${result.postState.player.hp}/${result.postState.player.maxHp} HP.`
         : null;
-    const postState = [playerState, ...enemyStates].filter(Boolean).join('\n');
+    const companionStates = (result.postState?.companions || []).map(companion => (companion.hp ?? 0) <= 0
+        ? `- COMPANION DOWN: ${companion.name} — 0/${companion.maxHp} HP (unconscious, not dead unless an event says so).`
+        : `- COMPANION ALIVE: ${companion.name} — ${companion.hp}/${companion.maxHp} HP.`);
+    const postState = [playerState, ...companionStates, ...enemyStates].filter(Boolean).join('\n');
     return [
         `[SYSTEM: Combat exchange ${result.exchangeId} has already been resolved completely by the engine.`,
         'Narrate these exact results once in one cohesive, vivid but concise passage.',

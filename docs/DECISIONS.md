@@ -8,6 +8,35 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-17 · Enemy targeting comes from the fiction + companion `guard` stance (engine-owned interception).**
+Playtest observation: enemies attacked the hero every round even with a warrior companion in
+the front line. The engine had supported companion-targeted `enemy_intents` all along — but
+everything biased the DM toward the hero: the one prompt example showed `"target": "player"`,
+a missing target defaulted to the player, a missing intent defaulted to attacking the player,
+and no guidance asked for tactical targeting. Settled fixes: (1) **Prompt targeting
+discipline** — enemy targets are drawn from established fiction only (melee foes strike
+whoever engages them, wounded foes turn on whoever hurt them, smart/ranged foes may pick the
+caster), never from comparing HP/AC to find the weakest victim; no dogpiling one fragile
+companion in a single exchange unless the fiction isolates them; a companion at 0 HP draws no
+finishing blows; the JSON example now shows a companion-targeted intent (examples teach louder
+than rules). (2) **New companion intent `guard`** — gives up the companion's attack to bodily
+screen the hero: enemy attacks aimed at `player` are redirected to the guardian (normal roll
+vs guardian AC + spellAcBonus, Uncanny Dodge correctly untouched since the target becomes a
+companion before that check), re-checked per attack so a guardian who drops mid-round stops
+screening and later blows reach the hero; incapacitated (stunned/paralyzed/unconscious)
+companions cannot declare it; stance flags reset every exchange and at combat start.
+Balance-reviewed (rpg-balance-master; memory `companion_combat_mechanics.md`): full
+redirection approved with NO cap or AC rider — guardian statlines (~AC 14, 18 HP) already
+make it risky (45–65% enemy hit chance), and the mid-round drop caps multi-enemy soak. Guard
+deliberately does NOT stack defend's disadvantage: defend = self-protection at partial risk,
+guard = altruism at full personal risk; stacking would make guard strictly dominate and delete
+defend's niche. Accepted scope edges: guard cannot protect during Opening Initiative (no
+intents exist yet — same as defend), v1 only redirects player-aimed attacks (no
+companion-guards-companion), and recruiting any living companion still disables the low-level
+solo defeat safety (a positive synergy — the guardian is exactly what makes that exposure
+worthwhile). Narration binding strengthened: the post-exchange authoritative state now lists
+companions (COMPANION ALIVE / COMPANION DOWN) so the DM cannot mis-narrate a downed guardian.
+
 **2026-07-17 · PWA is manifest-only: deliberately NO service worker.**
 Installability (manifest + icons + standalone display + theme color) shipped without any
 service worker, and this is a decision, not an omission. Three reasons: (1) the game cannot

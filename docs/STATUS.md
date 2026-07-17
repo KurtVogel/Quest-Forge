@@ -4,10 +4,29 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-17 late night (playtest #6 — the cleric combat half: Turn Undead with
-per-undead saves and the frightened disadvantage pipeline, the Healing Word bonus-action lane,
-Spiritual Weapon, Command, 2d8 Sacred Flame scaling, upcast Cure Wounds. Zero engine bugs across
-playtests #5 AND #6; one prompt observation (DM upcast Healing Word needlessly). Docs only.)_
+_Last updated: 2026-07-17 (enemy targeting discipline + companion Guard stance — see below;
+earlier same day: playtest #6, the cleric combat half, zero engine bugs.)_
+
+## Enemy targeting discipline + companion Guard stance (2026-07-17)
+
+Fixes the playtest observation that enemies attacked the hero every round while companions
+went untouched. Full write-up in DECISIONS.md 2026-07-17; balance-reviewed by
+rpg-balance-master before shipping. Two halves:
+
+- **DM prompt**: enemy targets come from the fiction (melee foes strike whoever engages them,
+  front-liners screen the hero, wounded foes turn on whoever hurt them) — never default
+  hero-focus, never HP/AC-metagame focus-fire, no dogpiling one fragile companion, no
+  finishing blows on downed companions. The `combat_exchange` example now shows a
+  companion-targeted enemy intent (the previous player-only example was the strongest
+  hero-bias signal).
+- **Engine** (`combatExchange.js`): new companion intent `guard` — the companion gives up
+  their attack to screen the hero; enemy attacks aimed at `player` redirect into the guardian
+  (normal roll vs guardian AC, re-checked per attack so a mid-round drop lets later blows
+  through), incapacitation-gated, stance flags reset each exchange and at combat start.
+  Deliberately no defend-disadvantage stacking (defend and guard keep distinct niches).
+  Narration post-state now lists COMPANION ALIVE/DOWN lines so a downed guardian can't be
+  mis-narrated. 6 new tests (925 total) + lint green. **Watch in the next companion playtest:**
+  does the DM actually vary targets now, and does it declare guard when the player commands it.
 
 ## Playtest #6: cleric combat half (2026-07-17, late night)
 
@@ -734,7 +753,7 @@ memory layer remains the money-maker to keep polishing.
 
 ## Verification
 
-- `npm test` — **919** tests passing (63 files)
+- `npm test` — **925** tests passing (63 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)

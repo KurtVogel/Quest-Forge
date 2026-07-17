@@ -556,6 +556,118 @@ describe('engine-owned exchange resolution', () => {
     });
 });
 
+describe('Guard stance', () => {
+    const guardian = (overrides = {}) => ({
+        id: 'tor', name: 'Torvald', hp: 18, maxHp: 18, ac: 14, attackBonus: 4, damage: '1d8+2', status: 'healthy', ...overrides,
+    });
+
+    it('redirects a player-targeted enemy attack into the guarding companion', () => {
+        rollQueue.push(15, 4); // enemy d20 (15+4=19 hits AC 14), damage 1d6+2 = 6
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            companion_intents: [{ companion_id: 'tor', action: 'guard' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        });
+        const plan = planCombatExchange(state({ party: [guardian()] }), intent);
+
+        expect(plan.ok).toBe(true);
+        const attack = plan.payload.result.events.find(event => event.type === 'attack');
+        expect(attack).toMatchObject({ actor: 'Goblin', target: 'Torvald', hit: true, damage: 6, intercepted: true });
+        expect(plan.payload.playerDamage).toBe(0);
+        expect(plan.payload.party.find(companion => companion.id === 'tor').hp).toBe(12);
+        expect(plan.payload.result.summary).toContain('gives up their attack to shield the hero');
+        expect(plan.payload.result.summary).toContain('guard — Torvald intercepts the blow meant for the hero');
+    });
+
+    it('also redirects the default missing-intent enemy attack', () => {
+        rollQueue.push(15, 4);
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            companion_intents: [{ companion_id: 'tor', action: 'guard' }],
+        });
+        const plan = planCombatExchange(state({ party: [guardian()] }), intent);
+        const attack = plan.payload.result.events.find(event => event.type === 'attack');
+
+        expect(attack).toMatchObject({ target: 'Torvald', intercepted: true });
+        expect(plan.payload.playerDamage).toBe(0);
+    });
+
+    it('lets later attacks through to the player once the guardian drops mid-round', () => {
+        // Enemy A downs the 5 HP guardian (15+4 hits AC 14, 1d6+2 = 8); enemy B then
+        // finds no active guardian and strikes the hero (15+4=19 vs AC 16, 1d6+2 = 5).
+        rollQueue.push(15, 6, 15, 3);
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            companion_intents: [{ companion_id: 'tor', action: 'guard' }],
+            enemy_intents: [
+                { enemy_id: 'A', action: 'attack', target: 'player' },
+                { enemy_id: 'B', action: 'attack', target: 'player' },
+            ],
+        });
+        const plan = planCombatExchange(state({
+            enemies: [enemy('A'), enemy('B')],
+            party: [guardian({ hp: 5 })],
+        }), intent);
+        const attacks = plan.payload.result.events.filter(event => event.type === 'attack');
+
+        expect(attacks[0]).toMatchObject({ actor: 'A', target: 'Torvald', intercepted: true });
+        expect(attacks[1]).toMatchObject({ actor: 'B', target: 'Vesa', hit: true, damage: 5 });
+        expect(attacks[1].intercepted).toBeUndefined();
+        expect(plan.payload.party.find(companion => companion.id === 'tor')).toMatchObject({ hp: 0, status: 'downed' });
+        expect(plan.payload.playerDamage).toBe(5);
+    });
+
+    it('does not intercept attacks declared against a different companion', () => {
+        rollQueue.push(15, 4); // hits Wit's AC 13
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            companion_intents: [
+                { companion_id: 'tor', action: 'guard' },
+                { companion_id: 'wit', action: 'pass' },
+            ],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'wit' }],
+        });
+        const plan = planCombatExchange(state({
+            party: [guardian(), { id: 'wit', name: 'Wit', hp: 10, maxHp: 10, ac: 13, attackBonus: 3, damage: '1d6+1', status: 'healthy' }],
+        }), intent);
+        const attack = plan.payload.result.events.find(event => event.type === 'attack');
+
+        expect(attack).toMatchObject({ target: 'Wit', hit: true });
+        expect(attack.intercepted).toBeUndefined();
+        expect(plan.payload.party.find(companion => companion.id === 'tor').hp).toBe(18);
+    });
+
+    it('clears a stale guarding flag at the start of each exchange', () => {
+        rollQueue.push(5, 15, 4); // companion default attack misses; enemy hits the hero for 6
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        });
+        const plan = planCombatExchange(state({ party: [guardian({ guarding: true })] }), intent);
+        const attack = plan.payload.result.events.find(event => event.actor === 'Goblin');
+
+        expect(attack).toMatchObject({ target: 'Vesa', hit: true, damage: 6 });
+        expect(attack.intercepted).toBeUndefined();
+        expect(plan.payload.playerDamage).toBe(6);
+    });
+
+    it('rejects a guard declaration from an incapacitated companion', () => {
+        rollQueue.push(15, 4); // enemy attack proceeds against the unprotected hero
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            companion_intents: [{ companion_id: 'tor', action: 'guard' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        });
+        const plan = planCombatExchange(state({ party: [guardian({ conditions: ['stunned'] })] }), intent);
+        const attack = plan.payload.result.events.find(event => event.type === 'attack');
+
+        expect(plan.payload.result.summary).toContain('Torvald is stunned and cannot guard the hero');
+        expect(attack).toMatchObject({ target: 'Vesa' });
+        expect(attack.intercepted).toBeUndefined();
+        expect(plan.payload.playerDamage).toBe(6);
+    });
+});
+
 describe('Opening Initiative', () => {
     it('resolves only actors ahead of the player, in initiative order', () => {
         const openingState = state({
