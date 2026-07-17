@@ -4,10 +4,45 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-17 night (playtest #5 — the level-5 wizard tier: level-up-on-load from
-banked XP, the ASI flow, Fireball with engine saves and half damage, honored upcasting, 2d10
-cantrip scaling, the full dying→death-save→stabilize arc at L5, and Arcane Recovery's best-first
-3-level budget. Zero engine bugs, zero console errors. Docs-only session, no deploy needed.)_
+_Last updated: 2026-07-17 late night (playtest #6 — the cleric combat half: Turn Undead with
+per-undead saves and the frightened disadvantage pipeline, the Healing Word bonus-action lane,
+Spiritual Weapon, Command, 2d8 Sacred Flame scaling, upcast Cure Wounds. Zero engine bugs across
+playtests #5 AND #6; one prompt observation (DM upcast Healing Word needlessly). Docs only.)_
+
+## Playtest #6: cleric combat half (2026-07-17, late night)
+
+Fresh dwarf cleric campaign ("The Unquiet Terraces": terraced burial gardens, bone-things,
+grave-robbing relic thieves, established shieldbearer companion Tuura) — created at L1, promoted
+to L5 via the banked-XP load path (which minted channelDivinity + Destroy Undead on the way up),
+ASI into WIS 17 / DC 14. **Zero engine bugs; every cleric combat mechanic worked first try:**
+
+- **add_companions from the premise** put Tuura in the party with sane stats before the first
+  fight; she took slots every round and correctly "holds position" when her target died first.
+- **Turn Undead (channel)**: two Desecrated Ancestors flagged `is_undead` with `save_bonus` by
+  the DM at combat_start; channelDivinity spent; per-undead saves rolled (one failed →
+  **frightened** persisted on the enemy card, one passed). At 22 maxHp they sat just above the
+  ≤20 Destroy threshold — the boundary behaved (turned, not destroyed).
+- **Frightened → attack disadvantage end to end**, visibly annotated: "Rolled 7 vs AC 17
+  (d20 3, 18 → 3; [frightened])".
+- **The caster bonus-action lane**: Sacred Flame action + Healing Word bonus in one committed
+  turn, both resolved in order.
+- **Sacred Flame 2d8** cantrip scaling at L5 (rolled 3+6); **Spiritual Weapon** L2 slot + spell
+  attack; **Command** L1 slot with a natural-20 negate.
+- **Out-of-combat upcast Cure Wounds** "using a level 2 slot": 2d8+3 rolled openly, healed 13.
+- Combat closed with +160 XP for both ancestors; a comedy round of three natural 1s in a row
+  proved the crypto dice impartial.
+
+One observation (prompt, P2): the DM **upcast Healing Word through an L2 slot while L1 sat
+full** — the engine honors any legal requested slot_level, but wasteful upcasting is worth a
+one-line SPELLCASTING rule ("upcast only when the situation warrants it") if it recurs. Also
+still unexercised live after three spellcasting playtests (all low-value now — the code paths
+are shared with verified casts + unit tests): Sleep/Hold Person actually LANDING on a target
+(save-fail path verified via Turn Undead's frightened instead), Scorching Ray multi-target
+(fireball verified the multi-target plumbing), Destroy Undead actual destruction (needs ≤20
+maxHp undead), mass heals with 2+ wounded allies, and lift-pacing of landed control conditions.
+The wizard-leftovers hunt for humanoid targets died to two honestly-failed navigation checks —
+the marsh kept its secrets; both campaigns remain playable (autosave: Ilmo; Load Game slot:
+"Ansio — Unquiet Terraces (playtest)").
 
 ## Playtest #5: the level-5 wizard tier (2026-07-17, late)
 
