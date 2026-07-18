@@ -1796,9 +1796,66 @@ export function gameReducer(state, action) {
             // Player-initiated consumable use. The engine owns the dice and HP; the
             // resulting system message also informs the DM (it enters the LLM history),
             // so the DM narrates the act on its next turn without re-applying anything.
-            const item = state.inventory.find(i => i.id === action.payload);
+            // Payload is an item id, or { itemId, targetId } to administer a healing
+            // consumable to a companion (out of combat only).
+            const usePayload = action.payload && typeof action.payload === 'object'
+                ? action.payload
+                : { itemId: action.payload };
+            const item = state.inventory.find(i => i.id === usePayload.itemId);
             if (!item) return state;
             const usesBonusAction = isBonusActionConsumable(item);
+
+            // Administer a healing consumable to a companion: same engine-rolled
+            // healing, revives downed (never dead) — mirrors the player path below.
+            if (usePayload.targetId && item.consumableType === 'healing' && item.healing) {
+                const companion = (state.party || []).find(c => c.id === usePayload.targetId);
+                if (!companion) return state;
+                if (state.combat.active) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`Administering a ${item.name} to ${companion.name} mid-fight is not supported — use healing magic in your combat turn, or wait until the fight ends.`)],
+                    };
+                }
+                if (companion.status === 'dead') {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`The ${item.name} cannot help the dead.`)],
+                    };
+                }
+                const companionMaxHp = companion.maxHp || companion.hp || 1;
+                if ((companion.hp ?? 0) >= companionMaxHp) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`${companion.name} is already at full health — you keep the ${item.name}.`)],
+                    };
+                }
+                const wasDown = (companion.hp ?? 0) <= 0;
+                const roll = rollNotation(item.healing, item.name);
+                const healedTo = Math.min(companionMaxHp, (companion.hp || 0) + roll.total);
+                const gained = healedTo - (companion.hp || 0);
+                return {
+                    ...state,
+                    party: state.party.map(c => c.id === companion.id
+                        ? normalizeCompanion({ hp: healedTo, status: companionStatus(healedTo, companionMaxHp) }, c)
+                        : c),
+                    inventory: consumeItem(state.inventory, item.id),
+                    rollHistory: [...state.rollHistory, roll],
+                    messages: [
+                        ...state.messages,
+                        systemMessage(
+                            `You give ${companion.name} a **${item.name}** — they recover **${gained} HP** (now ${healedTo}/${companionMaxHp})${wasDown ? ' and are back on their feet' : ''}. ${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`,
+                            {
+                                narrationCue: {
+                                    type: 'player_mechanic',
+                                    mechanic: item.name,
+                                    effect: `${companion.name} recovered ${gained} HP${wasDown ? ' and regained consciousness' : ''}`,
+                                    actionType: 'action',
+                                },
+                            }
+                        ),
+                    ],
+                };
+            }
 
             // Healing consumables resolve fully client-side with real dice.
             if (item.consumableType === 'healing' && item.healing) {
@@ -2688,6 +2745,19 @@ export function gameReducer(state, action) {
             if (newState.character?.sustainedSpell) {
                 const released = clearSustainedSpellState(newState.character, newState.party, newState.inventory);
                 newState = { ...newState, character: released.character, party: released.party };
+            }
+            // A companion down at combat's end is stable — no bleed-out mechanic by
+            // design (death stays behind the deliberate remove_companions channel).
+            // One visible line so the player knows they're recoverable, not lost.
+            const downedAtEnd = (newState.party || []).filter(c => c.status === 'downed');
+            if (downedAtEnd.length > 0) {
+                newState = {
+                    ...newState,
+                    messages: [
+                        ...newState.messages,
+                        systemMessage(`${downedAtEnd.map(c => `**${c.name}**`).join(' and ')} ${downedAtEnd.length === 1 ? 'is' : 'are'} down but stable — a healing potion, healing magic, or a rest will bring them back.`),
+                    ],
+                };
             }
 
             // Client-side XP fallback — only when NO XP was earned for this fight at all:

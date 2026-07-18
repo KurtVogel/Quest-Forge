@@ -328,3 +328,68 @@ describe('consumable use', () => {
         expect(next.messages.at(-1).content).toContain('drink it on your turn');
     });
 });
+
+describe('administering a healing potion to a companion', () => {
+    const downedCompanion = (overrides = {}) => ({
+        id: 'tor', name: 'Torvald Ironhand', hp: 0, maxHp: 18, ac: 14,
+        attackBonus: 4, damage: '1d8+2', level: 2, status: 'downed', affinity: 60,
+        ...overrides,
+    });
+
+    it('heals a downed companion back to their feet and consumes the potion', () => {
+        const state = { ...makeState(), party: [downedCompanion()], inventory: [...makeState().inventory, makePotion()] };
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: { itemId: 'potion-1', targetId: 'tor' } });
+
+        const tor = next.party[0];
+        expect(tor.hp).toBeGreaterThan(0);
+        expect(tor.status).not.toBe('downed');
+        expect(next.inventory.some(i => i.id === 'potion-1')).toBe(false);
+        expect(next.character.currentHP).toBe(12); // hero untouched
+        expect(next.messages.at(-1).content).toContain('back on their feet');
+        expect(next.messages.at(-1).narrationCue).toMatchObject({ type: 'player_mechanic' });
+    });
+
+    it('refuses during active combat without consuming anything', () => {
+        const state = withCombat({ ...makeState(), party: [downedCompanion()], inventory: [...makeState().inventory, makePotion()] });
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: { itemId: 'potion-1', targetId: 'tor' } });
+
+        expect(next.party[0].hp).toBe(0);
+        expect(next.inventory.some(i => i.id === 'potion-1')).toBe(true);
+        expect(next.messages.at(-1).content).toContain('not supported');
+    });
+
+    it('refuses on a dead or full-health companion', () => {
+        const dead = { ...makeState(), party: [downedCompanion({ status: 'dead' })], inventory: [...makeState().inventory, makePotion()] };
+        const deadNext = gameReducer(dead, { type: 'USE_ITEM', payload: { itemId: 'potion-1', targetId: 'tor' } });
+        expect(deadNext.inventory.some(i => i.id === 'potion-1')).toBe(true);
+        expect(deadNext.messages.at(-1).content).toContain('cannot help the dead');
+
+        const full = { ...makeState(), party: [downedCompanion({ hp: 18, status: 'healthy' })], inventory: [...makeState().inventory, makePotion()] };
+        const fullNext = gameReducer(full, { type: 'USE_ITEM', payload: { itemId: 'potion-1', targetId: 'tor' } });
+        expect(fullNext.inventory.some(i => i.id === 'potion-1')).toBe(true);
+        expect(fullNext.messages.at(-1).content).toContain('already at full health');
+    });
+});
+
+describe('END_COMBAT downed-companion messaging', () => {
+    it('announces that a downed companion is stable and recoverable', () => {
+        const state = withCombat({
+            ...makeState(),
+            party: [{ id: 'tor', name: 'Torvald Ironhand', hp: 0, maxHp: 18, ac: 14, status: 'downed', level: 2, affinity: 60 }],
+        }, { enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' }] });
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: { llmAwardedXp: true } });
+
+        expect(next.combat.active).toBe(false);
+        expect(next.messages.some(m => m.content.includes('down but stable'))).toBe(true);
+    });
+
+    it('stays silent when everyone is on their feet', () => {
+        const state = withCombat({
+            ...makeState(),
+            party: [{ id: 'tor', name: 'Torvald Ironhand', hp: 12, maxHp: 18, ac: 14, status: 'healthy', level: 2, affinity: 60 }],
+        }, { enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' }] });
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: { llmAwardedXp: true } });
+
+        expect(next.messages.some(m => m.content.includes('down but stable'))).toBe(false);
+    });
+});

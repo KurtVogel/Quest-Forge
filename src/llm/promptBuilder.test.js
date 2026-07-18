@@ -53,6 +53,34 @@ function prompt(overrides = {}) {
     });
 }
 
+describe('stable cache prefix (DECISIONS.md 2026-07-18)', () => {
+    it('keeps every byte up through the premise identical across turns with different dynamic state', () => {
+        const premise = 'The barony of Kolkanmaa is starving and the toll-weirs keep failing.';
+        const a = prompt({ premise, customSystemPrompt: 'Grim, grounded tone.' });
+        const b = prompt({
+            premise,
+            customSystemPrompt: 'Grim, grounded tone.',
+            character: makeCharacter({ currentHP: 3, exp: 250, conditions: ['Poisoned'] }),
+            party: [{ id: 'c1', name: 'Osma', hp: 9, maxHp: 18, ac: 16, level: 2, affinity: 60 }],
+            quests: [{ id: 'q1', name: 'Find the wardens', status: 'active', description: 'x' }],
+            worldFacts: [{ id: 'f1', fact: 'The Pike buys captives.', timestamp: 1 }],
+            combat: { active: true, round: 2, enemies: [{ id: 'g1', name: 'Goblin', hp: 5, maxHp: 11, ac: 12 }], turnOrder: [] },
+            rollHistory: [{ description: 'Stealth', total: 14, notation: '1d20+2', rolls: [12], modifier: 2 }],
+        });
+        const prefixEnd = a.indexOf(premise) + premise.length;
+        expect(prefixEnd).toBeGreaterThan(1000);
+        expect(b.slice(0, prefixEnd)).toBe(a.slice(0, prefixEnd));
+    });
+
+    it('places the static contract blocks in the prefix and only the short reminder at the tail', () => {
+        const text = prompt({ premise: 'A premise.' });
+        expect(text.indexOf('## RESPONSE FORMAT')).toBeLessThan(text.indexOf('## CAMPAIGN PREMISE'));
+        expect(text.indexOf('## ITEM CATALOG')).toBeLessThan(text.indexOf('## CAMPAIGN PREMISE'));
+        expect(text.indexOf('## RESPONSE FORMAT')).toBeLessThan(text.indexOf('## PLAYER CHARACTER'));
+        expect(text.trimEnd().endsWith('never leave a required event out of the block.')).toBe(true);
+    });
+});
+
 describe('recent table rulings block', () => {
     const baseRuling = {
         objective: 'Convince Maren to share gossip about Odo',

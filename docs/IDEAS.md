@@ -858,7 +858,7 @@ Today's stack (Gemini 3.1 Pro uncached, machinery on Flash) ≈ **$0.06/turn**; 
 tier, a 300-turn/mo player costs $19 on the current stack (loss) vs $6.40 efficient (59% blended
 margin). These three items are what make a hosted tier economically viable:
 
-### Context caching for the DM system prompt — status: `idea`, high value pre-launch
+### Context caching for the DM system prompt — status: `shipped 2026-07-18`
 The static prompt blocks (CORE_INSTRUCTIONS + RESPONSE_FORMAT + ruleset, ~5–7k tokens) are
 rebuilt and re-billed at full input price on every DM call (main, combat intent, combat
 narration, post-mechanic cue). Gemini and xAI both offer cached-input pricing at ~90% off
@@ -866,14 +866,26 @@ narration, post-mechanic cue). Gemini and xAI both offer cached-input pricing at
 so the static prefix is stable and cache-eligible (order: static blocks first, dynamic state
 after) and wire provider cache params. Cuts DM input cost ~30–45%. Benefits BYOK players too —
 their key, their savings.
+**Shipped (DECISIONS.md 2026-07-18):** `buildSystemPrompt` now emits a byte-stable prefix —
+fully static blocks (CORE, ruleset, RESPONSE_FORMAT, item catalog) then per-campaign constants
+(preset, custom DM prompt, premise) — before any dynamic state, with a short static
+FORMAT_REMINDER at the tail preserving trailing-JSON compliance. No explicit cache params
+needed: Gemini implicit caching, OpenAI and xAI automatic prompt caching all key on the stable
+request prefix. A regression test locks the byte-identical-prefix invariant.
 
-### Machinery model upgrade: gemini-2.5-flash → current Flash-Lite — status: `idea`
+### Machinery model upgrade: gemini-2.5-flash → current Flash-Lite — status: `shipped 2026-07-18`
 `llm/machinery.js` pins MACHINERY_MODEL to legacy `gemini-2.5-flash`. Current-gen
 Gemini 3.1 Flash-Lite is $0.25/$1.50 per 1M (vs 3.5 Flash $1.50/$9.00) — cuts the ~$0.014/turn
 machinery overhead to ~$0.003. Needs an extraction-quality check before switching (Scribe
 appearance/stance merging and roll audits are the sensitive consumers — run the golden
 fixtures + a keyed eval:memory pass on the new model). Also: legacy-model deprecation risk
 makes this worth doing regardless of cost.
+**Shipped:** MACHINERY_MODEL → `gemini-3.1-flash-lite` (stable id verified against the live
+models API). Quality gate: full suite green + a keyed 30-turn eval:memory run on the new
+model — needle hit rate 73% but every recall answer substantively perfect (misses were
+synonyms: "repair" vs needle "mend"; all four landmarks named vs needle "landmark"), ZERO
+console errors AND zero warnings (prior runs had warnings), extraction budgets held
+(44 facts / 48 cards / 12 NPCs / 6 journal entries over 78 messages), fronts paced correctly.
 
 ### Hosted-tier key proxy (server-side) — status: `idea`, blocks hosted monetization only
 BYOK launch needs none of this. A hosted paid tier requires a thin server-side proxy so

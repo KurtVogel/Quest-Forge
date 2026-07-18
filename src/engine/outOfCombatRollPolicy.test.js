@@ -4,6 +4,7 @@ const { sendMessage } = vi.hoisted(() => ({ sendMessage: vi.fn() }));
 vi.mock('../llm/adapter.js', () => ({ sendMessage }));
 
 import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls, reviewOutsideCombatRollsSync } from './outOfCombatRollPolicy.js';
+import { MACHINERY_MODEL } from '../llm/machinery.js';
 
 const SETTINGS = { apiKey: 'test-key', llmProvider: 'gemini', model: 'gemini-2.5-flash' };
 
@@ -170,7 +171,7 @@ describe('reviewOutsideCombatRolls LLM-arbiter path', () => {
     it('runs the audit on the Gemini machinery key when the DM provider is not gemini', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({ rolls_evaluation: [{ index: 0, approved: true }] }));
         await reviewOutsideCombatRolls([roll], 'I make my case.', 'narrative', { apiKey: 'k', geminiApiKey: 'gk', llmProvider: 'openai', model: 'gpt-4o-mini' });
-        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ provider: 'gemini', apiKey: 'gk', model: 'gemini-2.5-flash' }));
+        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ provider: 'gemini', apiKey: 'gk', model: MACHINERY_MODEL }));
     });
 
     it('falls back to sync rules when a non-gemini DM has no Gemini machinery key', async () => {

@@ -4,8 +4,36 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-17 (playtest #7 verified Guard + targeting live and surfaced a P1
-low-level-solo semantic divergence, fixed same session; deployed.)_
+_Last updated: 2026-07-18 (efficiency + hardening batch: cache-stable prompt prefix,
+Flash-Lite machinery, companion recovery gaps, ChatPanel logic extraction; deployed.)_
+
+## Efficiency + hardening batch (2026-07-18)
+
+Four items shipped in one session (947 tests + lint green; DECISIONS.md 2026-07-18):
+
+1. **Cache-stable prompt prefix** — `buildSystemPrompt` now emits all static blocks first
+   (CORE, ruleset, RESPONSE_FORMAT, item catalog, then per-campaign preset/custom/premise)
+   before any dynamic state, so Gemini/OpenAI/xAI prompt caching engages on every DM call
+   (~5–7k tokens at ~90% off + faster prefill). A short static FORMAT_REMINDER anchors
+   trailing-JSON compliance at the end; a vitest locks the byte-identical-prefix invariant.
+   **Watch item:** trailing-JSON discipline with RESPONSE_FORMAT no longer last — the live
+   turns run so far behaved, but if a provider starts dropping event blocks, the reminder
+   tail is the knob to strengthen.
+2. **Machinery on gemini-3.1-flash-lite** (was legacy 2.5-flash) — ~5x cheaper machinery
+   tokens and off the deprecation track; verified against the live models API. **Gate
+   passed**: keyed 30-turn eval:memory on the new model — every recall answer substantively
+   perfect (73% needle rate is synonym variance: "repair" vs "mend"), zero console
+   errors/warnings, extraction budgets held, fronts paced correctly.
+3. **Companion recovery** (rpg-balance-master spec, `companion_recovery_mechanics.md`) —
+   rests already healed companions (25% short / full long, verified); the real gaps closed:
+   healing potions can now be given to a hurt/downed companion out of combat (`USE_ITEM
+   { itemId, targetId }`, engine-rolled, revives downed never dead, Inventory "→ Name"
+   buttons), END_COMBAT announces "down but stable — potion, magic, or rest brings them
+   back", and the COMPANIONS prompt block nudges affinity when the player personally saves
+   a downed companion. Deliberately no bleed-out timer.
+4. **ChatPanel decision logic extracted** (strengthening-queue P1, 2026-07-06 — ticked):
+   the withheld-setup visibility rules and the LLM message-window filter now live in
+   `components/Chat/turnVisibility.js` with a 9-test suite.
 
 ## Playtest #7: Guard stance + targeting discipline live (2026-07-17)
 
@@ -798,7 +826,7 @@ memory layer remains the money-maker to keep polishing.
 
 ## Verification
 
-- `npm test` — **931** tests passing (63 files)
+- `npm test` — **947** tests passing (65 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)

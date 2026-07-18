@@ -15,6 +15,7 @@ import { curateStoryMemory } from '../../engine/storyMemory.js';
 import { captureInjection } from '../../dev/memoryInspectorStore.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
+import { buildMessageWindow, deriveSetupVisibility } from './turnVisibility.js';
 import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../../engine/roleplayCheck.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
@@ -234,23 +235,7 @@ export default function ChatPanel() {
      * Only sends the last MESSAGE_WINDOW un-summarized messages.
      * Older messages have been captured in journal entries and world facts.
      */
-    const buildMessageHistory = () => {
-        const s = stateRef.current;
-        // Hidden setup messages were intentionally superseded by authoritative roll/exchange
-        // results. Sending them back can bias the narrator toward a pre-rolled outcome.
-        const unsummarized = s.messages.filter(m => {
-            if (m.summarized || m.hidden) return false;
-            if (m.role === 'system') {
-                return /rolled \*\*/i.test(m.content || '');
-            }
-            return true;
-        });
-        const window = unsummarized.slice(-MESSAGE_WINDOW);
-        return window.map(m => ({
-            role: m.role === 'system' ? 'user' : m.role,
-            content: m.content,
-        }));
-    };
+    const buildMessageHistory = () => buildMessageWindow(stateRef.current.messages, MESSAGE_WINDOW);
 
     /**
      * Send a message to the LLM and process the response.
@@ -383,29 +368,11 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
         }
 
-        // Any narration that still has PENDING ROLLS is a "setup" the post-roll narration
-        // will supersede, so withhold it: the DM narrates the whole beat once, AFTER the
-        // dice resolve (see rollResolver). Only the final, roll-free narration is shown.
-        // This must hold for CHAINED rolls too — a failed check that provokes an enemy
-        // attack, a multi-enemy round, a triggered save — not just the player's first
-        // action. Keying on pending rolls alone is the fix; the previous condition also
-        // required the first-turn `originalPlayerMessage`, so every chained setup stayed
-        // visible and the player saw the beat twice (setup, then outcome).
-        // EXCEPTION: a check the Scribe extracted from natural prose (no JSON) reads like
-        // a real DM asking for a roll mid-scene. That narration is a complete beat, not a
-        // withheld setup — hiding it retroactively erased fiction the player had already
-        // read. Keep it visible and stage the proposal beneath it, unless it pre-narrated
-        // the outcome or the check was rejected as a player-authority override.
-        // setupPhase (defer outcome mutations until dice resolve) still keys on pending
-        // rolls alone — visibility and mutation deferral are separate concerns.
-        const proposalFromProse = !!events?._textRollDetected
-            && !events?._preNarratedOutcome
-            && !events?._playerAuthorityRollRejected
-            && events?.requestedRolls?.length > 0;
-        const setupPhase = events?.requestedRolls?.length > 0
-            || !!events?.combatExchange
-            || !!events?._playerAuthorityRollRejected;
-        const hideSetup = setupPhase && !proposalFromProse;
+        // Withheld-setup policy lives in turnVisibility.js (unit-tested): narration
+        // with pending rolls is superseded by the post-roll beat and hidden, EXCEPT
+        // prose-extracted proposals the player already read; setupPhase separately
+        // defers outcome mutations until dice resolve.
+        const { setupPhase, hideSetup } = deriveSetupVisibility(events);
         if (hideSetup) setStreamingMessage('');
         // Pre-generate a stable message ID so applyEvents can reference it as a loot source key.
         const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;

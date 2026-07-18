@@ -43,6 +43,10 @@ export default function InventoryPanel() {
         dispatch({ type: 'USE_ITEM', payload: item.id });
     };
 
+    const handleUseOn = (item, companionId) => {
+        dispatch({ type: 'USE_ITEM', payload: { itemId: item.id, targetId: companionId } });
+    };
+
     return (
         <div className="inventory-panel">
             <div className="inv-header">
@@ -91,6 +95,8 @@ export default function InventoryPanel() {
                                 bonusActionUsed={bonusActionUsed}
                                 onToggleEquip={handleToggleEquip}
                                 onUse={handleUse}
+                                onUseOn={handleUseOn}
+                                party={state.party || []}
                                 onRemove={handleRemove}
                             />
                         ))}
@@ -113,6 +119,8 @@ export default function InventoryPanel() {
                                 bonusActionUsed={bonusActionUsed}
                                 onToggleEquip={handleToggleEquip}
                                 onUse={handleUse}
+                                onUseOn={handleUseOn}
+                                party={state.party || []}
                                 onRemove={handleRemove}
                             />
                         ))
@@ -123,7 +131,13 @@ export default function InventoryPanel() {
     );
 }
 
-function InventoryItem({ item, nonProficient, character, combatActive, isPlayerCombatTurn, bonusActionUsed, onToggleEquip, onUse, onRemove }) {
+function InventoryItem({ item, nonProficient, character, combatActive, isPlayerCombatTurn, bonusActionUsed, onToggleEquip, onUse, onUseOn, party = [], onRemove }) {
+    // Out of combat, a healing consumable can be administered to a hurt living
+    // companion (in combat, companion healing goes through spells/the exchange).
+    const isHealingItem = item.consumableType === 'healing' && item.healing;
+    const giveTargets = isHealingItem && !combatActive
+        ? party.filter(c => c.status !== 'dead' && (c.hp ?? 0) < (c.maxHp || 1))
+        : [];
     const isHealingPotion = item.consumableType === 'healing' && item.healing;
     const usesBonusAction = item.actionType === 'bonus' || isHealingPotion;
     const atFullHealth = isHealingPotion && character?.currentHP >= character?.maxHP;
@@ -170,6 +184,16 @@ function InventoryItem({ item, nonProficient, character, combatActive, isPlayerC
                         {isHealingPotion ? 'Drink' : 'Use'}
                     </button>
                 )}
+                {giveTargets.map(companion => (
+                    <button
+                        key={companion.id}
+                        className="inv-use-btn"
+                        onClick={() => onUseOn(item, companion.id)}
+                        title={`Give ${item.name} to ${companion.name} (${companion.hp}/${companion.maxHp} HP${companion.status === 'downed' ? ', downed — this revives them' : ''})`}
+                    >
+                        → {companion.name.split(' ')[0]}
+                    </button>
+                ))}
                 {(item.type === 'weapon' || item.type === 'armor' || item.type === 'shield') && (
                     <button
                         className={`inv-equip-btn ${item.equipped ? 'unequip' : ''}`}

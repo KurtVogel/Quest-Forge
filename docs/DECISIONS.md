@@ -8,6 +8,29 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-18 · The DM system prompt is a byte-stable prefix + dynamic tail; format compliance lives in a tiny end reminder.**
+`buildSystemPrompt` used to interleave static and dynamic blocks and kept the big
+RESPONSE_FORMAT contract at the very end — which defeated every provider's prompt caching
+(Gemini implicit, OpenAI/xAI automatic all key on a stable request prefix) and re-billed
+~5–7k static tokens at full price on all four DM call types every turn. Settled order:
+fully static constants first (CORE_INSTRUCTIONS, ruleset, RESPONSE_FORMAT, item catalog),
+then per-campaign constants (preset, custom DM instructions, premise), THEN all dynamic
+state. Two corollaries are the actual decisions: (1) **never interpolate live state into a
+prefix block** — one changed byte re-bills the whole prompt (a vitest locks the
+byte-identical-prefix invariant across differing dynamic states); (2) moving RESPONSE_FORMAT
+off the end risks trailing-JSON compliance, which rides recency — so a short static
+`FORMAT_REMINDER` sits at the very end of every prompt instead of the full contract. No
+explicit provider cache params exist to wire; the stable prefix IS the mechanism. Mode
+suffixes (combat intent, table talk) append after everything and never break the prefix.
+Same session: machinery model moved `gemini-2.5-flash` → `gemini-3.1-flash-lite` (IDEAS.md
+economics + legacy-deprecation risk), gated on golden fixtures plus a keyed eval:memory run;
+companion recovery gaps closed per rpg-balance-master (`companion_recovery_mechanics.md`:
+rests already healed companions — only potion-on-companion targeting via `USE_ITEM
+{ itemId, targetId }` out of combat, an END_COMBAT "down but stable" line, and the
+downed-then-saved affinity prompt nudge were missing; deliberately NO bleed-out timer —
+companion death stays behind `remove_companions`); and the ChatPanel withheld-narration +
+message-window rules extracted to tested `components/Chat/turnVisibility.js`.
+
 **2026-07-17 · "Low-level solo" means no battle-ready companion — one semantic, four sites.**
 Playtest #7 exposed the divergence live: the exchange engine's `terminalState` treated a
 hero whose only companion was DOWNED as solo (defeat-setback at 0 HP), while the reducer's

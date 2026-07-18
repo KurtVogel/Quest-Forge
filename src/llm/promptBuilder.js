@@ -25,6 +25,13 @@ import { isCompanionActive } from '../engine/combatExchange.js';
 export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount }) {
     const parts = [];
 
+    // ——— STABLE PREFIX (DECISIONS.md 2026-07-18) ———
+    // Everything up to the premise is byte-identical across every call of a
+    // campaign: fully static constants first, then per-campaign constants.
+    // Gemini/OpenAI/xAI prompt caching all key on a stable request prefix, so
+    // KEEP STATIC BLOCKS FIRST and never interpolate live state into them —
+    // one changed byte here re-bills the whole prompt at full input price.
+
     // Core DM instructions
     parts.push(CORE_INSTRUCTIONS);
 
@@ -35,20 +42,22 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         parts.push(NARRATIVE_RULES);
     }
 
-    // Tone/setting preset
+    // Response format contract — static, so it lives in the cached prefix; a
+    // short FORMAT_REMINDER at the very end keeps trailing-JSON compliance.
+    parts.push(RESPONSE_FORMAT);
+
+    // Item catalog — static app data.
+    parts.push(buildItemCatalogBlock());
+
+    // Tone/setting preset (stable per campaign)
     const presetData = PRESETS[preset || DEFAULT_PRESET];
     if (presetData) {
         parts.push(`\n## SETTING & TONE\n${presetData.systemPromptAddition}`);
     }
 
-    // User's custom DM instructions
+    // User's custom DM instructions (stable per campaign)
     if (customSystemPrompt && customSystemPrompt.trim()) {
         parts.push(`\n## CUSTOM DM INSTRUCTIONS (from the player)\n${customSystemPrompt.trim()}`);
-    }
-
-    const lowLevelSafety = buildLowLevelSoloSafetyBlock(character, party);
-    if (lowLevelSafety) {
-        parts.push(lowLevelSafety);
     }
 
     // Campaign premise — the player's opening scenario. Foundational canon set at
@@ -57,6 +66,13 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     const normalizedPremise = normalizeCampaignPremise(premise);
     if (normalizedPremise) {
         parts.push(buildPremiseBlock(normalizedPremise));
+    }
+
+    // ——— DYNAMIC STATE (changes turn to turn; nothing below is cacheable) ———
+
+    const lowLevelSafety = buildLowLevelSoloSafetyBlock(character, party);
+    if (lowLevelSafety) {
+        parts.push(lowLevelSafety);
     }
 
     // World tempo replaces the old always-visible fronts dossier (DECISIONS.md
@@ -101,8 +117,6 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     if (inventory && inventory.length > 0) {
         parts.push(buildInventoryBlock(inventory, character));
     }
-
-    parts.push(buildItemCatalogBlock());
 
     // Active quests
     if (quests && quests.length > 0) {
@@ -155,8 +169,9 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         parts.push(buildCombatBlock(combat, character));
     }
 
-    // Response format instructions
-    parts.push(RESPONSE_FORMAT);
+    // Tiny static tail: RESPONSE_FORMAT moved into the cached prefix, but the
+    // trailing-JSON habit lives on recency — keep a short reminder last.
+    parts.push(FORMAT_REMINDER);
 
     return parts.join('\n\n');
 }
@@ -510,6 +525,12 @@ GOOD — DM proposes the roll with public adjudication; narrates the full scene 
 > \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":12,"description":"Slip past the patrol using the route you observed","reason":"The patrol watches the only exit","opposition":"Alert guards and moving torchlight","failure_stakes":"The patrol notices the escape attempt","difficulty_reason":"Meaningful challenge reduced by the observed route","advantage":true,"disadvantage":false,"advantage_reason":"The player studied the patrol route first"}] }\`\`\`
 > *(The client withholds this pre-roll line. Once the dice return, narrate the whole beat in one vivid pass — the creep along the wall AND whether you're spotted — never split across two messages.)*`;
 
+// Static closing reminder. RESPONSE_FORMAT lives early in the prompt (inside the
+// cache-stable prefix); this tiny tail keeps the trailing-JSON habit anchored to
+// the end of the context, where format compliance actually lives.
+const FORMAT_REMINDER = `## FINAL FORMAT REMINDER
+Follow the RESPONSE FORMAT contract above: immersive narrative prose first, then — whenever this turn carries events, requested rolls, or combat intent — exactly one fenced \`\`\`json event block as the very LAST thing in the response. Never narrate mechanics the engine owns, and never leave a required event out of the block.`;
+
 function buildCharacterBlock(character, combat = null) {
     const stats = Object.entries(character.abilityScores)
         .map(([ability, score]) => `${ABILITY_SHORT[ability]}: ${score} (${formatModifier(getModifier(score))})`)
@@ -628,7 +649,8 @@ ${party.map(c => {
         const conditions = c.conditions?.length ? ` | Conditions: ${c.conditions.join(', ')}` : '';
         return `- **${c.name}** (id: ${c.id}) | Role: ${c.role || 'ally'} | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Attack: ${c.weapon || 'Unarmed'} ${formatModifier(c.attackBonus ?? 0)} (${c.damage || '1d4+1'}) | Status: ${status} | Affinity: ${c.affinity}/100${conditions}`;
     }).join('\n')}
-A DOWNED companion is unconscious but ALIVE and recoverable through healing or rest — never narrate their death as a side remark. If the fiction genuinely, deliberately kills a companion, you MUST emit \`remove_companions\` for them in that same response; while they remain on this list, they are alive.`;
+A DOWNED companion is unconscious but ALIVE and recoverable through healing or rest — never narrate their death as a side remark. If the fiction genuinely, deliberately kills a companion, you MUST emit \`remove_companions\` for them in that same response; while they remain on this list, they are alive.
+When the player's own action brings a downed companion back (a potion, healing magic, dragging them to safety), that is a natural moment to warm the companion's affinity and personal stance via \`update_companions\`; repeatedly leaving them downed and unaided naturally cools it.`;
 }
 
 function buildInventoryBlock(inventory, character) {
