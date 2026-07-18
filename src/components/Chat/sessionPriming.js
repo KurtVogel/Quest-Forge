@@ -23,7 +23,7 @@ OPENING PACE — NORMAL LIFE FIRST: the opening scene establishes the place and 
 
 Before finishing, reconcile the premise with the current INVENTORY exactly once:
 - For each concrete, portable item the premise explicitly establishes that the PLAYER CHARACTER already owns, carries, brought, wears, or wields, add it through starting_items only if an equivalent item is not already in INVENTORY. Match by identity and common synonyms, not just exact wording; the engine also rejects exact/catalog duplicates.
-- Each starting_items entry uses { "name": "descriptive item name", "itemKey": "known catalog key only when certain", "description": "brief premise-grounded flavor", "equipped": false }. Set equipped true only when the premise explicitly says the character begins wearing or wielding it.
+- Each starting_items entry uses { "name": "descriptive item name", "itemKey": "known catalog key only when certain", "description": "brief premise-grounded flavor", "equipped": false, "quantity": 1 }. Set equipped true only when the premise explicitly says the character begins wearing or wielding it. When the premise states a count of an identical stackable item ("two Potions of Healing"), set quantity to that number instead of emitting one entry.
 - Do not add items merely mentioned as belonging to an NPC, faction, place, shop, inheritance not yet received, desire, plan, or possible future reward. Do not turn buildings, land, titles, relationships, animals, or other non-portable assets into inventory.
 - Preserve descriptive names and harmless flavor, but do not invent prices, magic bonuses, attack bonuses, damage, armor values, consumable effects, or other mechanics. Recognized catalog items receive mechanics from the engine.
 

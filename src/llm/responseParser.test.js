@@ -132,6 +132,19 @@ describe('defenses against LLM misbehavior', () => {
         expect(events.itemsFound).toHaveLength(20);
     });
 
+    it('keeps a clamped premise stack quantity ("two Potions of Healing")', () => {
+        const { events } = parseResponse(fence({
+            starting_items: [
+                { name: 'Potion of Healing', itemKey: 'potionHealing', quantity: 2 },
+                { name: 'Trail rations', quantity: 999 },
+                { name: 'Walking stick', quantity: 'not-a-number' },
+            ],
+        }));
+        expect(events.startingItems[0]).toMatchObject({ quantity: 2 });
+        expect(events.startingItems[1]).toMatchObject({ quantity: 10 }); // clamped
+        expect(events.startingItems[2].quantity).toBeUndefined(); // defaults to 1, omitted
+    });
+
     it('adds premise starting belongings once without trusting invented mechanics', () => {
         const { events } = parseResponse(fence({
             starting_items: [

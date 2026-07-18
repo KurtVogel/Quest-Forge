@@ -4,8 +4,32 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-18 (efficiency + hardening batch: cache-stable prompt prefix,
-Flash-Lite machinery, companion recovery gaps, ChatPanel logic extraction; deployed.)_
+_Last updated: 2026-07-18 late (playtest #8 verified the efficiency batch live; two small
+fixes — visible companion rest healing, starting_items stack quantity; deployed.)_
+
+## Playtest #8: efficiency batch verified live (2026-07-18, late)
+
+Fresh wizard + shieldmaiden campaign ("The Ferry of Broken Bells", in-medias-res ferry
+ambush) exercising the same-day batch end to end. **Everything held:** premise booted
+straight into combat with companion/quest/contract items reconciled; fiction-grounded
+targeting again (both toughs stayed on the shieldmaiden; the rope-cutter turned on the
+caster who burned him); the DM cast Sleep SINGLE-target on its own — the new "ONE foe"
+spell-list tag fixing the over-target failure at the source (no dead turns all session);
+unconscious → attack advantage with the condition on the enemy card; event compliance
+perfect all session with RESPONSE_FORMAT moved into the cached prefix (the FORMAT_REMINDER
+tail is doing its job); **potion → companion loop verified live** ("Give … to Kaarina"
+button → engine-rolled 2d4+2 → 6→13/18 HP → DM narrated the act without re-applying);
+Flash-Lite machinery ran the whole session with zero console errors.
+
+Found and fixed same session (950 tests + lint green):
+
+1. **P3 silent companion rest healing** — a short rest healed the companion 13→18/18 but
+   the rest message mentioned only the hero. TAKE_REST now appends "Companions recover:
+   Name X/Y HP (back on their feet)" when any companion actually healed.
+2. **P3 starting_items dropped stack quantity** — the premise's "two Potions of Healing"
+   became one: the parser stripped `quantity` and the priming template never asked for it.
+   Parser now passes a clamped (1–10) quantity through and the sessionPriming contract
+   documents it.
 
 ## Efficiency + hardening batch (2026-07-18)
 
@@ -826,7 +850,7 @@ memory layer remains the money-maker to keep polishing.
 
 ## Verification
 
-- `npm test` — **947** tests passing (65 files)
+- `npm test` — **950** tests passing (65 files)
 - `npm run lint` — clean
 - `npm run build` — green (~929 KB JS main chunk; split deferred pre-public)
 - Real-provider gates: `npm run eval:combat`, `npm run eval:memory` (shell API keys required)

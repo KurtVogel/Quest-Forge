@@ -340,11 +340,17 @@ export function normalizeEvents(raw) {
                 const name = String(item.name || '').trim();
                 const itemKey = String(item.itemKey || item.key || '').trim();
                 if (!name && !itemKey) return null;
+                // Premise-established stacks ("two Potions of Healing") keep their
+                // count — clamped small; starting gear is belongings, not a hoard.
+                const quantity = Number.isFinite(Number(item.quantity))
+                    ? Math.max(1, Math.min(10, Math.floor(Number(item.quantity))))
+                    : 1;
                 return {
                     ...(name && { name }),
                     ...(itemKey && { itemKey }),
                     ...(item.description && { description: String(item.description).slice(0, 500) }),
                     ...(item.equipped === true && { equipped: true }),
+                    ...(quantity > 1 && { quantity }),
                 };
             })
             .filter(Boolean)

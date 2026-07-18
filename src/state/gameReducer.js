@@ -1461,6 +1461,36 @@ export function gameReducer(state, action) {
                 currentConditions = currentConditions.filter(c => String(c).toLowerCase() !== String(endedSustained.condition).toLowerCase());
             }
 
+            // Companions rest too (dead ones excepted): full heal on a long rest,
+            // 25% of maxHp (min 1) on a short one. Computed before the message so
+            // their recovery is VISIBLE — it healed silently until 2026-07-18.
+            const restedParty = (state.party || []).map(companion => {
+                if (companion.status === 'dead') return companion;
+                const maxHp = companion.maxHp || companion.hp || 1;
+                const companionHp = isLong
+                    ? maxHp
+                    : Math.min(maxHp, (companion.hp || 0) + Math.max(1, Math.ceil(maxHp * 0.25)));
+                const restedCompanion = normalizeCompanion({
+                    hp: companionHp,
+                    conditions: isLong ? [] : companion.conditions,
+                    status: companionStatus(companionHp, maxHp),
+                }, companion);
+                if (endedSustained?.targetId === companion.id) {
+                    delete restedCompanion.spellAcBonus;
+                    if (endedSustained.condition) {
+                        restedCompanion.conditions = (restedCompanion.conditions || [])
+                            .filter(c => String(c).toLowerCase() !== String(endedSustained.condition).toLowerCase());
+                    }
+                }
+                return restedCompanion;
+            });
+            const companionRecoveries = restedParty
+                .filter((companion, i) => (companion.hp ?? 0) > ((state.party || [])[i]?.hp ?? 0))
+                .map(companion => `${companion.name} ${companion.hp}/${companion.maxHp} HP${(state.party || []).find(c => c.id === companion.id)?.status === 'downed' ? ' (back on their feet)' : ''}`);
+            const companionNote = companionRecoveries.length > 0
+                ? ` Companions recover: ${companionRecoveries.join(', ')}.`
+                : '';
+
             // Build rest message
             const healedAmount = healed - state.character.currentHP;
             const restMsg = {
@@ -1468,8 +1498,8 @@ export function gameReducer(state, action) {
                 timestamp: Date.now(),
                 role: 'system',
                 content: isLong
-                    ? `**Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${newSpellSlots ? ' Spell slots restored.' : ''}${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}`
-                    : `**Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.${recoveryNote}`,
+                    ? `**Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${newSpellSlots ? ' Spell slots restored.' : ''}${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}${companionNote}`
+                    : `**Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.${recoveryNote}${companionNote}`,
                 ...(action.meta?.narrate && {
                     narrationCue: {
                         type: 'player_mechanic',
@@ -1508,26 +1538,7 @@ export function gameReducer(state, action) {
                     lowLevelDefeat: clearsEarlyDefeat ? false : state.character.lowLevelDefeat,
                     deathSaves: clearsEarlyDefeat ? { successes: 0, failures: 0 } : state.character.deathSaves,
                 }) : restedBase,
-                party: (state.party || []).map(companion => {
-                    if (companion.status === 'dead') return companion;
-                    const maxHp = companion.maxHp || companion.hp || 1;
-                    const companionHp = isLong
-                        ? maxHp
-                        : Math.min(maxHp, (companion.hp || 0) + Math.max(1, Math.ceil(maxHp * 0.25)));
-                    const restedCompanion = normalizeCompanion({
-                        hp: companionHp,
-                        conditions: isLong ? [] : companion.conditions,
-                        status: companionStatus(companionHp, maxHp),
-                    }, companion);
-                    if (endedSustained?.targetId === companion.id) {
-                        delete restedCompanion.spellAcBonus;
-                        if (endedSustained.condition) {
-                            restedCompanion.conditions = (restedCompanion.conditions || [])
-                                .filter(c => String(c).toLowerCase() !== String(endedSustained.condition).toLowerCase());
-                        }
-                    }
-                    return restedCompanion;
-                }),
+                party: restedParty,
                 messages: [...state.messages, restMsg],
             };
         }
