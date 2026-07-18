@@ -52,7 +52,7 @@ it under Process notes.
 | enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-07-13 |
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-07-07 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-07-07 |
-| memory-journal | `engine/worldJournal.js` | 2026-07-05 |
+| memory-journal | `engine/worldJournal.js` | 2026-07-18 |
 | story-memory | `engine/storyMemory.js` | 2026-07-14 |
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-07-15 |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-07-12 |
@@ -61,7 +61,7 @@ it under Process notes.
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-07-15 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-07-08 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-07-06 |
-| providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | — |
+| providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-07-18 |
 | chat-orchestration | `components/Chat/ChatPanel.jsx` (`sendToLLM`, `applyEvents`, message window) | 2026-07-06 |
 
 ## Coverage Snapshot
@@ -147,6 +147,10 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P1** (vector-memory-rag, 2026-07-15): `openEmbedDB()` (`engine/vectorMemory.js:29-42`) has no `request.onblocked` handler — the same gap already fixed in `state/persistence.js:openDB` (2026-07-12) — so a future `EMBED_DB_VERSION` bump while another tab holds a connection open would hang every embed/persist/load call silently.
 - [ ] **P1** (progression, 2026-07-16): `applySingleLevelUp` (`engine/progression.js:67`) sets `hitDice.remaining: newLevel` unconditionally on every level-up — a genuine reset to full, not a +1 gain. `state/gameReducer.js:1170-1192`'s rest logic treats `hitDice.remaining` as a real spendable resource (short rest spends it down, long rest recovers only half, min 1) — so a character who spent hit dice on a short rest and then levels up from XP before their next long rest gets a full, silent, free refill of every hit die instead of the correct 5e behavior (gain one new die; previously spent ones stay spent). Every `progression.test.js` fixture starts with `remaining === total`, hiding the bug.
 - [ ] **P1** (progression, 2026-07-16): `estimateCombatExperience` (`engine/progression.js:129`) and the entire client-side XP-fallback path it feeds — `state/gameReducer.js:2414-2437`'s `END_COMBAT` branch that awards XP only when the DM never did — have zero test coverage (confirmed via grep: no match in `gameReducer.combat.test.js`). This is the safety net for "the DM forgot to award XP for a fight," untested at every level: the `slainXpOnly` vs. full-defeat enemy filter, the per-enemy `hp*2+ac*3` clamp band, and the double-award guard (`!llmAwardedXp && !state.combat.xpAwarded`).
+- [ ] **P1** (providers-adapter, 2026-07-18): the four provider send/stream impls are near-untested — `openai.js`/`xai.js` have no test file, `gemini.test.js` covers only `embedText`; `assertCompleteResponse` (the truncation guard protecting the trailing JSON event block), the SSE parse loop, and `httpError`'s `.status` stamping (adapter retry depends on it) are unverified — `src/llm/providers/{openai,xai,gemini}.js`.
+- [ ] **P2** (providers-adapter, 2026-07-18): gemini send+stream read only `candidate.content.parts[0].text` — a multi-part response (thinking-capable models) silently drops `parts[1..]` — `llm/providers/gemini.js:110,207`.
+- [ ] **P1** (memory-journal, 2026-07-18): the `npcs_encountered` upsert loop (classify gating, `!npc.name` skip, `!classified.allowRoster` combat-fodder rejection, `UPDATE_NPC` dispatch) has zero coverage — every summarize test uses `npcs_encountered: []` — `engine/worldJournal.js:147-178`.
+- [ ] **P2** (memory-journal, 2026-07-18): `buildJournalContext` KNOWN NPCs extras (relationshipHistory arc, pinned/importance/agenda/secrets/tension/trust/callbackHooks, `rosterTier` filter, >8-NPC overflow line) largely untested — `engine/worldJournal.js:286-318`.
 - [ ] **P1** (prompt-building, 2026-07-16): `buildCombatBlock` (`llm/promptBuilder.js:764-793`) — the block the DM reads every combat turn to know who's alive, downed, defending, or conditioned — has its dynamic per-combatant formatting completely untested. Every `promptBuilder.combatPacing.test.js` case either passes empty `enemies`/`turnOrder` arrays or only asserts on the static surrounding prose; none assert on the actual rendered `Atk:`/`Dmg:`/`Status:`/`DEFENDING`/`Conditions:` fields, the turn-order `→` marker, or the `ACTIVE — exactly two player_slots required` vs. `inactive` surge summary line (confirmed via grep — zero matches for any of these strings across all `promptBuilder.*.test.js` files).
 
 ## Entry template
@@ -171,6 +175,33 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-18 — providers-adapter + memory-journal (Lap 1: correctness & test depth)
+
+`npm test`: 931 passing / 63 files.
+
+Rotation excluded (last 6 entries, local ∪ origin — identical, confirmed via `git show origin/master:...`): progression, prompt-building (07-16), vector-memory-rag, inventory-economy (07-15), response-parsing, story-memory (07-14), rules-math, enemy-stats-conditions (07-13), persistence, character-vault (07-12), combat-exchange, cloud-sync (07-09). Eligible & never-audited: **providers-adapter** (picked first per the never-audited rule). Next least-recently-audited: dice-engine & memory-journal both 07-05, tie broken toward lower coverage → **memory-journal** (`worldJournal.js` 55.78%, registry-lowest). Coverage snapshot (07-12) is 6 days old, within the 7-day window — not refreshed.
+
+### providers-adapter (`llm/adapter.js`, `llm/providers/{gemini,openai,xai}.js`)
+- **Scope examined:** all four files end to end; `adapter.test.js` (all — routing, throws, retry/backoff, catalog), `gemini.test.js` (only `embedText`).
+- **Findings:**
+  - **P1:** the four provider send/stream implementations have near-zero direct coverage. `openai.js` and `xai.js` have **no test file at all**; `gemini.test.js` exercises only `embedText`. So `assertCompleteResponse` — the `finishReason`/`finish_reason` guard that makes a truncated turn *retryable* instead of silently applying a half-response missing its trailing JSON event block (a load-bearing game-loop invariant) — plus the SSE buffer/parse loop and `httpError`'s `.status` stamping (which the adapter's retry decision literally reads) are all unverified. Coverage: gemini.js 25.27%, openai.js/xai.js 3.70%. All testable with a mocked `fetch` (the embed test already does exactly this).
+  - **P2:** gemini send+stream read only `candidate.content.parts[0].text` (`gemini.js:110,207`) — a multi-part response (possible with thinking-capable models, which the file's own comment notes count reasoning tokens) silently drops `parts[1..]`.
+  - **P2:** streaming providers discard any final `data:` line still in `buffer` when the last chunk lacks a trailing newline; were that dropped line the STOP-`finishReason` chunk, `assertCompleteResponse(null)` treats the turn as complete — a truncated tail could pass silently. Low likelihood (well-formed SSE ends in `\n\n`).
+  - Verified strong: adapter routing, unknown-provider/missing-key throws, and retry/backoff (transient-recover, fatal-no-retry, give-up-after-2, temperature forward) are all deliberately tested.
+- **Suggested improvements:** (1) add `openai.test.js` + `xai.test.js` and extend `gemini.test.js` with mocked-fetch send/stream cases: happy path, `finish_reason:"length"` → throws, HTTP-error → `.status` stamped, multi-chunk SSE reassembly; (2) join non-empty `parts[]` text in gemini instead of `parts[0]`; (3) flush the trailing `buffer` after the read loop, or assert a terminal finishReason was actually observed.
+
+### memory-journal (`engine/worldJournal.js`)
+- **Scope examined:** full file end to end; `worldJournal.test.js` (buildJournalContext/normalizeLocationName) + `worldJournal.summarize.test.js` (maybeAutoSummarize, 7 tests); cross-checked `UPDATE_NPC`→`upsertNpc` (`gameReducer.js:2478`).
+- **Findings:**
+  - **P1:** the `npcs_encountered` upsert loop (`worldJournal.js:147-178`) has zero coverage — every summarize test passes `npcs_encountered: []` and the context tests inject pre-built NPC objects, so the journal's *own* NPC-extraction path never runs: `classifyNpcCandidate` gating, the `!npc.name` skip, the `!classified.allowRoster` combat-fodder rejection (what keeps generic goblins out of the durable roster), and the `UPDATE_NPC` dispatch shape. This is the bulk of the 55.78% gap; a regression that let fodder into the roster or emitted a malformed UPDATE_NPC would pass all 931 tests. (The undefined-field merge safety lives in `upsertNpc`, itself never exercised via this path.)
+  - **P2:** `buildJournalContext`'s KNOWN NPCs extras rendering (`286-318`) is only partly covered — looks/personality/stance/bondMoments are asserted, but the `relationshipHistory` `→` arc (286-288), pinned/importance/agenda/secrets/relationshipTension/trust/callbackHooks fields, the `rosterTier` filter (275), and the >8-NPC `hiddenCount` overflow line (314-316) are not.
+  - Verified strong: maybeAutoSummarize's cadence guard, no-key skip, repair-path recovery, world-facts cap (5), all-hidden-batch defer, rejection/no-advance, and the full transition-history detection matrix are deliberately and well tested.
+- **Suggested improvements:** (1) add a maybeAutoSummarize test with a populated `npcs_encountered` (one roster-eligible named NPC + one combat-fodder entry) asserting UPDATE_NPC fires only for the eligible one; (2) extend buildJournalContext tests to a >8-NPC set asserting the overflow line and one arc/trust/callbackHooks render.
+
+### Process notes
+- Spot-checked three of the oldest still-open queue items against current code — scribe SET_LOCATION/rejected-sendMessage (`scribe.test.js`: 0 matches), imageGen `downscaleDataUrl` coverage (`imageGen.test.js`: 0), frontDirector throw-path tests (`frontDirector.test.js`: 0) — all still unfixed. No checkbox changes.
+- Coverage snapshot (07-12) is 6 days old, within the 7-day window; not refreshed.
 
 ## 2026-07-16 — progression + prompt-building (Lap 1: correctness & test depth)
 
