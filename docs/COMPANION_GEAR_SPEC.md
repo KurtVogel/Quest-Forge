@@ -1,6 +1,6 @@
 # Spec: Companion Gear — weapon & armor upgrades for companions
 
-**Status:** Approved for implementation (Vesa, 2026-07-19). Not yet started.
+**Status:** SHIPPED 2026-07-19 (see DECISIONS.md 2026-07-19 and STATUS.md playtest #9). Balance verdicts adopted: AC absolute cap 21, flat damage bonus preserved (default +2), no ranged special-casing.
 **Scope:** ~half-day including playtest. One session.
 **Prerequisite reading:** `CLAUDE.md` (auto-loaded), this file. Do NOT crawl the codebase beyond the files named here.
 

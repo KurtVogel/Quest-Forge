@@ -46,7 +46,7 @@ export default function CompanionsPanel() {
                             <div className="companion-stats">
                                 <span title="Level">Lvl {companion.level}</span>
                                 <span title="Armor Class">AC {companion.ac}</span>
-                                <span className="companion-weapon" title="Attack">{companion.weapon || 'Unarmed'} {companion.attackBonus >= 0 ? '+' : ''}{companion.attackBonus ?? 0} · {companion.damage || '1d4+1'}</span>
+                                <span className="companion-weapon" title="Attack">{companion.weapon || 'Unarmed'} {(companion.attackBonus ?? 0) + (companion.weaponBonus || 0) >= 0 ? '+' : ''}{(companion.attackBonus ?? 0) + (companion.weaponBonus || 0)} · {companion.damage || '1d4+1'}{companion.weaponBonus ? `+${companion.weaponBonus}` : ''}</span>
                             </div>
 
                             <div className="comp-hp-wrap" title={`Health: ${companion.hp} / ${companion.maxHp}`}>

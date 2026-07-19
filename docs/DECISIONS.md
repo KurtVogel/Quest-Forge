@@ -8,6 +8,33 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-19 · Companion gear is abstract stats, not inventory; the engine rederives mechanics from the weapon name.**
+Shipped per `docs/COMPANION_GEAR_SPEC.md` (D1–D7 settled there; recorded here). A companion
+has ONE weapon and an implied armor level, expressed purely through the existing stat fields
+— no companion inventory, keepsakes live in `notes`. The DM channel is `update_companions`
+extended with documented gear fields (`weapon`, `ac`); the DM never supplies `damage` or
+`attackBonus` for a gear change. On a weapon change `normalizeCompanion` rederives damage
+dice from the catalog via `normalizeItemKey` (recognized catalog dice OVERRIDE DM-supplied
+dice, the hero-inventory principle applied to companions; versatile weapons use the
+one-handed die), preserving the companion's flat damage bonus (trailing `+N` of the existing
+damage, default `+2` — balance verdict: flat damage is static competence, `attackBonus`
+already owns level scaling, `weaponBonus` owns magic; never double up). Magic `+1..+3` is a
+separate additive `companion.weaponBonus` (the `spellAcBonus` pattern), parsed from the
+weapon name, reset on every weapon change, applied to attack AND damage at roll time in
+`combatExchange.js` — never baked statefully into `attackBonus`. **Companion AC clamps to an
+absolute cap of 21** (balance verdict: no per-update delta clamp — "unarmored → plate" is a
+legitimate +6 jump; 21 keeps companions at-or-below a maximally-invested hero). Gear changes
+announce themselves with a ⚔ system line (weapon/damage/bonus/AC deltas only — hp/affinity
+updates stay quiet). Hero-side item transfer is prompt-enforced (any handed-over item, upgrade
+or keepsake, pairs with `items_lost`; no engine-side inventory linkage in v1). Live playtest
+#9 verified the full loop: keepsake dagger → affinity only, no stat change; Longsword +1 +
+Chain Shirt gift → `1d8+2` rederived, `weaponBonus` 1, AC 15, both items removed, and the
+next real exchange rolled `1d20+5` / `1d8+3` with enemies resolving against the new AC.
+**Watch item (balance):** gear + `guard` stance — the 2026-07-17 guard verdict assumed
+guardian AC 13–15 (real enemy hit chance); a fully-geared AC-21 guardian drops that to
+~10–30%. Not blocking (a geared tank being tankier is the point), but if guard-spam trivializes
+fights in play, revisit late-game enemy attack bonuses.
+
 **2026-07-18 · The DM system prompt is a byte-stable prefix + dynamic tail; format compliance lives in a tiny end reminder.**
 `buildSystemPrompt` used to interleave static and dynamic blocks and kept the big
 RESPONSE_FORMAT contract at the very end — which defeated every provider's prompt caching

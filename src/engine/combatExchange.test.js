@@ -340,6 +340,23 @@ describe('engine-owned exchange resolution', () => {
         expect(enemyAttack.mode).toContain('Smoke obscures Vesa');
     });
 
+    it('applies a companion weaponBonus to both the attack roll and the damage roll', () => {
+        rollQueue.push(11, 4, 5); // companion d20 11, damage d6 4; enemy d20 5 misses the hero
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            companion_intents: [{ companion_id: 'wit', action: 'attack', target: 'Goblin' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        });
+        const plan = planCombatExchange(state({
+            party: [{ id: 'wit', name: 'Wit', hp: 10, maxHp: 10, ac: 13, attackBonus: 3, damage: '1d6+1', weaponBonus: 1, status: 'healthy' }],
+        }), intent);
+        const companionAttack = plan.payload.result.events.find(event => event.actor === 'Wit');
+
+        expect(companionAttack.rolled).toBe(15); // 11 + 3 attack bonus + 1 weapon bonus
+        expect(companionAttack.hit).toBe(true);
+        expect(companionAttack.damage).toBe(6); // d6 4 + 1 flat + 1 weapon bonus
+    });
+
     it('shares explicit player flanking advantage with a companion on the same target', () => {
         rollQueue.push(2, 3, 4, 18, 1);
         const intent = normalizeCombatExchange({

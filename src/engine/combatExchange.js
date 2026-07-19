@@ -1117,6 +1117,29 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
     };
 }
 
+// Companion magic-weapon bonus (COMPANION_GEAR_SPEC.md D4): a flat additive field set by
+// the reducer when a gifted weapon carries +1..+3, consumed here at roll time — the
+// spellAcBonus pattern. Absent on pre-gear saves ⇒ 0.
+function companionWeaponBonus(companion) {
+    const n = Number(companion?.weaponBonus);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(3, Math.trunc(n));
+}
+
+// Fold the magic bonus into the damage notation so the dice log shows the true roll
+// ('1d8+2' with a +1 weapon rolls as '1d8+3').
+function companionDamageNotation(companion) {
+    const notation = String(companion.damage || '1d4+1');
+    const bonus = companionWeaponBonus(companion);
+    if (!bonus) return notation;
+    const match = notation.trim().match(/^(.*?)([+-]\d+)\s*$/);
+    if (match) {
+        const combined = Number(match[2]) + bonus;
+        return combined === 0 ? match[1] : `${match[1]}${combined >= 0 ? '+' : ''}${combined}`;
+    }
+    return `${notation.trim()}+${bonus}`;
+}
+
 function resolveCompanionAttack(companion, target, events, rolls, situationalRuling = null, flankingEnemyIds = null) {
     const ruling = rulingFlags(situationalRuling);
     // Propagate explicit player flanking only when the companion has no separate ruling.
@@ -1126,7 +1149,7 @@ function resolveCompanionAttack(companion, target, events, rolls, situationalRul
         : situationalRuling;
     const modifiers = conditionAwareAttackModifiers(companion.conditions, target.conditions, ruling.advantage || companionFlanking, ruling.disadvantage || !!target.defending);
     const attack = rollD20(
-        companion.attackBonus ?? 2,
+        (companion.attackBonus ?? 2) + companionWeaponBonus(companion),
         `${companion.name} attacks ${target.name}`,
         modifiers.advantage,
         modifiers.disadvantage
@@ -1136,7 +1159,7 @@ function resolveCompanionAttack(companion, target, events, rolls, situationalRul
     const hit = attack.natural !== 1 && (critical || attack.roll.total >= target.ac);
     let damage = 0;
     if (hit) {
-        const damageRoll = rollDamage(companion.damage || '1d4+1', `${companion.name} damage`, { critical });
+        const damageRoll = rollDamage(companionDamageNotation(companion), `${companion.name} damage`, { critical });
         rolls.push(damageRoll.roll);
         damage = damageRoll.total;
         target.hp = Math.max(0, target.hp - damage);

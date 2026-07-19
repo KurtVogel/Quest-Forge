@@ -117,6 +117,22 @@ describe('recent table rulings block', () => {
     });
 });
 
+describe('companion gear prompt contract (COMPANION_GEAR_SPEC.md)', () => {
+    it('documents the gear fields and the companion-gear rule in the static blocks', () => {
+        const text = prompt();
+        expect(text).toContain('"weapon": "Longsword +1"');
+        expect(text).toContain('**COMPANION GEAR:**');
+        expect(text).toContain('NEVER supply "damage" or "attackBonus" for a gear change');
+    });
+
+    it('folds a companion weaponBonus into the party block attack line', () => {
+        const text = prompt({
+            party: [{ id: 'c1', name: 'Kaarina', role: 'shieldmaiden', level: 2, hp: 18, maxHp: 18, ac: 16, weapon: 'Longsword +1', attackBonus: 3, damage: '1d8+2', weaponBonus: 1, affinity: 60, status: 'healthy' }],
+        });
+        expect(text).toContain('Longsword +1 +4 (1d8+2+1)');
+    });
+});
+
 describe('buildSystemPrompt top-level assembly', () => {
     it('always includes the core DM instructions and response format', () => {
         const text = prompt();

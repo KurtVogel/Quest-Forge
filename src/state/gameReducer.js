@@ -3,7 +3,7 @@
  */
 import { computeACFromInventory, getModifier } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
-import { normalizeItem, normalizeItemKey } from '../data/items.js';
+import { ITEM_CATALOG, clampMagicBonus, normalizeItem, normalizeItemKey, parseMagicBonusFromName } from '../data/items.js';
 import { rollDie, rollNotation, rollWithModifier } from '../engine/dice.ts';
 import { ABILITY_NAMES, buildClassResources, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../engine/characterUtils.js';
 import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
@@ -710,6 +710,40 @@ function defaultCompanionDamage(weapon = '') {
     return '1d4+1';
 }
 
+// Companion gear (COMPANION_GEAR_SPEC.md): one abstract weapon expressed through stats.
+// On a weapon change the engine rederives damage dice from the catalog (D3/D5) and the
+// magic bonus from the name (D4); the flat damage bonus is companion competence, not
+// level — preserve the existing trailing +N, default +2 (balance verdict 2026-07-19).
+const COMPANION_DAMAGE_DICE = /\d*d\d+/i;
+const COMPANION_FLAT_DAMAGE_DEFAULT = 2;
+
+function parseTrailingFlatBonus(damage) {
+    const match = String(damage || '').trim().match(/([+-]\d+)\s*$/);
+    if (!match) return null;
+    const n = Number(match[1]);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(8, Math.trunc(n)));
+}
+
+function deriveCompanionWeaponProfile(weapon, existingDamage, payloadDamage) {
+    const weaponBonus = clampMagicBonus(parseMagicBonusFromName(weapon));
+    const flatBonus = parseTrailingFlatBonus(existingDamage)
+        ?? parseTrailingFlatBonus(payloadDamage)
+        ?? COMPANION_FLAT_DAMAGE_DEFAULT;
+    const itemKey = normalizeItemKey(weapon);
+    const catalog = itemKey ? ITEM_CATALOG[itemKey] : null;
+    if (catalog?.type === 'weapon' && COMPANION_DAMAGE_DICE.test(catalog.damage || '')) {
+        // Recognized catalog mechanics override LLM-supplied dice (D5). Versatile
+        // weapons use the one-handed die — companions don't model hands.
+        const damage = flatBonus > 0 ? `${catalog.damage}+${flatBonus}` : catalog.damage;
+        return { damage, weaponBonus };
+    }
+    const fallback = (typeof payloadDamage === 'string' && payloadDamage.trim())
+        ? payloadDamage.trim().slice(0, 20)
+        : defaultCompanionDamage(weapon);
+    return { damage: fallback, weaponBonus };
+}
+
 function companionStatus(hp, maxHp) {
     if (hp <= 0) return 'downed';
     const pct = maxHp > 0 ? hp / maxHp : 1;
@@ -724,14 +758,31 @@ function normalizeCompanion(payload = {}, existing = {}) {
     const level = clampNumber(merged.level, 1, MAX_CHARACTER_LEVEL, existing.level || 1);
     const maxHp = clampNumber(merged.maxHp ?? merged.maxHP, 1, 999, existing.maxHp || 20);
     const hp = clampNumber(merged.hp, 0, maxHp, existing.hp ?? maxHp);
-    const weapon = merged.weapon || existing.weapon || 'Dagger';
+    const weapon = String(merged.weapon || existing.weapon || 'Dagger').trim().slice(0, 60) || 'Dagger';
     const attackBonus = clampNumber(
         merged.attackBonus ?? merged.modifier,
         -5,
         15,
         existing.attackBonus ?? Math.min(8, 2 + Math.ceil(level / 3))
     );
-    const damage = merged.damage || existing.damage || defaultCompanionDamage(weapon);
+    // The weapon-rederivation branch fires ONLY when the payload actually changes the
+    // weapon — a rest or heal update passing { hp, status } must never touch damage.
+    const weaponChanged = typeof payload.weapon === 'string' && payload.weapon.trim() !== ''
+        && payload.weapon.trim().toLowerCase() !== String(existing.weapon || '').trim().toLowerCase();
+    let damage;
+    let weaponBonus;
+    if (weaponChanged) {
+        const derived = deriveCompanionWeaponProfile(
+            weapon,
+            existing.damage,
+            typeof payload.damage === 'string' ? payload.damage : ''
+        );
+        damage = derived.damage;
+        weaponBonus = derived.weaponBonus;
+    } else {
+        damage = merged.damage || existing.damage || defaultCompanionDamage(weapon);
+        weaponBonus = clampMagicBonus(Number(existing.weaponBonus) || 0);
+    }
 
     return {
         id: merged.id || `companion-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
@@ -741,10 +792,14 @@ function normalizeCompanion(payload = {}, existing = {}) {
         level,
         maxHp,
         hp,
-        ac: clampNumber(merged.ac, 1, 30, existing.ac || 12),
+        // Absolute AC cap 21 (balance verdict 2026-07-19): a maxed hero tops out ~21-23,
+        // so a generously geared companion stays at-or-below that ceiling. No per-update
+        // delta clamp — "unarmored → plate" is a legitimate +6 jump.
+        ac: clampNumber(merged.ac, 1, 21, existing.ac || 12),
         weapon,
         attackBonus,
         damage,
+        weaponBonus,
         status: hasExplicitStatus
             ? (merged.status || companionStatus(hp, maxHp))
             : (existing.status === 'dead' ? 'dead' : companionStatus(hp, maxHp)),
@@ -2653,15 +2708,34 @@ export function gameReducer(state, action) {
             };
         }
 
-        case 'UPDATE_COMPANION':
+        case 'UPDATE_COMPANION': {
+            let gearAnnouncement = null;
+            const party = (state.party || []).map(companion => {
+                if (companion.id !== action.payload.id && companion.name !== action.payload.name) return companion;
+                const next = normalizeCompanion(action.payload, companion);
+                // Gear changes announce themselves (D6) — silent state changes are a bug.
+                // Pure hp/affinity/status updates stay quiet.
+                const weaponChanged = next.weapon !== companion.weapon
+                    || next.damage !== companion.damage
+                    || (next.weaponBonus || 0) !== (companion.weaponBonus || 0);
+                const acChanged = next.ac !== (companion.ac ?? next.ac);
+                if (weaponChanged || acChanged) {
+                    const parts = [];
+                    if (weaponChanged) {
+                        const bonus = next.weaponBonus ? `, +${next.weaponBonus} atk/dmg` : '';
+                        parts.push(`now wields the ${next.weapon} (${next.damage}${bonus})`);
+                    }
+                    if (acChanged) parts.push(`AC ${companion.ac} → ${next.ac}`);
+                    gearAnnouncement = systemMessage(`⚔ ${next.name} ${parts.join('; ')}.`);
+                }
+                return next;
+            });
             return {
                 ...state,
-                party: (state.party || []).map(companion =>
-                    (companion.id === action.payload.id || companion.name === action.payload.name)
-                        ? normalizeCompanion(action.payload, companion)
-                        : companion
-                ),
+                party,
+                messages: gearAnnouncement ? [...state.messages, gearAnnouncement] : state.messages,
             };
+        }
 
         case 'REMOVE_COMPANION':
             return {

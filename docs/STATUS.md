@@ -4,8 +4,30 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-18 late (playtest #8 verified the efficiency batch live; two small
-fixes — visible companion rest healing, starting_items stack quantity; deployed.)_
+_Last updated: 2026-07-19 (Companion Gear shipped per spec + live playtest #9; deployed.)_
+
+## Companion Gear v1 + playtest #9 (2026-07-19, deployed)
+
+The approved `docs/COMPANION_GEAR_SPEC.md` implemented in one session (DECISIONS.md
+2026-07-19 records D1–D7 + the balance verdicts). Gear gifts to companions are now
+mechanical: `update_companions` carries `weapon`/`ac`; on a weapon change the engine
+rederives damage dice from the catalog (catalog dice override DM dice; flat `+N` preserved,
+default +2), parses `+1..+3` into a new additive `companion.weaponBonus` (spellAcBonus
+pattern, applied to hit AND damage at roll time), clamps companion AC to an absolute 21,
+and announces every gear change with a ⚔ system line. Hero-side `items_lost` pairing is
+prompt-enforced; sentimental gifts stay stats-free (`notes`/affinity). Party block + prompt
+show effective numbers; Companions panel folds the bonus into its attack line. 12 new tests
+(962 total) + lint + build green; prefix-stability tests unaffected.
+
+**Playtest #9** (continued the Ferry of Broken Bells autosave — Sielu + Kaarina): keepsake
+dagger gift → affinity 75, weapon untouched, no system line (correct quiet path);
+Longsword +1 + Chain Shirt gift → DM emitted the gear update + BOTH items_lost, engine
+system line "now wields the Longsword +1 (1d8+2, +1 atk/dmg); AC 14 → 15", and the next
+real fight rolled Kaarina's attack at `1d20+5` and damage `1d8+3` with the spearman's
+counter resolving vs AC 15. Zero console errors. One finding fixed same session: the DM
+skipped `items_lost` for the *keepsake* (non-gear) gift — the COMPANION GEAR prompt rule
+now states ANY handed-over item leaves the hero's inventory. Campaign left mid-fight at
+the Valto pickets (autosave, reload-safe).
 
 ## Playtest #8: efficiency batch verified live (2026-07-18, late)
 

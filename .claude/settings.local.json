@@ -85,7 +85,10 @@
       "Bash(awk '/^export async function detectSemanticTextRolls/,0' src/llm/responseParser.js)",
       "Bash(awk '/^export async function reviewOutsideCombatRolls/,0' src/engine/outOfCombatRollPolicy.js)",
       "Bash(echo \"exit: $?\")",
-      "Bash(npm.cmd test *)"
+      "Bash(npm.cmd test *)",
+      "Bash(cd \"C:\\\\RPG Game Antigravity\" && diff /tmp/origin_ss.md docs/SCHEDULED_STRENGTHENING.md)",
+      "Bash(cd \"C:\\\\RPG Game Antigravity\" && git show origin/master:docs/SCHEDULED_STRENGTHENING.md > /tmp/origin_strengthening.md 2>&1 && tail -n 100 /tmp/origin_strengthening.md | grep -E \"^## 202\" )",
+      "Bash(node -e ' *)"
     ]
   }
 }

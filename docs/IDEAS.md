@@ -894,6 +894,23 @@ enforcement, model routing (standard vs premium-model turns). This is where the 
 get enforced; it is deliberately NOT part of the client architecture (no backend stays true
 for BYOK). Scope it as its own project when the public-launch gate opens (STATUS "Up next" #5).
 
+### Inventory-panel "Give to <companion>" buttons for weapons/armor — status: `idea` (companion-gear follow-up)
+Mirror of the potion `→ Name` buttons: an engine-owned UI path that drives the same
+UPDATE_COMPANION gear derivation directly from the Inventory panel, removing reliance on DM
+cooperation for the `update_companions` + `items_lost` pairing (playtest #9 showed the DM
+can forget the items_lost half for non-gear gifts). From COMPANION_GEAR_SPEC.md §9.
+
+### Companion keepsake list as a structured capped field — status: `idea` (companion-gear follow-up)
+Sentimental gifts currently land in free-text `notes` (or only in affinity). A capped,
+deduped, append-only list like `bondMoments` would make keepsakes durable against note
+churn and renderable on the companion card. From COMPANION_GEAR_SPEC.md §9.
+
+### Scribe gear-handoff audit backstop — status: `idea` (companion-gear follow-up)
+Like the loot persistence audit: detect a narrated gear handoff to a companion that the DM
+never emitted as `update_companions`/`items_lost` and backfill it. From
+COMPANION_GEAR_SPEC.md §9; wait for real-play evidence that DMs actually miss the gear
+update (playtest #9's Gemini DM emitted it correctly first try).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)

@@ -367,7 +367,7 @@ When game events occur, include a structured JSON block at the END of your respo
     { "name": "<culture-grounded companion name>", "role": "guard", "level": 2, "hp": 18, "maxHp": 18, "ac": 14, "weapon": "Longsword", "attackBonus": 4, "damage": "1d8+2", "affinity": 70 }
   ],
   "update_companions": [
-    { "id": "companion-id", "name": "<existing companion name>", "hp": 10, "affinity": 75 }
+    { "id": "companion-id", "name": "<existing companion name>", "hp": 10, "affinity": 75, "weapon": "Longsword +1", "ac": 16 }
   ],
   "remove_companions": [],
   "player_death": null
@@ -481,6 +481,7 @@ ECONOMY & HEALING:
 - Magic weapon/armor/shield bonuses are supported from +1 to +3 only. Use "magicBonus": 1, 2, or 3. Weapons apply this to both attack and damage; armor and shields apply it to AC. Do not create +4 or higher equipment unless the user explicitly asks for high-power homebrew.
 - The client owns equipped weapon attack/damage and armor/shield AC math. In combat, identify only each strike's target; the engine supplies the weapon mechanics.
 - When the player puts on, removes, draws, sheathes, swaps, drops from hand, or otherwise changes worn/wielded equipment they still own, emit "equipment_changes": [{ "action": "equip"|"unequip", "type": "armor"|"shield"|"weapon", "name": "<item name if known>" }]. Use this for removing armor so AC updates. Do NOT use items_lost unless the item leaves the player's possession.
+- **COMPANION GEAR:** when the hero gives a companion a weapon or armor and the companion takes it up, emit "update_companions" with the new "weapon" name and/or "ac" — the engine derives all dice, magic bonuses, and mechanics from the weapon name; NEVER supply "damage" or "attackBonus" for a gear change. ANY item the hero hands over — upgrade or keepsake — leaves their inventory: emit items_lost in the same response (and items_found when the companion hands gear back or swaps). A sentimental or non-mechanical gift changes no stats: record it in the companion's "notes" and optionally warm "affinity". Companions politely decline gear they could not plausibly use (a scholar and a greataxe) — adjudicate from the fiction, no rules lawyering.
 
 REST & RESOURCES:
 - When the party rests, provide "rest_taken": "short" or "long". The system automatically handles:
@@ -647,7 +648,8 @@ These characters are currently traveling with the player. They act in combat and
 ${party.map(c => {
         const status = c.status || (c.hp <= 0 ? 'downed' : 'healthy');
         const conditions = c.conditions?.length ? ` | Conditions: ${c.conditions.join(', ')}` : '';
-        return `- **${c.name}** (id: ${c.id}) | Role: ${c.role || 'ally'} | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Attack: ${c.weapon || 'Unarmed'} ${formatModifier(c.attackBonus ?? 0)} (${c.damage || '1d4+1'}) | Status: ${status} | Affinity: ${c.affinity}/100${conditions}`;
+        const weaponBonus = c.weaponBonus || 0;
+        return `- **${c.name}** (id: ${c.id}) | Role: ${c.role || 'ally'} | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Attack: ${c.weapon || 'Unarmed'} ${formatModifier((c.attackBonus ?? 0) + weaponBonus)} (${c.damage || '1d4+1'}${weaponBonus ? `+${weaponBonus}` : ''}) | Status: ${status} | Affinity: ${c.affinity}/100${conditions}`;
     }).join('\n')}
 A DOWNED companion is unconscious but ALIVE and recoverable through healing or rest — never narrate their death as a side remark. If the fiction genuinely, deliberately kills a companion, you MUST emit \`remove_companions\` for them in that same response; while they remain on this list, they are alive.
 When the player's own action brings a downed companion back (a potion, healing magic, dragging them to safety), that is a natural moment to warm the companion's affinity and personal stance via \`update_companions\`; repeatedly leaving them downed and unaided naturally cools it.`;
