@@ -4,8 +4,19 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-19 later (playtest #10 stress-tested companion gear through a full
-dying arc; one P1 orphan-exchange fix; deployed.)_
+_Last updated: 2026-07-19 late (legacy Fighter level bonus retired per balance verdict;
+playtest #10 earlier the same day; deployed.)_
+
+## Legacy Fighter level bonus retired (2026-07-19, late)
+
+Vesa flagged the ancient `getLevelBonus` (+1 hit/damage per Fighter level past 1st, cap
++3) — added in earliest development for survivability, long before Fighting Styles,
+Champion, Extra Attack, or Action Surge existed. rpg-balance-master ruled: remove
+entirely (full rationale in DECISIONS.md 2026-07-19 and the agent's
+`fighter_level_bonus_ruling.md`). Stripped from rules/rollResolver/combatExchange and the
+DM prompt line; pre-change L2+ Fighter saves get a one-time LOAD_GAME notice
+(`levelBonusRetired` flag, pre-stamped at creation). 967 tests + lint green — four tests
+that had baked the +2 into expected totals were updated to the new math.
 
 ## Playtest #10: gear under fire — guard, dying arc, decline path (2026-07-19, later)
 

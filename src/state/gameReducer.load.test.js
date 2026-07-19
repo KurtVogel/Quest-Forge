@@ -61,6 +61,42 @@ describe('LOAD_GAME fronts heal', () => {
     });
 });
 
+describe('LOAD_GAME fighter level-bonus retirement notice (DECISIONS.md 2026-07-19)', () => {
+    const fighterSave = (character = {}) => ({
+        character: {
+            name: 'Veteran', race: 'human', class: 'fighter', level: 4, exp: 900,
+            currentHP: 30, maxHP: 30, conditions: [],
+            abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 },
+            ...character,
+        },
+        inventory: [],
+        messages: [],
+    });
+
+    it('shows the notice once for a legacy level-2+ fighter and stamps the flag', () => {
+        const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: fighterSave() });
+        expect(next.messages.at(-1).content).toContain('flat level bonus to hit and damage has been retired');
+        expect(next.character.levelBonusRetired).toBe(true);
+
+        const again = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: { ...fighterSave(), character: { ...next.character } },
+        });
+        expect(again.messages.some(m => (m.content || '').includes('has been retired'))).toBe(false);
+    });
+
+    it('stays quiet for level-1 fighters and non-fighters', () => {
+        const l1 = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: fighterSave({ level: 1, exp: 0 }) });
+        expect(l1.messages.some(m => (m.content || '').includes('has been retired'))).toBe(false);
+
+        const wizard = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: fighterSave({ class: 'wizard', level: 4 }),
+        });
+        expect(wizard.messages.some(m => (m.content || '').includes('has been retired'))).toBe(false);
+    });
+});
+
 const baseCharacter = {
     name: 'Survivor',
     race: 'human',

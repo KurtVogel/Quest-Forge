@@ -8,7 +8,24 @@ Format: date · decision · why. Newest first.
 
 ---
 
-**2026-07-19 · Companion gear is abstract stats, not inventory; the engine rederives mechanics from the weapon name.**
+**2026-07-19 · The legacy flat Fighter level bonus is retired — Fighting Styles, Champion, and Extra Attack carry the martial identity.**
+`getLevelBonus` (+1 to hit AND damage per level past 1st, cap +3, Fighter-only) predated
+every real Fighter feature: Vesa added it in the earliest development stage to give the
+class some survivability when it had nothing else. Since then the Fighter gained
+engine-owned Fighting Styles, Champion crits (19–20), Extra Attack, Action Surge, Second
+Wind, and full ASI cadence — so the abstraction AND the things it abstracted both applied,
+making Fighter the only class with a private flat scaling term stacked over
+ability + proficiency + magic (Wizard/Cleric spell attack and Rogue both stop there; their
+scaling lives in slots/cantrip dice/Sneak Attack). By L4+ it pushed fighters to
+near-auto-hit against playtest-typical AC 11–14, breaking bounded accuracy for one class.
+rpg-balance-master verdict (adopted verbatim): **remove entirely, no shrunk replacement** —
+Fighter's niche stays more attacks, wider crits, burst resources, best HP/armor, not a
+hidden thumb on the to-hit math. Removed from `rules.js` (`getWeaponAttackBonus` + the
+function), both `rollResolver.js` damage paths, `combatExchange.js` damage, and the DM
+prompt's "Level Bonus (combat)" line. **Never ship a mid-campaign nerf silently:** LOAD_GAME
+shows a one-time notice for pre-change L2+ Fighter saves (flag `levelBonusRetired`;
+`createCharacter` pre-stamps it so post-change fighters never see the notice; legacy hero-
+file imports correctly re-trigger it once).
 Shipped per `docs/COMPANION_GEAR_SPEC.md` (D1–D7 settled there; recorded here). A companion
 has ONE weapon and an implied armor level, expressed purely through the existing stat fields
 — no companion inventory, keepsakes live in `notes`. The DM channel is `update_companions`

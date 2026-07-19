@@ -194,7 +194,7 @@ describe('engine-owned exchange resolution', () => {
     });
 
     it('tells narration that a heavily wounded foe remains alive and combat is ongoing', () => {
-        rollQueue.push(15, 7, 1); // player hits for 11; Cave-Worg misses
+        rollQueue.push(15, 7, 1); // player hits for 10; Cave-Worg misses
         const intent = normalizeCombatExchange({
             player_slots: [{ action: 'attack', strikes: [{ target: 'Cave-Worg' }] }],
             enemy_intents: [{ enemy_id: 'Cave-Worg', action: 'attack', target: 'player' }],
@@ -203,14 +203,14 @@ describe('engine-owned exchange resolution', () => {
             enemies: [enemy('Cave-Worg', { hp: 20, maxHp: 32, ac: 14 })],
         }), intent);
 
-        expect(plan.payload.enemies[0].hp).toBe(9);
+        expect(plan.payload.enemies[0].hp).toBe(10);
         expect(plan.payload.result.terminal).toBeNull();
-        expect(plan.payload.result.summary).toContain('Cave-Worg remains alive at 9/32 HP');
+        expect(plan.payload.result.summary).toContain('Cave-Worg remains alive at 10/32 HP');
 
         const prompt = combatNarrationPrompt(plan.payload.result);
         expect(prompt).toContain('The terminal state is mechanically authoritative: ongoing');
         expect(prompt).toContain('COMBAT IS STILL ACTIVE');
-        expect(prompt).toContain('ALIVE AND ACTIVE: Cave-Worg — 9/32 HP');
+        expect(prompt).toContain('ALIVE AND ACTIVE: Cave-Worg — 10/32 HP');
         expect(prompt).toContain('Never describe an ALIVE AND ACTIVE combatant as dead');
     });
 

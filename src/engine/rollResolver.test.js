@@ -552,7 +552,7 @@ describe('fighter fighting styles in roll resolution', () => {
             }
         );
 
-        expect(results[0]).toMatchObject({ type: 'attack_roll', success: true, damage: 15, targetHp: 15 });
+        expect(results[0]).toMatchObject({ type: 'attack_roll', success: true, damage: 14, targetHp: 16 });
         expect(messagesFrom(dispatch)).toContain('Great Weapon Fighting rerolls: 1->5, 2->6');
     });
 });
@@ -581,8 +581,8 @@ describe('fighter Champion archetype', () => {
         expect(results[0]).toMatchObject({
             success: true,
             critical: true,
-            damage: 14, // (4 + 5) crit dice + STR 3 + Fighter level bonus 2
-            targetHp: 6,
+            damage: 12, // (4 + 5) crit dice + STR 3
+            targetHp: 8,
         });
         expect(messagesFrom(dispatch)).toContain('Champion critical on natural 19');
         expect(messagesFrom(dispatch)).toContain('crit — dice doubled');

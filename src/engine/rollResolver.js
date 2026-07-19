@@ -14,7 +14,7 @@
  */
 
 import { rollWithModifier, parseNotation, rollDice } from './dice.ts';
-import { getSkillModifier, getModifier, getLevelBonus, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getEquippedWeapon, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES, getSneakAttackDice } from './rules.js';
+import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getEquippedWeapon, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES, getSneakAttackDice } from './rules.js';
 
 /** Maximum depth for recursive follow-up roll handling. */
 const MAX_ROLL_DEPTH = 3;
@@ -688,7 +688,7 @@ function rollDamageWithStyle(notation, label, { crit = false, character = null, 
 
 /**
  * Roll a damage notation and surface it (ADD_ROLL + chat line). Doubles the dice on a
- * crit and adds the player's Fighter level bonus when a player `character` is supplied.
+ * crit; a player `character` also brings Fighting Style and Sneak Attack effects.
  * @returns {{ total: number }}
  */
 function rollAndShowDamage(notation, label, dispatch, { crit = false, character = null, inventory = [], advantage = false, disadvantage = false, hasAlly = false } = {}) {
@@ -701,11 +701,6 @@ function rollAndShowDamage(notation, label, dispatch, { crit = false, character 
     }
 
     const baseMod = result.modifier;
-    const lvlBonus = character ? getLevelBonus(character) : 0;
-    if (lvlBonus > 0) {
-        result.total += lvlBonus;
-        result.modifier += lvlBonus;
-    }
 
     // Rogue Sneak Attack (out-of-combat)
     let sneakAttackDetail = '';
@@ -724,12 +719,11 @@ function rollAndShowDamage(notation, label, dispatch, { crit = false, character 
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     const critLabel = crit ? ' *(crit — dice doubled)*' : '';
-    const lvlLabel = lvlBonus > 0 ? `, level bonus: +${lvlBonus}` : '';
     dispatch({
         type: 'ADD_MESSAGE',
         payload: {
             role: 'system',
-            content: `**${label}**${critLabel} (${notation}): **${result.total}** damage (dice: ${result.rolls.join(', ')}${baseMod ? `, mod: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel}${result.fightingStyleDetail || ''}${sneakAttackDetail})`,
+            content: `**${label}**${critLabel} (${notation}): **${result.total}** damage (dice: ${result.rolls.join(', ')}${baseMod ? `, mod: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${result.fightingStyleDetail || ''}${sneakAttackDetail})`,
         },
     });
 
@@ -799,19 +793,11 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC) {
 function resolveDamageRoll(roll, character, dispatch, inventory = []) {
     try {
         const result = rollDamageWithStyle(roll.notation || '1d4', roll.description || 'Damage Roll', { character, inventory });
-
-        // Apply class level bonus to damage (Fighter: +1 per level beyond 1st)
-        const lvlBonus = getLevelBonus(character);
-        const baseMod = result.modifier; // Original modifier from notation (before level bonus)
-        if (lvlBonus > 0) {
-            result.total += lvlBonus;
-            result.modifier += lvlBonus;
-        }
+        const baseMod = result.modifier;
 
         dispatch({ type: 'ADD_ROLL', payload: result });
 
-        const lvlLabel = lvlBonus > 0 ? `, level bonus: +${lvlBonus}` : '';
-        const rollMsg = `**${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${baseMod ? `, modifier: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${lvlLabel}${result.fightingStyleDetail || ''})`;
+        const rollMsg = `**${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${baseMod ? `, modifier: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${result.fightingStyleDetail || ''})`;
 
         dispatch({
             type: 'ADD_MESSAGE',

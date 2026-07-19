@@ -15,8 +15,8 @@ export const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
 
 const STARTING_GOLD_DICE = { count: 2, sides: 20 };
 // Standard 5e ASI cadence, uniform across classes — no feats by design, and no
-// Fighter bonus ASIs (Fighter identity already comes from the level bonus,
-// Fighting Styles, Champion crits, Extra Attack, and Action Surge).
+// Fighter bonus ASIs (Fighter identity already comes from Fighting Styles,
+// Champion crits, Extra Attack, and Action Surge).
 const ABILITY_SCORE_IMPROVEMENT_LEVELS = [4, 8, 12, 16, 19];
 
 /**
@@ -223,6 +223,9 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         notes: '',
         createdAt: Date.now(),
         startingGoldRolls,
+        // Post-2026-07-19 characters never had the legacy Fighter level bonus, so the
+        // one-time LOAD_GAME retirement notice must never fire for them.
+        levelBonusRetired: true,
     };
 
     return {

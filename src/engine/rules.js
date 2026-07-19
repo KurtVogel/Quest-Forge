@@ -154,7 +154,6 @@ export function getWeaponAttackBonus(character, inventory = []) {
         : 0;
     return abilityMod
         + (proficient ? getProficiencyBonus(character.level) : 0)
-        + getLevelBonus(character)
         + (weapon?.attackBonus || weapon?.magicBonus || 0)
         + styleBonus;
 }
@@ -335,18 +334,6 @@ export function combineRollModifiers(rollAdvantage, rollDisadvantage, conditionE
         : '';
     if (adv && dis) return { advantage: false, disadvantage: false, note: note ? `${note} (cancelled out)` : '' };
     return { advantage: adv, disadvantage: dis, note };
-}
-
-/**
- * Get the level-based combat bonus for a character.
- * Currently Fighter-only: +1 to hit and damage per level beyond 1st, capped at +3.
- * Abstracts Fighting Style / martial scaling. Extra Attack is handled in rollResolver.js.
- * @param {object} character
- * @returns {number} Bonus (0 at level 1, +1 at level 2, max +3)
- */
-export function getLevelBonus(character) {
-    if (!character || character.class !== 'fighter') return 0;
-    return Math.min(3, Math.max(0, character.level - 1));
 }
 
 /**

@@ -3128,6 +3128,19 @@ export function gameReducer(state, action) {
                 && isLowLevelSolo(backfilledCharacter, validated.party)) {
                 backfilledCharacter = applyEarlyDefeat(backfilledCharacter);
             }
+            // One-time notice for pre-2026-07-19 Fighter saves: the legacy flat "level
+            // bonus" (+1 hit/damage per level past 1st, cap +3) is retired — Fighting
+            // Styles, Champion crits, and Extra Attack carry the martial identity now
+            // (DECISIONS.md 2026-07-19). Never ship a mid-campaign nerf silently.
+            const levelBonusNotice = [];
+            if (backfilledCharacter?.class === 'fighter'
+                && (backfilledCharacter.level || 1) >= 2
+                && !backfilledCharacter.levelBonusRetired) {
+                backfilledCharacter = { ...backfilledCharacter, levelBonusRetired: true };
+                levelBonusNotice.push(systemMessage(
+                    'Balance update: the Fighter\'s flat level bonus to hit and damage has been retired. Your edge now comes from your Fighting Style, Champion critical range, Extra Attack, Action Surge, and Second Wind — no other class carried a hidden flat bonus, and now neither does yours.'
+                ));
+            }
             const loadedSession = {
                 ...initialGameState.session,
                 ...action.payload.session,
@@ -3164,7 +3177,7 @@ export function gameReducer(state, action) {
                 // and discarded, leaving the raw saved inventory — so the migrations never applied.
                 inventory: normalizedEquippedInventory,
                 character: backfilledCharacter,
-                messages: [...validated.messages, ...pendingProgression.messages],
+                messages: [...validated.messages, ...pendingProgression.messages, ...levelBonusNotice],
                 user: state.user,
                 settings: {
                     ...initialGameState.settings,

@@ -12,7 +12,6 @@ import {
     getConditionRollEffects,
     getEquippedWeapon,
     getIncapacitatingCondition,
-    getLevelBonus,
     getModifier,
     getSavingThrowModifier,
     getSkillModifier,
@@ -389,10 +388,6 @@ function rollDamage(notation, description, { critical = false, character = null,
         roll.subtotal = roll.rolls.reduce((sum, value) => sum + value, 0);
         roll.total = roll.subtotal + parsed.modifier;
     }
-    const levelBonus = character ? getLevelBonus(character) : 0;
-    roll.total += levelBonus;
-    roll.modifier += levelBonus;
-
     // Rogue Sneak Attack (in-combat)
     let sneakAttackDetail = null;
     if (character && character.class === 'rogue') {

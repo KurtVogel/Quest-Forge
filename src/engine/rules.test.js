@@ -1,6 +1,6 @@
 /**
  * Tests for the pure rules math: modifiers, saving throws, condition effects,
- * skill modifiers, AC, and the Fighter level bonus.
+ * skill modifiers, and AC.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -11,7 +11,6 @@ import {
     getIncapacitatingCondition,
     combineRollModifiers,
     getSkillModifier,
-    getLevelBonus,
     getArmorClass,
     computeACFromInventory,
     getMaxHitPoints,
@@ -124,16 +123,6 @@ describe('getSkillModifier', () => {
     });
 });
 
-describe('getLevelBonus', () => {
-    it('is fighter-only and capped at +3', () => {
-        expect(getLevelBonus({ class: 'fighter', level: 1 })).toBe(0);
-        expect(getLevelBonus({ class: 'fighter', level: 3 })).toBe(2);
-        expect(getLevelBonus({ class: 'fighter', level: 9 })).toBe(3);
-        expect(getLevelBonus({ class: 'wizard', level: 9 })).toBe(0);
-        expect(getLevelBonus(null)).toBe(0);
-    });
-});
-
 describe('armor class', () => {
     it('computes unarmored, armored, and shielded AC', () => {
         expect(getArmorClass(2)).toBe(12); // 10 + DEX
@@ -169,8 +158,8 @@ describe('fighter fighting styles', () => {
         const bow = [{ type: 'weapon', category: 'martialRanged', damage: '1d8', ranged: true, equipped: true }];
         const sword = [{ type: 'weapon', category: 'martialMelee', damage: '1d8', equipped: true }];
         const dexFighter = { ...fighter, fightingStyle: 'archery', abilityScores: { ...fighter.abilityScores, strength: 10, dexterity: 16 } };
-        expect(getWeaponAttackBonus(dexFighter, bow)).toBe(9); // DEX + prof + level bonus + style
-        expect(getWeaponAttackBonus(dexFighter, sword)).toBe(4); // no Archery bonus
+        expect(getWeaponAttackBonus(dexFighter, bow)).toBe(7); // DEX 3 + prof 2 + Archery 2
+        expect(getWeaponAttackBonus(dexFighter, sword)).toBe(2); // STR 0 + prof 2, no Archery bonus
     });
 
     it('applies Dueling to one-handed melee damage only', () => {

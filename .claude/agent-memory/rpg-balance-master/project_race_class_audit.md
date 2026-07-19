@@ -33,10 +33,17 @@ Defined in `classes.js` with `features` (by level), `resources` (tracked per-res
 
 **Fighter — most complete**
 - d10 hit die; heavy armor + shield (Chain Mail AC 16 + Shield, auto-equipped).
-- `getLevelBonus()` (`rules.js`): +1 to hit AND damage per level beyond 1st, **capped at +3** (was uncapped in March). Applied to attack and damage rolls in `rollResolver.js`.
-- **Extra Attack at L5**: `rollResolver.js` rolls two attacks for fighters L5+.
+- Fighting Styles at creation (Defense +1 AC, Dueling +2 dmg, Great Weapon reroll 1s/2s,
+  Archery +2 to-hit), Champion archetype at L3 (crits on natural 19-20), Extra Attack at
+  L5 (two independently-targeted strikes per Attack slot).
 - Resources: `secondWind` (short rest, L1), `actionSurge` (short rest, L2) — tracked with used/max.
 - Features L1–5 defined (Second Wind/Fighting Style → Action Surge → Martial Archetype → ASI → Extra Attack).
+- `getLevelBonus()` (flat +1 to-hit AND damage per level beyond 1st, capped +3) **RULED FOR
+  REMOVAL 2026-07-19** — see [[fighter_level_bonus_ruling]]. It was a stand-in from before
+  Fighting Style/Champion/Extra Attack existed and was making mid-level Fighters
+  near-unmissable against playtest AC 11-14; it duplicated the martial identity those real
+  features now carry. Confirm with `git log`/current `rules.js` whether the implementing
+  session has landed this yet before citing it as present or absent.
 
 **Rogue — skill specialist**
 - d8; light armor; **4 skill picks** (`numSkillChoices: 4`) — the deliberate skill-monkey niche.

@@ -4,7 +4,7 @@
  */
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT, getFightingStyleLabel, getMartialArchetypeLabel } from '../engine/characterUtils.js';
-import { formatModifier, getModifier, getProficiencyBonus, getLevelBonus, getSavingThrowModifier, isProficientWithWeapon } from '../engine/rules.js';
+import { formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifier, isProficientWithWeapon } from '../engine/rules.js';
 import { getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
@@ -614,7 +614,7 @@ function buildCharacterBlock(character, combat = null) {
 - **EXP:** ${expLine}
 - **AC:** ${character.armorClass}
 - **Wealth:** ${character.gold || 0} gp | ${character.silver || 0} sp | ${character.copper || 0} cp
-- **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}${getLevelBonus(character) > 0 ? `\n- **Level Bonus (combat):** +${getLevelBonus(character)} to hit and damage (applied automatically by the system — do NOT add this yourself)` : ''}
+- **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}
 - **Stats:** ${stats}
 - **Saving Throws:** ${saves} (* = proficient; applied automatically by the system)
 - **Skill Proficiencies:** ${skillProfs}${character.expertiseSkills?.length ? `\n- **Expertise Skills:** ${character.expertiseSkills.join(', ')} (applied automatically by the system)` : ''}
