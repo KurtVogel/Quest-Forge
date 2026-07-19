@@ -8,6 +8,23 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-19 · DM-emitted `rest_taken` is replay-guarded (`recentRests` ledger) — the transaction-family treatment, applied to rests.**
+Vesa's live-play report: the "**Long Rest** — Fully restored…" banner kept reappearing for
+multiple turns after the rest, long after the hero had left the shelter. Root cause: the DM
+re-emits `rest_taken` while the rest's narration is still inside its 20-message window —
+the exact echo failure that already forced ledgers for purchases, sales, coin grants, and
+spell casts — but `TAKE_REST` had no guard, so every echo re-ran the FULL rest: fresh
+banner, silent full re-heal, slot refill, resource reset (a free heal whenever the DM
+echoed after new damage). Fix follows the `recentSpellCasts` pattern: `recentRests` stores
+`sourceId|restType|messageIndex` strings (cap 8); a DM-sourced rest is dropped when the
+same message already applied one (exact sourceId replay) or a same-type rest landed within
+the last 8 messages — unless the player's own message asks to rest again (rest-verb check
+that ignores the partitive "the rest of the loot"). A suppressed echo re-stamps the ledger
+at the current index, so an echo that outlives the window stays suppressed. Character
+Sheet button rests are deliberate clicks — never guarded, but recorded, so a DM echo of a
+button rest is caught too. Guard is per rest type; sanitized on LOAD_GAME like the other
+ledgers.
+
 **2026-07-19 · The legacy flat Fighter level bonus is retired — Fighting Styles, Champion, and Extra Attack carry the martial identity.**
 `getLevelBonus` (+1 to hit AND damage per level past 1st, cap +3, Fighter-only) predated
 every real Fighter feature: Vesa added it in the earliest development stage to give the

@@ -122,7 +122,151 @@ describe('class resource activation', () => {
 
         expect(rested.messages.at(-1)).not.toHaveProperty('narrationCue');
     });
+});
 
+describe('DM rest replay guard', () => {
+    const filler = (n) => Array.from({ length: n }, (_, i) => ({
+        id: `filler-${i}`,
+        role: i % 2 ? 'assistant' : 'user',
+        content: `turn ${i}`,
+    }));
+
+    it('applies the first DM-emitted rest and stamps the ledger', () => {
+        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-1' },
+        });
+
+        expect(rested.character.currentHP).toBe(20);
+        expect(rested.messages.at(-1).content).toContain('Long Rest');
+        expect(rested.recentRests).toEqual(['msg-1|long|0']);
+    });
+
+    it('suppresses a re-emitted DM rest within the window — no banner, no re-heal', () => {
+        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-1' },
+        });
+        // The hero takes damage and moves on; the DM echoes rest_taken turns later.
+        const wounded = {
+            ...rested,
+            character: { ...rested.character, currentHP: 12 },
+            messages: [...rested.messages, ...filler(4)],
+        };
+        const echoed = gameReducer(wounded, {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-2' },
+        });
+
+        expect(echoed.character.currentHP).toBe(12);
+        expect(echoed.messages).toHaveLength(wounded.messages.length);
+        // Re-stamped at the echo's index so a persistent echo stays suppressed.
+        expect(echoed.recentRests.at(-1)).toBe(`msg-2|long|${wounded.messages.length - 1}`);
+    });
+
+    it('suppresses a DM echo of a Character Sheet button rest', () => {
+        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { narrate: true },
+        });
+        const echoed = gameReducer(rested, {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-9' },
+        });
+
+        expect(echoed.messages).toHaveLength(rested.messages.length);
+    });
+
+    it('honors a nearby DM rest when the player explicitly rests again', () => {
+        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-1' },
+        });
+        const wounded = { ...rested, character: { ...rested.character, currentHP: 5 } };
+        const again = gameReducer(wounded, {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-2', playerMessage: 'We make camp and rest for the night again.' },
+        });
+
+        expect(again.character.currentHP).toBe(20);
+        expect(again.messages.at(-1).content).toContain('Long Rest');
+    });
+
+    it('does not treat partitive "the rest of" as rest intent', () => {
+        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-1' },
+        });
+        const echoed = gameReducer(rested, {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-2', playerMessage: 'I grab the rest of the coins and head out.' },
+        });
+
+        expect(echoed.messages).toHaveLength(rested.messages.length);
+    });
+
+    it('always suppresses an exact same-source replay, even with rest intent', () => {
+        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-1', playerMessage: 'We rest.' },
+        });
+        const replayed = gameReducer(rested, {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-1', playerMessage: 'We rest.' },
+        });
+
+        expect(replayed.messages).toHaveLength(rested.messages.length);
+    });
+
+    it('applies a DM rest again once the replay window has passed', () => {
+        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-1' },
+        });
+        const later = {
+            ...rested,
+            character: { ...rested.character, currentHP: 8 },
+            messages: [...rested.messages, ...filler(12)],
+        };
+        const secondRest = gameReducer(later, {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-2' },
+        });
+
+        expect(secondRest.character.currentHP).toBe(20);
+        expect(secondRest.messages.at(-1).content).toContain('Long Rest');
+    });
+
+    it('never suppresses deliberate Character Sheet button rests', () => {
+        const first = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'short',
+            meta: { narrate: true },
+        });
+        const second = gameReducer(first, {
+            type: 'TAKE_REST',
+            payload: 'short',
+            meta: { narrate: true },
+        });
+
+        expect(second.messages).toHaveLength(first.messages.length + 1);
+    });
+});
+
+describe('rest and resource mechanics', () => {
     it('Second Wind clears low-level defeat when it restores HP', () => {
         const next = gameReducer(makeFighter({
             level: 1,

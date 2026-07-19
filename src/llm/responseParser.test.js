@@ -731,7 +731,11 @@ describe('applyEvents dispatch coverage', () => {
                 { status: 'completed', id: 'q1', name: 'Find the relic' },
             ],
         });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'TAKE_REST', payload: 'short' });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'TAKE_REST',
+            payload: 'short',
+            meta: expect.objectContaining({ source: 'dm' }),
+        }));
         expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_CONDITION', payload: 'prone' });
         expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_CONDITION', payload: 'blinded' });
         expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_QUEST', payload: { name: 'Find the relic', description: 'It was lost long ago.' } });

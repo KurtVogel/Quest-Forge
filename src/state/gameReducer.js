@@ -139,6 +139,9 @@ function validateSaveState(payload) {
         recentSpellCasts: Array.isArray(payload.recentSpellCasts)
             ? payload.recentSpellCasts.filter(entry => typeof entry === 'string').slice(-8)
             : [],
+        recentRests: Array.isArray(payload.recentRests)
+            ? payload.recentRests.filter(entry => typeof entry === 'string').slice(-RECENT_REST_LIMIT)
+            : [],
         combat: (() => {
             const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)
                 ? payload.combat
@@ -410,6 +413,29 @@ function playerMessageRecastsSpell(spell, playerMessage) {
     return REPEAT_TRANSACTION_RE.test(text) && /\b(cast|spell|it|that)\b/i.test(text);
 }
 
+// Rest replay guard: the observed failure is the DM re-emitting rest_taken for
+// several turns after a rest it already narrated, so the "Long Rest" banner kept
+// reappearing (and silently re-healing/refilling slots) long after the hero had
+// moved on. The window is wider than the coin/spell ones because the rest
+// narration lingers in the DM's message window and the echo persists with it.
+const RECENT_REST_MESSAGE_WINDOW = 8;
+const RECENT_REST_LIMIT = 8;
+
+function playerMessageRequestsRest(playerMessage) {
+    const text = String(playerMessage || '');
+    if (!text.trim()) return false;
+    // "rest of the loot"/"the rest of them" is partitive, not resting.
+    if (/\brest(?:s|ed|ing)?\b(?!\s+of\b)/i.test(text)) return true;
+    return /\b(sleep|nap|slumber|make camp|set up camp|camp for|bed down|turn in for)\b/i.test(text);
+}
+
+function rememberRecentRest(entries, sourceId, restType, messageIndex) {
+    const key = `${String(sourceId || '').slice(0, 160)}|${restType}|${messageIndex}`;
+    const previous = (Array.isArray(entries) ? entries : [])
+        .filter(entry => typeof entry === 'string' && entry !== key);
+    return [...previous, key].slice(-RECENT_REST_LIMIT);
+}
+
 function playerMessageSupportsRepeatTransaction(item, playerMessage, verbRe) {
     const text = String(playerMessage || '');
     if (!text.trim()) return false;
@@ -630,6 +656,7 @@ export const initialGameState = {
     recentRulings: [], // Roleplay-check rulings that ended without dice — injected so the DM cannot re-propose overruled/set-aside checks from scratch
     recentChecks: [], // Compact out-of-combat check-proposal ledger — heat input for diceless-but-tense arcs (chases, heists)
     recentSpellCasts: [], // "sourceId|spellKey" replay guard so a re-parsed spell_cast never double-spends a slot
+    recentRests: [], // "sourceId|restType|messageIndex" replay guard — a DM re-emitting rest_taken must not re-run the rest
     combat: {
         active: false,
         enemies: [],
@@ -1446,6 +1473,35 @@ export function gameReducer(state, action) {
             }
 
             const isLong = action.payload === 'long';
+            const restType = isLong ? 'long' : 'short';
+            const restMeta = action.meta || {};
+            const restMessageIndex = currentMessageIndex(state);
+            const recentRests = state.recentRests || [];
+            // DM-emitted rests (rest_taken) replay-guard exactly like purchases and
+            // spell casts: the DM keeps re-emitting the event while the rest's
+            // narration sits in its message window, re-healing the hero and
+            // re-posting the "Long Rest" banner turns after the camp was struck.
+            // Character Sheet button rests are deliberate clicks and never guarded,
+            // but they DO record into the ledger so a DM echo of a button rest is
+            // still caught. A nearby same-type rest only counts as new when the
+            // player's own message asks to rest again.
+            if (restMeta.source === 'dm') {
+                const restSourceId = String(restMeta.sourceId || '').slice(0, 160);
+                const exactReplay = restSourceId && recentRests.some(entry => entry.startsWith(`${restSourceId}|`));
+                const nearbyReplay = recentRests.some(entry => {
+                    const parts = entry.split('|');
+                    if (parts[1] !== restType) return false;
+                    const entryIndex = Number(parts[2]);
+                    if (!Number.isFinite(entryIndex)) return false;
+                    const distance = restMessageIndex - entryIndex;
+                    return distance >= 0 && distance <= RECENT_REST_MESSAGE_WINDOW;
+                });
+                if (exactReplay || (nearbyReplay && !playerMessageRequestsRest(restMeta.playerMessage))) {
+                    // Re-stamp the ledger at the current index so an echo that
+                    // persists past the window keeps being suppressed.
+                    return { ...state, recentRests: rememberRecentRest(recentRests, restSourceId, restType, restMessageIndex) };
+                }
+            }
             const charClass = CLASSES[state.character.class];
             const conMod = getModifier(state.character.abilityScores?.constitution || 10);
             const hitDice = state.character.hitDice || { total: state.character.level, remaining: state.character.level, die: charClass?.hitDie || 8 };
@@ -1595,6 +1651,7 @@ export function gameReducer(state, action) {
                 }) : restedBase,
                 party: restedParty,
                 messages: [...state.messages, restMsg],
+                recentRests: rememberRecentRest(recentRests, restMeta.sourceId, restType, restMessageIndex),
             };
         }
 

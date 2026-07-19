@@ -695,7 +695,9 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     }
 
     if (events.restTaken === 'short' || events.restTaken === 'long') {
-        dispatch({ type: 'TAKE_REST', payload: events.restTaken });
+        // source: 'dm' arms the reducer's rest replay guard — the DM tends to keep
+        // re-emitting rest_taken while the rest's narration is still in its window.
+        dispatch({ type: 'TAKE_REST', payload: events.restTaken, meta: { source: 'dm', ...transactionMeta } });
     }
 
     for (const cast of events.spellCasts || []) {

@@ -146,6 +146,26 @@ describe('LOAD_GAME progression migrations', () => {
         expect(next.messages[1].content).toContain('finds his footing');
     });
 
+    it('sanitizes the recentRests replay ledger from untrusted saves', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...baseCharacter, exp: 0 },
+                inventory: [],
+                messages: [],
+                recentRests: ['msg-1|long|4', { hostile: true }, 42, 'msg-2|short|6'],
+            },
+        });
+
+        expect(next.recentRests).toEqual(['msg-1|long|4', 'msg-2|short|6']);
+
+        const missing = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: { character: { ...baseCharacter, exp: 0 }, inventory: [], messages: [] },
+        });
+        expect(missing.recentRests).toEqual([]);
+    });
+
     it('applies pending level-ups for saves that crossed the new XP threshold', () => {
         const next = gameReducer(initialGameState, {
             type: 'LOAD_GAME',

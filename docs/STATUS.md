@@ -4,8 +4,20 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-19 late (legacy Fighter level bonus retired per balance verdict;
-playtest #10 earlier the same day; deployed.)_
+_Last updated: 2026-07-19 latest (duplicate long-rest banner fixed — rest_taken replay
+guard; before that: legacy Fighter level bonus retired; playtest #10; deployed.)_
+
+## Duplicate long-rest messages fixed (2026-07-19, latest)
+
+Vesa reported the "**Long Rest** — Fully restored…" banner reappearing for multiple turns
+after a rest. Cause: the DM re-emits `rest_taken` while the rest narration is still in its
+message window, and `TAKE_REST` was the last DM-writable mechanic WITHOUT a replay ledger —
+each echo re-posted the banner and silently re-ran the full rest (re-heal, slot refill,
+resource reset). Added the `recentRests` ledger (the `recentSpellCasts` pattern): DM-sourced
+rests are suppressed on exact same-message replay or a same-type rest within the last 8
+messages, unless the player's own message asks to rest again; suppressed echoes re-stamp
+the window so persistent echoes stay dead. Character Sheet button rests stay unguarded but
+feed the ledger. Details in DECISIONS.md 2026-07-19. 976 tests + lint green.
 
 ## Legacy Fighter level bonus retired (2026-07-19, late)
 
