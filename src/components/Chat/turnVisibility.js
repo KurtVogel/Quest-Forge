@@ -40,6 +40,26 @@ export function deriveSetupVisibility(events) {
 }
 
 /**
+ * Drop a combat_exchange the DM emitted while no combat is live. There is no
+ * machine to resolve it (typical case: the hero is DYING after END_COMBAT and
+ * the DM pattern-matches the in-combat death-save flow), and leaving it on the
+ * events object would both hide the response's narration (the setup policy
+ * above) and dead-end in a plan rejection the reducer silently ignores when
+ * combat is inactive — swallowing the whole response. A combat_start in the
+ * same response keeps its exchange: that is the legitimate in-medias-res
+ * opening flow.
+ *
+ * @param {object|null} events - normalized events from parseResponse.
+ * @param {boolean} combatActive - live combat.active at response time.
+ * @returns {boolean} true when an orphan exchange was dropped (mutates events).
+ */
+export function dropOrphanCombatExchange(events, combatActive) {
+    if (!events?.combatExchange || combatActive || events.combatStart) return false;
+    delete events.combatExchange;
+    return true;
+}
+
+/**
  * Build the sliding-window message history for the LLM.
  *
  * Drops summarized messages (the journal owns them), hidden messages (withheld

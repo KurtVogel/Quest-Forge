@@ -3,7 +3,7 @@
  * previously trapped in ChatPanel closures (strengthening queue, 2026-07-06).
  */
 import { describe, expect, it } from 'vitest';
-import { buildMessageWindow, deriveSetupVisibility } from './turnVisibility.js';
+import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from './turnVisibility.js';
 
 const roll = { type: 'skill_check', skill: 'stealth', dc: 12 };
 
@@ -41,6 +41,31 @@ describe('deriveSetupVisibility', () => {
         expect(deriveSetupVisibility(null)).toEqual({ proposalFromProse: false, setupPhase: false, hideSetup: false });
         expect(deriveSetupVisibility({ itemsFound: [{ name: 'Rope' }] }))
             .toEqual({ proposalFromProse: false, setupPhase: false, hideSetup: false });
+    });
+});
+
+describe('dropOrphanCombatExchange', () => {
+    it('drops an exchange emitted outside active combat so the narration stays visible', () => {
+        const events = { combatExchange: { playerSlots: [{ action: 'death_save' }] }, worldFacts: [] };
+        expect(dropOrphanCombatExchange(events, false)).toBe(true);
+        expect(events.combatExchange).toBeUndefined();
+        expect(deriveSetupVisibility(events).hideSetup).toBe(false);
+    });
+
+    it('keeps the exchange during live combat', () => {
+        const events = { combatExchange: { playerSlots: [] } };
+        expect(dropOrphanCombatExchange(events, true)).toBe(false);
+        expect(events.combatExchange).toBeDefined();
+    });
+
+    it('keeps a combat_start opening exchange (in-medias-res flow)', () => {
+        const events = { combatStart: { enemies: [] }, combatExchange: { playerSlots: [] } };
+        expect(dropOrphanCombatExchange(events, false)).toBe(false);
+        expect(events.combatExchange).toBeDefined();
+    });
+
+    it('tolerates null events', () => {
+        expect(dropOrphanCombatExchange(null, false)).toBe(false);
     });
 });
 

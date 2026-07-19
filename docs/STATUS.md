@@ -4,7 +4,43 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-19 (Companion Gear shipped per spec + live playtest #9; deployed.)_
+_Last updated: 2026-07-19 later (playtest #10 stress-tested companion gear through a full
+dying arc; one P1 orphan-exchange fix; deployed.)_
+
+## Playtest #10: gear under fire — guard, dying arc, decline path (2026-07-19, later)
+
+Continued the same campaign through the Valto-picket fight to stress the shipped gear in
+real combat. **Everything the feature promises held under the worst case:**
+
+- **Gear + guard (the balance watch item's first data):** "Kaarina — wall up!" → guard
+  declared, the crossbow bolt aimed at the hero redirected into her with the intercept
+  annotation and rolled **15 vs her new AC 15** — the geared AC is what the redirect math
+  used. Even geared she soaked 13 damage in one guard round (18 → 5 HP): guard is nowhere
+  near trivial at chain-shirt level. Verdict data point: no action needed at this tier.
+- **The +1 deciding a fight:** hero crit-killed the spearman, went down to 0 next round
+  (death saves engaged correctly — battle-ready companion present, so NOT the solo
+  setback; natural 1 correctly counted two failures), and Kaarina — dead-target retarget
+  note firing — won the fight alone: her earlier **14 vs AC 13** hit only connected
+  because of the +1, and her 21-to-hit kill secured END_COMBAT +122 XP while the hero
+  bled out. `weaponBonus` survived every combat HP update, the revival, and reload.
+- **Decline path:** offered the looted crossbow, Kaarina refused with mechanically
+  literate fiction ("takes two hands — if I drop my shield to shoot, the next bolt takes
+  my throat") — no stat change, and the crossbow entered the HERO's inventory as a
+  catalog Light Crossbow. Zero console errors all session.
+
+**Found and fixed same session (P1, pre-existing — not a gear regression):** combat ended
+in victory while the hero was DYING; the DM's next response answered with a
+`combat_exchange` death-save envelope **after END_COMBAT** — and the entire response
+vanished: `deriveSetupVisibility` hid the prose (combat-intent policy), `planCombatExchange`
+rejected the plan, and `REJECT_COMBAT_EXCHANGE` is a silent no-op when combat is inactive.
+The player stared at silence. Fix: `dropOrphanCombatExchange` in `turnVisibility.js` —
+an exchange emitted with no live combat (and no `combat_start`, preserving the
+in-medias-res flow) is dropped with a console warning so the narration displays and the
+turn proceeds normally; 4 new tests (966 total). Re-verified live: the retried turn
+narrated Kaarina's potion rescue and the engine revived the hero via the documented
+NPC-healing channel (dying cleared, death saves reset). Observation (no action): the
+narrated rescue potion didn't exist in inventory — the DM's `healing` field is the right
+channel, but fiction invented a phantom vial; harmless, worth an eye in future sessions.
 
 ## Companion Gear v1 + playtest #9 (2026-07-19, deployed)
 

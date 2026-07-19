@@ -15,7 +15,7 @@ import { curateStoryMemory } from '../../engine/storyMemory.js';
 import { captureInjection } from '../../dev/memoryInspectorStore.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
-import { buildMessageWindow, deriveSetupVisibility } from './turnVisibility.js';
+import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from './turnVisibility.js';
 import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../../engine/roleplayCheck.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
@@ -336,6 +336,14 @@ Translate the player's committed action into the single bounded combat_exchange 
         // exist on an OOC turn — no rolls, loot, quests, or NPC/state mutations.
         let events = (opts.narrationOnly || opts.tableTalk) ? null : parsed.events;
         opts.onNarrative?.(narrative);
+
+        // A combat_exchange with no live combat has no machine to resolve it; left in
+        // place it hides the narration AND dead-ends in a silent plan rejection —
+        // the whole response vanishes (playtest #10 finding: DM emitted a death_save
+        // exchange after END_COMBAT closed the fight with the hero dying).
+        if (dropOrphanCombatExchange(events, !!s.combat?.active)) {
+            console.warn('[ChatPanel] Dropped a combat_exchange emitted outside active combat; narrating normally.');
+        }
 
         // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text
         if (!opts.narrationOnly && !opts.tableTalk && (!events || !events.requestedRolls?.length) && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
