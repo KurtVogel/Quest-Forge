@@ -285,6 +285,28 @@ describe('seedMemories', () => {
         expect(getMemoryCount()).toBe(2);
     });
 
+    it('awaited clearMemories orders the persisted clear ahead of a campaign-switch seed (no cross-campaign resurrection)', async () => {
+        // The previous campaign's cache sits in IndexedDB.
+        await putEmbedding({
+            text: 'Old campaign: the Duke is dead.',
+            vector: unitVector(0),
+            category: 'world_fact',
+            schema: SCHEMA,
+            timestamp: 1,
+        });
+        embedTextMock.mockResolvedValue(unitVector(1));
+
+        // The ChatPanel mount sequence for a different campaign: clear, THEN seed.
+        await clearMemories();
+        await seedMemories('key', [{ text: 'New campaign: the ferry line is cut.', category: 'world_fact' }]);
+
+        // Only the new campaign's memory exists — the old row was gone before the
+        // seed's own cache load could resurrect it into memoryStore.
+        expect(getMemoryCount()).toBe(1);
+        const matches = await retrieveRelevant('key', 'What happened to the ferry?', 3, 0.1);
+        expect(matches.map(m => m.text)).toEqual(['New campaign: the ferry line is cut.']);
+    });
+
     it('ignores cached embeddings with an incompatible schema and re-embeds from scratch', async () => {
         await putEmbedding({
             text: 'Stale fact.',

@@ -31,6 +31,9 @@ function openEmbedDB() {
         const request = indexedDB.open(EMBED_DB_NAME, EMBED_DB_VERSION);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(request.result);
+        // A version bump while another tab holds a connection would otherwise hang
+        // every embed/persist/load call silently (same gap fixed in persistence.js).
+        request.onblocked = () => reject(new Error('Embedding cache blocked by another open tab'));
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
             if (db.objectStoreNames.contains(EMBED_STORE)) {
@@ -50,11 +53,14 @@ function persistEmbedding(entry) {
 }
 
 function clearPersistedEmbeddings() {
-    openEmbedDB().then(db => {
+    // Resolves only after the IndexedDB clear COMMITS, so a caller can order a
+    // subsequent load/seed behind it. Never rejects — the cache is non-critical.
+    return openEmbedDB().then(db => new Promise(resolve => {
         const tx = db.transaction(EMBED_STORE, 'readwrite');
         tx.objectStore(EMBED_STORE).clear();
-        tx.oncomplete = () => db.close();
-    }).catch(() => {});
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onabort = () => { db.close(); resolve(); };
+    })).catch(() => {});
 }
 
 async function loadPersistedEmbeddings() {
@@ -217,7 +223,11 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55)
  */
 export function clearMemories() {
     memoryStore = [];
-    clearPersistedEmbeddings();
+    // Awaitable: resolves once the persisted cache is actually gone. Callers about to
+    // seed a different campaign MUST await this — seedMemories loads the persisted
+    // cache on its own connection, and an unordered load can resurrect the previous
+    // campaign's embeddings into the fresh session (cross-campaign contamination).
+    return clearPersistedEmbeddings();
 }
 
 /**

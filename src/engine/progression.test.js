@@ -55,6 +55,34 @@ describe('D&D 5e XP progression', () => {
         expect(result.messages.some(m => m.content.includes('Average HP **6** from d10 + 2 CON = **+8 HP**'))).toBe(true);
     });
 
+    it('grants ONE new hit die on level-up without refilling spent ones', () => {
+        const result = awardExperience({
+            ...character,
+            level: 2,
+            exp: 0,
+            maxHP: 20,
+            currentHP: 20,
+            hitDice: { total: 2, remaining: 0, die: 10 }, // both dice spent on short rests
+        }, 600);
+
+        expect(result.character.level).toBe(3);
+        expect(result.character.hitDice).toEqual({ total: 3, remaining: 1, die: 10 });
+    });
+
+    it('keeps hit dice at full when none were spent, including across multi-level jumps', () => {
+        const rested = awardExperience({
+            ...character,
+            level: 1,
+            exp: 0,
+            maxHP: 12,
+            currentHP: 12,
+            hitDice: { total: 1, remaining: 1, die: 10 },
+        }, 900); // 300 → L2, 600 more → L3
+
+        expect(rested.character.level).toBe(3);
+        expect(rested.character.hitDice).toEqual({ total: 3, remaining: 3, die: 10 });
+    });
+
     it('defaults fighters to Champion when Martial Archetype unlocks at level 3', () => {
         const result = awardExperience({
             ...character,

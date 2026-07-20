@@ -4,8 +4,31 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-19 latest (duplicate long-rest banner fixed — rest_taken replay
-guard; before that: legacy Fighter level bonus retired; playtest #10; deployed.)_
+_Last updated: 2026-07-20 (three strengthening-queue P1s fixed: RAG campaign-switch race,
+embed-DB onblocked, hit-dice level-up refill; deployed.)_
+
+## Strengthening batch: RAG race + hit-dice refill (2026-07-20)
+
+Three P1s from the Open Findings Queue, picked because two were real bugs, not coverage:
+
+1. **RAG cross-campaign contamination race** — ChatPanel's mount seeding fired
+   `clearMemories()` (fire-and-forget IndexedDB clear) and immediately called
+   `seedMemories()`, whose cache load opens its own connection: an unordered load could
+   resurrect the PREVIOUS campaign's embeddings into a fresh session's `memoryStore` for
+   the whole session. `clearMemories()` now resolves only after the persisted clear
+   commits, ChatPanel awaits it before seeding, and a regression test proves a
+   campaign-switch seed cannot see the old campaign's rows.
+2. **`openEmbedDB` onblocked** — a future `EMBED_DB_VERSION` bump with another tab open
+   would have hung every embed call silently; now rejects (all embed-cache paths already
+   catch and degrade to in-memory), matching the 2026-07-12 persistence.js fix.
+3. **Hit-dice free refill on level-up** — `applySingleLevelUp` reset `hitDice.remaining`
+   to full; a hero who spent dice on a short rest then leveled mid-day got them all back.
+   Now a level grants exactly ONE new die and spent dice stay spent — the same rule the
+   spell-slot table already followed on level-up. (Level-up still fully heals HP; that
+   generosity is deliberate and unchanged.)
+
+979 tests + lint green. Scene-art queue items deliberately skipped — Vesa is unconvinced
+about the scene-art feature's direction altogether; parked until that's decided.
 
 ## Duplicate long-rest messages fixed (2026-07-19, latest)
 

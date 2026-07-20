@@ -68,7 +68,13 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
         // never silently refills the day's magic.
         ...(isSpellcaster(character.class) && { spellSlots: buildSpellSlots(newLevel, character.spellSlots) }),
         martialArchetype: normalizeMartialArchetype(character.class, newLevel, character.martialArchetype),
-        hitDice: { ...hitDice, total: newLevel, remaining: newLevel },
+        // The new level grants ONE new hit die; already-spent dice stay spent — like
+        // spell slots above, leveling mid-day never refills the day's rest resources.
+        hitDice: {
+            ...hitDice,
+            total: newLevel,
+            remaining: Math.min(newLevel, Math.max(0, hitDice.remaining ?? hitDice.total ?? character.level) + 1),
+        },
     };
     const updatedCharacter = {
         ...updatedCharacterBase,

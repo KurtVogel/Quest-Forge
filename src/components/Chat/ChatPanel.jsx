@@ -170,7 +170,6 @@ export default function ChatPanel() {
         if (!machineryKey || memorySeededRef.current) return;
 
         memorySeededRef.current = true; // Prevent concurrent attempts
-        clearMemories();
 
         const items = [
             ...(s.worldFacts || []).map(f => ({ text: f.fact, category: f.category || 'world_fact' })),
@@ -187,12 +186,15 @@ export default function ChatPanel() {
             })),
         ];
 
-        if (items.length > 0) {
-            seedMemories(machineryKey, items).catch((e) => {
+        // The clear MUST commit before seeding: seedMemories loads the persisted cache
+        // on its own IndexedDB connection, and an unordered load can resurrect the
+        // previous campaign's embeddings into this session (cross-campaign contamination).
+        clearMemories()
+            .then(() => (items.length > 0 ? seedMemories(machineryKey, items) : undefined))
+            .catch((e) => {
                 console.error('[RAG] Memory seeding failed — will retry next mount:', e);
                 memorySeededRef.current = false; // Allow retry on next mount
             });
-        }
     }, []); // Only on mount
 
     /**
