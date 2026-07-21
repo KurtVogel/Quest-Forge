@@ -42,7 +42,7 @@ it under Process notes.
 
 | Feature ID | Scope (primary files) | Last audited |
 |---|---|---|
-| dice-engine | `engine/dice.ts` | 2026-07-05 |
+| dice-engine | `engine/dice.ts` | 2026-07-21 |
 | rules-math | `engine/rules.js` | 2026-07-13 |
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-07-16 |
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-07-14 |
@@ -62,7 +62,7 @@ it under Process notes.
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-07-08 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-07-06 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-07-18 |
-| chat-orchestration | `components/Chat/ChatPanel.jsx` (`sendToLLM`, `applyEvents`, message window) | 2026-07-06 |
+| chat-orchestration | `components/Chat/ChatPanel.jsx` (`sendToLLM`, `applyEvents`, message window) | 2026-07-21 |
 
 ## Coverage Snapshot
 
@@ -70,28 +70,28 @@ Refreshed by the audit **at most weekly** (when older than 7 days), via:
 `npm.cmd install --no-save @vitest/coverage-v8 && npx.cmd vitest run --coverage --coverage.all --coverage.include='src/**/*.{js,jsx,ts}'`
 Used only to bias feature picking toward weak spots; per-file statement % for registry files.
 
-**2026-07-12** (658 tests / 51 files passing). % Statements per registry file:
+**2026-07-21** (988 tests / 64 files passing). % Statements per registry file:
 
 | Feature ID | File | % Stmts |
 |---|---|---|
-| dice-engine | `engine/dice.ts` | 74.07 |
-| rules-math | `engine/rules.js` | 88.57 |
+| dice-engine | `engine/dice.ts` | 93.93 |
+| rules-math | `engine/rules.js` | 92.30 |
 | progression | `engine/progression.js` | 97.91 |
-| response-parsing | `responseParser.js` / `jsonExtractor.js` | 96.15 / 89.83 |
-| prompt-building | `promptBuilder.js` | 98.15 |
-| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 76.23 / 100 |
-| combat-exchange | `combatExchange.js` | 84.05 |
-| enemy-stats-conditions | `enemyStats.js` | 88.40 |
-| hidden-fronts | `fronts.js` / `frontDirector.js` / `frontUpgrade.js` | 87.09 / 74.41 / 81.03 |
-| scribe | `scribe.js` | 78.87 |
-| memory-journal | `worldJournal.js` | 55.78 (lowest in registry) |
-| story-memory | `storyMemory.js` | 92.10 |
-| vector-memory-rag | `vectorMemory.js` | 95.57 |
-| persistence | `persistence.js` | 85.29 |
-| cloud-sync | `cloudSync.js` / `auth.js` | 84.40 / 0 (auth.js untested — thin Firebase wrapper) |
-| character-vault | `characterVault.js` / `characterUtils.js` | 86.84 / 89.15 |
-| inventory-economy | `items.js` / `equipment.js` | 96.49 / 100 (currency.js absent from v8 report — tooling quirk, has its own passing test file) |
-| quests | (part of `gameReducer.js`, 83.27 overall) | — |
+| response-parsing | `responseParser.js` / `jsonExtractor.js` | 95.95 / 95.06 |
+| prompt-building | `promptBuilder.js` | 98.56 |
+| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 77.07 / 100 |
+| combat-exchange | `combatExchange.js` | 82.47 |
+| enemy-stats-conditions | `enemyStats.js` | 93.50 |
+| hidden-fronts | `fronts.js` / `frontDirector.js` / `frontUpgrade.js` | 88.18 / 74.41 / 81.03 |
+| scribe | `scribe.js` | 78.03 |
+| memory-journal | `worldJournal.js` | 91.83 |
+| story-memory | `storyMemory.js` | 96.45 |
+| vector-memory-rag | `vectorMemory.js` | 93.38 |
+| persistence | `persistence.js` | 86.25 |
+| cloud-sync | `cloudSync.js` / `auth.js` | 96.33 / 0 (auth.js untested — thin Firebase wrapper) |
+| character-vault | `characterVault.js` / `characterUtils.js` | 88.75 / 89.15 |
+| inventory-economy | `items.js` / `equipment.js` | 98.36 / 100 (currency.js absent from v8 report — tooling quirk, has its own passing test file) |
+| quests | (part of `gameReducer.js`, 85.12 overall) | — |
 | scene-art | `imageGen.js` | 56.32 |
 | providers-adapter | `adapter.js` / `gemini.js` / `openai.js` / `xai.js` | 100 / 25.27 / 3.70 / 3.70 (network boundary, expected low) |
 | chat-orchestration | `ChatPanel.jsx` | 0 (no component test file exists) |
@@ -151,6 +151,9 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (providers-adapter, 2026-07-18): gemini send+stream read only `candidate.content.parts[0].text` — a multi-part response (thinking-capable models) silently drops `parts[1..]` — `llm/providers/gemini.js:110,207`.
 - [ ] **P1** (memory-journal, 2026-07-18): the `npcs_encountered` upsert loop (classify gating, `!npc.name` skip, `!classified.allowRoster` combat-fodder rejection, `UPDATE_NPC` dispatch) has zero coverage — every summarize test uses `npcs_encountered: []` — `engine/worldJournal.js:147-178`.
 - [ ] **P2** (memory-journal, 2026-07-18): `buildJournalContext` KNOWN NPCs extras (relationshipHistory arc, pinned/importance/agenda/secrets/tension/trust/callbackHooks, `rosterTier` filter, >8-NPC overflow line) largely untested — `engine/worldJournal.js:286-318`.
+- [ ] **P1** (dice-engine, 2026-07-21): unbounded dice `count` DoS — `parseNotation`/`rollDice`/`rollWithModifier` cap the lower bound (count/sides ≥ 1) but have NO upper cap, and a large count is valid syntax so `parseNotation` never throws — the try/catch at `rollResolver.js:696` can't catch it. LLM-authored `roll.damage` from `requested_rolls` (`rollResolver.js:230/256/299`) and non-catalog `item.healing` (`gameReducer.js:2057/2110`; `normalizeItem` spreads `healing` through, `items.js:164`) reach `rollWithModifier(count,…)` uncapped, so `9999999d6` loops millions of times and freezes the tab. Add `MAX_DICE_COUNT` cap (throw) — `engine/dice.ts:118-135`.
+- [ ] **P2** (dice-engine, 2026-07-21): `rollDie` modulo bias — `array[0] % sides` over the Uint32 range is not perfectly uniform for non-power-of-2 dice (d6/d20); ~1 in 2³², negligible but a real seam in the crypto-fair guarantee. Rejection-sample to remove — `engine/dice.ts:33`.
+- [ ] **P1** (chat-orchestration, 2026-07-21): the malformed-output events-routing switch (orphan `combat_exchange` drop `346`, `combatExchangeRejected`/in-combat-`requestedRolls` rejection `798-811`, semantic-roll merge-not-replace `358-363`) is entirely untested — `ChatPanel.jsx` is 0% with no test file; a regression that made the merge *replace* events (dropping loot/quests) or let in-combat rolls fall through to a free enemy attack passes all 988 tests. Extract to a pure helper like `turnVisibility.js` and test — `components/Chat/ChatPanel.jsx:798-832`.
 - [ ] **P1** (prompt-building, 2026-07-16): `buildCombatBlock` (`llm/promptBuilder.js:764-793`) — the block the DM reads every combat turn to know who's alive, downed, defending, or conditioned — has its dynamic per-combatant formatting completely untested. Every `promptBuilder.combatPacing.test.js` case either passes empty `enemies`/`turnOrder` arrays or only asserts on the static surrounding prose; none assert on the actual rendered `Atk:`/`Dmg:`/`Status:`/`DEFENDING`/`Conditions:` fields, the turn-order `→` marker, or the `ACTIVE — exactly two player_slots required` vs. `inactive` surge summary line (confirmed via grep — zero matches for any of these strings across all `promptBuilder.*.test.js` files).
 
 ## Entry template
@@ -175,6 +178,32 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-21 — dice-engine + chat-orchestration (Lap 2: robustness against hostile input)
+
+`npm test`: 988 passing / 64 files.
+
+**Lap transition:** as of 2026-07-18 every registry feature carries a Last-audited date, so Lap 1 is complete and this is the first **Lap 2** entry (robustness against malformed LLM output / stale saves / imports). Rotation excluded (last 6, local ∪ origin — identical): providers-adapter, memory-journal (07-18), progression, prompt-building (07-16), vector-memory-rag, inventory-economy (07-15), response-parsing, story-memory (07-14), rules-math, enemy-stats-conditions (07-13), persistence, character-vault (07-12). Oldest eligible → **dice-engine** (07-05); tie of scene-art/chat-orchestration (07-06) broke to lowest coverage → **chat-orchestration** (0%). Coverage snapshot refreshed (was exactly 7 days old).
+
+### dice-engine (`engine/dice.ts`)
+- **Scope examined:** full file end to end; `dice.test.ts` (all 16 tests); traced every notation call site — `combatExchange.js:374/379`, `rollResolver.js:666-668/694-701`, `gameReducer.js` `rollNotation(item.healing)` at 2057/2110, and `data/items.js:149-195` `normalizeItem`.
+- **Findings:**
+  - **P1 (hostile-input DoS):** the `sides<1`/`count<1` guards added on the 07-05 lap gave a *lower* bound, but there is still **no upper bound on `count`** in `parseNotation`/`rollDice`/`rollWithModifier`. A large-count notation is valid syntax, so `parseNotation` does **not** throw — meaning `rollDamageWithStyle`'s defensive try/catch (`rollResolver.js:696-701`, 1d4 fallback) cannot catch it; `rollDice` simply loops `count` times → unrecoverable tab freeze / OOM. Two live hostile paths: (1) **LLM-authored** outside-combat `roll.damage` from `requested_rolls` flows straight to `rollAndShowDamage`→`parseNotation`→`rollWithModifier(count,…)` (`rollResolver.js:230/256/299`); (2) a non-catalog consumable's `item.healing` reaches `rollNotation` (`gameReducer.js:2057/2110`) because `normalizeItem` spreads `...source` through unvalidated (`items.js:164`), so a malformed `items_found` event or hand-edited hero-file import can mint `healing:"9999999d6"`. The combat crit path even doubles it (`parsed.count * 2`, `combatExchange.js:379`). `d0` fails loudly; `9999999d6` hangs silently — the opposite of the guarantee that guard was meant to give.
+  - **P2:** `rollDie` uses `array[0] % sides` over the full Uint32 range — not perfectly uniform for non-power-of-2 dice (d6/d20). Bias is ~1 part in 2³², astronomically negligible, but it is a real (documentable) seam in the "crypto-fair, LLM-can't-cheat" claim. Note only.
+  - **P2:** `rollInitiative`/`rollAbilityCheck` (`dice.ts:91-100`, the only uncovered lines 92-99) are untested — thin wrappers, low value.
+- **Suggested improvements:** (1) add `MAX_DICE_COUNT` (e.g. 100) to `parseNotation`, throwing like any malformed notation, plus a belt-and-suspenders clamp in `rollDice`; (2) test that a huge-count notation throws and that the `rollResolver`/`USE_ITEM` fallback engages instead of hanging; (3) optionally rejection-sample in `rollDie` to remove the modulo bias.
+
+### chat-orchestration (`components/Chat/ChatPanel.jsx`)
+- **Scope examined:** `handleSend`→`sendToLLM`→events-routing switch (300-365, 787-857), combat commit/narration effects (481-581), `handleRetryCombatNarration` (945); confirmed both machinery detours are fault-isolated (`detectSemanticTextRolls` `responseParser.js:843-864`, `reviewOutsideCombatRolls` `outOfCombatRollPolicy.js:73-118`); tests: only `turnVisibility.test.js` + `sessionPriming.test.js` exist in `components/Chat/`.
+- **Findings:**
+  - **Verified strong** (the point of a robustness lap): orphan `combat_exchange` drop (346), `combatExchangeRejected`→REJECT (798-803), in-combat `requestedRolls`→REJECT never falling back to LLM attacks (807-811), JSON-only `spell_cast` backstop (842-857), semantic-roll **merge-not-replace** so a detected roll can't drop the turn's loot/quests (358-363), both auxiliary machinery calls returning safe defaults on any throw, and a real "Retry narration" button that clears the exchangeId de-dup ref (945/1059) — narration failure never rerolls or strands the player.
+  - **P1:** none of that is tested. `ChatPanel.jsx` is **0%** (no test file); every branch above lives in a 1179-line closure. A regression that made the semantic-roll merge *replace* `events` (dropping loot/quests) or let an in-combat `requestedRolls` fall through to a free enemy attack would pass all 988 tests. Same underlying gap the 07-06 queue item notes (still open; only `turnVisibility`/`sessionPriming` were extracted since) — Lap 2 sharpens it to the specific malformed-output routing switch worth extracting into a pure, testable helper.
+  - **Cross-ref:** the dice-count DoS above is *also* reachable through ChatPanel's accepted-roleplay-check → `resolveRolls` path, so the cap belongs in the engine, not a ChatPanel guard.
+- **Suggested improvements:** (1) extract the events-routing switch (798-832) + orphan/rejection guards into a pure helper mirroring `turnVisibility.js`; (2) add the first ChatPanel-level test asserting each `events` shape routes to the right dispatch (rejected/exchange/in-combat-rolls/out-of-combat-rolls/player-authority).
+
+### Process notes
+- Spot-checked two of the oldest open items against current code: scribe `SET_LOCATION`/rejected-`sendMessage` (`scribe.test.js`: 0 matches) and frontDirector throw-path tests (no `frontDirector.test.js`) — both still unfixed. roll-resolution's enemy-attacks-companion branch has a downed-companion fixture (`rollResolver.test.js:524`) but no living-companion damage assertion — left open. No checkbox changes.
+- Coverage snapshot refreshed to 2026-07-21 (988 tests / 64 files); prior snapshot was exactly 7 days old.
 
 ## 2026-07-18 — providers-adapter + memory-journal (Lap 1: correctness & test depth)
 
