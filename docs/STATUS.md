@@ -4,8 +4,28 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-21 (coin-loss replay ledger + payment-audit exactness; the one-shot
-mechanics invariant recorded in DECISIONS.md.)_
+_Last updated: 2026-07-21 (coin-loss replay ledger + payment-audit exactness; same-day
+strengthening: dice-count DoS cap + eventRouting extraction.)_
+
+## Same-day strengthening: dice DoS + ChatPanel routing extraction (2026-07-21)
+
+Both fresh P1s from this morning's audit lap, fixed and ticked in the queue:
+
+1. **Dice-count DoS closed** — `parseNotation` now rejects counts above
+   `MAX_DICE_COUNT` (100) like any malformed notation, so an LLM-authored
+   `9999999d6` throws into rollResolver's existing 1d4 fallback instead of
+   freezing the tab; `rollDice` gets a 1000-count backstop (headroom for crit
+   doubling), and the two unguarded `USE_ITEM` healing rolls now reject a bad
+   formula visibly without consuming the item. Bonus P2: `rollDie` rejection-
+   samples away the Uint32 modulo bias — the crypto-fair guarantee is now exact.
+2. **Events-routing switch extracted** — the malformed-output routing decisions
+   (combat rejection, exchange commit, in-combat legacy-roll rejection, proposal
+   staging, authority correction, JSON-only spell-cast backstop) moved from
+   ChatPanel's closure into pure `components/Chat/eventRouting.js` with a
+   15-test suite pinning every branch and priority. ChatPanel only executes the
+   chosen route's side effects.
+
+1009 tests + lint green, deployed.
 
 ## Coin-loss replay guard + exact-payment audit (2026-07-21)
 

@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     DIE_TYPES,
+    MAX_DICE_COUNT,
     parseNotation,
     rollDie,
     rollDice,
@@ -116,6 +117,13 @@ describe('parseNotation', () => {
         expect(() => parseNotation('0d6')).toThrow(/Invalid dice notation/);
         expect(() => parseNotation('0d0')).toThrow(/Invalid dice notation/);
     });
+
+    it('rejects absurd dice counts instead of freezing the tab (hostile-input DoS)', () => {
+        expect(() => parseNotation('9999999d6')).toThrow(/Invalid dice notation/);
+        expect(() => parseNotation(`${MAX_DICE_COUNT + 1}d6`)).toThrow(/Invalid dice notation/);
+        // The boundary itself stays valid.
+        expect(parseNotation(`${MAX_DICE_COUNT}d6`).count).toBe(MAX_DICE_COUNT);
+    });
 });
 
 describe('rollNotation', () => {
@@ -149,6 +157,34 @@ describe('check helpers', () => {
         for (const roll of rolls) {
             expect(roll).toBeGreaterThanOrEqual(1);
             expect(roll).toBeLessThanOrEqual(8);
+        }
+    });
+
+    it('rollDice throws on non-integer, zero, and runaway counts (engine backstop)', () => {
+        expect(() => rollDice(0, 6)).toThrow(/Invalid dice count/);
+        expect(() => rollDice(2.5, 6)).toThrow(/Invalid dice count/);
+        expect(() => rollDice(NaN, 6)).toThrow(/Invalid dice count/);
+        expect(() => rollDice(1000001, 6)).toThrow(/Invalid dice count/);
+    });
+
+    it('leaves headroom above MAX_DICE_COUNT so crit doubling never throws', () => {
+        // Combat crits roll parsed.count * 2; a max-size parsed notation must
+        // still resolve through the engine backstop without throwing.
+        expect(rollDice(MAX_DICE_COUNT * 2, 6)).toHaveLength(MAX_DICE_COUNT * 2);
+    });
+
+    it('rolls every face of a non-power-of-2 die at plausible frequency (rejection sampling)', () => {
+        // Sanity check, not a statistics test: 6000 d6 rolls should hit each face
+        // roughly 1000 times; a broken sampler (e.g. an off-by-one excluding a
+        // face, or a stuck rejection loop) fails this decisively.
+        const counts = new Map<number, number>();
+        for (let i = 0; i < 6000; i++) {
+            const roll = rollDie(6);
+            counts.set(roll, (counts.get(roll) || 0) + 1);
+        }
+        expect([...counts.keys()].sort()).toEqual([1, 2, 3, 4, 5, 6]);
+        for (const face of [1, 2, 3, 4, 5, 6]) {
+            expect(counts.get(face)!).toBeGreaterThan(700);
         }
     });
 });

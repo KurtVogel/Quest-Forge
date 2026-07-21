@@ -16,6 +16,7 @@ import { captureInjection } from '../../dev/memoryInspectorStore.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from './turnVisibility.js';
+import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
 import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../../engine/roleplayCheck.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
@@ -792,56 +793,39 @@ Translate the player's committed action into the single bounded combat_exchange 
                 onNarrative: text => { dmNarrative = text; },
             });
 
-            const combatWasActive = stateRef.current.combat?.active;
             const combatStartedNow = !!events?.combatStart;
-            let combatIntentHandled = false;
-            if (events?.combatExchangeRejected) {
-                combatIntentHandled = true;
-                dispatch({
-                    type: 'REJECT_COMBAT_EXCHANGE',
-                    payload: { reason: 'The DM returned a malformed combat intent envelope.' },
-                });
-            } else if (events?.combatExchange && !combatStartedNow) {
-                combatIntentHandled = true;
+            // The routing decision is pure and unit-tested in eventRouting.js;
+            // this switch only executes the chosen route's side effects.
+            const routed = routeTurnEvents(events, { combatWasActive: stateRef.current.combat?.active });
+            const combatIntentHandled = routed.combatIntentHandled;
+            if (routed.route === TURN_ROUTES.COMBAT_REJECTED
+                || routed.route === TURN_ROUTES.IN_COMBAT_ROLLS_REJECTED) {
+                dispatch({ type: 'REJECT_COMBAT_EXCHANGE', payload: { reason: routed.reason } });
+            } else if (routed.route === TURN_ROUTES.COMBAT_EXCHANGE) {
                 commitCombatPlan(planCombatExchange(stateRef.current, events.combatExchange));
-            } else if (events?.requestedRolls?.length > 0 && (combatWasActive || combatStartedNow)) {
-                // Active combat never falls back to LLM-authored attack batches. An invalid
-                // envelope costs nobody a turn and cannot produce a free enemy attack.
-                combatIntentHandled = true;
-                dispatch({ type: 'REJECT_COMBAT_EXCHANGE', payload: { reason: 'The DM requested legacy combat rolls instead of a committed action envelope.' } });
-            } else if (events?.requestedRolls?.length > 0) {
-                // Outside combat, dice do not exist until the player accepts the public
-                // adjudication. Combat remains immediate and engine-owned above.
-                const initialLoot = (events.goldFound || events.silverFound || events.copperFound || events.itemsFound?.length) ? {
-                    goldFound: events.goldFound || 0,
-                    silverFound: events.silverFound || 0,
-                    copperFound: events.copperFound || 0,
-                    itemsFound: events.itemsFound || [],
-                } : null;
+            } else if (routed.route === TURN_ROUTES.ROLL_PROPOSAL) {
                 // A hidden setup rides the proposal so its fiction survives: re-woven into
                 // the post-roll outcome, or revealed if the player changes approach.
                 // Prose-detected checks stay visible, so they carry no setup payload.
                 stageRoleplayCheck(events.requestedRolls, trimmed, {
                     preNarrated: events._preNarratedOutcome,
-                    loot: initialLoot,
+                    loot: routed.proposalLoot,
                     setupNarrative: events._setupHidden ? dmNarrative : '',
                     setupMessageId: events._setupHidden ? events._setupMessageId : null,
                 });
-            } else if (events?._playerAuthorityRollRejected) {
+            } else if (routed.route === TURN_ROUTES.AUTHORITY_CORRECTION) {
                 await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
             }
             if (startedCombatIntent && !combatIntentHandled) {
                 dispatch({ type: 'CANCEL_COMBAT_INTENT' });
             }
 
-            // JSON-only spell_cast backstop: some DMs answer "I cast Detect Magic" with
-            // nothing but the event block (pattern-matching combat's two-phase flow), so
-            // the engine spends the slot while the player stares at an empty message.
-            // Out-of-combat casting has no second engine call — request the missing
-            // narration explicitly. Roll-setup turns defer the cast, so they never land here.
-            if (events?.spellCasts?.length > 0 && !dmNarrative.trim()
-                && !combatIntentHandled && !events?.requestedRolls?.length
-                && !stateRef.current.combat?.active) {
+            // The JSON-only spell_cast backstop condition lives in eventRouting.js.
+            if (needsSpellCastNarration(events, {
+                dmNarrative,
+                combatIntentHandled,
+                combatActive: stateRef.current.combat?.active,
+            })) {
                 const castResults = [...stateRef.current.messages].slice(-1 - events.spellCasts.length)
                     .filter(m => m.role === 'system' && /casts /i.test(m.content || ''))
                     .map(m => m.content)

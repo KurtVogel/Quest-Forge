@@ -327,6 +327,21 @@ describe('consumable use', () => {
         expect(next.combat.bonusActionUsed).toBe(false);
         expect(next.messages.at(-1).content).toContain('drink it on your turn');
     });
+
+    it('rejects a hostile healing notation visibly instead of throwing or freezing', () => {
+        const state = {
+            ...makeState(),
+            character: { ...makeState().character, currentHP: 4, maxHP: 12 },
+            inventory: [...makeState().inventory, makePotion({ healing: '9999999d6' })],
+        };
+
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: 'potion-1' });
+
+        expect(next.character.currentHP).toBe(4);
+        expect(next.inventory.some(i => i.id === 'potion-1')).toBe(true);
+        expect(next.rollHistory).toHaveLength(0);
+        expect(next.messages.at(-1).content).toContain('invalid healing formula');
+    });
 });
 
 describe('administering a healing potion to a companion', () => {
@@ -368,6 +383,15 @@ describe('administering a healing potion to a companion', () => {
         const fullNext = gameReducer(full, { type: 'USE_ITEM', payload: { itemId: 'potion-1', targetId: 'tor' } });
         expect(fullNext.inventory.some(i => i.id === 'potion-1')).toBe(true);
         expect(fullNext.messages.at(-1).content).toContain('already at full health');
+    });
+
+    it('rejects a hostile healing notation on the companion path too', () => {
+        const state = { ...makeState(), party: [downedCompanion()], inventory: [...makeState().inventory, makePotion({ healing: '1d0' })] };
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: { itemId: 'potion-1', targetId: 'tor' } });
+
+        expect(next.party[0].hp).toBe(0);
+        expect(next.inventory.some(i => i.id === 'potion-1')).toBe(true);
+        expect(next.messages.at(-1).content).toContain('invalid healing formula');
     });
 });
 

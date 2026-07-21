@@ -19,6 +19,15 @@ export interface DiceRollResult {
 
 let rollIdCounter = 0;
 
+// Upper bound for hostile input at the notation boundary: LLM-authored damage/healing
+// notations and hand-edited save/hero files are valid *syntax* at any size, so
+// "9999999d6" must fail loudly like "1d0" does instead of looping the tab to death.
+// 100 dice covers every legitimate game roll with a wide margin.
+export const MAX_DICE_COUNT = 100;
+// Looser engine-level backstop so internal doubling (crit rolls take parsed.count * 2)
+// can never trip it — this catches programming errors, not LLM input.
+const DICE_COUNT_BACKSTOP = 1000;
+
 /**
  * Roll a single die with the given number of sides using crypto-random.
  */
@@ -28,15 +37,27 @@ export function rollDie(sides: number): number {
   if (!Number.isInteger(sides) || sides <= 0) {
     throw new Error(`Invalid die: d${sides}`);
   }
+  // Rejection-sample away the modulo bias: raw Uint32 % sides slightly favors low
+  // faces on non-power-of-2 dice (~1 in 2^32 — negligible, but the crypto-fair
+  // guarantee should be exact). Values in the truncated final cycle are re-rolled;
+  // for any playable die the rejection chance is < 1 in 60000 per draw.
+  const limit = 0x100000000 - (0x100000000 % sides);
   const array = new Uint32Array(1);
-  crypto.getRandomValues(array);
-  return (array[0] % sides) + 1;
+  let value: number;
+  do {
+    crypto.getRandomValues(array);
+    value = array[0];
+  } while (value >= limit);
+  return (value % sides) + 1;
 }
 
 /**
  * Roll multiple dice.
  */
 export function rollDice(count: number, sides: number): number[] {
+  if (!Number.isInteger(count) || count < 1 || count > DICE_COUNT_BACKSTOP) {
+    throw new Error(`Invalid dice count: ${count}`);
+  }
   const results: number[] = [];
   for (let i = 0; i < count; i++) {
     results.push(rollDie(sides));
@@ -122,9 +143,10 @@ export function parseNotation(notation: string): { count: number; sides: number;
   }
   const count = parseInt(match[1], 10);
   const sides = parseInt(match[2], 10);
-  // The regex accepts "0d6" and "1d0"; both would silently produce empty or NaN
-  // rolls downstream. Reject them like any other malformed notation.
-  if (count < 1 || sides < 1) {
+  // The regex accepts "0d6", "1d0", and "9999999d6"; the first two would silently
+  // produce empty or NaN rolls downstream, the last would freeze the tab rolling
+  // millions of dice. Reject all of them like any other malformed notation.
+  if (count < 1 || sides < 1 || count > MAX_DICE_COUNT) {
     throw new Error(`Invalid dice notation: "${notation}"`);
   }
   return {

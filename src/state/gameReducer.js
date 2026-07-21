@@ -2054,7 +2054,18 @@ export function gameReducer(state, action) {
                     };
                 }
                 const wasDown = (companion.hp ?? 0) <= 0;
-                const roll = rollNotation(item.healing, item.name);
+                // item.healing is untrusted (LLM items_found / imported hero files pass it
+                // through unvalidated) — a malformed notation must reject the use visibly,
+                // not throw out of the reducer. The item is kept, nothing is consumed.
+                let roll;
+                try {
+                    roll = rollNotation(item.healing, item.name);
+                } catch {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`**${item.name}** has an invalid healing formula (${item.healing}) and cannot be used.`)],
+                    };
+                }
                 const healedTo = Math.min(companionMaxHp, (companion.hp || 0) + roll.total);
                 const gained = healedTo - (companion.hp || 0);
                 return {
@@ -2107,7 +2118,16 @@ export function gameReducer(state, action) {
                         messages: [...state.messages, systemMessage(`**Bonus action already used** — ${item.name} can wait until your next turn.`)],
                     };
                 }
-                const roll = rollNotation(item.healing, item.name);
+                // Same untrusted-notation guard as the companion path above.
+                let roll;
+                try {
+                    roll = rollNotation(item.healing, item.name);
+                } catch {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`**${item.name}** has an invalid healing formula (${item.healing}) and cannot be used.`)],
+                    };
+                }
                 const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total);
                 const gained = healed - state.character.currentHP;
                 const healedCharacter = healed > 0
