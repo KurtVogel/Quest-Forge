@@ -488,6 +488,137 @@ describe('ADD_COIN_GRANT', () => {
     });
 });
 
+describe('APPLY_COIN_LOSS', () => {
+    function addMessages(state, count, prefix = 'loss-msg') {
+        let next = state;
+        for (let i = 0; i < count; i++) {
+            next = gameReducer(next, {
+                type: 'ADD_MESSAGE',
+                payload: { id: `${prefix}-${i}`, role: 'assistant', content: `Filler line ${i}.` },
+            });
+        }
+        return next;
+    }
+
+    it('deducts the coins and remembers the loss in the ledger', () => {
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const next = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 6, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I pay the innkeeper.' } },
+        });
+        expect(next.character.silver).toBe(4);
+        expect(next.recentCoinLosses).toHaveLength(1);
+        expect(next.recentCoinLosses[0].status).toBe('applied');
+    });
+
+    it('suppresses an identical loss re-emitted on a later turn (the payment echo)', () => {
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-1', playerMessage: 'You only took four — the price was six.' } },
+        });
+        const later = addMessages(paid, 2);
+        const replayed = gameReducer(later, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-2', playerMessage: 'I head for the stables.' } },
+        });
+        expect(replayed.character.silver).toBe(8); // one 2-silver charge, not two
+        expect(replayed.messages.at(-1).content).toMatch(/Duplicate coin charge ignored/);
+        expect(replayed.recentCoinLosses.at(-1).status).toBe('ignored');
+    });
+
+    it('allows an identical loss when the player initiates a new payment this turn', () => {
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I tip the barmaid two silver.' } },
+        });
+        const later = addMessages(paid, 2);
+        const second = gameReducer(later, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-2', playerMessage: 'I tip the stable boy as well.' } },
+        });
+        expect(second.character.silver).toBe(6);
+    });
+
+    it('always suppresses an exact same-source replay, even with payment phrasing', () => {
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I pay him two silver.' } },
+        });
+        const replayed = gameReducer(paid, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I pay him two silver.' } },
+        });
+        expect(replayed.character.silver).toBe(8);
+    });
+
+    it('applies an identical loss again once outside the replay window', () => {
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-1' } },
+        });
+        const later = addMessages(paid, 6);
+        const second = gameReducer(later, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-2' } },
+        });
+        expect(second.character.silver).toBe(6);
+    });
+
+    it('reports insufficient funds without paying, and still stamps the ledger', () => {
+        const state = makeState({ character: { gold: 0, silver: 1, copper: 0 } });
+        const next = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 6, _meta: { sourceId: 'msg-pay-1' } },
+        });
+        expect(next.character.silver).toBe(1);
+        expect(next.messages.at(-1).content).toMatch(/Not enough coin/);
+        expect(next.recentCoinLosses).toHaveLength(1);
+    });
+
+    it('ignores empty and negative losses', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: -3, silver: 0 },
+        });
+        expect(next).toBe(state);
+    });
+
+    it('blocks the audit backstop from re-charging a payment the DM already evented', () => {
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 6, _meta: { sourceId: 'msg-pay-1' } },
+        });
+        const later = addMessages(paid, 1);
+        const audited = gameReducer(later, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { silver: 6, _meta: { sourceId: 'msg-pay-2:payment', playerMessage: 'I nod and move on.' } },
+        });
+        expect(audited.character.silver).toBe(4); // charged once, not twice
+        expect(audited.messages.at(-1).content).toMatch(/Duplicate payment ignored/);
+    });
+
+    it('blocks a DM coin-loss echo of a payment the audit already settled', () => {
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const audited = gameReducer(state, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { silver: 6, _meta: { sourceId: 'msg-pay-1:payment' } },
+        });
+        const later = addMessages(audited, 1);
+        const replayed = gameReducer(later, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 6, _meta: { sourceId: 'msg-pay-2', playerMessage: 'I keep walking.' } },
+        });
+        expect(replayed.character.silver).toBe(4);
+        expect(replayed.messages.at(-1).content).toMatch(/Duplicate coin charge ignored/);
+    });
+});
+
 describe('AUDIT_COIN_PAYMENT', () => {
     it('deducts a narrated payment the engine missed and says so', () => {
         const state = makeState();

@@ -114,6 +114,7 @@ src/
 - 4-space indent, ES modules, function components + hooks. Match the surrounding file's style.
 - `dice.ts` is the only TypeScript file; everything else is JS/JSX. `tsconfig.json` exists but the app is **not** type-checked in CI.
 - Player-facing dice must stay crypto-random (`crypto.getRandomValues`, via `dice.ts`) — never `Math.random()`. This is the project's "the LLM can't cheat the dice" guarantee.
+- **One-shot mechanics invariant (DECISIONS.md 2026-07-21):** every DM-writable channel that mutates numeric/mechanical state MUST ship with an exact-amount/one-shot prompt contract, same-message sourceId idempotency, AND a cross-message replay ledger in the same commit (`recentPurchases`/`recentSales`/`recentCoinGrants`/`recentCoinLosses`/`recentSpellCasts`/`recentRests` are the pattern; combat uses `exchangeId`). The DM re-emitting an already-applied event on later turns is a proven, recurring failure mode — never add a new event channel without its ledger. Deliberate prompt-only exceptions (XP, out-of-combat damage/healing) are documented in that DECISIONS entry with reasons.
 - `responseParser.js`, `scribe.js`, and `jsonExtractor.js` carry a lot of hard-won resilience against LLM output quirks. Edit carefully — regressions here break the game loop silently.
 - `npm run lint` is expected to pass. Keep it clean when changing code.
 - Windows-first repo (paths, `install.cmd`).

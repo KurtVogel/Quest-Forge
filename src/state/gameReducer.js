@@ -133,6 +133,7 @@ function validateSaveState(payload) {
         recentPurchases: normalizeRecentTransactions(payload.recentPurchases),
         recentSales: normalizeRecentTransactions(payload.recentSales),
         recentCoinGrants: normalizeRecentTransactions(payload.recentCoinGrants),
+        recentCoinLosses: normalizeRecentTransactions(payload.recentCoinLosses),
         recentRulings: (Array.isArray(payload.recentRulings) ? payload.recentRulings : [])
             .map(normalizeRollRuling).filter(Boolean).slice(-RECENT_RULING_LIMIT),
         recentChecks: sanitizeRecentChecks(payload.recentChecks),
@@ -397,6 +398,35 @@ function playerMessageSupportsRepeatCoinGrant(playerMessage) {
     return REPEAT_TRANSACTION_RE.test(text) && COIN_WORD_RE.test(text);
 }
 
+// Coin losses replay in the same tight window as grants: the observed failure
+// (live 2026-07-21) is the DM re-emitting a payment's coin loss on the following
+// turn while recapping money already taken — the rest_taken/spell_cast echo
+// pattern on the spend side.
+const RECENT_COIN_LOSS_MESSAGE_WINDOW = 4;
+// Verbs that inherently mean handing money over — on their own they show the
+// player initiating a (possibly repeat) payment this turn.
+const STRONG_PAYMENT_VERB_RE = /\b(pay|pays|paying|paid|repay|repays|repaying|repaid|tip|tips|tipping|tipped|bribe|bribes|bribing|bribed|donate|donates|donating|donated)\b/i;
+// Broader transfer verbs count only when the message also names coin.
+const COIN_TRANSFER_VERB_RE = /\b(give|gives|giving|gave|hand|hands|handing|handed|toss|tosses|tossing|tossed|drop|drops|dropping|dropped|leave|leaves|leaving|left|slip|slips|slipping|slipped|slide|slides|sliding|slid|spend|spends|spending|spent|count|counts|counting|counted|settle|settles|settling|settled|offer|offers|offering|offered)\b/i;
+
+function buildCoinLossTransaction(gold, silver, copper) {
+    const totalCp = gold * 100 + silver * 10 + copper;
+    return {
+        signature: `coin-loss|${gold}g|${silver}s|${copper}c`,
+        item: { itemKey: 'coin-loss', name: formatCurrency(totalCp) },
+        quantity: 1,
+        priceCp: totalCp,
+    };
+}
+
+function playerMessageSupportsRepeatCoinLoss(playerMessage) {
+    const text = String(playerMessage || '');
+    if (!text.trim()) return false;
+    if (STRONG_PAYMENT_VERB_RE.test(text)) return true;
+    if (REPEAT_TRANSACTION_RE.test(text) && COIN_WORD_RE.test(text)) return true;
+    return COIN_TRANSFER_VERB_RE.test(text) && COIN_WORD_RE.test(text);
+}
+
 // Spell replay window matches the coin-grant one: the observed failure is the DM
 // re-emitting spell_cast on the very next turn while narrating what the spell did.
 const RECENT_SPELL_CAST_MESSAGE_WINDOW = 4;
@@ -653,6 +683,7 @@ export const initialGameState = {
     recentPurchases: [], // Recent one-shot purchase signatures — prevents cross-turn LLM replays from double-charging
     recentSales: [], // Sale twin of recentPurchases — prevents replayed sells from double-removing/double-paying
     recentCoinGrants: [], // Coin twin of recentPurchases — prevents a reward re-emitted on a later turn from paying twice
+    recentCoinLosses: [], // Spend-side twin of recentCoinGrants — prevents a payment re-emitted on a later turn from charging twice
     recentRulings: [], // Roleplay-check rulings that ended without dice — injected so the DM cannot re-propose overruled/set-aside checks from scratch
     recentChecks: [], // Compact out-of-combat check-proposal ledger — heat input for diceless-but-tense arcs (chases, heists)
     recentSpellCasts: [], // "sourceId|spellKey" replay guard so a re-parsed spell_cast never double-spends a slot
@@ -1171,21 +1202,89 @@ export function gameReducer(state, action) {
             };
         }
 
+        // The spend-side twin of ADD_COIN_GRANT: one narrative coin loss (payment, toll,
+        // fine, tip, theft) as a single replay-guarded unit. The DM tends to re-emit a
+        // payment's coin loss on a later turn while recapping or confirming money already
+        // taken (live finding 2026-07-21: a 2-silver correction was charged again on the
+        // next turn) — the recentCoinLosses ledger suppresses an identical loss inside a
+        // short message window unless the player's own message initiates a payment this
+        // turn. The Scribe payment audit shares this ledger, so the event path and the
+        // audit backstop can never both charge the same narrated payment.
+        case 'APPLY_COIN_LOSS': {
+            const meta = action.payload?._meta || {};
+            const gold = clampCoinAmount(action.payload?.gold);
+            const silver = clampCoinAmount(action.payload?.silver);
+            const copper = clampCoinAmount(action.payload?.copper);
+            if (gold <= 0 && silver <= 0 && copper <= 0) return state;
+            const transaction = buildCoinLossTransaction(gold, silver, copper);
+            const sourceId = String(meta.sourceId || '').slice(0, 160);
+            const messageIndex = currentMessageIndex(state);
+            const duplicate = findRecentTransactionDuplicate(
+                state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW
+            );
+            const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
+            if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatCoinLoss(meta.playerMessage))) {
+                return {
+                    ...state,
+                    recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`Duplicate coin charge ignored — ${transaction.item.name} was already paid moments ago.`),
+                    ],
+                };
+            }
+            const recentCoinLosses = rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex);
+            const result = spendCurrency(state.character, { gold, silver, copper });
+            if (!result.paid) {
+                return {
+                    ...state,
+                    recentCoinLosses,
+                    messages: [...state.messages, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)],
+                };
+            }
+            return {
+                ...state,
+                character: result.character,
+                recentCoinLosses,
+            };
+        }
+
         // Scribe payment audit: the narrative showed the hero completing a payment that the
         // DM never emitted as a coin-loss event. Deduct it, clamped to the purse — never
-        // below zero — and say so visibly. Idempotency is owned by the caller via a
-        // CLAIM_LOOT_SOURCE-claimed sourceId, mirroring the loot-recovery path.
+        // below zero — and say so visibly. Same-message idempotency is owned by the caller
+        // via a CLAIM_LOOT_SOURCE-claimed sourceId, mirroring the loot-recovery path;
+        // cross-message replays share the recentCoinLosses ledger with APPLY_COIN_LOSS so
+        // a payment the DM already evented (or the audit already settled) is never taken twice.
         case 'AUDIT_COIN_PAYMENT': {
+            const meta = action.payload?._meta || {};
             const gold = clampCoinAmount(action.payload?.gold);
             const silver = clampCoinAmount(action.payload?.silver);
             const copper = clampCoinAmount(action.payload?.copper);
             const costCp = gold * 100 + silver * 10 + copper;
             if (costCp <= 0) return state;
+            const transaction = buildCoinLossTransaction(gold, silver, copper);
+            const sourceId = String(meta.sourceId || '').slice(0, 160);
+            const messageIndex = currentMessageIndex(state);
+            const duplicate = findRecentTransactionDuplicate(
+                state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW
+            );
+            if (duplicate && !playerMessageSupportsRepeatCoinLoss(meta.playerMessage)) {
+                return {
+                    ...state,
+                    recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`**Duplicate payment ignored:** ${formatCurrency(costCp)} was already deducted moments ago.`),
+                    ],
+                };
+            }
+            const recentCoinLosses = rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex);
             const result = spendCurrency(state.character, { gold, silver, copper });
             if (result.paid) {
                 return {
                     ...state,
                     character: result.character,
+                    recentCoinLosses,
                     messages: [
                         ...state.messages,
                         systemMessage(`**Payment settled from narration:** ${formatCurrency(costCp)} deducted from your purse.`),
@@ -1196,6 +1295,7 @@ export function gameReducer(state, action) {
             if (availableCp <= 0) {
                 return {
                     ...state,
+                    recentCoinLosses,
                     messages: [
                         ...state.messages,
                         systemMessage(`**Payment noted from narration:** ${formatCurrency(costCp)} was owed, but your purse is empty — nothing deducted.`),
@@ -1206,6 +1306,7 @@ export function gameReducer(state, action) {
             return {
                 ...state,
                 character: partial.character,
+                recentCoinLosses,
                 messages: [
                     ...state.messages,
                     systemMessage(`**Payment settled from narration:** ${formatCurrency(availableCp)} deducted (purse emptied; ${formatCurrency(result.missingCp)} short of the narrated ${formatCurrency(costCp)}).`),

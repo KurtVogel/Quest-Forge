@@ -8,6 +8,40 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-21 · Coin losses are replay-guarded (`recentCoinLosses` + `APPLY_COIN_LOSS`) — and the one-shot mechanics invariant is now the standing rule, not a per-bug discovery.**
+Vesa's live report: the DM narrated a 6-silver price, the purse dropped only 4 "based on
+narration", telling the DM took the remaining 2 — and then 2 more vanished on the following
+turn. Two distinct defects: (a) no exactness backstop on narrated payments — the payment
+audit had no rule for a shortfall where the engine deducted LESS than the narrated price
+for the same payment, and no digit-exact copying rule; (b) coin LOSSES were the last
+unguarded coin channel — `gold/silver/copper_lost` dispatched raw `REMOVE_*` with no
+ledger, so the DM echoing the correction next turn charged it again (the `rest_taken`
+disease on the spend side). Fix, three layers: **engine** — losses now travel as ONE
+`APPLY_COIN_LOSS` action guarded by a `recentCoinLosses` ledger (4-message window, exact
+sourceId replay always suppressed, escape hatch when the player's own message initiates a
+payment: strong pay verbs alone — pay/tip/bribe/donate — or transfer verbs/repeat phrasing
+plus a coin word); `AUDIT_COIN_PAYMENT` checks and feeds the SAME ledger, so the DM event
+path and the Scribe audit backstop can never both charge one narrated payment. **Scribe
+payment audit** — new rules: copy narrated amounts digit-exactly (spelled-out numbers
+convert exactly), report the exact shortfall when applied events under-deducted a narrated
+price, and never re-report a payment the narrative merely recalls from an earlier scene.
+**DM prompt** — loose coin events are one-shot and EXACT (event amount must equal the
+narrated amount; corrections emit only the missing difference, once); `exp_awarded` got
+the same one-shot line.
+**The invariant (the actual decision):** every DM-writable channel that mutates numeric or
+mechanical state MUST ship, in the same commit that adds it, with (1) an exact-amount /
+one-shot contract in the prompt, (2) same-message idempotency (sourceId), and (3) a
+cross-message replay ledger unless replays are structurally impossible. Current coverage:
+purchases→`recentPurchases`, sales→`recentSales`, coin gains→`recentCoinGrants`, coin
+losses→`recentCoinLosses`, spells→`recentSpellCasts`, rests→`recentRests`, loot/payment
+audits→claimed sourceIds + the coin ledgers, combat→`exchangeId`. Deliberately
+prompt-only (documented, watched): `exp_awarded` (two distinct same-amount awards within
+a short window are legitimate and there is no player-intent escape hatch to tell them
+apart) and out-of-combat `damage_taken`/`healing` (ongoing effects — poison, burning —
+legitimately repeat identical amounts on consecutive turns; combat, the dangerous path,
+is already exchange-guarded). If either is ever observed double-applying in play, that
+observation overrides this paragraph and it gets a ledger with whatever escape hatch fits.
+
 **2026-07-19 · DM-emitted `rest_taken` is replay-guarded (`recentRests` ledger) — the transaction-family treatment, applied to rests.**
 Vesa's live-play report: the "**Long Rest** — Fully restored…" banner kept reappearing for
 multiple turns after the rest, long after the hero had left the shelter. Root cause: the DM

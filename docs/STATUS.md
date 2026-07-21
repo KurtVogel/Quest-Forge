@@ -4,8 +4,35 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-20 (three strengthening-queue P1s fixed: RAG campaign-switch race,
-embed-DB onblocked, hit-dice level-up refill; deployed.)_
+_Last updated: 2026-07-21 (coin-loss replay ledger + payment-audit exactness; the one-shot
+mechanics invariant recorded in DECISIONS.md.)_
+
+## Coin-loss replay guard + exact-payment audit (2026-07-21)
+
+Vesa's live report: a narrated 6-silver price deducted only 4 "based on narration", the
+DM took the remaining 2 when told, then 2 MORE vanished on the following turn. Root
+causes and fixes (DECISIONS.md 2026-07-21):
+
+1. **Coin losses were the last unguarded coin channel** — `gold/silver/copper_lost`
+   dispatched raw `REMOVE_*` with no ledger (the `rest_taken` disease on the spend side).
+   Losses now travel as ONE `APPLY_COIN_LOSS` action guarded by `recentCoinLosses`
+   (4-message window; escape hatch when the player's own message initiates a payment —
+   pay/tip/bribe/donate alone, or transfer verbs/repeat phrasing + a coin word).
+   `AUDIT_COIN_PAYMENT` checks and feeds the SAME ledger, so the DM event path and the
+   Scribe audit backstop can never both charge one narrated payment.
+2. **No exactness backstop on narrated payments** — the Scribe payment audit gained
+   digit-exact amount copying, an explicit shortfall rule (narrated 6, engine deducted
+   4 → report exactly 2), and a no-re-reporting rule for payments merely recalled from
+   earlier scenes.
+3. **DM prompt** — loose coin events are one-shot and EXACT (amount must equal the
+   narrated number; corrections emit only the missing difference, once); `exp_awarded`
+   got the same one-shot line.
+
+The bigger deliverable: the **one-shot mechanics invariant** is now a standing rule in
+DECISIONS.md — every DM-writable numeric channel ships with prompt contract + sourceId
+idempotency + replay ledger in the same commit, with the deliberate prompt-only
+exceptions (XP, out-of-combat damage/healing) documented with reasons and watch
+conditions. 988 tests + lint green.
 
 ## Strengthening batch: RAG race + hit-dice refill (2026-07-20)
 

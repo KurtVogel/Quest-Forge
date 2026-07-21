@@ -111,6 +111,9 @@ Loot audit rules:
 Payment audit rules:
 - Report a payment ONLY when the DM narrative explicitly completes it: the hero counts out, hands over, or drops the coins and the other party takes them. Intentions, promises, IOUs, haggling, and prices merely quoted are never payments.
 - Anything listed under EVENTS ALREADY APPLIED as a coin loss or purchase is NOT missing.
+- Copy narrated amounts digit-exactly; spelled-out numbers convert exactly ("six silver" is "silver": 6, "a dozen coppers" is "copper": 12). Never round, estimate, or infer an amount the narrative does not state.
+- Shortfalls count: when the narrative names an exact price the hero completes paying and EVENTS ALREADY APPLIED shows a SMALLER coin loss for that same payment, report exactly the difference (narrative says six silver paid, events applied silver -4 -> "missing_payment": { "silver": 2 }). Never re-report the part already deducted.
+- Never re-report a payment the narrative merely recalls, confirms, defends, or references from an EARLIER scene — only payments completed for the first time in THIS narrative. "You already paid the six silver" is a recollection, not a new payment.
 - Exact amounts only; never estimate. A wrongly deducted coin is worse than a missed one — certainty is required.
 - When in doubt, omit. Omit "missing_loot" and "missing_payment" entirely when nothing is missing.`;
 
@@ -217,7 +220,7 @@ function applyMissingLoot(missing, lootAudit, dispatch, playerMessage = '') {
  * became a coin-loss event. The reducer clamps the deduction to the purse and posts a
  * visible system line; idempotency is a claimed per-message sourceId, like loot recovery.
  */
-function applyMissingPayment(missing, lootAudit, dispatch) {
+function applyMissingPayment(missing, lootAudit, dispatch, playerMessage = '') {
     if (!missing || typeof missing !== 'object') return;
     const gold = coerceLootAmount(missing.gold);
     const silver = coerceLootAmount(missing.silver);
@@ -232,7 +235,16 @@ function applyMissingPayment(missing, lootAudit, dispatch) {
         return;
     }
     dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: paymentSourceId });
-    dispatch({ type: 'AUDIT_COIN_PAYMENT', payload: { gold, silver, copper } });
+    // The reducer checks the shared recentCoinLosses ledger, so a payment the DM
+    // already evented on a nearby turn cannot be deducted a second time through
+    // the audit backstop (and vice versa).
+    dispatch({
+        type: 'AUDIT_COIN_PAYMENT',
+        payload: {
+            gold, silver, copper,
+            _meta: { sourceId: paymentSourceId, ...(playerMessage && { playerMessage }) },
+        },
+    });
     console.log(`[Scribe] Payment audit settled: gold ${gold}, silver ${silver}, copper ${copper}`);
 }
 
@@ -422,7 +434,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
 
         if (lootAudit) {
             applyMissingLoot(extracted.missing_loot, lootAudit, dispatch, playerMessage);
-            applyMissingPayment(extracted.missing_payment, lootAudit, dispatch);
+            applyMissingPayment(extracted.missing_payment, lootAudit, dispatch, playerMessage);
         }
 
         captureScribePass({

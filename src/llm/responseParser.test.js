@@ -672,7 +672,7 @@ describe('applyEvents dispatch coverage', () => {
 
     it('suppresses a loose coin loss emitted alongside an atomic purchase', () => {
         const dispatch = run({ purchase: { itemKey: 'torch' }, gold_lost: 5 });
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'REMOVE_GOLD' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'APPLY_COIN_LOSS' }));
     });
 
     it('suppresses a loose coin gain emitted alongside an atomic sale', () => {
@@ -686,7 +686,10 @@ describe('applyEvents dispatch coverage', () => {
             type: 'ADD_COIN_GRANT',
             payload: expect.objectContaining({ gold: 3, silver: 0, copper: 7 }),
         }));
-        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_SILVER', payload: 2 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'APPLY_COIN_LOSS',
+            payload: expect.objectContaining({ gold: 0, silver: 2, copper: 0 }),
+        }));
     });
 
     it('skips loot dispatch when the loot source was already claimed', () => {

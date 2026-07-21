@@ -681,9 +681,20 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             },
         });
     }
-    if (goldLost > 0) dispatch({ type: 'REMOVE_GOLD', payload: goldLost });
-    if (silverLost > 0) dispatch({ type: 'REMOVE_SILVER', payload: silverLost });
-    if (copperLost > 0) dispatch({ type: 'REMOVE_COPPER', payload: copperLost });
+    // Coin losses travel the same way, as ONE replay-guarded unit: the recentCoinLosses
+    // ledger suppresses a payment the DM re-emits on a later turn while recapping money
+    // already taken (the rest_taken/coin-grant echo pattern on the spend side).
+    if (goldLost > 0 || silverLost > 0 || copperLost > 0) {
+        dispatch({
+            type: 'APPLY_COIN_LOSS',
+            payload: {
+                gold: goldLost,
+                silver: silverLost,
+                copper: copperLost,
+                _meta: transactionMeta,
+            },
+        });
+    }
 
     if (events.levelUp) {
         // Explicit level-up from the DM — skip ADD_EXP to avoid double-leveling

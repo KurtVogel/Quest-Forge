@@ -619,7 +619,13 @@ describe('Scribe loot persistence audit', () => {
         });
 
         expect(dispatch).toHaveBeenCalledWith({ type: 'CLAIM_LOOT_SOURCE', payload: 'msg-1:scribe-loot:payment' });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'AUDIT_COIN_PAYMENT', payload: { gold: 5, silver: 0, copper: 0 } });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: {
+                gold: 5, silver: 0, copper: 0,
+                _meta: { sourceId: 'msg-1:scribe-loot:payment', playerMessage: 'I pay the ferryman.' },
+            },
+        });
     });
 
     it('skips an already-claimed payment audit so retries cannot double-deduct', async () => {
