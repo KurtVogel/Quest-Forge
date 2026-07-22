@@ -527,3 +527,88 @@ describe('REJECT_COMBAT_EXCHANGE', () => {
         expect(rejected).toBe(state);
     });
 });
+
+describe('END_COMBAT client-side XP fallback', () => {
+    function endCombatState(enemies, combatOverrides = {}) {
+        const base = makeState();
+        return {
+            ...base,
+            character: { ...base.character, exp: 0 },
+            combat: {
+                ...initialGameState.combat,
+                active: true,
+                enemies,
+                xpAwarded: false,
+                ...combatOverrides,
+            },
+        };
+    }
+
+    it('awards estimated XP for overcome foes when the DM never did', () => {
+        const state = endCombatState([
+            { id: 'e1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' },       // 7*2+13*3 = 53
+            { id: 'e2', name: 'Bandit', hp: 5, maxHp: 10, ac: 12, combatStatus: 'fled' },   // 10*2+12*3 = 56
+        ]);
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
+
+        expect(next.combat.active).toBe(false);
+        expect(next.character.exp).toBe(109);
+        const xpMessage = next.messages.at(-1).content;
+        expect(xpMessage).toContain('+109 XP');
+        expect(xpMessage).toContain('battle complete: Goblin, Bandit');
+    });
+
+    it('excludes enemies still standing from the fallback award', () => {
+        const state = endCombatState([
+            { id: 'e1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' },
+            { id: 'e2', name: 'Ogre', hp: 30, maxHp: 30, ac: 13 }, // still active
+        ]);
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
+
+        expect(next.character.exp).toBe(53);
+        expect(next.messages.at(-1).content).toContain('battle complete: Goblin');
+    });
+
+    it('pays only genuinely slain foes on a loss (slainXpOnly), never fled or surrendered ones', () => {
+        const state = endCombatState([
+            { id: 'e1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' },       // slain: pays
+            { id: 'e2', name: 'Bandit', hp: 5, maxHp: 10, ac: 12, combatStatus: 'fled' },   // fled on a loss: no XP
+            { id: 'e3', name: 'Thug', hp: 8, maxHp: 8, ac: 11, combatStatus: 'surrendered' },
+        ]);
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: { defeat: true, slainXpOnly: true } });
+
+        expect(next.character.exp).toBe(53);
+        expect(next.messages.at(-1).content).toContain('foes slain before the fight ended: Goblin');
+    });
+
+    it('stays silent when the DM already awarded XP this turn (llmAwardedXp)', () => {
+        const state = endCombatState([
+            { id: 'e1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' },
+        ]);
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: { llmAwardedXp: true } });
+
+        expect(next.character.exp).toBe(0);
+        expect(next.messages.some(m => (m.content || '').includes('XP'))).toBe(false);
+    });
+
+    it('stays silent when XP was already earned earlier in the fight (combat.xpAwarded)', () => {
+        const state = endCombatState(
+            [{ id: 'e1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' }],
+            { xpAwarded: true },
+        );
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
+
+        expect(next.character.exp).toBe(0);
+        expect(next.messages.some(m => (m.content || '').includes('XP'))).toBe(false);
+    });
+
+    it('awards nothing when every foe escaped a lost fight', () => {
+        const state = endCombatState([
+            { id: 'e1', name: 'Bandit', hp: 5, maxHp: 10, ac: 12, combatStatus: 'fled' },
+        ]);
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: { escaped: true, slainXpOnly: true } });
+
+        expect(next.character.exp).toBe(0);
+        expect(next.combat.active).toBe(false);
+    });
+});

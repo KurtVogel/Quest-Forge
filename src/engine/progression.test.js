@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { awardExperience, getExperienceThreshold, isMaxLevel, MAX_CHARACTER_LEVEL } from './progression.js';
+import { awardExperience, estimateCombatExperience, getExperienceThreshold, isMaxLevel, MAX_CHARACTER_LEVEL } from './progression.js';
 import { normalizeAbilityScoreImprovementState } from './characterUtils.js';
 
 const character = {
@@ -157,5 +157,39 @@ describe('D&D 5e XP progression', () => {
         expect(result.character.level).toBe(20);
         expect(result.messages.some(m => m.content.includes('Level Up'))).toBe(false);
         expect(isMaxLevel(result.character.level)).toBe(true);
+    });
+});
+
+describe('estimateCombatExperience (End-Combat XP fallback)', () => {
+    it('values an enemy at hp*2 + ac*3', () => {
+        expect(estimateCombatExperience([{ maxHp: 20, ac: 14 }])).toBe(82);
+    });
+
+    it('floors a trivial enemy at 25 XP', () => {
+        expect(estimateCombatExperience([{ maxHp: 1, ac: 5 }])).toBe(25);
+    });
+
+    it('caps a boss at 300 XP per enemy', () => {
+        expect(estimateCombatExperience([{ maxHp: 200, ac: 20 }])).toBe(300);
+    });
+
+    it('defaults missing stats to hp 10 / ac 12', () => {
+        expect(estimateCombatExperience([{}])).toBe(56);
+    });
+
+    it('values a slain enemy from maxHp, not its 0 current hp', () => {
+        expect(estimateCombatExperience([{ maxHp: 20, hp: 0, ac: 10 }])).toBe(70);
+    });
+
+    it('sums per-enemy clamped values across the encounter', () => {
+        expect(estimateCombatExperience([
+            { maxHp: 1, ac: 5 },     // 25 (floored)
+            { maxHp: 20, ac: 14 },   // 82
+            { maxHp: 200, ac: 20 },  // 300 (capped)
+        ])).toBe(407);
+    });
+
+    it('returns 0 for an empty encounter', () => {
+        expect(estimateCombatExperience([])).toBe(0);
     });
 });
