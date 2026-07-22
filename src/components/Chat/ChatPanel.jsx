@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
-import { streamMessage } from '../../llm/adapter.js';
+import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { buildSystemPrompt } from '../../llm/promptBuilder.js';
 import { parseResponse, applyEvents, detectPreNarratedOutcome, normalizeEvents, detectSemanticTextRolls } from '../../llm/responseParser.js';
 import { handleRequestedRolls } from '../../engine/rollResolver.js';
@@ -17,6 +17,7 @@ import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from './turnVisibility.js';
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
+import { buildNudgePrompt, detectMissingEventsCue, extractNudgeEventFields } from './missingEventsNudge.js';
 import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../../engine/roleplayCheck.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
@@ -132,7 +133,7 @@ export default function ChatPanel() {
 
             // The authored premise and live starting inventory are already in the system
             // prompt. The one-time opening also reconciles explicit premise possessions.
-            sendToLLM(buildCampaignOpeningPrompt(), null)
+            sendToLLM(buildCampaignOpeningPrompt(), null, { openingScene: true })
                 .catch(e => {
                     console.warn('[Priming] Session start priming failed:', e);
                 })
@@ -432,7 +433,54 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
         }
 
+        // Missing-events nudge (IDEAS 2026-07-11): a no-JSON response at a contract
+        // moment loses quest_updates/starting_items forever — the only channels with
+        // no Scribe audit backstop. Recovery is one JSON-only follow-up, whitelisted.
+        if (!opts.narrationOnly && !opts.tableTalk && !opts.combatIntentOnly
+            && !stateRef.current.combat?.active
+            && !(events?.requestedRolls?.length > 0)) { // a text-detected check owns this turn
+            const nudgeCue = detectMissingEventsCue({
+                hadEventBlock: !!parsed.events,
+                openingScene: !!opts.openingScene,
+                playerMessage: originalPlayerMessage || opts.playerActionContext || '',
+                narrative,
+                combatActive: !!stateRef.current.combat?.active,
+            });
+            if (nudgeCue) await recoverMissingEvents(nudgeCue, narrative, msgId);
+        }
+
         return events;
+    };
+
+    /**
+     * One cheap JSON-only follow-up for a prose-only contract moment. The reply is
+     * hard-whitelisted (missingEventsNudge.js) and re-shaped through the real parser
+     * before applying, so nothing beyond quest_updates/starting_items can enter.
+     */
+    const recoverMissingEvents = async (cue, narrative, lootSourceId) => {
+        try {
+            const s = stateRef.current;
+            const response = await sendMessage({
+                provider: s.settings.llmProvider,
+                apiKey: s.settings.apiKey,
+                model: s.settings.model,
+                systemPrompt: buildCurrentSystemPrompt([], []),
+                messageHistory: buildMessageHistory(),
+                userMessage: buildNudgePrompt(cue, narrative),
+                temperature: 0.2,
+            });
+            const rawFields = extractNudgeEventFields(response, cue);
+            if (!rawFields) return;
+            const synthetic = parseResponse('```json\n' + JSON.stringify(rawFields) + '\n```');
+            if (!synthetic.events) return;
+            applyEvents(synthetic.events, dispatch, () => stateRef.current, {
+                lootSourceId: `${lootSourceId}:nudge`,
+            });
+            console.warn(`[ChatPanel] Missing-events nudge recovered ${Object.keys(rawFields).join(' + ')} (${cue.reason} cue).`);
+        } catch (error) {
+            // Recovery is best-effort — a failed nudge must never block the turn.
+            console.warn('[ChatPanel] Missing-events nudge failed:', error.message || error);
+        }
     };
 
     useEffect(() => {
