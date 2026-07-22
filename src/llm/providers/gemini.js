@@ -53,6 +53,22 @@ async function httpError(response) {
 }
 
 /**
+ * Thinking-capable models may return several parts per candidate (and flag
+ * reasoning summaries with `thought: true`). Reading only parts[0] silently
+ * drops the rest — which for a DM turn is the trailing JSON event block.
+ */
+function extractCandidateText(candidate) {
+    const parts = candidate?.content?.parts;
+    if (!Array.isArray(parts)) return '';
+    let text = '';
+    for (const part of parts) {
+        if (part?.thought) continue; // reasoning summary, not response text
+        if (typeof part?.text === 'string') text += part.text;
+    }
+    return text;
+}
+
+/**
  * Convert our message format to Gemini's content format.
  */
 function formatMessages(systemPrompt, messageHistory, userMessage, temperature) {
@@ -107,7 +123,7 @@ export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHi
     const data = await response.json();
     const candidate = data.candidates?.[0];
     assertCompleteResponse(candidate?.finishReason);
-    const text = candidate?.content?.parts?.[0]?.text;
+    const text = extractCandidateText(candidate);
     if (!text) {
         throw new Error('No response generated. The model may have been blocked or returned empty.');
     }
@@ -204,7 +220,7 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
                     const data = JSON.parse(jsonStr);
                     const candidate = data.candidates?.[0];
                     if (candidate?.finishReason) finishReason = candidate.finishReason;
-                    const text = candidate?.content?.parts?.[0]?.text || '';
+                    const text = extractCandidateText(candidate);
                     if (text) {
                         fullText += text;
                         onChunk(text);
