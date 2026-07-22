@@ -50,7 +50,7 @@ it under Process notes.
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-07-08 |
 | combat-exchange | `engine/combatExchange.js`, reducer combat phases, opening initiative | 2026-07-09 |
 | enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-07-13 |
-| hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-07-07 |
+| hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-07-22 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-07-07 |
 | memory-journal | `engine/worldJournal.js` | 2026-07-18 |
 | story-memory | `engine/storyMemory.js` | 2026-07-14 |
@@ -60,7 +60,7 @@ it under Process notes.
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-07-12 |
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-07-15 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-07-08 |
-| scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-07-06 |
+| scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-07-22 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-07-18 |
 | chat-orchestration | `components/Chat/ChatPanel.jsx` (`sendToLLM`, `applyEvents`, message window) | 2026-07-21 |
 
@@ -154,6 +154,9 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P1** (dice-engine, 2026-07-21): unbounded dice `count` DoS — `parseNotation`/`rollDice`/`rollWithModifier` cap the lower bound (count/sides ≥ 1) but have NO upper cap, and a large count is valid syntax so `parseNotation` never throws — the try/catch at `rollResolver.js:696` can't catch it. LLM-authored `roll.damage` from `requested_rolls` (`rollResolver.js:230/256/299`) and non-catalog `item.healing` (`gameReducer.js:2057/2110`; `normalizeItem` spreads `healing` through, `items.js:164`) reach `rollWithModifier(count,…)` uncapped, so `9999999d6` loops millions of times and freezes the tab. Add `MAX_DICE_COUNT` cap (throw) — `engine/dice.ts:118-135`. *Fixed 2026-07-21: `MAX_DICE_COUNT = 100` throws at the notation boundary (rollResolver's 1d4 fallback now engages); `rollDice` backstop at 1000 leaves crit-doubling headroom; the two unguarded `USE_ITEM` `rollNotation(item.healing)` sites reject visibly ("invalid healing formula") without consuming the item. Tests both boundaries + both USE_ITEM paths.*
 - [x] **P2** (dice-engine, 2026-07-21): `rollDie` modulo bias — `array[0] % sides` over the Uint32 range is not perfectly uniform for non-power-of-2 dice (d6/d20); ~1 in 2³², negligible but a real seam in the crypto-fair guarantee. Rejection-sample to remove — `engine/dice.ts:33`. *Fixed 2026-07-21: rejection sampling in `rollDie` (re-draw values in the truncated final Uint32 cycle) + face-frequency sanity test.*
 - [x] **P1** (chat-orchestration, 2026-07-21): the malformed-output events-routing switch (orphan `combat_exchange` drop `346`, `combatExchangeRejected`/in-combat-`requestedRolls` rejection `798-811`, semantic-roll merge-not-replace `358-363`) is entirely untested — `ChatPanel.jsx` is 0% with no test file; a regression that made the merge *replace* events (dropping loot/quests) or let in-combat rolls fall through to a free enemy attack passes all 988 tests. Extract to a pure helper like `turnVisibility.js` and test — `components/Chat/ChatPanel.jsx:798-832`. *Fixed 2026-07-21: routing switch + proposal-loot + JSON-only-spell-cast-backstop conditions extracted to pure `components/Chat/eventRouting.js` (`routeTurnEvents`/`extractProposalLoot`/`needsSpellCastNarration`); ChatPanel executes the returned route's side effects only. 15-test suite pins every branch incl. rejection-beats-exchange priority, exchange-rides-combat_start fall-through, and in-combat rolls never resolving. (The semantic-roll merge at 358-363 stays inline — it is two lines between two awaited machinery calls; the broader ChatPanel decomposition remains the 07-06 item's future work.)*
+- [ ] **P1** (scene-art, 2026-07-22): the xAI degradation branches — `xai-empty`/moderation-filtered (`imageGen.js:123-125`), the network/parse `catch` (132-135), the pollinations `cacheSet`, and the cache-hit early return (88-90) — are all untested; `imageGen.test.js` covers only missing-key/success/prefix/http-401, so the fallback wiring an adult-content app leans on has no regression net — `llm/providers/imageGen.js:88-135`.
+- [ ] **P2** (scene-art, 2026-07-22): no length cap on the composed/fallback prompt before it is `encodeURIComponent`'d into the Pollinations `<img src>` — a long DM narration (`SceneArt.jsx:168-171` uses the whole last turn) can exceed browser/CDN URL limits and the `<img>` fails silently (never fetched, so the catch never fires); `slice()` the prompt (~1–2k) — `imageGen.js:141-142` + `scribe.js:721`.
+- [ ] **P2** (hidden-fronts, 2026-07-22): `UPDATE_FRONT` lets the DM's per-turn channel regress portent stage by 1 (`gameReducer.js:2713`, `Math.max(existing-1, …)`) while the cadence engine keeps stage monotonic (`fronts.js:239`); CLAUDE.md specifies "non-regressing portent stages" — decide whether this softening is intended and document it, else clamp.
 - [ ] **P1** (prompt-building, 2026-07-16): `buildCombatBlock` (`llm/promptBuilder.js:764-793`) — the block the DM reads every combat turn to know who's alive, downed, defending, or conditioned — has its dynamic per-combatant formatting completely untested. Every `promptBuilder.combatPacing.test.js` case either passes empty `enemies`/`turnOrder` arrays or only asserts on the static surrounding prose; none assert on the actual rendered `Atk:`/`Dmg:`/`Status:`/`DEFENDING`/`Conditions:` fields, the turn-order `→` marker, or the `ACTIVE — exactly two player_slots required` vs. `inactive` surge summary line (confirmed via grep — zero matches for any of these strings across all `promptBuilder.*.test.js` files).
 
 ## Entry template
@@ -178,6 +181,36 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-22 — scene-art + hidden-fronts (Lap 2: robustness against hostile input)
+
+`npm test`: 1009 passing / 65 files.
+
+Rotation excluded (last 6, local ∪ origin — identical): dice-engine, chat-orchestration (07-21), providers-adapter, memory-journal (07-18), progression, prompt-building (07-16), vector-memory-rag, inventory-economy (07-15), response-parsing, story-memory (07-14), rules-math, enemy-stats-conditions (07-13). Oldest eligible → **scene-art** (07-06, coverage 56.32%); tie at 07-07 broke to lowest coverage → **hidden-fronts** (frontDirector 74.41%). Coverage snapshot (07-21) is 1 day old — not refreshed.
+
+### scene-art (`llm/providers/imageGen.js`, `composeScenePrompt`, portraits)
+- **Scope examined:** `imageGen.js` end to end; `imageGen.test.js` (4 tests); `composeScenePrompt` (`scribe.js:685-727`); `SceneArt.jsx` generation + `fallbackNotice` paths.
+- **Findings:**
+  - **P1 (coverage of degradation paths):** the two xAI *fallback-trigger* branches are untested — `xai-empty` (`response.ok` but no `b64_json`, i.e. **moderation-filtered**, `imageGen.js:123-125`) and the `catch` network/parse branch (132-135) — plus the pollinations `cacheSet` and the cache-hit early return (88-90). `imageGen.test.js` covers only missing-key, xAI-success, key-prefix, http-401. For an adult-content app, `xai-empty` is a *common* real path, and its wiring into `SceneArt.jsx:75`'s notice has no regression net.
+  - **P2 (robustness):** no length cap anywhere on the prompt before it is `encodeURIComponent`'d into the Pollinations `<img src>` (`imageGen.js:141-142`). `composeScenePrompt` returns the Gemini art-director text uncapped (`scribe.js:721`), and the scene fallback feeds the **entire** last DM narration as `situation` (`SceneArt.jsx:168-171`) — a long turn can build a URL past browser/CDN limits, and the `<img>` fails silently (src URL, never fetched, so `SceneArt.jsx:197` catch never fires). xAI POST body is unaffected.
+  - **P2 (mislabel):** a malformed `response.json()` on an ok:true xAI response throws inside the try and is tagged `xai-network:` (132-133) though it is a parse error, not connectivity. Degrades safely; cosmetic.
+  - **P1 (reflag, open since 07-06):** `downscaleDataUrl` (40-69), the hero-file-export compaction path, still 0% — no test passes `maxWidth`/`maxHeight`, so downscale never runs.
+- **Suggested improvements:** (1) mocked-fetch tests for xai-empty, fetch-throws, and a cache-hit round-trip asserting fetch call-count; (2) `slice()` the prompt (~1–2k) before the Pollinations URL; (3) a downscale test with a stubbed Image/canvas.
+
+### hidden-fronts (`engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js`)
+- **Scope examined:** all three files end to end; `frontDirector.test.js` (3), `frontUpgrade.test.js` (3), `gameReducer.fronts.test.js`, `gameReducer.worldTempo.test.js` (emergent fronts); traced `UPDATE_FRONT`/`APPLY_FRONT_ADVANCE_BATCH` reducer paths.
+- **Findings:**
+  - **Verified strong (the point of a robustness lap):** the LLM-output sanitizers are solid — `sanitizeGeneratedFronts`/`sanitizeFrontUpgrade`/`sanitizeFaction` null-guard non-arrays/non-objects and require complete records; `normalizeAdvance` rejects non-finite deltas; `UPDATE_FRONT` re-bounds DM clock/stage to ±1 of existing (`gameReducer.js:2709-2714`) so `normalizeFrontUpdate`'s clamp-to-12 can't jump; `APPLY_FRONT_ADVANCE_BATCH` rejects stale/replayed batches via `journalEnd <= previousEnd` (2727) + per-front cadenceId dedupe.
+  - **P1 (coverage, reflag of 07-07):** `frontDirector.js` has NO malformed-response test — `parseJsonResponse`'s two throws (no `fronts` key; parse+repair fail, 47/54) and `generateCampaignFronts`'s `fronts.length < 2` throw (134) are uncovered. The one-shot new-campaign seeding call has zero net on exactly this lap's target.
+  - **P1 (coverage, correcting the 07-07 item):** `upgradeCampaignFrontsV2`'s four pre-call guards (missing char/session, already-upgraded ≥2, active combat, missing apiKey — 109-112) are untested. **Correction:** the existing "rejects incomplete enrichment" test actually trips line **131** (`missingFactionIds`) — the vesaCampaign front lacks a faction, so empty enrichments hit 131 first — not line 133 as the queue item claims; line **133** (`< 2` web) is the genuinely-unreached throw.
+  - **P2 (real, reflag of 07-07):** `applyFrontAdvanceBatch` sets `clockGainUsed = true` / `lastAdvanceDelta: 1` / `appliedCount += 1` even when the front is already at `maxClock` and the clamp is a no-op (`fronts.js:220-227`) — a maxed front proposed for +1 burns the cadence's single clock slot AND poisons next cadence's `advancedLastCadence` throttle, denying a different front's legitimate advance. No test drives `clock === maxClock`.
+  - **P2 (design seam):** `UPDATE_FRONT` lets the DM's per-turn channel *regress* portent stage by 1 (`gameReducer.js:2713`), while the cadence engine keeps stage monotonic (`fronts.js:239`). CLAUDE.md specifies "non-regressing portent stages" — intentional softening or an unguarded seam; worth a one-line decision.
+  - No direct `engine/fronts.test.js` exists — every fronts.js function is tested only incidentally through the reducer.
+- **Suggested improvements:** (1) frontDirector malformed-response tests (no-JSON, repair-fail, <2 fronts); (2) the four upgrade guard-throw tests; (3) a `clock === maxClock` advance test asserting a *different* front still gains its clock; (4) create `engine/fronts.test.js` as the home for these normalizer edge cases.
+
+### Process notes
+- Spot-checked the two oldest still-open scene-art items against current code: cache entries still never expire and there is still no reroll/bypass affordance (`SceneArt.jsx` `handleGenerateArt` returns the cached hit), and `downscaleDataUrl` still has 0 downscale coverage — both left open. No checkbox changes.
+- Coverage snapshot (07-21) is 1 day old, within the 7-day window; not refreshed.
 
 ## 2026-07-21 — dice-engine + chat-orchestration (Lap 2: robustness against hostile input)
 
