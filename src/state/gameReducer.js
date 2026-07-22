@@ -342,14 +342,34 @@ function currentMessageIndex(state) {
     return Math.max(0, (state.messages || []).length - 1);
 }
 
-function findRecentTransactionDuplicate(entries, transaction, sourceId, currentIndex, window = RECENT_TRANSACTION_MESSAGE_WINDOW) {
+/**
+ * Conversational distance between two message indexes: system lines and hidden
+ * roll-setup messages don't count. A single check turn burns ~5 raw messages
+ * (user, hidden setup, two roll system lines, outcome), which silently expired
+ * the raw-index coin windows — the DM's "very next turn" re-emission landed 8
+ * raw messages later and re-paid a 20 gp fee (live finding 2026-07-22).
+ */
+function conversationalDistance(messages, fromIndex, toIndex) {
+    if (!Array.isArray(messages)) return Math.max(0, toIndex - fromIndex);
+    let distance = 0;
+    for (let i = Math.max(0, fromIndex + 1); i <= Math.min(toIndex, messages.length - 1); i++) {
+        const message = messages[i];
+        if (!message || message.role === 'system' || message.hidden) continue;
+        distance += 1;
+    }
+    return distance;
+}
+
+function findRecentTransactionDuplicate(entries, transaction, sourceId, currentIndex, window = RECENT_TRANSACTION_MESSAGE_WINDOW, messages = null) {
     return normalizeRecentTransactions(entries)
         .slice()
         .reverse()
         .find(entry => {
             if (entry.signature !== transaction.signature) return false;
             if (sourceId && entry.sourceId === sourceId) return true;
-            const distance = currentIndex - entry.messageIndex;
+            const distance = messages
+                ? conversationalDistance(messages, entry.messageIndex, currentIndex)
+                : currentIndex - entry.messageIndex;
             return distance >= 0 && distance <= window;
         }) || null;
 }
@@ -385,7 +405,9 @@ function clampCoinAmount(value) {
 function buildCoinGrantTransaction(gold, silver, copper) {
     const totalCp = gold * 100 + silver * 10 + copper;
     return {
-        signature: `coins|${gold}g|${silver}s|${copper}c`,
+        // Value-based signature: a re-emission with drifted denominations ("12
+        // silver" recapped as "1 gold 2 silver") is the SAME grant (2026-07-22).
+        signature: `coins|${totalCp}cp`,
         item: { itemKey: 'coin-grant', name: formatCurrency(totalCp) },
         quantity: 1,
         priceCp: totalCp,
@@ -413,7 +435,8 @@ const COIN_TRANSFER_VERB_RE = /\b(give|gives|giving|gave|hand|hands|handing|hand
 function buildCoinLossTransaction(gold, silver, copper) {
     const totalCp = gold * 100 + silver * 10 + copper;
     return {
-        signature: `coin-loss|${gold}g|${silver}s|${copper}c`,
+        // Value-based signature — same denomination-drift rule as coin grants.
+        signature: `coin-loss|${totalCp}cp`,
         item: { itemKey: 'coin-loss', name: formatCurrency(totalCp) },
         quantity: 1,
         priceCp: totalCp,
@@ -1185,7 +1208,7 @@ export function gameReducer(state, action) {
             const sourceId = String(meta.sourceId || '').slice(0, 160);
             const messageIndex = currentMessageIndex(state);
             const duplicate = findRecentTransactionDuplicate(
-                state.recentCoinGrants, transaction, sourceId, messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW
+                state.recentCoinGrants, transaction, sourceId, messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW, state.messages
             );
             const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
             if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatCoinGrant(meta.playerMessage))) {
@@ -1227,7 +1250,7 @@ export function gameReducer(state, action) {
             const sourceId = String(meta.sourceId || '').slice(0, 160);
             const messageIndex = currentMessageIndex(state);
             const duplicate = findRecentTransactionDuplicate(
-                state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW
+                state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW, state.messages
             );
             const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
             if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatCoinLoss(meta.playerMessage))) {
@@ -1273,7 +1296,7 @@ export function gameReducer(state, action) {
             const sourceId = String(meta.sourceId || '').slice(0, 160);
             const messageIndex = currentMessageIndex(state);
             const duplicate = findRecentTransactionDuplicate(
-                state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW
+                state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW, state.messages
             );
             if (duplicate && !playerMessageSupportsRepeatCoinLoss(meta.playerMessage)) {
                 return {

@@ -652,3 +652,68 @@ describe('AUDIT_COIN_PAYMENT', () => {
         expect(next.messages.at(-1).content).toMatch(/purse is empty/);
     });
 });
+
+describe('coin replay guards: denomination drift + conversational window (2026-07-22 live finding)', () => {
+    function addMessage(state, message) {
+        return gameReducer(state, { type: 'ADD_MESSAGE', payload: message });
+    }
+
+    it('suppresses a payment re-emitted with drifted denominations (12 silver recapped as 1 gold 2 silver)', () => {
+        const paid = gameReducer(makeState(), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 12, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I pay her twelve silver.' } },
+        });
+        const startCp = paid.character.gold * 100 + paid.character.silver * 10 + (paid.character.copper || 0);
+
+        const replayed = gameReducer(addMessage(paid, { id: 'm1', role: 'assistant', content: 'You walk out.' }), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 1, silver: 2, _meta: { sourceId: 'msg-pay-2', playerMessage: 'We head home through the fog.' } },
+        });
+
+        const endCp = replayed.character.gold * 100 + replayed.character.silver * 10 + (replayed.character.copper || 0);
+        expect(endCp).toBe(startCp); // same 120 cp value — the drifted recap charges nothing
+        expect(replayed.recentCoinLosses.at(-1).status).toBe('ignored');
+    });
+
+    it('keeps the grant guard alive across a dice turn: system and hidden messages do not age the window', () => {
+        const granted = gameReducer(makeState(), {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-fee-1', playerMessage: 'I collect the fee.' } },
+        });
+        // A single check turn burns ~5 raw messages: XP line, user, hidden setup,
+        // two roll system lines — plus one visible outcome. Raw distance 7 killed
+        // the old window; conversational distance is only 3.
+        let state = granted;
+        state = addMessage(state, { id: 'm1', role: 'system', content: '**Experience gained:** +100 XP.' });
+        state = addMessage(state, { id: 'm2', role: 'user', content: 'I pay Sorsa and we slip home.' });
+        state = addMessage(state, { id: 'm3', role: 'assistant', content: 'Setup narration.', hidden: true });
+        state = addMessage(state, { id: 'm4', role: 'system', content: 'Check (DC 12): Rolled 23 — Success!' });
+        state = addMessage(state, { id: 'm5', role: 'system', content: '[ROLL RESULT: rolled 23 — SUCCESS]', hidden: true });
+        state = addMessage(state, { id: 'm6', role: 'assistant', content: 'You ghost home, the fee secure in your pouch.' });
+
+        const replayed = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-fee-recap', playerMessage: 'We settle in at the hideout.' } },
+        });
+
+        expect(replayed.character.gold).toBe(granted.character.gold); // no second 20 gp
+        expect(replayed.recentCoinGrants.at(-1).status).toBe('ignored');
+    });
+
+    it('still allows an identical grant once genuine conversation has moved on', () => {
+        const granted = gameReducer(makeState(), {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-fee-1' } },
+        });
+        let state = granted;
+        for (let i = 0; i < 6; i++) {
+            state = addMessage(state, { id: `u${i}`, role: 'user', content: `Later scene beat ${i}.` });
+            state = addMessage(state, { id: `a${i}`, role: 'assistant', content: `The story moves on ${i}.` });
+        }
+        const second = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-fee-2' } },
+        });
+        expect(second.character.gold).toBe(granted.character.gold + 20); // a genuinely new, later 20 gp job
+    });
+});
