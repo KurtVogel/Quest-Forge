@@ -4,8 +4,68 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-21 (coin-loss replay ledger + payment-audit exactness; same-day
-strengthening: dice-count DoS cap + eventRouting extraction.)_
+_Last updated: 2026-07-22 (overnight autonomous session: 5-item strengthening batch,
+companion-gear follow-up trio, missing-events nudge, rogue playtest #11 with a live-found
+coin-guard fix.)_
+
+## Overnight session 2026-07-22: strengthening + gear trio + nudge + playtest #11
+
+Vesa queued the whole recommended list and went to sleep; everything shipped in order,
+each unit committed + pushed separately (6 commits), 1081 tests + lint green throughout.
+
+**Strengthening batch (queue items ticked):**
+
+1. **Gemini multi-part fix** — `parts[0]`-only reads dropped everything past the first
+   part of a multi-part candidate; the default DM (`gemini-3.1-pro-preview`) is
+   thinking-capable and the dropped tail is exactly where the JSON event block lives.
+   Both send+stream now concatenate all non-thought parts. Plus the first real provider
+   test suites (25 tests: truncation guards, SSE reassembly, `.status` stamping, xAI key
+   normalization) — the P1 providers-adapter queue item.
+2. **Maxed front no longer eats the cadence clock-gain slot** — an at-cap +1 degrades to
+   symptom-only, leaving the single gain slot for a front that can use it.
+3. **`UPDATE_FRONT` portent stage clamped non-regressing** (DECISIONS.md 2026-07-22) —
+   the DM can't see stage values since the tempo redesign, so a lower stage was always a
+   blind guess; clock softening unchanged.
+4. **END_COMBAT XP fallback tested end-to-end** (13 tests) — estimator clamp band,
+   slainXpOnly-on-loss filter, both double-award guards.
+
+**Companion-gear follow-up trio** (IDEAS §9, DECISIONS.md 2026-07-22): Inventory
+"→ Name" give-gear buttons (`GIVE_GEAR_TO_COMPANION` + `deriveGiftAC`, downgrades refused
+visibly, hero AC recomputes on handover), keepsakes as a structured capped companion
+field (cap 5, deduped, on the card + party prompt block), and the Scribe gear-handoff
+audit backstop (loot-audit pattern, `:gear` sourceId, untracked armor skipped). 29 tests.
+
+**Missing-events nudge** (IDEAS 2026-07-11, DECISIONS.md 2026-07-22): a no-JSON response
+at a contract moment (premise opening / completed agreement) triggers one JSON-only
+follow-up, hard-whitelisted to `quest_updates` + opening `starting_items` — the only
+channels without a Scribe audit backstop. Makes Grok-as-DM safe at the moments the
+07-11 playtest saw it drop events; Gemini untouched in practice.
+
+**Playtest #11 (rogue, breakneck, "The Lamplighters' Ledger"):** fresh L1 elf rogue +
+premise companion Terho, full heist arc — opening auto-scene with premise
+quests/companion/starting-items all reconciled, five check proposals at sane DCs with
+advantage from fictional positioning (dog-bark cover), an eased retry (DC 12 → 10 after
+the patrol passed), a diceless interrogation of a surrendered captive, and expertise
+visible in the dice log (+7 stealth). Tonight's features verified live: give-gear button
+(Longsword → Terho, catalog 1d8+2, ⚔ line, item left inventory, survived reload),
+keepsake captured from a narrated scarf gift and rendered on the card, exact 20 gp fee +
+12-silver payment with the recollection turn deducting nothing. Combat: initiative,
+Sneak Attack annotated, fiction-grounded targeting, Terho auto-declaring GUARD over the
+dying hero (redirect rolled vs his AC), no finishing blows, dead-target action dropped
+visibly — and a genuinely dramatic ending: the L1 rogue died to two natural-1 death
+saves with her guardian still standing (correct semantics — companion present means no
+solo mercy; observation logged in IDEAS.md, not a bug). Zero console errors all session.
+
+**Live-found P1, fixed same session** (DECISIONS.md 2026-07-22): the post-roll outcome
+response restated the night's finances and BOTH coin ledgers waved it through — a dice
+turn's ~5 raw messages had aged out the 4-message window, and denomination drift (12 sp
+recapped as 1 gp 2 sp) beat the per-denomination signature. Hero ended +18.8 gp rich.
+Coin signatures are now value-based and the coin windows measure conversational distance
+(system/hidden messages don't age the guard); outcome prompt gained a no-re-emission
+rule. 3 regression tests. The spell/rest ledgers keep raw windows for now — noted in
+IDEAS as the pattern to apply on first observed failure.
+
+Deployed to https://quest-forge-99ab1.web.app at session end.
 
 ## Same-day strengthening: dice DoS + ChatPanel routing extraction (2026-07-21)
 

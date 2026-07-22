@@ -8,6 +8,68 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-22 · Coin replay windows measure conversational distance, and coin signatures are value-based.**
+Playtest #11 reproduced a fresh double-pay/double-grant the 2026-07-21 ledgers missed: the
+post-roll outcome response restated the night's finances (`gold_found: 20` plus the
+12-silver payment recapped as `gold_lost: 1, silver_lost: 2`) and both guards waved it
+through. Two causes: (a) the 4-message windows counted RAW message indexes, and a single
+check turn burns ~5 raw messages (user, hidden setup, two roll system lines, outcome) —
+so "the very next turn" had already aged out of the window; (b) denomination drift (12 sp
+recapped as 1 gp 2 sp) defeated the per-denomination signature. Decisions: the coin
+grant/loss ledgers now (1) compare signatures by TOTAL copper value — for guard identity,
+120 cp is 120 cp regardless of how the DM denominates the recap (the Scribe-side
+"denominations are sacred" rule is about recording amounts faithfully and is unchanged);
+(2) measure their windows in conversational distance — system lines and hidden roll-setup
+messages don't age the guard, so the window means what the design intended regardless of
+how many engine messages a dice turn emits. The post-roll outcome prompt gained rule (6):
+recapping already-applied coin/loot/XP/rest events is narration only, never an event.
+Purchases/sales/spells/rests keep raw-index windows for now — no observed failure there,
+but if one shows up, conversational distance is the established pattern to apply.
+
+**2026-07-22 · Portent stage is non-regressing on EVERY write path, including the DM's per-turn `UPDATE_FRONT`.**
+The cadence engine has always kept stage monotonic (`fronts.js`), but `UPDATE_FRONT` let
+the DM's per-turn channel step stage down by 1 — an inconsistency the 2026-07-22 audit
+flagged. Ruling: clamp upward-only (still max +1 per update). Since the world-tempo
+redesign the DM never sees clocks or stages (they're private pacing state), so any stage
+it emits is a blind guess — and portents are escalation milestones already manifest in the
+world; player interference softens the CLOCK (the plan), not the stage (what already
+happened). This matches CLAUDE.md's documented "non-regressing portent stages" contract.
+
+**2026-07-22 · Companion-gear follow-up trio shipped (COMPANION_GEAR_SPEC.md §9).**
+(1) **Inventory give-gear buttons** — `GIVE_GEAR_TO_COMPANION` mirrors the potion
+"→ Name" buttons: out of combat, weapons/armor/shields hand over engine-side through the
+same `UPDATE_COMPANION` derivation (catalog dice, `+N` magic bonus, ⚔ announcement), with
+no reliance on the DM pairing `update_companions` + `items_lost`. Gifted protection is
+priced by `deriveGiftAC` (light/medium armor = baseAC + 2 competence allowance, heavy
+as-is, magic `acBonus` on top, absolute 21 cap) — the +2 allowance matches how DMs priced
+gifted armor in play (Chain Shirt 13 → companion AC 15, playtest #9). Downgrades and
+duplicate weapons are refused with a visible line (the item stays); the hero's own AC
+recomputes when they hand over equipped armor. (2) **Keepsakes as a structured capped
+field** — `update_companions` carries `keepsake`; the reducer appends into a deduped
+(token containment), append-only list capped at 5, rendered on the companion card and in
+the party prompt block. Sentimental gifts no longer live-or-die by `notes` churn. (3)
+**Scribe gear-handoff audit** — the loot-audit pattern applied to gear: narrated handoffs
+the DM never evented route tracked items through `GIVE_GEAR_TO_COMPANION`, keepsakes
+through the keepsake channel, untracked weapons through a stats-only update; untracked
+armor is conservatively skipped (no derivable AC — an invented AC is worse than a missed
+handoff). Idempotent per narration via a claimed `:gear` sourceId. IDEAS.md's own
+wait-for-evidence note on (3) was overridden by Vesa's explicit go-ahead 2026-07-22; the
+audit is a backstop that fires only when the DM misses, so the cost of shipping early is
+one extra prompt block on audited turns.
+
+**2026-07-22 · Missing-events nudge for weak-JSON DM providers (quest_updates + opening starting_items only).**
+The 2026-07-11 playtest showed Grok narrating contract moments in pure prose. Coins,
+loot, payments, and now gear all have Scribe audit backstops; the two channels with NO
+backstop are `quest_updates` and the opening's `starting_items` — miss those once and
+they're gone. Design: when a response carries no JSON block at all AND lands on a
+high-signal cue (the one-time premise opening, or completed-agreement phrasing), ChatPanel
+sends one JSON-only follow-up whose reply is hard-whitelisted to those channels and
+re-shaped through the real parser. Deliberately NOT a general "re-emit everything" nudge:
+coin cues are excluded (the Scribe audit owns them — a nudge would race it), check turns
+are excluded (the proposal machine owns them), and a DM that emitted ANY event block is
+trusted even if a field looks absent. Gemini is untouched in practice — it virtually
+always emits a block.
+
 **2026-07-21 · Coin losses are replay-guarded (`recentCoinLosses` + `APPLY_COIN_LOSS`) — and the one-shot mechanics invariant is now the standing rule, not a per-bug discovery.**
 Vesa's live report: the DM narrated a 6-silver price, the purse dropped only 4 "based on
 narration", telling the DM took the remaining 2 — and then 2 more vanished on the following

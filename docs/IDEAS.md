@@ -683,7 +683,7 @@ be model version/settings, don't over-fit the shared prompt to one provider):**
   (`eval:combat`, `eval:memory`) still speaks Gemini/OpenAI only — xAI support would need
   adding if a future comparison should run scripted rather than by hand.
 
-### Missing-events nudge for weak-JSON DM providers — status: `open` (2026-07-11 playtest)
+### Missing-events nudge for weak-JSON DM providers — status: `shipped` (2026-07-22, scoped to quest_updates + opening starting_items — the only channels without a Scribe audit backstop; see DECISIONS.md)
 Grok (and plausibly other non-Gemini DMs) returns pure-prose responses at moments the contract
 expects events: the premise opening (`starting_items`), job acceptance (`quest_updates`),
 narrated coin/loot. The parser already detects "no JSON block at all" — when that happens on a
@@ -894,22 +894,42 @@ enforcement, model routing (standard vs premium-model turns). This is where the 
 get enforced; it is deliberately NOT part of the client architecture (no backend stays true
 for BYOK). Scope it as its own project when the public-launch gate opens (STATUS "Up next" #5).
 
-### Inventory-panel "Give to <companion>" buttons for weapons/armor — status: `idea` (companion-gear follow-up)
+### Inventory-panel "Give to <companion>" buttons for weapons/armor — status: `shipped` (2026-07-22, `GIVE_GEAR_TO_COMPANION` + `deriveGiftAC`; live-verified in playtest #11)
 Mirror of the potion `→ Name` buttons: an engine-owned UI path that drives the same
 UPDATE_COMPANION gear derivation directly from the Inventory panel, removing reliance on DM
 cooperation for the `update_companions` + `items_lost` pairing (playtest #9 showed the DM
 can forget the items_lost half for non-gear gifts). From COMPANION_GEAR_SPEC.md §9.
 
-### Companion keepsake list as a structured capped field — status: `idea` (companion-gear follow-up)
+### Companion keepsake list as a structured capped field — status: `shipped` (2026-07-22, `companion.keepsakes` cap 5, deduped append-only; live-verified in playtest #11)
 Sentimental gifts currently land in free-text `notes` (or only in affinity). A capped,
 deduped, append-only list like `bondMoments` would make keepsakes durable against note
 churn and renderable on the companion card. From COMPANION_GEAR_SPEC.md §9.
 
-### Scribe gear-handoff audit backstop — status: `idea` (companion-gear follow-up)
+### Scribe gear-handoff audit backstop — status: `shipped` (2026-07-22)
 Like the loot persistence audit: detect a narrated gear handoff to a companion that the DM
 never emitted as `update_companions`/`items_lost` and backfill it. From
-COMPANION_GEAR_SPEC.md §9; wait for real-play evidence that DMs actually miss the gear
-update (playtest #9's Gemini DM emitted it correctly first try).
+COMPANION_GEAR_SPEC.md §9; the wait-for-evidence note was overridden by Vesa's explicit
+go-ahead — the audit only fires when the DM misses, so shipping early costs one prompt
+block on audited turns. Untracked armor is conservatively skipped (no derivable AC).
+
+### [strengthening] Conversational-distance windows for the spell/rest replay ledgers — status: `idea` (2026-07-22)
+The coin ledgers now measure their replay windows in conversational distance (system and
+hidden messages don't age the guard) after playtest #11 proved a dice turn's ~5 raw
+messages silently expired the raw-index window. `recentSpellCasts` and `recentRests` still
+use raw message indexes with the same 4-message window — no observed failure yet, but the
+same inflation applies to any post-roll turn. Apply the established pattern if a replay
+slips through either ledger in play.
+
+### Low-level death-save lethality with a companion present — status: `observation` (playtest #11, 2026-07-22)
+The low-level solo 0-HP mercy (non-lethal setback) correctly does NOT apply when a
+battle-ready companion is present (`isCompanionActive`, DECISIONS.md 2026-07-17) — so a
+level-1 hero with a companion runs real death saves. Playtest #11's level-1 rogue died to
+two natural-1 death saves in her second-ever fight while her guardian was still standing.
+Working as designed, and the drama was genuinely excellent (guard stance over the dying
+body, defeat, bodies dragged off) — but it means recruiting a companion at level 1
+REMOVES a safety net the true solo hero has. Worth an rpg-balance-master look only if
+real campaigns feel unfairly lethal at level 1-2 with a party; do not change reflexively,
+the near-death drama is a feature.
 
 ---
 
