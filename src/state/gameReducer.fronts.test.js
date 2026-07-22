@@ -240,6 +240,65 @@ describe('hidden campaign fronts', () => {
         expect(advanced.fronts[1].lastAdvanceDelta).toBe(0);
     });
 
+    it('does not let a front already at max clock consume the cadence clock-gain slot', () => {
+        const makeFront = (id, clock) => ({
+            id, title: id, goal: 'Press.', stakes: 'Pain.',
+            grimPortents: ['One.', 'Two.', 'Three.'],
+            clock, maxClock: 6, stage: 0, status: 'active', publicHints: [],
+        });
+        const state = {
+            ...initialGameState,
+            session: { id: 'campaign', frontDirector: { version: 2, lastJournalEnd: 10 } },
+            // The maxed front is FIRST, so pre-fix it would eat the slot.
+            fronts: [makeFront('front-maxed', 6), makeFront('front-live', 1)],
+        };
+        const advanced = gameReducer(state, {
+            type: 'APPLY_FRONT_ADVANCE_BATCH',
+            payload: {
+                cadenceId: 'cad-20',
+                journalEnd: 20,
+                advances: [
+                    { id: 'front-maxed', delta: 1, symptom: 'The siege tightens.', reason: 'Nowhere left to go.' },
+                    { id: 'front-live', delta: 1, symptom: 'Scouts probe the walls.', reason: 'Opportunity.' },
+                ],
+            },
+        });
+        expect(advanced.fronts[0].clock).toBe(6); // capped — cannot move
+        expect(advanced.fronts[0].lastAdvanceDelta).toBe(0);
+        expect(advanced.fronts[0].publicHints).toContain('The siege tightens.'); // symptom still lands
+        expect(advanced.fronts[1].clock).toBe(2); // the slot went to the front that could use it
+        expect(advanced.fronts[1].lastAdvanceDelta).toBe(1);
+    });
+
+    it('skips advances aimed at dormant or resolved fronts entirely', () => {
+        const makeFront = (id, status) => ({
+            id, title: id, goal: 'Press.', stakes: 'Pain.',
+            grimPortents: ['One.', 'Two.', 'Three.'],
+            clock: 2, maxClock: 6, stage: 1, status, publicHints: [],
+        });
+        const state = {
+            ...initialGameState,
+            session: { id: 'campaign', frontDirector: { version: 2, lastJournalEnd: 10 } },
+            fronts: [makeFront('front-dormant', 'dormant'), makeFront('front-resolved', 'resolved')],
+        };
+        const next = gameReducer(state, {
+            type: 'APPLY_FRONT_ADVANCE_BATCH',
+            payload: {
+                cadenceId: 'cad-20',
+                journalEnd: 20,
+                advances: [
+                    { id: 'front-dormant', delta: 1, symptom: 'Stirring.', reason: 'Time.' },
+                    { id: 'front-resolved', delta: 1, symptom: 'Echoes.', reason: 'Time.' },
+                ],
+            },
+        });
+        for (const front of next.fronts) {
+            expect(front.clock).toBe(2);
+            expect(front.publicHints).toEqual([]);
+            expect(front.lastAdvanceId).toBeFalsy();
+        }
+    });
+
     it('refuses a clock gain for a front that advanced in the immediately previous cadence', () => {
         const front = {
             id: 'front-road', title: 'The Closed Road', goal: 'Choke the road.', stakes: 'Starvation.',
@@ -308,6 +367,17 @@ describe('hidden campaign fronts', () => {
         expect(gameReducer(state, { type: 'UPDATE_FRONT', payload: { id: 'invented', clock: 6 } })).toBe(state);
         const next = gameReducer(state, { type: 'UPDATE_FRONT', payload: { id: 'known', clock: 6, stage: 6 } });
         expect(next.fronts[0]).toMatchObject({ clock: 3, stage: 2, maxClock: 6 });
+    });
+
+    it('never regresses portent stage through the per-turn UPDATE_FRONT channel', () => {
+        // The DM never sees stage values (they are private), so a lower stage is a
+        // blind guess — the cadence engine keeps stage monotonic and so does this path.
+        const state = {
+            ...initialGameState,
+            fronts: [{ id: 'known', title: 'Known', clock: 3, stage: 2, maxClock: 6 }],
+        };
+        const next = gameReducer(state, { type: 'UPDATE_FRONT', payload: { id: 'known', clock: 2, stage: 0 } });
+        expect(next.fronts[0]).toMatchObject({ clock: 2, stage: 2 }); // clock softens, stage holds
     });
 
     it('installs contextual fronts once without changing established campaign state', () => {

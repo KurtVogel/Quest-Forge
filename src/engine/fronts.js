@@ -214,10 +214,13 @@ export function applyFrontAdvanceBatch(fronts = [], batch = {}) {
 
         let delta = advance.delta;
         if (delta > 0) {
+            const atCap = (front.clock || 0) >= (front.maxClock || DEFAULT_MAX_CLOCK);
             const advancedLastCadence = !!previousCadenceId
                 && front.lastAdvanceId === previousCadenceId
                 && (front.lastAdvanceDelta || 0) > 0;
-            if (clockGainUsed || advancedLastCadence) {
+            if (atCap) {
+                delta = 0; // clock can't move — leave the cadence's single gain slot for another front
+            } else if (clockGainUsed || advancedLastCadence) {
                 delta = 0; // pacing guard: keep the symptom/notes, hold the clock
             } else {
                 clockGainUsed = true;

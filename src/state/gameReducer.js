@@ -2709,8 +2709,10 @@ export function gameReducer(state, action) {
                 ...(update.clock !== undefined && {
                     clock: Math.max((existing.clock || 0) - 1, Math.min((existing.clock || 0) + 1, update.clock)),
                 }),
+                // Stage is non-regressing (like the cadence engine, fronts.js): portents
+                // already manifest in the world stay manifest. Clock may soften instead.
                 ...(update.stage !== undefined && {
-                    stage: Math.max((existing.stage || 0) - 1, Math.min((existing.stage || 0) + 1, update.stage)),
+                    stage: Math.max(existing.stage || 0, Math.min((existing.stage || 0) + 1, update.stage)),
                 }),
                 maxClock: existing.maxClock || 6,
             };
