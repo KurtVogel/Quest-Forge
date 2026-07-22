@@ -62,6 +62,12 @@ export default function CompanionsPanel() {
                                     <div className={`comp-affinity-fill ${affinityClass}`} style={{ width: `${affinityPercent}%` }}></div>
                                 </div>
                             </div>
+
+                            {(companion.keepsakes || []).length > 0 && (
+                                <div className="comp-keepsakes" title="Keepsakes from your journey together">
+                                    {companion.keepsakes.join(' · ')}
+                                </div>
+                            )}
                         </div>
                     );
                 })}

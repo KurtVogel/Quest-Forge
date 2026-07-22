@@ -661,3 +661,97 @@ describe('Scribe loot persistence audit', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
     });
 });
+
+describe('Scribe gear-handoff audit', () => {
+    beforeEach(() => {
+        sendMessage.mockReset();
+    });
+
+    function emptyExtraction(extra = {}) {
+        return JSON.stringify({ world_facts: [], npc_updates: [], story_memory: [], location: null, ...extra });
+    }
+
+    function auditState(overrides = {}) {
+        return {
+            party: [{ id: 'c1', name: 'Kaarina Tammi', status: 'healthy', ac: 12, weapon: 'Dagger' }],
+            inventory: [{ id: 'i1', name: 'Longsword +1', type: 'weapon' }],
+            appliedLootSourceIds: [],
+            ...overrides,
+        };
+    }
+
+    it('routes a narrated weapon handoff through GIVE_GEAR_TO_COMPANION and keepsakes through UPDATE_COMPANION', async () => {
+        sendMessage.mockResolvedValue(emptyExtraction({
+            missing_gear_handoffs: [
+                { companion: 'Kaarina', item: 'Longsword +1', kind: 'weapon' },
+                { companion: 'Kaarina', item: 'carved bone whistle', kind: 'keepsake' },
+            ],
+        }));
+
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I hand Kaarina my longsword and the whistle.',
+            dmNarrative: 'Kaarina straps the longsword to her belt and tucks the whistle away.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+            lootAudit: { sourceId: 'msg-9:scribe-loot', appliedEvents: null, getState: () => auditState() },
+        });
+
+        expect(dispatch).toHaveBeenCalledWith({ type: 'CLAIM_LOOT_SOURCE', payload: 'msg-9:scribe-loot:gear' });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'GIVE_GEAR_TO_COMPANION',
+            payload: { itemId: 'i1', companionId: 'c1' },
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'UPDATE_COMPANION',
+            payload: { id: 'c1', keepsake: 'carved bone whistle' },
+        });
+    });
+
+    it('falls back to a stats-only weapon update when the narrated item is not in inventory, and skips untracked armor', async () => {
+        sendMessage.mockResolvedValue(emptyExtraction({
+            missing_gear_handoffs: [
+                { companion: 'Kaarina', item: 'Boarding Axe', kind: 'weapon' },
+                { companion: 'Kaarina', item: 'salvaged breastplate', kind: 'armor' },
+            ],
+        }));
+
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'Take the axe and the breastplate.',
+            dmNarrative: 'Kaarina hefts the boarding axe and buckles on the breastplate.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+            lootAudit: { sourceId: 'msg-10:scribe-loot', appliedEvents: null, getState: () => auditState({ inventory: [] }) },
+        });
+
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'UPDATE_COMPANION',
+            payload: { id: 'c1', weapon: 'Boarding Axe' },
+        });
+        // Untracked armor has no derivable AC — conservative skip, no companion AC guess.
+        expect(dispatch.mock.calls.some(([action]) => action.type === 'GIVE_GEAR_TO_COMPANION')).toBe(false);
+        expect(dispatch.mock.calls.filter(([action]) => action.type === 'UPDATE_COMPANION')).toHaveLength(1);
+    });
+
+    it('is idempotent per narration: an already-claimed gear sourceId applies nothing', async () => {
+        sendMessage.mockResolvedValue(emptyExtraction({
+            missing_gear_handoffs: [{ companion: 'Kaarina', item: 'Longsword +1', kind: 'weapon' }],
+        }));
+
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I hand Kaarina my longsword.',
+            dmNarrative: 'She straps it on.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+            lootAudit: {
+                sourceId: 'msg-11:scribe-loot',
+                appliedEvents: null,
+                getState: () => auditState({ appliedLootSourceIds: ['msg-11:scribe-loot:gear'] }),
+            },
+        });
+
+        expect(dispatch.mock.calls.some(([action]) => ['GIVE_GEAR_TO_COMPANION', 'UPDATE_COMPANION', 'CLAIM_LOOT_SOURCE'].includes(action.type))).toBe(false);
+    });
+});

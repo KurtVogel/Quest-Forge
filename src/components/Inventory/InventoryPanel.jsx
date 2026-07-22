@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { formatCurrency } from '../../engine/currency.js';
 import { isProficientWithWeapon } from '../../engine/rules.js';
+import { deriveGiftAC } from '../../engine/companionGear.js';
 import './Inventory.css';
 
 export default function InventoryPanel() {
@@ -45,6 +46,10 @@ export default function InventoryPanel() {
 
     const handleUseOn = (item, companionId) => {
         dispatch({ type: 'USE_ITEM', payload: { itemId: item.id, targetId: companionId } });
+    };
+
+    const handleGiveGear = (item, companionId) => {
+        dispatch({ type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: item.id, companionId } });
     };
 
     return (
@@ -96,6 +101,7 @@ export default function InventoryPanel() {
                                 onToggleEquip={handleToggleEquip}
                                 onUse={handleUse}
                                 onUseOn={handleUseOn}
+                                onGiveGear={handleGiveGear}
                                 party={state.party || []}
                                 onRemove={handleRemove}
                             />
@@ -120,6 +126,7 @@ export default function InventoryPanel() {
                                 onToggleEquip={handleToggleEquip}
                                 onUse={handleUse}
                                 onUseOn={handleUseOn}
+                                onGiveGear={handleGiveGear}
                                 party={state.party || []}
                                 onRemove={handleRemove}
                             />
@@ -131,12 +138,18 @@ export default function InventoryPanel() {
     );
 }
 
-function InventoryItem({ item, nonProficient, character, combatActive, isPlayerCombatTurn, bonusActionUsed, onToggleEquip, onUse, onUseOn, party = [], onRemove }) {
+function InventoryItem({ item, nonProficient, character, combatActive, isPlayerCombatTurn, bonusActionUsed, onToggleEquip, onUse, onUseOn, onGiveGear, party = [], onRemove }) {
     // Out of combat, a healing consumable can be administered to a hurt living
     // companion (in combat, companion healing goes through spells/the exchange).
     const isHealingItem = item.consumableType === 'healing' && item.healing;
     const giveTargets = isHealingItem && !combatActive
         ? party.filter(c => c.status !== 'dead' && (c.hp ?? 0) < (c.maxHp || 1))
+        : [];
+    // Out of combat, weapons/armor/shields can be handed to a standing companion —
+    // the engine-owned mirror of the DM's update_companions gear path.
+    const isGearItem = item.type === 'weapon' || item.type === 'armor' || item.type === 'shield' || item.isShield;
+    const gearTargets = isGearItem && !combatActive
+        ? party.filter(c => c.status !== 'dead' && c.status !== 'downed')
         : [];
     const isHealingPotion = item.consumableType === 'healing' && item.healing;
     const usesBonusAction = item.actionType === 'bonus' || isHealingPotion;
@@ -194,6 +207,35 @@ function InventoryItem({ item, nonProficient, character, combatActive, isPlayerC
                         → {companion.name.split(' ')[0]}
                     </button>
                 ))}
+                {gearTargets.map(companion => {
+                    const isWeapon = item.type === 'weapon';
+                    const sameWeapon = isWeapon
+                        && String(item.name || '').trim().toLowerCase() === String(companion.weapon || '').trim().toLowerCase();
+                    const giftAC = isWeapon ? null : deriveGiftAC(item, companion.ac || 12);
+                    const acAfter = giftAC === null ? null : Math.min(21, giftAC);
+                    const noUpgrade = !isWeapon && (acAfter === null || acAfter <= (companion.ac || 12));
+                    const disabled = sameWeapon || noUpgrade;
+                    const title = sameWeapon
+                        ? `${companion.name} already wields a ${companion.weapon}`
+                        : noUpgrade
+                            ? (acAfter === null
+                                ? 'No derivable protection value for this item'
+                                : `${companion.name}'s current protection (AC ${companion.ac}) is at least as good`)
+                            : isWeapon
+                                ? `Give ${item.name} to ${companion.name} — they take it up (the engine derives their new dice)`
+                                : `Give ${item.name} to ${companion.name} (AC ${companion.ac} → ${acAfter})`;
+                    return (
+                        <button
+                            key={companion.id}
+                            className="inv-use-btn"
+                            onClick={() => onGiveGear(item, companion.id)}
+                            disabled={disabled}
+                            title={title}
+                        >
+                            → {companion.name.split(' ')[0]}
+                        </button>
+                    );
+                })}
                 {(item.type === 'weapon' || item.type === 'armor' || item.type === 'shield') && (
                     <button
                         className={`inv-equip-btn ${item.equipped ? 'unequip' : ''}`}

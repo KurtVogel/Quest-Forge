@@ -200,3 +200,118 @@ describe('companion gear', () => {
         expect(next.party[0].ac).toBe(21);
     });
 });
+
+describe('GIVE_GEAR_TO_COMPANION (Inventory give buttons)', () => {
+    function gearState(overrides = {}) {
+        return makeState({
+            party: [{ id: 'c1', name: 'Kaarina Tammi', level: 2, hp: 18, maxHp: 18, ac: 12, weapon: 'Dagger', damage: '1d4+2', status: 'healthy' }],
+            inventory: [
+                { id: 'i1', name: 'Longsword +1', type: 'weapon', damage: '1d8', quantity: 1 },
+                { id: 'i2', name: 'Chain Shirt', type: 'armor', armorType: 'medium', baseAC: 13, quantity: 1, equipped: true },
+            ],
+            ...overrides,
+        });
+    }
+
+    it('hands over a catalog weapon: engine dice, magic bonus, item leaves, gear line announces', () => {
+        const next = gameReducer(gearState(), {
+            type: 'GIVE_GEAR_TO_COMPANION',
+            payload: { itemId: 'i1', companionId: 'c1' },
+        });
+
+        expect(next.party[0]).toMatchObject({ weapon: 'Longsword +1', damage: '1d8+2', weaponBonus: 1 });
+        expect(next.inventory.find(i => i.id === 'i1')).toBeUndefined();
+        expect(next.messages.at(-1).content).toContain('now wields the Longsword +1');
+    });
+
+    it('hands over armor as an AC upgrade and recomputes the hero own AC on the loss', () => {
+        const next = gameReducer(gearState(), {
+            type: 'GIVE_GEAR_TO_COMPANION',
+            payload: { itemId: 'i2', companionId: 'c1' },
+        });
+
+        expect(next.party[0].ac).toBe(15); // chain shirt 13 + 2 competence allowance
+        expect(next.inventory.find(i => i.id === 'i2')).toBeUndefined();
+        expect(next.messages.some(m => m.content.includes('AC 12 → 15'))).toBe(true);
+        // The hero handed over their own equipped armor: unarmored 10 + DEX 1.
+        expect(next.character.armorClass).toBe(11);
+    });
+
+    it('refuses a protection downgrade with a visible line and keeps the item', () => {
+        const state = gearState();
+        state.party[0].ac = 16;
+        const next = gameReducer(state, {
+            type: 'GIVE_GEAR_TO_COMPANION',
+            payload: { itemId: 'i2', companionId: 'c1' },
+        });
+
+        expect(next.party[0].ac).toBe(16);
+        expect(next.inventory.find(i => i.id === 'i2')).toBeDefined();
+        expect(next.messages.at(-1).content).toContain('at least as good');
+    });
+
+    it('refuses the same weapon the companion already wields', () => {
+        const state = gearState();
+        state.party[0].weapon = 'Longsword +1';
+        const next = gameReducer(state, {
+            type: 'GIVE_GEAR_TO_COMPANION',
+            payload: { itemId: 'i1', companionId: 'c1' },
+        });
+
+        expect(next.inventory.find(i => i.id === 'i1')).toBeDefined();
+        expect(next.messages.at(-1).content).toContain('already wields');
+    });
+
+    it('is a no-op during active combat and for downed or dead companions', () => {
+        const inCombat = gearState({ combat: { ...initialGameState.combat, active: true } });
+        expect(gameReducer(inCombat, { type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: 'i1', companionId: 'c1' } })).toBe(inCombat);
+
+        const downed = gearState();
+        downed.party[0].status = 'downed';
+        expect(gameReducer(downed, { type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: 'i1', companionId: 'c1' } })).toBe(downed);
+    });
+
+    it('decrements a stacked item instead of removing the whole stack', () => {
+        const state = gearState();
+        state.inventory[0].quantity = 2;
+        const next = gameReducer(state, {
+            type: 'GIVE_GEAR_TO_COMPANION',
+            payload: { itemId: 'i1', companionId: 'c1' },
+        });
+
+        expect(next.inventory.find(i => i.id === 'i1').quantity).toBe(1);
+    });
+});
+
+describe('companion keepsakes', () => {
+    it('appends a keepsake through update_companions without touching gear stats', () => {
+        const state = makeState({
+            party: [{ id: 'c1', name: 'Kaarina', level: 2, hp: 18, maxHp: 18, ac: 12, weapon: 'Dagger', damage: '1d4+2', status: 'healthy' }],
+        });
+        const next = gameReducer(state, {
+            type: 'UPDATE_COMPANION',
+            payload: { id: 'c1', keepsake: "the hero's carved bone whistle", affinity: 75 },
+        });
+
+        expect(next.party[0].keepsakes).toEqual(["the hero's carved bone whistle"]);
+        expect(next.party[0].weapon).toBe('Dagger');
+        expect(next.party[0].damage).toBe('1d4+2');
+    });
+
+    it('drops keepsake restatements and keeps the list append-only across updates', () => {
+        let state = makeState({
+            party: [{ id: 'c1', name: 'Kaarina', level: 2, hp: 18, maxHp: 18, ac: 12, weapon: 'Dagger', damage: '1d4+2', status: 'healthy', keepsakes: ["the hero's carved bone whistle"] }],
+        });
+        state = gameReducer(state, {
+            type: 'UPDATE_COMPANION',
+            payload: { id: 'c1', keepsake: 'carved bone whistle' },
+        });
+        expect(state.party[0].keepsakes).toEqual(["the hero's carved bone whistle"]);
+
+        state = gameReducer(state, {
+            type: 'UPDATE_COMPANION',
+            payload: { id: 'c1', hp: 9 },
+        });
+        expect(state.party[0].keepsakes).toEqual(["the hero's carved bone whistle"]); // survives unrelated updates
+    });
+});

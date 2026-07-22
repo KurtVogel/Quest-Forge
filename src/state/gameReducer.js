@@ -10,6 +10,7 @@ import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js';
 import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeEmergentFront, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
+import { appendKeepsakes, deriveGiftAC } from '../engine/companionGear.js';
 import { appendRecentEncounter, buildEncounterEntry, MAX_ACTIVE_FRONTS, MAX_RECENT_ENCOUNTERS, normalizeTempoDirective } from '../engine/worldTempo.js';
 import { dedupeLocationRecords, normalizeLocationRecord, upsertLocation } from '../engine/locationRegistry.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard, normalizeStoryMemoryUpdate, pickMergedCardText } from '../engine/storyMemory.js';
@@ -864,6 +865,12 @@ function normalizeCompanion(payload = {}, existing = {}) {
         conditions: Array.isArray(merged.conditions) ? merged.conditions : (existing.conditions || []),
         notes: merged.notes || existing.notes || '',
         appearance: merged.appearance || existing.appearance || '',
+        // Sentimental gifts as a durable capped list (never wholesale replaced):
+        // per-update `keepsake` beats append; restatements drop by containment.
+        keepsakes: appendKeepsakes(existing.keepsakes, [
+            ...(Array.isArray(payload.keepsakes) ? payload.keepsakes : []),
+            ...(typeof payload.keepsake === 'string' ? [payload.keepsake] : []),
+        ]),
     };
 }
 
@@ -2922,6 +2929,51 @@ export function gameReducer(state, action) {
                 ...state,
                 party: (state.party || []).filter(c => c.name !== action.payload.name && c.id !== action.payload.id),
             };
+
+        case 'GIVE_GEAR_TO_COMPANION': {
+            // Engine-owned mirror of the potion "→ Name" buttons: the player hands a
+            // weapon, armor, or shield to a companion straight from the Inventory
+            // panel, so the gear change never depends on the DM pairing
+            // update_companions with items_lost. Out of combat only; the inner
+            // UPDATE_COMPANION announces the change (D6) and derives all mechanics.
+            if (state.combat?.active) return state;
+            const { itemId, companionId } = action.payload || {};
+            const item = (state.inventory || []).find(i => i.id === itemId);
+            const companion = (state.party || []).find(c => c.id === companionId);
+            if (!item || !companion || companion.status === 'dead' || companion.status === 'downed') return state;
+
+            const isWeapon = item.type === 'weapon';
+            const giftAC = isWeapon ? null : deriveGiftAC(item, companion.ac || 12);
+            if (!isWeapon && giftAC === null) return state;
+
+            let gearPayload;
+            if (isWeapon) {
+                if (String(item.name || '').trim().toLowerCase() === String(companion.weapon || '').trim().toLowerCase()) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`${companion.name} already wields a ${companion.weapon} — the ${item.name} stays with you.`)],
+                    };
+                }
+                gearPayload = { id: companion.id, weapon: item.name };
+            } else {
+                const newAc = Math.min(21, giftAC);
+                if (newAc <= (companion.ac || 12)) {
+                    return {
+                        ...state,
+                        messages: [...state.messages, systemMessage(`${companion.name}'s current protection is at least as good — the ${item.name} stays with you.`)],
+                    };
+                }
+                gearPayload = { id: companion.id, ac: newAc };
+            }
+
+            const updated = gameReducer(state, { type: 'UPDATE_COMPANION', payload: gearPayload });
+            // Exactly one unit leaves the hero's possession; AC recomputes in case
+            // the hero handed over their own equipped protection.
+            const remaining = (item.quantity || 1) > 1
+                ? updated.inventory.map(i => (i.id === item.id ? { ...i, quantity: i.quantity - 1 } : i))
+                : updated.inventory.filter(i => i.id !== item.id);
+            return withInventoryAndAC(updated, remaining);
+        }
 
         // --- Combat ---
         case 'START_COMBAT': {

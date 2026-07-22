@@ -74,8 +74,9 @@ function coversTokens(container, contained, threshold) {
 }
 
 /** Same containment heuristic as the world-fact dedupe: a text whose meaningful
- * tokens are ~all inside an existing one is a restatement, not new material. */
-function isNearDuplicateText(candidate, existingText) {
+ * tokens are ~all inside an existing one is a restatement, not new material.
+ * Exported for capped append-only lists elsewhere (companion keepsakes). */
+export function isNearDuplicateText(candidate, existingText) {
     const tokens = meaningfulTokens(candidate);
     const existing = meaningfulTokens(existingText);
     if (tokens.size === 0) return true;

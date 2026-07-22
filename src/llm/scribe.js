@@ -115,7 +115,18 @@ Payment audit rules:
 - Shortfalls count: when the narrative names an exact price the hero completes paying and EVENTS ALREADY APPLIED shows a SMALLER coin loss for that same payment, report exactly the difference (narrative says six silver paid, events applied silver -4 -> "missing_payment": { "silver": 2 }). Never re-report the part already deducted.
 - Never re-report a payment the narrative merely recalls, confirms, defends, or references from an EARLIER scene — only payments completed for the first time in THIS narrative. "You already paid the six silver" is a recollection, not a new payment.
 - Exact amounts only; never estimate. A wrongly deducted coin is worse than a missed one — certainty is required.
-- When in doubt, omit. Omit "missing_loot" and "missing_payment" entirely when nothing is missing.`;
+- When in doubt, omit. Omit "missing_loot" and "missing_payment" entirely when nothing is missing.
+
+Also report gear the narrative shows the hero handing to a COMPANION that the companion accepts and takes up, when the engine applied no matching companion update, as another top-level field:
+"missing_gear_handoffs": [{ "companion": "exact companion name", "item": "exact item name", "kind": "weapon" }]
+
+Gear handoff rules:
+- Report ONLY handoffs the DM narrative completes: the companion accepts and takes up the item (straps it on, sheathes it, dons it, tucks it away). Offers, refusals, loans for a single moment, and mere suggestions are never handoffs.
+- "kind" is "weapon" for weapons, "armor" or "shield" for protection the companion now wears, "keepsake" for a sentimental item with no combat use.
+- PARTY COMPANIONS' CURRENT GEAR lists what each companion already carries — an item already listed there is NOT a new handoff, and narration merely referencing or admiring their existing gear reports nothing.
+- Anything under EVENTS ALREADY APPLIED (companion gear or keepsake updates, items lost by the hero) is NOT missing.
+- Copy the companion's and the item's names exactly as the narrative writes them.
+- When in doubt, omit — an invented handoff is worse than a missed one. Omit "missing_gear_handoffs" entirely when nothing is missing.`;
 
 /** Compact owned-inventory summary so the audit can tell "using" from "acquiring".
  * Live Grok finding 2026-07-09: "takes out her flint and steel" read as a completed
@@ -146,6 +157,16 @@ function describeAppliedLoot(events) {
     for (const item of events.itemsFound || []) {
         parts.push(`item: ${typeof item === 'string' ? item : item?.name || item?.itemKey || 'unknown'}`);
     }
+    for (const item of events.itemsLost || []) {
+        parts.push(`item lost by hero: ${typeof item === 'string' ? item : item?.name || 'unknown'}`);
+    }
+    for (const update of events.updateCompanions || []) {
+        const gearBits = [];
+        if (update?.weapon) gearBits.push(`weapon ${update.weapon}`);
+        if (update?.ac !== undefined) gearBits.push(`AC ${update.ac}`);
+        if (update?.keepsake) gearBits.push(`keepsake ${update.keepsake}`);
+        if (gearBits.length > 0) parts.push(`companion gear update (${update?.name || update?.id || 'companion'}): ${gearBits.join(', ')}`);
+    }
     for (const purchase of events.purchases || []) parts.push(`purchase: ${purchase?.itemKey || purchase?.name || purchase?.item?.name || 'item'}`);
     for (const sale of events.sells || []) parts.push(`sale: ${sale?.itemKey || sale?.name || 'item'}`);
     for (const item of events.startingItems || []) parts.push(`starting item: ${item?.name || item?.itemKey || 'unknown'}`);
@@ -156,6 +177,91 @@ function coerceLootAmount(value, max = 10000) {
     const num = typeof value === 'number' ? value : parseFloat(value);
     if (!Number.isFinite(num)) return 0;
     return Math.max(0, Math.min(max, Math.trunc(num)));
+}
+
+/** Compact companion-gear summary so the gear-handoff audit can tell "already
+ * carries" from "just received". */
+function describePartyGear(state) {
+    const lines = (state?.party || [])
+        .map(companion => {
+            const name = String(companion?.name || '').trim();
+            if (!name) return null;
+            const bits = [`weapon: ${companion.weapon || 'Unarmed'}`, `AC ${companion.ac ?? '?'}`];
+            const keepsakes = (companion.keepsakes || []).filter(Boolean);
+            if (keepsakes.length > 0) bits.push(`keepsakes: ${keepsakes.join(', ')}`);
+            return `${name} — ${bits.join(', ')}`;
+        })
+        .filter(Boolean)
+        .join('; ');
+    return lines ? lines.slice(0, 600) : null;
+}
+
+const GEAR_HANDOFF_KINDS = new Set(['weapon', 'armor', 'shield', 'keepsake']);
+
+function companionNameMatches(companionName, reportedName) {
+    const known = String(companionName || '').trim().toLowerCase();
+    const reported = String(reportedName || '').trim().toLowerCase();
+    if (!known || !reported) return false;
+    if (known === reported) return true;
+    // First-name reporting ("Kaarina" for "Kaarina Tammi") and vice versa.
+    return known.split(/\s+/)[0] === reported.split(/\s+/)[0];
+}
+
+/**
+ * Scribe gear-handoff audit: narrated companion gear handoffs the DM never
+ * emitted as update_companions/items_lost. Routes tracked items through
+ * GIVE_GEAR_TO_COMPANION (announces + removes from the hero) and keepsakes
+ * through the capped keepsake list. Conservative by design: armor with no
+ * tracked inventory item has no derivable AC and is skipped. Idempotent per
+ * narration via a claimed `:gear` sourceId.
+ */
+function applyMissingGearHandoffs(missing, lootAudit, dispatch) {
+    const entries = (Array.isArray(missing) ? missing : [])
+        .map(entry => {
+            const companion = String(entry?.companion || '').trim().slice(0, 60);
+            const item = String(entry?.item || '').trim().slice(0, 80);
+            const kind = GEAR_HANDOFF_KINDS.has(entry?.kind) ? entry.kind : null;
+            if (!companion || !item || !kind) return null;
+            return { companion, item, kind };
+        })
+        .filter(Boolean)
+        .slice(0, 2);
+    if (entries.length === 0) return;
+
+    const { sourceId, getState } = lootAudit;
+    if (!sourceId) return;
+    const gearSourceId = `${sourceId}:gear`;
+    const state = getState?.();
+    if ((state?.appliedLootSourceIds || []).includes(gearSourceId)) {
+        console.warn(`[Scribe] Gear-handoff audit for ${gearSourceId} already applied; skipping.`);
+        return;
+    }
+    dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: gearSourceId });
+
+    let applied = 0;
+    for (const entry of entries) {
+        const companion = (state?.party || []).find(c => companionNameMatches(c.name, entry.companion));
+        if (!companion || companion.status === 'dead') continue;
+        if (entry.kind === 'keepsake') {
+            dispatch({ type: 'UPDATE_COMPANION', payload: { id: companion.id, keepsake: entry.item } });
+            applied += 1;
+            continue;
+        }
+        const owned = (state?.inventory || []).find(
+            i => String(i?.name || '').trim().toLowerCase() === entry.item.toLowerCase(),
+        );
+        if (owned) {
+            // The reducer announces, derives mechanics, and removes the item.
+            dispatch({ type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: owned.id, companionId: companion.id } });
+            applied += 1;
+        } else if (entry.kind === 'weapon') {
+            // Narrated-only weapon the engine never tracked: stats still follow
+            // the fiction (UPDATE_COMPANION derives dice and announces).
+            dispatch({ type: 'UPDATE_COMPANION', payload: { id: companion.id, weapon: entry.item } });
+            applied += 1;
+        }
+    }
+    if (applied > 0) console.log(`[Scribe] Gear-handoff audit applied ${applied} narrated handoff(s).`);
 }
 
 /**
@@ -332,6 +438,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
     const ownedInventory = (lootAudit && typeof lootAudit.getState === 'function')
         ? describeOwnedInventory(lootAudit.getState())
         : null;
+    const partyGear = (lootAudit && typeof lootAudit.getState === 'function')
+        ? describePartyGear(lootAudit.getState())
+        : null;
 
     try {
         const response = await sendMessage({
@@ -356,6 +465,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     : null,
                 ownedInventory
                     ? `HERO'S CURRENT INVENTORY (already owned — using, drawing, or lighting these is NOT an acquisition): ${ownedInventory}`
+                    : null,
+                partyGear
+                    ? `PARTY COMPANIONS' CURRENT GEAR (already carried — referencing these is NOT a new handoff): ${partyGear}`
                     : null,
             ].filter(Boolean).join('\n\n'),
         });
@@ -435,6 +547,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         if (lootAudit) {
             applyMissingLoot(extracted.missing_loot, lootAudit, dispatch, playerMessage);
             applyMissingPayment(extracted.missing_payment, lootAudit, dispatch, playerMessage);
+            applyMissingGearHandoffs(extracted.missing_gear_handoffs, lootAudit, dispatch);
         }
 
         captureScribePass({
@@ -445,6 +558,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             location: extracted.location || null,
             lootAudited: !!(lootAudit && Array.isArray(extracted.missing_loot) && extracted.missing_loot.length > 0),
             paymentAudited: !!(lootAudit && Array.isArray(extracted.missing_payment) && extracted.missing_payment.length > 0),
+            gearAudited: !!(lootAudit && Array.isArray(extracted.missing_gear_handoffs) && extracted.missing_gear_handoffs.length > 0),
         });
     } catch (e) {
         // Scribe failures must never block the main game loop, but log clearly
