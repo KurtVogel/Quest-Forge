@@ -46,7 +46,25 @@ vi.mock('firebase/firestore', () => {
             commit: async () => { maybeFail('commit'); ops.forEach(op => op()); },
         };
     };
-    return { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, __store: store, __fail };
+    // Buffers writes like the real transaction: nothing lands until the callback
+    // resolves and the commit succeeds. Reuses the batch/getDoc failure keys so
+    // failure-injection tests exercise the same branches as before.
+    const runTransaction = async (_db, fn) => {
+        const ops = [];
+        const transaction = {
+            get: async (ref) => {
+                maybeFail('getDoc');
+                return { exists: () => store.has(ref.path), data: () => store.get(ref.path) };
+            },
+            set: (ref, data) => { maybeFail('setDoc'); ops.push(() => store.set(ref.path, JSON.parse(JSON.stringify(data)))); },
+            delete: (ref) => ops.push(() => store.delete(ref.path)),
+        };
+        const result = await fn(transaction);
+        maybeFail('commit');
+        ops.forEach(op => op());
+        return result;
+    };
+    return { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, runTransaction, __store: store, __fail };
 });
 
 const firestore = await import('firebase/firestore');
@@ -149,6 +167,23 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         const [firstChunk] = chunkPaths();
         firestore.__store.delete(firstChunk);
         expect(await loadGameFromCloud('u1', 'slot-big')).toBeNull();
+    });
+
+    it('a mid-save failure leaves the previous save fully intact (one atomic transaction)', async () => {
+        // The chunk-race P2 (2026-07-09): the old plain-getDoc read meant a save
+        // could interleave with another device's write. Now the read and the whole
+        // write share one transaction — a failed commit must change NOTHING.
+        await saveGameToCloud('u1', 'slot-1', makeHugeGameState());
+        const before = new Map(firestore.__store);
+
+        firestore.__fail.commit = new Error('contention');
+        expect(await saveGameToCloud('u1', 'slot-1', makeGameState())).toBe(false);
+
+        expect(firestore.__store.size).toBe(before.size);
+        for (const [path, data] of before) {
+            expect(firestore.__store.get(path)).toEqual(data);
+        }
+        expect((await loadGameFromCloud('u1', 'slot-1')).messages).toHaveLength(40);
     });
 
     it('maps the reserved __autosave__ slot to a legal doc id', async () => {

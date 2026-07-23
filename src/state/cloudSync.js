@@ -1,4 +1,4 @@
-import { collection, doc, setDoc, getDoc, getDocs, writeBatch } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, runTransaction } from "firebase/firestore";
 import { db } from "../config/firebase.js";
 import { serializeGameState, buildSaveMetadata } from "./persistence.js";
 
@@ -83,30 +83,27 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // The state is stored as a stringified JSON blob (avoids Firestore's nested
         // object limits/index explosion) beside the metadata used by the list view.
         const payload = JSON.stringify(trimmedState);
+        const inline = payload.length <= CHUNK_CHAR_LIMIT;
+        const chunks = inline ? [] : splitPayload(payload);
 
-        // How many chunks does the PREVIOUS save occupy? Stale ones must go in the
-        // same atomic write, or an old chunk could survive and corrupt a later load.
-        const existingSnap = await getDoc(saveDocRef);
-        const previousChunkCount = existingSnap.exists() ? (existingSnap.data().payloadChunks || 0) : 0;
-
-        if (payload.length <= CHUNK_CHAR_LIMIT && previousChunkCount === 0) {
-            // Common case: everything fits in one document.
-            await setDoc(saveDocRef, { ...metadata, payload, payloadChunks: 0 });
-        } else {
-            // Chunked write, or an inline write that must also clear stale chunks
-            // from a previously-chunked save — one atomic batch either way.
-            const inline = payload.length <= CHUNK_CHAR_LIMIT;
-            const chunks = inline ? [] : splitPayload(payload);
-            const batch = writeBatch(db);
-            batch.set(saveDocRef, { ...metadata, payload: inline ? payload : null, payloadChunks: chunks.length });
+        // The previous save's chunk count is read INSIDE the transaction: two
+        // devices saving the same slot near-simultaneously (Vesa's multi-machine
+        // workflow) could otherwise both read a stale payloadChunks and race on
+        // which stale chunks get cleared, orphaning a chunk. Firestore re-runs
+        // the transaction on contention, so the stale-chunk sweep always matches
+        // the state actually being overwritten. (Size-wise a transaction carries
+        // the same ~10 MiB request ceiling the previous writeBatch had.)
+        await runTransaction(db, async (transaction) => {
+            const existingSnap = await transaction.get(saveDocRef);
+            const previousChunkCount = existingSnap.exists() ? (existingSnap.data().payloadChunks || 0) : 0;
+            transaction.set(saveDocRef, { ...metadata, payload: inline ? payload : null, payloadChunks: chunks.length });
             chunks.forEach((data, index) => {
-                batch.set(doc(chunksCollection(uid, slotId), String(index)), { index, data });
+                transaction.set(doc(chunksCollection(uid, slotId), String(index)), { index, data });
             });
             for (let stale = chunks.length; stale < previousChunkCount; stale++) {
-                batch.delete(doc(chunksCollection(uid, slotId), String(stale)));
+                transaction.delete(doc(chunksCollection(uid, slotId), String(stale)));
             }
-            await batch.commit();
-        }
+        });
 
         console.log(`Cloud save successful: ${slotId} (${payload.length} chars${payload.length > CHUNK_CHAR_LIMIT ? ', chunked' : ''})`);
         return true;
@@ -200,15 +197,17 @@ export async function deleteGameFromCloud(uid, slotId) {
 
         // Deleting a Firestore document does NOT delete its subcollections —
         // orphaned chunks would silently linger (and could corrupt a future save
-        // that reuses the slot with a smaller chunk count). Remove them explicitly.
-        const existingSnap = await getDoc(saveDocRef);
-        const chunkCount = existingSnap.exists() ? (existingSnap.data().payloadChunks || 0) : 0;
-        const batch = writeBatch(db);
-        for (let i = 0; i < chunkCount; i++) {
-            batch.delete(doc(chunksCollection(uid, slotId), String(i)));
-        }
-        batch.delete(saveDocRef);
-        await batch.commit();
+        // that reuses the slot with a smaller chunk count). Remove them explicitly,
+        // reading the chunk count inside the transaction so a concurrent save from
+        // another device cannot leave the sweep working from a stale count.
+        await runTransaction(db, async (transaction) => {
+            const existingSnap = await transaction.get(saveDocRef);
+            const chunkCount = existingSnap.exists() ? (existingSnap.data().payloadChunks || 0) : 0;
+            for (let i = 0; i < chunkCount; i++) {
+                transaction.delete(doc(chunksCollection(uid, slotId), String(i)));
+            }
+            transaction.delete(saveDocRef);
+        });
 
         console.log(`Cloud delete successful: ${slotId}`);
         return true;
