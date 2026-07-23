@@ -4,9 +4,35 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-23 (audit-fix session: two crash P1s, three P2s incl. legacy
-roll-repair removal, and a coverage batch that empties the strengthening queue down to
-the parked scene-art items + one cloud-sync P2.)_
+_Last updated: 2026-07-23, later (companion relationship parity shipped + cloud-sync
+chunk-race P2 fixed — the strengthening queue is now empty except the four parked
+scene-art items.)_
+
+## Companion relationship parity + cloud-sync transaction (2026-07-23, later)
+
+Vesa picked the two recommendations; both shipped, committed separately, 1103 tests +
+lint green, deployed.
+
+1. **Companion relationship memory parity** (IDEAS → shipped; DECISIONS.md 2026-07-23):
+   went with "one system owns all bonds" — investigation showed the Scribe was ALREADY
+   building shadow roster records for companions (playtest #11's Terho had a full stance
+   + bond moments on record), so companions now LINK to roster records instead of
+   mirroring fields onto the party store. `ADD_COMPANION` mints the record if missing
+   (never reseeds an existing one), LOAD_GAME heals pre-parity saves, the party prompt
+   block surfaces stance + last 2 bond moments per companion line (curation-independent),
+   the Scribe prompt makes companions first-class `npc_updates` subjects, and the
+   Companions panel shows "Toward you" / "Moments between you". Verified live on the
+   playtest #11 autosave: Terho's card immediately showed his recorded stance and the
+   guard-redirect bond moment, zero console errors, no migration needed.
+2. **Cloud-sync chunk race** (last non-parked queue item, ticked): `saveGameToCloud`'s
+   `previousChunkCount` read moved inside a `runTransaction` with the full write
+   (inline/chunked paths unified), so two devices overwriting one slot can no longer
+   sweep stale chunks from a stale count; `deleteGameFromCloud`'s sweep is transactional
+   too. Mock grew a write-buffering `runTransaction`; atomicity regression test added.
+
+**Open decisions for Vesa (unchanged):** scene-art keep-and-harden vs. rethink (four
+queue items parked on it), and whether playtest #11's L1-death observation warrants a
+balance consult (recommendation stands: wait for more real play).
 
 ## Audit-fix session 2026-07-23: crash P1s, P2 trio, queue-clearing coverage batch
 

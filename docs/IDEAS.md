@@ -20,13 +20,16 @@ injected, RAG-embedded, card-displayed ("Toward you" / "Moments between you"), a
 synthesizable via Deepen memory reading recent conversation. See DECISIONS.md 2026-07-05.
 Follow-up ideas below.
 
-### Companions deserve the same relationship memory as roster NPCs — status: `idea`
-Party members (`party`, `add_companions`) carry only `affinity` (0–100) and notes — thinner
-relationship state than roster NPCs now have. A companion who traveled with you for thirty
-sessions should have a richer "toward you" record than a tavern keeper. Options: mirror
-`stanceToPlayer`/`bondMoments` onto companions (Scribe already sees them in narrative), or
-promote companions into the NPC roster with a `companion` flag so one system owns all bonds.
-Why: the party is the most sustained relationship surface in the game.
+### Companions deserve the same relationship memory as roster NPCs — status: `shipped` (2026-07-23)
+Party members (`party`, `add_companions`) carried only `affinity` (0–100) and notes — thinner
+relationship state than roster NPCs. Shipped the "one system owns all bonds" option (see
+DECISIONS.md 2026-07-23): companions link to roster NPC records — which the Scribe was
+already building for them as unnoticed "shadow" records — rather than mirroring fields onto
+the party store. `ADD_COMPANION`/`LOAD_GAME` guarantee the record exists, the party prompt
+block carries the stance + last bond moments on each companion line, the Scribe prompt makes
+companions first-class `npc_updates` subjects, and the Companions panel shows "Toward you" +
+"Moments between you". Why: the party is the most sustained relationship surface in the game.
+Follow-up idea kept separate: the relationship timeline view (below) now benefits companions too.
 
 ### Relationship timeline view — status: `idea`
 `bondMoments` is capped at 8 for prompt economy, but the full history could be archived (e.g.

@@ -8,6 +8,27 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-23 · Companion relationship memory lives in the NPC roster — one system owns all bonds.**
+The IDEAS entry offered two designs: mirror `stanceToPlayer`/`bondMoments` onto the party
+store, or link companions to roster NPC records. Investigation settled it: nothing ever
+excluded party companions from the roster, so real campaigns ALREADY carry Scribe-built
+"shadow" records for companions with rich stances (verified live — playtest #11's Terho
+had a complete stance and bond moments on record, including his guard redirect). Mirroring
+would have added a THIRD copy of the merge machinery and forked the existing records.
+Ruling: the roster record is the single home for a companion's personal bond; the party
+record keeps mechanics + affinity + keepsakes. `ADD_COMPANION` mints the roster record if
+missing (an existing record is never reseeded — the Scribe keeps it current), LOAD_GAME
+heals pre-parity saves the same way, the party prompt block surfaces the linked stance +
+last bond moments directly on each companion line (so it never depends on KNOWN NPCs
+curation winning), and the Companions panel renders "Toward you" / "Moments between you"
+from the linked record. DM contract: companion stance/bondMoment route through
+`npc_updates` exactly like any NPC; `update_companions` stays mechanics/affinity/keepsake.
+Free wins from the shared system: ex-companions keep their history as ordinary NPCs,
+"Deepen memory" backfills companions, and companion records were already RAG-embedded.
+Known limit (accepted): linkage is by `namesMatch` (exact/leading-title folding) — a
+trailing-epithet fork ("Kaarina the Shieldmaiden" vs "Kaarina") creates a second record,
+same as roster-wide behavior; the Scribe's exact-name rule is the guard.
+
 **2026-07-23 · The legacy combat roll-repair layer is removed, not preserved as dormant code.**
 `repairCombatRollBatch`, `canonicalizeCombatRollBatch`, and the recursive follow-up chain
 with its `MAX_ROLL_DEPTH` guard (~200 lines + 11 tests) were Phase-2 batched-combat
