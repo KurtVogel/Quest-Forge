@@ -281,10 +281,12 @@ export function buildJournalContext(journal, npcs, currentLocation) {
         const npcList = shown.map(n => {
             const disp = n.disposition ? ` (${n.disposition})` : '';
             const notes = n.lastNotes || n.notes || '';
-            // Show the relationship arc so the DM keeps a shifted bond consistent — a
-            // friend who turned on the player should stay turned.
+            // Show the latest relationship shift so the DM keeps a changed bond
+            // consistent — a friend who turned on the player should stay turned.
+            // Only previous → current: the full chain burned tokens/card space
+            // without adding play value (Vesa, 2026-07-23); data keeps every step.
             const arc = Array.isArray(n.relationshipHistory) && n.relationshipHistory.length > 0
-                ? `relationship: ${[...n.relationshipHistory.map(h => h.from), n.disposition].join(' → ')}`
+                ? `relationship: ${n.relationshipHistory[n.relationshipHistory.length - 1].from} → ${n.disposition}`
                 : '';
             const extras = [
                 n.pinned && 'pinned',

@@ -344,17 +344,18 @@ function NPCTab({
                             </div>
                         )}
                         {npc.relationshipHistory?.length > 0 && (
-                            <div className="journal-npc-arc" title="How this relationship has shifted">
+                            // Only the latest shift is shown (previous → current) — the
+                            // full chain took a lot of card space without being
+                            // interesting (Vesa, 2026-07-23). Data keeps every step.
+                            <div className="journal-npc-arc" title="How this relationship last shifted">
                                 <span className="journal-npc-arc-label">Arc:</span>
-                                <span className={`journal-npc-arc-step ${npc.relationshipHistory[0].from}`}>
-                                    {npc.relationshipHistory[0].from}
+                                <span className={`journal-npc-arc-step ${npc.relationshipHistory[npc.relationshipHistory.length - 1].from}`}>
+                                    {npc.relationshipHistory[npc.relationshipHistory.length - 1].from}
                                 </span>
-                                {npc.relationshipHistory.map((h, i) => (
-                                    <span key={i} className="journal-npc-arc-seg">
-                                        <span className="journal-npc-arc-sep">→</span>
-                                        <span className={`journal-npc-arc-step ${h.to}`}>{h.to}</span>
-                                    </span>
-                                ))}
+                                <span className="journal-npc-arc-seg">
+                                    <span className="journal-npc-arc-sep">→</span>
+                                    <span className={`journal-npc-arc-step ${npc.disposition}`}>{npc.disposition}</span>
+                                </span>
                             </div>
                         )}
                         <div className="journal-npc-footer">

@@ -158,6 +158,26 @@ describe('KNOWN NPCs extras rendering (queue 2026-07-18)', () => {
         expect(context).not.toContain('a third hook that must not render'); // capped at 2
     });
 
+    it('renders only the latest relationship shift, not the whole chain (Vesa, 2026-07-23)', () => {
+        const npcs = [{
+            name: 'Valto',
+            disposition: 'friendly',
+            lastNotes: 'Won over at the pickets.',
+            rosterTier: 'character',
+            relationshipHistory: [
+                { from: 'neutral', at: 1 },
+                { from: 'wary', at: 2 },
+                { from: 'hostile', at: 3 },
+            ],
+            lastSeen: 1000,
+        }];
+        const context = buildJournalContext([], npcs, 'Varga Pass');
+
+        expect(context).toContain('relationship: hostile → friendly');
+        expect(context).not.toContain('neutral → wary → hostile');
+        expect(context).not.toContain('wary → hostile → friendly');
+    });
+
     it('filters non-character roster tiers and caps the list at 8 with an overflow line', () => {
         const npcs = [
             ...Array.from({ length: 10 }, (_, i) => ({
