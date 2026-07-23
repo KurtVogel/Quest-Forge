@@ -16,146 +16,15 @@
 import { rollWithModifier, parseNotation, rollDice } from './dice.ts';
 import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getEquippedWeapon, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES, getSneakAttackDice } from './rules.js';
 
-/** Maximum depth for recursive follow-up roll handling. */
-const MAX_ROLL_DEPTH = 3;
-
 const ABILITY_NAMES = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
-const NON_PLAYER_ROLL_TYPES = new Set(['npc_attack', 'npc_save', 'companion_attack']);
-// Recognize a player's attack intent from prose. This is a SAFETY NET for when the DM
-// returns an enemy-only batch despite engine-owned enemy turns — it must be broad, because
-// a missed verb silently costs the player their declared attack. Stems cover tense/plural.
-const ATTACK_INTENT_RE = /\b(attack|strik|hits?|slash|stab|shoot|shot|fires?|swing|smash|punch|kick|cuts?|hack|chop|cleav|hew|thrust|lunge|jab|bash|slam|drives?|plunge|skewer|carve|guts?|impal|charge|throws?|threw|loose|clubs?|whack|pummel|maul|gores?|bites?|claw|hammer|pierc|sever|behead|decapitat|lash|whips?|headbutt|tackl|smite|sweeps?|run through|bring .{0,20}(?:down|around|to bear))\b/i;
 
-
-/**
- * Repair the dangerous LLM failure mode where a player declares an attack but the
- * returned combat batch contains only enemy/companion rolls. The engine can safely
- * infer the target when exactly one living enemy remains, or when the player named
- * one of several living enemies. Ambiguous batches are blocked rather than inventing
- * player intent or granting enemies a free exchange.
- */
-export function repairCombatRollBatch(requestedRolls, { combat, character, playerAction } = {}) {
-    const rolls = Array.isArray(requestedRolls) ? requestedRolls : [];
-    const currentFighter = combat?.turnOrder?.[combat.currentTurn];
-    const isPlayerTurn = combat?.active && currentFighter?.type === 'player';
-    const hasNonPlayerCombatRoll = rolls.some(roll => NON_PLAYER_ROLL_TYPES.has(roll.type));
-    const isPlayerAttack = roll => roll?.type === 'attack_roll'
-        || String(roll?.skill || '').toLowerCase() === 'attack';
-    const playerAttacks = rolls.filter(isPlayerAttack);
-    const expectedAttackCount = character?.pendingActionSurge ? 2 : 1;
-
-    if (!isPlayerTurn || !hasNonPlayerCombatRoll || !ATTACK_INTENT_RE.test(playerAction || '')) {
-        return { rolls, repaired: false, blocked: false };
-    }
-
-    const livingEnemies = (combat.enemies || []).filter(enemy =>
-        (enemy.hp ?? 0) > 0 && enemy.condition !== 'dead'
-    );
-    const actionText = String(playerAction || '').toLowerCase();
-    const namedTargets = livingEnemies.filter(enemy =>
-        enemy.name && actionText.includes(enemy.name.toLowerCase())
-    );
-    const inferredTarget = namedTargets.length === 1
-        ? namedTargets[0]
-        : livingEnemies.length === 1
-            ? livingEnemies[0]
-            : null;
-    const findTarget = ref => {
-        if (!ref) return null;
-        const normalized = String(ref).toLowerCase();
-        return livingEnemies.find(enemy =>
-            enemy.id === ref || enemy.name?.toLowerCase() === normalized
-        ) || null;
-    };
-    const existingTarget = playerAttacks.map(roll => findTarget(roll.target)).find(Boolean);
-    const target = existingTarget || inferredTarget;
-    const needsRepair = playerAttacks.length < expectedAttackCount
-        || playerAttacks.some(roll => !roll.skill || !findTarget(roll.target));
-
-    if (!needsRepair) return { rolls, repaired: false, blocked: false };
-    if (!target) return { rolls: [], repaired: false, blocked: true };
-
-    const playerName = character?.name || 'Player';
-    const normalizedPlayerAttacks = playerAttacks.map(roll => ({
-        ...roll,
-        type: 'attack_roll',
-        skill: 'attack',
-        target: findTarget(roll.target)?.id || target.id,
-        dc: findTarget(roll.target)?.ac || target.ac,
-        description: roll.description || `${playerName} attacks ${target.name}`,
-    }));
-    const missingAttackCount = Math.max(0, expectedAttackCount - playerAttacks.length);
-    const restoredAttacks = Array.from({ length: missingAttackCount }, (_, index) => ({
-        type: 'attack_roll',
-        skill: 'attack',
-        target: target.id,
-        dc: target.ac,
-        description: expectedAttackCount > 1
-            ? `${playerName} attacks ${target.name} (Action ${playerAttacks.length + index + 1})`
-            : `${playerName} attacks ${target.name}`,
-    }));
-
-    const remainingRolls = rolls.filter(roll => !isPlayerAttack(roll));
-    return {
-        rolls: [...normalizedPlayerAttacks, ...restoredAttacks, ...remainingRolls],
-        repaired: true,
-        blocked: false,
-    };
-}
-
-/**
- * Put a player-turn exchange into engine order and allow each enemy at most one
- * attack across the entire recursive roll chain, regardless of how many player
- * actions or follow-up roll requests occur.
- */
-export function canonicalizeCombatRollBatch(requestedRolls, combat, enemyAttackersSeen = new Set()) {
-    const rolls = Array.isArray(requestedRolls) ? requestedRolls : [];
-    const currentFighter = combat?.turnOrder?.[combat.currentTurn];
-    if (!combat?.active || currentFighter?.type !== 'player') {
-        return { rolls, droppedEnemyAttacks: 0, enemyAttackersSeen: new Set(enemyAttackersSeen) };
-    }
-
-    const seen = new Set(enemyAttackersSeen);
-    const enemies = combat.enemies || [];
-    const enemyKey = (roll) => {
-        const ref = roll.attackerId || roll.attacker;
-        const normalized = String(ref || 'unknown').toLowerCase();
-        const tracked = enemies.find(enemy =>
-            enemy.id === ref || enemy.name?.toLowerCase() === normalized
-        );
-        return tracked ? `enemy:${tracked.id}` : `actor:${normalized}`;
-    };
-
-    const playerRolls = [];
-    const companionRolls = [];
-    const npcSaves = [];
-    const enemyAttacks = [];
-    let droppedEnemyAttacks = 0;
-
-    for (const roll of rolls) {
-        if (roll.type === 'npc_attack') {
-            const key = enemyKey(roll);
-            if (seen.has(key)) {
-                droppedEnemyAttacks += 1;
-                continue;
-            }
-            seen.add(key);
-            enemyAttacks.push(roll);
-        } else if (roll.type === 'companion_attack') {
-            companionRolls.push(roll);
-        } else if (roll.type === 'npc_save') {
-            npcSaves.push(roll);
-        } else {
-            playerRolls.push(roll);
-        }
-    }
-
-    return {
-        rolls: [...playerRolls, ...companionRolls, ...npcSaves, ...enemyAttacks],
-        droppedEnemyAttacks,
-        enemyAttackersSeen: seen,
-    };
-}
+// The Phase-2 batched-combat repair layer (repairCombatRollBatch /
+// canonicalizeCombatRollBatch) and the recursive follow-up chain with its
+// MAX_ROLL_DEPTH guard were removed 2026-07-23 (DECISIONS.md): active-combat
+// requested_rolls are rejected outright (the exchange machine owns combat), so
+// the repair plumbing was production-unreachable, and the sole caller stages
+// follow-up rolls as new proposals instead of recursing. See git history for
+// the legacy implementation.
 
 /**
  * Resolve a batch of requested rolls.
@@ -422,18 +291,19 @@ function formatPendingLootNote(pendingLoot) {
         }),
     ].filter(Boolean);
     if (parts.length === 0) return '';
-    return ` (6) Your withheld setup declared potential loot (${parts.join(', ')}) which was NOT applied. If this outcome genuinely awards any of it, narrate the acquisition and emit the matching items_found/X_found events in THIS response. If the dice deny it, neither narrate nor emit those gains.`;
+    return ` (7) Your withheld setup declared potential loot (${parts.join(', ')}) which was NOT applied. If this outcome genuinely awards any of it, narrate the acquisition and emit the matching items_found/X_found events in THIS response. If the dice deny it, neither narrate nor emit those gains.`;
 }
 
 /**
- * Handle the full roll → follow-up → recursive roll cycle with depth limiting.
- * @param {Array} requestedRolls - Initial roll requests
+ * Resolve one out-of-combat roll batch and trigger the outcome narration.
+ * Follow-up roll requests in the outcome are handed to `onFollowUpRolls`
+ * (re-staged as a fresh proposal by the caller), never resolved recursively.
+ * @param {Array} requestedRolls - Roll requests to resolve
  * @param {object} options - Configuration
  * @param {function} options.getState - Returns current game state
  * @param {function} options.dispatch - Game state dispatch
  * @param {function} options.sendToLLM - Function to send follow-up to LLM
- * @param {number} [depth=0] - Current recursion depth (internal)
- * @returns {Promise<void>}
+ * @returns {Promise<{resolved: boolean, requiresCombatExchange?: boolean}>}
  */
 export async function handleRequestedRolls(requestedRolls, {
     getState,
@@ -441,87 +311,22 @@ export async function handleRequestedRolls(requestedRolls, {
     sendToLLM,
     preNarrated = false,
     playerAction = '',
-    enemyAttackersSeen = new Set(),
     onFollowUpRolls = null,
     pendingLoot = null,
     setupNarrative = '',
-}, depth = 0) {
-    if (depth >= MAX_ROLL_DEPTH) {
-        console.warn(`[RollResolver] Max roll depth (${MAX_ROLL_DEPTH}) reached — stopping recursive follow-ups.`);
-        dispatch({
-            type: 'ADD_MESSAGE',
-            payload: {
-                role: 'system',
-                content: `Roll chain limit reached (${MAX_ROLL_DEPTH} levels). The DM will continue from here on your next message.`,
-            },
-        });
-        return { resolved: false };
-    }
-
+}) {
     const state = getState();
     const character = state.character;
     const inventory = state.inventory || [];
-    if (depth === 0 && state.combat?.active) {
+    if (state.combat?.active) {
         console.warn('[RollResolver] Rejected legacy requested_rolls during active combat; combat_exchange is required.');
         return { resolved: false, requiresCombatExchange: true };
     }
-    const repairedBatch = depth === 0
-        ? repairCombatRollBatch(requestedRolls, {
-            combat: state.combat,
-            character,
-            playerAction,
-        })
-        : { rolls: requestedRolls, repaired: false, blocked: false };
 
-    if (repairedBatch.blocked) {
-        dispatch({
-            type: 'ADD_MESSAGE',
-            payload: {
-                role: 'system',
-                content: '**Combat safeguard:** The DM omitted your declared attack and the engine could not safely infer its target. Enemy actions were not rolled; name your target and try again.',
-            },
-        });
-        return { resolved: false };
-    }
+    const rolls = Array.isArray(requestedRolls) ? requestedRolls : [];
+    console.log(`[RollResolver] Processing ${rolls.length} roll(s)`);
 
-    if (repairedBatch.repaired) {
-        dispatch({
-            type: 'ADD_MESSAGE',
-            payload: {
-                role: 'system',
-                content: '**Combat safeguard:** The DM omitted or malformed your declared attack, so the engine repaired it before resolving enemy actions.',
-            },
-        });
-    }
-
-    const canonicalBatch = canonicalizeCombatRollBatch(
-        repairedBatch.rolls,
-        state.combat,
-        enemyAttackersSeen
-    );
-
-    if (canonicalBatch.droppedEnemyAttacks > 0) {
-        dispatch({
-            type: 'ADD_MESSAGE',
-            payload: {
-                role: 'system',
-                content: `**Combat safeguard:** Removed ${canonicalBatch.droppedEnemyAttacks} duplicate enemy attack${canonicalBatch.droppedEnemyAttacks === 1 ? '' : 's'}. Each enemy can attack at most once in a combat exchange.`,
-            },
-        });
-    }
-
-    if (canonicalBatch.rolls.length === 0 && canonicalBatch.droppedEnemyAttacks > 0) {
-        await sendToLLM(
-            '[SYSTEM: Combat correction — the enemy attack you just requested was removed because that enemy already acted in this exchange. Narrate the completed exchange now from the existing roll results. Do not request more rolls and do not apply HP again.]',
-            undefined,
-            { suppressHpEvents: true }
-        );
-        return { resolved: true };
-    }
-
-    console.log(`[RollResolver] Processing ${canonicalBatch.rolls.length} roll(s) at depth ${depth}`);
-
-    const { results: rollResults, appliedHp } = resolveRolls(canonicalBatch.rolls, {
+    const { results: rollResults, appliedHp } = resolveRolls(rolls, {
         character,
         inventory,
         combat: state.combat,
@@ -540,7 +345,7 @@ export async function handleRequestedRolls(requestedRolls, {
         });
 
         // Auto-trigger follow-up: DM narrates the outcome
-        console.log(`[RollResolver] 🔄 Auto-triggering follow-up LLM call (depth ${depth}) with roll results`);
+        console.log('[RollResolver] 🔄 Auto-triggering follow-up LLM call with roll results');
 
         try {
             const correctionNote = preNarrated
@@ -587,19 +392,9 @@ export async function handleRequestedRolls(requestedRolls, {
                         setupMessageId: followUpEvents._setupHidden ? followUpEvents._setupMessageId : null,
                     });
                 } else {
-                    await handleRequestedRolls(
-                        followUpEvents.requestedRolls,
-                        {
-                            getState,
-                            dispatch,
-                            sendToLLM,
-                            preNarrated: followUpEvents._preNarratedOutcome || false,
-                            enemyAttackersSeen: canonicalBatch.enemyAttackersSeen,
-                            pendingLoot,
-                            setupNarrative: followUpSetup,
-                        },
-                        depth + 1
-                    );
+                    // Follow-up rolls always re-stage as a fresh proposal via the
+                    // caller's handler; there is no recursive resolution path anymore.
+                    console.warn('[RollResolver] Follow-up rolls dropped — no onFollowUpRolls handler was provided.');
                 }
             }
         } catch (e) {

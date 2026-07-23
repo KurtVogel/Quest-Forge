@@ -196,6 +196,15 @@ function describePartyGear(state) {
     return lines ? lines.slice(0, 600) : null;
 }
 
+/** Filler strings a model emits for "location unchanged" — never canonical places. */
+const JUNK_LOCATION_RE = /^(null|none|undefined|unknown|unchanged|same|same place|no change|current location|n\/a|-+)\.?$/i;
+
+/** True when an audit field arrived with actual content (they are object-shaped). */
+function hasAuditPayload(value) {
+    if (!value || typeof value !== 'object') return false;
+    return Array.isArray(value) ? value.length > 0 : Object.keys(value).length > 0;
+}
+
 const GEAR_HANDOFF_KINDS = new Set(['weapon', 'armor', 'shield', 'keepsake']);
 
 function companionNameMatches(companionName, reportedName) {
@@ -529,8 +538,12 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             dispatch({ type: 'UPDATE_CHARACTER', payload: { appearance: extracted.player_appearance.trim().slice(0, 600) } });
         }
 
-        if (extracted.location) {
-            dispatch({ type: 'SET_LOCATION', payload: extracted.location });
+        // A model answering "where are we now?" with filler must not mint a canonical
+        // place — "null"/"unchanged" as the current location was a real 2026-07-23 find.
+        const extractedLocation = typeof extracted.location === 'string' ? extracted.location.trim() : '';
+        const location = extractedLocation && !JUNK_LOCATION_RE.test(extractedLocation) ? extractedLocation : null;
+        if (location) {
+            dispatch({ type: 'SET_LOCATION', payload: location });
         }
 
         const locationProfile = extracted.location_profile;
@@ -555,9 +568,11 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             npcsUpdated: rosteredNames,
             cards: storyMemory,
             playerAppearance: typeof extracted.player_appearance === 'string' && !!extracted.player_appearance.trim(),
-            location: extracted.location || null,
-            lootAudited: !!(lootAudit && Array.isArray(extracted.missing_loot) && extracted.missing_loot.length > 0),
-            paymentAudited: !!(lootAudit && Array.isArray(extracted.missing_payment) && extracted.missing_payment.length > 0),
+            location,
+            // missing_loot/missing_payment are OBJECTS, not arrays — Array.isArray
+            // kept both inspector flags permanently false (2026-07-23 audit).
+            lootAudited: !!(lootAudit && hasAuditPayload(extracted.missing_loot)),
+            paymentAudited: !!(lootAudit && hasAuditPayload(extracted.missing_payment)),
             gearAudited: !!(lootAudit && Array.isArray(extracted.missing_gear_handoffs) && extracted.missing_gear_handoffs.length > 0),
         });
     } catch (e) {

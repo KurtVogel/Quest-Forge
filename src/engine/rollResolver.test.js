@@ -4,7 +4,7 @@
  * The dice module is mocked with a queue so outcomes are scripted, not random.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { canonicalizeCombatRollBatch, handleRequestedRolls, repairCombatRollBatch, resolveRolls, formatRollSummary } from './rollResolver.js';
+import { handleRequestedRolls, resolveRolls, formatRollSummary } from './rollResolver.js';
 
 const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
 
@@ -87,74 +87,23 @@ const messagesFrom = (dispatch) => dispatch.mock.calls
 
 beforeEach(() => { rollQueue.length = 0; });
 
-describe('combat roll-batch safeguard', () => {
+describe('active-combat legacy-batch rejection (repair layer removed 2026-07-23)', () => {
     const combat = {
         active: true,
         currentTurn: 0,
         turnOrder: [{ id: 'player', type: 'player', name: 'Testo', initiative: 18 }],
         enemies: [
             { id: 'chief', name: 'Chief Kraul', hp: 23, maxHp: 28, ac: 14, condition: 'healthy' },
-            { id: 'runt', name: 'Goblin Runt', hp: 0, maxHp: 8, ac: 12, condition: 'dead' },
         ],
     };
 
-    it('restores a declared player attack before an enemy-only batch', () => {
-        const enemyRoll = { type: 'npc_attack', attackerId: 'chief', target: 'player', modifier: 4, damage: '1d8+2' };
-        const result = repairCombatRollBatch([enemyRoll], {
-            combat,
-            character: makeCharacter(),
-            playerAction: 'I attack it',
-        });
-
-        expect(result).toMatchObject({ repaired: true, blocked: false });
-        expect(result.rolls).toEqual([
-            expect.objectContaining({ type: 'attack_roll', skill: 'attack', target: 'chief', dc: 14 }),
-            enemyRoll,
-        ]);
-    });
-
-    it('restores both Attack actions when Action Surge is already active', () => {
-        const result = repairCombatRollBatch(
-            [{ type: 'npc_attack', attackerId: 'chief', target: 'player' }],
-            {
-                combat,
-                character: makeCharacter({ pendingActionSurge: true }),
-                playerAction: 'I attack again and use action surge',
-            }
-        );
-
-        expect(result.rolls.filter(roll => roll.type === 'attack_roll')).toHaveLength(2);
-        expect(result.rolls.slice(0, 2).every(roll => roll.target === 'chief')).toBe(true);
-    });
-
-    it('repairs an attack_roll missing skill and target instead of silently dropping it', () => {
-        const malformedAttack = { type: 'attack_roll', skill: null, target: null, description: 'Sword strike' };
-        const enemyRoll = { type: 'npc_attack', attackerId: 'chief', target: 'player', damage: '1d8+2' };
-        const result = repairCombatRollBatch([malformedAttack, enemyRoll], {
-            combat,
-            character: makeCharacter(),
-            playerAction: 'I attack the ghoul again',
-        });
-
-        expect(result).toMatchObject({ repaired: true, blocked: false });
-        expect(result.rolls).toHaveLength(2);
-        expect(result.rolls[0]).toMatchObject({
-            type: 'attack_roll',
-            skill: 'attack',
-            target: 'chief',
-            dc: 14,
-            description: 'Sword strike',
-        });
-    });
-
-    it('never runs repaired legacy batches during active combat', async () => {
-        rollQueue.push(12, 12);
+    it('rejects any legacy batch during active combat without rolling or dispatching', async () => {
         const dispatch = vi.fn();
         const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [] });
 
         const outcome = await handleRequestedRolls(
             [
-                { type: 'attack_roll', skill: null, target: null, description: 'Vesa sword strike' },
+                { type: 'attack_roll', skill: null, target: null, description: 'Sword strike' },
                 { type: 'npc_attack', attackerId: 'chief', attacker: 'Chief Kraul', target: 'player' },
             ],
             {
@@ -166,143 +115,6 @@ describe('combat roll-batch safeguard', () => {
         );
 
         expect(outcome).toEqual({ resolved: false, requiresCombatExchange: true });
-        expect(dispatch).not.toHaveBeenCalled();
-        expect(sendToLLM).not.toHaveBeenCalled();
-    });
-
-    it('does not treat a damage roll as the player attack that must precede an enemy', () => {
-        const damageOnly = { type: 'damage_roll', notation: '1d8+3', description: 'Sword damage' };
-        const enemyRoll = { type: 'npc_attack', attackerId: 'chief', target: 'player', damage: '1d8+2' };
-        const result = repairCombatRollBatch([damageOnly, enemyRoll], {
-            combat,
-            character: makeCharacter(),
-            playerAction: 'I attack again',
-        });
-
-        expect(result.repaired).toBe(true);
-        expect(result.rolls.filter(roll => roll.type === 'attack_roll')).toEqual([
-            expect.objectContaining({ skill: 'attack', target: 'chief', dc: 14 }),
-        ]);
-    });
-
-    it('restores a missing second Action Surge attack when only one was requested', () => {
-        const firstAttack = { type: 'attack_roll', skill: 'attack', target: 'chief', dc: 14 };
-        const enemyRoll = { type: 'npc_attack', attackerId: 'chief', target: 'player' };
-        const result = repairCombatRollBatch([firstAttack, enemyRoll], {
-            combat,
-            character: makeCharacter({ pendingActionSurge: true }),
-            playerAction: 'I attack with action surge',
-        });
-
-        expect(result.repaired).toBe(true);
-        expect(result.rolls.filter(roll => roll.type === 'attack_roll')).toHaveLength(2);
-    });
-
-    it('does not invent a target when multiple living enemies remain unnamed', () => {
-        const ambiguousCombat = {
-            ...combat,
-            enemies: [
-                ...combat.enemies,
-                { id: 'archer', name: 'Goblin Archer', hp: 7, maxHp: 7, ac: 13, condition: 'healthy' },
-            ],
-        };
-        const enemyRolls = [{ type: 'npc_attack', attackerId: 'chief', target: 'player' }];
-        const result = repairCombatRollBatch(enemyRolls, {
-            combat: ambiguousCombat,
-            character: makeCharacter(),
-            playerAction: 'I attack it',
-        });
-
-        expect(result).toEqual({ rolls: [], repaired: false, blocked: true });
-    });
-
-    it.each(['I cut at the chief', 'I hew the chief', 'I thrust at the chief', 'I chop the chief down', 'I lunge at the chief'])(
-        'recognizes the attack verb in %p and restores the omitted player attack',
-        (playerAction) => {
-            const enemyRoll = { type: 'npc_attack', attackerId: 'chief', target: 'player', modifier: 4, damage: '1d8+2' };
-            const result = repairCombatRollBatch([enemyRoll], { combat, character: makeCharacter(), playerAction });
-            expect(result.repaired).toBe(true);
-            expect(result.rolls[0]).toMatchObject({ type: 'attack_roll', skill: 'attack', target: 'chief' });
-        }
-    );
-
-    it('leaves a complete batch unchanged', () => {
-        const complete = [
-            { type: 'attack_roll', skill: 'attack', target: 'chief' },
-            { type: 'npc_attack', attackerId: 'chief', target: 'player' },
-        ];
-        expect(repairCombatRollBatch(complete, {
-            combat,
-            character: makeCharacter(),
-            playerAction: 'I attack it',
-        })).toEqual({ rolls: complete, repaired: false, blocked: false });
-    });
-
-    it('puts Action Surge attacks first and allows Kraul only one attack in the exchange', () => {
-        const firstEnemyAttack = { type: 'npc_attack', attacker: 'Chief Kraul', target: 'player' };
-        const firstPlayerAttack = { type: 'attack_roll', skill: 'attack', target: 'chief', description: 'First strike' };
-        const secondPlayerAttack = { type: 'attack_roll', skill: 'attack', target: 'chief', description: 'Action Surge strike' };
-        const duplicateEnemyAttack = { type: 'npc_attack', attackerId: 'chief', target: 'player', description: 'Counterattack' };
-
-        const result = canonicalizeCombatRollBatch([
-            firstEnemyAttack,
-            firstPlayerAttack,
-            secondPlayerAttack,
-            duplicateEnemyAttack,
-        ], combat);
-
-        expect(result.rolls).toEqual([firstPlayerAttack, secondPlayerAttack, firstEnemyAttack]);
-        expect(result.droppedEnemyAttacks).toBe(1);
-
-        const chainedDuplicate = canonicalizeCombatRollBatch(
-            [duplicateEnemyAttack],
-            combat,
-            result.enemyAttackersSeen
-        );
-        expect(chainedDuplicate.rolls).toEqual([]);
-        expect(chainedDuplicate.droppedEnemyAttacks).toBe(1);
-    });
-
-    it('does not advance or roll enemies when the missing target is ambiguous', async () => {
-        const dispatch = vi.fn();
-        const ambiguousCombat = {
-            ...combat,
-            enemies: [
-                ...combat.enemies,
-                { id: 'archer', name: 'Goblin Archer', hp: 7, maxHp: 7, ac: 13, condition: 'healthy' },
-            ],
-        };
-        const sendToLLM = vi.fn();
-
-        const outcome = await handleRequestedRolls(
-            [{ type: 'npc_attack', attackerId: 'chief', target: 'player' }],
-            {
-                getState: () => ({ character: makeCharacter(), inventory: [], combat: ambiguousCombat, party: [] }),
-                dispatch,
-                sendToLLM,
-                playerAction: 'I attack it',
-            }
-        );
-
-        expect(outcome).toEqual({ resolved: false, requiresCombatExchange: true });
-        expect(sendToLLM).not.toHaveBeenCalled();
-        expect(dispatch).not.toHaveBeenCalled();
-    });
-
-    it('does not process a chained legacy enemy attack in active combat', async () => {
-        const dispatch = vi.fn();
-        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [] });
-
-        await handleRequestedRolls(
-            [{ type: 'npc_attack', attackerId: 'chief', target: 'player' }],
-            {
-                getState: () => ({ character: makeCharacter(), inventory: [], combat, party: [] }),
-                dispatch,
-                sendToLLM,
-                enemyAttackersSeen: new Set(['enemy:chief']),
-            }
-        );
-
         expect(dispatch).not.toHaveBeenCalled();
         expect(sendToLLM).not.toHaveBeenCalled();
     });

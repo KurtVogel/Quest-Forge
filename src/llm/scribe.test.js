@@ -755,3 +755,59 @@ describe('Scribe gear-handoff audit', () => {
         expect(dispatch.mock.calls.some(([action]) => ['GIVE_GEAR_TO_COMPANION', 'UPDATE_COMPANION', 'CLAIM_LOOT_SOURCE'].includes(action.type))).toBe(false);
     });
 });
+
+describe('Scribe location + inspector-flag hygiene (2026-07-23 audit)', () => {
+    beforeEach(() => {
+        sendMessage.mockReset();
+    });
+
+    function extraction(extra = {}) {
+        return JSON.stringify({ world_facts: [], npc_updates: [], story_memory: [], location: null, ...extra });
+    }
+
+    it('drops junk location strings instead of minting canonical places', async () => {
+        for (const junk of ['null', 'Unchanged', 'unknown', 'N/A', 'same place']) {
+            sendMessage.mockResolvedValue(extraction({ location: junk }));
+            const dispatch = vi.fn();
+            await runScribe({
+                playerMessage: 'Where are we?',
+                dmNarrative: 'You are where you were.',
+                settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+                dispatch,
+            });
+            expect(dispatch.mock.calls.some(([action]) => action.type === 'SET_LOCATION')).toBe(false);
+        }
+    });
+
+    it('still records a genuine location', async () => {
+        sendMessage.mockResolvedValue(extraction({ location: 'The Gilded Eel taproom' }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'We enter the tavern.',
+            dmNarrative: 'The Gilded Eel is warm and loud.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+        });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'SET_LOCATION', payload: 'The Gilded Eel taproom' });
+    });
+
+    it('reports object-shaped loot/payment audits to the inspector', async () => {
+        const { getInspectorSnapshot } = await import('../dev/memoryInspectorStore.js');
+        sendMessage.mockResolvedValue(extraction({
+            missing_loot: { gold: 3, items: [] },
+            missing_payment: { silver: 6 },
+        }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I pocket the coins and pay the toll.',
+            dmNarrative: 'You take three gold and hand over six silver.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+            lootAudit: { sourceId: 'msg-77:scribe-loot', appliedEvents: null, getState: () => ({ appliedLootSourceIds: [], inventory: [], party: [] }) },
+        });
+        const pass = getInspectorSnapshot().lastScribePass;
+        expect(pass.lootAudited).toBe(true);
+        expect(pass.paymentAudited).toBe(true);
+        expect(pass.gearAudited).toBe(false);
+    });
+});

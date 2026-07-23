@@ -64,7 +64,7 @@ export function captureInjection({ playerMessage, location, retrieved = [], cura
 }
 
 /** Summary of the Scribe's last completed per-turn extraction pass. */
-export function captureScribePass({ facts = [], npcsUpdated = [], cards = [], playerAppearance = false, location = null, lootAudited = false, paymentAudited = false } = {}) {
+export function captureScribePass({ facts = [], npcsUpdated = [], cards = [], playerAppearance = false, location = null, lootAudited = false, paymentAudited = false, gearAudited = false } = {}) {
     publish({
         lastScribePass: {
             at: Date.now(),
@@ -75,6 +75,7 @@ export function captureScribePass({ facts = [], npcsUpdated = [], cards = [], pl
             location: clip(location, 120) || null,
             lootAudited: !!lootAudited,
             paymentAudited: !!paymentAudited,
+            gearAudited: !!gearAudited,
         },
     });
 }
