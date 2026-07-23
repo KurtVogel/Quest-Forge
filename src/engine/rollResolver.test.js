@@ -691,3 +691,20 @@ describe('enemy attacks a companion (inline damage, queue 2026-07-08)', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'TAKE_DAMAGE', payload: 5 });
     });
 });
+
+describe('standalone damage_roll malformed-notation catch (queue 2026-07-08)', () => {
+    it('drops an unparseable damage roll without crashing the rest of the batch', () => {
+        rollQueue.push(14); // the healthy skill check that must still resolve
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const { results } = runWithContext([
+            { type: 'damage_roll', notation: 'banana d6', description: 'Nonsense damage' },
+            { type: 'skill_check', skill: 'perception', dc: 10 },
+        ]);
+
+        expect(results.some(r => r.type === 'damage_roll')).toBe(false); // dropped, not crashed
+        expect(results.some(r => r.type === 'skill_check' || r.skill === 'perception')).toBe(true);
+        expect(errorSpy).toHaveBeenCalledWith('[RollResolver] Error parsing damage roll notation:', expect.anything());
+        errorSpy.mockRestore();
+    });
+});

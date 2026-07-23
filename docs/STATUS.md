@@ -4,9 +4,44 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-22 (overnight autonomous session: 5-item strengthening batch,
-companion-gear follow-up trio, missing-events nudge, rogue playtest #11 with a live-found
-coin-guard fix.)_
+_Last updated: 2026-07-23 (audit-fix session: two crash P1s, three P2s incl. legacy
+roll-repair removal, and a coverage batch that empties the strengthening queue down to
+the parked scene-art items + one cloud-sync P2.)_
+
+## Audit-fix session 2026-07-23: crash P1s, P2 trio, queue-clearing coverage batch
+
+The morning's scheduled audit (scribe + roll-resolution, hostile-input lap) delivered
+two real crash bugs; Vesa green-lit fixing everything in order. Four commits, 1096 tests
++ lint green, deployed.
+
+1. **World-fact poison pill (P1)** — a non-string `fact`/`category` from the Scribe
+   passed the truthiness-only guard, persisted into the save, and crashed
+   `buildSystemPrompt` on every later turn. Both world-fact actions now build records
+   through an explicit typed/clamped whitelist (never spreading the payload), the prompt
+   sites keep a String() belt, and `validateSaveState` heals already-poisoned saves —
+   LOAD_GAME's raw worldFacts override was quietly bypassing the validator and now
+   flows through it.
+2. **Mid-batch roll crash (P1)** — a truthy non-string `skill` threw deep in
+   rollResolver AFTER dice were shown, eating the HP flush and outcome narration.
+   `skill`/`ability` are now coerced trimmed-string-or-null at the parser boundary.
+3. **P2 trio** — the dev inspector's loot/payment-audit flags were permanently false
+   (Array.isArray on object-shaped fields; the store also silently dropped the
+   gearAudited flag); a junk-location drop-list stops "null"/"unchanged" from becoming
+   canonical places; and the dormant Phase-2 combat roll-repair layer was REMOVED
+   (~200 lines + 11 tests — production-unreachable, and its recursion would have
+   bypassed the active-combat rejection if revived; DECISIONS.md 2026-07-23).
+4. **Coverage batch (25 tests)** — runScribe/reflection guard paths, the journal's
+   npcs_encountered upsert loop, enemy-attacks-companion inline damage with the
+   UPDATE_COMPANION flush, buildCombatBlock's per-combatant rendering + Action Surge
+   contract lines, frontDirector/frontUpgrade malformed-response safety rails, the
+   resolveDamageRoll malformed-notation catch, and ADD_QUEST's finished-quests-stay-
+   closed ruling (documented + pinned; DECISIONS.md).
+
+**Strengthening queue after this session:** only the four scene-art items (parked on
+Vesa's feature-direction call) and the cloud-sync cross-device chunk-race P2 remain
+open. Two decisions flagged for Vesa: scene-art keep-and-harden vs. rethink, and
+whether the L1-death-with-companion lethality observation (playtest #11) warrants a
+balance consult now (recommendation: wait for more real play).
 
 ## Overnight session 2026-07-22: strengthening + gear trio + nudge + playtest #11
 

@@ -8,6 +8,27 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-23 · The legacy combat roll-repair layer is removed, not preserved as dormant code.**
+`repairCombatRollBatch`, `canonicalizeCombatRollBatch`, and the recursive follow-up chain
+with its `MAX_ROLL_DEPTH` guard (~200 lines + 11 tests) were Phase-2 batched-combat
+machinery from before the atomic exchange engine. The 2026-07-23 audit proved them
+production-unreachable: active-combat `requested_rolls` are rejected outright before any
+of it could run (the exchange machine owns combat), repair/canonicalize are no-ops
+without an active player combat turn, and the sole caller stages follow-up rolls as
+fresh roleplay-check proposals — the recursion branch never executed. Worse, the
+recursion would have BYPASSED the active-combat rejection if ever revived (the guard
+only ran at depth 0). Ruling: delete rather than document — dormant code kept green by
+tests alone reads as load-bearing, costs every future audit lap, and this piece was a
+live hazard. Git history keeps the implementation if batched legacy combat ever returns.
+
+**2026-07-23 · Finished quests stay closed: a reused quest name opens a NEW arc, never a silent reopen.**
+`ADD_QUEST`'s dedupe matches ACTIVE quests only — flagged by the 2026-07-08 audit as
+possibly-unintentional. Ruling: intentional, now documented in place and pinned by test.
+A completed/failed quest is table history; recurring jobs legitimately reuse names
+("Guard the caravan"), and silently reopening the old entry would erase how the first
+arc ended. If the DM genuinely wants to reopen a closed quest it can emit a new quest
+with fresh framing — the Quests panel keeps both records honest.
+
 **2026-07-22 · Coin replay windows measure conversational distance, and coin signatures are value-based.**
 Playtest #11 reproduced a fresh double-pay/double-grant the 2026-07-21 ledgers missed: the
 post-roll outcome response restated the night's finances (`gold_found: 20` plus the
