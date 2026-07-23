@@ -577,9 +577,26 @@ export function getCoreNpcName(name) {
     return core.trim().toLowerCase();
 }
 
+const NAME_STOP_TOKENS = new Set(['the', 'a', 'an', 'of', 'von', 'van', 'de', 'da', 'la', 'le']);
+
+function meaningfulNameTokens(name) {
+    return getCoreNpcName(name)
+        .split(/[^a-z0-9']+/)
+        .filter(token => token.length > 1 && !NAME_STOP_TOKENS.has(token));
+}
+
 /**
- * Compares two NPC names, returning true if they are case-insensitive exact matches
- * or if their core names match after title-stripping.
+ * Compares two NPC names, returning true if they are case-insensitive exact matches,
+ * if their core names match after title-stripping, or if one name's meaningful
+ * tokens are contained in the other's ("Saima" ⊂ "Saima Aallotar").
+ *
+ * The containment rule is the roster fork guard (2026-07-23 romance playtest: the DM
+ * narrative alternated "Saima" / "Saima Aallotar" and the roster split one woman into
+ * separate records, each holding half the relationship history). Same tradeoff the
+ * location registry accepted for containment folding: two distinct same-campaign NPCs
+ * sharing a first name is rarer and cheaper than every long-named NPC forking. Generic
+ * creature/role names ("Guard", "a bandit") never containment-match — only proper names
+ * fold, and title-only names strip to zero tokens so they cannot match anything.
  */
 export function namesMatch(name1, name2) {
     if (!name1 || !name2) return false;
@@ -589,5 +606,73 @@ export function namesMatch(name1, name2) {
 
     const core1 = getCoreNpcName(name1);
     const core2 = getCoreNpcName(name2);
-    return core1 && core2 && core1 === core2;
+    if (core1 && core2 && core1 === core2) return true;
+
+    const tokens1 = meaningfulNameTokens(name1);
+    const tokens2 = meaningfulNameTokens(name2);
+    const [shortTokens, longTokens, shortName] = tokens1.length <= tokens2.length
+        ? [tokens1, tokens2, name1]
+        : [tokens2, tokens1, name2];
+    if (shortTokens.length === 0) return false;
+    if (isGenericCreatureName(shortName)) return false;
+    const longSet = new Set(longTokens);
+    return shortTokens.every(token => longSet.has(token));
+}
+
+/**
+ * Fold same-person roster records that forked before the namesMatch containment
+ * rule existed (LOAD_GAME heal, the dedupeLocationRecords pattern). The record
+ * with the LONGER name keeps its identity; dossier prose merges through the
+ * normal fragment/restatement policy, bond moments and hooks union with their
+ * own dedupe, and current-state fields come from whichever record was seen last.
+ */
+export function dedupeNpcRoster(npcs = []) {
+    const kept = [];
+    for (const raw of npcs) {
+        const npc = raw || {};
+        const matchIdx = kept.findIndex(existing => namesMatch(existing.name, npc.name));
+        if (matchIdx === -1) {
+            kept.push(npc);
+            continue;
+        }
+        const other = kept[matchIdx];
+        // `newer` drives current-state fields; `base` is the other record.
+        const [base, newer] = (npc.lastSeen || 0) >= (other.lastSeen || 0) ? [other, npc] : [npc, other];
+        const longerName = (String(npc.name || '').length > String(other.name || '').length ? npc.name : other.name);
+        const merged = {
+            ...base,
+            ...pruneRecordBlanks(newer),
+            name: longerName,
+            id: other.id || npc.id,
+            firstMet: Math.min(base.firstMet || Infinity, newer.firstMet || Infinity) === Infinity
+                ? undefined
+                : Math.min(base.firstMet || Infinity, newer.firstMet || Infinity),
+            lastSeen: Math.max(base.lastSeen || 0, newer.lastSeen || 0) || undefined,
+            pinned: !!(base.pinned || newer.pinned),
+            trust: Number.isFinite(newer.trust) ? newer.trust : base.trust,
+            kind: base.kind === 'character' || newer.kind === 'character' ? 'character' : (newer.kind || base.kind),
+            rosterTier: base.rosterTier === 'character' || newer.rosterTier === 'character'
+                ? 'character'
+                : (newer.rosterTier || base.rosterTier),
+            bondMoments: appendBondMoments(base.bondMoments, newer.bondMoments),
+            callbackHooks: appendCallbackHooks(base.callbackHooks, newer.callbackHooks),
+            knownFacts: [...new Set([...(base.knownFacts || []), ...(newer.knownFacts || [])])],
+            relationshipHistory: [...(base.relationshipHistory || []), ...(newer.relationshipHistory || [])]
+                .sort((a, b) => (a.at || 0) - (b.at || 0)),
+        };
+        for (const field of NPC_DURABLE_TEXT_FIELDS) {
+            merged[field] = mergeNpcDossierText(base[field], newer[field]);
+        }
+        kept[matchIdx] = normalizeNpcRecord(merged);
+    }
+    return kept;
+}
+
+function pruneRecordBlanks(record) {
+    const out = {};
+    for (const [key, value] of Object.entries(record)) {
+        if (value === '' || value === null || value === undefined) continue;
+        out[key] = value;
+    }
+    return out;
 }

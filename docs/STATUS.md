@@ -54,6 +54,38 @@ models via the mandatory machinery key, demote scene art to a reference-conditio
 occasional shot, drop the silent Pollinations fallback), pending Vesa's call and a
 side-by-side provider spike.
 
+## Playtest #12: the romance run — courtship works, roster forking found + fixed (2026-07-23)
+
+Purpose-built run for the relationship systems: fresh charismatic male rogue (Juho
+Sarelius — the new identity fields exercised: gender "man", appearance, background with
+secret bad poetry) courting Saima Aallotar, a widowed innkeeper planted in the premise.
+Previous campaign saved to a named slot first ("Noora — Lamplighters' Ledger").
+
+**Romance verdict: the system works.** Five-turn courtship arc entirely DICELESS (roll
+discipline held — flirtation, a friendly card game, and vulnerability trades all resolved
+through fiction; no charisma-check spam), with real NPC agency (Saima set the pace and
+made the invitation herself), organic escalation (toast → bought ale she saved for
+closing time → chair-stacking → shared mug + poetry confession → her room), the
+explicit scene emerging exactly per the default adult prompt's "scene logic and player
+choice" contract, and morning-after continuity. Identity fields all landed: the DM wove
+in the appearance canon from message one, the background's poetry became the pivotal
+beat, premise starting_items reconciled (the dubious letter + doublet), the seeded
+appearance showed "Look Confirmed" in the portrait section, and an 8-copper ale payment
+deducted copper-exact. Bond moments captured every beat as compact one-liners; the
+intimate content was recorded frank-in-content, clinical-in-register as designed. Zero
+console errors all session.
+
+**Found + fixed same session (P1): NPC roster forking** (DECISIONS.md 2026-07-23) —
+Saima split into THREE records ("Saima Aallotar" / "Saima" / "The Innkeeper"), Risto
+forked from "Burly, sour-faced merchant"; relationship history fragmented across them
+and stances went stuttery (the complete-stance merge can't work with the same person
+listed twice in KNOWN STANCES). Fixed: `namesMatch` token-containment rule (generic
+names excluded), `dedupeNpcRoster` LOAD_GAME heal (verified live: the forked save folded
+5 → 4 records with merged history), Scribe fullest-known-name rule against role-title
+records. 1112 tests + lint green. Watch next session: whether stance text still
+stutters with a single unified record (the fork was feeding the Scribe conflicting
+known-stance context).
+
 **Open decisions for Vesa (unchanged):** scene-art keep-and-harden vs. rethink (four
 queue items parked on it), and whether playtest #11's L1-death observation warrants a
 balance consult (recommendation stands: wait for more real play).

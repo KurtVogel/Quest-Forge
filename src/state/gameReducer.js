@@ -20,6 +20,7 @@ import {
     buildStoryMemoryPromotion,
     clampNpcDossierField,
     classifyNpcCandidate,
+    dedupeNpcRoster,
     listArchivableFodder,
     mergeNpcDossierText,
     migrateLegacyNpc,
@@ -3500,9 +3501,11 @@ export function gameReducer(state, action) {
                 session: loadedSession,
                 // Companion relationship records ride the NPC roster; mint any that
                 // pre-parity saves are missing so every current companion has one.
+                // dedupeNpcRoster first folds records that forked before the
+                // namesMatch containment rule ("Saima" vs "Saima Aallotar").
                 npcs: (validated.party || []).reduce(
                     (npcs, companion) => ensureCompanionRosterRecord(npcs, companion),
-                    (action.payload.npcs || []).map(npc => migrateLegacyNpc(npc))
+                    dedupeNpcRoster((action.payload.npcs || []).map(npc => migrateLegacyNpc(npc)))
                 ),
                 ui: { ...initialGameState.ui },
             };

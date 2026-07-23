@@ -25,9 +25,31 @@ from the linked record. DM contract: companion stance/bondMoment route through
 `npc_updates` exactly like any NPC; `update_companions` stays mechanics/affinity/keepsake.
 Free wins from the shared system: ex-companions keep their history as ordinary NPCs,
 "Deepen memory" backfills companions, and companion records were already RAG-embedded.
-Known limit (accepted): linkage is by `namesMatch` (exact/leading-title folding) — a
-trailing-epithet fork ("Kaarina the Shieldmaiden" vs "Kaarina") creates a second record,
-same as roster-wide behavior; the Scribe's exact-name rule is the guard.
+Known limit at ship time: linkage was by exact/leading-title `namesMatch` only — a name
+fragment forked a second record. **Closed the same day** (see the roster fork-guard entry
+below): `namesMatch` now folds token-containment variants ("Saima" ⊂ "Saima Aallotar").
+
+**2026-07-23 · NPC roster fork guard: namesMatch folds token-containment name variants.**
+Playtest #12 (the romance run) split one woman into THREE roster records inside six turns:
+"Saima Aallotar", "Saima" (the DM narrative alternates naturally between full and first
+name), and "The Innkeeper" (the Scribe reached for a role title). Each record held a
+partial copy of the same relationship — stances contradicted, bond moments split, and the
+Scribe's complete-stance merge contract can't work when KNOWN STANCES lists the same
+person twice. Decisions: (1) `namesMatch` gains a third rule after exact and
+core-title-strip matching — meaningful-token containment ("Saima" ⊂ "Saima Aallotar",
+reorderings included), with generic creature/role names (`isGenericCreatureName`) and
+title-only names excluded so "Guard" can never fold into "Guard Captain Toivo". This is
+the location registry's containment lesson applied to people, accepting the same rare
+false-positive (two same-campaign NPCs sharing a bare first name) as cheaper than every
+long-named NPC forking. Because `upsertNpc` matches before creating, this prevents forks
+at BOTH create and update time, and companion↔roster linkage (party block, Companions
+panel) inherits it. (2) `dedupeNpcRoster` heals existing saves on LOAD_GAME — folds
+same-person records keeping the longer name, merging dossier prose through the normal
+fragment/restatement policy, unioning bond moments/hooks/facts with their dedupes, and
+letting the later-seen record drive current-state fields. Verified live on the forked
+playtest save. (3) Role-title forks ("The Innkeeper") share no name tokens and cannot be
+folded mechanically — the Scribe prompt now demands the FULLEST known proper name and
+forbids role-title records for named characters; existing husks stay as thin records.
 
 **2026-07-23 · The legacy combat roll-repair layer is removed, not preserved as dormant code.**
 `repairCombatRollBatch`, `canonicalizeCombatRollBatch`, and the recursive follow-up chain

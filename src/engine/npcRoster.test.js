@@ -8,6 +8,7 @@ import {
     classifyNpcCandidate,
     clampNpcDossierField,
     curateNpcsForPrompt,
+    dedupeNpcRoster,
     formatNpcEmbeddingText,
     hasNpcNarrativeWeight,
     isGenericCreatureName,
@@ -22,6 +23,7 @@ import {
     getCoreNpcName,
     namesMatch,
 } from './npcRoster.js';
+import { mergeNpcUpdate } from '../state/gameReducer.js';
 
 describe('formatNpcEmbeddingText', () => {
     it('carries established looks into RAG so retrieval preserves visual continuity', () => {
@@ -337,5 +339,72 @@ describe('appendCallbackHooks', () => {
         expect(many).toHaveLength(MAX_NPC_CALLBACK_HOOKS);
         expect(many.at(-1)).toContain('chandlery');
         expect(many).not.toContain('The carved whalebone comb, still in her pocket.');
+    });
+});
+describe('namesMatch containment + dedupeNpcRoster (fork guard, 2026-07-23 romance playtest)', () => {
+    it('folds a bare first name into the full name and keeps distinct people apart', () => {
+        expect(namesMatch('Saima', 'Saima Aallotar')).toBe(true);
+        expect(namesMatch('Saima Aallotar', 'Saima')).toBe(true);
+        expect(namesMatch('Aallotar Saima', 'Saima Aallotar')).toBe(true); // reordered
+        expect(namesMatch('Risto', 'Saima Aallotar')).toBe(false);
+        expect(namesMatch('Mother Sorsa', 'Sorsa')).toBe(true); // existing title-strip rule intact
+    });
+
+    it('never containment-matches generic or title-only names', () => {
+        expect(namesMatch('Guard', 'Guard Captain Toivo')).toBe(false);
+        expect(namesMatch('The Innkeeper', 'Saima Aallotar')).toBe(false);
+        expect(namesMatch('a bandit', 'Bandit King Ruho')).toBe(false);
+    });
+
+    it('dedupeNpcRoster folds forked records: longer name, merged dossier, unioned moments', () => {
+        const folded = dedupeNpcRoster([
+            {
+                id: 'npc-1', name: 'Saima Aallotar', rosterTier: 'character', kind: 'character',
+                disposition: 'friendly', lastSeen: 100, firstMet: 10,
+                stanceToPlayer: 'Amused by his wit and relaxed demeanor.',
+                bondMoments: [{ text: 'He toasted her boat-hook, earning a dry smirk.', at: 20 }],
+            },
+            {
+                id: 'npc-2', name: 'Saima', rosterTier: 'character', kind: 'character',
+                disposition: 'friendly', lastSeen: 200, firstMet: 50, pinned: true,
+                stanceToPlayer: 'Deeply intrigued and physically drawn to him after the quiet evening.',
+                bondMoments: [
+                    { text: 'He toasted her boat-hook, earning a dry smirk.', at: 20 },
+                    { text: 'She invited him up to her room after closing.', at: 60 },
+                ],
+                lastLocation: "Aalto's Rest",
+            },
+        ]);
+
+        expect(folded).toHaveLength(1);
+        const saima = folded[0];
+        expect(saima.name).toBe('Saima Aallotar');
+        expect(saima.pinned).toBe(true);
+        expect(saima.lastSeen).toBe(200);
+        expect(saima.firstMet).toBe(10);
+        expect(saima.lastLocation).toBe("Aalto's Rest");
+        // Dossier prose merges (append, not clobber) and moments union without duplicates.
+        expect(saima.stanceToPlayer).toContain('Amused by his wit');
+        expect(saima.stanceToPlayer).toContain('Deeply intrigued');
+        expect(saima.bondMoments).toHaveLength(2);
+    });
+
+    it('dedupeNpcRoster leaves genuinely distinct records untouched', () => {
+        const roster = dedupeNpcRoster([
+            { id: 'npc-1', name: 'Saima Aallotar', rosterTier: 'character', kind: 'character', disposition: 'friendly' },
+            { id: 'npc-2', name: 'Risto', rosterTier: 'character', kind: 'character', disposition: 'neutral' },
+            { id: 'npc-3', name: 'The Innkeeper', rosterTier: 'character', kind: 'character', disposition: 'friendly' },
+        ]);
+        expect(roster).toHaveLength(3);
+    });
+
+    it('upsertNpc routes a bare-first-name update into the full-name record instead of forking', () => {
+        const npcs = mergeNpcUpdate(
+            [{ id: 'npc-1', name: 'Saima Aallotar', rosterTier: 'character', kind: 'character', disposition: 'friendly', stanceToPlayer: 'Guarded but amused.' }],
+            { name: 'Saima', kind: 'character', rosterEligible: true, bondMoment: 'She shared his mug and held his gaze.' }
+        );
+        expect(npcs).toHaveLength(1);
+        expect(npcs[0].name).toBe('Saima Aallotar');
+        expect(npcs[0].bondMoments.map(m => m.text)).toContain('She shared his mug and held his gaze.');
     });
 });
