@@ -811,3 +811,119 @@ describe('Scribe location + inspector-flag hygiene (2026-07-23 audit)', () => {
         expect(pass.gearAudited).toBe(false);
     });
 });
+
+describe('runScribe guard paths (queue 2026-07-07)', () => {
+    beforeEach(() => {
+        sendMessage.mockReset();
+    });
+
+    it('short-circuits without an API key or without narrative — no LLM call, no dispatch', async () => {
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'Hello',
+            dmNarrative: 'A whole scene happens.',
+            settings: { apiKey: '', llmProvider: 'gemini' },
+            dispatch,
+        });
+        await runScribe({
+            playerMessage: 'Hello',
+            dmNarrative: '',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+        });
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('swallows a rejected machinery call without dispatching or throwing', async () => {
+        sendMessage.mockRejectedValue(new Error('network down'));
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const dispatch = vi.fn();
+
+        await expect(runScribe({
+            playerMessage: 'I open the door.',
+            dmNarrative: 'The door opens.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+        })).resolves.toBeUndefined();
+
+        expect(dispatch).not.toHaveBeenCalled();
+        expect(errorSpy).toHaveBeenCalledWith('[Scribe] Extraction failed:', 'network down');
+        errorSpy.mockRestore();
+    });
+});
+
+describe('runNpcFrontReflection guard paths (queue 2026-07-07)', () => {
+    beforeEach(() => {
+        sendMessage.mockReset();
+    });
+
+    const baseState = (overrides = {}) => ({
+        settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+        session: { id: 'campaign' },
+        fronts: [{ id: 'front-road', status: 'active' }],
+        npcs: [],
+        journal: [],
+        worldFacts: [],
+        party: [],
+        ...overrides,
+    });
+
+    it('skips silently without an API key, and with neither NPCs nor fronts', async () => {
+        const dispatch = vi.fn();
+        await runNpcFrontReflection({
+            state: baseState({ settings: { apiKey: '', llmProvider: 'gemini' } }),
+            dispatch,
+            cadence: { id: 'cad-1', journalEnd: 10 },
+        });
+        await runNpcFrontReflection({
+            state: baseState({ fronts: [], npcs: [] }),
+            dispatch,
+            cadence: { id: 'cad-1', journalEnd: 10 },
+        });
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('dispatches nothing when the reflection response is unrepairable JSON', async () => {
+        sendMessage.mockResolvedValue('The fronts are moving in interesting ways, I feel.');
+        const dispatch = vi.fn();
+        await runNpcFrontReflection({
+            state: baseState(),
+            dispatch,
+            cadence: { id: 'cad-1', journalEnd: 10 },
+        });
+        expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('withholds APPLY_FRONT_ADVANCE_BATCH entirely when no cadence rode along', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            npc_updates: [],
+            front_advances: [{ id: 'front-road', delta: 1, symptom: 'Carts stop.', reason: 'Time.' }],
+            story_memory: [],
+        }));
+        const dispatch = vi.fn();
+        await runNpcFrontReflection({ state: baseState(), dispatch, cadence: null });
+        expect(dispatch.mock.calls.some(([action]) => action.type === 'APPLY_FRONT_ADVANCE_BATCH')).toBe(false);
+    });
+
+    it('classifies reflection npc_updates and rejects combat fodder from the roster', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            npc_updates: [
+                { name: 'Mother Sorsa', agenda: 'Collect what she is owed, always.' },
+                { name: 'Goblin Ambusher 2', lastNotes: 'Slain in the reeds.' },
+            ],
+            front_advances: [],
+            story_memory: [],
+        }));
+        const dispatch = vi.fn();
+        await runNpcFrontReflection({
+            state: baseState(),
+            dispatch,
+            cadence: { id: 'cad-1', journalEnd: 10 },
+        });
+        const updates = dispatch.mock.calls.filter(([action]) => action.type === 'UPDATE_NPC');
+        expect(updates).toHaveLength(1);
+        expect(updates[0][0].payload.name).toBe('Mother Sorsa');
+    });
+});

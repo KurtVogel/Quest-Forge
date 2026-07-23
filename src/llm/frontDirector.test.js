@@ -56,3 +56,33 @@ describe('Fronts v2 campaign generation', () => {
         expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('Do not write an act outline');
     });
 });
+
+describe('malformed-response guards (queue 2026-07-07)', () => {
+    beforeEach(() => sendMessage.mockReset());
+
+    it('throws the no-fronts error when the response has no JSON at all', async () => {
+        sendMessage.mockResolvedValue('I would love to build you some fronts! Here are my thoughts in prose.');
+        await expect(generateCampaignFronts(campaign())).rejects.toThrow(/did not contain fronts/);
+    });
+
+    it('throws the malformed error when JSON.parse and repair both fail', async () => {
+        sendMessage.mockResolvedValue('{ "fronts": [ { "title": "Broken" '.repeat(3));
+        await expect(generateCampaignFronts(campaign())).rejects.toThrow(/malformed|did not contain fronts/);
+    });
+
+    it('throws when fewer than two fronts survive sanitization', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            fronts: [
+                { title: 'Only One', goal: 'Press.', stakes: 'Pain.', grimPortents: ['A.', 'B.', 'C.'], faction: { name: 'F', goal: 'G.' } },
+                { title: 'Faction-less — dropped by the sanitizer', goal: 'Press.', stakes: 'Pain.', grimPortents: ['A.', 'B.', 'C.'] },
+            ],
+        }));
+        await expect(generateCampaignFronts(campaign())).rejects.toThrow(/did not produce two safe, specific fronts/);
+    });
+
+    it('throws the eligibility error for an ineligible campaign without calling the DM model', async () => {
+        await expect(generateCampaignFronts(campaign({ combat: { active: true } })))
+            .rejects.toThrow(/not eligible/);
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+});

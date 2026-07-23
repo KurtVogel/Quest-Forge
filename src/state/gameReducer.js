@@ -2424,6 +2424,10 @@ export function gameReducer(state, action) {
         case 'ADD_QUEST': {
             const payload = action.payload || {};
             const nameToken = normalizeRefToken(payload.name);
+            // Dedupe matches ACTIVE quests only — deliberate (documented 2026-07-23):
+            // a completed/failed quest is table history and stays closed; a new quest
+            // reusing its name is a new arc ("Guard the caravan" can recur), never a
+            // silent reopen that would erase how the first one ended.
             const existing = state.quests.find(quest =>
                 quest.status === 'active' && (
                     (payload.id && quest.id === payload.id) ||

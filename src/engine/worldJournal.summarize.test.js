@@ -138,3 +138,38 @@ describe('maybeAutoSummarize', () => {
         expect(dispatch).not.toHaveBeenCalled();
     });
 });
+
+describe('npcs_encountered upsert loop (queue 2026-07-18)', () => {
+    it('classifies and upserts named NPCs, skipping nameless entries and combat fodder', async () => {
+        sendMessageMock.mockResolvedValue(validSummary({
+            npcs_encountered: [
+                {
+                    name: 'Mother Sorsa',
+                    disposition: 'neutral',
+                    notes: 'Fenced the ledger without asking questions.',
+                    personality: 'Dry, patient, exact about debts.',
+                    basedIn: 'Kuusisaari',
+                },
+                { disposition: 'hostile', notes: 'A nameless entry the loop must skip.' },
+                { name: 'Goblin Ambusher 3', notes: 'Combat fodder slain at the reeds.' },
+            ],
+        }));
+        const state = makeState(makeMessages(12));
+        const dispatch = vi.fn();
+
+        await maybeAutoSummarize(state, dispatch, 0);
+
+        const updates = dispatch.mock.calls.filter(([action]) => action.type === 'UPDATE_NPC');
+        expect(updates).toHaveLength(1);
+        expect(updates[0][0].payload).toMatchObject({
+            name: 'Mother Sorsa',
+            disposition: 'neutral',
+            lastNotes: 'Fenced the ledger without asking questions.',
+            personality: 'Dry, patient, exact about debts.',
+            basedIn: 'Kuusisaari',
+        });
+        // Optional dossier fields the summary omitted must be absent, not undefined-clobbering.
+        expect('goals' in updates[0][0].payload).toBe(false);
+        expect('secrets' in updates[0][0].payload).toBe(false);
+    });
+});

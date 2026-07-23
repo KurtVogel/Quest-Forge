@@ -60,3 +60,21 @@ describe('quest identity', () => {
         expect(next.quests[0].status).toBe('active');
     });
 });
+
+describe('finished quests stay closed (documented 2026-07-23)', () => {
+    it('a new quest reusing a completed quest name opens a NEW arc instead of reopening the old one', () => {
+        const state = {
+            ...initialGameState,
+            quests: [{ id: 'q1', name: 'Guard the Caravan', status: 'completed', addedAt: 1 }],
+        };
+        const next = gameReducer(state, {
+            type: 'ADD_QUEST',
+            payload: { name: 'Guard the Caravan', description: 'A second run north.' },
+        });
+
+        expect(next.quests).toHaveLength(2);
+        expect(next.quests[0]).toMatchObject({ id: 'q1', status: 'completed' }); // history intact
+        expect(next.quests[1]).toMatchObject({ name: 'Guard the Caravan', status: 'active', description: 'A second run north.' });
+        expect(next.quests[1].id).not.toBe('q1');
+    });
+});

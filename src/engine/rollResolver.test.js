@@ -636,3 +636,58 @@ describe('follow-up narration failure surfacing', () => {
         expect(errorLine.payload.content).toContain('Your roll above stands');
     });
 });
+describe('enemy attacks a companion (inline damage, queue 2026-07-08)', () => {
+    const partyCombat = {
+        active: false, // legacy path runs out of engine-owned combat (pre-combat_start ambush)
+        enemies: [{ id: 'wolf', name: 'Fen Wolf', hp: 11, maxHp: 11, ac: 12, condition: 'healthy' }],
+    };
+
+    it('rolls vs the companion AC, applies inline damage to the companion, and flushes their HP', () => {
+        rollQueue.push(15, 4); // to-hit die (15 + 3 = 18 vs AC 14), damage die
+        const { results, dispatch } = runWithContext(
+            [{ type: 'npc_attack', attackerId: 'wolf', attacker: 'Fen Wolf', target: 'companion-1', modifier: 3, damage: '1d6+1' }],
+            {
+                combat: partyCombat,
+                party: [{ id: 'companion-1', name: 'Terho', hp: 15, maxHp: 15, ac: 14, status: 'healthy' }],
+            }
+        );
+
+        const attack = results.find(r => r.type === 'npc_attack');
+        expect(attack).toMatchObject({
+            success: true,
+            damage: 5, // 1d6(4) + 1
+            targetName: 'Terho',
+            targetHp: 10,
+            targetMaxHp: 15,
+        });
+        expect(attack.targetIsPlayer).toBeUndefined();
+        expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_COMPANION', payload: { id: 'companion-1', hp: 10 } });
+        // The player took nothing — no TAKE_DAMAGE flush.
+        expect(dispatch.mock.calls.some(([action]) => action.type === 'TAKE_DAMAGE')).toBe(false);
+    });
+
+    it('resolves a miss against the companion AC without touching companion HP', () => {
+        rollQueue.push(5); // 5 + 3 = 8 vs AC 14 — miss, no damage die drawn
+        const { results, dispatch } = runWithContext(
+            [{ type: 'npc_attack', attackerId: 'wolf', attacker: 'Fen Wolf', target: 'Terho', modifier: 3, damage: '1d6+1' }],
+            {
+                combat: partyCombat,
+                party: [{ id: 'companion-1', name: 'Terho', hp: 15, maxHp: 15, ac: 14, status: 'healthy' }],
+            }
+        );
+
+        expect(results.find(r => r.type === 'npc_attack')).toMatchObject({ success: false });
+        expect(dispatch.mock.calls.some(([action]) => action.type === 'UPDATE_COMPANION')).toBe(false);
+    });
+
+    it('falls back to the player when the named target is not a tracked companion', () => {
+        rollQueue.push(15, 4);
+        const { results, dispatch } = runWithContext(
+            [{ type: 'npc_attack', attackerId: 'wolf', attacker: 'Fen Wolf', target: 'some stranger', modifier: 3, damage: '1d6+1' }],
+            { combat: partyCombat, party: [] }
+        );
+
+        expect(results.find(r => r.type === 'npc_attack')).toMatchObject({ targetIsPlayer: true, damage: 5 });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'TAKE_DAMAGE', payload: 5 });
+    });
+});

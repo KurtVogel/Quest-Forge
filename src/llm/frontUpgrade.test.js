@@ -69,3 +69,38 @@ describe('established campaign Fronts v2 upgrade', () => {
         await expect(upgradeCampaignFrontsV2(vesaCampaign())).rejects.toThrow('No campaign state was changed');
     });
 });
+
+describe('upgrade safety rails (queue 2026-07-07)', () => {
+    beforeEach(() => sendMessage.mockReset());
+
+    it('refuses without a loaded campaign, and never calls the DM model', async () => {
+        await expect(upgradeCampaignFrontsV2(vesaCampaign({ character: null }))).rejects.toThrow(/Load the campaign/);
+        await expect(upgradeCampaignFrontsV2(vesaCampaign({ session: { premise: 'no id' } }))).rejects.toThrow(/Load the campaign/);
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('refuses a repeat upgrade of an already-v2 campaign', async () => {
+        const state = vesaCampaign();
+        state.session.frontDirector = { generationVersion: 2 };
+        await expect(upgradeCampaignFrontsV2(state)).rejects.toThrow(/already has the Dynamic Living World upgrade/);
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('refuses during active combat and without an API key', async () => {
+        await expect(upgradeCampaignFrontsV2(vesaCampaign({ combat: { active: true } }))).rejects.toThrow(/Finish the current combat/);
+        await expect(upgradeCampaignFrontsV2(vesaCampaign({ settings: { apiKey: '' } }))).rejects.toThrow(/API key/);
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('aborts atomically when an existing faction-less front was not enriched', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            front_enrichments: [], // the existing front has no faction and gets none
+            new_fronts: [{
+                title: 'The Sealed Bounty', goal: 'Suppress the bargain.', stakes: 'Witnesses disappear.',
+                grimPortents: ['A witness recants.', 'Records burn.', 'A hunter arrives.'],
+                faction: { name: 'Agents', goal: 'Bury it.' },
+            }],
+        }));
+        await expect(upgradeCampaignFrontsV2(vesaCampaign())).rejects.toThrow(/did not safely enrich every existing pressure/);
+    });
+});

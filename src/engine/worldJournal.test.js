@@ -119,3 +119,56 @@ describe('worldJournal context builder', () => {
         expect(context).toBe('');
     });
 });
+
+describe('KNOWN NPCs extras rendering (queue 2026-07-18)', () => {
+    it('renders the full dossier extras line: pin, importance, agenda, secret, tension, trust, arc, hooks', () => {
+        const npcs = [{
+            name: 'Mother Sorsa',
+            disposition: 'wary',
+            lastNotes: 'Fenced the ledger.',
+            pinned: true,
+            importance: 5,
+            personality: 'Dry, patient, exact about debts.',
+            goals: 'Keep her parlor untouchable.',
+            agenda: 'Learn who the Auditor really is.',
+            secrets: 'She once informed for the Lamplighters.',
+            relationshipTension: 'She profits from the hero but fears their heat.',
+            trust: 35,
+            basedIn: 'Kuusisaari',
+            lastLocation: 'The stilt-quarter parlor',
+            relationshipHistory: [{ from: 'neutral', at: 1 }],
+            callbackHooks: ['the unpaid winter favor', 'the Lamplighter informant years', 'a third hook that must not render'],
+            lastSeen: 1000,
+        }];
+        const context = buildJournalContext([], npcs, 'Kuusisaari');
+
+        expect(context).toContain('- **Mother Sorsa** (wary): Fenced the ledger.');
+        expect(context).toContain('pinned');
+        expect(context).toContain('importance: 5/5');
+        expect(context).toContain('personality: Dry, patient, exact about debts.');
+        expect(context).toContain('wants: Keep her parlor untouchable.');
+        expect(context).toContain('agenda: Learn who the Auditor really is.');
+        expect(context).toContain('secret: She once informed for the Lamplighters.');
+        expect(context).toContain('tension: She profits from the hero but fears their heat.');
+        expect(context).toContain('trust: 35/100');
+        expect(context).toContain('based in: Kuusisaari');
+        expect(context).toContain('last seen: The stilt-quarter parlor');
+        expect(context).toContain('relationship: neutral → wary');
+        expect(context).toContain('hooks: the unpaid winter favor; the Lamplighter informant years');
+        expect(context).not.toContain('a third hook that must not render'); // capped at 2
+    });
+
+    it('filters non-character roster tiers and caps the list at 8 with an overflow line', () => {
+        const npcs = [
+            ...Array.from({ length: 10 }, (_, i) => ({
+                id: `npc-villager-${i}`, name: `Villager ${i}`, disposition: 'neutral', lastNotes: `Villager number ${i}.`, rosterTier: 'character', lastSeen: i,
+            })),
+            { name: 'Slain Wolf', rosterTier: 'archived_creature', lastNotes: 'Combat fodder.', lastSeen: 99 },
+        ];
+        const context = buildJournalContext([], npcs, 'Road');
+
+        expect(context).not.toContain('Slain Wolf');
+        expect((context.match(/- \*\*Villager /g) || []).length).toBe(8);
+        expect(context).toContain('*(2 other NPCs available via RETRIEVED MEMORIES when relevant)*');
+    });
+});
