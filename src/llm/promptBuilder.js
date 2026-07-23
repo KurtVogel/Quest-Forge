@@ -600,8 +600,16 @@ function buildCharacterBlock(character, combat = null) {
         ? `${character.exp || 0} XP (max level reached)`
         : `${character.exp || 0} / ${getExperienceThreshold(character.level)} to next level`;
 
+    const genderLine = character.gender?.trim()
+        ? `\n- **Gender:** ${character.gender.trim().slice(0, 60)}`
+        : '';
     const appearanceLine = character.appearance?.trim()
         ? `\n- **Appearance (established canon — keep it exactly consistent in narration):** ${character.appearance.trim().slice(0, 300)}`
+        : '';
+    // Player-authored personal history: canon like the campaign premise, but it
+    // travels WITH the hero (roster/exports) rather than belonging to one campaign.
+    const backgroundLine = character.background?.trim()
+        ? `\n- **Background (player-authored personal canon — honor it and weave it into the world; it is established history, not a hook you may contradict):** ${character.background.trim().slice(0, 2000)}`
         : '';
 
     const spellcasting = describeSpellcastingForPrompt(character);
@@ -610,7 +618,7 @@ function buildCharacterBlock(character, combat = null) {
         : '';
 
     return `## PLAYER CHARACTER
-- **Name:** ${character.name}${deathStatus}${appearanceLine}
+- **Name:** ${character.name}${deathStatus}${genderLine}${appearanceLine}${backgroundLine}
 - **Race:** ${character.race}
 - **Class:** ${character.class} (Level ${character.level})
 - **HP:** ${character.currentHP}/${character.maxHP}

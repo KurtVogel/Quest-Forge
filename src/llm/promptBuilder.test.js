@@ -304,6 +304,26 @@ describe('party block', () => {
         expect(text).not.toContain('## COMPANIONS');
     });
 
+    it('renders creation identity fields (gender + background) in the character block', () => {
+        const text = prompt({
+            character: makeCharacter({
+                gender: 'nonbinary',
+                appearance: 'White hair in a tight braid.',
+                background: 'A disgraced lamplighter who still knows every toll-gate code.',
+            }),
+        });
+        expect(text).toContain('- **Gender:** nonbinary');
+        expect(text).toContain('**Appearance (established canon');
+        expect(text).toContain('player-authored personal canon');
+        expect(text).toContain('A disgraced lamplighter who still knows every toll-gate code.');
+    });
+
+    it('omits gender and background lines when the fields are empty', () => {
+        const text = prompt({});
+        expect(text).not.toContain('- **Gender:**');
+        expect(text).not.toContain('player-authored personal canon');
+    });
+
     it('surfaces the companion\'s roster stance and bond moments on the party line', () => {
         const text = prompt({
             party: [

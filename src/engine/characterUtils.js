@@ -220,6 +220,12 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         ...(isSpellcaster(className) && { spellSlots: buildSpellSlots(1), sustainedSpell: null }),
         hitDice: { total: 1, remaining: 1, die: charClass.hitDie },
         conditions: [],
+        // Player-authored identity, all optional. Appearance caps at 600 to match
+        // the reducer's Scribe-merge clamp (a longer seed would truncate on the
+        // first merged update); background matches the notes/vault 2000 cap.
+        gender: String(options.gender || '').trim().slice(0, 60),
+        appearance: String(options.appearance || '').trim().slice(0, 600),
+        background: String(options.background || '').trim().slice(0, 2000),
         notes: '',
         createdAt: Date.now(),
         startingGoldRolls,

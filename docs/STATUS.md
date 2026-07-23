@@ -30,6 +30,27 @@ lint green, deployed.
    sweep stale chunks from a stale count; `deleteGameFromCloud`'s sweep is transactional
    too. Mock grew a write-buffering `runTransaction`; atomicity regression test added.
 
+Follow-ups the same evening (Vesa requests):
+
+3. **NPC relationship arc trimmed** — the Journal card and KNOWN NPCs prompt line now
+   show only the latest shift (previous → current) instead of the whole
+   wary → hostile → … chain (space/tokens without play value); `relationshipHistory`
+   data keeps every step for a future timeline view. Verified live.
+4. **Creation identity fields** — the wizard's name step is now "Who is your hero?"
+   with three optional free-text boxes: gender (60), appearance (600, matching the
+   Scribe-merge clamp — pre-fills the portrait section and seeds the appearance-merge
+   base), background (2000, personal canon that travels with the hero). All three render
+   on the confirm screen, flow into the PLAYER CHARACTER prompt block (Gender line +
+   "player-authored personal canon" background line), thread into portrait/scene-art
+   descriptors, and round-trip hero exports with sanitizer clamps. Wizard walked
+   end-to-end live to the confirm screen (autosave untouched). 1107 tests + lint green.
+
+**Also this session:** scene-art direction discussed — recommendation on the table is a
+portrait-first pivot (portrait-at-creation, NPC portraits, re-platform on Gemini image
+models via the mandatory machinery key, demote scene art to a reference-conditioned
+occasional shot, drop the silent Pollinations fallback), pending Vesa's call and a
+side-by-side provider spike.
+
 **Open decisions for Vesa (unchanged):** scene-art keep-and-harden vs. rethink (four
 queue items parked on it), and whether playtest #11's L1-death observation warrants a
 balance consult (recommendation stands: wait for more real play).

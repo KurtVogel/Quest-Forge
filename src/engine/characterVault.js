@@ -157,6 +157,8 @@ export function sanitizeCharacter(raw) {
         classResources: buildClassResources(raw.class, level),
         hitDice: { total: level, remaining: level, die: charClass.hitDie },
         conditions: [],
+        gender: String(raw.gender || '').trim().slice(0, 60),
+        background: String(raw.background || '').trim().slice(0, 2000),
         appearance: String(raw.appearance || '').trim().slice(0, MAX_APPEARANCE_LENGTH),
         portraitUrl: sanitizeImageUrl(raw.portraitUrl),
         portraitPrompt: String(raw.portraitPrompt || '').trim().slice(0, MAX_APPEARANCE_LENGTH),

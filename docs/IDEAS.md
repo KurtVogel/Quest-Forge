@@ -501,6 +501,11 @@ fallback. Hero exports/imports preserve confirmed appearance and safe portrait U
 Still open: one portrait at creation and portraits for major NPCs, reusing Scribe-captured
 `appearance` records for consistency.
 
+**Stepping stone shipped (2026-07-23):** the creation wizard's identity step now captures
+optional gender / appearance / background free-text. Appearance seeds the Scribe merge base
+and pre-fills the portrait section, so the portrait-at-creation flow below only needs to add
+the Generate step itself — the text inputs already exist at creation time.
+
 **Competitive angle (2026-06-28):** Old Greg's Tavern generates the portrait *immediately in
 the creation flow* — write the character's story, describe their looks, see the face right away.
 That first-impression moment is a strong hook we're missing (our v1 portrait lives in the Profile

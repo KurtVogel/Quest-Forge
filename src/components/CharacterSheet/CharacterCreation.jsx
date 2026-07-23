@@ -16,6 +16,9 @@ export default function CharacterCreation() {
     const [phase, setPhase] = useState('start'); // 'start' | 'wizard' | 'roster'
     const [step, setStep] = useState(0);
     const [name, setName] = useState('');
+    const [gender, setGender] = useState('');
+    const [appearance, setAppearance] = useState('');
+    const [background, setBackground] = useState('');
     const [race, setRace] = useState('');
     const [charClass, setCharClass] = useState('');
     const [fightingStyle, setFightingStyle] = useState('defense');
@@ -119,7 +122,7 @@ export default function CharacterCreation() {
             abilityScores[ability] = statAssignment[ability];
         }
 
-        const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle, expertiseSkills });
+        const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle, expertiseSkills, gender, appearance, background });
         const inventory = createStartingInventory(charClass);
         beginAdventure(character, inventory);
     };
@@ -292,7 +295,7 @@ export default function CharacterCreation() {
                 <div className="char-creation-content">
                     {currentStep === 'name' && (
                         <div className="creation-step">
-                            <h3>What is your name, adventurer?</h3>
+                            <h3>Who is your hero?</h3>
                             <input
                                 type="text"
                                 className="creation-input"
@@ -302,6 +305,34 @@ export default function CharacterCreation() {
                                 autoFocus
                                 maxLength={30}
                             />
+                            <input
+                                type="text"
+                                className="creation-input"
+                                value={gender}
+                                onChange={(e) => setGender(e.target.value)}
+                                placeholder="Gender — woman, man, nonbinary, anything else… (optional)"
+                                maxLength={60}
+                            />
+                            <textarea
+                                className="creation-input creation-premise"
+                                value={appearance}
+                                onChange={(e) => setAppearance(e.target.value)}
+                                placeholder={'Appearance (optional) — build, face, hair, scars, how they carry themselves. Becomes established canon: the DM keeps it consistent, and it feeds portraits and scene art.'}
+                                rows={3}
+                                maxLength={600}
+                            />
+                            <textarea
+                                className="creation-input creation-premise"
+                                value={background}
+                                onChange={(e) => setBackground(e.target.value)}
+                                placeholder={'Background (optional) — where they come from, what they did before, debts, family, the wound that set them on the road. Personal canon that travels with the hero across campaigns.'}
+                                rows={4}
+                                maxLength={2000}
+                            />
+                            <p className="creation-hint">
+                                Gender, appearance, and background are optional — but whatever you
+                                write here is canon the DM will honor.
+                            </p>
                         </div>
                     )}
 
@@ -474,6 +505,7 @@ export default function CharacterCreation() {
                             <h3>Your Hero</h3>
                             <div className="creation-summary">
                                 <div className="summary-row"><strong>Name:</strong> {name}</div>
+                                {gender.trim() && <div className="summary-row"><strong>Gender:</strong> {gender.trim()}</div>}
                                 <div className="summary-row"><strong>Race:</strong> {RACES[race]?.name}</div>
                                 <div className="summary-row"><strong>Class:</strong> {CLASSES[charClass]?.name}</div>
                                 {charClass === 'fighter' && (
@@ -495,6 +527,8 @@ export default function CharacterCreation() {
                                         {expertiseSkills.map(s => SKILL_LABELS[s] || s).join(', ')}
                                     </div>
                                 )}
+                                {appearance.trim() && <div className="summary-row"><strong>Appearance:</strong> {appearance.trim()}</div>}
+                                {background.trim() && <div className="summary-row"><strong>Background:</strong> {background.trim()}</div>}
                             </div>
                         </div>
                     )}

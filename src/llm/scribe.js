@@ -822,9 +822,10 @@ export async function composeScenePrompt({ situation, character, npcs = [], comb
 
     if (character) {
         const equipped = (character.equippedSummary || '').trim();
+        const gender = character.gender?.trim() || '';
         const desc = character.appearance?.trim()
-            || `a ${character.race || ''} ${character.class || 'adventurer'}`.trim();
-        lines.push(`Player character — ${character.name}: ${desc}${equipped ? ` Wearing/wielding: ${equipped}.` : ''}`);
+            || `a ${gender ? `${gender} ` : ''}${character.race || ''} ${character.class || 'adventurer'}`.replace(/\s+/g, ' ').trim();
+        lines.push(`Player character — ${character.name}${gender ? ` (${gender})` : ''}: ${desc}${equipped ? ` Wearing/wielding: ${equipped}.` : ''}`);
     }
 
     // NPCs likely in frame: most recently active first, capped for prompt size.

@@ -41,6 +41,26 @@ describe('export round-trip', () => {
         expect(imported.inventory).toHaveLength(inventory.length);
     });
 
+    it('round-trips creation identity fields (gender, appearance, background) with clamps', () => {
+        const character = createCharacter('Noora', 'elf', 'rogue', BASE_SCORES, ['stealth', 'acrobatics'], {
+            expertiseSkills: ['stealth', 'acrobatics'],
+            gender: '  woman  ',
+            appearance: 'Wiry, storm-grey eyes, a burglar\'s quick hands.',
+            background: 'Raised on the stilt-quarter canals; owes her fence twelve silver.',
+        });
+        expect(character.gender).toBe('woman');
+
+        const imported = parseCharacterExport(JSON.stringify(buildCharacterExport(character, createStartingInventory('rogue'))));
+        expect(imported.character.gender).toBe('woman');
+        expect(imported.character.appearance).toBe('Wiry, storm-grey eyes, a burglar\'s quick hands.');
+        expect(imported.character.background).toBe('Raised on the stilt-quarter canals; owes her fence twelve silver.');
+
+        // Hand-edited files can't smuggle unbounded identity text past the sanitizer.
+        const oversized = sanitizeCharacter({ ...character, gender: 'x'.repeat(500), background: 'y'.repeat(5000) });
+        expect(oversized.gender).toHaveLength(60);
+        expect(oversized.background).toHaveLength(2000);
+    });
+
     it('imports arrive rested: full HP, no conditions, fresh resources', () => {
         const { character, inventory } = makeFighter();
         const wounded = {
