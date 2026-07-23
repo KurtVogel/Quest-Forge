@@ -47,11 +47,11 @@ it under Process notes.
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-07-16 |
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-07-14 |
 | prompt-building | `llm/promptBuilder.js` | 2026-07-16 |
-| roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-07-08 |
+| roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-07-23 |
 | combat-exchange | `engine/combatExchange.js`, reducer combat phases, opening initiative | 2026-07-09 |
 | enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-07-13 |
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-07-22 |
-| scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-07-07 |
+| scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-07-23 |
 | memory-journal | `engine/worldJournal.js` | 2026-07-18 |
 | story-memory | `engine/storyMemory.js` | 2026-07-14 |
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-07-15 |
@@ -157,6 +157,11 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P1** (scene-art, 2026-07-22): the xAI degradation branches — `xai-empty`/moderation-filtered (`imageGen.js:123-125`), the network/parse `catch` (132-135), the pollinations `cacheSet`, and the cache-hit early return (88-90) — are all untested; `imageGen.test.js` covers only missing-key/success/prefix/http-401, so the fallback wiring an adult-content app leans on has no regression net — `llm/providers/imageGen.js:88-135`.
 - [ ] **P2** (scene-art, 2026-07-22): no length cap on the composed/fallback prompt before it is `encodeURIComponent`'d into the Pollinations `<img src>` — a long DM narration (`SceneArt.jsx:168-171` uses the whole last turn) can exceed browser/CDN URL limits and the `<img>` fails silently (never fetched, so the catch never fires); `slice()` the prompt (~1–2k) — `imageGen.js:141-142` + `scribe.js:721`.
 - [x] **P2** (hidden-fronts, 2026-07-22): `UPDATE_FRONT` lets the DM's per-turn channel regress portent stage by 1 (`gameReducer.js:2713`, `Math.max(existing-1, …)`) while the cadence engine keeps stage monotonic (`fronts.js:239`); CLAUDE.md specifies "non-regressing portent stages" — decide whether this softening is intended and document it, else clamp. *Fixed 2026-07-22: clamped upward-only (DECISIONS.md 2026-07-22 — the DM cannot see stage values since the tempo redesign, so a lower stage was always a blind guess; clock softening unchanged); test.*
+- [ ] **P1** (scribe, 2026-07-23): a non-string `fact`/`category` from the Scribe passes `ADD_WORLD_FACTS`' truthiness-only guard (`!f?.fact`, raw `...f` spread), persists into the save, and then crashes `buildSystemPrompt` on every subsequent turn (`f.fact.toLowerCase()` in `buildActiveConstraints`; `cat.toUpperCase()` in `buildWorldFactsBlock`) — type-guard both + clamp fact length — `state/gameReducer.js:2487-2495`, `llm/promptBuilder.js:770,797`.
+- [ ] **P1** (roll-resolution, 2026-07-23): `skill` is not type-guarded at the parser boundary (unlike `dc`/`modifier`) — a truthy non-string skill (array/number) throws `roll.skill.toLowerCase is not a function` at `rollResolver.js:906` mid-batch, after dice were already shown, skipping the working-HP flush and outcome narration; coerce string-or-null — `llm/responseParser.js:308`.
+- [ ] **P2** (scribe, 2026-07-23): `captureScribePass` computes `lootAudited`/`paymentAudited` with `Array.isArray` on the object-shaped `missing_loot`/`missing_payment` — both flags permanently false in the dev memory inspector — `llm/scribe.js:559-560`.
+- [ ] **P2** (scribe, 2026-07-23): `if (extracted.location)` truthiness-only — a model emitting the literal string "null"/"unchanged" becomes the canonical current location and mints a location-registry record; add a junk-string drop-list — `llm/scribe.js:532-534`.
+- [ ] **P2** (roll-resolution, 2026-07-23): `repairCombatRollBatch`/`canonicalizeCombatRollBatch` + the `MAX_ROLL_DEPTH` recursion are production-unreachable (depth-0 active-combat rejection precedes them; the sole call site always passes `onFollowUpRolls`) — ~200 lines of dormant legacy kept green by tests alone, and the recursion would skip the active-combat rejection if ever revived; document as legacy or remove via a DECISIONS entry — `engine/rollResolver.js:464-474,590-603`.
 - [ ] **P1** (prompt-building, 2026-07-16): `buildCombatBlock` (`llm/promptBuilder.js:764-793`) — the block the DM reads every combat turn to know who's alive, downed, defending, or conditioned — has its dynamic per-combatant formatting completely untested. Every `promptBuilder.combatPacing.test.js` case either passes empty `enemies`/`turnOrder` arrays or only asserts on the static surrounding prose; none assert on the actual rendered `Atk:`/`Dmg:`/`Status:`/`DEFENDING`/`Conditions:` fields, the turn-order `→` marker, or the `ACTIVE — exactly two player_slots required` vs. `inactive` surge summary line (confirmed via grep — zero matches for any of these strings across all `promptBuilder.*.test.js` files).
 
 ## Entry template
@@ -181,6 +186,33 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-23 — scribe + roll-resolution (Lap 2: robustness against hostile input)
+
+`npm test`: 1078 passing / 69 files.
+
+Rotation excluded (last 6, local ∪ origin — identical): scene-art, hidden-fronts (07-22), dice-engine, chat-orchestration (07-21), providers-adapter, memory-journal (07-18), progression, prompt-building (07-16), vector-memory-rag, inventory-economy (07-15), response-parsing, story-memory (07-14). Oldest eligible → **scribe** (07-07, 78.03%); the 07-08 tie roll-resolution/quests broke to lowest coverage → **roll-resolution** (rollResolver 77.07%). Coverage snapshot (07-21) is 2 days old — not refreshed.
+
+### scribe (`llm/scribe.js` — extraction, loot/payment/gear audits, reflection, art director)
+- **Scope examined:** `scribe.js` end to end; `scribe.test.js` (all suites); traced every dispatch target — `upsertNpc`/`normalizeNpcRecord`/`mergeNpcDossierText` (`npcRoster.js`), `ADD_WORLD_FACTS`/`SET_LOCATION`/`UPDATE_LOCATION_PROFILE` (`gameReducer.js`), `buildWorldFactsBlock`/`buildActiveConstraints` (`promptBuilder.js`).
+- **Findings:**
+  - **P1 (hostile input → persistent crash):** `ADD_WORLD_FACTS` guards only truthiness (`!f?.fact`) and spreads `...f` raw (`gameReducer.js:2487-2495`) — a non-string `fact` (number/object, exactly the quirk class the repair pipeline exists for) survives `factTokenSet`'s `String()` dedupe, persists into the save, and then `buildActiveConstraints` throws `f.fact.toLowerCase is not a function` (`promptBuilder.js:797`) on EVERY subsequent prompt build — the campaign errors out each turn until the fact is manually removed. Non-string `category` breaks `cat.toUpperCase()` (`promptBuilder.js:770`) identically. Fact text also has no length clamp (dossier fields clamp at 600; world facts are never pruned).
+  - **Verified strong (the point of the lap):** the NPC write path sanitizes hard — `cleanText` String()s all dossier prose, `mergeNpcDossierText`/`appendCallbackHooks`/`appendBondMoments` clamp+cap+dedupe, appearance sliced at 600, `SET_LOCATION` type-guards non-string payloads, missing-loot/payment amounts coerced+clamped (10000/denom, 4 items, 2 handoffs), and all three audits are idempotent per claimed sourceId — each covered by tests.
+  - **P2 (telemetry bug):** `captureScribePass` computes `lootAudited`/`paymentAudited` with `Array.isArray(extracted.missing_loot)`, but the schema defines both as OBJECTS — the two flags are permanently false in the dev memory inspector (`scribe.js:559-560`). `gearAudited` (a real array) is correct.
+  - **P2 (robustness):** `if (extracted.location)` is truthiness-only (`scribe.js:532`) — a weak model emitting the literal string `"null"`/`"unchanged"` sets it as the canonical current location AND mints a location-registry record via `upsertLocation`.
+  - **P1 (reflag, 07-07 queue items still open — re-verified):** `runScribe`'s no-key/no-narrative short-circuit, a rejected `sendMessage`, and the `SET_LOCATION` dispatch remain untested; all of `runNpcFrontReflection`'s guard/malformed-JSON paths likewise (current `scribe.test.js` asserts none of them).
+- **Suggested improvements:** (1) type-guard `fact`/`category` (`typeof === 'string'`) + clamp fact length in `ADD_WORLD_FACTS`; (2) drop-list for junk location strings ("null", "unchanged", "same", "n/a") before `SET_LOCATION`; (3) fix the two `Array.isArray` flags; (4) the 07-07 guard tests.
+
+### roll-resolution (`engine/rollResolver.js`, `outOfCombatRollPolicy.js`, proposal reducer paths)
+- **Scope examined:** `rollResolver.js` end to end; `rollResolver.test.js` (all describes); the parser normalization boundary (`responseParser.js:305-331`); the sole production call site `handleAcceptRoleplayCheck` (`ChatPanel.jsx:681-701`). `outOfCombatRollPolicy.js` sits at 100% — skimmed only.
+- **Findings:**
+  - **P1 (hostile input → mid-batch crash):** the parser type-guards `dc`/`modifier` (`typeof number`, `responseParser.js:310/321`) but passes `skill` through raw whenever truthy (line 308) — `skill: ["stealth"]` or `skill: 42` (classic LLM quirks) survives the `String(roll.skill)` comparisons (`rollResolver.js:278`) and then throws `roll.skill.toLowerCase is not a function` at `rollResolver.js:906` — AFTER earlier rolls in the batch already dispatched visible dice/messages, so the working-HP flush (line 317) and outcome narration are skipped: dice shown, nothing applied, turn lost ("Error resolving check" is all the player sees).
+  - **P2 (dormant legacy machinery):** `repairCombatRollBatch`/`canonicalizeCombatRollBatch` and the recursion/`MAX_ROLL_DEPTH` path are production-unreachable — both repair paths require `combat.active`, but depth-0 active combat is rejected first (`rollResolver.js:464`), and the single call site always passes `onFollowUpRolls` so the `depth + 1` branch (590-603) never runs; ~200 lines kept green by tests alone. If ever revived, note the recursion SKIPS the active-combat rejection (`depth === 0 &&` guard). Worth an explicit decision: annotate as legacy safety net or remove.
+  - **P1 (reflag, 07-08 queue item still open — re-verified):** enemy→companion inline damage (`rollResolver.js:255-267`) still has zero coverage — the "companion attacks" suite tests companion→enemy only; every `npc_attack` test targets the player.
+- **Suggested improvements:** (1) coerce `skill` (and `type`/`attacker`/`target`) to string-or-null at the parser boundary — one line each, matching the existing `dc`/`modifier` guards; (2) the enemy-attacks-companion test; (3) settle the dormant-machinery question in DECISIONS.md rather than carrying untestable-in-production complexity silently.
+
+### Process notes
+- Re-verified the four oldest open scribe/roll-resolution queue items against current code during the audit itself (they are this run's features): all still open, none checked off.
 
 ## 2026-07-22 — scene-art + hidden-fronts (Lap 2: robustness against hostile input)
 
