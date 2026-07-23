@@ -11,6 +11,21 @@ import './CharacterSheet.css';
 
 const STEPS = ['name', 'race', 'class', 'stats', 'skills', 'confirm', 'adventure'];
 
+/**
+ * Characters-remaining countdown for a capped text field. Counts down instead of
+ * up and turns warning-red near the cap (last 5%, at least 10 chars) so the
+ * player sees the limit coming instead of hitting an invisible wall.
+ */
+function CharCountdown({ length, max }) {
+    const remaining = Math.max(0, max - length);
+    const warnAt = Math.max(10, Math.round(max * 0.05));
+    return (
+        <div className={`creation-character-count${remaining <= warnAt ? ' count-low' : ''}`}>
+            {remaining.toLocaleString()} characters left
+        </div>
+    );
+}
+
 export default function CharacterCreation() {
     const { dispatch } = useGame();
     const [phase, setPhase] = useState('start'); // 'start' | 'wizard' | 'roster'
@@ -248,9 +263,7 @@ export default function CharacterCreation() {
                                 rows={5}
                                 maxLength={CAMPAIGN_PREMISE_MAX_LENGTH}
                             />
-                            <div className="creation-character-count">
-                                {premise.length.toLocaleString()} / {CAMPAIGN_PREMISE_MAX_LENGTH.toLocaleString()}
-                            </div>
+                            <CharCountdown length={premise.length} max={CAMPAIGN_PREMISE_MAX_LENGTH} />
                         </div>
                     )}
 
@@ -313,6 +326,7 @@ export default function CharacterCreation() {
                                 placeholder="Gender — woman, man, nonbinary, anything else… (optional)"
                                 maxLength={60}
                             />
+                            <CharCountdown length={gender.length} max={60} />
                             <textarea
                                 className="creation-input creation-premise"
                                 value={appearance}
@@ -321,6 +335,7 @@ export default function CharacterCreation() {
                                 rows={3}
                                 maxLength={600}
                             />
+                            <CharCountdown length={appearance.length} max={600} />
                             <textarea
                                 className="creation-input creation-premise"
                                 value={background}
@@ -329,6 +344,7 @@ export default function CharacterCreation() {
                                 rows={4}
                                 maxLength={2000}
                             />
+                            <CharCountdown length={background.length} max={2000} />
                             <p className="creation-hint">
                                 Gender, appearance, and background are optional — but whatever you
                                 write here is canon the DM will honor.
@@ -558,9 +574,7 @@ export default function CharacterCreation() {
                                 rows={5}
                                 maxLength={CAMPAIGN_PREMISE_MAX_LENGTH}
                             />
-                            <div className="creation-character-count">
-                                {premise.length.toLocaleString()} / {CAMPAIGN_PREMISE_MAX_LENGTH.toLocaleString()}
-                            </div>
+                            <CharCountdown length={premise.length} max={CAMPAIGN_PREMISE_MAX_LENGTH} />
                         </div>
                     )}
                 </div>

@@ -525,6 +525,13 @@
     text-align: right;
 }
 
+/* Near the cap (last 5%): the countdown turns warning-red so the limit is
+   visible before typing hits the invisible maxLength wall. */
+.creation-character-count.count-low {
+    color: #e74c3c;
+    font-weight: 600;
+}
+
 .creation-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

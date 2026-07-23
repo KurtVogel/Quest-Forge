@@ -44,6 +44,9 @@ Follow-ups the same evening (Vesa requests):
    "player-authored personal canon" background line), thread into portrait/scene-art
    descriptors, and round-trip hero exports with sanitizer clamps. Wizard walked
    end-to-end live to the confirm screen (autosave untouched). 1107 tests + lint green.
+   Follow-up polish: every capped wizard text box (identity trio + both premise fields)
+   now shows a characters-LEFT countdown that turns red inside the last 5% of the cap
+   (min 10), replacing the count-up premise counter — no more invisible maxLength wall.
 
 **Also this session:** scene-art direction discussed — recommendation on the table is a
 portrait-first pivot (portrait-at-creation, NPC portraits, re-platform on Gemini image
