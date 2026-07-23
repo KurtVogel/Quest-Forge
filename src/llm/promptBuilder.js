@@ -759,12 +759,13 @@ function buildWorldFactsBlock(worldFacts) {
     const shown = sorted.slice(0, MAX_PROMPT_WORLD_FACTS);
     const hiddenCount = Math.max(0, worldFacts.length - MAX_PROMPT_WORLD_FACTS);
 
-    // Group by category for readability
+    // Group by category for readability. Belt over the reducer's type guard:
+    // a fact record is save-persisted hostile input and must never crash here.
     const byCategory = {};
     for (const f of shown) {
-        const cat = f.category || 'general';
+        const cat = typeof f.category === 'string' && f.category ? f.category : 'general';
         if (!byCategory[cat]) byCategory[cat] = [];
-        byCategory[cat].push(f.fact);
+        byCategory[cat].push(String(f.fact ?? ''));
     }
     const lines = Object.entries(byCategory)
         .map(([cat, facts]) => `**[${cat.toUpperCase()}]**\n${facts.map(f => `- ${f}`).join('\n')}`)
@@ -794,7 +795,7 @@ function buildActiveConstraints(quests, worldFacts, character, party) {
     // Scan world facts for active threats (simple keyword detection)
     const threatKeywords = ['hunting', 'pursuing', 'wants the player dead', 'deadline', 'before the', 'bounty', 'wanted'];
     const threatFacts = (worldFacts || []).filter(f =>
-        threatKeywords.some(kw => f.fact.toLowerCase().includes(kw))
+        threatKeywords.some(kw => String(f?.fact ?? '').toLowerCase().includes(kw))
     );
     if (threatFacts.length > 0) {
         reminders.push(`Active threats/pressures:\n${threatFacts.map(f => `- ${f.fact}`).join('\n')}`);

@@ -113,7 +113,14 @@ function validateSaveState(payload) {
         quests: Array.isArray(payload.quests) ? payload.quests : [],
         journal: Array.isArray(payload.journal) ? payload.journal : [],
         npcs: Array.isArray(payload.npcs) ? payload.npcs : [],
-        worldFacts: Array.isArray(payload.worldFacts) ? payload.worldFacts : [],
+        // Heal poisoned saves: a pre-guard non-string fact/category crashed prompt
+        // building on every turn — re-type what's fixable, drop what isn't.
+        worldFacts: (Array.isArray(payload.worldFacts) ? payload.worldFacts : [])
+            .map(f => {
+                const sanitized = sanitizeWorldFactPayload(f);
+                return sanitized ? { ...f, ...sanitized } : null;
+            })
+            .filter(Boolean),
         storyMemory: Array.isArray(payload.storyMemory)
             ? payload.storyMemory.map(m => normalizeStoryMemoryCard(m)).filter(Boolean)
             : [],
@@ -238,6 +245,22 @@ const FACT_STOP_WORDS = new Set([
     'that', 'this', 'it', 'its', 'their', 'his', 'her', 'has', 'have', 'had',
     'by', 'for', 'with', 'at', 'on', 'as', 'be', 'been', 'from', 'now', 'not', 'no',
 ]);
+
+// World facts are hostile LLM input persisted forever: a non-string fact/category
+// spread raw into the store used to crash buildSystemPrompt on every later turn
+// (2026-07-23 audit). Explicit whitelist, typed, clamped — never spread the payload.
+const WORLD_FACT_MAX_LENGTH = 400;
+const WORLD_FACT_CATEGORY_MAX_LENGTH = 40;
+
+function sanitizeWorldFactPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    const fact = typeof payload.fact === 'string' ? payload.fact.trim().slice(0, WORLD_FACT_MAX_LENGTH) : '';
+    if (!fact) return null;
+    const category = (typeof payload.category === 'string' && payload.category.trim())
+        ? payload.category.trim().slice(0, WORLD_FACT_CATEGORY_MAX_LENGTH)
+        : 'general';
+    return { fact, category };
+}
 
 function factTokenSet(text) {
     const normalized = String(text || '')
@@ -2468,11 +2491,12 @@ export function gameReducer(state, action) {
 
         // --- World Facts ---
         case 'ADD_WORLD_FACT': {
+            const sanitized = sanitizeWorldFactPayload(action.payload);
+            if (!sanitized) return state;
             const fact = {
                 id: `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 timestamp: Date.now(),
-                category: 'general',
-                ...action.payload,
+                ...sanitized,
             };
             const existingSets = state.worldFacts.map(f => factTokenSet(f.fact));
             if (isNearDuplicateFact(fact.fact, existingSets)) return state;
@@ -2485,13 +2509,13 @@ export function gameReducer(state, action) {
             const existingSets = state.worldFacts.map(f => factTokenSet(f.fact));
             const newFacts = [];
             for (const f of action.payload || []) {
-                if (!f?.fact || isNearDuplicateFact(f.fact, existingSets)) continue;
-                existingSets.push(factTokenSet(f.fact));
+                const sanitized = sanitizeWorldFactPayload(f);
+                if (!sanitized || isNearDuplicateFact(sanitized.fact, existingSets)) continue;
+                existingSets.push(factTokenSet(sanitized.fact));
                 newFacts.push({
                     id: `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                     timestamp: Date.now(),
-                    category: 'general',
-                    ...f,
+                    ...sanitized,
                 });
             }
             if (newFacts.length === 0) return state;
@@ -3439,8 +3463,10 @@ export function gameReducer(state, action) {
                     ...(action.payload.settings || {}),
                     ...state.settings,
                 },
-                // Backfill new fields for old saves that don't have them
-                worldFacts: action.payload.worldFacts || [],
+                // Backfill new fields for old saves that don't have them.
+                // worldFacts comes from validateSaveState so the poisoned-fact heal
+                // (non-string fact/category) is never bypassed by this raw override.
+                worldFacts: validated.worldFacts,
                 fronts: loadedFronts,
                 session: loadedSession,
                 npcs: (action.payload.npcs || []).map(npc => migrateLegacyNpc(npc)),

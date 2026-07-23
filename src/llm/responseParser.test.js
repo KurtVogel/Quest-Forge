@@ -883,3 +883,20 @@ describe('detectSemanticTextRolls', () => {
         expect(rolls).toBeNull();
     });
 });
+
+describe('requested_rolls hostile-field guards (2026-07-23 audit)', () => {
+    it('coerces a truthy non-string skill/ability to null instead of crashing mid-batch', () => {
+        const raw = 'Careful now.\n\n```json\n' + JSON.stringify({
+            requested_rolls: [
+                { type: 'skill_check', skill: ['stealth', 'acrobatics'], dc: 12 },
+                { type: 'skill_check', skill: 42, ability: { weird: true }, dc: 10 },
+                { type: 'skill_check', skill: '  perception ', dc: 8 },
+            ],
+        }) + '\n```';
+        const { events } = parseResponse(raw);
+        expect(events.requestedRolls[0].skill).toBeNull();
+        expect(events.requestedRolls[1].skill).toBeNull();
+        expect(events.requestedRolls[1].ability).toBeNull();
+        expect(events.requestedRolls[2].skill).toBe('perception'); // trimmed
+    });
+});

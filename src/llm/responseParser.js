@@ -305,8 +305,10 @@ export function normalizeEvents(raw) {
         requestedRolls: Array.isArray(raw.requested_rolls)
             ? raw.requested_rolls.map(r => ({
                 type: r.type || 'skill_check',
-                skill: r.skill || null,
-                ability: r.ability || null,
+                // Type-guarded like dc/modifier: a truthy non-string (array/number)
+                // throws deep in rollResolver AFTER dice are shown (2026-07-23 audit).
+                skill: typeof r.skill === 'string' && r.skill.trim() ? r.skill.trim() : null,
+                ability: typeof r.ability === 'string' && r.ability.trim() ? r.ability.trim() : null,
                 dc: typeof r.dc === 'number' ? r.dc : 15,
                 description: r.description || '',
                 reason: String(r.reason || r.roll_reason || '').slice(0, 500),
