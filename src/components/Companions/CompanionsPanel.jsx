@@ -1,4 +1,5 @@
 import { useGame } from '../../state/GameContext.jsx';
+import { namesMatch } from '../../engine/npcRoster.js';
 import './Companions.css';
 
 export default function CompanionsPanel() {
@@ -6,6 +7,9 @@ export default function CompanionsPanel() {
 
     // Fall back to empty array if undefined
     const party = state.party || [];
+    // A companion's personal bond with the hero (stance + moments) lives in
+    // their roster NPC record — the party record carries only mechanics.
+    const npcs = state.npcs || [];
 
     if (party.length === 0) {
         return (
@@ -31,6 +35,10 @@ export default function CompanionsPanel() {
                     const hpPercent = Math.max(0, Math.min(100, (companion.hp / companion.maxHp) * 100));
                     const affinityPercent = Math.max(0, Math.min(100, companion.affinity || 50));
                     const status = companion.status || (companion.hp <= 0 ? 'downed' : 'healthy');
+                    const dossier = npcs.find(npc => namesMatch(npc.name, companion.name));
+                    const bondMoments = (dossier?.bondMoments || [])
+                        .map(moment => moment?.text)
+                        .filter(Boolean);
 
                     let affinityClass = '';
                     if (affinityPercent >= 75) affinityClass = 'affinity-high';
@@ -66,6 +74,24 @@ export default function CompanionsPanel() {
                             {(companion.keepsakes || []).length > 0 && (
                                 <div className="comp-keepsakes" title="Keepsakes from your journey together">
                                     {companion.keepsakes.join(' · ')}
+                                </div>
+                            )}
+
+                            {dossier?.stanceToPlayer && (
+                                <p className="comp-stance">
+                                    <span className="comp-bond-label">Toward you</span>
+                                    {dossier.stanceToPlayer}
+                                </p>
+                            )}
+
+                            {bondMoments.length > 0 && (
+                                <div className="comp-bond-moments">
+                                    <span className="comp-bond-label">Moments between you</span>
+                                    <ul className="comp-bond-list">
+                                        {[...bondMoments].reverse().slice(0, 4).map((moment, i) => (
+                                            <li key={i} title={moment}>{moment}</li>
+                                        ))}
+                                    </ul>
                                 </div>
                             )}
                         </div>

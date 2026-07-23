@@ -201,3 +201,36 @@
     font-style: italic;
     line-height: 1.35;
 }
+
+.comp-stance {
+    margin: 0.35rem 0 0;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.comp-bond-label {
+    display: block;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    opacity: 0.7;
+    margin-bottom: 0.1rem;
+}
+
+.comp-bond-moments {
+    margin-top: 0.35rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.comp-bond-list {
+    margin: 0;
+    padding-left: 1rem;
+}
+
+.comp-bond-list li {
+    margin-bottom: 0.15rem;
+}

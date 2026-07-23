@@ -303,6 +303,39 @@ describe('party block', () => {
         const text = prompt({ party: [] });
         expect(text).not.toContain('## COMPANIONS');
     });
+
+    it('surfaces the companion\'s roster stance and bond moments on the party line', () => {
+        const text = prompt({
+            party: [
+                { id: 'c1', name: 'Kaarina', role: 'shieldmaiden', level: 2, hp: 18, maxHp: 18, ac: 15, weapon: 'Longsword +1', attackBonus: 4, damage: '1d8+2', affinity: 75 },
+            ],
+            npcs: [
+                {
+                    id: 'npc-1', name: 'Kaarina', disposition: 'friendly', rosterTier: 'character', kind: 'character',
+                    stanceToPlayer: 'Trusts the hero with her life after the ford rescue; hides how much his recklessness frightens her.',
+                    bondMoments: [
+                        { text: 'The hero pulled Kaarina from the river at the ford.', at: 1 },
+                        { text: 'Kaarina gave the hero her mother\'s iron ring.', at: 2 },
+                    ],
+                },
+            ],
+        });
+        expect(text).toContain('Toward the hero: Trusts the hero with her life');
+        expect(text).toContain('Personal history with the hero: The hero pulled Kaarina from the river at the ford.; Kaarina gave the hero her mother\'s iron ring.');
+        // The DM contract: stance/bond updates route through npc_updates, not update_companions.
+        expect(text).toContain('`npc_updates` with `stanceToPlayer`');
+    });
+
+    it('renders a plain party line when the companion has no roster dossier', () => {
+        const text = prompt({
+            party: [
+                { id: 'c1', name: 'Terho', level: 1, hp: 9, maxHp: 9, ac: 12, affinity: 50 },
+            ],
+        });
+        expect(text).toContain('**Terho**');
+        expect(text).not.toContain('Toward the hero:');
+        expect(text).not.toContain('Personal history with the hero:');
+    });
 });
 
 describe('inventory block', () => {

@@ -921,6 +921,29 @@ function normalizeCompanion(payload = {}, existing = {}) {
 }
 
 /**
+ * Companion relationship memory lives in the NPC roster ("one system owns all
+ * bonds", DECISIONS.md 2026-07-23): the party record keeps combat mechanics and
+ * affinity, while the matching roster NPC record carries stanceToPlayer /
+ * bondMoments / dossier prose — captured by the Scribe's npc_updates exactly as
+ * for any NPC. Joining the party guarantees that record exists; an existing
+ * record is left untouched (the Scribe keeps it current, and re-seeding could
+ * clobber a richer dossier with defaults).
+ */
+function ensureCompanionRosterRecord(npcs = [], companion) {
+    const name = String(companion?.name || '').trim();
+    if (!name) return npcs;
+    if (npcs.some(npc => namesMatch(npc.name, name))) return npcs;
+    return mergeNpcUpdate(npcs, {
+        name,
+        kind: 'character',
+        rosterEligible: true,
+        disposition: 'friendly',
+        lastNotes: `Traveling with the hero as a party companion (${companion.role || 'ally'}).`,
+        ...(companion.appearance ? { appearance: companion.appearance } : {}),
+    });
+}
+
+/**
  * Strip blank fields ('', null, undefined) from an NPC payload so a thin update can
  * never erase detail that's already known. Once an NPC's personality, goal, or secret
  * is on record, a later turn that simply omits it leaves it intact — continuity wins
@@ -2940,9 +2963,11 @@ export function gameReducer(state, action) {
                     messages: [...state.messages, systemMessage(`The party is full (${MAX_PARTY_SIZE}/${MAX_PARTY_SIZE}). Someone must leave before another companion can join.`)],
                 };
             }
+            const added = normalizeCompanion(action.payload);
             return {
                 ...state,
-                party: [...party, normalizeCompanion(action.payload)],
+                party: [...party, added],
+                npcs: ensureCompanionRosterRecord(state.npcs, added),
             };
         }
 
@@ -3473,7 +3498,12 @@ export function gameReducer(state, action) {
                 worldFacts: validated.worldFacts,
                 fronts: loadedFronts,
                 session: loadedSession,
-                npcs: (action.payload.npcs || []).map(npc => migrateLegacyNpc(npc)),
+                // Companion relationship records ride the NPC roster; mint any that
+                // pre-parity saves are missing so every current companion has one.
+                npcs: (validated.party || []).reduce(
+                    (npcs, companion) => ensureCompanionRosterRecord(npcs, companion),
+                    (action.payload.npcs || []).map(npc => migrateLegacyNpc(npc))
+                ),
                 ui: { ...initialGameState.ui },
             };
         }

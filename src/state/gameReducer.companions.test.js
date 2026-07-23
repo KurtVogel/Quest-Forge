@@ -315,3 +315,82 @@ describe('companion keepsakes', () => {
         expect(state.party[0].keepsakes).toEqual(["the hero's carved bone whistle"]); // survives unrelated updates
     });
 });
+
+describe('companion roster relationship records (one system owns all bonds, 2026-07-23)', () => {
+    it('mints a roster NPC record when a companion joins the party', () => {
+        const next = gameReducer(makeState(), {
+            type: 'ADD_COMPANION',
+            payload: { name: 'Kaarina', role: 'shieldmaiden', appearance: 'A broad-shouldered woman with a notched shield.' },
+        });
+
+        expect(next.npcs).toHaveLength(1);
+        expect(next.npcs[0]).toMatchObject({
+            name: 'Kaarina',
+            kind: 'character',
+            disposition: 'friendly',
+            appearance: 'A broad-shouldered woman with a notched shield.',
+        });
+        expect(next.npcs[0].lastNotes).toContain('party companion (shieldmaiden)');
+    });
+
+    it('leaves an existing roster record untouched when that NPC joins the party', () => {
+        const state = makeState({
+            npcs: [{
+                id: 'npc-1', name: 'Kaarina', disposition: 'wary', rosterTier: 'character', kind: 'character',
+                stanceToPlayer: 'Owes the hero a debt she resents.',
+                lastNotes: 'Argued with the hero over the toll ledger.',
+            }],
+        });
+        const next = gameReducer(state, {
+            type: 'ADD_COMPANION',
+            payload: { name: 'Kaarina', role: 'shieldmaiden' },
+        });
+
+        expect(next.party).toHaveLength(1);
+        expect(next.npcs).toHaveLength(1);
+        expect(next.npcs[0].stanceToPlayer).toBe('Owes the hero a debt she resents.');
+        expect(next.npcs[0].disposition).toBe('wary');
+        expect(next.npcs[0].lastNotes).toBe('Argued with the hero over the toll ledger.');
+    });
+
+    it('matches existing records by core name so a leading-title variant is not duplicated', () => {
+        const state = makeState({
+            npcs: [{
+                id: 'npc-1', name: 'Captain Kaarina', disposition: 'friendly', rosterTier: 'character', kind: 'character',
+                stanceToPlayer: 'Fond of the hero.',
+            }],
+        });
+        const next = gameReducer(state, {
+            type: 'ADD_COMPANION',
+            payload: { name: 'Kaarina' },
+        });
+        expect(next.npcs).toHaveLength(1);
+    });
+
+    it('LOAD_GAME mints missing roster records for current party companions', () => {
+        const save = {
+            character: {
+                name: 'Testo', race: 'human', class: 'fighter', level: 2,
+                currentHP: 12, maxHP: 20, armorClass: 14,
+                abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 },
+            },
+            inventory: [],
+            messages: [],
+            party: [
+                { id: 'c1', name: 'Terho', level: 1, hp: 9, maxHp: 9, ac: 12, role: 'lamplighter' },
+                { id: 'c2', name: 'Kaarina', level: 2, hp: 18, maxHp: 18, ac: 15 },
+            ],
+            npcs: [{ id: 'npc-1', name: 'Kaarina', disposition: 'friendly', rosterTier: 'character', kind: 'character', stanceToPlayer: 'Loyal to the hero.' }],
+            combat: { active: false },
+            settings: {},
+        };
+        const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: save });
+
+        const terho = next.npcs.find(npc => npc.name === 'Terho');
+        const kaarina = next.npcs.find(npc => npc.name === 'Kaarina');
+        expect(terho).toBeTruthy();
+        expect(terho.lastNotes).toContain('party companion (lamplighter)');
+        expect(kaarina.stanceToPlayer).toBe('Loyal to the hero.');
+        expect(next.npcs).toHaveLength(2);
+    });
+});

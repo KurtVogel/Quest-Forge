@@ -18,6 +18,7 @@ import { TABLE_TALK_STANDING_RULE } from './tableTalk.js';
 import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js';
 import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
 import { isCompanionActive } from '../engine/combatExchange.js';
+import { namesMatch } from '../engine/npcRoster.js';
 
 /**
  * Build the complete system prompt for the LLM.
@@ -110,7 +111,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
 
     // Party / Companions
     if (party && party.length > 0) {
-        parts.push(buildPartyBlock(party));
+        parts.push(buildPartyBlock(party, npcs || []));
     }
 
     // Inventory
@@ -644,7 +645,7 @@ The player has already spent Action Surge. Their next declared action gets one a
 - The client clears this state only after both validated slots commit successfully.`;
 }
 
-function buildPartyBlock(party) {
+function buildPartyBlock(party, npcs = []) {
     return `## COMPANIONS (PARTY)
 These characters are currently traveling with the player. They act in combat and can be conversed with.
 ${party.map(c => {
@@ -652,10 +653,25 @@ ${party.map(c => {
         const conditions = c.conditions?.length ? ` | Conditions: ${c.conditions.join(', ')}` : '';
         const weaponBonus = c.weaponBonus || 0;
         const keepsakes = (c.keepsakes || []).length ? ` | Keepsakes from the hero: ${c.keepsakes.join('; ')}` : '';
-        return `- **${c.name}** (id: ${c.id}) | Role: ${c.role || 'ally'} | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Attack: ${c.weapon || 'Unarmed'} ${formatModifier((c.attackBonus ?? 0) + weaponBonus)} (${c.damage || '1d4+1'}${weaponBonus ? `+${weaponBonus}` : ''}) | Status: ${status} | Affinity: ${c.affinity}/100${conditions}${keepsakes}`;
+        const line = `- **${c.name}** (id: ${c.id}) | Role: ${c.role || 'ally'} | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Attack: ${c.weapon || 'Unarmed'} ${formatModifier((c.attackBonus ?? 0) + weaponBonus)} (${c.damage || '1d4+1'}${weaponBonus ? `+${weaponBonus}` : ''}) | Status: ${status} | Affinity: ${c.affinity}/100${conditions}${keepsakes}`;
+        // The companion's personal bond with the hero lives in their roster NPC
+        // record ("one system owns all bonds") — surface it right on the party
+        // line so it never depends on KNOWN NPCs curation.
+        const dossier = npcs.find(npc => namesMatch(npc.name, c.name));
+        const bond = [];
+        if (dossier?.stanceToPlayer) {
+            bond.push(`  Toward the hero: ${String(dossier.stanceToPlayer).slice(0, 300)}`);
+        }
+        const moments = (Array.isArray(dossier?.bondMoments) ? dossier.bondMoments : [])
+            .slice(-2).map(m => String(m?.text || '').trim()).filter(Boolean);
+        if (moments.length > 0) {
+            bond.push(`  Personal history with the hero: ${moments.join('; ').slice(0, 300)}`);
+        }
+        return bond.length > 0 ? `${line}\n${bond.join('\n')}` : line;
     }).join('\n')}
 A DOWNED companion is unconscious but ALIVE and recoverable through healing or rest — never narrate their death as a side remark. If the fiction genuinely, deliberately kills a companion, you MUST emit \`remove_companions\` for them in that same response; while they remain on this list, they are alive.
-When the player's own action brings a downed companion back (a potion, healing magic, dragging them to safety), that is a natural moment to warm the companion's affinity and personal stance via \`update_companions\`; repeatedly leaving them downed and unaided naturally cools it.`;
+Companions are people, not gear: play an established "Toward the hero" stance and personal history consistently in every scene. When an exchange genuinely shifts how a companion regards the hero, record it exactly as for any NPC — \`npc_updates\` with \`stanceToPlayer\` (their complete current stance) and \`bondMoment\` (the moment itself); \`update_companions\` carries only mechanics, affinity, and keepsakes.
+When the player's own action brings a downed companion back (a potion, healing magic, dragging them to safety), that is a natural moment to warm the companion's affinity via \`update_companions\` and their personal stance via \`npc_updates\`; repeatedly leaving them downed and unaided naturally cools it.`;
 }
 
 function buildInventoryBlock(inventory, character) {
