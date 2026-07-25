@@ -31,11 +31,16 @@ companions first-class `npc_updates` subjects, and the Companions panel shows "T
 "Moments between you". Why: the party is the most sustained relationship surface in the game.
 Follow-up idea kept separate: the relationship timeline view (below) now benefits companions too.
 
-### Relationship timeline view — status: `idea`
+### Relationship timeline view — status: partially `shipped` (2026-07-25), archival still `idea`
 `bondMoments` is capped at 8 for prompt economy, but the full history could be archived (e.g.
 oldest moments folded into a compact "relationship chronicle" paragraph on overflow instead of
 dropped) and shown as a scrollable timeline in the Journal card. Why: long romances/rivalries
 lose their earliest beats exactly when they've become the most meaningful.
+
+**Shipped 2026-07-25 (the disposition half):** the Journal card's "Arc" row is now an
+expandable timeline — collapsed it keeps the 2026-07-23 latest-shift-only ruling, expanded
+it lists every recorded `relationshipHistory` step with date, from → to, and note. The
+bondMoments overflow-archival ("relationship chronicle" fold) remains open.
 
 ### Escape the Elara/Silas/Thorne naming basin — status: `shipped` (2026-06-22)
 Live campaigns repeatedly converged on the same high-probability LLM fantasy names; the response
@@ -514,12 +519,16 @@ offer a Generate Portrait step inline so the hero has a face before the first sc
 [MARKETING.md](MARKETING.md) steal-table. Why: the immediate face makes the character feel real
 and is one of the most screenshot/trailer-friendly moments we can offer.
 
-### Scene-art polish follow-ups — status: `idea`, small
+### Scene-art polish follow-ups — status: partially `shipped` (2026-07-25)
 Now that scene art runs on xAI + Scribe-composed prompts (shipped 2026-06-14) and has
 target modes for Scene / Character / Custom (shipped 2026-06-15): a 1k/2k resolution toggle
 in Settings; a "regenerate" button (new seed) on a scene; optionally persist generated scene
 images to a gallery/journal. Also consider surfacing the moderation-filtered case to the
 player (currently it just silently falls back).
+
+**Shipped 2026-07-25:** the "Reroll image" button (cache-bypassing regenerate, live-verified),
+and every fallback case is now labeled — including the new Gemini quality-fallback tier
+(DECISIONS.md 2026-07-25). Still open: resolution toggle, gallery/journal persistence.
 
 ### Companion combat depth — status: combat v1 `shipped` (2026-06-15), relationship depth `idea`
 Shipped v1: companions are lightweight allies with normalized combat stats, a 4-companion
@@ -844,15 +853,19 @@ scored on JSON behavior. Run before prompt changes. Builds on the vitest fixture
 (shipped 2026-06-11). DEV-mode hook that dumps unparseable LLM responses into fixture files —
 players generate the test corpus.
 
-### Code splitting — status: `idea`, low priority (pre-public)
-Bundle is ~884 KB minified (Vite warns at 500 KB). Dynamic import for Firebase and/or
-SceneArt would cut initial load meaningfully. Deferred until the public-launch project.
+### Code splitting — status: vendor chunks `shipped` (2026-07-25), dynamic import still `idea`
+Bundle was ~1.07 MB minified in one chunk (Vite warns at 500 KB). Shipped: `manualChunks`
+vendor split — `vendor-react` (192 KB) + `vendor-firebase` (330 KB) now hash separately
+from app code (549 KB), so with Hosting's immutable `/assets/**` policy, app deploys stop
+invalidating ~520 KB of unchanged vendor bytes in players' caches. Still open (low
+priority, pre-public): dynamic `import()` for Firebase/SceneArt to cut *initial* load.
 
-### Fix "Continue as Guest" — status: `idea`, decide: fix or remove
+### Fix "Continue as Guest" — status: `resolved: removed` (2026-07-25)
 Anonymous auth is **disabled** in the Firebase project (`ADMIN_ONLY_OPERATION`, verified
-2026-06-10), so the Guest button errors. Either enable anonymous auth in the console or
-drop the button. Note: guest UIDs are per-device, so guest cloud saves would never sync
-across devices anyway — removal is probably right.
+2026-06-10), so the Guest button errored. Resolution: the button was already gone from the
+UI; the dead `signInAsGuest` function is now removed from `auth.js` too. Guest UIDs are
+per-device, so guest cloud saves would never have synced across devices — removal was the
+right call. Signed-out play (local saves) remains fully supported.
 
 ---
 

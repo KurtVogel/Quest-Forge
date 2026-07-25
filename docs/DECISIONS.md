@@ -8,6 +8,28 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-25 · Scene-art direction: keep xAI primary, Gemini 3 Pro Image replaces Pollinations as the quality fallback — not the full Gemini pivot.**
+Settled by a 9-image side-by-side spike (identical prompts: female-NPC portrait, two-character
+tavern scene, and the hard case — an armored dwarf woman explicitly tagged "(woman)" three
+ways). Results: xAI Grok Imagine 3/3 gender-correct, excellent, fastest (~5-9 s);
+`gemini-3-pro-image` 3/3 gender-correct, arguably the best pure art (~17 s);
+**`gemini-3.1-flash-image` FAILED the hard case** — rendered a bearded male dwarf, exactly
+the misgendering failure the gender-registration work exists to prevent. Decisions: (1) xAI
+stays the primary renderer when an image key is set — proven quality plus the adult-content
+latitude a mature game needs (Gemini image moderation is stricter, a real risk for this
+app's content model). (2) The silent low-quality Pollinations fallback is replaced by
+`gemini-3-pro-image` on the **mandatory machinery key** — every player has one, so the
+quality floor becomes a real image model; pro tier, never flash, because the fallback must
+not reintroduce the misgendering bug; `imageConfig.aspectRatio` verified working.
+Pollinations survives only as a labeled last resort when both real providers fail. (3) The
+full "re-platform everything on Gemini, drop xAI" pivot is REJECTED for now on the flash
+gender failure + moderation risk; portrait-at-creation and richer NPC portraits remain open
+IDEAS on top of this plumbing (the SceneArt Character focus mode already renders NPC
+portraits and now carries the registered gender tag). Also shipped with this: the Reroll
+button (cache-bypassing regenerate — generation is the point of the feature), the
+Pollinations URL prompt cap, and full test coverage of the degradation chain, which clears
+all four parked scene-art queue items.
+
 **2026-07-25 · NPC gender is a first-class structured roster field, not a hope buried in appearance prose.**
 Live failure: Vesa requested art of a female NPC and got a male figure — her appearance
 record never stated gender, and the art pipeline had nothing to anchor on (the HERO's

@@ -4,8 +4,45 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-25 (both 07-25 audit batches fixed — queue empty except the four
-parked scene-art items — and NPC gender registration shipped.)_
+_Last updated: 2026-07-25, later (scene-art direction settled by spike + implemented —
+strengthening queue now COMPLETELY empty — plus playtest #13, vendor code splitting,
+arc timeline, guest cleanup.)_
+
+## Scene-art decision + implementation, playtest #13, small-items sweep (2026-07-25, later)
+
+Vesa delegated the whole "what next" list; everything ran autonomously in one session.
+1144 tests + lint green, deployed.
+
+**Scene-art direction settled by a 9-image provider spike** (DECISIONS.md 2026-07-25):
+identical prompts (female-NPC portrait / two-character tavern scene / armored-dwarf-woman
+hard case) through xAI Grok Imagine, `gemini-3.1-flash-image`, and `gemini-3-pro-image`.
+xAI and Gemini Pro were 3/3 gender-correct and excellent; **Gemini Flash FAILED the hard
+case** (bearded male dwarf despite three explicit "woman" cues — the exact reported bug).
+Ruling: NOT the full Gemini pivot — xAI stays primary (quality + adult-content latitude),
+but the silent Pollinations fallback is replaced by `gemini-3-pro-image` on the mandatory
+machinery key, so every player's quality floor is now a real image model; Pollinations is a
+labeled last resort only. Implemented with it: the **Reroll image** button (cache bypass),
+gender tags in all focus/scene entity descriptors (companions pull gender/appearance from
+their linked roster record), an inviolable-gender rule in the art director prompt,
+Pollinations URL prompt cap, and 19 imageGen tests covering the whole degradation chain —
+**clearing all four parked scene-art queue items. The strengthening queue is now empty.**
+
+**Playtest #13 (gender verification, fresh "The Ferrywoman's Debt" campaign):** premise
+planted a female ferrywoman (Aune Virtapää) and male innkeeper. The DM emitted `gender` for
+BOTH NPCs in its turn-one npc_updates (the new prompt contract working immediately); the
+Scribe merged Aune's appearance; the autosave carried `gender: "woman"` / `"man"` on single
+unforked records; Journal cards showed the WOMAN/MAN badges; the Character-focus portrait
+prompt carried "Aune Virtapää (woman)" + her full appearance; xAI rendered, and Reroll
+produced a genuinely new image. Zero console errors. (Note: the dev-browser profile was
+fresh — the old Saima campaign lives in another profile, so the stance-stutter watch item
+carries to a future session on that save.)
+
+**Small items:** vendor code splitting shipped (`vendor-react` 192 KB + `vendor-firebase`
+330 KB now hash separately from the 549 KB app chunk — immutable-cached across deploys);
+Journal "Arc" row expands into the full relationship timeline (dates, from → to, notes;
+collapsed default keeps the 07-23 latest-shift ruling; bondMoments archival remains the
+open half of the IDEAS entry); dead `signInAsGuest` removed (anonymous auth disabled
+server-side since 2026-06-10 — IDEAS resolved as "removed").
 
 ## Audit-fix session 2026-07-25: both fresh batches cleared + NPC gender registration
 
