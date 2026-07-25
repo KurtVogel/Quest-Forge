@@ -55,8 +55,8 @@ it under Process notes.
 | memory-journal | `engine/worldJournal.js` | 2026-07-18 |
 | story-memory | `engine/storyMemory.js` | 2026-07-14 |
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-07-15 |
-| persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-07-12 |
-| cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-07-09 |
+| persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-07-25 |
+| cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-07-25 |
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-07-12 |
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-07-15 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-07-25 |
@@ -159,6 +159,11 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (quests, 2026-07-25): a quest with a valid `name` but missing/typo'd `status` matches no dispatch branch and is silently dropped — the DM's "job accepted" intent vanishes with no trace; consider defaulting unknown-but-identified updates to `new` — `llm/responseParser.js:731-738`.
 - [ ] **P2** (combat-exchange, 2026-07-25): `normalizeCombatExchange`'s top-level non-object guard (null/array/string → null, `:104`), `reconcileStartingCombatExchange`'s null-on-normalize-failure (`:205`), and the flood `slice` caps (playerSlots 2 / enemyIntents 30 / companionIntents 4) are all untested — add hostile-envelope + cap tests mirroring dice-engine's `MAX_DICE_COUNT` — `engine/combatExchange.js:104,110,141,162,205`.
 - [ ] **P2** (combat-exchange, 2026-07-25): `resolvePlayerSlots` reads `character.spellSlots`/`.name` without `?.` (`:926`) while `validatePlayerSlots` optional-chains `state.character?.` — a null character on an active-combat save passes validation then throws in resolve; add a character-presence guard at `planCombatExchange` entry (latent — combat shouldn't be active characterless) — `engine/combatExchange.js:926,1399`.
+- [ ] **P1** (persistence, 2026-07-25): a `null`/non-object entry in a save's `messages` array makes the campaign **un-loadable** — `validateSaveState` deliberately passes junk messages through unchanged, and LOAD_GAME's own `prunedMessageCount` derivation then throws (`null.summarized`); the identical unguarded `.filter(m => m.summarized)` sits in BOTH save paths, so it would also brick autosave + cloud save. Any JSON round-trip mints `null` from an `undefined` hole (`JSON.stringify([undefined]) === '[null]'`, and cloud saves ARE a JSON round-trip). One-line fix: drop non-object entries in the heal — `gameReducer.js:106-112,3459`, `persistence.js:141`, `cloudSync.js:68`.
+- [ ] **P2** (persistence, 2026-07-25): `saveRosterCharacter` mints `char-${Date.now()}` for a no-id hero but the id is never written back to live state (`CharacterSheet.handleSaveToRoster` ignores the returned entry) — a legacy pre-id-era hero duplicates a roster entry on every "Save to Roster" click; dispatch the minted id back — `persistence.js:254`, `CharacterSheet.jsx:107`.
+- [ ] **P2** (persistence, 2026-07-25): `loadSettings` returns raw `JSON.parse` output with no plain-object guard — a corrupted `rpg-client-settings` value parsing to a string spreads junk index keys into settings via GameContext's `{...initial.settings, ...savedSettings}` — `persistence.js:31-32`, `GameContext.jsx:34-35`.
+- [ ] **P2** (cloud-sync, 2026-07-25): `loadGameFromCloud` returns whatever `JSON.parse` yields with no top-level plain-object guard — a corrupted payload parsing to a number/string/array passes callers' truthy checks and dispatches LOAD_GAME with a primitive (a string even spreads index junk through `validateSaveState`); return null unless plain object — `cloudSync.js:150,155`, `App.jsx:74`, `SettingsModal.jsx:133`.
+- [ ] **P2** (cloud-sync, 2026-07-25): loading a cloud save with an expired/absent auth session falls through `if (isCloud && state.user?.uid)` into the LOCAL branch, finds nothing, and silently no-ops — surface a "sign in to load cloud saves" error instead — `SettingsModal.jsx:128-132`, `App.jsx:68-72`.
 - [ ] **P1** (scene-art, 2026-07-22): the xAI degradation branches — `xai-empty`/moderation-filtered (`imageGen.js:123-125`), the network/parse `catch` (132-135), the pollinations `cacheSet`, and the cache-hit early return (88-90) — are all untested; `imageGen.test.js` covers only missing-key/success/prefix/http-401, so the fallback wiring an adult-content app leans on has no regression net — `llm/providers/imageGen.js:88-135`.
 - [ ] **P2** (scene-art, 2026-07-22): no length cap on the composed/fallback prompt before it is `encodeURIComponent`'d into the Pollinations `<img src>` — a long DM narration (`SceneArt.jsx:168-171` uses the whole last turn) can exceed browser/CDN URL limits and the `<img>` fails silently (never fetched, so the catch never fires); `slice()` the prompt (~1–2k) — `imageGen.js:141-142` + `scribe.js:721`.
 - [x] **P2** (hidden-fronts, 2026-07-22): `UPDATE_FRONT` lets the DM's per-turn channel regress portent stage by 1 (`gameReducer.js:2713`, `Math.max(existing-1, …)`) while the cadence engine keeps stage monotonic (`fronts.js:239`); CLAUDE.md specifies "non-regressing portent stages" — decide whether this softening is intended and document it, else clamp. *Fixed 2026-07-22: clamped upward-only (DECISIONS.md 2026-07-22 — the DM cannot see stage values since the tempo redesign, so a lower stage was always a blind guess; clock softening unchanged); test.*
@@ -191,6 +196,33 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-25 — cloud-sync + persistence (Lap 2: robustness against hostile input) — second run
+
+`npm test`: 1112 passing / 69 files.
+
+Rotation excluded (last 6, local ∪ origin — identical at `ad2d3c0`): quests, combat-exchange (07-25), scribe, roll-resolution (07-23), scene-art, hidden-fronts (07-22), dice-engine, chat-orchestration (07-21), providers-adapter, memory-journal (07-18), progression, prompt-building (07-16). Oldest eligible → **cloud-sync** (07-09); the 07-12 tie persistence/character-vault broke to lowest coverage → **persistence** (86.25 < 88.75). Coverage snapshot (07-21) still under 7 days — not refreshed.
+
+### persistence (`state/persistence.js` + the LOAD_GAME heal boundary it feeds)
+- **Scope examined:** `persistence.js` end to end (openDB, save/load/list/delete, roster, autosave, `serializeGameState`); `validateSaveState` + LOAD_GAME (`gameReducer.js:97-196,3420-3480`); consumers (`App.jsx:20-78`, `SettingsModal.jsx:95-175`, `CharacterSheet.jsx:105-118`, `CharacterCreation.jsx:145-188`); `persistence.test.js`.
+- **Findings:**
+  - **P1 (poisoned save → un-loadable campaign):** `validateSaveState`'s messages heal keeps non-object entries as-is (`if (!message || typeof message !== 'object' || !message.narrationCue) return message` — `null` stays `null`, `gameReducer.js:106-112`), and the SAME action then runs `.filter(m => m.summarized)` at `gameReducer.js:3459` — `null.summarized` throws, LOAD_GAME crashes, and the save can never be loaded again. The identical unguarded filter sits in BOTH save paths (`persistence.js:141`, `cloudSync.js:68`), so junk that somehow reached live state would also brick every autosave and cloud save. A JSON round-trip mints exactly this poison from an `undefined` array hole (`JSON.stringify([undefined]) === '[null]'`), and cloud saves are a JSON round-trip. One-line fix at the heal boundary: drop non-object message entries.
+  - **P2 (legacy roster duplicates):** `saveRosterCharacter` mints `char-${Date.now()}` when `character.id` is missing (`:254`) but nothing writes it back — `handleSaveToRoster` ignores the return (`CharacterSheet.jsx:107`), so a pre-id-era hero creates a new roster entry per click. Forged/roster heroes are fine (`createCharacter` mints ids; roster-begin stamps `id: selectedHero.id`).
+  - **P2:** `loadSettings` returns raw `JSON.parse` output; GameContext's truthy-check + spread lets a corrupted non-object value scatter junk index keys into settings (no crash — model validation follows) — `persistence.js:31-32`, `GameContext.jsx:34-35`.
+  - **Verified strong:** onblocked timeout, `tx.onabort` closes on every read AND write path, resolve-on-COMMIT, spread-plus-strip serializer with tested 4-secret stripping, contiguous-prefix `prunedMessageCount`, roster no-id fallback itself tested.
+- **Suggested improvements:** (1) `.filter(m => m && typeof m === 'object')` in the messages heal + a poisoned-save load test; (2) dispatch the minted roster id back to state after Save to Roster; (3) plain-object guard in `loadSettings`.
+
+### cloud-sync (`state/cloudSync.js`, `state/auth.js`, chunked Firestore saves)
+- **Scope examined:** all four cloudSync functions, `splitPayload`/`cloudDocId`; consumers (`App.jsx:66-78`, `SettingsModal.jsx:95-175,270-280`); `auth.js`; `cloudSync.test.js`, `cloudSync.nodb.test.js`.
+- **Findings:**
+  - **Shares the P1 above** at `cloudSync.js:68` (same null-throwing `m.summarized` filter); the validateSaveState heal closes it for both paths at once.
+  - **P2 (no shape guard on the parsed payload):** `loadGameFromCloud` returns whatever `JSON.parse` yields (`:150,155`) — a corrupted payload parsing to a number/string/array passes the callers' `if (savedState)` truthy checks (`App.jsx:74`, `SettingsModal.jsx:133`) and dispatches LOAD_GAME with a primitive, which `validateSaveState` quietly turns into a character-less husk state (a string even spreads index junk). Return null unless the parse is a plain object.
+  - **P2 (silent no-op):** cloud Load with an expired/absent session falls through `isCloud && state.user?.uid` into the LOCAL branch, finds nothing, does nothing — no player-visible error (`SettingsModal.jsx:128-132`, `App.jsx:68-72`).
+  - **Verified strong (the point of the lap):** transactional chunk-count read + stale-chunk sweep — the cross-device race degrades to a clean missing-chunk null, never a torn payload; surrogate-safe `splitPayload` (emoji test); reserved `__autosave__` doc mapping; hostile `payloadChunks` (NaN/huge) degrades cleanly; slotIds are `save-${Date.now()}` — Firestore-path safe. Coverage 96.33% with failure paths tested since 07-13/07-23.
+- **Suggested improvements:** (1) plain-object guard at the JSON.parse boundary + test; (2) "sign in to load cloud saves" message instead of the silent fallthrough; (3) hostile-metadata test (payloadChunks NaN / absurdly large).
+
+### Process notes
+- Second run this date (user-requested, same Lap 2 lens); the scheduled 6:00 run covered quests + combat-exchange. Queue deduped — the checked 07-09/07-12 cloud-sync/persistence items don't overlap these. No registry changes beyond dates.
 
 ## 2026-07-25 — quests + combat-exchange (Lap 2: robustness against hostile input)
 
