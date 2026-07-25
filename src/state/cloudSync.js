@@ -65,7 +65,8 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // Cloud saves now carry the FULL message history, same as local saves —
         // chunking removed the 1 MiB reason to trim summarized scrollback.
         const messages = gameState.messages || [];
-        const prunedMessageCount = messages.filter(m => m.summarized).length;
+        // `m?.` belt: a null entry in live state must not brick every cloud save.
+        const prunedMessageCount = messages.filter(m => m?.summarized).length;
         const trimmedState = {
             ...serializeGameState(gameState),
             session: { ...gameState.session, prunedMessageCount },
@@ -132,6 +133,13 @@ export async function loadGameFromCloud(uid, slotId) {
         if (!docSnap.exists()) return null;
         const data = docSnap.data();
 
+        // A corrupted payload parsing to a number/string/array passes callers'
+        // truthy checks and reaches LOAD_GAME as a primitive — only a plain
+        // object is a save (2026-07-25 audit).
+        const asSaveObject = (parsed) => (
+            parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+        );
+
         if (data.payloadChunks > 0) {
             const snapshot = await getDocs(chunksCollection(uid, slotId));
             const chunks = [];
@@ -147,12 +155,12 @@ export async function loadGameFromCloud(uid, slotId) {
                 }
             }
             console.log(`Cloud load successful: ${slotId} (${data.payloadChunks} chunks)`);
-            return JSON.parse(chunks.slice(0, data.payloadChunks).join(''));
+            return asSaveObject(JSON.parse(chunks.slice(0, data.payloadChunks).join('')));
         }
 
         if (data.payload) {
             console.log(`Cloud load successful: ${slotId}`);
-            return JSON.parse(data.payload);
+            return asSaveObject(JSON.parse(data.payload));
         }
         return null;
     } catch (e) {

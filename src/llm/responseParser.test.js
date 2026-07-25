@@ -772,6 +772,51 @@ describe('applyEvents dispatch coverage', () => {
         expect(questCalls[0][0].payload.name).toBe('Real Quest');
     });
 
+    it('type-guards quest updates: object-valued name/description cannot reach the save (2026-07-25 P1)', () => {
+        const { events } = parseResponse(fence({
+            quest_updates: [
+                // Object name survives a truthiness guard ('[object Object]') and
+                // would crash QuestPanel's render permanently.
+                { status: 'new', name: { title: 'Sneaky object' }, description: 'desc' },
+                { status: 'new', name: 'Valid Quest', description: { nested: 'object' } },
+                { status: 'new', name: 42, description: 'numeric name' },
+            ],
+        }));
+        expect(events.questUpdates).toHaveLength(1);
+        expect(events.questUpdates[0].name).toBe('Valid Quest');
+        expect(events.questUpdates[0].description).toBeUndefined();
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({ character: {}, party: [] }));
+        const questCalls = dispatch.mock.calls.filter(([action]) => action.type === 'ADD_QUEST');
+        expect(questCalls).toHaveLength(1);
+        expect(typeof questCalls[0][0].payload.name).toBe('string');
+    });
+
+    it('accepts a numeric quest id by coercing it to a string', () => {
+        const { events } = parseResponse(fence({
+            quest_updates: [{ status: 'completed', id: 7, name: 'Find the relic' }],
+        }));
+        expect(events.questUpdates[0].id).toBe('7');
+    });
+
+    it('defaults an identified quest with a missing or misspelled status to new instead of dropping it', () => {
+        const dispatch = run({
+            quest_updates: [
+                { name: 'Accepted Job', description: 'The DM forgot the status field.' },
+                { status: 'complated', id: 'q9', name: 'Typo Quest' },
+            ],
+        });
+        const questCalls = dispatch.mock.calls.filter(([action]) => action.type === 'ADD_QUEST');
+        expect(questCalls.map(([action]) => action.payload.name)).toEqual(['Accepted Job', 'Typo Quest']);
+    });
+
+    it('caps a quest_updates flood at 8 entries', () => {
+        const { events } = parseResponse(fence({
+            quest_updates: Array.from({ length: 40 }, (_, i) => ({ status: 'new', name: `Quest ${i}` })),
+        }));
+        expect(events.questUpdates).toHaveLength(8);
+    });
+
     it('dispatches combat start/end, enemy, and companion updates', () => {
         const dispatch = run({
             combat_start: { enemies: [{ name: 'Goblin', hp: 7, maxHp: 7, ac: 12 }] },

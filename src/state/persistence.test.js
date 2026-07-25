@@ -50,6 +50,17 @@ describe('settings (localStorage)', () => {
         globalThis.localStorage.setItem('rpg-client-settings', '{not valid json');
         expect(loadSettings()).toBeNull();
     });
+
+    it('returns null when the stored value parses to a non-object (2026-07-25 audit)', () => {
+        // A string would spread junk index keys into settings via GameContext's
+        // `{...defaults, ...saved}` merge; arrays are equally not settings.
+        globalThis.localStorage.setItem('rpg-client-settings', '"corrupted"');
+        expect(loadSettings()).toBeNull();
+        globalThis.localStorage.setItem('rpg-client-settings', '[1,2,3]');
+        expect(loadSettings()).toBeNull();
+        globalThis.localStorage.setItem('rpg-client-settings', '42');
+        expect(loadSettings()).toBeNull();
+    });
 });
 
 function makeGameState(overrides = {}) {
@@ -212,6 +223,15 @@ describe('character roster', () => {
     it('generates an id when the character has none', async () => {
         const entry = await saveRosterCharacter({ name: 'No Id Hero', race: 'elf', class: 'wizard', level: 1 }, []);
         expect(entry.id).toMatch(/^char-/);
+    });
+
+    it('embeds a minted id into the stored character so callers can adopt it (2026-07-25 audit)', async () => {
+        // Without adoption, a legacy pre-id-era hero duplicated a roster entry
+        // on every "Save to Roster" click.
+        const entry = await saveRosterCharacter({ name: 'No Id Hero', race: 'elf', class: 'wizard', level: 1 }, []);
+        expect(entry.character.id).toBe(entry.id);
+        const withId = await saveRosterCharacter(makeHero(), []);
+        expect(withId.character.id).toBe('hero-1');
     });
 
     it('deletes a roster hero', async () => {

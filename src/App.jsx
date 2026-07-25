@@ -14,6 +14,7 @@ function StartScreen() {
   const [saves, setSaves] = useState([]);
   const [cloudSaves, setCloudSaves] = useState([]);
   const [cloudLoadError, setCloudLoadError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [showSaves, setShowSaves] = useState(false);
 
@@ -64,8 +65,15 @@ function StartScreen() {
   };
 
   const handleLoadSave = async (slotId, isCloud = false) => {
+    setLoadError('');
+    // An expired/absent session used to fall through to the LOCAL branch,
+    // find nothing, and silently do nothing (2026-07-25 audit).
+    if (isCloud && !state.user?.uid) {
+      setLoadError('Sign in with Google to load cloud saves — your session has expired or you are signed out.');
+      return;
+    }
     let savedState = null;
-    if (isCloud && state.user?.uid) {
+    if (isCloud) {
       savedState = await loadGameFromCloud(state.user.uid, slotId);
     } else {
       savedState = await loadGame(slotId);
@@ -74,6 +82,8 @@ function StartScreen() {
     if (savedState) {
       clearImageCache();
       dispatch({ type: 'LOAD_GAME', payload: savedState });
+    } else {
+      setLoadError('That save could not be loaded — details in the browser console.');
     }
   };
 
@@ -159,6 +169,12 @@ function StartScreen() {
             </span>
           </button>
         </div>
+
+        {loadError && (
+          <div className="start-cloud-error">
+            {loadError}
+          </div>
+        )}
 
         {showSaves && (
           <div className="start-saves-list">

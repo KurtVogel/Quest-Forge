@@ -104,7 +104,12 @@ export default function CharacterSheet() {
 
     const handleSaveToRoster = async () => {
         try {
-            await saveRosterCharacter(character, state.inventory);
+            const entry = await saveRosterCharacter(character, state.inventory);
+            // A legacy hero without an id gets one minted by the roster store —
+            // adopt it so re-saving updates that entry instead of duplicating it.
+            if (!character.id && entry?.id) {
+                dispatch({ type: 'UPDATE_CHARACTER', payload: { id: entry.id } });
+            }
             dispatch({
                 type: 'ADD_MESSAGE',
                 payload: {

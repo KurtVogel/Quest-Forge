@@ -1400,6 +1400,10 @@ export function planCombatExchange(state, exchange) {
     if (!state.combat?.active || ![COMBAT_PHASES.AWAITING_PLAYER, COMBAT_PHASES.AWAITING_INTENT].includes(state.combat.phase)) {
         return { ok: false, error: 'Combat is not waiting for a player action.' };
     }
+    // Latent but load-reachable: validatePlayerSlots optional-chains state.character
+    // while resolvePlayerSlots does not — a characterless save with active combat
+    // would pass validation and then throw mid-resolve (2026-07-25 audit).
+    if (!state.character) return { ok: false, error: 'No active character — the exchange cannot resolve.' };
     if (!exchange) return { ok: false, error: 'The DM did not provide a valid combat exchange.' };
     const validation = validatePlayerSlots(exchange, state);
     if (!validation.ok) return validation;

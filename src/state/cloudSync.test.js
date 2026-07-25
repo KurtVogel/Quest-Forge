@@ -137,6 +137,17 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         expect(loaded.character.name).toBe('Astra');
     });
 
+    it('returns null when the payload parses to a non-object (2026-07-25 audit)', async () => {
+        // A corrupted payload parsing to a primitive/array passed callers'
+        // truthy checks and reached LOAD_GAME as a non-save value.
+        await saveGameToCloud('u1', 'slot-corrupt', makeGameState());
+        const main = firestore.__store.get('users/u1/saves/slot-corrupt');
+        for (const junk of ['"corrupted string"', '42', '[1,2,3]', 'null']) {
+            main.payload = junk;
+            expect(await loadGameFromCloud('u1', 'slot-corrupt')).toBeNull();
+        }
+    });
+
     it('never splits a surrogate pair at a chunk boundary', async () => {
         // Emoji are two code units each; a naive fixed-size slice would cut pairs.
         await saveGameToCloud('u1', 'slot-emoji', makeGameState({

@@ -128,6 +128,40 @@ describe('combat-start reference reconciliation', () => {
     });
 });
 
+describe('hostile intent envelopes (2026-07-25 audit)', () => {
+    it('rejects non-object top-level envelopes outright', () => {
+        expect(normalizeCombatExchange(null)).toBeNull();
+        expect(normalizeCombatExchange(undefined)).toBeNull();
+        expect(normalizeCombatExchange('attack the goblin')).toBeNull();
+        expect(normalizeCombatExchange(42)).toBeNull();
+        expect(normalizeCombatExchange([{ player_slots: [{ action: 'attack' }] }])).toBeNull();
+    });
+
+    it('reconcileStartingCombatExchange returns null when normalization fails', () => {
+        expect(reconcileStartingCombatExchange('garbage', [enemy('Goblin')])).toBeNull();
+        expect(reconcileStartingCombatExchange({ player_slots: [] }, [enemy('Goblin')])).toBeNull();
+    });
+
+    it('caps flooded slot/intent arrays at their documented limits', () => {
+        const flooded = normalizeCombatExchange({
+            player_slots: Array.from({ length: 20 }, () => ({ action: 'attack', strikes: [{ target: 'Goblin' }] })),
+            enemy_intents: Array.from({ length: 200 }, (_, i) => ({ enemy_id: `goblin-${i}`, action: 'attack', target: 'player' })),
+            companion_intents: Array.from({ length: 40 }, (_, i) => ({ companion_id: `ally-${i}`, action: 'defend' })),
+        });
+        expect(flooded.playerSlots).toHaveLength(2);
+        expect(flooded.enemyIntents).toHaveLength(30);
+        expect(flooded.companionIntents).toHaveLength(4);
+    });
+
+    it('rejects the exchange when the save has no character (latent load-boundary guard)', () => {
+        const noCharacter = { ...state(), character: null };
+        expect(planCombatExchange(noCharacter, exchange())).toMatchObject({
+            ok: false,
+            error: expect.stringContaining('No active character'),
+        });
+    });
+});
+
 describe('combat exchange validation', () => {
     it('accepts only bounded intent actions and requires a player slot', () => {
         expect(normalizeCombatExchange({ enemy_intents: [] })).toBeNull();

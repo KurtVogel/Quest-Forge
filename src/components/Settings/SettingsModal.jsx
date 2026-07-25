@@ -124,9 +124,19 @@ export default function SettingsModal() {
     };
 
     const handleLoad = async (slotId, isCloud = false) => {
+        // An expired/absent session used to fall through to the LOCAL branch,
+        // find nothing, and silently do nothing (2026-07-25 audit).
+        if (isCloud && !state.user?.uid) {
+            setSyncStatus('Sign in with Google to load cloud saves — your session has expired or you are signed out.');
+            return;
+        }
         let savedState = null;
-        if (isCloud && state.user?.uid) {
+        if (isCloud) {
             savedState = await loadGameFromCloud(state.user.uid, slotId);
+            if (!savedState) {
+                setSyncStatus('Cloud save could not be loaded — details in the browser console.');
+                return;
+            }
         } else {
             savedState = await loadGame(slotId);
         }

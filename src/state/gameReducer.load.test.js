@@ -385,3 +385,50 @@ describe('LOAD_GAME progression migrations', () => {
         expect(withoutIds.recentSales).toEqual([]);
     });
 });
+
+describe('LOAD_GAME poisoned messages heal (2026-07-25 P1)', () => {
+    const baseSave = {
+        character: {
+            name: 'Survivor', race: 'human', class: 'fighter', level: 1, exp: 0,
+            currentHP: 12, maxHP: 12, conditions: [],
+        },
+        inventory: [],
+    };
+
+    it('drops null and non-object message entries instead of crashing the load', () => {
+        // JSON.stringify([undefined]) === '[null]' — a cloud round-trip mints
+        // exactly this poison, and `.filter(m => m.summarized)` then threw,
+        // making the save permanently un-loadable.
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...baseSave,
+                messages: [
+                    null,
+                    { role: 'user', content: 'Hello', summarized: true },
+                    undefined,
+                    'junk string',
+                    42,
+                    { role: 'assistant', content: 'Hi there' },
+                ],
+            },
+        });
+        expect(next.messages.map(m => m.content)).toEqual(['Hello', 'Hi there']);
+        expect(next.session.prunedMessageCount).toBe(1);
+    });
+
+    it('still strips consumed narrationCues from surviving messages', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...baseSave,
+                messages: [
+                    null,
+                    { role: 'system', content: 'Second Wind!', narrationCue: { kind: 'rest' } },
+                ],
+            },
+        });
+        expect(next.messages).toHaveLength(1);
+        expect(next.messages[0].narrationCue).toBeUndefined();
+    });
+});

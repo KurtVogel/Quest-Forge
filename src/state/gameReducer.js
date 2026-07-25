@@ -103,12 +103,18 @@ function validateSaveState(payload) {
         // (Second Wind / healing potion). Its visible system result belongs in the save,
         // but replaying the cue after Continue/Load would create an unsolicited DM turn.
         // A loaded transcript is history, so every restored cue is already consumed.
+        // Drop non-object entries first: a JSON round-trip mints `null` from an
+        // undefined array hole (cloud saves ARE a JSON round-trip), and one null
+        // message crashed LOAD_GAME's `.filter(m => m.summarized)` — an
+        // un-loadable campaign (2026-07-25 audit).
         messages: Array.isArray(payload.messages)
-            ? payload.messages.map(message => {
-                if (!message || typeof message !== 'object' || !message.narrationCue) return message;
-                const { narrationCue: _consumedCue, ...restoredMessage } = message;
-                return restoredMessage;
-            })
+            ? payload.messages
+                .filter(message => message && typeof message === 'object')
+                .map(message => {
+                    if (!message.narrationCue) return message;
+                    const { narrationCue: _consumedCue, ...restoredMessage } = message;
+                    return restoredMessage;
+                })
             : [],
         rollHistory: Array.isArray(payload.rollHistory) ? payload.rollHistory : [],
         quests: Array.isArray(payload.quests) ? payload.quests : [],
@@ -3456,7 +3462,7 @@ export function gameReducer(state, action) {
                 // Derive the summarization boundary from the messages actually present
                 // (summarized messages are a contiguous prefix). This self-heals a stale
                 // index from a trimmed cloud save or an older save format.
-                prunedMessageCount: (validated.messages || []).filter(m => m.summarized).length,
+                prunedMessageCount: (validated.messages || []).filter(m => m?.summarized).length,
             };
             let loadedFronts = Array.isArray(action.payload.fronts)
                 ? action.payload.fronts.map(f => normalizeFront(f))

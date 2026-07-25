@@ -29,7 +29,11 @@ export function saveSettings(settings) {
 export function loadSettings() {
     try {
         const stored = localStorage.getItem(SETTINGS_KEY);
-        return stored ? JSON.parse(stored) : null;
+        if (!stored) return null;
+        const parsed = JSON.parse(stored);
+        // A corrupted value parsing to a string/array would spread junk index keys
+        // into settings via GameContext's `{...defaults, ...saved}` merge.
+        return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : null;
     } catch (e) {
         console.warn('Failed to load settings:', e);
         return null;
@@ -138,7 +142,8 @@ export async function saveGame(slotId, gameState) {
         const savedMessages = gameState.messages || [];
         // prunedMessageCount indexes into the array we actually persist. Summarized messages
         // are always a contiguous prefix, so their count IS the boundary index.
-        const prunedMessageCount = savedMessages.filter(m => m.summarized).length;
+        // `m?.` belt: a null entry in live state must not brick every autosave.
+        const prunedMessageCount = savedMessages.filter(m => m?.summarized).length;
 
         const saveData = {
             slotId,
@@ -250,14 +255,18 @@ export async function saveRosterCharacter(character, inventory) {
     return new Promise((resolve, reject) => {
         const tx = db.transaction(ROSTER_STORE, 'readwrite');
         const store = tx.objectStore(ROSTER_STORE);
+        // A legacy pre-id-era hero gets an id minted here; the caller must write it
+        // back into live state (see CharacterSheet.handleSaveToRoster) or every
+        // later "Save to Roster" click mints a fresh id and duplicates the entry.
+        const id = character.id || `char-${Date.now()}`;
         const entry = {
-            id: character.id || `char-${Date.now()}`,
+            id,
             name: character.name,
             race: character.race,
             class: character.class,
             level: character.level,
             savedAt: Date.now(),
-            character,
+            character: character.id ? character : { ...character, id },
             inventory: inventory || [],
         };
         const request = store.put(entry);

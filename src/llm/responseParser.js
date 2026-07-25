@@ -288,6 +288,33 @@ function normalizeSpellCasts(raw) {
         .filter(Boolean);
 }
 
+const QUEST_UPDATE_STATUSES = new Set(['new', 'updated', 'completed', 'failed']);
+
+/**
+ * Type-guard a quest update at the parser boundary (mirrors the world-fact
+ * whitelist): an object-valued name/description would persist into the save and
+ * crash QuestPanel's render on every open (2026-07-25 audit). A valid identity
+ * with a missing or misspelled status defaults to 'new' — the DM's "job
+ * accepted" intent must not vanish silently, and ADD_QUEST upserts so an
+ * existing quest just refreshes.
+ */
+function normalizeQuestUpdate(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const id = (typeof raw.id === 'string' || typeof raw.id === 'number')
+        ? String(raw.id).trim().slice(0, 80)
+        : '';
+    const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 160) : '';
+    if (!id && !name) return null;
+    const description = typeof raw.description === 'string' ? raw.description.trim().slice(0, 800) : '';
+    const status = typeof raw.status === 'string' ? raw.status.trim().toLowerCase() : '';
+    return {
+        ...(id && { id }),
+        ...(name && { name }),
+        ...(description && { description }),
+        status: QUEST_UPDATE_STATUSES.has(status) ? status : 'new',
+    };
+}
+
 /**
  * Normalize and validate event data from the LLM.
  */
@@ -389,7 +416,9 @@ export function normalizeEvents(raw) {
         conditionsRemoved: Array.isArray(raw.conditions_removed) ? raw.conditions_removed : [],
         // Limited class abilities the player spent this turn (e.g. ["secondWind"]).
         resourcesUsed: Array.isArray(raw.resources_used) ? raw.resources_used : [],
-        questUpdates: Array.isArray(raw.quest_updates) ? raw.quest_updates : [],
+        questUpdates: Array.isArray(raw.quest_updates)
+            ? raw.quest_updates.slice(0, 8).map(normalizeQuestUpdate).filter(Boolean)
+            : [],
         location: raw.location || null,
         healing: clamp(raw.healing, 0, 999),
         // Combat events (validated to prevent state corruption)
