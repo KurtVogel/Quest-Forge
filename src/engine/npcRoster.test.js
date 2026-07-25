@@ -37,6 +37,16 @@ describe('formatNpcEmbeddingText', () => {
         expect(text).toContain('Looks: Close-cropped white hair');
         expect(text).toContain('Warned the hero off the docks.');
     });
+
+    it('carries registered gender next to the name so retrieval never misgenders', () => {
+        const text = formatNpcEmbeddingText({
+            name: 'Maera',
+            gender: 'woman',
+            disposition: 'wary',
+            appearance: 'Close-cropped white hair.',
+        });
+        expect(text).toContain('Maera (woman, wary)');
+    });
 });
 
 describe('player-relationship memory (stanceToPlayer + bondMoments)', () => {

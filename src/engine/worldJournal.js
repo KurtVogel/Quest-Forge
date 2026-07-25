@@ -279,7 +279,10 @@ export function buildJournalContext(journal, npcs, currentLocation) {
         const hiddenCount = Math.max(0, rosterNpcs.length - shown.length);
 
         const npcList = shown.map(n => {
-            const disp = n.disposition ? ` (${n.disposition})` : '';
+            // Gender rides next to the name (not buried in extras): scene art and
+            // pronoun consistency both depend on the DM never re-guessing it.
+            const identity = [n.gender, n.disposition].filter(Boolean).join(', ');
+            const disp = identity ? ` (${identity})` : '';
             const notes = n.lastNotes || n.notes || '';
             // Show the latest relationship shift so the DM keeps a changed bond
             // consistent — a friend who turned on the player should stay turned.

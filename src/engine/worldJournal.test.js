@@ -34,6 +34,21 @@ describe('worldJournal context builder', () => {
         expect(context).toContain('established looks EXACTLY consistent');
     });
 
+    it('shows registered gender next to the NPC name so art and pronouns stay consistent', () => {
+        const npcs = [{
+            name: 'Saima',
+            gender: 'woman',
+            disposition: 'friendly',
+            lastNotes: 'Runs the inn.',
+            lastSeen: 1000,
+        }];
+        const context = buildJournalContext([], npcs, 'Brackwater');
+        expect(context).toContain('**Saima** (woman, friendly)');
+
+        const ungendered = buildJournalContext([], [{ name: 'Kaldor', disposition: 'friendly', lastNotes: 'Smith.', lastSeen: 1000 }], 'Brackwater');
+        expect(ungendered).toContain('**Kaldor** (friendly)');
+    });
+
     it('injects the NPC\'s personal stance toward the hero and their shared history', () => {
         const npcs = [{
             name: 'Maren',

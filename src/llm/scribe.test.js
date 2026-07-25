@@ -277,6 +277,15 @@ describe('buildKnownAppearances', () => {
     it('returns null when nobody in the exchange has a recorded appearance', () => {
         expect(buildKnownAppearances({ character: { name: 'Vesa' }, npcs: [] }, 'A quiet road.')).toBeNull();
     });
+
+    it('tags a registered gender onto the NPC entry so merges keep it in view', () => {
+        const gendered = {
+            character: null,
+            npcs: [{ name: 'Maera', gender: 'woman', appearance: 'Close-cropped white hair.' }],
+        };
+        const context = buildKnownAppearances(gendered, 'Maera waits by the gate.');
+        expect(context).toContain('Maera (woman): Close-cropped white hair');
+    });
 });
 
 describe('buildKnownStances', () => {

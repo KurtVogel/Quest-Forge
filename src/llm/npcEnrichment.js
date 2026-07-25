@@ -95,6 +95,7 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
         existingRecord: {
             disposition: npc.disposition,
             lastNotes: npc.lastNotes || npc.notes,
+            gender: npc.gender,
             appearance: npc.appearance,
             personality: npc.personality,
             goals: npc.goals,
@@ -127,6 +128,7 @@ Output ONLY valid JSON:
   "stanceToPlayer": "how this NPC personally regards the HERO right now — affection, attraction, romantic feeling, friendship, gratitude, respect, amusement, resentment, fear, obligation — written from the NPC's side and grounded in what actually passed between them",
   "bondMoments": ["up to 3 one-line records of significant personal moments between the hero and this NPC that the context establishes — flirtation, confession, shared danger, gift, promise, betrayal, deep insult"],
   "appearance": "the NPC's COMPLETE physical/visual description — build, body proportions, face, hair, clothing, distinguishing and intimate features — merging the existing record with any concrete visual details the recent conversation states. Omit unless the context actually establishes looks",
+  "gender": "the NPC's gender as the context establishes or makes clearly apparent (pronouns, titles, explicit statements) — 'woman', 'man', or the fiction's own wording. Omit only if genuinely unknowable",
   "personality": "stable traits and how they present, only if grounded in context",
   "goals": "longer-term wants if established",
   "privateNotes": "hidden intent, blind spots, or unrevealed motive useful for DM consistency",
@@ -218,6 +220,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
     // Appearance replaces at the reducer boundary, so enrichment must emit the
     // COMPLETE merged look (600-char clamp mirrors the per-turn Scribe path).
     if (cleanText(parsed.appearance)) update.appearance = clampNpcDossierField(parsed.appearance);
+    if (cleanText(parsed.gender)) update.gender = cleanText(parsed.gender).slice(0, 40);
     if (cleanText(parsed.personality)) update.personality = clampNpcDossierField(parsed.personality);
     if (cleanText(parsed.goals)) update.goals = clampNpcDossierField(parsed.goals);
     if (cleanText(parsed.privateNotes)) update.privateNotes = clampNpcDossierField(parsed.privateNotes);

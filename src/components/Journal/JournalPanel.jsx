@@ -291,6 +291,11 @@ function NPCTab({
                             <span className="journal-npc-name">{npc.name}</span>
                             {npc.pinned && <span className="journal-npc-pin-badge" title="Pinned for long-term recall">Pinned</span>}
                             {thin && <span className="journal-npc-thin-badge" title="Agenda, inner life, or personal stance toward you not yet synthesized — Deepen memory fills them from campaign history and your conversations">Thin record</span>}
+                            {npc.gender && (
+                                <span className="journal-npc-gender" title="Registered gender — keeps portraits and scene art consistent">
+                                    {npc.gender}
+                                </span>
+                            )}
                             <span className={`journal-npc-disposition ${npc.disposition}`}>
                                 {npc.disposition || 'unknown'}
                             </span>

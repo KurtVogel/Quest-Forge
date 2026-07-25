@@ -504,7 +504,8 @@ export function formatNpcEmbeddingText(npc = {}) {
     const basedIn = cleanText(npc.basedIn);
     const lastLocation = cleanText(npc.lastLocation);
     const appearance = cleanText(npc.appearance);
-    const parts = [`${name} (${npc.disposition || 'unknown'})`];
+    const gender = cleanText(npc.gender);
+    const parts = [`${name} (${[gender, npc.disposition || 'unknown'].filter(Boolean).join(', ')})`];
     if (appearance) parts.push(`Looks: ${appearance.slice(0, 160)}`);
     if (basedIn) parts.push(`Based in: ${basedIn}`);
     if (lastLocation) parts.push(`Last seen: ${lastLocation}`);

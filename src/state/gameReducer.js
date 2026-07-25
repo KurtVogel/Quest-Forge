@@ -996,6 +996,11 @@ function upsertNpc(npcs, payload) {
     if (update.appearance) {
         update.appearance = String(update.appearance).trim().slice(0, 600);
     }
+    // Short current-state field (like appearance, plain replace): feeds scene art,
+    // the KNOWN NPCs block, and NPC RAG so generated images stop misgendering.
+    if (update.gender) {
+        update.gender = String(update.gender).trim().slice(0, 40);
+    }
     if (update.stanceToPlayer) {
         update.stanceToPlayer = clampNpcDossierField(update.stanceToPlayer);
     }
