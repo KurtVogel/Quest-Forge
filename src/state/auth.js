@@ -1,4 +1,4 @@
-import { signInWithPopup, signOut, onAuthStateChanged, signInAnonymously } from "firebase/auth";
+import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { auth, googleProvider } from "../config/firebase.js";
 
 /**
@@ -12,20 +12,6 @@ export async function signInWithGoogle() {
         return result.user;
     } catch (error) {
         console.error("Error signing in with Google", error);
-        throw error;
-    }
-}
-
-/**
- * Sign in as an anonymous guest
- */
-export async function signInAsGuest() {
-    if (!auth) throw new Error("Firebase auth not initialized");
-    try {
-        const result = await signInAnonymously(auth);
-        return result.user;
-    } catch (error) {
-        console.error("Error signing in anonymously", error);
         throw error;
     }
 }

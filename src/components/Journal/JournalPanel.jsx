@@ -349,19 +349,41 @@ function NPCTab({
                             </div>
                         )}
                         {npc.relationshipHistory?.length > 0 && (
-                            // Only the latest shift is shown (previous → current) — the
-                            // full chain took a lot of card space without being
-                            // interesting (Vesa, 2026-07-23). Data keeps every step.
-                            <div className="journal-npc-arc" title="How this relationship last shifted">
-                                <span className="journal-npc-arc-label">Arc:</span>
-                                <span className={`journal-npc-arc-step ${npc.relationshipHistory[npc.relationshipHistory.length - 1].from}`}>
-                                    {npc.relationshipHistory[npc.relationshipHistory.length - 1].from}
-                                </span>
-                                <span className="journal-npc-arc-seg">
-                                    <span className="journal-npc-arc-sep">→</span>
-                                    <span className={`journal-npc-arc-step ${npc.disposition}`}>{npc.disposition}</span>
-                                </span>
-                            </div>
+                            // Only the latest shift shows by default (previous → current) —
+                            // the full chain took card space without play value (Vesa,
+                            // 2026-07-23). The stored history is the opt-in timeline below.
+                            <details className="journal-npc-arc-details">
+                                <summary className="journal-npc-arc" title="How this relationship last shifted — expand for the full history">
+                                    <span className="journal-npc-arc-label">Arc:</span>
+                                    <span className={`journal-npc-arc-step ${npc.relationshipHistory[npc.relationshipHistory.length - 1].from}`}>
+                                        {npc.relationshipHistory[npc.relationshipHistory.length - 1].from}
+                                    </span>
+                                    <span className="journal-npc-arc-seg">
+                                        <span className="journal-npc-arc-sep">→</span>
+                                        <span className={`journal-npc-arc-step ${npc.disposition}`}>{npc.disposition}</span>
+                                    </span>
+                                    {npc.relationshipHistory.length > 1 && (
+                                        <span className="journal-npc-arc-more">
+                                            +{npc.relationshipHistory.length - 1} earlier
+                                        </span>
+                                    )}
+                                </summary>
+                                <ol className="journal-npc-arc-timeline">
+                                    {npc.relationshipHistory.map((step, i) => (
+                                        <li key={i}>
+                                            {step.at && (
+                                                <span className="journal-npc-arc-when">
+                                                    {new Date(step.at).toLocaleDateString()}
+                                                </span>
+                                            )}
+                                            <span className={`journal-npc-arc-step ${step.from}`}>{step.from}</span>
+                                            <span className="journal-npc-arc-sep">→</span>
+                                            <span className={`journal-npc-arc-step ${step.to}`}>{step.to}</span>
+                                            {step.note && <span className="journal-npc-arc-note" title={step.note}>{step.note}</span>}
+                                        </li>
+                                    ))}
+                                </ol>
+                            </details>
                         )}
                         <div className="journal-npc-footer">
                             {npc.lastSeen && (
