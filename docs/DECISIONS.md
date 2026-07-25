@@ -8,6 +8,32 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-25 · NPC gender is a first-class structured roster field, not a hope buried in appearance prose.**
+Live failure: Vesa requested art of a female NPC and got a male figure — her appearance
+record never stated gender, and the art pipeline had nothing to anchor on (the HERO's
+gender was already structured via the creation wizard; NPCs had no equivalent). Decision:
+`gender` joins the roster record as a short current-state field (40-char clamp, plain
+replace like `appearance` — a disguise/reveal must be able to change it), captured by the
+whole machinery family: the Scribe extracts it budget-exempt the first time fiction makes
+it knowable (pronouns and titles count), "Deepen memory" enrichment backfills it, and the
+DM's own `npc_updates` may carry it. It is injected everywhere identity matters: next to
+the name in KNOWN NPCs (`**Saima** (woman, friendly)`), in KNOWN APPEARANCES entries fed
+back to the Scribe, in `composeScenePrompt`'s NPC lines, in NPC RAG embedding text, and on
+the Journal NPC card as a badge. The art director prompt gained an inviolable-gender rule
+(a "(woman)" tag must render unmistakably as a woman). Chose a structured field over
+"make appearance descriptions always start with gender" because prose merging can lose or
+bury a lead phrase; a keyed field survives every merge and is greppable by every consumer.
+
+**2026-07-25 · Quest updates with a usable identity but unknown status default to `new`.**
+Part of the quest_updates type-guard fix (2026-07-25 P1): the old dispatch chain silently
+dropped a quest whose `status` was missing or misspelled ("complated"), vanishing the DM's
+"job accepted" intent with no trace — the exact moment the missing-events nudge exists to
+protect. `normalizeQuestUpdate` now defaults unknown-but-identified updates to `new`.
+Safe because ADD_QUEST upserts by id/name (an existing active quest just refreshes) and
+the finished-quests-stay-closed ruling (2026-07-23) means a typo'd "completed" cannot
+reopen table history — worst case a resolved quest gets a fresh active arc the player can
+remove, versus the old worst case of a new quest never appearing at all.
+
 **2026-07-23 · Companion relationship memory lives in the NPC roster — one system owns all bonds.**
 The IDEAS entry offered two designs: mirror `stanceToPlayer`/`bondMoments` onto the party
 store, or link companions to roster NPC records. Investigation settled it: nothing ever

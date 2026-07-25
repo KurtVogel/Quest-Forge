@@ -4,9 +4,46 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-23, later (companion relationship parity shipped + cloud-sync
-chunk-race P2 fixed — the strengthening queue is now empty except the four parked
-scene-art items.)_
+_Last updated: 2026-07-25 (both 07-25 audit batches fixed — queue empty except the four
+parked scene-art items — and NPC gender registration shipped.)_
+
+## Audit-fix session 2026-07-25: both fresh batches cleared + NPC gender registration
+
+The morning's two scheduled audits (quests + combat-exchange, cloud-sync + persistence,
+both Lap 2 hostile-input) filed 2 P1s + 8 P2s; Vesa green-lit fixing all ten, plus a live
+finding of his own: a female NPC rendered male in generated art. 1129 tests + lint green.
+
+**The two P1s (both campaign-bricking):**
+
+1. **Poisoned save → un-loadable campaign** — a `null` in a save's `messages` array
+   (minted by any JSON round-trip from an `undefined` hole; cloud saves ARE one) crashed
+   LOAD_GAME's `.filter(m => m.summarized)` forever. `validateSaveState` now drops
+   non-object message entries, with `m?.summarized` belts at all three filter sites
+   (load, local save, cloud save). Poisoned-save load tests added.
+2. **Quest events type-guarded** — `normalizeQuestUpdate` at the parser boundary
+   (the `sanitizeWorldFactPayload` pattern): object-valued name/description can no longer
+   persist and brick QuestPanel; flood cap 8; and an identified update with a
+   missing/typo'd status now defaults to `new` instead of silently vanishing
+   (DECISIONS.md 2026-07-25 — safe because ADD_QUEST upserts and finished quests stay
+   closed).
+
+**The eight P2s:** hostile-envelope + flood-cap tests for `normalizeCombatExchange` /
+`reconcileStartingCombatExchange`; a characterless-save guard at `planCombatExchange`
+entry; Save to Roster now writes a minted legacy-hero id back into live state (no more
+duplicate roster entries per click); plain-object guards on `loadSettings` and
+`loadGameFromCloud`'s parsed payloads; and signed-out/failed cloud loads surface explicit
+messages (SettingsModal syncStatus + a start-screen error line) instead of silently
+no-opping.
+
+**NPC gender registration** (DECISIONS.md 2026-07-25): `gender` is now a structured
+roster field — Scribe-extracted budget-exempt the moment fiction makes it knowable,
+enrichment-backfilled, DM-emittable, clamped in the reducer, and injected next to the
+name in KNOWN NPCs, KNOWN APPEARANCES, scene-prompt NPC lines, NPC RAG text, and the
+Journal card badge. The art director prompt gained an inviolable-gender rule. Fixes the
+live misgendered-portrait failure at the root: the image prompt now always carries
+"(woman)"/"(man)" for registered characters. **Watch next session:** whether the Scribe
+actually captures gender for existing campaign NPCs (records only heal as NPCs appear in
+play), and whether Grok-rendered art respects the tag.
 
 ## Companion relationship parity + cloud-sync transaction (2026-07-23, later)
 
