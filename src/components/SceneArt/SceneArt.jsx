@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { generatePortraitImageDetailed, generateSceneImageDetailed } from '../../llm/providers/imageGen.js';
+import { getMachineryGeminiKey } from '../../llm/machinery.js';
+import { namesMatch } from '../../engine/npcRoster.js';
 import { composeScenePrompt } from '../../llm/scribe.js';
 import './SceneArt.css';
 
@@ -17,7 +19,7 @@ function describeEntity(target) {
     if (target.type === 'player') {
         const c = target.entity;
         return [
-            `${c.name}, a ${c.race || ''} ${c.class || 'adventurer'}`.trim(),
+            `${c.name}${c.gender ? ` (${c.gender})` : ''}, a ${c.race || ''} ${c.class || 'adventurer'}`.trim(),
             c.appearance,
             target.gear && `Wearing/wielding: ${target.gear}.`,
         ].filter(Boolean).join('. ');
@@ -25,7 +27,7 @@ function describeEntity(target) {
     if (target.type === 'companion') {
         const c = target.entity;
         return [
-            `${c.name}, ${c.role || 'companion'}`,
+            `${c.name}${c.gender ? ` (${c.gender})` : ''}, ${c.role || 'companion'}`,
             c.appearance || c.notes,
             c.weapon && `Wielding ${c.weapon}.`,
         ].filter(Boolean).join('. ');
@@ -33,7 +35,9 @@ function describeEntity(target) {
     if (target.type === 'npc') {
         const n = target.entity;
         return [
-            `${n.name}, ${n.disposition || 'NPC'}`,
+            // The registered gender rides right beside the name — the art
+            // director's inviolable-gender rule keys on this "(woman)" tag.
+            `${n.name}${n.gender ? ` (${n.gender})` : ''}, ${n.disposition || 'NPC'}`,
             n.appearance || n.lastNotes || n.notes,
             n.lastLocation && `Last seen at ${n.lastLocation}.`,
         ].filter(Boolean).join('. ');
@@ -68,20 +72,24 @@ function buildCustomPrompt(subject, location, character) {
 }
 
 function fallbackNotice(result) {
-    if (result?.provider !== 'pollinations') return '';
+    if (!result || result.provider === 'xai') return '';
+    if (result.provider === 'gemini') {
+        // Gemini is a full-quality provider — only explain WHY xAI didn't render.
+        if (result.fallbackReason === 'missing-key') {
+            return 'Rendered with Gemini (your machinery key). Add an xAI Image API Key in Settings for Grok Imagine art.';
+        }
+        if (result.fallbackReason === 'xai-empty') {
+            return 'xAI returned no image (possibly filtered) — rendered with Gemini instead.';
+        }
+        return 'xAI rendering failed — rendered with Gemini (your machinery key) instead.';
+    }
     if (result.fallbackReason === 'missing-key') {
-        return 'Free fallback render — add an xAI Image API Key in Settings for the intended high-quality scene art.';
+        return 'Free fallback render — add an xAI Image API Key (or a Gemini machinery key) in Settings for the intended high-quality scene art.';
     }
-    if (result.fallbackReason === 'xai-empty') {
-        return 'xAI returned no image, possibly because the prompt was filtered. This is a lower-quality free fallback.';
+    if (result.fallbackReason?.includes('xai-empty')) {
+        return 'No image provider produced an image, possibly because the prompt was filtered. This is a lower-quality free fallback.';
     }
-    if (result.fallbackReason?.startsWith('xai-http-')) {
-        return `xAI rendering failed (${result.fallbackReason.replace('xai-http-', 'HTTP ')}). This is a lower-quality free fallback.`;
-    }
-    if (result.fallbackReason?.startsWith('xai-network:')) {
-        return `The browser could not reach xAI (${result.fallbackReason.slice('xai-network:'.length).trim()}). This is a lower-quality free fallback.`;
-    }
-    return 'xAI rendering failed, so this is a lower-quality free fallback. Check the image key or try again.';
+    return 'Image rendering failed on the real providers, so this is a lower-quality free fallback. Check the image key or try again.';
 }
 
 export default function SceneArt() {
@@ -105,12 +113,19 @@ export default function SceneArt() {
             entity: state.character,
             gear,
         },
-        ...(state.party || []).map(c => ({
-            id: `companion:${c.id || c.name}`,
-            type: 'companion',
-            label: c.name,
-            entity: c,
-        })),
+        // A companion's gender/appearance live on their linked roster record
+        // (DECISIONS.md 2026-07-23, one system owns all bonds) — merge them in.
+        ...(state.party || []).map(c => {
+            const dossier = (state.npcs || []).find(n => namesMatch(n.name, c.name));
+            return {
+                id: `companion:${c.id || c.name}`,
+                type: 'companion',
+                label: c.name,
+                entity: dossier
+                    ? { ...c, gender: c.gender || dossier.gender, appearance: c.appearance || dossier.appearance }
+                    : c,
+            };
+        }),
         ...(state.npcs || []).filter(n => n.name).map(n => ({
             id: `npc:${n.id || n.name}`,
             type: 'npc',
@@ -127,7 +142,7 @@ export default function SceneArt() {
 
     const selectedTarget = visualTargets.find(t => t.id === targetId) || visualTargets[0] || null;
 
-    const handleGenerateArt = async () => {
+    const handleGenerateArt = async ({ reroll = false } = {}) => {
         const location = state.currentLocation;
         if (!location) return;
         if (mode === 'focus' && !selectedTarget) {
@@ -139,13 +154,20 @@ export default function SceneArt() {
             return;
         }
 
+        // Reroll bypasses the image cache — an unchanged scene must be able to
+        // produce a NEW image (generation is the point of the feature).
+        const genOptions = {
+            geminiApiKey: getMachineryGeminiKey(state.settings),
+            bypassCache: reroll,
+        };
+
         setIsLoading(true);
         setError('');
         setGenerationNotice('');
         try {
             if (mode === 'focus') {
                 const prompt = buildFocusedPrompt(selectedTarget, location);
-                const result = await generatePortraitImageDetailed(prompt, state.settings.imageApiKey);
+                const result = await generatePortraitImageDetailed(prompt, state.settings.imageApiKey, genOptions);
                 if (result) {
                     setCurrentImage({ url: result.url, caption: selectedTarget.label, shape: 'portrait' });
                     setGenerationNotice(fallbackNotice(result));
@@ -155,7 +177,7 @@ export default function SceneArt() {
 
             if (mode === 'custom') {
                 const prompt = buildCustomPrompt(customSubject.trim(), location, state.character);
-                const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey);
+                const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey, genOptions);
                 if (result) {
                     setCurrentImage({ url: result.url, caption: customSubject.trim(), shape: 'scene' });
                     setGenerationNotice(fallbackNotice(result));
@@ -189,7 +211,7 @@ export default function SceneArt() {
                 'Grounded cinematic dark-fantasy realism, professional concept art, anatomically coherent figures, detailed materials, dramatic natural lighting, not cartoonish or childlike, no text, no watermark.',
             ].filter(Boolean).join(' ');
 
-            const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey);
+            const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey, genOptions);
             if (result) {
                 setCurrentImage({ url: result.url, caption: location, shape: 'scene' });
                 setGenerationNotice(fallbackNotice(result));
@@ -272,13 +294,22 @@ export default function SceneArt() {
                             />
                         )}
 
-                        <button className="scene-art-generate-btn" onClick={handleGenerateArt}>
+                        <button className="scene-art-generate-btn" onClick={() => handleGenerateArt()}>
                             Visualize {mode === 'scene'
                                 ? state.currentLocation
                                 : mode === 'focus'
                                     ? (selectedTarget?.label || 'Character')
                                     : 'Subject'}
                         </button>
+                        {currentImage && (
+                            <button
+                                className="scene-art-reroll-btn"
+                                onClick={() => handleGenerateArt({ reroll: true })}
+                                title="Generate a fresh image for the same subject, bypassing the cache"
+                            >
+                                Reroll image
+                            </button>
+                        )}
                         {error && <div className="scene-art-error">{error}</div>}
                         {generationNotice && <div className="scene-art-notice">{generationNotice}</div>}
                     </div>

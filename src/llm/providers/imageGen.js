@@ -1,11 +1,17 @@
 /**
- * Scene-art image generation via xAI (Grok Imagine).
+ * Scene-art image generation: xAI (Grok Imagine) first, Gemini image gen second.
  *
  * The prompt is composed upstream by the Scribe (see scribe.js `composeScenePrompt`),
  * which assembles the current situation plus the known visual details of the
  * characters/things in frame. This module just renders that finished prompt and
- * caches the result. If no xAI key is set or the request fails, it falls back to a
- * free, no-auth provider (lower quality) so scene art still appears.
+ * caches the result. Provider chain (DECISIONS.md 2026-07-25 spike):
+ *   1. xAI Grok Imagine (imageApiKey) — primary: best adult-content latitude,
+ *      gender-faithful, fast.
+ *   2. Gemini 3 Pro Image (the mandatory machinery key) — quality fallback:
+ *      spike-verified gender-faithful and excellent; every player has this key.
+ *      (The flash image tier is NOT used: it failed the armored-dwarf-woman
+ *      gender case — the exact failure this chain exists to prevent.)
+ *   3. Pollinations (no key) — labeled last resort only.
  */
 
 import { normalizeXaiApiKey } from './xaiKey.js';
@@ -16,6 +22,13 @@ const IMAGE_CACHE_MAX = 10;
 const XAI_IMAGE_ENDPOINT = 'https://api.x.ai/v1/images/generations';
 // Recommended model as of 2026 (grok-imagine-image-pro is deprecated May 2026).
 const XAI_IMAGE_MODEL = 'grok-imagine-image-quality';
+
+const GEMINI_IMAGE_MODEL = 'gemini-3-pro-image';
+const GEMINI_IMAGE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent`;
+
+// Pollinations renders via a GET URL; an uncapped prompt can exceed browser/CDN
+// URL limits and the <img> then fails silently (never fetched, no error event).
+const POLLINATIONS_PROMPT_MAX = 1500;
 
 /**
  * Insert or update a cache entry with LRU eviction (max IMAGE_CACHE_MAX entries).
@@ -79,13 +92,17 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
     if (!prompt) return null;
 
     const normalizedImageApiKey = normalizeXaiApiKey(imageApiKey);
+    const geminiApiKey = (options.geminiApiKey || '').trim();
     const aspectRatio = options.aspectRatio || '16:9';
     const resolution = options.resolution || '1k';
     const fallbackWidth = options.fallbackWidth || 1280;
     const fallbackHeight = options.fallbackHeight || 720;
     const baseCacheKey = `${aspectRatio}|${resolution}|${prompt.toLowerCase().trim()}`;
-    const preferredCacheKey = `${normalizedImageApiKey ? 'xai' : 'pollinations'}|${baseCacheKey}`;
-    if (IMAGE_CACHE.has(preferredCacheKey)) {
+    const preferredProvider = normalizedImageApiKey ? 'xai' : (geminiApiKey ? 'gemini' : 'pollinations');
+    const preferredCacheKey = `${preferredProvider}|${baseCacheKey}`;
+    // bypassCache is the reroll affordance: generation is the point of the
+    // feature, so "Visualize again" must be able to produce a NEW image.
+    if (!options.bypassCache && IMAGE_CACHE.has(preferredCacheKey)) {
         return IMAGE_CACHE.get(preferredCacheKey);
     }
 
@@ -135,10 +152,55 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
         }
     }
 
-    // Free fallback (no key required). Lower quality — used only when xAI is unavailable.
+    // Gemini image fallback on the mandatory machinery key — every player has
+    // one, so the quality floor is a real image model, not Pollinations.
+    if (geminiApiKey) {
+        try {
+            const response = await fetch(`${GEMINI_IMAGE_ENDPOINT}?key=${encodeURIComponent(geminiApiKey)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: {
+                        responseModalities: ['IMAGE'],
+                        imageConfig: { aspectRatio },
+                    },
+                }),
+            });
+            if (response.ok) {
+                const data = await response.json();
+                const parts = data?.candidates?.[0]?.content?.parts || [];
+                const inline = parts.find(p => p?.inlineData?.data)?.inlineData;
+                if (inline) {
+                    const dataUrl = `data:${inline.mimeType || 'image/png'};base64,${inline.data}`;
+                    const finalUrl = await downscaleDataUrl(dataUrl, {
+                        maxWidth: options.maxWidth,
+                        maxHeight: options.maxHeight,
+                        quality: options.quality,
+                    });
+                    const result = { url: finalUrl, provider: 'gemini', fallbackReason };
+                    cacheSet(`gemini|${baseCacheKey}`, result);
+                    return result;
+                }
+                const finish = data?.candidates?.[0]?.finishReason || 'no-image';
+                fallbackReason = `${fallbackReason}; gemini-empty (${finish})`;
+                console.log('[ImageGen] Gemini returned no image:', finish);
+            } else {
+                const errText = await response.text().catch(() => '');
+                fallbackReason = `${fallbackReason}; gemini-http-${response.status}`;
+                console.warn(`[ImageGen] Gemini image request failed (Status ${response.status}). ${errText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
+            }
+        } catch (e) {
+            fallbackReason = `${fallbackReason}; gemini-network: ${String(e.message || e).slice(0, 200)}`;
+            console.log('[ImageGen] Gemini image generation failed, falling back:', e.message);
+        }
+    }
+
+    // Free fallback (no key required). Lower quality — used only when both real
+    // providers are unavailable.
     try {
         const seed = Math.floor(Math.random() * 100000);
-        const safePrompt = encodeURIComponent(prompt);
+        const safePrompt = encodeURIComponent(prompt.slice(0, POLLINATIONS_PROMPT_MAX));
         const fallbackUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=${fallbackWidth}&height=${fallbackHeight}&nologo=true&seed=${seed}`;
         // Returned as an <img src> URL directly to avoid CORS issues on fetch.
         const result = { url: fallbackUrl, provider: 'pollinations', fallbackReason };
@@ -157,16 +219,17 @@ export async function generateImage(prompt, imageApiKey, options = {}) {
     return result?.url || null;
 }
 
-export async function generateSceneImageDetailed(prompt, imageApiKey) {
+export async function generateSceneImageDetailed(prompt, imageApiKey, extraOptions = {}) {
     return generateImageResult(prompt, imageApiKey, {
         aspectRatio: '16:9',
         resolution: '1k',
         fallbackWidth: 1280,
         fallbackHeight: 720,
+        ...extraOptions,
     });
 }
 
-export async function generatePortraitImageDetailed(prompt, imageApiKey) {
+export async function generatePortraitImageDetailed(prompt, imageApiKey, extraOptions = {}) {
     return generateImageResult(prompt, imageApiKey, {
         aspectRatio: '3:4',
         resolution: '1k',
@@ -175,16 +238,17 @@ export async function generatePortraitImageDetailed(prompt, imageApiKey) {
         maxWidth: 480,
         maxHeight: 640,
         quality: 0.82,
+        ...extraOptions,
     });
 }
 
-export async function generateSceneImage(prompt, imageApiKey) {
-    const result = await generateSceneImageDetailed(prompt, imageApiKey);
+export async function generateSceneImage(prompt, imageApiKey, extraOptions = {}) {
+    const result = await generateSceneImageDetailed(prompt, imageApiKey, extraOptions);
     return result?.url || null;
 }
 
-export async function generatePortraitImage(prompt, imageApiKey) {
-    const result = await generatePortraitImageDetailed(prompt, imageApiKey);
+export async function generatePortraitImage(prompt, imageApiKey, extraOptions = {}) {
+    const result = await generatePortraitImageDetailed(prompt, imageApiKey, extraOptions);
     return result?.url || null;
 }
 

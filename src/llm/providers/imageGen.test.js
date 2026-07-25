@@ -1,5 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearImageCache, generateSceneImageDetailed } from './imageGen.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearImageCache, generateSceneImageDetailed, generatePortraitImageDetailed } from './imageGen.js';
+
+const xaiOk = (b64 = 'dGVzdA==') => ({
+    ok: true,
+    json: async () => ({ data: [{ b64_json: b64 }] }),
+});
+
+const geminiOk = (b64 = 'Z2VtaW5p', mimeType = 'image/png') => ({
+    ok: true,
+    json: async () => ({
+        candidates: [{ content: { parts: [{ inlineData: { data: b64, mimeType } }] } }],
+    }),
+});
 
 describe('scene image provider reporting', () => {
     beforeEach(() => {
@@ -7,7 +19,7 @@ describe('scene image provider reporting', () => {
         vi.restoreAllMocks();
     });
 
-    it('labels the free provider when no xAI image key is configured', async () => {
+    it('labels the free provider when no image key of any kind is configured', async () => {
         const fetchMock = vi.fn();
         vi.stubGlobal('fetch', fetchMock);
 
@@ -22,10 +34,7 @@ describe('scene image provider reporting', () => {
     });
 
     it('reports xAI success without a fallback warning', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
-            ok: true,
-            json: async () => ({ data: [{ b64_json: 'dGVzdA==' }] }),
-        });
+        const fetchMock = vi.fn().mockResolvedValue(xaiOk());
         vi.stubGlobal('fetch', fetchMock);
 
         const result = await generateSceneImageDetailed('Vesa defeats Kraul', 'xai-test-key');
@@ -43,10 +52,7 @@ describe('scene image provider reporting', () => {
     });
 
     it('adds the xAI prefix when a pasted key omits it', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({
-            ok: true,
-            json: async () => ({ data: [{ b64_json: 'dGVzdA==' }] }),
-        });
+        const fetchMock = vi.fn().mockResolvedValue(xaiOk());
         vi.stubGlobal('fetch', fetchMock);
 
         await generateSceneImageDetailed('Vesa lights a lantern', 'secret-suffix');
@@ -58,7 +64,7 @@ describe('scene image provider reporting', () => {
         }));
     });
 
-    it('labels fallback output when xAI rejects the request', async () => {
+    it('labels fallback output when xAI rejects the request and no Gemini key exists', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
             ok: false,
             status: 401,
@@ -71,5 +77,221 @@ describe('scene image provider reporting', () => {
             provider: 'pollinations',
             fallbackReason: expect.stringContaining('xai-http-401'),
         });
+    });
+});
+
+describe('xAI degradation branches (2026-07-22 queue P1)', () => {
+    beforeEach(() => {
+        clearImageCache();
+        vi.restoreAllMocks();
+    });
+
+    it('falls back with xai-empty when xAI returns 200 but no image (moderation)', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ data: [] }),
+        }));
+
+        const result = await generateSceneImageDetailed('A filtered scene', 'xai-key');
+        expect(result).toMatchObject({
+            provider: 'pollinations',
+            fallbackReason: expect.stringContaining('xai-empty'),
+        });
+    });
+
+    it('falls back with xai-network when the fetch itself throws', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection reset')));
+
+        const result = await generateSceneImageDetailed('A scene', 'xai-key');
+        expect(result).toMatchObject({
+            provider: 'pollinations',
+            fallbackReason: expect.stringContaining('xai-network: connection reset'),
+        });
+    });
+
+    it('a cached pollinations fallback never blocks a later xAI retry', async () => {
+        // First call: xAI down → pollinations cached under its own provider key.
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('down')));
+        const first = await generateSceneImageDetailed('Same scene', 'xai-key');
+        expect(first.provider).toBe('pollinations');
+
+        // Second call: xAI recovered — the preferred-provider cache key misses
+        // and the retry reaches xAI.
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
+        const second = await generateSceneImageDetailed('Same scene', 'xai-key');
+        expect(second.provider).toBe('xai');
+    });
+
+    it('returns the cached xAI result on an identical repeat call', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(xaiOk());
+        vi.stubGlobal('fetch', fetchMock);
+
+        await generateSceneImageDetailed('Same scene', 'xai-key');
+        await generateSceneImageDetailed('Same scene', 'xai-key');
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('bypassCache rerolls a fresh image instead of returning the cache', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(xaiOk());
+        vi.stubGlobal('fetch', fetchMock);
+
+        await generateSceneImageDetailed('Same scene', 'xai-key');
+        await generateSceneImageDetailed('Same scene', 'xai-key', { bypassCache: true });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('Gemini image fallback (DECISIONS.md 2026-07-25)', () => {
+    beforeEach(() => {
+        clearImageCache();
+        vi.restoreAllMocks();
+    });
+
+    it('renders through Gemini on the machinery key when no xAI key is set', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(geminiOk());
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await generateSceneImageDetailed('A rainy street', '', { geminiApiKey: 'gem-key' });
+
+        expect(result).toMatchObject({
+            provider: 'gemini',
+            fallbackReason: 'missing-key',
+            url: 'data:image/png;base64,Z2VtaW5p',
+        });
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(url).toContain('gemini-3-pro-image:generateContent');
+        expect(url).toContain('key=gem-key');
+        const body = JSON.parse(init.body);
+        expect(body.generationConfig.imageConfig.aspectRatio).toBe('16:9');
+        expect(body.generationConfig.responseModalities).toEqual(['IMAGE']);
+    });
+
+    it('portraits request the 3:4 aspect from Gemini', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(geminiOk());
+        vi.stubGlobal('fetch', fetchMock);
+
+        await generatePortraitImageDetailed('A portrait', '', { geminiApiKey: 'gem-key' });
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig.imageConfig.aspectRatio).toBe('3:4');
+    });
+
+    it('tries xAI first and falls through to Gemini when xAI fails', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' })
+            .mockResolvedValueOnce(geminiOk());
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await generateSceneImageDetailed('A scene', 'xai-key', { geminiApiKey: 'gem-key' });
+        expect(result.provider).toBe('gemini');
+        expect(result.fallbackReason).toContain('xai-http-500');
+        expect(fetchMock.mock.calls[0][0]).toContain('api.x.ai');
+        expect(fetchMock.mock.calls[1][0]).toContain('generativelanguage.googleapis.com');
+    });
+
+    it('falls to pollinations with a combined reason when Gemini also returns no image', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ candidates: [{ finishReason: 'IMAGE_SAFETY', content: { parts: [] } }] }),
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await generateSceneImageDetailed('A blocked scene', '', { geminiApiKey: 'gem-key' });
+        expect(result).toMatchObject({
+            provider: 'pollinations',
+            fallbackReason: expect.stringContaining('gemini-empty (IMAGE_SAFETY)'),
+        });
+    });
+
+    it('falls to pollinations when Gemini errors over HTTP', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 429, text: async () => 'quota' });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const result = await generateSceneImageDetailed('A scene', '', { geminiApiKey: 'gem-key' });
+        expect(result).toMatchObject({
+            provider: 'pollinations',
+            fallbackReason: expect.stringContaining('gemini-http-429'),
+        });
+    });
+});
+
+describe('pollinations URL prompt cap (2026-07-22 queue P2)', () => {
+    beforeEach(() => {
+        clearImageCache();
+        vi.restoreAllMocks();
+    });
+
+    it('caps a very long composed prompt before URL-encoding it', async () => {
+        vi.stubGlobal('fetch', vi.fn());
+        const longPrompt = 'A grand tableau. '.repeat(500); // ~8500 chars
+
+        const result = await generateSceneImageDetailed(longPrompt, '');
+        expect(result.provider).toBe('pollinations');
+        const encodedPrompt = result.url.split('/prompt/')[1].split('?')[0];
+        expect(decodeURIComponent(encodedPrompt).length).toBeLessThanOrEqual(1500);
+    });
+});
+
+describe('downscaleDataUrl portrait compaction (2026-07-06 queue P1)', () => {
+    // The downscale path needs Image + canvas; stub minimal DOM implementations.
+    let origImage;
+    let origDocument;
+
+    function stubDom({ naturalWidth, naturalHeight, fail = false }) {
+        class FakeImage {
+            set src(_value) {
+                this.naturalWidth = naturalWidth;
+                this.naturalHeight = naturalHeight;
+                queueMicrotask(() => (fail ? this.onerror?.(new Error('bad image')) : this.onload?.()));
+            }
+        }
+        origImage = globalThis.Image;
+        origDocument = globalThis.document;
+        globalThis.Image = FakeImage;
+        globalThis.document = {
+            createElement: () => ({
+                getContext: () => ({ drawImage: vi.fn() }),
+                toDataURL: (mime) => `data:${mime};base64,c2NhbGVk`,
+            }),
+        };
+    }
+
+    beforeEach(() => {
+        clearImageCache();
+        vi.restoreAllMocks();
+    });
+
+    afterEach(() => {
+        globalThis.Image = origImage;
+        globalThis.document = origDocument;
+    });
+
+    it('downscales an oversized portrait to the requested bounds', async () => {
+        stubDom({ naturalWidth: 960, naturalHeight: 1280 });
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
+
+        const result = await generatePortraitImageDetailed('A portrait', 'xai-key');
+        expect(result.url).toBe('data:image/jpeg;base64,c2NhbGVk');
+    });
+
+    it('returns the original data URL when the image is already small enough', async () => {
+        stubDom({ naturalWidth: 400, naturalHeight: 500 });
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
+
+        const result = await generatePortraitImageDetailed('A portrait', 'xai-key');
+        expect(result.url).toBe('data:image/jpeg;base64,dGVzdA==');
+    });
+
+    it('degrades to the original data URL when decoding fails', async () => {
+        stubDom({ naturalWidth: 0, naturalHeight: 0, fail: true });
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
+
+        const result = await generatePortraitImageDetailed('A portrait', 'xai-key');
+        expect(result.url).toBe('data:image/jpeg;base64,dGVzdA==');
+    });
+
+    it('scene renders skip downscaling entirely (no maxWidth/maxHeight)', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
+        const result = await generateSceneImageDetailed('A scene', 'xai-key');
+        expect(result.url).toBe('data:image/jpeg;base64,dGVzdA==');
     });
 });

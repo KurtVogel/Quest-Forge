@@ -6,6 +6,7 @@ import { downloadCharacterExport } from '../../engine/characterVault.js';
 import { saveRosterCharacter } from '../../state/persistence.js';
 import { getExperienceThreshold, isMaxLevel } from '../../engine/progression.js';
 import { generatePortraitImage } from '../../llm/providers/imageGen.js';
+import { getMachineryGeminiKey } from '../../llm/machinery.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
 import { getKnownSpells, getSpellAttackBonus, getSpellSaveDC, isSpellcaster } from '../../engine/spellcasting.js';
@@ -147,7 +148,9 @@ export default function CharacterSheet() {
         setIsGeneratingPortrait(true);
         setPortraitError('');
         try {
-            const portraitUrl = await generatePortraitImage(portraitPrompt, state.settings.imageApiKey);
+            const portraitUrl = await generatePortraitImage(portraitPrompt, state.settings.imageApiKey, {
+                geminiApiKey: getMachineryGeminiKey(state.settings),
+            });
             if (!portraitUrl) throw new Error('No portrait returned.');
             dispatch({
                 type: 'UPDATE_CHARACTER',

@@ -120,6 +120,23 @@
     background: rgba(212, 175, 55, 0.1);
 }
 
+.scene-art-reroll-btn {
+    margin: 0;
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: 1px solid var(--border-primary);
+    color: var(--text-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: var(--font-body);
+    transition: all 0.2s;
+}
+
+.scene-art-reroll-btn:hover {
+    border-color: var(--gold);
+    color: var(--gold);
+}
+
 .scene-art-loading {
     display: flex;
     align-items: center;
