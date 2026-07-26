@@ -43,7 +43,7 @@ it under Process notes.
 | Feature ID | Scope (primary files) | Last audited |
 |---|---|---|
 | dice-engine | `engine/dice.ts` | 2026-07-21 |
-| rules-math | `engine/rules.js` | 2026-07-13 |
+| rules-math | `engine/rules.js` | 2026-07-26 |
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-07-16 |
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-07-14 |
 | prompt-building | `llm/promptBuilder.js` | 2026-07-16 |
@@ -57,7 +57,7 @@ it under Process notes.
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-07-15 |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-07-25 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-07-25 |
-| character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-07-12 |
+| character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-07-26 |
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-07-15 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-07-25 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-07-22 |
@@ -173,6 +173,10 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P2** (scribe, 2026-07-23): `if (extracted.location)` truthiness-only — a model emitting the literal string "null"/"unchanged" becomes the canonical current location and mints a location-registry record; add a junk-string drop-list — `llm/scribe.js:532-534`. *Fixed 2026-07-23: junk-string drop-list ("null"/"unchanged"/"same place"/…) before SET_LOCATION, tested both ways.*
 - [x] **P2** (roll-resolution, 2026-07-23): `repairCombatRollBatch`/`canonicalizeCombatRollBatch` + the `MAX_ROLL_DEPTH` recursion are production-unreachable (depth-0 active-combat rejection precedes them; the sole call site always passes `onFollowUpRolls`) — ~200 lines of dormant legacy kept green by tests alone, and the recursion would skip the active-combat rejection if ever revived; document as legacy or remove via a DECISIONS entry — `engine/rollResolver.js:464-474,590-603`. *Resolved 2026-07-23: removed (~200 lines + 11 dormant-code tests) with a DECISIONS.md entry; follow-up rolls always re-stage via onFollowUpRolls, no recursion path remains.*
 - [x] **P1** (prompt-building, 2026-07-16): `buildCombatBlock` (`llm/promptBuilder.js:764-793`) — the block the DM reads every combat turn to know who's alive, downed, defending, or conditioned — has its dynamic per-combatant formatting completely untested. Every `promptBuilder.combatPacing.test.js` case either passes empty `enemies`/`turnOrder` arrays or only asserts on the static surrounding prose; none assert on the actual rendered `Atk:`/`Dmg:`/`Status:`/`DEFENDING`/`Conditions:` fields, the turn-order `→` marker, or the `ACTIVE — exactly two player_slots required` vs. `inactive` surge summary line (confirmed via grep — zero matches for any of these strings across all `promptBuilder.*.test.js` files). *Fixed 2026-07-23: per-combatant Atk/Dmg/Health/Conditions/Status/DEFENDING fields, the turn-order arrow, both Action Surge summary lines, and empty-state placeholders all asserted.*
+- [ ] **P2** (character-vault, 2026-07-26): `sanitizeCharacter` grants Expertise to ANY class on import (no rogue gate, unlike `createCharacter`) — a hand-edited fighter/wizard export with `expertiseSkills` imports doubled skill proficiency; class-gate it AND fix the test that pins the wrong behavior — `characterVault.js:131-132`, `characterUtils.js:210`, `characterVault.test.js:245`.
+- [ ] **P2** (rules-math, 2026-07-26): `computeACFromInventory`/`getEquippedWeapon` guard a missing `character` but not a non-array `inventory` (`inventory.find` throws on `null`/object; the `= []` default catches only `undefined`) — reachable via a corrupted/stale save (LOAD_GAME skips the vault sanitizer); add `Array.isArray` guard + test — `rules.js:71-75,98`.
+- [ ] **P2** (rules-math, 2026-07-26): `isProficientWithWeapon` crashes on a non-string `weapon.name`/`category` (`(weapon.name||'').toLowerCase()`) — reachable because `normalizeItem` passes a numeric `source.name` through for non-catalog items; coerce with `String()` + numeric-name test — `rules.js:125,127`, `items.js:169`.
+- [ ] **P2** (character-vault, 2026-07-26): `sanitizeInventory` admits arrays (`typeof [] === 'object'`) → `normalizeItem([])` mints a junk "Unknown item" instead of dropping; tighten the filter — `characterVault.js:188`.
 
 ## Entry template
 
@@ -196,6 +200,32 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-26 — character-vault + rules-math (Lap 2: robustness against hostile input)
+
+`npm test`: 1144 passing / 69 files.
+
+Rotation excluded (last 6, local ∪ origin — identical at `fcf0c7e`): cloud-sync, persistence, quests, combat-exchange (07-25), scribe, roll-resolution (07-23), scene-art, hidden-fronts (07-22), dice-engine, chat-orchestration (07-21), providers-adapter, memory-journal (07-18). Oldest eligible → **character-vault** (07-12); the 07-13 tie rules-math/enemy-stats broke to lowest coverage → **rules-math** (92.30 < 93.50). Coverage snapshot (07-21) still under 7 days — not refreshed. Open Findings Queue was fully drained (every item `[x]`) — no open items to re-verify this run.
+
+### character-vault (`engine/characterVault.js`, `engine/characterUtils.js`, roster flows)
+- **Scope examined:** `sanitizeCharacter`/`sanitizeInventory`/`parseCharacterExport`/`sanitizeImageUrl` end to end; `characterUtils.createCharacter` for the creation-vs-import contract; `characterVault.test.js` (all 3 describes).
+- **Findings:**
+  - **P2 (trust-boundary — cross-class Expertise via import):** `sanitizeCharacter` keeps `raw.expertiseSkills` for ANY class as long as the skill is proficient (`characterVault.js:131-132`) — no class gate — while `createCharacter` grants expertise ONLY to rogues (`characterUtils.js:210`). A hand-edited fighter/wizard export with `expertiseSkills:['athletics']` imports with doubled proficiency on that skill (`getSkillModifier` `profMultiplier=2`), contradicting the file's own "rebuild derived/class-gated fields from class data" charter. `characterVault.test.js:245` currently *pins the wrong behavior* (imports a fighter and asserts `expertiseSkills:['athletics']` survives), which is why it went unnoticed. Impact is out-of-combat skill checks only, hence P2 not P1 — but it's a real reachable exploit on the explicitly-untrusted path.
+  - **P2 (junk item minted from an array):** `sanitizeInventory`'s filter admits arrays (`typeof [] === 'object'`, `:188`); `normalizeItem([])` → `{...[]}` = `{}` → an "Unknown item" gear entry rather than a drop. Cosmetic, but the sanitizer's job is to reject non-items.
+  - **Verified strong (the lap's point):** identity clamps (name/gender/background/appearance), portrait-URL allowlist (rejects `javascript:`), maxHP recompute-vs-legacy-band split, derived-field rebuild, ASI-applied preservation, one-of-each equip normalization, null/undefined/foreign-file/bad-version rejections — all covered.
+- **Suggested improvements:** (1) gate `expertiseSkills` on a class that grants expertise (mirror `createCharacter`'s rogue check) and FIX the mischaracterized test at :245; (2) drop `Array.isArray(item)` in the `sanitizeInventory` filter.
+
+### rules-math (`engine/rules.js`)
+- **Scope examined:** every exported fn; consumer trust (`characterUtils`, `combatExchange`, `promptBuilder`, `gameReducer` AC recompute); `rules.test.js`.
+- **Findings:**
+  - **P2 (non-array inventory crash — guard asymmetry):** `computeACFromInventory` guards `!character?.abilityScores` (`:72`) but NOT a non-array `inventory` — `inventory.find(...)` (`:75,79`) throws `.find is not a function` on `null`/object. Same seam in `getEquippedWeapon` (`:98`, `= []` default catches only `undefined`, not an explicit `null`) → `getWeaponAttackBonus`/`getWeaponDamageNotation`. Reachable via a stale/corrupted save whose `inventory` isn't an array — LOAD_GAME does NOT run the vault sanitizer. Untested.
+  - **P2 (non-string weapon name/category crash):** `isProficientWithWeapon` does `(weapon.name || '').toLowerCase()` and `(weapon.category||'')...` (`:127,125`) — a truthy non-string `name`/`category` throws. Reachable: `normalizeItem` passes a numeric `source.name` straight through for non-catalog items (`items.js:169`, `123 || '...'` = `123`), so an equipped hand-edited `{name:12345,type:'weapon',category:'martialMelee'}` crashes every `getWeaponAttackBonus` call (character sheet + prompt build). Coerce with `String()`. Untested.
+  - **P2 (minor):** `getMaxHitPoints` with a malformed `classData:{}` (hitDie undefined) returns `NaN` silently; only null is guarded (`:368`). Latent — production callers pass `CLASSES[x]` or `null`.
+  - **Verified strong:** modifiers, prof-bonus boundaries, saving throws (null/missing guarded), condition effects (`String(raw)` — robust to non-string conditions), advantage/disadvantage cancellation, sneak-attack gating, maxHP low-CON floor, incapacitating-condition detection.
+- **Suggested improvements:** (1) `Array.isArray(inventory) ? … : []` guard in `computeACFromInventory`/`getEquippedWeapon` + a non-array test; (2) `String(weapon.name)`/`String(weapon.category)` in `isProficientWithWeapon` + a numeric-name test; (3) optional `Number.isFinite(classData.hitDie)` fallback in `getMaxHitPoints`.
+
+### Process notes
+- Registry unchanged (no subsystem added/removed since last write). Queue was fully drained; this run adds 4 P2 items below.
 
 ## 2026-07-25 — cloud-sync + persistence (Lap 2: robustness against hostile input) — second run
 
