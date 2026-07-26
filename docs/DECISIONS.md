@@ -8,6 +8,26 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-26 · Incapacitated enemies lose their whole turn — confirmed already correct, no new engine-owned duration/save.**
+The 2026-07-13 audit's "stunned ogre still attacks at full effectiveness" finding was fixed the
+next day (commit `39446ae`, 2026-07-14) but its docs/IDEAS.md entry was never flipped from
+`idea` to `shipped` — pure docs hygiene, re-flagged and corrected today. rpg-balance-master
+re-verified the shipped behavior against both options in the original finding: (a) force a
+skip for stunned/paralyzed/unconscious, or (b) drop them from `SUPPORTED_ENEMY_CONDITIONS`.
+Option (a) is what shipped, and it's stricter than originally scoped — `resolveEnemies`
+(`engine/combatExchange.js`) checks `getIncapacitatingCondition` ahead of the action switch, so
+an incapacitated enemy loses attack, defend, flee, AND surrender, not just attack. Conditions
+persist until the DM explicitly clears them via `remove_conditions` on that enemy's own intent
+(no engine-owned duration or save-each-turn) — this matches every other DM-driven condition
+channel in this codebase, and Hold Person's "clears after ~1 round of struggle" is a documented
+prompt-only pacing convention, not a timer. Verdict: sufficient as a bounded hardening fix; a
+single-target, action-cost control spell doesn't create a runaway lockdown problem, and a real
+duration/save mechanic is a materially bigger feature than this fix's scope. Companions have a
+parallel `guard`-intent incapacitation check but no attack-intent one — left alone since no
+current mechanism (spell or enemy attack) can inflict these three conditions on a companion;
+revisit only if a future feature adds one. Full ruling:
+`.claude/agent-memory/rpg-balance-master/incapacitating_enemy_conditions_ruling.md`.
+
 **2026-07-25 · Scene-art direction: keep xAI primary, Gemini 3 Pro Image replaces Pollinations as the quality fallback — not the full Gemini pivot.**
 Settled by a 9-image side-by-side spike (identical prompts: female-NPC portrait, two-character
 tavern scene, and the hard case — an armored dwarf woman explicitly tagged "(woman)" three

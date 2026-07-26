@@ -293,19 +293,21 @@ embedded into RAG, so it fell through every durable tier once the 20-message win
 
 ## Gameplay & Mechanics
 
-### [strengthening] Incapacitating conditions don't stop an enemy's own turn — status: `idea`
-`stunned`/`paralyzed`/`unconscious` are valid enemy conditions (`engine/enemyStats.js`
-`SUPPORTED_ENEMY_CONDITIONS`) and the DM can apply them via `enemy_condition_updates`, but
-`CONDITION_EFFECTS` (`engine/rules.js`) only defines the `incomingAttack` half (attackers get
-advantage against them) — there's no `attack` effect, and `resolveEnemies`/`resolveEnemyAttack`
-(`engine/combatExchange.js`) never check whether the acting enemy is itself incapacitated before
-resolving its `attack` intent. A DM-narrated "the ogre is stunned by the spell" has zero effect on
-that ogre's own turn — it still swings normally. Why: this is a silent half-implementation of a
-condition the game explicitly models as applicable to enemies; found during the scheduled
-strengthening audit (2026-07-13). Options: force a skip/defend outcome for these three conditions
-in `resolveEnemies`, or (simpler, if full incapacitation is out of scope) drop them from
-`SUPPORTED_ENEMY_CONDITIONS` so the DM isn't invited to apply a condition that doesn't do what its
-name implies.
+### [strengthening] Incapacitating conditions don't stop an enemy's own turn — status: `shipped` (2026-07-14, confirmed 2026-07-26)
+Found during the 2026-07-13 scheduled strengthening audit; this entry was left at `idea` after
+the fix shipped the very next day (commit `39446ae`, STATUS.md "Strengthening-queue batch 2") —
+docs-hygiene gap, not a design gap. `resolveEnemies` (`engine/combatExchange.js`) now checks
+`getIncapacitatingCondition(enemy.conditions)` before the action switch: a stunned/paralyzed/
+unconscious enemy loses attack, defend, flee, AND surrender (the check sits ahead of all four
+branches), pushes a visible note, and only acts again once the DM clears the condition via
+`remove_conditions` on that enemy's own intent — exactly the "enemy intents can clear conditions
+immediately before their own action" contract. rpg-balance-master re-reviewed 2026-07-26
+(`.claude/agent-memory/rpg-balance-master/incapacitating_enemy_conditions_ruling.md`): confirmed
+option (a) is fully implemented and correct, `SUPPORTED_ENEMY_CONDITIONS` correctly keeps all
+three, no engine-owned duration/save is needed for Hold Person's paralysis (the prompt-only
+"~1 round of struggle" pacing convention is sufficient for this bounded fix), and companions have
+a parallel `guard`-intent incapacitation check but no attack-intent one — left alone since no
+current mechanism can inflict these three conditions on a companion.
 
 ### Recent-rulings ledger for overruled/withdrawn checks — status: `shipped` (2026-07-05)
 Live play: a check the player had already challenged and gotten overruled came back verbatim a
