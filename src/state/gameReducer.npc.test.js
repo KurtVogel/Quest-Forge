@@ -140,6 +140,38 @@ describe('gameReducer NPC roster gating', () => {
     });
 });
 
+describe('gameReducer NPC portraits', () => {
+    const withNpc = gameReducer(initialGameState, {
+        type: 'UPDATE_NPC',
+        payload: { name: 'Aune Virtapää', disposition: 'wary', gender: 'woman', appearance: 'Broad-shouldered, grey-streaked braid, scarred brow.' },
+    });
+    const npcId = withNpc.npcs[0].id;
+
+    it('stores a generated portrait with prompt and provider on the record', () => {
+        const next = gameReducer(withNpc, {
+            type: 'SET_NPC_PORTRAIT',
+            payload: {
+                id: npcId,
+                portraitUrl: 'data:image/jpeg;base64,abc123==',
+                portraitPrompt: 'Waist-up character portrait of Aune Virtapää (woman).',
+                portraitProvider: 'xai',
+            },
+        });
+        expect(next.npcs[0].portraitUrl).toBe('data:image/jpeg;base64,abc123==');
+        expect(next.npcs[0].portraitPrompt).toContain('(woman)');
+        expect(next.npcs[0].portraitProvider).toBe('xai');
+        expect(next.npcs[0].portraitUpdatedAt).toBeGreaterThan(0);
+    });
+
+    it('drops an unsafe portrait URL instead of storing it (hostile-save allowlist)', () => {
+        const next = gameReducer(withNpc, {
+            type: 'SET_NPC_PORTRAIT',
+            payload: { id: npcId, portraitUrl: 'javascript:alert(1)', portraitProvider: 'xai' },
+        });
+        expect(next.npcs[0].portraitUrl).toBeUndefined();
+    });
+});
+
 describe('gameReducer player-relationship memory', () => {
     it('records a bondMoment as durable append-only history on the NPC', () => {
         const met = gameReducer(initialGameState, {

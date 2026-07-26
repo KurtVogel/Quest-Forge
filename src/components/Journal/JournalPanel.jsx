@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { enrichNpcProfile, needsNpcEnrichment, normalizeCallbackHook } from '../../llm/npcEnrichment.js';
 import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
-import { isMachineryReady } from '../../llm/machinery.js';
+import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js';
 import { scoreNpcForPrompt } from '../../engine/npcRoster.js';
+import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
+import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 import './Journal.css';
 
 const DISPOSITION_MARK = {
@@ -22,6 +24,9 @@ export default function JournalPanel({ isOpen, onClose }) {
     const [selectedIds, setSelectedIds] = useState(() => new Set());
     const [reviewingFodder, setReviewingFodder] = useState(false);
     const [reviewMessage, setReviewMessage] = useState('');
+    const [portraitBusyId, setPortraitBusyId] = useState(null);
+
+    const imageKeyAvailable = !!(state.settings?.imageApiKey || getMachineryGeminiKey(state.settings));
 
     const characterNpcs = useMemo(
         () => (state.npcs || []).filter(npc => npc.rosterTier !== 'archived_creature'),
@@ -93,6 +98,34 @@ export default function JournalPanel({ isOpen, onClose }) {
             setEnrichError(error.message || 'Failed to deepen NPC memory.');
         } finally {
             setEnrichingId(null);
+        }
+    };
+
+    const handlePortrait = async (npc) => {
+        if (portraitBusyId) return;
+        setEnrichError('');
+        setPortraitBusyId(npc.id);
+        try {
+            const prompt = buildNpcPortraitPrompt(npc);
+            const result = await generatePortraitImageDetailed(prompt, state.settings?.imageApiKey, {
+                geminiApiKey: getMachineryGeminiKey(state.settings),
+                bypassCache: !!npc.portraitUrl, // reroll must paint a genuinely new image
+            });
+            if (!result?.url) throw new Error('No portrait returned.');
+            dispatch({
+                type: 'SET_NPC_PORTRAIT',
+                payload: {
+                    id: npc.id,
+                    portraitUrl: result.url,
+                    portraitPrompt: prompt,
+                    portraitProvider: result.provider || '',
+                },
+            });
+            await flushAutoSave({ npcPortraitId: npc.id });
+        } catch (error) {
+            setEnrichError(error.message || 'Portrait failed.');
+        } finally {
+            setPortraitBusyId(null);
         }
     };
 
@@ -177,6 +210,8 @@ export default function JournalPanel({ isOpen, onClose }) {
                                 onPin={(id, pinned) => dispatch({ type: 'PIN_NPC', payload: { id, pinned } })}
                                 onArchive={(id) => dispatch({ type: 'ARCHIVE_NPC', payload: { id } })}
                                 onDeepen={handleDeepen}
+                                onPortrait={imageKeyAvailable ? handlePortrait : null}
+                                portraitBusyId={portraitBusyId}
                             />
                         </>
                     )}
@@ -254,6 +289,8 @@ function NPCTab({
     onPin,
     onArchive,
     onDeepen,
+    onPortrait = null,
+    portraitBusyId = null,
 }) {
     if (npcs.length === 0) {
         return (
@@ -300,6 +337,20 @@ function NPCTab({
                                 {npc.disposition || 'unknown'}
                             </span>
                         </div>
+                        {npc.portraitUrl && (
+                            <div className="journal-npc-portrait">
+                                <img
+                                    src={npc.portraitUrl}
+                                    alt={`Portrait of ${npc.name}`}
+                                    title={npc.portraitPrompt || undefined}
+                                />
+                                {npc.portraitProvider && npc.portraitProvider !== 'xai' && (
+                                    <span className="journal-npc-portrait-provider">
+                                        {npc.portraitProvider === 'gemini' ? 'Gemini fallback' : npc.portraitProvider}
+                                    </span>
+                                )}
+                            </div>
+                        )}
                         {npc.appearance && (
                             <p className="journal-npc-looks">
                                 <span className="journal-npc-looks-label">Looks</span>
@@ -399,6 +450,19 @@ function NPCTab({
                                     onClick={() => onDeepen(npc)}
                                 >
                                     {deepening ? 'Deepening…' : 'Deepen memory'}
+                                </button>
+                            )}
+                            {!archived && onPortrait && npc.appearance && (
+                                <button
+                                    type="button"
+                                    className="journal-npc-portrait-btn"
+                                    disabled={portraitBusyId === npc.id}
+                                    title="Paint this character from their recorded looks and gender"
+                                    onClick={() => onPortrait(npc)}
+                                >
+                                    {portraitBusyId === npc.id
+                                        ? 'Painting…'
+                                        : (npc.portraitUrl ? 'Reroll portrait' : 'Portrait')}
                                 </button>
                             )}
                             {!archived && onPin && (

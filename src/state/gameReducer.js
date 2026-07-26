@@ -2926,6 +2926,24 @@ export function gameReducer(state, action) {
                 )),
             };
 
+        case 'SET_NPC_PORTRAIT':
+            // normalizeNpcRecord's SAFE_PORTRAIT_URL allowlist is the belt here —
+            // an unsafe URL is dropped rather than stored.
+            return {
+                ...state,
+                npcs: (state.npcs || []).map(npc => (
+                    npc.id === action.payload?.id
+                        ? normalizeNpcRecord({
+                            ...npc,
+                            portraitUrl: action.payload.portraitUrl,
+                            portraitPrompt: String(action.payload.portraitPrompt || '').slice(0, 2000),
+                            portraitProvider: String(action.payload.portraitProvider || '').slice(0, 40),
+                            portraitUpdatedAt: Date.now(),
+                        })
+                        : npc
+                )),
+            };
+
         case 'MIGRATE_NPC_ROSTER': {
             const needsMigration = (state.npcs || []).some(npc => !npc.rosterTier);
             if (!needsMigration) return state;
