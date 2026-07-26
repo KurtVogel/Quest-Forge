@@ -8,6 +8,75 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-26 · Campaign Chronicle v1 is strictly player-facing, retold from real messages, on the DM model — and every new persisted top-level field MUST join the autosave deps + get a flush hint.**
+Shipped the IDEAS.md 2026-07-06 design as scoped there: a Chronicle tab in the World Journal
+(the auto-journal tab is now titled "Journal"; "Chronicle" belongs to the saga view), a
+"Close chapter" action that retells every message since the last chapter as continuous
+narrative, and a whole-chronicle markdown export. Settled sub-decisions: (1) the chronicler
+reads the ACTUAL play messages (never deleted, only journal-pruned from the LLM window) —
+hidden withheld-setup messages are excluded (withdrawn fiction), journal-summarized ones
+included; (2) it runs on the DM model (creative work, the frontDirector precedent), chunked
+at 30 messages with the previous passage's tail threaded through for seamless continuation —
+no separate stitch pass; (3) system lines ride along marked TABLE RECORD with an explicit
+transmute-into-fiction rule — live-verified that dice numbers and DCs do not leak into the
+prose; (4) the prompt carries "unvarnished" + the clinical-register canon rules — a retelling
+is exactly the surface an LLM bowdlerizes; (5) the chronicle is NEVER injected into the DM
+prompt, RAG, or the Scribe — cosmetic drift stays cosmetic. **The hard-won lesson:** the
+first live chapter silently vanished on reload because `state.chronicle` wasn't in
+GameContext's debounced-autosave dependency array AND `flushAutoSave` reads a pre-dispatch
+state ref, so its hints (`npcUpdate`-style) are the only way a flush can carry a
+just-dispatched change — an unknown hint is a silent no-op. Any future top-level persisted
+field needs BOTH: the autosave dep entry and (if flushed explicitly) a real flush hint. The
+same audit found the NPC-portrait flush was a no-op hint too (it was rescued by the
+debounced save only because `npcs` is a dep); both now use proper hints backed by shared
+reducer helpers (`applyNpcPortrait`, `appendChronicleChapter`).
+
+**2026-07-26 · Hero reveal at creation: the confirm step IS the engine proof, and the portrait is painted there.**
+The wizard's confirm step became the "hero reveal" (IDEAS "first engine proof moment" +
+the portrait-at-creation competitive gap): portrait frame with inline Generate/Reroll,
+derived-stat chips, ability/skill grids with real modifiers, starting gear. Settled: (1) the
+preview runs the REAL `createCharacter`/`createStartingInventory` calls — every number shown
+is the number Begin Adventure produces, not a UI estimate; (2) identity edits (name, gender,
+appearance, race, class) invalidate a generated portrait — a portrait is tied to the identity
+it was painted from; (3) the portrait rides the same xAI → Gemini Pro → Pollinations chain
+as everything else, fallback-labeled, gated on an image key with a Settings pointer when
+missing; (4) `buildPortraitPrompt` moved to a shared module (`portraitPrompt.js`) used by
+both the wizard and the Character Profile. NPC portraits shipped the same day on the same
+module: `buildNpcPortraitPrompt` rides the registered gender beside the name ("(woman)" —
+the inviolable-gender convention), uses the merged appearance as the likeness, adds
+lastNotes as role context, and NEVER includes privateNotes; `SET_NPC_PORTRAIT` stores
+url/prompt/provider on the roster record and `normalizeNpcRecord` drops non-allowlisted
+portrait URLs from hostile saves (the characterVault allowlist mirrored locally to keep
+npcRoster dependency-free).
+
+**2026-07-26 · stanceToPlayer emission is a full rewrite restating still-true parts verbatim — prompt contract strengthened on BOTH paths instead of loosening the engine merge.**
+Playtest #14 reproduced the stance stutter on a single unforked record (Aune): her card read
+"Guarded and dismissive… Cautious but slightly appreciative… resentful and suspicious… to be
+dismissed quickly" — contradictory fragments accumulating in order. Root cause: both the DM's
+inline `npc_updates` and the Scribe emit this-turn fragments in fresh wording; the engine's
+containment merge (replace only at ≥85% token coverage) correctly refuses to let a fragment
+replace a rich record, so it appends, and superseded feelings stand beside new ones forever
+(they only age out at the 600-char cap). Decision: fix the emission contract, not the engine —
+lowering the replace threshold would let fragments erase records (the exact disease the merge
+exists to prevent). The DM rule, the companion rule, and the Scribe contract now all demand:
+start from the recorded stance, keep every still-true part IN ITS EXISTING WORDING, integrate
+the shift, drop only what this exchange superseded — with the mechanical why spelled out
+(restated-verbatim text is what lets the engine detect a rewrite). Watch item: whether
+existing stuttered records self-clean as future full rewrites replace them; "Deepen memory"
+remains the manual heal.
+
+**2026-07-26 · A terminal quest_update for a quest that was never opened records it as finished table history instead of vanishing.**
+Playtest #14: the DM resolved the premise's letter-delivery arc with `quest_updates` status
+"completed" in the same response — correct per QUEST TRACKING ("close it in the same response
+that resolves it") — but the quest had never been opened, and `COMPLETE_QUEST`/`FAIL_QUEST`
+only mapped over existing quests: silent no-op, no entry anywhere, no completion beat.
+Decision: a named object ref that matches nothing upserts the quest directly in its terminal
+status (it lands in the Quests panel's finished section). This PRESERVES the 2026-07-23
+"finished quests stay closed" ruling — we record history, we never reopen it — and bare-string
+refs that match nothing (panel buttons, stale ids) stay no-ops so a UI glitch can't mint
+ghost quests. The parser now passes `description` through on terminal updates so the record
+is complete.
+
 **2026-07-26 · Incapacitated enemies lose their whole turn — confirmed already correct, no new engine-owned duration/save.**
 The 2026-07-13 audit's "stunned ogre still attacks at full effectiveness" finding was fixed the
 next day (commit `39446ae`, 2026-07-14) but its docs/IDEAS.md entry was never flipped from

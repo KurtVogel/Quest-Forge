@@ -251,7 +251,14 @@ alone missed immediate pre-arrival events after the 20-message window slid. Pair
 ### Campaign milestone XP tied to front/act completion — status: `idea`
 Milestone XP on resolving a front beat, complementing per-combat XP.
 
-### Campaign Chronicle — chapter-close retelling as one continuous story — status: `idea` (2026-07-06)
+### Campaign Chronicle — chapter-close retelling as one continuous story — status: v1 `shipped` (2026-07-26)
+**Shipped 2026-07-26** exactly per the design below (DECISIONS.md 2026-07-26): Chronicle tab
+in the World Journal, player-initiated "Close chapter" retelling the span since the last
+chapter from the ACTUAL play messages (chunked, previous-passage tail threaded for
+continuity, DM model), markdown export, strictly player-facing (never DM prompt/RAG),
+unvarnished + clinical-register prompt. Still open from the original notes: offering a
+chapter close automatically when a front resolves or a major quest completes, milestone-XP
+pairing as a chapter-close ceremony, and a chapter illustration via scene art.
 When the player closes a major chapter (player-initiated "close chapter", or offered when a
 front resolves / a major quest completes), a chronicler pass writes that span of play as a
 single naturally flowing narrative — a readable saga chapter, accumulated into a "Chronicle"
@@ -499,7 +506,13 @@ end to end on the playtest #3 cleric save.
 pressure" — needs clamp checks at every damage site). **Still open for v2:** wizard ritual
 flavor, NPC/enemy casters, scroll/wand items, spell-driven scene-art moments.
 
-### Character portraits — status: player portrait v1 `shipped` (2026-06-15), NPC portraits `idea`
+### Character portraits — status: player portrait v1 `shipped` (2026-06-15), portrait-at-creation + NPC portraits `shipped` (2026-07-26)
+**Shipped 2026-07-26** (DECISIONS.md): the creation wizard's confirm step is now the hero
+reveal with inline Generate/Reroll portrait (identity edits invalidate it; same provider
+chain, fallback-labeled), and Journal character cards have a Portrait/Reroll button painting
+NPCs from their Scribe-captured appearance + registered gender ("(woman)" beside the name,
+privateNotes never leaks). `SET_NPC_PORTRAIT` persists url/prompt/provider on the roster
+record with a hostile-save URL allowlist.
 Shipped v1: the Character Profile has a Portrait section where the player confirms the hero's
 appearance before Generate unlocks. `imageGen.js` uses xAI Grok Imagine at 3:4 / 1k and then
 downscales stored xAI data URLs so portraits stay compact; Pollinations remains the no-key
@@ -583,7 +596,11 @@ Why: the inspectable engine is a real differentiator and a marketing asset (see
 [MARKETING.md](MARKETING.md)) — a sheet that looks like a game, not a chat sidebar, sells the
 "this is a real RPG" story. Scope is mostly UX/layout; keep all derived values engine-computed.
 
-### Character creation as the first "engine proof" moment — status: `idea` (2026-06-28)
+### Character creation as the first "engine proof" moment — status: `shipped` (2026-07-26)
+**Shipped 2026-07-26** as the hero reveal (DECISIONS.md): the confirm step shows portrait,
+race/class/level, HP/AC/initiative/proficiency/speed/hit die/spell slots, ability + skill
+grids with real modifiers, and starting gear — every number from the same
+createCharacter/createStartingInventory calls Begin Adventure makes. Original thinking:
 The creation flow should not end on a plain form submit. It should culminate in a crisp,
 game-feeling hero reveal: portrait, ancestry/class, level, AC/HP, key proficiencies, skill
 modifiers, starting equipment, and the campaign premise handoff. This borrows the emotional

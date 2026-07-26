@@ -4,7 +4,61 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-26 (morning audit's four P2s fixed same day — queue empty again)._
+_Last updated: 2026-07-27, small hours (overnight feature run: hero reveal +
+portrait-at-creation, NPC portraits, Campaign Chronicle v1, playtest #14 + three fixes)._
+
+## Overnight run 2026-07-26→27: portraits, Chronicle, playtest #14 (Vesa delegated the whole list)
+
+Vesa approved the full recommended list and went to sleep; everything ran autonomously,
+each unit committed separately. 1164 tests + lint green throughout, deployed at session end.
+
+**Playtest #14 (continued "The Ferrywoman's Debt" — the Saima save is NOT in this
+browser profile, so that specific watch item still carries):** proposal machinery clean
+(DC 15 with full public ruling, roll 21, withheld setup re-established), gender badges
+render (Aune WOMAN / Onni MAN), location registry folded "Kuusisaari river ferry landing"
+→ "the ferry landing", xAI scene art rendered, zero console errors. Three real findings,
+all fixed same night:
+
+1. **Terminal quest vanishing (P2)** — the DM completed the never-opened premise quest in
+   one response; COMPLETE_QUEST/FAIL_QUEST silently no-opped. Named terminal refs now
+   upsert as finished table history (DECISIONS.md 2026-07-26).
+2. **Stance stutter reproduced on a single unforked record** — so the roster fork was NOT
+   the sole cause: both DM and Scribe emit reworded fragments the containment merge can
+   only append. Fixed at the contract: stance emission is a full rewrite restating
+   still-true parts verbatim, on all three prompt paths (DECISIONS.md). Watch: do old
+   stuttered records self-clean on the next genuine stance shift?
+3. **Appearance-thinning observation (watch)** — Aune's LOOKS lost braid/build/age details
+   from the premise description somewhere in the merge chain; unproven (no baseline
+   snapshot), watch on future playtests.
+
+**Hero reveal + portrait-at-creation (IDEAS → shipped):** the wizard confirm step is now
+an engine-proof reveal — portrait frame with inline Generate/Reroll (identity edits
+invalidate; key-gated with a Settings pointer), derived-stat chips, ability/skill grids
+with real modifiers, starting gear, all from the REAL createCharacter calls. Live-verified
+(dwarf cleric: HP 11, AC 16, slots L1 ×2, Insight +4 — exact engine math; xAI portrait
+rendered; portrait survives step navigation; autosave untouched by an abandoned wizard).
+
+**NPC portraits (IDEAS → shipped):** Journal character cards paint NPCs from Scribe
+appearance + registered gender ("(woman)" beside the name — the inviolable-gender
+convention), lastNotes as context, privateNotes never leaks. Persisted on the roster
+record behind a hostile-save URL allowlist; fallback-labeled. Live-verified on Aune
+(xAI render, reroll affordance, survived reload).
+
+**Campaign Chronicle v1 (IDEAS flagship → shipped):** World Journal grew a Chronicle tab
+(the entries tab is now titled "Journal") — "Close chapter" retells all play since the
+last chapter from the ACTUAL messages, chunked with passage-tail continuity, DM model,
+unvarnished + clinical register, strictly player-facing (never DM prompt/RAG), markdown
+export. Live-verified: a genuinely good chapter with zero dice-number leakage, survived
+reload. **The catch that almost shipped broken:** a new persisted top-level field needs
+BOTH an autosave dependency entry and a real flushAutoSave hint — `chronicle` had
+neither and the first chapter silently vanished (the NPC-portrait flush had the same
+no-op-hint bug, rescued only by `npcs` being a dep). Standing rule in DECISIONS.md.
+
+**Also:** incapacitating enemy conditions confirmed already fixed since 2026-07-14 —
+the audit finding's IDEAS entry was stale, never the code (rpg-balance-master re-ruling
+in DECISIONS.md + agent memory). Watch items carried: Saima-save stance check (other
+browser profile), Scribe gender backfill on pre-gender campaigns, Grok art respecting
+the gender tag (needs eyes on rendered images — headless session couldn't judge).
 
 ## Audit-fix 2026-07-26: character-vault + rules-math P2 batch (queue emptied)
 
