@@ -1092,3 +1092,211 @@
     font-style: italic;
     color: var(--text-secondary, #a9a9b3);
 }
+
+/* === Hero reveal (creation wizard confirm step) === */
+
+.hero-reveal h3 {
+    text-align: center;
+}
+
+.reveal-layout {
+    display: flex;
+    gap: 1.25rem;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+
+.reveal-portrait {
+    flex: 0 0 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.reveal-portrait img {
+    width: 180px;
+    border-radius: 8px;
+    border: 1px solid var(--gold-dim);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+
+.reveal-portrait-empty {
+    width: 180px;
+    aspect-ratio: 3 / 4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0.75rem;
+    border: 1px dashed var(--border-primary);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-style: italic;
+}
+
+.reveal-portrait-note {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    text-align: center;
+}
+
+.reveal-identity {
+    flex: 1;
+    min-width: 0;
+}
+
+.reveal-meta {
+    color: var(--gold);
+    font-family: var(--font-heading);
+    font-size: 1.05rem;
+    margin-bottom: 0.75rem;
+}
+
+.reveal-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.9rem;
+}
+
+.reveal-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+    padding: 0.4rem 0.7rem;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    background: var(--surface-primary);
+}
+
+.reveal-chip span {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+}
+
+.reveal-chip strong {
+    color: var(--gold);
+    font-size: 1rem;
+    line-height: 1.1;
+}
+
+.reveal-abilities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.reveal-ability {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.05rem;
+    min-width: 3rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+}
+
+.reveal-ability span {
+    font-size: 0.62rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+}
+
+.reveal-ability strong {
+    font-size: 1rem;
+    color: var(--text-primary, #e8e6e3);
+}
+
+.reveal-ability em {
+    font-style: normal;
+    font-size: 0.72rem;
+    color: var(--gold);
+}
+
+.reveal-columns {
+    display: flex;
+    gap: 1.25rem;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+
+.reveal-section {
+    flex: 1;
+    min-width: 0;
+}
+
+.reveal-section h4 {
+    color: var(--gold);
+    font-family: var(--font-heading);
+    font-size: 0.9rem;
+    margin: 0 0 0.4rem;
+}
+
+.reveal-skill-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.reveal-skill {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.reveal-skill strong {
+    color: var(--gold);
+}
+
+.reveal-skill em {
+    font-style: normal;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gold-dim);
+}
+
+.reveal-skill.expertise span {
+    color: var(--text-primary, #e8e6e3);
+}
+
+.reveal-gear {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.reveal-gear li {
+    padding: 0.1rem 0;
+}
+
+.reveal-wealth {
+    margin-top: 0.4rem;
+    font-size: 0.85rem;
+    color: var(--gold);
+}
+
+.reveal-canon {
+    margin-top: 0.5rem;
+}
+
+@media (max-width: 640px) {
+    .reveal-layout,
+    .reveal-columns {
+        flex-direction: column;
+    }
+
+    .reveal-portrait {
+        align-self: center;
+    }
+}

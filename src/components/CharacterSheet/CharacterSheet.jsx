@@ -11,18 +11,8 @@ import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
 import { getKnownSpells, getSpellAttackBonus, getSpellSaveDC, isSpellcaster } from '../../engine/spellcasting.js';
 import CharacterScreen from './CharacterScreen.jsx';
+import { buildPortraitPrompt } from './portraitPrompt.js';
 import './CharacterSheet.css';
-
-function buildPortraitPrompt(character, appearance, equippedItems = []) {
-    const gear = equippedItems.length > 0 ? ` Wearing/carrying: ${equippedItems.join(', ')}.` : '';
-    const gender = character.gender?.trim() ? `${character.gender.trim()} ` : '';
-    return [
-        `Waist-up character portrait of ${character.name}, a ${gender}${character.race} ${character.class}.`,
-        appearance,
-        gear,
-        'Adult low-fantasy tabletop RPG portrait, grounded and believable, expressive face, sharp eyes, practical clothing and gear, moody painterly realism, dark neutral background, soft rim light, no text, no frame.',
-    ].filter(Boolean).join(' ');
-}
 
 export default function CharacterSheet() {
     const { state, dispatch } = useGame();

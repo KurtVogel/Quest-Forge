@@ -1,13 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { createCharacter, createStartingInventory, STANDARD_ARRAY, ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
 import { sanitizeCharacter, sanitizeInventory, parseCharacterExport, downloadCharacterExport } from '../../engine/characterVault.js';
 import { listRosterCharacters, saveRosterCharacter, deleteRosterCharacter } from '../../state/persistence.js';
 import { RACES, RACE_LIST } from '../../data/races.js';
 import { CLASSES, CLASS_LIST } from '../../data/classes.js';
-import { SKILL_ABILITIES } from '../../engine/rules.js';
+import { SKILL_ABILITIES, computeACFromInventory, getModifier, getProficiencyBonus, getSkillModifier } from '../../engine/rules.js';
+import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
+import { getMachineryGeminiKey } from '../../llm/machinery.js';
+import { buildPortraitPrompt } from './portraitPrompt.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH, normalizeCampaignPremise } from '../../config/contentLimits.js';
 import './CharacterSheet.css';
+
+const formatModifier = (mod) => (mod >= 0 ? `+${mod}` : `${mod}`);
 
 const STEPS = ['name', 'race', 'class', 'stats', 'skills', 'confirm', 'adventure'];
 
@@ -27,7 +32,7 @@ function CharCountdown({ length, max }) {
 }
 
 export default function CharacterCreation() {
-    const { dispatch } = useGame();
+    const { state, dispatch } = useGame();
     const [phase, setPhase] = useState('start'); // 'start' | 'wizard' | 'roster'
     const [step, setStep] = useState(0);
     const [name, setName] = useState('');
@@ -45,7 +50,21 @@ export default function CharacterCreation() {
     const [roster, setRoster] = useState([]);
     const [selectedHeroId, setSelectedHeroId] = useState(null);
     const [rosterError, setRosterError] = useState(null);
+    const [portraitUrl, setPortraitUrl] = useState('');
+    const [portraitProvider, setPortraitProvider] = useState('');
+    const [portraitPromptUsed, setPortraitPromptUsed] = useState('');
+    const [isGeneratingPortrait, setIsGeneratingPortrait] = useState(false);
+    const [portraitError, setPortraitError] = useState('');
     const importInputRef = useRef(null);
+
+    // A generated portrait is tied to the identity it was painted from — going
+    // back and changing who the hero is invalidates it.
+    useEffect(() => {
+        setPortraitUrl('');
+        setPortraitProvider('');
+        setPortraitPromptUsed('');
+        setPortraitError('');
+    }, [name, gender, appearance, race, charClass]);
 
     useEffect(() => {
         listRosterCharacters().then(setRoster).catch(() => setRoster([]));
@@ -99,6 +118,45 @@ export default function CharacterCreation() {
         setFightingStyle('defense');
     };
 
+    // Engine-computed preview of the finished hero for the reveal step: the same
+    // createCharacter/createStartingInventory calls handleCreate makes, so every
+    // number the player sees is the real engine math, not a UI estimate.
+    const currentStepName = STEPS[step];
+    const revealReady = !!(name.trim() && race && charClass && allStatsAssigned && allSkillsChosen);
+    const preview = useMemo(() => {
+        if (!revealReady || currentStepName !== 'confirm') return null;
+        const abilityScores = {};
+        for (const ability of ABILITY_NAMES) {
+            abilityScores[ability] = statAssignment[ability];
+        }
+        const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle, expertiseSkills, gender, appearance, background });
+        return { character, inventory: createStartingInventory(charClass) };
+    }, [revealReady, currentStepName, name, race, charClass, statAssignment, chosenSkills, fightingStyle, expertiseSkills, gender, appearance, background]);
+
+    const imageKeyAvailable = !!(state.settings?.imageApiKey || getMachineryGeminiKey(state.settings));
+
+    const handleGeneratePortrait = async () => {
+        if (!preview || !appearance.trim() || isGeneratingPortrait) return;
+        setIsGeneratingPortrait(true);
+        setPortraitError('');
+        try {
+            const equippedNames = preview.inventory.filter(i => i.equipped && i.name).map(i => i.name);
+            const prompt = buildPortraitPrompt(preview.character, appearance.trim(), equippedNames);
+            const result = await generatePortraitImageDetailed(prompt, state.settings?.imageApiKey, {
+                geminiApiKey: getMachineryGeminiKey(state.settings),
+                bypassCache: !!portraitUrl, // reroll must paint a genuinely new image
+            });
+            if (!result?.url) throw new Error('No portrait returned.');
+            setPortraitUrl(result.url);
+            setPortraitProvider(result.provider || '');
+            setPortraitPromptUsed(prompt);
+        } catch (e) {
+            setPortraitError(e.message || 'Portrait failed.');
+        } finally {
+            setIsGeneratingPortrait(false);
+        }
+    };
+
     const beginAdventure = (character, inventory) => {
         dispatch({ type: 'START_CHARACTER', payload: { character, inventory } });
 
@@ -138,6 +196,11 @@ export default function CharacterCreation() {
         }
 
         const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle, expertiseSkills, gender, appearance, background });
+        if (portraitUrl) {
+            character.portraitUrl = portraitUrl;
+            character.portraitPrompt = portraitPromptUsed;
+            character.portraitUpdatedAt = Date.now();
+        }
         const inventory = createStartingInventory(charClass);
         beginAdventure(character, inventory);
     };
@@ -516,36 +579,112 @@ export default function CharacterCreation() {
                         </div>
                     )}
 
-                    {currentStep === 'confirm' && (
-                        <div className="creation-step">
-                            <h3>Your Hero</h3>
-                            <div className="creation-summary">
-                                <div className="summary-row"><strong>Name:</strong> {name}</div>
-                                {gender.trim() && <div className="summary-row"><strong>Gender:</strong> {gender.trim()}</div>}
-                                <div className="summary-row"><strong>Race:</strong> {RACES[race]?.name}</div>
-                                <div className="summary-row"><strong>Class:</strong> {CLASSES[charClass]?.name}</div>
-                                {charClass === 'fighter' && (
-                                    <div className="summary-row">
-                                        <strong>Fighting Style:</strong> {CLASSES.fighter.fightingStyles[fightingStyle]?.label}
-                                    </div>
-                                )}
-                                <div className="summary-row">
-                                    <strong>Stats:</strong>{' '}
-                                    {ABILITY_NAMES.map(a => `${ABILITY_SHORT[a]}: ${statAssignment[a]}`).join(', ')}
+                    {currentStep === 'confirm' && preview && (
+                        <div className="creation-step hero-reveal">
+                            <h3>{name.trim()} stands ready</h3>
+                            <div className="reveal-layout">
+                                <div className="reveal-portrait">
+                                    {portraitUrl ? (
+                                        <img src={portraitUrl} alt={`Portrait of ${name.trim()}`} />
+                                    ) : (
+                                        <div className="reveal-portrait-empty">
+                                            {appearance.trim()
+                                                ? (isGeneratingPortrait ? 'The painter works…' : 'No portrait yet')
+                                                : 'Describe an appearance on the first step to give your hero a face.'}
+                                        </div>
+                                    )}
+                                    {portraitUrl && portraitProvider && portraitProvider !== 'xai' && (
+                                        <div className="reveal-portrait-note">
+                                            Rendered by {portraitProvider === 'gemini' ? 'Gemini (quality fallback)' : portraitProvider}
+                                        </div>
+                                    )}
+                                    {appearance.trim() && imageKeyAvailable && (
+                                        <button
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={handleGeneratePortrait}
+                                            disabled={isGeneratingPortrait}
+                                        >
+                                            {isGeneratingPortrait ? 'Painting…' : (portraitUrl ? 'Reroll portrait' : 'Generate portrait')}
+                                        </button>
+                                    )}
+                                    {appearance.trim() && !imageKeyAvailable && (
+                                        <div className="reveal-portrait-note">
+                                            Add an image key (Settings → AI Provider) to generate a portrait.
+                                        </div>
+                                    )}
+                                    {portraitError && <div className="roster-error">{portraitError}</div>}
                                 </div>
-                                <div className="summary-row">
-                                    <strong>Skills:</strong>{' '}
-                                    {allSkillProficiencies.map(s => SKILL_LABELS[s] || s).join(', ')}
-                                </div>
-                                {charClass === 'rogue' && (
-                                    <div className="summary-row">
-                                        <strong>Expertise Skills:</strong>{' '}
-                                        {expertiseSkills.map(s => SKILL_LABELS[s] || s).join(', ')}
+                                <div className="reveal-identity">
+                                    <div className="reveal-meta">
+                                        {gender.trim() && <>{gender.trim()} · </>}
+                                        {RACES[race]?.name} {CLASSES[charClass]?.name} · Level 1
+                                        {charClass === 'fighter' && <> · {CLASSES.fighter.fightingStyles[fightingStyle]?.label}</>}
                                     </div>
-                                )}
-                                {appearance.trim() && <div className="summary-row"><strong>Appearance:</strong> {appearance.trim()}</div>}
-                                {background.trim() && <div className="summary-row"><strong>Background:</strong> {background.trim()}</div>}
+                                    <div className="reveal-chips">
+                                        <div className="reveal-chip"><span>HP</span><strong>{preview.character.maxHP}</strong></div>
+                                        <div className="reveal-chip"><span>AC</span><strong>{computeACFromInventory(preview.inventory, preview.character)}</strong></div>
+                                        <div className="reveal-chip"><span>Initiative</span><strong>{formatModifier(getModifier(preview.character.abilityScores.dexterity))}</strong></div>
+                                        <div className="reveal-chip"><span>Proficiency</span><strong>+{getProficiencyBonus(1)}</strong></div>
+                                        <div className="reveal-chip"><span>Speed</span><strong>{preview.character.speed} ft</strong></div>
+                                        <div className="reveal-chip"><span>Hit Die</span><strong>d{CLASSES[charClass]?.hitDie}</strong></div>
+                                        {preview.character.spellSlots && (
+                                            <div className="reveal-chip">
+                                                <span>Spell Slots</span>
+                                                <strong>
+                                                    {Object.entries(preview.character.spellSlots)
+                                                        .filter(([, slot]) => slot?.max > 0)
+                                                        .map(([lvl, slot]) => `L${lvl} ×${slot.max}`)
+                                                        .join(' · ') || '—'}
+                                                </strong>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="reveal-abilities">
+                                        {ABILITY_NAMES.map(a => (
+                                            <div key={a} className="reveal-ability">
+                                                <span>{ABILITY_SHORT[a]}</span>
+                                                <strong>{preview.character.abilityScores[a]}</strong>
+                                                <em>{formatModifier(getModifier(preview.character.abilityScores[a]))}</em>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
                             </div>
+                            <div className="reveal-columns">
+                                <div className="reveal-section">
+                                    <h4>Skills</h4>
+                                    <div className="reveal-skill-list">
+                                        {allSkillProficiencies.map(s => (
+                                            <div key={s} className={`reveal-skill${expertiseSkills.includes(s) ? ' expertise' : ''}`}>
+                                                <span>{SKILL_LABELS[s] || s}</span>
+                                                <strong>{formatModifier(getSkillModifier(preview.character, s))}</strong>
+                                                {expertiseSkills.includes(s) && <em>expertise</em>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="reveal-section">
+                                    <h4>Starting gear</h4>
+                                    <ul className="reveal-gear">
+                                        {preview.inventory.map((item, i) => (
+                                            <li key={item.id || `${item.name}-${i}`}>
+                                                {item.name}
+                                                {item.quantity > 1 ? ` ×${item.quantity}` : ''}
+                                                {item.equipped ? ' — equipped' : ''}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    {preview.character.gold > 0 && (
+                                        <div className="reveal-wealth">{preview.character.gold} gp</div>
+                                    )}
+                                </div>
+                            </div>
+                            {(appearance.trim() || background.trim()) && (
+                                <div className="creation-summary reveal-canon">
+                                    {appearance.trim() && <div className="summary-row"><strong>Appearance:</strong> {appearance.trim()}</div>}
+                                    {background.trim() && <div className="summary-row"><strong>Background:</strong> {background.trim()}</div>}
+                                </div>
+                            )}
                         </div>
                     )}
 
