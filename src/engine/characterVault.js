@@ -128,8 +128,12 @@ export function sanitizeCharacter(raw) {
         ...(race.skillProficiencies || []),
         ...(Array.isArray(raw.skillProficiencies) ? raw.skillProficiencies : []),
     ])].filter(s => knownSkills.has(s));
-    const expertiseSkills = (Array.isArray(raw.expertiseSkills) ? raw.expertiseSkills : [])
-        .filter(s => skillProficiencies.includes(s));
+    // Expertise is class-gated like createCharacter: only rogues have it. Without
+    // the gate a hand-edited fighter/wizard export imports with doubled proficiency.
+    const expertiseSkills = raw.class === 'rogue'
+        ? (Array.isArray(raw.expertiseSkills) ? raw.expertiseSkills : [])
+            .filter(s => skillProficiencies.includes(s))
+        : [];
 
     const rebuilt = {
         id: `char-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -185,7 +189,7 @@ export function sanitizeInventory(rawInventory) {
     if (!Array.isArray(rawInventory)) return [];
     const sanitized = rawInventory
         .slice(0, MAX_INVENTORY_ITEMS)
-        .filter(item => item && (typeof item === 'object' || typeof item === 'string'))
+        .filter(item => item && !Array.isArray(item) && (typeof item === 'object' || typeof item === 'string'))
         .map((item, index) => {
             const normalized = normalizeItem(item);
             const wantsEquip = typeof item === 'object' && item.equipped === true;

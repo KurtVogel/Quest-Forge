@@ -13,6 +13,7 @@ import {
     getSkillModifier,
     getArmorClass,
     computeACFromInventory,
+    getEquippedWeapon,
     getMaxHitPoints,
     getWeaponAttackBonus,
     getWeaponDamageNotation,
@@ -151,6 +152,19 @@ describe('armor class', () => {
         expect(computeACFromInventory(armored, { ...fighter, fightingStyle: 'defense' })).toBe(17);
         expect(computeACFromInventory(unarmored, { ...fighter, fightingStyle: 'defense' })).toBe(11);
     });
+
+    it('treats a non-array inventory from a corrupted save as unarmored', () => {
+        expect(computeACFromInventory(null, fighter)).toBe(11); // 10 + DEX 1
+        expect(computeACFromInventory({ 0: { type: 'armor', baseAC: 16, equipped: true } }, fighter)).toBe(11);
+    });
+});
+
+describe('getEquippedWeapon', () => {
+    it('returns null for a non-array inventory instead of crashing', () => {
+        expect(getEquippedWeapon(null)).toBeNull();
+        expect(getEquippedWeapon({ 0: { type: 'weapon', equipped: true } })).toBeNull();
+        expect(getEquippedWeapon()).toBeNull();
+    });
 });
 
 describe('fighter fighting styles', () => {
@@ -247,6 +261,13 @@ describe('isProficientWithWeapon', () => {
         expect(isProficientWithWeapon(wizard, { name: 'Shard of the Broken Bell' })).toBe(true);
     });
 
+    it('coerces non-string name/category instead of crashing', () => {
+        // normalizeItem passes a numeric name through for non-catalog items.
+        expect(isProficientWithWeapon(wizard, { name: 12345, category: 'martialMelee' })).toBe(false);
+        expect(isProficientWithWeapon(fighter, { name: 12345, category: 'martialMelee' })).toBe(true);
+        expect(isProficientWithWeapon(wizard, { name: 12345, category: 987 })).toBe(true); // uncategorizable → no penalty
+    });
+
     it('subtracts proficiency from the attack bonus end-to-end', () => {
         // Wizard with an equipped longsword: STR -1, NO proficiency bonus.
         const longsword = [{ name: 'Longsword', type: 'weapon', category: 'martialMelee', damage: '1d8', equipped: true }];
@@ -286,6 +307,11 @@ describe('getMaxHitPoints', () => {
 
     it('falls back gracefully without class data', () => {
         expect(getMaxHitPoints('fighter', 1, 3, null)).toBe(13);
+    });
+
+    it('falls back instead of returning NaN on malformed classData', () => {
+        expect(getMaxHitPoints('fighter', 5, 2, {})).toBe(12); // missing hitDie → null fallback
+        expect(getMaxHitPoints('fighter', 5, 2, { hitDie: 'd10' })).toBe(12);
     });
 });
 

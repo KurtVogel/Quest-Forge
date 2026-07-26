@@ -238,11 +238,28 @@ describe('sanitizeCharacter clamps and rebuilds', () => {
             ...character,
             race: 'elf',
             skillProficiencies: ['athletics', 'lockpicking', 'flying'],
-            expertiseSkills: ['athletics', 'lockpicking'],
         });
         expect(clean.skillProficiencies).toEqual(expect.arrayContaining(['athletics', 'perception']));
         expect(clean.skillProficiencies).not.toContain('lockpicking');
-        expect(clean.expertiseSkills).toEqual(['athletics']);
+    });
+
+    it('class-gates expertise: non-rogues lose it, rogues keep only proficient skills', () => {
+        // A hand-edited fighter export can't smuggle in doubled proficiency.
+        const { character } = makeFighter();
+        const fighter = sanitizeCharacter({
+            ...character,
+            expertiseSkills: ['athletics'],
+        });
+        expect(fighter.expertiseSkills).toEqual([]);
+
+        const rogue = createCharacter('Noora', 'elf', 'rogue', BASE_SCORES, ['stealth', 'acrobatics'], {
+            expertiseSkills: ['stealth'],
+        });
+        const clean = sanitizeCharacter({
+            ...rogue,
+            expertiseSkills: ['stealth', 'lockpicking', 'athletics'],
+        });
+        expect(clean.expertiseSkills).toEqual(['stealth']);
     });
 
     it('strips unsafe portrait URLs from imported files', () => {
@@ -262,6 +279,12 @@ describe('sanitizeInventory', () => {
         expect(sanitizeInventory('stuff')).toEqual([]);
         const [sword] = sanitizeInventory([{ name: 'Longsword', type: 'weapon', magicBonus: 7 }]);
         expect(sword.magicBonus).toBe(3);
+    });
+
+    it('drops array entries instead of minting "Unknown item" junk', () => {
+        const items = sanitizeInventory([[], ['nested'], { name: 'Rope', type: 'gear' }, 42, null]);
+        expect(items).toHaveLength(1);
+        expect(items[0].name).toBe('Rope');
     });
 
     it('keeps at most one equipped weapon, armor, and shield', () => {

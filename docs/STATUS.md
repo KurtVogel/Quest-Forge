@@ -4,9 +4,34 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-25, later (scene-art direction settled by spike + implemented —
-strengthening queue now COMPLETELY empty — plus playtest #13, vendor code splitting,
-arc timeline, guest cleanup.)_
+_Last updated: 2026-07-26 (morning audit's four P2s fixed same day — queue empty again)._
+
+## Audit-fix 2026-07-26: character-vault + rules-math P2 batch (queue emptied)
+
+The morning's scheduled audit (character-vault + rules-math, hostile-input lap) filed
+four P2s; all four fixed in one batch plus the audit's optional third suggestion.
+1150 tests + lint green.
+
+1. **Cross-class Expertise via import** — `sanitizeCharacter` now rogue-gates
+   `expertiseSkills` (mirrors `createCharacter`); the test that pinned the wrong
+   behavior (fighter keeping expertise) replaced with a class-gate test.
+2. **Non-array inventory crash** — `computeACFromInventory`/`getEquippedWeapon` get
+   `Array.isArray` guards (corrupted-save `null`/object inventory → unarmored AC /
+   null weapon instead of a throw; LOAD_GAME never runs the vault sanitizer).
+3. **Non-string weapon name/category crash** — `isProficientWithWeapon` coerces with
+   `String()`; category logic still evaluates on numeric names.
+4. **`sanitizeInventory` array junk** — array entries are dropped instead of minting
+   an "Unknown item" via `normalizeItem([])`.
+5. Bonus one-liner: `getMaxHitPoints` falls back on a non-finite `hitDie` instead of
+   silently returning NaN.
+
+Also: `.claude/settings.local.json` untracked (already gitignored — it was committed
+before the ignore rule existed, so it kept showing as modified).
+
+**Carried watch items (need live play):** stance-stutter on the old Saima campaign
+(other browser profile), Scribe gender capture on existing-campaign NPCs, Grok art
+respecting the gender tag. Balance consult on the L1-death observation still waiting
+for more real play.
 
 ## Scene-art decision + implementation, playtest #13, small-items sweep (2026-07-25, later)
 

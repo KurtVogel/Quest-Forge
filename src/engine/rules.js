@@ -71,12 +71,15 @@ export function getArmorClass(dexMod, armor = null, shield = false) {
 export function computeACFromInventory(inventory, character) {
     if (!character?.abilityScores) return 10;
     const dexMod = getModifier(character.abilityScores.dexterity);
+    // A corrupted/stale save can carry a non-array inventory; LOAD_GAME does not
+    // run the vault sanitizer, so guard here rather than crash the AC recompute.
+    const items = Array.isArray(inventory) ? inventory : [];
 
-    const equippedArmor = inventory.find(i =>
+    const equippedArmor = items.find(i =>
         i.equipped && i.baseAC && !i.isShield && (i.type === 'armor')
     ) || null;
 
-    const equippedShield = inventory.find(i =>
+    const equippedShield = items.find(i =>
         i.equipped && (i.type === 'shield' || i.isShield)
     ) || null;
 
@@ -96,6 +99,7 @@ export function computeACFromInventory(inventory, character) {
 }
 
 export function getEquippedWeapon(inventory = []) {
+    if (!Array.isArray(inventory)) return null;
     return inventory.find(i => i.equipped && i.type === 'weapon') || null;
 }
 
@@ -123,8 +127,10 @@ export function getWeaponAbilityModifier(character, weapon = null) {
 export function isProficientWithWeapon(character, weapon) {
     if (!weapon || !character) return true;
     const profs = (CLASSES[character.class]?.weaponProficiencies || []).map(p => p.toLowerCase().trim());
-    const category = (weapon.category || '').toLowerCase();
-    const name = (weapon.name || '').toLowerCase().replace(/\s*\+\d+\b/g, '').trim();
+    // normalizeItem passes non-catalog names through untouched, so a hand-edited
+    // numeric name/category reaches here — coerce instead of crashing.
+    const category = String(weapon.category || '').toLowerCase();
+    const name = String(weapon.name || '').toLowerCase().replace(/\s*\+\d+\b/g, '').trim();
 
     // Specific-name proficiency (e.g. wizard "daggers", rogue "rapiers").
     for (const t of profs) {
@@ -365,7 +371,7 @@ export function getSneakAttackDice(character, weapon, advantage, disadvantage, h
  * @returns {number} Maximum HP
  */
 export function getMaxHitPoints(className, level, conMod, classData) {
-    if (!classData) return 10 + conMod;
+    if (!classData || !Number.isFinite(classData.hitDie)) return 10 + conMod;
 
     // Level 1: max hit die + CON mod
     // Subsequent levels: average hit die + CON mod per level.
