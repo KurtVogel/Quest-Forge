@@ -762,9 +762,9 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             // (or self-heals into a new one if the DM never opened it).
             dispatch({ type: 'ADD_QUEST', payload: { ...(quest.id && { id: quest.id }), name: quest.name, description: quest.description } });
         } else if (quest.status === 'completed' && (quest.id || quest.name)) {
-            dispatch({ type: 'COMPLETE_QUEST', payload: { id: quest.id, name: quest.name } });
+            dispatch({ type: 'COMPLETE_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description } });
         } else if (quest.status === 'failed' && (quest.id || quest.name)) {
-            dispatch({ type: 'FAIL_QUEST', payload: { id: quest.id, name: quest.name } });
+            dispatch({ type: 'FAIL_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description } });
         }
     }
 

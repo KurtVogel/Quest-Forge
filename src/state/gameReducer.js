@@ -2492,33 +2492,41 @@ export function gameReducer(state, action) {
             };
         }
 
-        case 'COMPLETE_QUEST': {
-            const ref = action.payload || '';
-            const refId = typeof ref === 'object' ? ref.id : ref;
-            const refName = typeof ref === 'object' ? ref.name : ref;
-            const nameToken = normalizeRefToken(refName);
-            return {
-                ...state,
-                quests: state.quests.map(q =>
-                    q.id === refId || (nameToken && normalizeRefToken(q.name) === nameToken)
-                        ? { ...q, status: 'completed' }
-                        : q
-                ),
-            };
-        }
-
+        case 'COMPLETE_QUEST':
         case 'FAIL_QUEST': {
+            const terminalStatus = action.type === 'COMPLETE_QUEST' ? 'completed' : 'failed';
             const ref = action.payload || '';
             const refId = typeof ref === 'object' ? ref.id : ref;
             const refName = typeof ref === 'object' ? ref.name : ref;
             const nameToken = normalizeRefToken(refName);
+            const matched = state.quests.some(q =>
+                q.id === refId || (nameToken && normalizeRefToken(q.name) === nameToken));
+            if (matched) {
+                return {
+                    ...state,
+                    quests: state.quests.map(q =>
+                        q.id === refId || (nameToken && normalizeRefToken(q.name) === nameToken)
+                            ? { ...q, status: terminalStatus }
+                            : q
+                    ),
+                };
+            }
+            // A quest arc opened and resolved in one DM response never existed in
+            // state — record it directly in its finished status as table history
+            // (playtest #14: the premise's letter delivery vanished without a trace).
+            // Only named object refs qualify; a bare id string that matches nothing
+            // (panel buttons, stale ids) stays a no-op.
+            const newName = typeof ref === 'object' ? String(ref.name || '').trim() : '';
+            if (!newName) return state;
             return {
                 ...state,
-                quests: state.quests.map(q =>
-                    q.id === refId || (nameToken && normalizeRefToken(q.name) === nameToken)
-                        ? { ...q, status: 'failed' }
-                        : q
-                ),
+                quests: [...state.quests, {
+                    id: ref.id || `quest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    name: newName,
+                    description: String(ref.description || '').trim(),
+                    status: terminalStatus,
+                    addedAt: Date.now(),
+                }],
             };
         }
 

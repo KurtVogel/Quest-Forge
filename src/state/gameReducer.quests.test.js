@@ -51,12 +51,36 @@ describe('quest identity', () => {
         expect(failed.quests.find(q => q.id === 'quest-rats').status).toBe('active');
     });
 
-    it('ignores a FAIL_QUEST reference that matches nothing', () => {
+    it('records an unmatched named terminal update as finished table history (playtest #14)', () => {
+        // A quest arc the DM opens and resolves in ONE response never existed in
+        // state — the terminal update must record it, not vanish.
+        const completed = gameReducer(initialGameState, {
+            type: 'COMPLETE_QUEST',
+            payload: { name: "The Ferrywoman's Letter", description: 'Delivered the sealed letter to Aune.' },
+        });
+        expect(completed.quests).toHaveLength(1);
+        expect(completed.quests[0]).toMatchObject({
+            name: "The Ferrywoman's Letter",
+            description: 'Delivered the sealed letter to Aune.',
+            status: 'completed',
+        });
+
         const added = gameReducer(initialGameState, {
             type: 'ADD_QUEST',
             payload: { id: 'quest-debt', name: 'Collect the Debt' },
         });
         const next = gameReducer(added, { type: 'FAIL_QUEST', payload: { name: 'A Quest That Never Was' } });
+        expect(next.quests.find(q => q.id === 'quest-debt').status).toBe('active');
+        expect(next.quests.find(q => q.name === 'A Quest That Never Was')).toMatchObject({ status: 'failed' });
+    });
+
+    it('keeps unmatched bare-string terminal refs as no-ops (panel buttons, stale ids)', () => {
+        const added = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { id: 'quest-debt', name: 'Collect the Debt' },
+        });
+        const next = gameReducer(added, { type: 'COMPLETE_QUEST', payload: 'quest-gone-stale' });
+        expect(next.quests).toHaveLength(1);
         expect(next.quests[0].status).toBe('active');
     });
 });
