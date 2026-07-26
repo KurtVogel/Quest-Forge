@@ -344,6 +344,10 @@ describe('party block', () => {
         expect(text).toContain('Personal history with the hero: The hero pulled Kaarina from the river at the ford.; Kaarina gave the hero her mother\'s iron ring.');
         // The DM contract: stance/bond updates route through npc_updates, not update_companions.
         expect(text).toContain('`npc_updates` with `stanceToPlayer`');
+        // Stutter guard (playtest #14): stance emission is a full rewrite of the
+        // stored record, never a this-turn fragment that appends a contradiction.
+        expect(text).toContain('REWRITE of the whole record');
+        expect(text).toContain('restating still-true parts in their existing wording');
     });
 
     it('renders a plain party line when the companion has no roster dossier', () => {

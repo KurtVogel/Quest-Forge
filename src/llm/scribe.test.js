@@ -182,6 +182,10 @@ describe('Scribe story memory extraction', () => {
         expect(request.userMessage).toContain('KNOWN PLAYER-RELATIONSHIP STANCES');
         expect(request.userMessage).toContain('privately flattered');
         expect(request.systemPrompt).toContain('COMPLETE updated stance');
+        // Stutter guard (playtest #14): the contract explains the merge mechanics —
+        // restate still-true parts verbatim or the engine appends a contradiction.
+        expect(request.systemPrompt).toContain('IN ITS EXISTING WORDING');
+        expect(request.systemPrompt).toContain('APPENDED');
     });
 
     it('caps world facts at three per turn no matter how chatty the extraction is', async () => {

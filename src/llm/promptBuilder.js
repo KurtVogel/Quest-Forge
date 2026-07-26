@@ -399,6 +399,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - Always include \`name\` and \`lastNotes\` for roster entries; include other fields only when newly learned
 - Include \`gender\` the first time a character's gender is established or apparent ("woman", "man", or the fiction's own wording) — it anchors portraits, scene art, and pronoun consistency for the rest of the campaign
 - When an exchange meaningfully shifts how an NPC personally regards the hero — flirtation, gratitude, growing trust or attraction, an insult, a betrayal — include \`stanceToPlayer\` (their complete current personal stance toward the hero, from their side) and \`bondMoment\` (one line recording the moment itself). Play established stances consistently: an NPC listed with \`toward the hero:\` in KNOWN NPCs remembers that history in every scene.
+- \`stanceToPlayer\` is a REWRITE of the whole record, not a note about this exchange: start from the \`toward the hero:\` stance shown in KNOWN NPCs, keep every part that still holds IN ITS EXISTING WORDING, integrate what this exchange changed, and drop only feelings this exchange genuinely superseded. A fragment describing just this turn ("appreciates his discretion tonight") gets APPENDED to the stored stance and leaves the contradicted old feelings standing beside it — emit the full revised stance or omit the field.
 
 ## WORLD TEMPO & HIDDEN FRONT INSTRUCTIONS
 - If the WORLD TEMPO section is present, it is private DM state. Never reveal front ids, faction stubs, intensity labels, pace levels, or that a pacing system exists. The player only ever experiences the fiction.
@@ -679,7 +680,7 @@ ${party.map(c => {
         return bond.length > 0 ? `${line}\n${bond.join('\n')}` : line;
     }).join('\n')}
 A DOWNED companion is unconscious but ALIVE and recoverable through healing or rest — never narrate their death as a side remark. If the fiction genuinely, deliberately kills a companion, you MUST emit \`remove_companions\` for them in that same response; while they remain on this list, they are alive.
-Companions are people, not gear: play an established "Toward the hero" stance and personal history consistently in every scene. When an exchange genuinely shifts how a companion regards the hero, record it exactly as for any NPC — \`npc_updates\` with \`stanceToPlayer\` (their complete current stance) and \`bondMoment\` (the moment itself); \`update_companions\` carries only mechanics, affinity, and keepsakes.
+Companions are people, not gear: play an established "Toward the hero" stance and personal history consistently in every scene. When an exchange genuinely shifts how a companion regards the hero, record it exactly as for any NPC — \`npc_updates\` with \`stanceToPlayer\` (the complete revised stance, restating still-true parts in their existing wording — same rule as any NPC) and \`bondMoment\` (the moment itself); \`update_companions\` carries only mechanics, affinity, and keepsakes.
 When the player's own action brings a downed companion back (a potion, healing magic, dragging them to safety), that is a natural moment to warm the companion's affinity via \`update_companions\` and their personal stance via \`npc_updates\`; repeatedly leaving them downed and unaided naturally cools it.`;
 }
 
