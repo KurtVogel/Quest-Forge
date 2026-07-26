@@ -684,3 +684,112 @@
     opacity: 0.6;
     cursor: wait;
 }
+
+/* Campaign Chronicle — player-facing saga chapters retold from real play */
+
+.chronicle-compose {
+    margin-bottom: 1rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.chronicle-compose-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.chronicle-title-input {
+    flex: 1;
+    min-width: 180px;
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    border: 1px solid var(--border-primary);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-primary);
+    font-size: 0.82rem;
+}
+
+.chronicle-write-btn,
+.chronicle-export-btn {
+    font-size: 0.75rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: 4px;
+    border: 1px solid var(--border-primary);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.chronicle-write-btn:hover:not(:disabled),
+.chronicle-export-btn:hover {
+    color: var(--gold);
+    border-color: rgba(215, 180, 90, 0.45);
+}
+
+.chronicle-write-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.chronicle-status {
+    margin: 0.5rem 0 0;
+    font-size: 0.76rem;
+    font-style: italic;
+    color: var(--text-secondary);
+}
+
+.chronicle-chapters {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.chronicle-chapter {
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    background:
+        var(--texture-noise),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+        var(--surface-primary);
+    background-size: 180px 180px, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal;
+}
+
+.chronicle-chapter-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.6rem 0.75rem;
+    cursor: pointer;
+    list-style: none;
+}
+
+.chronicle-chapter-summary::-webkit-details-marker {
+    display: none;
+}
+
+.chronicle-chapter-title {
+    font-family: var(--font-heading);
+    color: var(--gold);
+    font-size: 0.95rem;
+}
+
+.chronicle-chapter-when {
+    margin-left: auto;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.chronicle-chapter-text {
+    padding: 0 0.85rem 0.75rem;
+    font-size: 0.84rem;
+    line-height: 1.65;
+    color: var(--text-secondary);
+}
+
+.chronicle-chapter-text p {
+    margin: 0 0 0.7rem;
+}

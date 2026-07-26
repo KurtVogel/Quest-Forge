@@ -6,6 +6,7 @@ import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js'
 import { scoreNpcForPrompt } from '../../engine/npcRoster.js';
 import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
+import { writeChronicleChapter, chronicleToMarkdown, collectChapterMessages, CHRONICLE_MIN_MESSAGES } from '../../llm/chronicler.js';
 import './Journal.css';
 
 const DISPOSITION_MARK = {
@@ -25,6 +26,9 @@ export default function JournalPanel({ isOpen, onClose }) {
     const [reviewingFodder, setReviewingFodder] = useState(false);
     const [reviewMessage, setReviewMessage] = useState('');
     const [portraitBusyId, setPortraitBusyId] = useState(null);
+    const [chapterTitle, setChapterTitle] = useState('');
+    const [writingChapter, setWritingChapter] = useState(false);
+    const [chronicleStatus, setChronicleStatus] = useState('');
 
     const imageKeyAvailable = !!(state.settings?.imageApiKey || getMachineryGeminiKey(state.settings));
 
@@ -101,6 +105,39 @@ export default function JournalPanel({ isOpen, onClose }) {
         }
     };
 
+    const handleWriteChapter = async () => {
+        if (writingChapter) return;
+        setChronicleStatus('');
+        setWritingChapter(true);
+        try {
+            const chapter = await writeChronicleChapter({
+                state,
+                title: chapterTitle,
+                onProgress: setChronicleStatus,
+            });
+            dispatch({ type: 'ADD_CHRONICLE_CHAPTER', payload: chapter });
+            setChapterTitle('');
+            setChronicleStatus('Chapter written.');
+            await flushAutoSave({ chronicleChapter: chapter });
+        } catch (error) {
+            setChronicleStatus(error.message || 'The chronicler failed.');
+        } finally {
+            setWritingChapter(false);
+        }
+    };
+
+    const handleExportChronicle = () => {
+        const markdown = chronicleToMarkdown(state.chronicle || [], state.session?.name || 'Campaign');
+        const blob = new Blob([markdown], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        const slug = String(state.session?.name || 'campaign').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        link.download = `${slug || 'campaign'}-chronicle.md`;
+        link.click();
+        URL.revokeObjectURL(url);
+    };
+
     const handlePortrait = async (npc) => {
         if (portraitBusyId) return;
         setEnrichError('');
@@ -121,7 +158,14 @@ export default function JournalPanel({ isOpen, onClose }) {
                     portraitProvider: result.provider || '',
                 },
             });
-            await flushAutoSave({ npcPortraitId: npc.id });
+            await flushAutoSave({
+                npcPortrait: {
+                    id: npc.id,
+                    portraitUrl: result.url,
+                    portraitPrompt: prompt,
+                    portraitProvider: result.provider || '',
+                },
+            });
         } catch (error) {
             setEnrichError(error.message || 'Portrait failed.');
         } finally {
@@ -144,7 +188,13 @@ export default function JournalPanel({ isOpen, onClose }) {
                         className={`journal-tab ${tab === 'journal' ? 'active' : ''}`}
                         onClick={() => setTab('journal')}
                     >
-                        Chronicle
+                        Journal
+                    </button>
+                    <button
+                        className={`journal-tab ${tab === 'chronicle' ? 'active' : ''}`}
+                        onClick={() => setTab('chronicle')}
+                    >
+                        Chronicle{(state.chronicle || []).length > 0 ? ` (${state.chronicle.length})` : ''}
                     </button>
                     <button
                         className={`journal-tab ${tab === 'npcs' ? 'active' : ''}`}
@@ -164,6 +214,18 @@ export default function JournalPanel({ isOpen, onClose }) {
 
                 <div className="journal-body">
                     {tab === 'journal' && <JournalTab journal={state.journal || []} location={state.currentLocation} />}
+                    {tab === 'chronicle' && (
+                        <ChronicleTab
+                            chapters={state.chronicle || []}
+                            messages={state.messages || []}
+                            chapterTitle={chapterTitle}
+                            onChapterTitle={setChapterTitle}
+                            writing={writingChapter}
+                            status={chronicleStatus}
+                            onWrite={handleWriteChapter}
+                            onExport={handleExportChronicle}
+                        />
+                    )}
                     {tab === 'npcs' && (
                         <>
                             {characterNpcs.length > 0 && (
@@ -225,6 +287,78 @@ export default function JournalPanel({ isOpen, onClose }) {
                     )}
                 </div>
             </div>
+        </div>
+    );
+}
+
+function ChronicleTab({ chapters, messages, chapterTitle, onChapterTitle, writing, status, onWrite, onExport }) {
+    const lastChronicled = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) : -1;
+    const pendingCount = collectChapterMessages(messages, lastChronicled + 1).length;
+    const canWrite = pendingCount >= CHRONICLE_MIN_MESSAGES;
+
+    return (
+        <div className="chronicle-tab">
+            <div className="chronicle-compose">
+                <p className="journal-hint">
+                    Close a chapter to have the chronicler retell your play since the last one as
+                    a continuous saga — written from the actual scenes, kept forever, never shown
+                    to the DM. {pendingCount > 0
+                        ? `${pendingCount} message${pendingCount === 1 ? '' : 's'} of play await the quill.`
+                        : 'No new play since the last chapter.'}
+                </p>
+                <div className="chronicle-compose-row">
+                    <input
+                        type="text"
+                        className="chronicle-title-input"
+                        value={chapterTitle}
+                        onChange={(e) => onChapterTitle(e.target.value)}
+                        placeholder={`Chapter ${chapters.length + 1} title (optional)`}
+                        maxLength={80}
+                        disabled={writing}
+                    />
+                    <button
+                        type="button"
+                        className="chronicle-write-btn"
+                        disabled={writing || !canWrite}
+                        title={canWrite ? 'Retell the span since the last chapter' : `Needs at least ${CHRONICLE_MIN_MESSAGES} messages of new play`}
+                        onClick={onWrite}
+                    >
+                        {writing ? 'Writing…' : 'Close chapter'}
+                    </button>
+                    {chapters.length > 0 && (
+                        <button type="button" className="chronicle-export-btn" onClick={onExport}>
+                            Export markdown
+                        </button>
+                    )}
+                </div>
+                {status && <p className="chronicle-status">{status}</p>}
+            </div>
+
+            {chapters.length === 0 ? (
+                <div className="journal-empty">
+                    <p>No chapters written yet.</p>
+                    <p className="journal-hint">
+                        Play a stretch of your campaign, then close the chapter — the chronicler
+                        retells it from the real scenes, not summaries.
+                    </p>
+                </div>
+            ) : (
+                <div className="chronicle-chapters">
+                    {[...chapters].reverse().map((chapter, idx) => (
+                        <details key={chapter.id} className="chronicle-chapter" open={idx === 0}>
+                            <summary className="chronicle-chapter-summary">
+                                <span className="chronicle-chapter-title">{chapter.title}</span>
+                                <span className="chronicle-chapter-when">
+                                    {chapter.createdAt ? new Date(chapter.createdAt).toLocaleDateString() : ''}
+                                </span>
+                            </summary>
+                            <div className="chronicle-chapter-text">
+                                {chapter.text.split(/\n{2,}/).map((para, i) => <p key={i}>{para}</p>)}
+                            </div>
+                        </details>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }

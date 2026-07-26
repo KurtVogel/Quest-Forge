@@ -3,7 +3,7 @@
  */
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useReducer, useEffect, useCallback, useState, useRef } from 'react';
-import { archiveNpcBulk, gameReducer, initialGameState, mergeNpcUpdate } from './gameReducer.js';
+import { appendChronicleChapter, applyNpcPortrait, archiveNpcBulk, gameReducer, initialGameState, mergeNpcUpdate } from './gameReducer.js';
 import { loadSettings, saveSettings, autoSave } from './persistence.js';
 import { PROVIDERS } from '../llm/adapter.js';
 import { initializeFirebase } from '../config/firebase.js';
@@ -59,10 +59,12 @@ export function GameProvider({ children }) {
         window.__QF_STATE__ = snapshot;
     }, [state]);
 
-    const flushAutoSave = useCallback(async ({ npcUpdate = null, npcBulkArchiveIds = null } = {}) => {
+    const flushAutoSave = useCallback(async ({ npcUpdate = null, npcBulkArchiveIds = null, npcPortrait = null, chronicleChapter = null } = {}) => {
         let current = stateRef.current;
         if (!current?.session?.id || !current.character) return;
 
+        // The hints re-apply a just-dispatched change: stateRef predates the
+        // dispatch's re-render, so a hint-less flush would persist stale state.
         if (npcUpdate) {
             current = {
                 ...current,
@@ -72,6 +74,16 @@ export function GameProvider({ children }) {
             current = {
                 ...current,
                 npcs: archiveNpcBulk(current.npcs, npcBulkArchiveIds),
+            };
+        } else if (npcPortrait) {
+            current = {
+                ...current,
+                npcs: applyNpcPortrait(current.npcs || [], npcPortrait),
+            };
+        } else if (chronicleChapter) {
+            current = {
+                ...current,
+                chronicle: appendChronicleChapter(current.chronicle, chronicleChapter),
             };
         }
 
@@ -185,6 +197,7 @@ export function GameProvider({ children }) {
         state.pendingRoleplayCheck,
         state.npcs,
         state.journal,
+        state.chronicle,
         state.worldFacts,
         state.storyMemory,
         state.currentLocation,

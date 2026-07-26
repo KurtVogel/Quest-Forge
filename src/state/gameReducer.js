@@ -723,6 +723,7 @@ export const initialGameState = {
     rollHistory: [],
     quests: [],
     journal: [],
+    chronicle: [], // Player-facing saga chapters retold from real play — NEVER injected into the DM prompt or RAG
     npcs: [],
     worldFacts: [], // Canonical world facts that never get compressed — [{id, fact, category, timestamp}]
     storyMemory: [], // Compact dramatic callback cards — narrative-only memory, never mechanics
@@ -978,6 +979,44 @@ function pruneBlankFields(payload) {
  */
 export function mergeNpcUpdate(npcs, payload) {
     return upsertNpc(npcs, payload);
+}
+
+/**
+ * Attach a generated portrait to an NPC by id. Shared by the SET_NPC_PORTRAIT
+ * reducer case and flushAutoSave's pre-render merge (the flush reads a state
+ * ref that predates the dispatch). normalizeNpcRecord's allowlist drops
+ * unsafe URLs.
+ */
+export function applyNpcPortrait(npcs = [], payload = {}) {
+    return (npcs || []).map(npc => (
+        npc.id === payload.id
+            ? normalizeNpcRecord({
+                ...npc,
+                portraitUrl: payload.portraitUrl,
+                portraitPrompt: String(payload.portraitPrompt || '').slice(0, 2000),
+                portraitProvider: String(payload.portraitProvider || '').slice(0, 40),
+                portraitUpdatedAt: Date.now(),
+            })
+            : npc
+    ));
+}
+
+/**
+ * Append a chronicle chapter; shared by ADD_CHRONICLE_CHAPTER and
+ * flushAutoSave's pre-render merge.
+ */
+export function appendChronicleChapter(chronicle = [], payload = {}) {
+    const text = String(payload.text || '').trim();
+    if (!text) return chronicle || [];
+    const chapters = chronicle || [];
+    return [...chapters, {
+        id: `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        title: String(payload.title || '').trim().slice(0, 80) || `Chapter ${chapters.length + 1}`,
+        text: text.slice(0, 60000),
+        fromIndex: Number.isFinite(payload.fromIndex) ? payload.fromIndex : 0,
+        toIndex: Number.isFinite(payload.toIndex) ? payload.toIndex : 0,
+        createdAt: Date.now(),
+    }];
 }
 
 export function archiveNpcBulk(npcs = [], ids = []) {
@@ -2874,6 +2913,12 @@ export function gameReducer(state, action) {
                 }],
             };
 
+        case 'ADD_CHRONICLE_CHAPTER': {
+            const chronicle = appendChronicleChapter(state.chronicle, action.payload);
+            if (chronicle === (state.chronicle || [])) return state;
+            return { ...state, chronicle };
+        }
+
         // ADD_NPC and UPDATE_NPC are the same operation: upsert by id or name (see
         // upsertNpc). Keeping one create/merge path means the per-turn Scribe and the
         // DM's inline npc_updates can introduce a brand-new NPC the instant it appears,
@@ -2931,17 +2976,7 @@ export function gameReducer(state, action) {
             // an unsafe URL is dropped rather than stored.
             return {
                 ...state,
-                npcs: (state.npcs || []).map(npc => (
-                    npc.id === action.payload?.id
-                        ? normalizeNpcRecord({
-                            ...npc,
-                            portraitUrl: action.payload.portraitUrl,
-                            portraitPrompt: String(action.payload.portraitPrompt || '').slice(0, 2000),
-                            portraitProvider: String(action.payload.portraitProvider || '').slice(0, 40),
-                            portraitUpdatedAt: Date.now(),
-                        })
-                        : npc
-                )),
+                npcs: applyNpcPortrait(state.npcs, action.payload || {}),
             };
 
         case 'MIGRATE_NPC_ROSTER': {
