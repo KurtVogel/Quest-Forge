@@ -45,11 +45,11 @@ it under Process notes.
 | dice-engine | `engine/dice.ts` | 2026-07-21 |
 | rules-math | `engine/rules.js` | 2026-07-26 |
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-07-16 |
-| response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-07-14 |
+| response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-07-27 |
 | prompt-building | `llm/promptBuilder.js` | 2026-07-16 |
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-07-23 |
 | combat-exchange | `engine/combatExchange.js`, reducer combat phases, opening initiative | 2026-07-25 |
-| enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-07-13 |
+| enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-07-27 |
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-07-22 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-07-23 |
 | memory-journal | `engine/worldJournal.js` | 2026-07-18 |
@@ -181,6 +181,10 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 *Fixed 2026-07-26: `String()` coercion on both fields; numeric-name tests assert category logic still evaluates (wizard denied, fighter allowed, uncategorizable tolerated). Bonus: `getMaxHitPoints` now falls back on a non-finite `hitDie` instead of returning NaN (the audit's optional third suggestion).*
 - [x] **P2** (character-vault, 2026-07-26): `sanitizeInventory` admits arrays (`typeof [] === 'object'`) → `normalizeItem([])` mints a junk "Unknown item" instead of dropping; tighten the filter — `characterVault.js:188`.
 *Fixed 2026-07-26: `!Array.isArray(item)` in the filter; array entries drop, tested alongside numeric/null junk.*
+- [ ] **P1** (response-parsing, 2026-07-27): a fenced ```` ```json null ``` ```` block crashes `parseResponse` — `JSON.parse` succeeds so no repair engages, then `normalizeEvents(null)` throws on the unguarded call at `responseParser.js:261` (`Cannot read properties of null (reading 'equipment_changes')`); guard `normalizeEvents` entry to coerce non-object/array input to `{}` (empirically verified).
+- [ ] **P1** (response-parsing, 2026-07-27): a `null` element in `requested_rolls` crashes `normalizeEvents` — the map dereferences `r.type` with no per-element shape guard, unlike every sibling array map in the same function — `responseParser.js:333-334`; drop non-object entries before mapping (empirically verified).
+- [ ] **P2** (enemy-stats-conditions, 2026-07-27): `validateEnemySaveBonus` — the spell-save trust boundary — has zero direct tests (never imported by `enemyStats.test.js`, no `sanitizeLoadedEnemy` case passes `saveBonus`); add band-edge tests mirroring the attack-bonus block — `engine/enemyStats.js:49-53`.
+- [ ] **P2** (enemy-stats-conditions, 2026-07-27): `enemy_updates` elements pass through `normalizeEvents` unguarded (unlike quest/world-fact channels) — a `null`/non-object element reaches `UPDATE_ENEMY`'s `action.payload.id` — `llm/responseParser.js:427`, `state/gameReducer.js:3388`; drop non-object entries at the parser boundary.
 
 ## Entry template
 
@@ -204,6 +208,31 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-27 — enemy-stats-conditions + response-parsing (Lap 2: robustness against hostile input)
+
+`npm test`: 1164 passing / 71 files.
+
+Rotation excluded (last 6, local ∪ origin — identical at `1dfa230`): character-vault, rules-math (07-26), cloud-sync, persistence, quests, combat-exchange (07-25), scribe, roll-resolution (07-23), scene-art, hidden-fronts (07-22), dice-engine, chat-orchestration (07-21). Oldest eligible → **enemy-stats-conditions** (07-13); the 07-14 tie response-parsing/story-memory broke to lowest coverage → **response-parsing** (95.95 < 96.45). Coverage snapshot (07-21) is 6 days old — not refreshed. Open Findings Queue fully drained (every item `[x]`) — nothing to re-verify.
+
+### enemy-stats-conditions (`engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS`)
+- **Scope examined:** every `enemyStats.js` sanitizer end to end; the `normalizeConditionDelta`/`enemy_condition_updates`/`onSuccess`/intent-`removeConditions` flow in `combatExchange.js` and its application at `combatExchange.js:1417-1420`; `getIncapacitatingCondition`/`CONDITION_EFFECTS` in `rules.js`; `enemyStats.test.js` (all 6 describes).
+- **Findings:**
+  - **Verified strong (the lap's point):** offensive-reject/defensive-clamp policy holds at every edge; `sanitizeLoadedEnemy` rebounds every field and keeps a 0-HP foe dead; `normalizeConditionDelta` requires a target and drops empty deltas; condition-sync (`:1417-1420`) applies only to `isEnemyActive` foes via `findByRef`, so a hostile `enemy_condition_updates` aimed at a non-existent/dead enemy is silently dropped — no retarget, no crash; incapacitating-condition skip is covered.
+  - **P2 (coverage — save-bonus trust boundary untested):** `validateEnemySaveBonus` (`enemyStats.js:49-53`) — the spell-save trust boundary (feeds engine-rolled saves vs. `enemy.saveBonus`) — has **zero direct test**; `enemyStats.test.js` imports/exercises `validateEnemyAttackBonus` but never `validateEnemySaveBonus`, and no `sanitizeLoadedEnemy` case passes `saveBonus`. It's a copy of the attack-bonus band so risk is low, but its edges are unverified.
+  - **P2 (consistency — `enemy_updates` elements not type-guarded at the parser boundary):** `normalizeEvents` passes `raw.enemy_updates` through raw (`responseParser.js:427`), unlike the now-hardened `quest_updates`/`world_facts`. A `null`/non-object element reaches `UPDATE_ENEMY`, which does `action.payload.id` (`gameReducer.js:3388`) — throws if `combat.enemies` is non-empty. Low reachability (guarded off during active combat; enemies usually cleared otherwise), but the same class of gap other channels closed.
+- **Suggested improvements:** (1) add direct `validateEnemySaveBonus` band tests (edges -5/15, reject 16/'4'/NaN) — cheap, mirrors the attack-bonus block; (2) drop non-object entries from `enemy_updates` at the parser boundary (mirror `normalizeQuestUpdate`).
+
+### response-parsing (`llm/responseParser.js`, `llm/utils/jsonExtractor.js`)
+- **Scope examined:** `parseResponse` fenced + both unfenced fallbacks; `normalizeEvents` every field; `detectTextRollRequests`/`detectPreNarratedOutcome`; `extractBalancedJson`/`repairJson`/`parseJsonObjectLoose`; `responseParser.test.js`, `jsonExtractor.test.js`. Empirically probed the crash paths with a throwaway node harness.
+- **Findings:**
+  - **P1 (CONFIRMED — fenced `null` block crashes the turn):** a well-formed fenced block whose body is literally `null` (`` ```json\nnull\n``` ``) parses fine (so no repair fallback), then `events = normalizeEvents(events)` runs **outside** the try/catch (`responseParser.js:261`) and `normalizeEvents(null)` throws `Cannot read properties of null (reading 'equipment_changes')` — the throw escapes `parseResponse`. Fenced `5`/`"x"`/`false`/`[]` all degrade gracefully; only `null` throws. Verified live.
+  - **P1 (CONFIRMED — `requested_rolls:[null]` crashes the turn):** the `requestedRolls` map dereferences `r.type`/`r.attacker`/etc. with no per-element guard (`responseParser.js:333-334`), so a single `null` element throws `Cannot read properties of null (reading 'type')` — again on the unguarded line 261. Every *other* array map in the same function (`startingItems`, `memoryUpdates`, `questUpdates`, `spellCasts`) guards its elements; `requested_rolls` is the lone hold-out. A string element (`["perception"]`) doesn't crash but mints a junk `{skill:null}` roll. Verified live.
+  - **Verified strong:** the 2026-07-14 P0 `extractBalancedJson` innermost-brace anchor + string-aware `repairJson`; string-numeric coercion in `clamp`; `normalizeQuestUpdate`/spell/memory guards; combat-start sanitization.
+- **Suggested improvements:** (1) guard `normalizeEvents` entry — `if (!raw || typeof raw !== 'object' || Array.isArray(raw)) raw = {}` (or coerce non-object `events` to `null` at `:261`); (2) guard the `requested_rolls` map — drop non-object entries before mapping (mirror `normalizeQuestUpdate`'s shape guard). Both are the exact "malformed LLM output" this lap targets and the sibling maps already model the fix.
+
+### Process notes
+- Coverage snapshot 6 days old — left as-is per the ≤7-day rule. Registry unchanged (no subsystem gained/lost). Queue was fully drained; the two P1s + two P2s above are net-new.
 
 ## 2026-07-26 — character-vault + rules-math (Lap 2: robustness against hostile input)
 
