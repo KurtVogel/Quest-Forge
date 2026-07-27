@@ -319,6 +319,10 @@ function normalizeQuestUpdate(raw) {
  * Normalize and validate event data from the LLM.
  */
 export function normalizeEvents(raw) {
+    // A fenced ```json null``` (or bare scalar/array) block parses cleanly, so the
+    // repair path never engages — coerce to an empty event set instead of throwing
+    // on the first property read (2026-07-27 audit).
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) raw = {};
     const equipmentChanges = Array.isArray(raw.equipment_changes)
         ? raw.equipment_changes
         : (raw.equipment_change ? [raw.equipment_change] : []);
@@ -330,7 +334,9 @@ export function normalizeEvents(raw) {
 
     return {
         requestedRolls: Array.isArray(raw.requested_rolls)
-            ? raw.requested_rolls.map(r => ({
+            // Per-element shape guard like every sibling array map — a null/scalar
+            // element crashed the whole batch on `r.type` (2026-07-27 audit).
+            ? raw.requested_rolls.filter(r => r && typeof r === 'object' && !Array.isArray(r)).map(r => ({
                 type: r.type || 'skill_check',
                 // Type-guarded like dc/modifier: a truthy non-string (array/number)
                 // throws deep in rollResolver AFTER dice are shown (2026-07-23 audit).
@@ -424,7 +430,11 @@ export function normalizeEvents(raw) {
         // Combat events (validated to prevent state corruption)
         combatStart,
         combatEnd: !!raw.combat_end,
-        enemyUpdates: Array.isArray(raw.enemy_updates) ? raw.enemy_updates : [],
+        // Non-object elements dropped here so UPDATE_ENEMY never sees a null
+        // payload (2026-07-27 audit — the quest/world-fact channel pattern).
+        enemyUpdates: Array.isArray(raw.enemy_updates)
+            ? raw.enemy_updates.filter(e => e && typeof e === 'object' && !Array.isArray(e))
+            : [],
         // Companion events
         addCompanions: Array.isArray(raw.add_companions) ? raw.add_companions : [],
         updateCompanions: Array.isArray(raw.update_companions) ? raw.update_companions : [],

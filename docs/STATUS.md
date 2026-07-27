@@ -4,8 +4,31 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-27, small hours (overnight feature run: hero reveal +
-portrait-at-creation, NPC portraits, Campaign Chronicle v1, playtest #14 + three fixes)._
+_Last updated: 2026-07-27, evening (audit-fix: parser crash P1s + enemy-stats P2s,
+queue emptied)._
+
+## Audit-fix 2026-07-27: response-parsing P1 pair + enemy-stats P2 pair (queue emptied)
+
+The evening's scheduled audit (enemy-stats-conditions + response-parsing, Lap 2) filed
+2 P1 crash paths + 2 P2s; all four fixed in one batch. 1172 tests + lint green.
+
+1. **Fenced ```` ```json null ```` block crash (P1)** — valid JSON, so the repair path
+   never engaged and `normalizeEvents(null)` threw on its first property read, killing
+   the turn. `normalizeEvents` now coerces non-object/array input to `{}` (an empty
+   event set); null/scalar/array fenced-block regression tests.
+2. **`null` element in `requested_rolls` crash (P1)** — the map dereferenced `r.type`
+   with no per-element guard, unlike every sibling array map. Non-object elements are
+   filtered before mapping; valid siblings survive.
+3. **`validateEnemySaveBonus` untested (P2)** — the spell-save trust boundary now has
+   the same band-edge/reject/round suite as the attack-bonus block, plus a
+   `sanitizeLoadedEnemy` kept-vs-deleted case.
+4. **`enemy_updates` unguarded (P2)** — non-object elements are dropped at the parser
+   boundary so `UPDATE_ENEMY` never sees a null payload.
+
+**The strengthening queue is empty again.** Carried watch items (need live play / Vesa's
+eyes): stance-stutter self-clean + Scribe gender backfill on the Saima save (other
+browser profile), Grok art respecting the gender tag, Aune appearance-thinning
+(take a LOOKS baseline snapshot next playtest).
 
 ## Overnight run 2026-07-26→27: portraits, Chronicle, playtest #14 (Vesa delegated the whole list)
 

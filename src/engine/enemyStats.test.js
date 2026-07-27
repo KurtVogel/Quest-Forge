@@ -17,6 +17,7 @@ import {
     sanitizeEnemyDamage,
     sanitizeLoadedEnemy,
     validateEnemyAttackBonus,
+    validateEnemySaveBonus,
 } from './enemyStats.js';
 
 describe('validateEnemyAttackBonus (offensive: reject, never clamp)', () => {
@@ -37,6 +38,34 @@ describe('validateEnemyAttackBonus (offensive: reject, never clamp)', () => {
         expect(validateEnemyAttackBonus(NaN)).toBeUndefined();
         expect(validateEnemyAttackBonus(Infinity)).toBeUndefined();
         expect(validateEnemyAttackBonus(undefined)).toBeUndefined();
+    });
+});
+
+describe('validateEnemySaveBonus (offensive: reject, never clamp — 2026-07-27 audit)', () => {
+    it('accepts the exact band edges -5 and 15', () => {
+        expect(validateEnemySaveBonus(-5)).toBe(-5);
+        expect(validateEnemySaveBonus(15)).toBe(15);
+    });
+
+    it('rejects one past each edge instead of clamping', () => {
+        expect(validateEnemySaveBonus(-6)).toBeUndefined();
+        expect(validateEnemySaveBonus(16)).toBeUndefined();
+        expect(validateEnemySaveBonus(99)).toBeUndefined();
+    });
+
+    it('rounds in-band floats and rejects non-numbers', () => {
+        expect(validateEnemySaveBonus(4.6)).toBe(5);
+        expect(validateEnemySaveBonus('4')).toBeUndefined();
+        expect(validateEnemySaveBonus(NaN)).toBeUndefined();
+        expect(validateEnemySaveBonus(Infinity)).toBeUndefined();
+        expect(validateEnemySaveBonus(undefined)).toBeUndefined();
+    });
+
+    it('flows through sanitizeLoadedEnemy: in-band kept, absurd deleted', () => {
+        const kept = sanitizeLoadedEnemy({ id: 'e1', name: 'Wight', hp: 10, maxHp: 10, saveBonus: 6 });
+        expect(kept.saveBonus).toBe(6);
+        const rejected = sanitizeLoadedEnemy({ id: 'e2', name: 'Wight', hp: 10, maxHp: 10, saveBonus: 99 });
+        expect(rejected).not.toHaveProperty('saveBonus');
     });
 });
 

@@ -929,6 +929,41 @@ describe('detectSemanticTextRolls', () => {
     });
 });
 
+describe('hostile event-block shapes (2026-07-27 audit)', () => {
+    it('survives a fenced ```json null``` block — valid JSON, so no repair engages', () => {
+        const { narrative, events } = parseResponse('The mist thickens.\n\n```json\nnull\n```');
+        expect(narrative).toBe('The mist thickens.');
+        expect(events).not.toBeNull();
+        expect(events.requestedRolls).toEqual([]);
+        expect(events.questUpdates).toEqual([]);
+    });
+
+    it('survives fenced scalar and array blocks the same way', () => {
+        expect(parseResponse('Onward.\n\n```json\n42\n```').events.requestedRolls).toEqual([]);
+        expect(parseResponse('Onward.\n\n```json\n["loose"]\n```').events.requestedRolls).toEqual([]);
+    });
+
+    it('drops null/scalar/array elements in requested_rolls and keeps valid siblings', () => {
+        const { events } = parseResponse(fence({
+            requested_rolls: [
+                null,
+                'roll perception',
+                ['skill_check'],
+                { type: 'skill_check', skill: 'perception', dc: 12 },
+            ],
+        }));
+        expect(events.requestedRolls).toHaveLength(1);
+        expect(events.requestedRolls[0]).toMatchObject({ type: 'skill_check', skill: 'perception', dc: 12 });
+    });
+
+    it('drops non-object enemy_updates elements before they reach UPDATE_ENEMY', () => {
+        const { events } = parseResponse(fence({
+            enemy_updates: [null, 7, 'goblin', ['goblin'], { id: 'goblin-1', hp: 3 }],
+        }));
+        expect(events.enemyUpdates).toEqual([{ id: 'goblin-1', hp: 3 }]);
+    });
+});
+
 describe('requested_rolls hostile-field guards (2026-07-23 audit)', () => {
     it('coerces a truthy non-string skill/ability to null instead of crashing mid-batch', () => {
         const raw = 'Careful now.\n\n```json\n' + JSON.stringify({
