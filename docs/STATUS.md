@@ -4,8 +4,29 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-27, evening (audit-fix: parser crash P1s + enemy-stats P2s,
-queue emptied)._
+_Last updated: 2026-07-27, night (standing flank persistence — accepted flanking
+advantage now survives across combat exchanges)._
+
+## Standing flank persistence 2026-07-27 (Vesa's live finding)
+
+Vesa's playtest finding: an accepted flanking `situational_ruling` gave advantage for one
+exchange, then silently vanished on the next attack even though nothing in the fiction had
+changed — the DM had to re-emit the ruling every round and never did. Fixed engine-side
+(persistence beats re-prompting; no Scribe call in the combat hot path):
+
+- `combat.flankedEnemyIds` records the target when an exchange resolves with a
+  flanking-style ruling (the existing `isSharedFlankingRuling` detection). Later exchanges
+  auto-apply advantage to the hero's attacks (`flanking (standing)` beside the roll) and
+  propagate to companions on the same target, exactly like same-exchange flanking.
+- The DM stays adjudicator: an explicit slot ruling always replaces the standing one, and
+  a new `"flank_broken": ["<enemy id>"]` field in `combat_exchange` ends a flank when the
+  fiction repositions. The engine also auto-ends it: target dead/fled/surrendered, hero
+  Dash/Disengage, or the last companion down (a companionless party keeps a DM-adjudicated
+  NPC flank until the DM breaks it).
+- Establishment/break announced as system notes; enemy cards show a `flanked` chip; the
+  combat prompt block marks the enemy line FLANKED; LOAD_GAME sanitizes the id list.
+
+10 new engine tests; 1182 tests + lint green.
 
 ## Audit-fix 2026-07-27: response-parsing P1 pair + enemy-stats P2 pair (queue emptied)
 

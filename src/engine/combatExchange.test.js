@@ -1107,3 +1107,134 @@ describe('spellcasting v1 combat exchanges', () => {
         expect(utility).toMatchObject({ ok: false, error: expect.stringContaining(`no combat effect`) });
     });
 });
+
+describe('standing flank persistence', () => {
+    const flankedState = (overrides = {}) => state({
+        party: [{ id: 'wit', name: 'Wit', hp: 10, maxHp: 10, ac: 13, attackBonus: 3, damage: '1d6+1', status: 'healthy' }],
+        ...overrides,
+        combat: { flankedEnemyIds: ['Goblin'], ...(overrides.combat || {}) },
+    });
+
+    it('normalizes flank_broken references from the intent envelope', () => {
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }] }],
+            flank_broken: ['Goblin', 'Goblin', { target: 'Wolf' }],
+        });
+        expect(intent.flankBroken).toEqual(['Goblin', 'Wolf']);
+    });
+
+    it('records an established flank in the payload for the next exchange', () => {
+        rollQueue.push(2, 3, 4, 18, 1);
+        const plan = planCombatExchange(flankedState({ combat: { flankedEnemyIds: [] } }), normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'advantage', reason: 'Wit flanks the goblin from the opposite side' },
+            }],
+            companion_intents: [{ companion_id: 'wit', action: 'attack', target: 'Goblin' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+        expect(plan.payload.flankedEnemyIds).toEqual(['Goblin']);
+        expect(plan.payload.result.events.some(event =>
+            event.type === 'note' && /Flanking established against Goblin/.test(event.text))).toBe(true);
+    });
+
+    it('applies standing flank advantage to the player without a re-emitted ruling', () => {
+        rollQueue.push(2, 18, 5, 3);
+        const plan = planCombatExchange(flankedState(), normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }] }],
+            companion_intents: [{ companion_id: 'wit', action: 'pass' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        }));
+        const attack = plan.payload.result.events.find(event => event.type === 'attack' && event.actor === 'Vesa');
+        expect(attack.mode).toContain('d20 2, 18');
+        expect(attack.mode).toContain('DM ruling — advantage: flanking (standing)');
+        expect(plan.payload.flankedEnemyIds).toEqual(['Goblin']);
+    });
+
+    it('shares a standing flank with companions attacking the same target', () => {
+        rollQueue.push(4, 18, 1);
+        const plan = planCombatExchange(flankedState(), normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            companion_intents: [{ companion_id: 'wit', action: 'attack', target: 'Goblin' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+        const companionAttack = plan.payload.result.events.find(event => event.actor === 'Wit');
+        expect(companionAttack.mode).toContain('d20 4, 18');
+        expect(companionAttack.mode).toContain('DM ruling — advantage: flanking');
+    });
+
+    it('lets an explicit slot ruling replace the standing flank', () => {
+        rollQueue.push(18, 2, 3);
+        const plan = planCombatExchange(flankedState(), normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'disadvantage', reason: 'Smoke fills the room' },
+            }],
+            companion_intents: [{ companion_id: 'wit', action: 'pass' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        }));
+        const attack = plan.payload.result.events.find(event => event.type === 'attack' && event.actor === 'Vesa');
+        expect(attack.mode).toContain('DM ruling — disadvantage: Smoke fills the room');
+        expect(attack.mode).not.toContain('standing');
+    });
+
+    it('clears the flank when the DM declares flank_broken', () => {
+        rollQueue.push(18, 5, 3);
+        const plan = planCombatExchange(flankedState(), normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }] }],
+            companion_intents: [{ companion_id: 'wit', action: 'pass' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+            flank_broken: ['Goblin'],
+        }));
+        const attack = plan.payload.result.events.find(event => event.type === 'attack' && event.actor === 'Vesa');
+        expect(attack.mode).not.toContain('flanking');
+        expect(plan.payload.flankedEnemyIds).toEqual([]);
+        expect(plan.payload.result.events.some(event =>
+            event.type === 'note' && /flank on Goblin is broken/.test(event.text))).toBe(true);
+    });
+
+    it('drops a flanked enemy from the list once it is overcome', () => {
+        rollQueue.push(2, 18, 10);
+        const plan = planCombatExchange(flankedState({ enemies: [enemy('Goblin', { hp: 3, maxHp: 10 })] }), normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }] }],
+            companion_intents: [{ companion_id: 'wit', action: 'pass' }],
+        }));
+        expect(plan.payload.result.terminal).toBe('victory');
+        expect(plan.payload.flankedEnemyIds).toEqual([]);
+    });
+
+    it('abandons standing flanks when the hero disengages', () => {
+        rollQueue.push(3);
+        const plan = planCombatExchange(flankedState(), normalizeCombatExchange({
+            player_slots: [{ action: 'disengage' }],
+            companion_intents: [{ companion_id: 'wit', action: 'pass' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        }));
+        expect(plan.payload.flankedEnemyIds).toEqual([]);
+    });
+
+    it('ends the flank when no companion remains standing to hold it', () => {
+        rollQueue.push(2, 18, 5, 3);
+        const plan = planCombatExchange(flankedState({
+            party: [{ id: 'wit', name: 'Wit', hp: 0, maxHp: 10, ac: 13, attackBonus: 3, damage: '1d6+1', status: 'downed' }],
+        }), normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }] }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        }));
+        // The flank was still real at the start of this exchange; it just cannot persist.
+        const attack = plan.payload.result.events.find(event => event.type === 'attack' && event.actor === 'Vesa');
+        expect(attack.mode).toContain('advantage: flanking (standing)');
+        expect(plan.payload.flankedEnemyIds).toEqual([]);
+    });
+
+    it('keeps a DM-adjudicated flank alive for a companionless party until broken', () => {
+        rollQueue.push(2, 18, 5, 3);
+        const plan = planCombatExchange(flankedState({ party: [] }), normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }] }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        }));
+        expect(plan.payload.flankedEnemyIds).toEqual(['Goblin']);
+    });
+});

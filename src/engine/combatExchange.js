@@ -180,11 +180,17 @@ export function normalizeCombatExchange(raw) {
             .filter(Boolean)
         : [];
 
+    const rawFlankBroken = raw.flank_broken || raw.flankBroken;
+    const flankBroken = Array.isArray(rawFlankBroken)
+        ? [...new Set(rawFlankBroken.slice(0, 30).map(value => ref(value?.target ?? value)).filter(Boolean))]
+        : [];
+
     return {
         playerSlots,
         enemyIntents,
         companionIntents,
         ...(enemyConditionUpdates.length > 0 && { enemyConditionUpdates }),
+        ...(flankBroken.length > 0 && { flankBroken }),
     };
 }
 
@@ -302,6 +308,10 @@ function rulingFlags(ruling) {
         disadvantage: ruling?.mode === 'disadvantage',
     };
 }
+
+// Applied automatically while a flank persists between exchanges; a slot's own
+// explicit ruling always replaces it so the DM stays the adjudicator.
+const STANDING_FLANK_RULING = Object.freeze({ mode: 'advantage', reason: 'flanking (standing)' });
 
 function isSharedFlankingRuling(ruling) {
     if (ruling?.mode !== 'advantage') return false;
@@ -922,7 +932,7 @@ function clearPreviousSustained({ character, companions, updates, events }) {
     events.push({ type: 'note', text: `${previous.name || previous.key} fades as the new spell takes hold.` });
 }
 
-function resolvePlayerSlots({ state, exchange, enemies, companions, events, rolls }) {
+function resolvePlayerSlots({ state, exchange, enemies, companions, events, rolls, standingFlankIds = null }) {
     const character = state.character;
     const inventory = state.inventory || [];
     let dodging = false;
@@ -1060,7 +1070,10 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
                 events.push({ type: 'note', text: `${enemy?.name || strike.target} has already been overcome; the unused strike does not retarget without player intent.` });
                 continue;
             }
-            const ruling = rulingFlags(slot.situationalRuling);
+            // A standing flank persists between exchanges; a slot's own ruling replaces it.
+            const appliedRuling = slot.situationalRuling
+                || (standingFlankIds?.has(enemy.id) ? STANDING_FLANK_RULING : null);
+            const ruling = rulingFlags(appliedRuling);
             const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, ruling.advantage, ruling.disadvantage || !!enemy.defending);
             const attack = rollD20(
                 getWeaponAttackBonus(character, attackInventory),
@@ -1096,7 +1109,7 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
             events.push({
                 type: 'attack', actor: character.name || 'Player', target: enemy.name,
                 rolled: attack.roll.total, natural: attack.natural, dc: enemy.ac,
-                mode: rollModeLabel(attack, modifiers, slot.situationalRuling),
+                mode: rollModeLabel(attack, modifiers, appliedRuling),
                 hit, critical, damage, remainingHp: enemy.hp, maxHp: enemy.maxHp,
                 sneakAttackDetail,
             });
@@ -1418,7 +1431,19 @@ export function planCombatExchange(state, exchange) {
         const enemy = findByRef(enemies, update.target);
         if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, update, events);
     }
-    const player = resolvePlayerSlots({ state, exchange, enemies, companions, events, rolls });
+    // Standing flanks: an accepted flanking ruling persists engine-side between
+    // exchanges — the DM kept forgetting to re-emit it each round. The DM ends one
+    // with flank_broken when the fiction repositions; enemies leaving the fight,
+    // the hero dashing/disengaging away, or the last companion dropping also end it.
+    const standingFlankIds = new Set((state.combat.flankedEnemyIds || [])
+        .filter(id => isEnemyActive(enemies.find(enemy => enemy.id === id))));
+    for (const target of exchange.flankBroken || []) {
+        const enemy = findByRef(enemies, target);
+        if (enemy && standingFlankIds.delete(enemy.id)) {
+            events.push({ type: 'note', text: `The flank on ${enemy.name} is broken — the standing advantage ends.` });
+        }
+    }
+    const player = resolvePlayerSlots({ state, exchange, enemies, companions, events, rolls, standingFlankIds });
     // Casting changes the character mid-exchange (AC buffs, invisibility, spent
     // slots); enemies acting later in this same exchange must see that state.
     const castCharacter = mergeCharacterUpdates(state.character, player.characterUpdates);
@@ -1445,21 +1470,30 @@ export function planCombatExchange(state, exchange) {
                 deathSaveNatural: player.deathSaveNatural,
                 rolls,
                 result,
+                flankedEnemyIds: [],
                 consumeActionSurge: !!state.character.pendingActionSurge,
             },
         };
     }
 
-    // Collect enemies the player explicitly flanked this exchange. Other situational
+    // Collect enemies the player explicitly flanked this exchange (on top of any
+    // standing flanks carried over from earlier exchanges). Other situational
     // advantage sources, such as concealment or distraction, stay local to the actor.
-    const flankingEnemyIds = new Set();
+    const flankingEnemyIds = new Set(standingFlankIds);
     for (const slot of exchange.playerSlots || []) {
         if (!isSharedFlankingRuling(slot.situationalRuling)) continue;
         if (slot.action === 'attack') {
             const targetedEnemies = new Set((slot.strikes || [])
                 .map(strike => findByRef(enemies, strike.target)?.id)
                 .filter(Boolean));
-            if (targetedEnemies.size === 1) flankingEnemyIds.add([...targetedEnemies][0]);
+            if (targetedEnemies.size !== 1) continue;
+            const targetId = [...targetedEnemies][0];
+            if (flankingEnemyIds.has(targetId)) continue;
+            flankingEnemyIds.add(targetId);
+            const flanked = enemies.find(enemy => enemy.id === targetId);
+            if (isEnemyActive(flanked)) {
+                events.push({ type: 'note', text: `**Flanking established against ${flanked.name}** — the advantage persists until the flank breaks.` });
+            }
         }
     }
 
@@ -1483,6 +1517,17 @@ export function planCombatExchange(state, exchange) {
         playerHp,
     });
 
+    // Persist standing flanks for the next exchange. Repositioning by the hero
+    // (dash/disengage) abandons the pincer; a party whose every companion is down
+    // has nobody left to hold the far side (a companionless party keeps a
+    // DM-adjudicated flank — the second threat is an untracked NPC — until the DM
+    // breaks it). Enemies overcome this exchange fall out of the list.
+    const playerLeftMelee = (exchange.playerSlots || []).some(slot => slot.action === 'dash' || slot.action === 'disengage');
+    const flankHoldersRemain = companions.length === 0 || companions.some(isCompanionActive);
+    const flankedEnemyIds = playerLeftMelee || !flankHoldersRemain
+        ? []
+        : [...flankingEnemyIds].filter(id => isEnemyActive(enemies.find(enemy => enemy.id === id)));
+
     return {
         ok: true,
         payload: {
@@ -1495,6 +1540,7 @@ export function planCombatExchange(state, exchange) {
             deathSaveNatural: player.deathSaveNatural,
             rolls,
             result,
+            flankedEnemyIds,
             consumeActionSurge: !!state.character.pendingActionSurge,
         },
     };

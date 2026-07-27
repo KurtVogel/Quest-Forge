@@ -89,7 +89,11 @@ export default function CombatPanel() {
                         {/* Enemy Cards */}
                         <div className="combat-enemies">
                             {combat.enemies.map(enemy => (
-                                <EnemyCard key={enemy.id} enemy={enemy} />
+                                <EnemyCard
+                                    key={enemy.id}
+                                    enemy={enemy}
+                                    flanked={(combat.flankedEnemyIds || []).includes(enemy.id)}
+                                />
                             ))}
                         </div>
 
@@ -120,7 +124,7 @@ export default function CombatPanel() {
     );
 }
 
-function EnemyCard({ enemy }) {
+function EnemyCard({ enemy, flanked = false }) {
     const hpPercent = Math.max(0, (enemy.hp / enemy.maxHp) * 100);
     const displayStatus = enemy.combatStatus && enemy.combatStatus !== 'active'
         ? enemy.combatStatus
@@ -156,9 +160,10 @@ function EnemyCard({ enemy }) {
                 </span>
                 <span className="enemy-ac">AC {enemy.ac}</span>
             </div>
-            {enemy.conditions?.length > 0 && (
+            {(enemy.conditions?.length > 0 || flanked) && (
                 <div className="enemy-mechanical-conditions">
-                    {enemy.conditions.map(condition => (
+                    {flanked && <span>flanked</span>}
+                    {enemy.conditions?.map(condition => (
                         <span key={condition}>{condition}</span>
                     ))}
                 </div>

@@ -450,6 +450,7 @@ COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
 - A Check/Save slot uses \`{"action":"check|save","skill":"<skill or ability>","dc":<5-30>}\` for a genuinely uncertain non-attack action committed during combat. The engine rolls it before companion/enemy intents; do not also use requested_rolls.
 - A Check intended to impose a condition may include \`"on_success":{"target":"<living enemy id>","add":["prone"]}\`. The engine applies the bounded condition only if the check succeeds. Supported enemy conditions are poisoned, blinded, frightened, restrained, prone, invisible, stunned, paralyzed, and unconscious.
 - **Situational rulings preserve table negotiation.** Any player slot, companion intent, or enemy attack intent may include \`"situational_ruling":{"mode":"advantage|disadvantage","reason":"<brief established fictional reason>"}\`. Use this only when you, as DM, accept that current established fiction or a plausible tactical setup warrants it (for example, a genuinely established flank). The player's claim alone does not make the reason true. If it is unsupported, omit the ruling and briefly adjudicate from the actual situation. Never supply numerical modifiers or dice. The engine combines an accepted ruling with conditions and normal advantage/disadvantage cancellation, and shows the reason beside the roll.
+- **An accepted flank persists.** When you grant a flanking-style advantage ruling, the engine records the target as FLANKED and keeps applying that advantage to the hero's and companions' attacks on it in later exchanges — never re-emit the same flank ruling round after round, and never quietly drop an established flank. When the fiction genuinely ends it (the foe repositions or breaks free, knockback, the allies scatter), declare \`"flank_broken": ["<enemy id>"]\` inside that combat_exchange. The engine also ends a flank on its own when the target falls or flees, when the hero Dashes or Disengages away, or when every companion is down.
 - \`enemy_condition_updates\` synchronizes a condition already established by prior authoritative fiction before this exchange (for example, a foe the previous narration left prone). It is not permission to grant advantage merely because the player asserts one. These updates apply before player rolls.
 - Use \`flee\` only when the fiction establishes a successful escape; it ends combat without XP or pursuit attacks. If escape is uncertain, use a Check slot instead and let its result decide the fiction.
 - \`enemy_intents\`: at most one per living foe, using only \`attack\`, \`defend\`, \`flee\`, or \`surrender\`. An attack targets \`player\` or a living companion id. Missing intent defaults to that foe's basic attack against the hero.
@@ -848,13 +849,15 @@ function buildCombatBlock(combat, character) {
     const enemies = combat.enemies || [];
     const turnOrder = combat.turnOrder || [];
 
+    const flankedIds = new Set(combat.flankedEnemyIds || []);
     const enemyList = enemies.map(e => {
         const atk = Number.isFinite(e.attackBonus) ? ` | Atk: +${e.attackBonus}` : '';
         const dmg = (typeof e.damage === 'string' && e.damage) ? ` | Dmg: ${e.damage}` : '';
         const status = e.combatStatus && e.combatStatus !== 'active' ? ` | Status: ${e.combatStatus}` : '';
         const defense = e.defending ? ' | DEFENDING' : '';
+        const flanked = flankedIds.has(e.id) ? ' | FLANKED (standing advantage — engine-applied; emit flank_broken only when the fiction ends it)' : '';
         const conditions = e.conditions?.length ? ` | Conditions: ${e.conditions.join(', ')}` : '';
-        return `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac}${atk}${dmg} | Health: ${e.condition}${conditions}${status}${defense}`;
+        return `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac}${atk}${dmg} | Health: ${e.condition}${conditions}${status}${defense}${flanked}`;
     }).join('\n') || '- No tracked enemies';
 
     const turnList = turnOrder.map((t, i) =>

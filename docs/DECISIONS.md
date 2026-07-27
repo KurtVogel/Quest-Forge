@@ -8,6 +8,30 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-27 · An accepted flanking ruling persists engine-side across exchanges (`combat.flankedEnemyIds`), not re-adjudicated per round.**
+Live finding (Vesa): flanking advantage granted via `situational_ruling` lasted exactly one
+exchange — the DM had to re-emit the identical ruling every round and reliably forgot, so an
+unchanged tactical situation silently lost its advantage. Options weighed: (a) prompt harder
+("re-emit standing rulings each round") — rejected, prompt-only fixes to recurring DM
+forgetfulness are exactly what the engine exists to replace; (b) a Scribe pass judging each
+exchange whether advantages should stand — rejected, combat is the deterministic fast path
+(intent-pacing decision 2026-07-14) and an extra LLM call per exchange adds latency, cost,
+and nondeterminism to re-derive something the engine already knows; (c) engine-owned
+persistence — chosen. When an exchange resolves with a shared flanking ruling (the existing
+`isSharedFlankingRuling` detector), the target's id is committed as `combat.flankedEnemyIds`;
+later exchanges auto-apply advantage to hero attacks on it (labeled `flanking (standing)`)
+and propagate to companions exactly like same-exchange flanking. Adjudication authority stays
+with the DM at the boundaries: an explicit slot ruling (either direction) replaces the
+standing one, and `"flank_broken": ["<enemy id>"]` in `combat_exchange` ends a flank the
+fiction has undone — while the engine ends it deterministically when the target dies/flees/
+surrenders, the hero Dashes/Disengages away, or a party's last companion drops (a
+companionless party keeps its DM-adjudicated NPC flank until the DM breaks it, since the
+second threat is untracked). Scope guard: only flanking-style rulings persist — concealment,
+distraction, and other generic advantage sources remain single-exchange by the 2026-07-17
+propagation decision, because they genuinely are momentary. Establishment and break are
+announced as visible system notes, the FLANKED marker rides the combat prompt block and the
+enemy card, and LOAD_GAME sanitizes the list against tracked enemy ids.
+
 **2026-07-26 · Campaign Chronicle v1 is strictly player-facing, retold from real messages, on the DM model — and every new persisted top-level field MUST join the autosave deps + get a flush hint.**
 Shipped the IDEAS.md 2026-07-06 design as scoped there: a Chronicle tab in the World Journal
 (the auto-journal tab is now titled "Journal"; "Chronicle" belongs to the saga view), a

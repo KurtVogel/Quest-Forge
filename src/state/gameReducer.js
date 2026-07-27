@@ -195,6 +195,11 @@ function validateSaveState(payload) {
                 surprise: ['player', 'enemies'].includes(merged.surprise) ? merged.surprise : 'none',
                 queuedExchange: normalizeCombatExchange(merged.queuedExchange),
                 lastExchangeResult,
+                // Untrusted like everything else in a save: keep only string ids that
+                // name a still-tracked enemy (the exchange planner re-checks liveness).
+                flankedEnemyIds: Array.isArray(merged.flankedEnemyIds)
+                    ? [...new Set(merged.flankedEnemyIds.filter(id => typeof id === 'string' && enemies.some(enemy => enemy.id === id)))].slice(0, 30)
+                    : [],
             };
         })(),
         session: payload.session || initialGameState.session,
@@ -757,6 +762,7 @@ export const initialGameState = {
         lastExchangeResult: null,
         resolvedExchangeIds: [],
         surprise: 'none',
+        flankedEnemyIds: [], // Enemy ids under a standing flank — the engine keeps applying attack advantage across exchanges until the flank breaks
     },
     session: {
         id: null,
@@ -3183,6 +3189,7 @@ export function gameReducer(state, action) {
                     queuedExchange,
                     lastExchangeResult: null,
                     resolvedExchangeIds: [],
+                    flankedEnemyIds: [],
                 },
                 rollHistory: [...state.rollHistory, playerInitiativeRoll],
                 messages: [
@@ -3328,6 +3335,10 @@ export function gameReducer(state, action) {
                     queuedExchange: payload.result.kind === 'opening' ? next.combat.queuedExchange : null,
                     openingActorIds: payload.result.kind === 'opening' ? next.combat.openingActorIds : [],
                     resolvedExchangeIds: [...(next.combat.resolvedExchangeIds || []), payload.exchangeId].slice(-20),
+                    // Opening payloads omit the field and keep the (empty) list untouched.
+                    flankedEnemyIds: Array.isArray(payload.flankedEnemyIds)
+                        ? payload.flankedEnemyIds.slice(0, 30)
+                        : (next.combat.flankedEnemyIds || []),
                 },
             };
         }
