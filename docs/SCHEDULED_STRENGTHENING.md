@@ -53,8 +53,8 @@ it under Process notes.
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-07-22 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-07-23 |
 | memory-journal | `engine/worldJournal.js` | 2026-07-18 |
-| story-memory | `engine/storyMemory.js` | 2026-07-14 |
-| vector-memory-rag | `engine/vectorMemory.js` | 2026-07-15 |
+| story-memory | `engine/storyMemory.js` | 2026-07-28 |
+| vector-memory-rag | `engine/vectorMemory.js` | 2026-07-28 |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-07-25 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-07-25 |
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-07-26 |
@@ -70,30 +70,30 @@ Refreshed by the audit **at most weekly** (when older than 7 days), via:
 `npm.cmd install --no-save @vitest/coverage-v8 && npx.cmd vitest run --coverage --coverage.all --coverage.include='src/**/*.{js,jsx,ts}'`
 Used only to bias feature picking toward weak spots; per-file statement % for registry files.
 
-**2026-07-21** (988 tests / 64 files passing). % Statements per registry file:
+**2026-07-28** (1182 tests / 71 files passing). % Statements per registry file:
 
 | Feature ID | File | % Stmts |
 |---|---|---|
-| dice-engine | `engine/dice.ts` | 93.93 |
-| rules-math | `engine/rules.js` | 92.30 |
+| dice-engine | `engine/dice.ts` | 95.00 |
+| rules-math | `engine/rules.js` | 92.46 |
 | progression | `engine/progression.js` | 97.91 |
-| response-parsing | `responseParser.js` / `jsonExtractor.js` | 95.95 / 95.06 |
-| prompt-building | `promptBuilder.js` | 98.56 |
-| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 77.07 / 100 |
-| combat-exchange | `combatExchange.js` | 82.47 |
-| enemy-stats-conditions | `enemyStats.js` | 93.50 |
-| hidden-fronts | `fronts.js` / `frontDirector.js` / `frontUpgrade.js` | 88.18 / 74.41 / 81.03 |
-| scribe | `scribe.js` | 78.03 |
-| memory-journal | `worldJournal.js` | 91.83 |
+| response-parsing | `responseParser.js` / `jsonExtractor.js` | 95.52 / 95.06 |
+| prompt-building | `promptBuilder.js` | 98.66 |
+| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 81.79 / 100 |
+| combat-exchange | `combatExchange.js` | 82.90 |
+| enemy-stats-conditions | `enemyStats.js` | 97.40 |
+| hidden-fronts | `fronts.js` / `frontDirector.js` / `frontUpgrade.js` | 89.38 / 90.69 / 87.93 |
+| scribe | `scribe.js` | 81.13 |
+| memory-journal | `worldJournal.js` | 98.97 |
 | story-memory | `storyMemory.js` | 96.45 |
 | vector-memory-rag | `vectorMemory.js` | 93.38 |
-| persistence | `persistence.js` | 86.25 |
-| cloud-sync | `cloudSync.js` / `auth.js` | 96.33 / 0 (auth.js untested — thin Firebase wrapper) |
+| persistence | `persistence.js` | 86.58 |
+| cloud-sync | `cloudSync.js` / `auth.js` | 96.26 / 0 (auth.js untested — thin Firebase wrapper) |
 | character-vault | `characterVault.js` / `characterUtils.js` | 88.75 / 89.15 |
 | inventory-economy | `items.js` / `equipment.js` | 98.36 / 100 (currency.js absent from v8 report — tooling quirk, has its own passing test file) |
-| quests | (part of `gameReducer.js`, 85.12 overall) | — |
-| scene-art | `imageGen.js` | 56.32 |
-| providers-adapter | `adapter.js` / `gemini.js` / `openai.js` / `xai.js` | 100 / 25.27 / 3.70 / 3.70 (network boundary, expected low) |
+| quests | (part of `gameReducer.js`, 85.85 overall) | — |
+| scene-art | `imageGen.js` | 85.21 |
+| providers-adapter | `adapter.js` / `gemini.js` / `openai.js` / `xai.js` | 100 / 91.08 / 98.14 / 92.59 |
 | chat-orchestration | `ChatPanel.jsx` | 0 (no component test file exists) |
 
 ## Open Findings Queue
@@ -185,6 +185,10 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P1** (response-parsing, 2026-07-27): a `null` element in `requested_rolls` crashes `normalizeEvents` — the map dereferences `r.type` with no per-element shape guard, unlike every sibling array map in the same function — `responseParser.js:333-334`; drop non-object entries before mapping (empirically verified). *Fixed 2026-07-27: per-element shape filter before the map; null/scalar/array elements dropped, valid siblings kept (tested).*
 - [x] **P2** (enemy-stats-conditions, 2026-07-27): `validateEnemySaveBonus` — the spell-save trust boundary — has zero direct tests (never imported by `enemyStats.test.js`, no `sanitizeLoadedEnemy` case passes `saveBonus`); add band-edge tests mirroring the attack-bonus block — `engine/enemyStats.js:49-53`. *Fixed 2026-07-27: band-edge/reject/round suite mirroring the attack-bonus block + a `sanitizeLoadedEnemy` saveBonus kept/deleted case.*
 - [x] **P2** (enemy-stats-conditions, 2026-07-27): `enemy_updates` elements pass through `normalizeEvents` unguarded (unlike quest/world-fact channels) — a `null`/non-object element reaches `UPDATE_ENEMY`'s `action.payload.id` — `llm/responseParser.js:427`, `state/gameReducer.js:3388`; drop non-object entries at the parser boundary. *Fixed 2026-07-27: non-object elements dropped at the parser boundary (tested).*
+- [ ] **P2** (vector-memory-rag, 2026-07-28): `addMemory`'s guard `!text?.trim()` is not type-safe (`?.` guards null/undefined, not type) — a non-string `text` throws inside the async fn; the parser passes `world_facts[].fact` through un-typed (`responseParser.js:445`), so `ChatPanel.jsx:432 addMemory(key, f.fact,…)` on an object-valued fact throws, surfaced-safe only because every sink remembers `.catch()`. One-line fix: `typeof text !== 'string' || !text.trim()` — `engine/vectorMemory.js:118`.
+- [ ] **P2** (vector-memory-rag, 2026-07-28): `loadPersistedEmbeddings` validates `Array.isArray(vector) && length===768` but not that elements are finite numbers — a corrupted/tampered IndexedDB row (768-len non-number/NaN array) passes the compat filter into `memoryStore` and yields NaN scores (degrades to dropped, but pollutes the store) — add `entry.vector.every(Number.isFinite)` — `engine/vectorMemory.js:74-78`.
+- [ ] **P2** (vector-memory-rag, 2026-07-28): IndexedDB degradation paths untested — `openEmbedDB` `onblocked` reject, `loadPersistedEmbeddings` `request.onerror`→catch→`[]`, `persistEmbedding` failed-put `.catch`, `clearPersistedEmbeddings` `onabort`→resolve; add error-path tests — `engine/vectorMemory.js:36,47-53,55-64,84-88`.
+- [ ] **P2** (story-memory, 2026-07-28): exported read path not self-guarded — `scoreStoryMemory` spreads `...(card.tags||[])`/`...(card.linkedNpcNames||[])` (`:190-192`) and `buildStoryMemoryPromptBlock` calls `m.linkedNpcNames.join()` (`:230`); a non-array-truthy value throws mid-prompt-build. Unreachable today (all stored cards normalized, incl. LOAD_GAME) but the functions are exported with no internal guard — add `Array.isArray`/`normalizeTextArray` guards + a direct two-arg `normalizeStoryMemoryCard(update, existing)` merge test (the `existing`-preserve branches are unit-untested) — `engine/storyMemory.js:190-192,230,110-133`.
 
 ## Entry template
 
@@ -208,6 +212,32 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-28 — story-memory + vector-memory-rag (Lap 2: robustness against hostile input)
+
+`npm test`: 1182 passing / 71 files.
+
+Rotation excluded (last 6, local ∪ origin — identical at `a6865d0`): enemy-stats-conditions, response-parsing (07-27), character-vault, rules-math (07-26), cloud-sync, persistence, quests, combat-exchange (07-25), scribe, roll-resolution (07-23), scene-art, hidden-fronts (07-22). Oldest eligible → **story-memory** (07-14); the 07-15 tie vector-memory-rag/inventory-economy broke to lowest coverage → **vector-memory-rag** (93.38 < 98.36). Coverage snapshot refreshed (was exactly 7 days old). Open Findings Queue fully drained (every item `[x]`) — nothing to re-verify.
+
+### story-memory (`engine/storyMemory.js`, `memory_updates` → `UPDATE_STORY_MEMORY`, cards → `ADD_STORY_MEMORY_CARD(S)`)
+- **Scope examined:** `storyMemory.js` end to end (normalize card/update, `isNearDuplicateStoryCard`/`pickMergedCardText`, `scoreStoryMemory`/`curateStoryMemory`, `buildStoryMemoryPromptBlock`); every reducer write path — `ADD_STORY_MEMORY_CARD(S)`, `UPDATE_STORY_MEMORY`, **LOAD_GAME re-normalize** (`gameReducer.js:131-132`), npc→card promotion (`:2937-2952`); the DM `memory_updates` parser boundary (`responseParser.js:450-461`); read-path callers (`ChatPanel.jsx:266/273`, `promptBuilder.js:157`); `storyMemory.test.js`, `gameReducer.storyMemory.test.js`.
+- **Findings:**
+  - **Verified strong (the lap's point):** every path that writes `state.storyMemory` funnels through `normalizeStoryMemoryCard` — `String()`-coerces text/subject/type/status/source/location, array-guards tags/linkedNpcNames via `normalizeTextArray`, `clampNumber`s salience/emotionalCharge, length-clamps — **including LOAD_GAME**, so a poisoned/stale save's cards are re-sanitized on load. The DM update channel is double-guarded: the parser drops non-object `memory_updates` and `String()`-coerces each field (`:452-461`), then `normalizeStoryMemoryUpdate` drops identityless updates, whitelists `status`, and ignores a raw `lastUsedAt` (07-14 fix holds). Read paths therefore always see well-typed cards.
+  - **P2 (latent — exported read path not self-guarded):** `scoreStoryMemory` spreads `...(card.tags||[])`/`...(card.linkedNpcNames||[])` (`:190-192`) and `buildStoryMemoryPromptBlock` calls `m.linkedNpcNames.join()` (`:230`) — a non-array-*truthy* value (number `5` → "not iterable"; string → "join is not a function") throws mid-prompt-build. Unreachable **today** via the normalize-at-boundary discipline, but these are exported with zero internal guard; a future caller feeding un-normalized cards crashes the prompt.
+  - **P2 (coverage):** `normalizeStoryMemoryCard`'s two-arg `existing`-merge form (fallback branches `:110/113/116/123/125-133` that PRESERVE existing type/salience/emotionalCharge/subject/firstSeenAt/lastUsedAt/source when an update omits them) is never unit-tested — `storyMemory.test.js` calls it single-arg only. Exercised incidentally via reducer UPDATE tests, but "an update omitting salience keeps the existing salience" has no direct assertion.
+- **Suggested improvements:** (1) `Array.isArray`/`normalizeTextArray` guard on tags & linkedNpcNames inside `scoreStoryMemory`/`buildStoryMemoryPromptBlock` to make the exported read path self-safe; (2) a direct two-arg `normalizeStoryMemoryCard(update, existing)` merge test asserting omitted fields are preserved.
+
+### vector-memory-rag (`engine/vectorMemory.js`)
+- **Scope examined:** `vectorMemory.js` end to end (openEmbedDB, persist/clear/load, addMemory, cosineSimilarity, seedMemories, retrieveRelevant, buildRetrievedMemoriesBlock); all ChatPanel sinks (addMemory ×6, all `.catch()`-guarded — `:74/432/607/667/829/925` — and the mount seed `:176-199`, also `.catch()`'d); the parser `world_facts` boundary; `vectorMemory.test.js`.
+- **Findings:**
+  - **Verified strong:** schema-tagged v3 cache; `loadPersistedEmbeddings` drops schema/dimension-incompatible rows; awaitable `clearMemories` orders the persisted clear ahead of a campaign-switch seed (cross-campaign resurrection closed 07-20); `openEmbedDB` has an `onblocked` reject; `cosineSimilarity` guards null/length-mismatch; `addMemory` dedupes by exact text and drops on embed failure. Every sink is `.catch()`-wrapped → a throw degrades to "memory silently not added", never a surfaced crash.
+  - **P2 (non-type-safe internal guard, masked by callers):** `addMemory`'s guard is `!apiKey || !text?.trim()` (`:118`) — `?.` guards null/undefined but NOT type, so a non-string `text` reaches `.trim()` and throws inside the async fn. The parser does NOT type-guard `world_facts[].fact` (`responseParser.js:445` passes a non-string `f` through raw), so `ChatPanel.jsx:432` `addMemory(key, f.fact, …)` on a hallucinated object-valued fact throws — surfaced only because every call site remembers `.catch(() => {})`. A future sink without `.catch` surfaces it. One-line fix: `typeof text !== 'string' || !text.trim()`.
+  - **P2 (cache-element validation gap):** `loadPersistedEmbeddings` validates `Array.isArray(entry.vector) && length === 768` but NOT that elements are finite numbers (`:74-78`). A corrupted/tampered IndexedDB row (768-length array of non-numbers/NaN) passes the compat filter into `memoryStore`; `cosineSimilarity` then yields NaN/garbage. Degrades safely (NaN fails `>= minScore`, row dropped) but silently pollutes the store — the schema guard gives false confidence.
+  - **P2 (coverage):** IndexedDB degradation paths untested — `openEmbedDB` `onblocked` reject, `loadPersistedEmbeddings` `request.onerror`→catch→`[]`, `persistEmbedding` `.catch()` on a failed put, `clearPersistedEmbeddings` `onabort`→resolve. `vectorMemory.test.js` exercises only fake-indexeddb happy paths + the schema-incompat filter.
+- **Suggested improvements:** (1) type-guard `text` in `addMemory`; (2) `entry.vector.every(Number.isFinite)` in `loadPersistedEmbeddings`; (3) error-path tests (onblocked reject, getAll onerror → [], persist/clear failure degradation).
+
+### Process notes
+- Coverage snapshot refreshed to 2026-07-28 (1182 tests / 71 files) — was exactly 7 days old. Big movers since 07-21: providers (gemini 25→91, openai/xai 3.7→98/93), imageGen 56→85, worldJournal 91→99, enemyStats 93→97 (07-22/07-27 test additions). Registry unchanged. Queue was fully drained; the four P2s above are net-new.
 
 ## 2026-07-27 — enemy-stats-conditions + response-parsing (Lap 2: robustness against hostile input)
 
