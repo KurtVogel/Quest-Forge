@@ -44,7 +44,7 @@ it under Process notes.
 |---|---|---|
 | dice-engine | `engine/dice.ts` | 2026-07-21 |
 | rules-math | `engine/rules.js` | 2026-07-26 |
-| progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-07-16 |
+| progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-07-28 |
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-07-27 |
 | prompt-building | `llm/promptBuilder.js` | 2026-07-16 |
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-07-23 |
@@ -58,7 +58,7 @@ it under Process notes.
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-07-25 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-07-25 |
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-07-26 |
-| inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-07-15 |
+| inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-07-28 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-07-25 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-07-22 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-07-18 |
@@ -189,6 +189,10 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (vector-memory-rag, 2026-07-28): `loadPersistedEmbeddings` validates `Array.isArray(vector) && length===768` but not that elements are finite numbers — a corrupted/tampered IndexedDB row (768-len non-number/NaN array) passes the compat filter into `memoryStore` and yields NaN scores (degrades to dropped, but pollutes the store) — add `entry.vector.every(Number.isFinite)` — `engine/vectorMemory.js:74-78`.
 - [ ] **P2** (vector-memory-rag, 2026-07-28): IndexedDB degradation paths untested — `openEmbedDB` `onblocked` reject, `loadPersistedEmbeddings` `request.onerror`→catch→`[]`, `persistEmbedding` failed-put `.catch`, `clearPersistedEmbeddings` `onabort`→resolve; add error-path tests — `engine/vectorMemory.js:36,47-53,55-64,84-88`.
 - [ ] **P2** (story-memory, 2026-07-28): exported read path not self-guarded — `scoreStoryMemory` spreads `...(card.tags||[])`/`...(card.linkedNpcNames||[])` (`:190-192`) and `buildStoryMemoryPromptBlock` calls `m.linkedNpcNames.join()` (`:230`); a non-array-truthy value throws mid-prompt-build. Unreachable today (all stored cards normalized, incl. LOAD_GAME) but the functions are exported with no internal guard — add `Array.isArray`/`normalizeTextArray` guards + a direct two-arg `normalizeStoryMemoryCard(update, existing)` merge test (the `existing`-preserve branches are unit-untested) — `engine/storyMemory.js:190-192,230,110-133`.
+- [ ] **P2** (inventory-economy, 2026-07-28): a DM `items_found` entry carrying `equipped: true` survives `normalizeItem`'s `...source` spread, overrides ADD_ITEM's `equipped: false` default, and becomes `preferredItemId` in `normalizeEquippedSlots` — silently displacing the hero's active weapon/armor, bypassing the deliberate empty-slot-only auto-equip; a DM-supplied `id` likewise overrides the minted unique id (double-delete on collision in REMOVE_ITEM, theoretical — prompt hides inventory ids). Strip both keys from `normalizeItem` output or at ADD_ITEM entry + displacement test — `state/gameReducer.js:2084-2102`, `data/items.js:162-164`.
+- [ ] **P2** (inventory-economy, 2026-07-28): `items_found` elements pass the parser unguarded — a `null`/array element reaches `normalizeItem` and mints a junk "Unknown item" gear entry (same class quest_updates/enemy_updates/vault closed); drop non-object elements at the boundary — `llm/responseParser.js:393`.
+- [ ] **P2** (progression, 2026-07-28): string-typed `level`/`exp`/`maxHP` from a corrupted/hand-edited save survive LOAD_GAME (`healLoadedCharacter` heals only spell slots; vault sanitizer doesn't run on Continue/Load) — first XP award string-concatenates (`"3" + 1 = "31"`, `"20" + 8 = "208"`), silently corrupting the character past the level cap AND persisting into the next save. Numeric-coerce progression-critical fields in the heal + string-level load test — `state/gameReducer.js:84-101`, `engine/progression.js:44-45`.
+- [ ] **P2** (progression, 2026-07-28): hostile-input paths untested — negative/NaN/string XP amounts, `awardExperience(null)`, `getExperienceThreshold(0/-1/NaN/25)`, unknown class (hitDie 8 default), `estimateCombatExperience` with object-valued stats (NaN sum → silent 0-award, safe but unpinned) — `engine/progression.test.js`.
 
 ## Entry template
 
@@ -212,6 +216,32 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-07-28 — inventory-economy + progression (Lap 2: robustness against hostile input) — second run
+
+`npm test`: 1182 passing / 71 files.
+
+Rotation excluded (last 6, local ∪ origin — identical at `7925d7f`): story-memory, vector-memory-rag (07-28), enemy-stats-conditions, response-parsing (07-27), character-vault, rules-math (07-26), cloud-sync, persistence, quests, combat-exchange (07-25), scribe, roll-resolution (07-23). Oldest eligible → **inventory-economy** (07-15); the 07-16 tie progression/prompt-building broke to lowest coverage → **progression** (97.91 < 98.66). Coverage snapshot refreshed this morning — not re-run.
+
+### inventory-economy (`data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers)
+- **Scope examined:** `items.js`/`equipment.js`/`currency.js` end to end; `PURCHASE_ITEM`/`SELL_ITEM`/`ADD_ITEM`/`USE_ITEM` + the whole transaction-ledger layer (`buildPurchaseTransaction`, `findRecentTransactionDuplicate`, `rememberTransaction`, `conversationalDistance`, LOAD_GAME ledger sanitize `:148-149`); parser `items_found` boundary (`responseParser.js:393`); `items.test.js` (4), `equipment.test.js` (4), `currency.test.js` (24), `gameReducer.economy.test.js` (46).
+- **Findings:**
+  - **Verified strong (the lap's point):** the 07-15 clamps hold at every edge (purchase qty 100/event, item qty 999, valueCp 1M, sale proceeds 1M on both price paths, negative price floors); catalog mechanics are authoritative over LLM fields (pinned by test); ledgers are sanitized on load and replay-guarded with sourceId + signature; `toCopper` clamps each denomination non-negative so a hostile negative delta can't drain coin; `normalizeEquippedSlots` clears invalid equipped flags and resolves two-handed/shield conflicts. Purchase/sale raw-index replay windows are the **settled 07-22 decision** (conversational distance applies on first observed failure) — consistent, not flagged.
+  - **P2 (DM `items_found` can silently displace equipped gear):** `normalizeItem` spreads `...source` through, so a found item carrying `equipped: true` survives into ADD_ITEM's minted item (`{id, equipped: false, quantity: 1, ...normalizeItem(payload)}` — the spread **overrides** the safe defaults, `gameReducer.js:2084-2088`, `items.js:162-164`) and becomes `preferredItemId` in `normalizeEquippedSlots`, which then wins conflicts — unequipping the hero's current weapon/armor. This bypasses ADD_ITEM's own deliberate empty-slot-only auto-equip discipline (`:2090-2101`); equip belongs to `equipment_changes`. A DM-supplied `id` also survives the same spread and overrides the minted unique id (double-delete in REMOVE_ITEM's `filter(i => i.id !== payload)` on collision) — theoretical today (the prompt never exposes inventory ids), but stripping both is one line.
+  - **P2 (junk elements mint "Unknown item" gear):** parser passes `items_found` elements unguarded (`responseParser.js:393`) — a `null`/array element reaches `normalizeItem`, `{...null}`/`{...[]}` → `{}` → an "Unknown item" inventory entry. Same class the sibling channels closed (quest_updates 07-25, enemy_updates 07-27, vault inventory 07-26). Cosmetic, no crash.
+  - **P2 (coverage):** `equipment.test.js` never tests a `preferredItemId` absent from the list or non-equippable-preferred; `items.test.js` doesn't pin the equipped/id pass-through either way (which is why it went unnoticed).
+- **Suggested improvements:** (1) strip `id`/`equipped` in `normalizeItem` output (or delete both keys at ADD_ITEM entry) + a displacement regression test; (2) drop non-object `items_found` elements at the parser boundary; (3) the two equipment edge tests.
+
+### progression (`engine/progression.js` — XP, leveling, ASI, hit dice)
+- **Scope examined:** `progression.js` end to end; consumers `ADD_EXP`/`LEVEL_UP`/END_COMBAT fallback (`gameReducer.js:1893,2069,3247`); the LOAD_GAME heal boundary (`healLoadedCharacter`/`validateSaveState`, `:84-101`); `progression.test.js` (17).
+- **Findings:**
+  - **Verified strong:** XP table matches the PHB diff table including the famous level-11 dip; `awardExperience` guards amount (`Math.max(0, Math.floor(Number(amount) || 0))` — NaN/negative/string all safe); the 07-16 hit-die discipline (one new die, spent stay spent) and ASI backfill are pinned; max-level cap holds through milestone and loop paths; `estimateCombatExperience` clamps per enemy.
+  - **P2 (string-typed progression fields survive LOAD_GAME → permanent character corruption):** `validateSaveState`/`healLoadedCharacter` never numeric-coerce `level`/`exp`/`maxHP` (`gameReducer.js:84-101` — only spell slots are healed), and the vault sanitizer doesn't run on Continue/Load (established 07-26). A corrupted/hand-edited save with `level: "3"` string then hits `applySingleLevelUp`'s `character.level + 1` → `"31"` (string concat), `maxHP + hpGain` → `"208"` — the character teleports past the level cap with garbage HP **and persists that way into the next save**. `isMaxLevel`/`getExperienceThreshold` numeric-coerce so the loop exits, masking the corruption. Same reachability class as the 07-26 rules-math P2s, but the impact is silent durable corruption rather than a crash. Fix: coerce level/exp/maxHP/currentHP finite-or-default in the heal.
+  - **P2 (coverage):** hostile-input paths untested — negative/NaN/string XP amounts, `awardExperience(null)`, `getExperienceThreshold(0/-1/NaN/25)`, unknown class (`CLASSES[x]` undefined → hitDie 8 default), and `estimateCombatExperience` with non-numeric stats (an object-valued `maxHp` → NaN sum → degrades to a silent 0-award via `Number(NaN)||0`; safe but unpinned).
+- **Suggested improvements:** (1) numeric-coerce progression-critical character fields in `healLoadedCharacter` + a string-level load test; (2) a hostile-amount/unknown-class test block mirroring the rules-math 07-26 additions.
+
+### Process notes
+- Second run this date (user-requested), same Lap 2 lens; the 6:00 run covered story-memory + vector-memory-rag. Coverage snapshot already refreshed today. Registry unchanged; queue additions below deduped against all open/checked items.
 
 ## 2026-07-28 — story-memory + vector-memory-rag (Lap 2: robustness against hostile input)
 
