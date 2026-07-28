@@ -7,6 +7,7 @@ import {
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
     pickMergedCardText,
+    scoreStoryMemory,
 } from './storyMemory.js';
 
 describe('story memory normalization', () => {
@@ -214,5 +215,83 @@ describe('normalizeStoryMemoryUpdate', () => {
         expect(normalizeStoryMemoryUpdate({ status: 'resolved' })).toBe(null);
         expect(normalizeStoryMemoryUpdate(null)).toBe(null);
         expect(normalizeStoryMemoryUpdate('mem-1')).toBe(null);
+    });
+});
+
+describe('exported read-path guards (2026-07-28 audit)', () => {
+    it('scoreStoryMemory tolerates string-valued tags/linkedNpcNames without throwing', () => {
+        const score = scoreStoryMemory({
+            type: 'promise',
+            status: 'active',
+            text: 'Aune promised safe passage across the ferry line.',
+            subject: 'ferry promise',
+            salience: 3,
+            emotionalCharge: 2,
+            tags: 'ferry',
+            linkedNpcNames: 'Aune',
+        }, { query: 'the ferry line', npcs: [{ name: 'Aune' }] });
+
+        expect(Number.isFinite(score)).toBe(true);
+        expect(score).toBeGreaterThan(0);
+    });
+
+    it('buildStoryMemoryPromptBlock skips a non-array linkedNpcNames instead of throwing on .join', () => {
+        const block = buildStoryMemoryPromptBlock([{
+            type: 'promise',
+            salience: 3,
+            text: 'Aune promised safe passage.',
+            // A string is truthy and has .length — but no .join.
+            linkedNpcNames: 'Aune',
+        }]);
+
+        expect(block).toContain('Aune promised safe passage.');
+        expect(block).not.toContain('NPCs:');
+    });
+});
+
+describe('normalizeStoryMemoryCard two-arg merge (existing-preserve branches)', () => {
+    const existing = normalizeStoryMemoryCard({
+        id: 'mem-1',
+        type: 'promise',
+        text: 'Jack promised Oren a barge by midsummer.',
+        subject: "Jack's promise to Oren",
+        salience: 4,
+        emotionalCharge: 3,
+        status: 'dormant',
+        source: 'scribe',
+        location: 'the ferry landing',
+        firstSeenAt: 1000,
+        lastUsedAt: 2000,
+    });
+
+    it('an update carrying only new text keeps every durable field from the existing card', () => {
+        const merged = normalizeStoryMemoryCard({ text: 'Jack broke his promise to Oren.' }, existing);
+
+        expect(merged).toMatchObject({
+            id: 'mem-1',
+            type: 'promise',
+            text: 'Jack broke his promise to Oren.',
+            subject: "Jack's promise to Oren",
+            salience: 4,
+            emotionalCharge: 3,
+            status: 'dormant',
+            source: 'scribe',
+            location: 'the ferry landing',
+            firstSeenAt: 1000,
+            lastUsedAt: 2000,
+        });
+    });
+
+    it('an empty update falls back to the existing text instead of nulling the card', () => {
+        const merged = normalizeStoryMemoryCard({}, existing);
+        expect(merged.text).toBe('Jack promised Oren a barge by midsummer.');
+        expect(merged.id).toBe('mem-1');
+    });
+
+    it('explicit update fields still win over the existing card', () => {
+        const merged = normalizeStoryMemoryCard({ status: 'resolved', salience: 2, location: 'Kuusisaari' }, existing);
+        expect(merged.status).toBe('resolved');
+        expect(merged.salience).toBe(2);
+        expect(merged.location).toBe('Kuusisaari');
     });
 });

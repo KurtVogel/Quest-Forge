@@ -83,13 +83,31 @@ function sanitizeStoredExchangeResult(result) {
 /** Casters loaded from any-era saves get an authoritative slot table and a sane sustained spell. */
 function healLoadedCharacter(character) {
     if (!character || typeof character !== 'object') return null;
-    if (!isSpellcaster(character.class)) return character;
-    const sustained = character.sustainedSpell && typeof character.sustainedSpell === 'object' && character.sustainedSpell.key
-        ? character.sustainedSpell
+    // Progression-critical fields must be real numbers: a string level/exp from a
+    // corrupted or hand-edited save survives every downstream read until the first
+    // XP award string-concatenates ("3" + 1 = "31") and persists the corruption
+    // into the next save (2026-07-28 audit). Numeric strings coerce; junk falls
+    // back to a sane floor.
+    const toInt = (value, fallback) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? Math.trunc(n) : fallback;
+    };
+    const level = Math.min(MAX_CHARACTER_LEVEL, Math.max(1, toInt(character.level, 1)));
+    const maxHP = Math.max(1, toInt(character.maxHP, 10));
+    const healed = {
+        ...character,
+        level,
+        exp: Math.max(0, toInt(character.exp, 0)),
+        maxHP,
+        currentHP: Math.min(maxHP, Math.max(0, toInt(character.currentHP, maxHP))),
+    };
+    if (!isSpellcaster(healed.class)) return healed;
+    const sustained = healed.sustainedSpell && typeof healed.sustainedSpell === 'object' && healed.sustainedSpell.key
+        ? healed.sustainedSpell
         : null;
     return {
-        ...character,
-        spellSlots: sanitizeSpellSlots(character.level || 1, character.spellSlots),
+        ...healed,
+        spellSlots: sanitizeSpellSlots(level, healed.spellSlots),
         sustainedSpell: sustained,
     };
 }
@@ -2081,11 +2099,25 @@ export function gameReducer(state, action) {
 
         // --- Inventory ---
         case 'ADD_ITEM': {
+            // The engine mints item ids and owns equip placement. A DM/Scribe payload
+            // carrying `id` could collide with an existing entry (double-delete on
+            // REMOVE_ITEM), and `equipped: true` would displace the hero's active
+            // weapon/armor through normalizeEquippedSlots' preferred-item path,
+            // bypassing the deliberate empty-slot-only auto-equip (2026-07-28 audit).
+            // Premise starting items are the one sanctioned equip-on-add channel and
+            // declare it via `equipOnAdd`.
+            const equipOnAdd = !Array.isArray(action.payload) && action.payload?.equipOnAdd === true;
+            const {
+                id: _untrustedId,
+                equipped: _untrustedEquipped,
+                equipOnAdd: _equipFlag,
+                ...normalized
+            } = normalizeItem(action.payload);
             const newItem = {
                 id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                equipped: false,
                 quantity: 1,
-                ...normalizeItem(action.payload),
+                ...normalized,
+                equipped: equipOnAdd,
             };
             // Auto-equip armor/shields if no other of that type is currently equipped
             if (!newItem.equipped) {

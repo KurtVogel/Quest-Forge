@@ -193,3 +193,49 @@ describe('estimateCombatExperience (End-Combat XP fallback)', () => {
         expect(estimateCombatExperience([])).toBe(0);
     });
 });
+
+describe('hostile-input robustness (2026-07-28 audit)', () => {
+    it('getExperienceThreshold clamps junk levels to the table bounds', () => {
+        expect(getExperienceThreshold(0)).toBe(300);
+        expect(getExperienceThreshold(-1)).toBe(300);
+        expect(getExperienceThreshold(25)).toBe(50000);
+        expect(getExperienceThreshold(NaN)).toBe(50000);
+    });
+
+    it('awardExperience tolerates a missing character', () => {
+        expect(awardExperience(null, 100)).toEqual({ character: null, messages: [] });
+    });
+
+    it('awardExperience treats negative/NaN/non-numeric-string amounts as zero', () => {
+        for (const junk of [-500, NaN, 'a heap of XP', {}, null, undefined]) {
+            const result = awardExperience({ ...character, level: 1 }, junk);
+            expect(result.character.exp).toBe(0);
+            expect(result.character.level).toBe(1);
+            expect(result.messages).toHaveLength(0);
+        }
+    });
+
+    it('awardExperience coerces a numeric string amount (corrupted-save shape)', () => {
+        const result = awardExperience({ ...character, level: 1 }, '50');
+        expect(result.character.exp).toBe(50);
+    });
+
+    it('level-up falls back to the d8 hit die for an unknown class', () => {
+        const bard = { ...character, class: 'bard', level: 1, exp: 0, maxHP: 10, currentHP: 10, hitDice: { total: 1, remaining: 1, die: 8 } };
+        const result = awardExperience(bard, 300);
+        expect(result.character.level).toBe(2);
+        // floor(8/2) + 1 + CON(+2) = 7
+        expect(result.character.maxHP).toBe(17);
+    });
+
+    it('estimateCombatExperience coerces object-valued stats to defaults instead of a NaN sum', () => {
+        expect(estimateCombatExperience([{ maxHp: {}, ac: { armored: true } }])).toBe(56);
+        expect(estimateCombatExperience([{ maxHp: '30', ac: '14' }])).toBe(102);
+    });
+
+    it('estimateCombatExperience skips junk entries and non-array input', () => {
+        expect(estimateCombatExperience([null, 'goblin', 7])).toBe(0);
+        expect(estimateCombatExperience('not-an-array')).toBe(0);
+        expect(estimateCombatExperience()).toBe(0);
+    });
+});

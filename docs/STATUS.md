@@ -4,8 +4,42 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-27, night (standing flank persistence — accepted flanking
-advantage now survives across combat exchanges)._
+_Last updated: 2026-07-28 (audit-fix: all eight P2s from the day's two scheduled
+audits — vector-memory-rag, story-memory, inventory-economy, progression)._
+
+## Audit-fix 2026-07-28: eight-P2 batch cleared (queue emptied)
+
+The day's two scheduled audits (story-memory + vector-memory-rag, inventory-economy +
+progression, both Lap 2 hostile-input) filed 8 P2s; all eight fixed in one batch.
+1209 tests + lint green.
+
+1. **RAG type guards** — `addMemory` rejects non-string text (`?.` guarded null, not
+   type); the embed-cache compat filter rejects vectors with non-finite elements.
+2. **RAG degradation paths tested — and one REAL bug found by the new tests:**
+   `loadPersistedEmbeddings`' bare `return new Promise` skipped its own try/catch, so
+   a failing IndexedDB read rejected the whole campaign seed instead of degrading to
+   fresh embedding. Now `return await`. Blocked-open, failed-read, throwing-write, and
+   aborted-clear all tested.
+3. **Story-memory read guards** — `scoreStoryMemory`/`buildStoryMemoryPromptBlock`
+   tolerate non-array tags/linkedNpcNames (a string has `.length` but no `.join`);
+   the two-arg `normalizeStoryMemoryCard(update, existing)` preserve branches pinned.
+4. **ADD_ITEM trust boundary** — DM/Scribe-supplied `equipped`/`id` stripped at the
+   reducer (loot can no longer displace the hero's active gear or collide with minted
+   ids); premise starting items — the one sanctioned equip-on-add channel — now
+   declare an explicit `equipOnAdd` at their dispatch site.
+5. **items_found/items_lost boundary filter** — null/array/number/blank elements
+   dropped (a null in items_lost would have crashed the traded-item dedup).
+6. **Progression-field heal on load** — `healLoadedCharacter` numeric-coerces
+   level/exp/maxHP/currentHP for all classes, so a corrupted string level can no
+   longer string-concatenate on the first XP award (`"3" + 1 = "31"`) and persist.
+7. **Progression hostile-input suite** — junk XP amounts, null character, threshold
+   bounds, unknown-class hit die; `estimateCombatExperience` hardened to coerce
+   stats and skip junk entries instead of NaN-poisoning the sum.
+
+**The strengthening queue is empty again.** Carried watch items unchanged:
+stance-stutter self-clean on the Saima save (other browser profile), Scribe gender
+backfill on pre-gender campaigns, Grok art respecting the gender tag, Aune
+appearance-thinning LOOKS baseline snapshot next playtest.
 
 ## Standing flank persistence 2026-07-27 (Vesa's live finding)
 

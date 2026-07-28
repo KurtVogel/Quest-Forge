@@ -137,9 +137,17 @@ export function awardExperience(character, amount = 0, options = {}) {
 }
 
 export function estimateCombatExperience(enemies = []) {
-    return enemies.reduce((sum, enemy) => {
-        const hp = enemy.maxHp || enemy.hp || 10;
-        const ac = enemy.ac || 12;
+    // Fallback-estimator inputs come straight from LLM-authored enemy records —
+    // an object-valued stat would poison the whole sum with NaN (Math.max(25, NaN)
+    // is NaN), so coerce each stat and skip junk entries entirely.
+    const positive = (value) => {
+        const n = Number(value);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+    return (Array.isArray(enemies) ? enemies : []).reduce((sum, enemy) => {
+        if (!enemy || typeof enemy !== 'object') return sum;
+        const hp = positive(enemy.maxHp) || positive(enemy.hp) || 10;
+        const ac = positive(enemy.ac) || 12;
         const raw = hp * 2 + ac * 3;
         return sum + Math.max(25, Math.min(300, Math.round(raw)));
     }, 0);

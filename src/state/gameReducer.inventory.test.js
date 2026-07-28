@@ -417,3 +417,55 @@ describe('END_COMBAT downed-companion messaging', () => {
         expect(next.messages.some(m => m.content.includes('down but stable'))).toBe(false);
     });
 });
+
+describe('ADD_ITEM trust boundary (2026-07-28 audit)', () => {
+    it('ignores a DM-supplied equipped:true so found loot cannot displace active gear', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'ADD_ITEM',
+            payload: { name: 'Dagger', itemKey: 'dagger', equipped: true },
+        });
+
+        const dagger = next.inventory.find(i => i.itemKey === 'dagger');
+        expect(dagger.equipped).toBe(false);
+        expect(next.inventory.find(i => i.id === 'weapon-1').equipped).toBe(true);
+        expect(next.character.armorClass).toBe(state.character.armorClass);
+    });
+
+    it('ignores a DM-supplied id and mints its own (no collision double-delete)', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'ADD_ITEM',
+            payload: { name: 'Dagger', itemKey: 'dagger', id: 'weapon-1' },
+        });
+
+        const withThatId = next.inventory.filter(i => i.id === 'weapon-1');
+        expect(withThatId).toHaveLength(1);
+        expect(withThatId[0].name).toBe('Longsword');
+        const dagger = next.inventory.find(i => i.itemKey === 'dagger');
+        expect(dagger.id).not.toBe('weapon-1');
+    });
+
+    it('honors the premise starting-item equipOnAdd channel, which takes the active slot', () => {
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'ADD_ITEM',
+            payload: { name: 'Warhammer', itemKey: 'warhammer', equipOnAdd: true },
+        });
+
+        const warhammer = next.inventory.find(i => i.itemKey === 'warhammer');
+        expect(warhammer.equipped).toBe(true);
+        expect(warhammer.equipOnAdd).toBeUndefined();
+        expect(next.inventory.find(i => i.id === 'weapon-1').equipped).toBe(false);
+    });
+
+    it('still auto-equips armor into an empty slot without any flag', () => {
+        const state = { ...makeState(), inventory: [] };
+        const next = gameReducer(state, {
+            type: 'ADD_ITEM',
+            payload: { name: 'Leather Armor', itemKey: 'leatherArmor' },
+        });
+
+        expect(next.inventory.find(i => i.itemKey === 'leatherArmor').equipped).toBe(true);
+    });
+});

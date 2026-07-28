@@ -323,3 +323,142 @@ describe('seedMemories', () => {
         expect(getMemoryCount()).toBe(1);
     });
 });
+
+describe('hostile-input guards (2026-07-28 audit)', () => {
+    beforeEach(() => {
+        clearMemories();
+        globalThis.indexedDB = new IDBFactory();
+        embedTextMock.mockReset();
+    });
+
+    it('rejects non-string text without throwing (?. guards null, not type)', async () => {
+        for (const junk of [{ fact: 'object-valued world fact' }, 42, ['a'], null, undefined, true]) {
+            await addMemory('key', junk, 'world_fact');
+        }
+        expect(embedTextMock).not.toHaveBeenCalled();
+        expect(getMemoryCount()).toBe(0);
+    });
+
+    it('ignores a cached row whose vector contains non-finite elements and re-embeds fresh', async () => {
+        const poisoned = unitVector(0);
+        poisoned[5] = NaN;
+        await putEmbedding({
+            text: 'Poisoned fact.',
+            vector: poisoned,
+            category: 'world_fact',
+            schema: SCHEMA,
+            timestamp: 1,
+        });
+        embedTextMock.mockResolvedValue(unitVector(1));
+
+        await seedMemories('key', [{ text: 'Poisoned fact.', category: 'world_fact' }]);
+
+        // The poisoned row failed the compat filter, so the item embedded fresh
+        // instead of entering the store as a NaN-scoring vector.
+        expect(embedTextMock).toHaveBeenCalledTimes(1);
+        expect(getMemoryCount()).toBe(1);
+        const matches = await retrieveRelevant('key', 'query', 3, 0.1);
+        expect(Number.isFinite(matches[0]?.score ?? 0)).toBe(true);
+    });
+});
+
+describe('IndexedDB degradation paths (2026-07-28 audit)', () => {
+    beforeEach(() => {
+        clearMemories();
+        globalThis.indexedDB = new IDBFactory();
+        embedTextMock.mockReset();
+    });
+
+    const stubOpenSuccess = (db) => ({
+        open() {
+            const request = { result: db };
+            queueMicrotask(() => request.onsuccess?.());
+            return request;
+        },
+    });
+
+    it('a blocked open degrades to in-memory-only without hanging or throwing', async () => {
+        globalThis.indexedDB = {
+            open() {
+                const request = {};
+                queueMicrotask(() => request.onblocked?.());
+                return request;
+            },
+        };
+        embedTextMock.mockResolvedValue(unitVector(0));
+
+        await addMemory('key', 'The bridge collapsed.', 'world_fact');
+        expect(getMemoryCount()).toBe(1);
+
+        // Seeding still works: the cache load degrades to an empty list.
+        embedTextMock.mockResolvedValue(unitVector(1));
+        await seedMemories('key', [{ text: 'Another fact.', category: 'journal' }]);
+        expect(getMemoryCount()).toBe(2);
+
+        // The campaign-switch clear resolves instead of hanging the seed order.
+        await expect(clearMemories()).resolves.toBeUndefined();
+    });
+
+    it('a failing cache read (request.onerror) degrades seedMemories to fresh embedding', async () => {
+        const db = {
+            close() {},
+            transaction() {
+                return {
+                    objectStore: () => ({
+                        getAll() {
+                            const request = {};
+                            queueMicrotask(() => request.onerror?.());
+                            return request;
+                        },
+                        put() {},
+                    }),
+                };
+            },
+        };
+        globalThis.indexedDB = stubOpenSuccess(db);
+        embedTextMock.mockResolvedValue(unitVector(0));
+
+        await seedMemories('key', [{ text: 'Fact one.', category: 'world_fact' }]);
+
+        expect(embedTextMock).toHaveBeenCalledTimes(1);
+        expect(getMemoryCount()).toBe(1);
+    });
+
+    it('a throwing cache write never breaks the in-memory add', async () => {
+        const db = {
+            close() {},
+            transaction() {
+                return {
+                    objectStore: () => ({
+                        put() { throw new Error('QuotaExceededError'); },
+                    }),
+                };
+            },
+        };
+        globalThis.indexedDB = stubOpenSuccess(db);
+        embedTextMock.mockResolvedValue(unitVector(0));
+
+        await addMemory('key', 'The bridge collapsed.', 'world_fact');
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        expect(getMemoryCount()).toBe(1);
+    });
+
+    it('an aborted cache clear still resolves clearMemories and closes the connection', async () => {
+        const db = {
+            closed: false,
+            close() { this.closed = true; },
+            transaction() {
+                const tx = {};
+                tx.objectStore = () => ({
+                    clear() { queueMicrotask(() => tx.onabort?.()); },
+                });
+                return tx;
+            },
+        };
+        globalThis.indexedDB = stubOpenSuccess(db);
+
+        await expect(clearMemories()).resolves.toBeUndefined();
+        expect(db.closed).toBe(true);
+    });
+});

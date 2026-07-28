@@ -315,6 +315,12 @@ function normalizeQuestUpdate(raw) {
     };
 }
 
+/** items_found/items_lost accept catalog strings and item objects — nothing else. */
+function isLootEntry(entry) {
+    if (typeof entry === 'string') return entry.trim().length > 0;
+    return !!entry && typeof entry === 'object' && !Array.isArray(entry);
+}
+
 /**
  * Normalize and validate event data from the LLM.
  */
@@ -390,8 +396,11 @@ export function normalizeEvents(raw) {
             })
             .filter(Boolean)
             .slice(0, 12),
-        itemsFound: Array.isArray(raw.items_found) ? raw.items_found.slice(0, 20) : [],
-        itemsLost: Array.isArray(raw.items_lost) ? raw.items_lost.slice(0, 20) : [],
+        // A null/array/number element would mint a junk "Unknown item" (or crash the
+        // traded-item dedup's `.name` read) — keep only named strings and plain objects,
+        // the same boundary guard quest_updates/enemy_updates already have.
+        itemsFound: Array.isArray(raw.items_found) ? raw.items_found.filter(isLootEntry).slice(0, 20) : [],
+        itemsLost: Array.isArray(raw.items_lost) ? raw.items_lost.filter(isLootEntry).slice(0, 20) : [],
         equipmentChanges: equipmentChanges
             .map(c => ({
                 action: String(c?.action || '').toLowerCase(),
@@ -545,7 +554,11 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             console.warn(`[applyEvents] Ignored duplicate premise starting item "${normalized.name}".`);
             continue;
         }
-        dispatch({ type: 'ADD_ITEM', payload: normalized });
+        // ADD_ITEM strips a raw `equipped` at the reducer boundary; premise items
+        // that begin worn/wielded are the one sanctioned equip-on-add channel and
+        // declare that intent explicitly.
+        const { equipped: premiseEquipped, ...payload } = normalized;
+        dispatch({ type: 'ADD_ITEM', payload: { ...payload, ...(premiseEquipped === true && { equipOnAdd: true }) } });
         tokens.forEach(token => startingInventoryTokens.add(token));
     }
 

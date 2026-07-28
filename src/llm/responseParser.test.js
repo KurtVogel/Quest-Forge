@@ -132,6 +132,17 @@ describe('defenses against LLM misbehavior', () => {
         expect(events.itemsFound).toHaveLength(20);
     });
 
+    it('drops null/array/number/blank items_found and items_lost elements at the boundary', () => {
+        // A null element would crash the traded-item dedup's `.name` read and an
+        // array/number would mint a junk "Unknown item" (2026-07-28 audit).
+        const { events } = parseResponse(fence({
+            items_found: [null, 'Rope', ['nested'], 42, { name: 'Lantern' }, '   '],
+            items_lost: [null, 'Torch', 7],
+        }));
+        expect(events.itemsFound).toEqual(['Rope', { name: 'Lantern' }]);
+        expect(events.itemsLost).toEqual(['Torch']);
+    });
+
     it('keeps a clamped premise stack quantity ("two Potions of Healing")', () => {
         const { events } = parseResponse(fence({
             starting_items: [

@@ -183,12 +183,16 @@ export function scoreStoryMemory(card, { query = '', location = '', npcs = [], n
         location,
         ...(npcs || []).map(n => `${n.name || ''} ${n.disposition || ''} ${n.lastNotes || n.notes || ''}`),
     ].filter(Boolean).join(' '));
+    // Exported entry point: guard field types rather than trust every caller
+    // to pass a normalized card (all stored cards are, but the function isn't).
+    const cardTags = Array.isArray(card.tags) ? card.tags : [];
+    const cardNpcNames = Array.isArray(card.linkedNpcNames) ? card.linkedNpcNames : [];
     const cardTokens = tokenSet([
         card.text,
         card.subject,
         card.location,
-        ...(card.tags || []),
-        ...(card.linkedNpcNames || []),
+        ...cardTags,
+        ...cardNpcNames,
     ].filter(Boolean).join(' '));
 
     let score = card.salience * 2 + card.emotionalCharge;
@@ -199,7 +203,7 @@ export function scoreStoryMemory(card, { query = '', location = '', npcs = [], n
     }
 
     const npcNames = new Set((npcs || []).map(n => String(n.name || '').toLowerCase()).filter(Boolean));
-    for (const name of card.linkedNpcNames || []) {
+    for (const name of cardNpcNames) {
         if (npcNames.has(String(name).toLowerCase())) score += 5;
     }
 
@@ -227,7 +231,8 @@ export function buildStoryMemoryPromptBlock(memories = []) {
     if (!memories.length) return '';
     const lines = memories.slice(0, DEFAULT_CARD_LIMIT).map(m => {
         const subject = m.subject ? ` | subject: ${m.subject}` : '';
-        const npcs = m.linkedNpcNames?.length ? ` | NPCs: ${m.linkedNpcNames.join(', ')}` : '';
+        // Array.isArray, not just ?.length — a string value has .length but no .join.
+        const npcs = Array.isArray(m.linkedNpcNames) && m.linkedNpcNames.length ? ` | NPCs: ${m.linkedNpcNames.join(', ')}` : '';
         const loc = m.location ? ` | location: ${m.location}` : '';
         return `- (${m.type}; salience ${m.salience}/5${subject}${npcs}${loc}) ${m.text}`;
     }).join('\n');

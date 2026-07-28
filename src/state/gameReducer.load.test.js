@@ -432,3 +432,62 @@ describe('LOAD_GAME poisoned messages heal (2026-07-25 P1)', () => {
         expect(next.messages[0].narrationCue).toBeUndefined();
     });
 });
+
+describe('LOAD_GAME progression-field heal (2026-07-28 audit)', () => {
+    const corruptedSave = (character = {}) => ({
+        character: {
+            name: 'Survivor', race: 'human', class: 'fighter', level: 3, exp: 0,
+            currentHP: 20, maxHP: 20, conditions: [],
+            abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 },
+            ...character,
+        },
+        inventory: [],
+        messages: [],
+    });
+
+    it('numeric-coerces string-typed level/exp/maxHP/currentHP so XP math cannot string-concatenate', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: corruptedSave({ level: '3', exp: '20', maxHP: '20', currentHP: '20' }),
+        });
+
+        expect(next.character.level).toBe(3);
+        expect(next.character.exp).toBe(20);
+        expect(next.character.maxHP).toBe(20);
+        expect(next.character.currentHP).toBe(20);
+    });
+
+    it('falls back to sane floors for junk values and clamps out-of-band ones', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: corruptedSave({ level: 'twelve', exp: { amount: 500 }, maxHP: -4, currentHP: 999 }),
+        });
+
+        expect(next.character.level).toBe(1);
+        expect(next.character.exp).toBe(0);
+        expect(next.character.maxHP).toBe(1);
+        // currentHP clamps to the healed maxHP.
+        expect(next.character.currentHP).toBe(1);
+    });
+
+    it('clamps a beyond-cap level back to the D&D maximum', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: corruptedSave({ level: '99', maxHP: 200, currentHP: 200 }),
+        });
+
+        expect(next.character.level).toBe(20);
+    });
+
+    it('leaves an honest banked-XP save alone (the level-up-on-load path)', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: corruptedSave({ level: 1, exp: 6500, maxHP: 12, currentHP: 12 }),
+        });
+
+        // The banked XP either stays banked or has been applied by the load path —
+        // either way it must still be a number, never a string.
+        expect(typeof next.character.exp).toBe('number');
+        expect(next.character.level).toBeGreaterThanOrEqual(1);
+    });
+});

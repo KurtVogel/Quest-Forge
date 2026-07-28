@@ -66,7 +66,10 @@ function clearPersistedEmbeddings() {
 async function loadPersistedEmbeddings() {
     try {
         const db = await openEmbedDB();
-        return new Promise((resolve, reject) => {
+        // `return await`, not bare `return`: a bare returned promise's rejection
+        // (request.onerror) skips this try/catch and rejects the caller's seed
+        // instead of degrading to [] (found by the 2026-07-28 audit tests).
+        return await new Promise((resolve, reject) => {
             const tx = db.transaction(EMBED_STORE, 'readonly');
             const request = tx.objectStore(EMBED_STORE).getAll();
             request.onsuccess = () => {
@@ -75,6 +78,9 @@ async function loadPersistedEmbeddings() {
                     entry.schema === GEMINI_EMBED_SCHEMA
                     && Array.isArray(entry.vector)
                     && entry.vector.length === GEMINI_EMBED_DIMENSIONS
+                    // A corrupted/tampered row with NaN/non-number elements would
+                    // yield NaN cosine scores and pollute the store.
+                    && entry.vector.every(Number.isFinite)
                 ));
                 if (compatible.length !== entries.length) {
                     console.warn(`[VectorMemory] Ignored ${entries.length - compatible.length} incompatible cached embeddings.`);
@@ -115,7 +121,9 @@ function cosineSimilarity(a, b) {
  * @param {string} [category] - e.g. 'world_fact', 'journal', 'npc', 'event'
  */
 export async function addMemory(apiKey, text, category = 'general', location = null) {
-    if (!apiKey || !text?.trim()) return;
+    // `?.` guards null/undefined but not type — an object-valued world fact from
+    // the parser would throw on .trim() inside this async fn (2026-07-28 audit).
+    if (!apiKey || typeof text !== 'string' || !text.trim()) return;
 
     // Deduplicate by exact text
     if (memoryStore.some(m => m.text === text)) return;
