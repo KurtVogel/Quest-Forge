@@ -11,7 +11,7 @@ audits — vector-memory-rag, story-memory, inventory-economy, progression)._
 
 The day's two scheduled audits (story-memory + vector-memory-rag, inventory-economy +
 progression, both Lap 2 hostile-input) filed 8 P2s; all eight fixed in one batch.
-1209 tests + lint green.
+1209 tests + lint green, deployed to https://quest-forge-99ab1.web.app.
 
 1. **RAG type guards** — `addMemory` rejects non-string text (`?.` guarded null, not
    type); the embed-cache compat filter rejects vectors with non-finite elements.
