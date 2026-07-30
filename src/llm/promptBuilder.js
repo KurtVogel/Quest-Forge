@@ -21,10 +21,28 @@ import { isCompanionActive } from '../engine/combatExchange.js';
 import { namesMatch } from '../engine/npcRoster.js';
 
 /**
+ * Tripwire against unbounded prompt growth, NOT a target. A deliberately
+ * maxed-out mature-campaign state (15 clamped world facts, 8 curated NPC
+ * dossiers, 8k premise, 4k custom DM prompt, three 2k journal entries,
+ * story memory, RAG, full combat) measured 139,035 chars (~34k tokens) on
+ * 2026-07-30 — the original 90k proposal was already exceeded, so this sits
+ * ~15% above the measured max. Any change that trips the budget test in
+ * promptBuilder.test.js is real growth and deserves a deliberate decision,
+ * not a silent raise here.
+ */
+export const PROMPT_CHAR_BUDGET = 160000;
+
+/**
  * Build the complete system prompt for the LLM.
  */
 export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount }) {
-    const parts = [];
+    /** Named [{name, text}] parts — joined in push order; names feed the DEV size log only. */
+    const namedParts = [];
+    const parts = {
+        push(text, name = 'block') {
+            namedParts.push({ name, text });
+        },
+    };
 
     // ——— STABLE PREFIX (DECISIONS.md 2026-07-18) ———
     // Everything up to the premise is byte-identical across every call of a
@@ -34,31 +52,31 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     // one changed byte here re-bills the whole prompt at full input price.
 
     // Core DM instructions
-    parts.push(CORE_INSTRUCTIONS);
+    parts.push(CORE_INSTRUCTIONS, 'coreInstructions');
 
     // Ruleset instructions
     if (ruleset === 'simplified5e') {
-        parts.push(SIMPLIFIED_5E_RULES);
+        parts.push(SIMPLIFIED_5E_RULES, 'ruleset');
     } else {
-        parts.push(NARRATIVE_RULES);
+        parts.push(NARRATIVE_RULES, 'ruleset');
     }
 
     // Response format contract — static, so it lives in the cached prefix; a
     // short FORMAT_REMINDER at the very end keeps trailing-JSON compliance.
-    parts.push(RESPONSE_FORMAT);
+    parts.push(RESPONSE_FORMAT, 'responseFormat');
 
     // Item catalog — static app data.
-    parts.push(buildItemCatalogBlock());
+    parts.push(ITEM_CATALOG_BLOCK, 'itemCatalog');
 
     // Tone/setting preset (stable per campaign)
     const presetData = PRESETS[preset || DEFAULT_PRESET];
     if (presetData) {
-        parts.push(`\n## SETTING & TONE\n${presetData.systemPromptAddition}`);
+        parts.push(`\n## SETTING & TONE\n${presetData.systemPromptAddition}`, 'settingTone');
     }
 
     // User's custom DM instructions (stable per campaign)
     if (customSystemPrompt && customSystemPrompt.trim()) {
-        parts.push(`\n## CUSTOM DM INSTRUCTIONS (from the player)\n${customSystemPrompt.trim()}`);
+        parts.push(`\n## CUSTOM DM INSTRUCTIONS (from the player)\n${customSystemPrompt.trim()}`, 'customDmInstructions');
     }
 
     // Campaign premise — the player's opening scenario. Foundational canon set at
@@ -66,14 +84,14 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     // journal, which summarizes away setup that isn't an in-scene event).
     const normalizedPremise = normalizeCampaignPremise(premise);
     if (normalizedPremise) {
-        parts.push(buildPremiseBlock(normalizedPremise));
+        parts.push(buildPremiseBlock(normalizedPremise), 'premise');
     }
 
     // ——— DYNAMIC STATE (changes turn to turn; nothing below is cacheable) ———
 
     const lowLevelSafety = buildLowLevelSoloSafetyBlock(character, party);
     if (lowLevelSafety) {
-        parts.push(lowLevelSafety);
+        parts.push(lowLevelSafety, 'soloSafety');
     }
 
     // World tempo replaces the old always-visible fronts dossier (DECISIONS.md
@@ -98,83 +116,98 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         solo: !!character && (!party || party.length === 0),
     });
     if (tempoBlock) {
-        parts.push(tempoBlock);
+        parts.push(tempoBlock, 'worldTempo');
     }
 
     // Character info
     if (character) {
-        parts.push(buildCharacterBlock(character, combat));
+        parts.push(buildCharacterBlock(character, combat), 'character');
         if (character.pendingActionSurge) {
-            parts.push(buildActionSurgeBlock(character));
+            parts.push(buildActionSurgeBlock(character), 'actionSurge');
         }
     }
 
     // Party / Companions
     if (party && party.length > 0) {
-        parts.push(buildPartyBlock(party, npcs || []));
+        parts.push(buildPartyBlock(party, npcs || []), 'party');
     }
 
     // Inventory
     if (inventory && inventory.length > 0) {
-        parts.push(buildInventoryBlock(inventory, character));
+        parts.push(buildInventoryBlock(inventory, character), 'inventory');
     }
 
     // Active quests
     if (quests && quests.length > 0) {
         const activeQuests = quests.filter(q => q.status === 'active');
         if (activeQuests.length > 0) {
-            parts.push(buildQuestBlock(activeQuests));
+            parts.push(buildQuestBlock(activeQuests), 'quests');
         }
     }
 
     // Recent dice rolls (last 5)
     if (rollHistory && rollHistory.length > 0) {
-        parts.push(buildRecentRollsBlock(rollHistory.slice(-5)));
+        parts.push(buildRecentRollsBlock(rollHistory.slice(-5)), 'recentRolls');
     }
 
     // Recent no-dice check rulings — table history the DM must not re-litigate.
     if (recentRulings && recentRulings.length > 0) {
-        parts.push(buildRecentRulingsBlock(recentRulings));
+        parts.push(buildRecentRulingsBlock(recentRulings), 'recentRulings');
     }
 
     // Canonical world facts — these NEVER get compressed or forgotten
     if (worldFacts && worldFacts.length > 0) {
-        parts.push(buildWorldFactsBlock(worldFacts));
+        parts.push(buildWorldFactsBlock(worldFacts), 'worldFacts');
     }
 
     // Session memory — journal entries and NPC tracker
     const journalContext = buildJournalContext(journal || [], npcs || [], currentLocation);
     if (journalContext) {
-        parts.push(journalContext);
+        parts.push(journalContext, 'journalAndNpcs');
     }
 
     // Active constraints — synthesized DM reminders from quests, world state, threats
     const constraints = buildActiveConstraints(quests, worldFacts, character, party);
     if (constraints) {
-        parts.push(constraints);
+        parts.push(constraints, 'dmReminders');
     }
 
     const storyMemoryBlock = buildStoryMemoryPromptBlock(storyMemory || []);
     if (storyMemoryBlock) {
-        parts.push(storyMemoryBlock);
+        parts.push(storyMemoryBlock, 'storyMemory');
     }
 
     // RAG: retrieved memories most relevant to the current player action
     const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories);
     if (ragBlock) {
-        parts.push(ragBlock);
+        parts.push(ragBlock, 'retrievedMemories');
     }
 
     // Combat state
     if (combat?.active) {
-        parts.push(buildCombatBlock(combat, character));
+        parts.push(buildCombatBlock(combat, character), 'combat');
     }
 
     // Tiny static tail: RESPONSE_FORMAT moved into the cached prefix, but the
     // trailing-JSON habit lives on recency — keep a short reminder last.
-    parts.push(FORMAT_REMINDER);
+    parts.push(FORMAT_REMINDER, 'formatReminder');
 
-    return parts.join('\n\n');
+    const promptText = namedParts.map(p => p.text).join('\n\n');
+
+    // Size observability (dev only; TEST excluded so vitest output stays clean):
+    // one compact line per build — total chars plus the top 5 largest blocks.
+    // A mature campaign can stack a huge prompt without anyone noticing; this
+    // line and PROMPT_CHAR_BUDGET's tripwire test are how growth gets seen.
+    if (import.meta.env?.DEV && !import.meta.env?.TEST) {
+        const top = [...namedParts]
+            .sort((a, b) => b.text.length - a.text.length)
+            .slice(0, 5)
+            .map(p => `${p.name}=${p.text.length}`)
+            .join(', ');
+        console.log(`[PromptBuilder] system prompt: ${promptText.length} chars (budget ${PROMPT_CHAR_BUDGET}); largest blocks: ${top}`);
+    }
+
+    return promptText;
 }
 
 const CORE_INSTRUCTIONS = `# YOU ARE THE DUNGEON MASTER
@@ -714,11 +747,11 @@ function buildInventoryBlock(inventory, character) {
     return block;
 }
 
-function buildItemCatalogBlock() {
-    return `## ITEM CATALOG (common mechanical items)
+// Genuinely static (closes over nothing but the app's item catalog data), so
+// build it once at module load instead of re-joining the catalog every call.
+const ITEM_CATALOG_BLOCK = `## ITEM CATALOG (common mechanical items)
 Use itemKey for shop purchases and ordinary loot when possible. Catalog: ${describeCatalogForPrompt()}
 Magic equipment: add "magicBonus": 1, 2, or 3 only.`;
-}
 
 function buildQuestBlock(quests) {
     return `## ACTIVE QUESTS\n${quests.map(q => `- **${q.name}** [id: ${q.id}]: ${q.description || 'No details'}`).join('\n')}`;

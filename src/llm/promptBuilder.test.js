@@ -4,7 +4,7 @@
  * promptBuilder.*.test.js files (fronts, story memory, action surge, combat pacing).
  */
 import { describe, expect, it } from 'vitest';
-import { buildSystemPrompt } from './promptBuilder.js';
+import { buildSystemPrompt, PROMPT_CHAR_BUDGET } from './promptBuilder.js';
 
 function makeCharacter(overrides = {}) {
     return {
@@ -530,3 +530,246 @@ describe(`spellcasting prompt contract`, () => {
         expect(prompt()).not.toContain(`SPELLCASTING (engine-owned`);
     });
 });
+
+describe('prompt size budget (tripwire against unbounded growth)', () => {
+    /** Deterministic filler that reaches exactly `len` characters. */
+    function longText(seed, len) {
+        return seed.repeat(Math.ceil(len / seed.length)).slice(0, len);
+    }
+
+    it('keeps a deliberately maxed-out mature-campaign prompt under PROMPT_CHAR_BUDGET', () => {
+        const messageCount = 400;
+
+        const character = makeCharacter({
+            class: 'cleric',
+            level: 10,
+            exp: 61000,
+            currentHP: 21,
+            maxHP: 68,
+            gender: longText('a battle-scarred woman of the border shrines ', 60),
+            appearance: longText('Tall and broad-shouldered, silver-streaked black hair in a crown braid, a burn scar across the left jaw, hands wrapped in prayer cords. ', 600),
+            background: longText('Raised in the toll-shrines of the flooded delta, she buried three brothers before her twentieth year and swore the lantern vow against the drowned god\'s tithe-takers. ', 2000),
+            abilityScores: { strength: 14, dexterity: 10, constitution: 16, intelligence: 10, wisdom: 18, charisma: 12 },
+            savingThrowProficiencies: ['wisdom', 'charisma'],
+            skillProficiencies: ['insight', 'medicine', 'religion', 'persuasion'],
+            expertiseSkills: [],
+            conditions: ['Poisoned', 'Frightened'],
+            classResources: { channelDivinity: { used: 1, max: 2 } },
+            hitDice: { total: 10, remaining: 4, die: 8 },
+            spellSlots: {
+                1: { used: 2, max: 4 }, 2: { used: 1, max: 3 }, 3: { used: 0, max: 3 },
+                4: { used: 1, max: 3 }, 5: { used: 0, max: 2 },
+            },
+            sustainedSpell: { key: 'shieldOfFaith', name: 'Shield of Faith', acBonus: 2, targetType: 'self' },
+            pendingAbilityScoreImprovements: 1,
+            traits: ['Darkvision', 'Dwarven Resilience', 'Stonecunning'],
+            features: ['Channel Divinity', 'Turn Undead', 'Destroy Undead', 'Divine Domain'],
+        });
+
+        const npcs = Array.from({ length: 12 }, (_, i) => ({
+            id: `npc-${i}`,
+            name: `Dossier Notable ${i}`,
+            kind: 'character',
+            rosterTier: 'character',
+            disposition: 'wary',
+            gender: 'woman',
+            importance: 5,
+            pinned: i < 4,
+            trust: 60,
+            basedIn: 'Kolkanmaa Delta',
+            lastLocation: 'Jewelglade',
+            lastNotes: longText(`Notable ${i} brokered the weir-toll truce and still holds the hero's marker from the flood night. `, 300),
+            appearance: longText('Rope-scarred forearms, a tin votive round the neck, half an ear lost to the tithe-takers, eyes the grey of floodwater. ', 600),
+            personality: longText('Outwardly patient and ledger-minded, privately sentimental about debts of rescue and merciless about debts of coin. ', 600),
+            goals: longText('Wants the weir-tolls back in local hands and the drowned god\'s tithe barges burned to the waterline before the spring flood. ', 600),
+            secrets: longText('Has been feeding barge schedules to the tithe-takers under duress since her son was taken as surety last winter. ', 600),
+            agenda: longText('Is quietly buying grain against a flood-season famine and needs the hero seen at her side in the market to steady prices. ', 600),
+            relationshipTension: longText('Owes the hero her life but resents that the rescue is known; every public thanks costs her standing with the weir-guild. ', 600),
+            stanceToPlayer: longText('Trusts the hero with her ledgers and her son\'s name, flinches when they draw steel indoors, and is slowly letting warmth show through the broker\'s mask. ', 600),
+            bondMoments: Array.from({ length: 6 }, (_, j) => ({
+                text: longText(`Moment ${j}: the hero stood surety for her at the weir-court and paid the fine in front of the whole guild. `, 200),
+                at: j,
+            })),
+            callbackHooks: Array.from({ length: 5 }, (_, j) => longText(`Hook ${j}: the unopened letter from the tithe-barge still sits sealed in her strongbox. `, 120)),
+            relationshipHistory: [{ from: 'hostile', to: 'wary', at: 3 }],
+        }));
+
+        const party = Array.from({ length: 3 }, (_, i) => ({
+            id: `comp-${i}`,
+            name: `Dossier Notable ${i}`,
+            role: 'shieldbearer',
+            level: 8,
+            hp: 40 - i * 12,
+            maxHp: 52,
+            ac: 17,
+            weapon: 'Longsword +2',
+            attackBonus: 6,
+            damage: '1d8+4',
+            weaponBonus: 2,
+            affinity: 85,
+            status: i === 2 ? 'downed' : 'healthy',
+            conditions: i === 1 ? ['prone', 'poisoned'] : [],
+            keepsakes: Array.from({ length: 5 }, (_, j) => longText(`keepsake ${j}: a river-glass pendant from the ford night `, 80)),
+        }));
+
+        const inventory = Array.from({ length: 24 }, (_, i) => ({
+            id: `item-${i}`,
+            name: `Campaign Relic ${i} of the Drowned Vow`,
+            type: i % 4 === 0 ? 'weapon' : 'gear',
+            damage: i % 4 === 0 ? '1d8' : undefined,
+            damageType: i % 4 === 0 ? 'slashing' : undefined,
+            quantity: (i % 3) + 1,
+            valueCp: 1500 + i,
+            equipped: i < 3,
+        }));
+
+        const quests = Array.from({ length: 10 }, (_, i) => ({
+            id: `quest-${i}`,
+            name: `Standing Obligation ${i}`,
+            status: 'active',
+            description: longText(`Recover the weir-deed ${i} from the tithe-barge before the spring flood, without the guild learning who paid for the job. `, 300),
+        }));
+
+        const worldFacts = Array.from({ length: 18 }, (_, i) => ({
+            id: `fact-${i}`,
+            timestamp: i,
+            category: ['event', 'location', 'faction', 'lore'][i % 4],
+            // 400 chars = WORLD_FACT_MAX_LENGTH, the reducer's clamp.
+            fact: longText(`Canonical truth ${i}: the tithe-barge fleet is hunting the hero and a bounty stands posted at every weir before the flood deadline. `, 400),
+        }));
+
+        const journal = Array.from({ length: 12 }, (_, i) => ({
+            id: `journal-${i}`,
+            location: i >= 10 ? 'Jewelglade' : `Waystation ${i}`,
+            // 2000 chars = the journal summary clamp.
+            summary: longText(`Chapter ${i}: the party crossed the drowned causeway, bargained with the weir-guild, lost the pack mule to the tithe-takers, and swore the lantern vow again at the shrine. `, 2000),
+            consequences: [
+                longText('The weir-guild now owes the hero a flood-season favor. ', 200),
+                longText('The tithe-takers know which road the party took. ', 200),
+            ],
+        }));
+
+        const storyMemory = Array.from({ length: 10 }, (_, i) => ({
+            id: `mem-${i}`,
+            type: 'promise',
+            salience: 4,
+            subject: `the lantern vow ${i}`,
+            linkedNpcNames: ['Dossier Notable 1', 'Dossier Notable 2'],
+            location: 'Jewelglade',
+            text: longText(`The hero promised ${i} to return the weir-deed before the spring flood or forfeit the shrine lantern. `, 300),
+        }));
+
+        const retrievedMemories = Array.from({ length: 8 }, (_, i) => ({
+            category: i % 2 === 0 ? 'journal' : 'player',
+            location: 'Jewelglade',
+            text: longText(`Retrieved memory ${i}: three sessions ago the hero spared the tithe-captain at the ford and took his signet as surety. `, 400),
+        }));
+
+        const combat = {
+            active: true,
+            round: 6,
+            phase: 'awaiting_player',
+            surprise: 'none',
+            bonusActionUsed: true,
+            flankedEnemyIds: ['tithe-guard-1', 'tithe-guard-2'],
+            enemies: Array.from({ length: 6 }, (_, i) => ({
+                id: `tithe-guard-${i}`,
+                name: `Tithe-Guard Veteran ${i}`,
+                hp: 20 - i * 3,
+                maxHp: 26,
+                ac: 16,
+                attackBonus: 5,
+                damage: '1d10+3',
+                condition: i > 3 ? 'critical' : 'bloodied',
+                conditions: i % 2 === 0 ? ['prone', 'frightened'] : [],
+                combatStatus: 'active',
+                defending: i === 5,
+            })),
+            turnOrder: Array.from({ length: 10 }, (_, i) => ({ name: `Combatant ${i}`, initiative: 20 - i })),
+            currentTurn: 2,
+        };
+
+        const fronts = Array.from({ length: 4 }, (_, i) => ({
+            id: `front-${i}`,
+            status: 'active',
+            clock: 4,
+            stage: 2,
+            goal: `Front ${i} wants the delta tolls`,
+            faction: { name: `Faction ${i} of the Drowned Tithe`, goal: 'Claim every weir before the flood' },
+        }));
+
+        const recentRulings = Array.from({ length: 5 }, (_, i) => ({
+            objective: longText(`Convince the weir-clerk ${i} to unseal the toll ledgers without guild countersign `, 160),
+            skill: 'persuasion',
+            dc: 12,
+            outcome: i % 2 === 0 ? 'withdrawn' : 'set_aside',
+            finalRuling: i === 3,
+            challenge: 'The clerk already owes the hero a flood-debt',
+            atMessageCount: messageCount - i,
+            location: 'Jewelglade',
+            t: Date.now(),
+        }));
+
+        const text = buildSystemPrompt({
+            character,
+            inventory,
+            quests,
+            rollHistory: Array.from({ length: 8 }, (_, i) => ({
+                description: `Persuasion check ${i} against the weir-guild council`,
+                notation: '1d20+5',
+                total: 14 + (i % 6),
+                rolls: [9 + (i % 6)],
+                modifier: 5,
+            })),
+            preset: 'classicFantasy',
+            ruleset: 'simplified5e',
+            customSystemPrompt: longText('Grim, grounded low fantasy. Consequences are real, mercy is expensive, and the weather is always wrong. Describe smells and textures. ', 4000),
+            journal,
+            npcs,
+            party,
+            currentLocation: 'Jewelglade',
+            combat,
+            worldFacts,
+            fronts,
+            storyMemory,
+            retrievedMemories,
+            premise: longText('The barony of Kolkanmaa straddles a drowned river delta where toll-weirs hold back both the flood and the drowned god\'s tithe-barges. ', 8000),
+            recentRulings,
+            worldTempo: {
+                directive: {
+                    frontId: 'front-1',
+                    maxIntensity: 'presence',
+                    where: 'Jewelglade',
+                    suggestedSymptom: 'A tithe-barge moors at the public weir flying quarantine colors',
+                    activatesAtMessage: messageCount - 1,
+                    expiresAtMessage: messageCount + 6,
+                },
+            },
+            recentEncounters: Array.from({ length: 6 }, (_, i) => ({
+                messageIndex: messageCount - 2 - i,
+                name: `Skirmish ${i} at the weir`,
+                outcome: 'victory',
+            })),
+            recentChecks: Array.from({ length: 4 }, (_, i) => ({ messageIndex: messageCount - 1 - i, dc: 15 })),
+            paceDial: 'breakneck',
+            messageCount,
+        });
+
+        // Sanity: the heavyweight dynamic blocks actually made it into the prompt —
+        // an accidentally-omitted block would make the budget assertion meaningless.
+        expect(text).toContain('## CAMPAIGN PREMISE');
+        expect(text).toContain('## WORLD FACTS');
+        expect(text).toContain('## KNOWN NPCs');
+        expect(text).toContain('## COMPANIONS (PARTY)');
+        expect(text).toContain('## DRAMATIC CALLBACK OPPORTUNITIES');
+        expect(text).toContain('## RETRIEVED MEMORIES');
+        expect(text).toContain('## ACTIVE COMBAT');
+        expect(text).toContain('## WORLD TEMPO — PRIVATE PACING STATE');
+        expect(text).toContain('## RECENT TABLE RULINGS — BINDING');
+
+        // Measured 139,035 chars on 2026-07-30. If this trips, the prompt genuinely
+        // grew — investigate the new weight before even thinking about the budget.
+        expect(text.length).toBeLessThan(PROMPT_CHAR_BUDGET);
+    });
+});
+
