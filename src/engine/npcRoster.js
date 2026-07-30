@@ -421,6 +421,11 @@ export function migrateLegacyNpc(npc = {}) {
         callbackHooks: [],
         ...npc,
     };
+    // An explicit falsy rosterTier in a hand-edited/hostile save survives the
+    // spread above and would leave the record "unmigrated" forever — the
+    // GameContext migration effect re-dispatches on every render until it heals.
+    if (!merged.rosterTier) merged.rosterTier = 'character';
+    if (!merged.kind) merged.kind = 'character';
     merged.bondMoments = normalizeBondMoments(merged.bondMoments);
     if (merged.portraitUrl && !(typeof merged.portraitUrl === 'string' && SAFE_PORTRAIT_URL.test(merged.portraitUrl))) {
         delete merged.portraitUrl;

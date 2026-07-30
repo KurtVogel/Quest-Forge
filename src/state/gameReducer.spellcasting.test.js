@@ -83,6 +83,34 @@ describe('CAST_SPELL (out of combat)', () => {
         expect(recast.character.spellSlots[1].used).toBe(2);
     });
 
+    it('measures the spell replay window in conversational distance — a dice turn cannot age out the guard (2026-07-30)', () => {
+        const state = clericState();
+        const once = gameReducer(state, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-1', playerMessage: 'I cast Cure Wounds' } },
+        });
+        // A check turn: 6 raw messages, but only 2 conversational ones. Raw-index
+        // distance (6) would expire the 4-message window and let the echo re-spend
+        // a slot; conversational distance (2) keeps the guard alive.
+        const noisy = {
+            ...once,
+            messages: [
+                ...once.messages,
+                { role: 'user', content: 'I climb the wall' },
+                { role: 'system', content: '**Check** rolled 15' },
+                { role: 'system', content: 'roll detail' },
+                { role: 'assistant', content: 'setup', hidden: true },
+                { role: 'system', content: '**XP** +10' },
+                { role: 'assistant', content: 'You reach the top.' },
+            ],
+        };
+        const echoed = gameReducer(noisy, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'What now?' } },
+        });
+        expect(echoed).toBe(noisy); // suppressed — no second slot spent
+    });
+
     it('allows the same spell again once the replay window has passed', () => {
         const state = clericState();
         const once = gameReducer(state, {

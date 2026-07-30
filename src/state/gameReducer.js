@@ -476,6 +476,30 @@ function rememberTransaction(entries, transaction, sourceId, messageIndex, statu
     return [...previous, record].slice(-RECENT_TRANSACTION_LIMIT);
 }
 
+/**
+ * Build a store-ready inventory item from an untrusted (already-normalized) payload.
+ * The engine mints ids and owns equip placement: a DM/Scribe `id` could collide with
+ * an existing entry (double-delete on REMOVE_ITEM), and `equipped: true` would
+ * displace the hero's active gear (2026-07-28 audit; extended to PURCHASE_ITEM
+ * 2026-07-30 — the purchase path spread the payload AFTER its minted defaults).
+ * Premise starting items are the one sanctioned equip-on-add channel (`equipOnAdd`).
+ */
+function mintOwnedItem(normalizedItem, { equipOnAdd = false, quantity } = {}) {
+    const {
+        id: _untrustedId,
+        equipped: _untrustedEquipped,
+        equipOnAdd: _equipFlag,
+        ...safe
+    } = normalizedItem;
+    return {
+        id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        quantity: 1,
+        ...safe,
+        ...(quantity != null ? { quantity } : {}),
+        equipped: equipOnAdd,
+    };
+}
+
 // Coin grants replay in a tighter window than purchases: the observed failure is the DM
 // re-emitting a reward on the very next turn while narrating the pouch being counted or
 // split. Two identical legitimate finds four+ messages apart stay untouched.
@@ -1450,7 +1474,11 @@ export function gameReducer(state, action) {
             const duplicate = findRecentTransactionDuplicate(
                 state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW, state.messages
             );
-            if (duplicate && !playerMessageSupportsRepeatCoinLoss(meta.playerMessage)) {
+            // Exact same-source replay suppresses unconditionally — the sibling
+            // APPLY_COIN_LOSS has this short-circuit; without it a repeat-intent
+            // player message let the SAME audited payment charge twice.
+            const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
+            if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatCoinLoss(meta.playerMessage))) {
                 return {
                     ...state,
                     recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
@@ -1638,7 +1666,10 @@ export function gameReducer(state, action) {
                 if (parts[1] !== spell.key) return false;
                 const entryIndex = Number(parts[2]);
                 if (!Number.isFinite(entryIndex)) return false;
-                const distance = castMessageIndex - entryIndex;
+                // Conversational distance, not raw index: a dice turn burns ~5 raw
+                // messages and silently expired the raw-index coin windows (proven
+                // live 2026-07-22) — the same hole existed here until 2026-07-30.
+                const distance = conversationalDistance(state.messages, entryIndex, castMessageIndex);
                 return distance >= 0 && distance <= RECENT_SPELL_CAST_MESSAGE_WINDOW;
             });
             if (nearbyReplay && !playerMessageRecastsSpell(spell, meta.playerMessage)) return state;
@@ -1776,7 +1807,9 @@ export function gameReducer(state, action) {
                     if (parts[1] !== restType) return false;
                     const entryIndex = Number(parts[2]);
                     if (!Number.isFinite(entryIndex)) return false;
-                    const distance = restMessageIndex - entryIndex;
+                    // Conversational distance — same dice-turn expiry fix as the coin
+                    // ledgers (2026-07-22) and the spell ledger (2026-07-30).
+                    const distance = conversationalDistance(state.messages, entryIndex, restMessageIndex);
                     return distance >= 0 && distance <= RECENT_REST_MESSAGE_WINDOW;
                 });
                 if (exactReplay || (nearbyReplay && !playerMessageRequestsRest(restMeta.playerMessage))) {
@@ -2138,18 +2171,7 @@ export function gameReducer(state, action) {
             // Premise starting items are the one sanctioned equip-on-add channel and
             // declare it via `equipOnAdd`.
             const equipOnAdd = !Array.isArray(action.payload) && action.payload?.equipOnAdd === true;
-            const {
-                id: _untrustedId,
-                equipped: _untrustedEquipped,
-                equipOnAdd: _equipFlag,
-                ...normalized
-            } = normalizeItem(action.payload);
-            const newItem = {
-                id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                quantity: 1,
-                ...normalized,
-                equipped: equipOnAdd,
-            };
+            const newItem = mintOwnedItem(normalizeItem(action.payload), { equipOnAdd });
             // Auto-equip armor/shields if no other of that type is currently equipped
             if (!newItem.equipped) {
                 const isArmor = newItem.type === 'armor' && !newItem.isShield;
@@ -2170,7 +2192,10 @@ export function gameReducer(state, action) {
             const { item, quantity, priceCp } = transaction;
             const meta = action.payload?._meta || {};
             const sourceId = String(meta.sourceId || '').slice(0, 160);
-            const duplicate = findRecentTransactionDuplicate(state.recentPurchases, transaction, sourceId, currentMessageIndex(state));
+            // Pass messages so the window measures conversational distance — without
+            // them the helper silently falls back to raw index distance, the exact
+            // dice-turn expiry bug fixed for coins on 2026-07-22.
+            const duplicate = findRecentTransactionDuplicate(state.recentPurchases, transaction, sourceId, currentMessageIndex(state), RECENT_TRANSACTION_MESSAGE_WINDOW, state.messages);
             const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
             if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatTransaction(item, meta.playerMessage, PURCHASE_VERB_RE))) {
                 return {
@@ -2193,12 +2218,7 @@ export function gameReducer(state, action) {
                 };
             }
 
-            const newItem = {
-                id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                equipped: false,
-                ...item,
-                quantity,
-            };
+            const newItem = mintOwnedItem(item, { quantity });
 
             const nextState = {
                 ...state,
@@ -2404,7 +2424,7 @@ export function gameReducer(state, action) {
             };
             const saleMeta = payload._meta || {};
             const saleSourceId = String(saleMeta.sourceId || '').slice(0, 160);
-            const saleDuplicate = findRecentTransactionDuplicate(state.recentSales, saleTransaction, saleSourceId, currentMessageIndex(state));
+            const saleDuplicate = findRecentTransactionDuplicate(state.recentSales, saleTransaction, saleSourceId, currentMessageIndex(state), RECENT_TRANSACTION_MESSAGE_WINDOW, state.messages);
             const exactSaleReplay = !!saleSourceId && saleDuplicate?.sourceId === saleSourceId;
             if (saleDuplicate && (exactSaleReplay || !playerMessageSupportsRepeatTransaction(item, saleMeta.playerMessage, SALE_VERB_RE))) {
                 return {

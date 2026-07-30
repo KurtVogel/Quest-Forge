@@ -182,6 +182,41 @@ describe('DM rest replay guard', () => {
         expect(echoed.messages).toHaveLength(rested.messages.length);
     });
 
+    it('measures the rest window in conversational distance — a dice turn cannot age out the guard (2026-07-30)', () => {
+        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-1' },
+        });
+        // One check turn burns ~5+ raw messages, most of them system/hidden lines.
+        // Raw-index distance would expire the 8-message window; conversational
+        // distance counts only the 3 real turns here.
+        const noisy = {
+            ...rested,
+            character: { ...rested.character, currentHP: 12 },
+            messages: [
+                ...rested.messages,
+                { role: 'user', content: 'I search the ruins' },
+                { role: 'system', content: '**Check** rolled 14' },
+                { role: 'system', content: 'roll detail' },
+                { role: 'assistant', content: 'setup', hidden: true },
+                { role: 'system', content: 'roll detail 2' },
+                { role: 'system', content: '**XP** +10' },
+                { role: 'assistant', content: 'You find a ledger.' },
+                { role: 'system', content: 'autosave note' },
+                { role: 'user', content: 'I pocket it' },
+                { role: 'system', content: 'another system line' },
+            ],
+        };
+        const echoed = gameReducer(noisy, {
+            type: 'TAKE_REST',
+            payload: 'long',
+            meta: { source: 'dm', sourceId: 'msg-2' },
+        });
+
+        expect(echoed.character.currentHP).toBe(12); // suppressed — no re-heal
+    });
+
     it('honors a nearby DM rest when the player explicitly rests again', () => {
         const rested = gameReducer(makeFighter({ currentHP: 10 }), {
             type: 'TAKE_REST',

@@ -59,6 +59,58 @@ describe('PURCHASE_ITEM', () => {
         expect(torch.quantity).toBe(3);
     });
 
+    it('strips a hostile id and equipped flag from the purchase payload (2026-07-30)', () => {
+        // The DM payload spread used to land AFTER the minted defaults, so a
+        // supplied id could collide (double-delete class) and equipped: true
+        // could displace the hero's active armor without normalizeEquippedSlots.
+        const state = makeState({
+            inventory: [
+                { id: 'armor-1', itemKey: 'leatherArmor', name: 'Leather Armor', type: 'armor', equipped: true },
+            ],
+        });
+        const next = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'chainShirt', priceCp: 100, id: 'armor-1', equipped: true },
+        });
+        const bought = next.inventory.find(i => i.itemKey === 'chainShirt');
+        expect(bought).toBeTruthy();
+        expect(bought.id).not.toBe('armor-1');
+        expect(bought.equipped).toBe(false);
+        // The previously equipped armor keeps its slot.
+        expect(next.inventory.find(i => i.id === 'armor-1').equipped).toBe(true);
+    });
+
+    it('measures the duplicate-purchase window in conversational distance — system lines never age the guard (2026-07-30)', () => {
+        const state = makeState();
+        const first = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-a' } },
+        });
+        // A dice-heavy turn: many raw messages, but almost no conversational ones.
+        const noisy = {
+            ...first,
+            messages: [
+                ...first.messages,
+                { role: 'user', content: 'I try the lock' },
+                { role: 'system', content: '**Check** rolled 14' },
+                { role: 'system', content: '**XP** +10' },
+                { role: 'assistant', content: 'setup', hidden: true },
+                { role: 'system', content: 'roll detail' },
+                { role: 'system', content: 'roll detail 2' },
+                { role: 'assistant', content: 'The lock clicks open.' },
+                { role: 'system', content: 'autosave note' },
+                { role: 'system', content: 'another system line' },
+            ],
+        };
+        // Raw index distance is ~9 (past the window); conversational distance is 3.
+        const next = gameReducer(noisy, {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-b' } },
+        });
+        expect(next.messages.at(-1).content).toMatch(/Duplicate purchase ignored/);
+        expect(next.character.gold).toBe(first.character.gold);
+    });
+
     it('clamps an absurd quantity so a flat priceCp cannot mint an unbounded stack', () => {
         const state = makeState();
         const next = gameReducer(state, {
