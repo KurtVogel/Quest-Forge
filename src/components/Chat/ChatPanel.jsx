@@ -9,7 +9,7 @@ import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningEx
 import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownStances, runScribe } from '../../llm/scribe.js';
 import { isTableTalkMessage, TABLE_TALK_RESPONSE_MODE } from '../../llm/tableTalk.js';
-import { addMemory, seedMemories, retrieveRelevant, clearMemories } from '../../engine/vectorMemory.js';
+import { addMemory, seedMemories, retrieveRelevant } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { curateStoryMemory } from '../../engine/storyMemory.js';
 import { captureInjection } from '../../dev/memoryInspectorStore.js';
@@ -230,11 +230,11 @@ export default function ChatPanel() {
             })),
         ];
 
-        // The clear MUST commit before seeding: seedMemories loads the persisted cache
-        // on its own IndexedDB connection, and an unordered load can resurrect the
-        // previous campaign's embeddings into this session (cross-campaign contamination).
-        clearMemories()
-            .then(() => (items.length > 0 ? seedMemories(machineryKey, items) : undefined))
+        // Campaign-keyed seeding (v4): loads THIS campaign's cached embeddings and
+        // re-embeds only what's missing — no wipe, no cross-campaign leakage, and a
+        // page reload no longer re-embeds the whole corpus. One mount = one campaign
+        // (AppShell is keyed by session id), so mount-time seeding is sound.
+        seedMemories(machineryKey, items, s.session?.id || null)
             .catch((e) => {
                 console.error('[RAG] Memory seeding failed — will retry next mount:', e);
                 memorySeededRef.current = false; // Allow retry on next mount

@@ -23,7 +23,13 @@ import {
 const EMBED_DB_NAME = 'rpg-vector-memory';
 // v3: gemini-embedding-2 plus Google's asymmetric search/document formatting.
 // Vectors from a different model or input format cannot be compared meaningfully.
-const EMBED_DB_VERSION = 3;
+// v4 (2026-07-30 review P0-4): rows are campaign-keyed ([sessionId, text]).
+// Under the old text-only key the ONLY safe campaign switch was a full wipe —
+// ChatPanel cleared the store on every mount, which made the cache-hit branch
+// production-unreachable and re-embedded the whole campaign on every reload
+// (hundreds of API calls on a mature save). Now each campaign owns its rows,
+// seeding loads only the active campaign, and no mount-time wipe is needed.
+const EMBED_DB_VERSION = 4;
 const EMBED_STORE = 'embeddings';
 
 function openEmbedDB() {
@@ -39,7 +45,7 @@ function openEmbedDB() {
             if (db.objectStoreNames.contains(EMBED_STORE)) {
                 db.deleteObjectStore(EMBED_STORE);
             }
-            db.createObjectStore(EMBED_STORE, { keyPath: 'text' });
+            db.createObjectStore(EMBED_STORE, { keyPath: ['sessionId', 'text'] });
         };
     });
 }
@@ -63,7 +69,7 @@ function clearPersistedEmbeddings() {
     })).catch(() => {});
 }
 
-async function loadPersistedEmbeddings() {
+async function loadPersistedEmbeddings(sessionId) {
     try {
         const db = await openEmbedDB();
         // `return await`, not bare `return`: a bare returned promise's rejection
@@ -75,16 +81,16 @@ async function loadPersistedEmbeddings() {
             request.onsuccess = () => {
                 const entries = request.result || [];
                 const compatible = entries.filter(entry => (
-                    entry.schema === GEMINI_EMBED_SCHEMA
+                    // Only the active campaign's rows — another campaign's memories
+                    // must never leak into this session's retrieval.
+                    entry.sessionId === sessionId
+                    && entry.schema === GEMINI_EMBED_SCHEMA
                     && Array.isArray(entry.vector)
                     && entry.vector.length === GEMINI_EMBED_DIMENSIONS
                     // A corrupted/tampered row with NaN/non-number elements would
                     // yield NaN cosine scores and pollute the store.
                     && entry.vector.every(Number.isFinite)
                 ));
-                if (compatible.length !== entries.length) {
-                    console.warn(`[VectorMemory] Ignored ${entries.length - compatible.length} incompatible cached embeddings.`);
-                }
                 resolve(compatible);
             };
             request.onerror = () => reject(request.error);
@@ -97,8 +103,10 @@ async function loadPersistedEmbeddings() {
 
 // --- In-memory store ---
 
-/** In-memory store: { text, vector, category, timestamp }[] */
+/** In-memory store for the ACTIVE campaign: { sessionId, text, vector, category, timestamp }[] */
 let memoryStore = [];
+/** Campaign whose memories are currently loaded; stamped onto every new entry. */
+let activeSessionId = null;
 
 /** Simple cosine similarity between two numeric arrays. */
 function cosineSimilarity(a, b) {
@@ -135,6 +143,10 @@ export async function addMemory(apiKey, text, category = 'general', location = n
     }
 
     const entry = {
+        // Campaign key — rows are persisted per campaign so a switch loads its own
+        // cache instead of wiping everything. An entry added before any seed set a
+        // session stays in-memory only (the composite key rejects a null part).
+        sessionId: activeSessionId,
         text,
         vector,
         category,
@@ -146,45 +158,45 @@ export async function addMemory(apiKey, text, category = 'general', location = n
         timestamp: Date.now(),
     };
     memoryStore.push(entry);
-    persistEmbedding(entry); // fire-and-forget to IndexedDB
+    if (activeSessionId != null) persistEmbedding(entry); // fire-and-forget to IndexedDB
 }
 
 /**
- * Bulk-add memories. First tries to load cached embeddings from IndexedDB.
- * Only re-embeds items that aren't already cached.
+ * Bulk-seed the active campaign's memories. Loads that campaign's cached
+ * embeddings from IndexedDB and re-embeds only the items not already cached.
+ * Always REPLACES the in-memory store wholesale — switching campaigns is just
+ * seeding the new one; no wipe of other campaigns' rows is needed or performed.
  * @param {string} apiKey
  * @param {Array<{text: string, category: string}>} items
+ * @param {string|null} sessionId - the campaign these memories belong to
  */
-export async function seedMemories(apiKey, items) {
-    if (!apiKey || !items?.length) return;
+export async function seedMemories(apiKey, items, sessionId = null) {
+    if (!apiKey) return;
+    activeSessionId = sessionId;
+    memoryStore = [];
+    if (!items?.length && sessionId == null) return;
 
-    // Try loading persisted embeddings first
-    const persisted = await loadPersistedEmbeddings();
+    // This campaign's cached embeddings first
+    const persisted = sessionId != null ? await loadPersistedEmbeddings(sessionId) : [];
     if (persisted.length > 0) {
         memoryStore = persisted;
-        console.log(`[VectorMemory] Loaded ${persisted.length} cached embeddings from IndexedDB`);
+        console.log(`[VectorMemory] Loaded ${persisted.length} cached embeddings for this campaign`);
+    }
 
-        // Only embed items not already in cache
-        const existingTexts = new Set(persisted.map(m => m.text));
-        const newItems = items.filter(item => !existingTexts.has(item.text));
-        if (newItems.length > 0) {
-            console.log(`[VectorMemory] Embedding ${newItems.length} new items not in cache`);
-            const BATCH = 5;
-            for (let i = 0; i < newItems.length; i += BATCH) {
-                const batch = newItems.slice(i, i + BATCH);
-                await Promise.all(batch.map(item => addMemory(apiKey, item.text, item.category, item.location)));
-            }
+    // Embed only items not already cached
+    const existingTexts = new Set(persisted.map(m => m.text));
+    const newItems = (items || []).filter(item => !existingTexts.has(item.text));
+    if (newItems.length > 0) {
+        if (persisted.length > 0) console.log(`[VectorMemory] Embedding ${newItems.length} new items not in cache`);
+        const BATCH = 5;
+        for (let i = 0; i < newItems.length; i += BATCH) {
+            const batch = newItems.slice(i, i + BATCH);
+            await Promise.all(batch.map(item => addMemory(apiKey, item.text, item.category, item.location)));
         }
-        return;
     }
-
-    // No cache — embed everything from scratch
-    const BATCH = 5;
-    for (let i = 0; i < items.length; i += BATCH) {
-        const batch = items.slice(i, i + BATCH);
-        await Promise.all(batch.map(item => addMemory(apiKey, item.text, item.category, item.location)));
+    if (persisted.length === 0) {
+        console.log(`[VectorMemory] Seeded ${memoryStore.length} memories (fresh embeddings)`);
     }
-    console.log(`[VectorMemory] Seeded ${memoryStore.length} memories (fresh embeddings)`);
 }
 
 /**
@@ -227,14 +239,15 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55)
 }
 
 /**
- * Clear the in-memory store and persisted IndexedDB cache (called on new game).
+ * Clear the in-memory store and the ENTIRE persisted cache (all campaigns).
+ * Since rows became campaign-keyed this is a maintenance/reset tool, not part
+ * of the campaign-switch path — seeding a campaign replaces the in-memory
+ * store and reads only that campaign's rows.
  */
 export function clearMemories() {
     memoryStore = [];
-    // Awaitable: resolves once the persisted cache is actually gone. Callers about to
-    // seed a different campaign MUST await this — seedMemories loads the persisted
-    // cache on its own connection, and an unordered load can resurrect the previous
-    // campaign's embeddings into the fresh session (cross-campaign contamination).
+    activeSessionId = null;
+    // Awaitable: resolves once the persisted clear actually commits.
     return clearPersistedEmbeddings();
 }
 

@@ -29,11 +29,11 @@ function unitVector(index) {
 
 function putEmbedding(entry) {
     return new Promise((resolve, reject) => {
-        const request = globalThis.indexedDB.open('rpg-vector-memory', 3);
+        const request = globalThis.indexedDB.open('rpg-vector-memory', 4);
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
             if (!db.objectStoreNames.contains('embeddings')) {
-                db.createObjectStore('embeddings', { keyPath: 'text' });
+                db.createObjectStore('embeddings', { keyPath: ['sessionId', 'text'] });
             }
         };
         request.onsuccess = () => {
@@ -265,8 +265,9 @@ describe('seedMemories', () => {
         expect(getMemoryCount()).toBe(2);
     });
 
-    it('loads compatible cached embeddings and only embeds items missing from the cache', async () => {
+    it('loads compatible cached embeddings for the campaign and only embeds items missing from the cache', async () => {
         await putEmbedding({
+            sessionId: 's1',
             text: 'Cached fact.',
             vector: unitVector(0),
             category: 'world_fact',
@@ -278,37 +279,40 @@ describe('seedMemories', () => {
         await seedMemories('key', [
             { text: 'Cached fact.', category: 'world_fact' },
             { text: 'Brand new fact.', category: 'world_fact' },
-        ]);
+        ], 's1');
 
         expect(embedTextMock).toHaveBeenCalledTimes(1);
         expect(embedTextMock).toHaveBeenCalledWith('key', 'Brand new fact.', { inputType: 'document' });
         expect(getMemoryCount()).toBe(2);
     });
 
-    it('awaited clearMemories orders the persisted clear ahead of a campaign-switch seed (no cross-campaign resurrection)', async () => {
-        // The previous campaign's cache sits in IndexedDB.
-        await putEmbedding({
-            text: 'Old campaign: the Duke is dead.',
-            vector: unitVector(0),
-            category: 'world_fact',
-            schema: SCHEMA,
-            timestamp: 1,
-        });
+    it('campaign-keyed seeding isolates campaigns without any wipe (2026-07-30, v4)', async () => {
+        embedTextMock.mockResolvedValue(unitVector(0));
+        await seedMemories('key', [{ text: 'Old campaign: the Duke is dead.', category: 'world_fact' }], 'campaign-a');
+        expect(getMemoryCount()).toBe(1);
+
+        // Switching campaigns is just seeding the new one — no clear in between.
         embedTextMock.mockResolvedValue(unitVector(1));
+        await seedMemories('key', [{ text: 'New campaign: the ferry line is cut.', category: 'world_fact' }], 'campaign-b');
 
-        // The ChatPanel mount sequence for a different campaign: clear, THEN seed.
-        await clearMemories();
-        await seedMemories('key', [{ text: 'New campaign: the ferry line is cut.', category: 'world_fact' }]);
-
-        // Only the new campaign's memory exists — the old row was gone before the
-        // seed's own cache load could resurrect it into memoryStore.
+        // Only the new campaign's memory is live.
         expect(getMemoryCount()).toBe(1);
         const matches = await retrieveRelevant('key', 'What happened to the ferry?', 3, 0.1);
         expect(matches.map(m => m.text)).toEqual(['New campaign: the ferry line is cut.']);
+
+        // Switching BACK hits campaign A's persisted cache — nothing re-embeds.
+        embedTextMock.mockClear();
+        await seedMemories('key', [{ text: 'Old campaign: the Duke is dead.', category: 'world_fact' }], 'campaign-a');
+        expect(embedTextMock).not.toHaveBeenCalled();
+        expect(getMemoryCount()).toBe(1);
+        embedTextMock.mockResolvedValue(unitVector(0)); // query aligned with campaign A's cached vector
+        const back = await retrieveRelevant('key', 'Is the Duke alive?', 3, 0.1);
+        expect(back.map(m => m.text)).toEqual(['Old campaign: the Duke is dead.']);
     });
 
     it('ignores cached embeddings with an incompatible schema and re-embeds from scratch', async () => {
         await putEmbedding({
+            sessionId: 's1',
             text: 'Stale fact.',
             vector: unitVector(0),
             category: 'world_fact',
@@ -317,7 +321,7 @@ describe('seedMemories', () => {
         });
         embedTextMock.mockResolvedValue(unitVector(0));
 
-        await seedMemories('key', [{ text: 'Stale fact.', category: 'world_fact' }]);
+        await seedMemories('key', [{ text: 'Stale fact.', category: 'world_fact' }], 's1');
 
         expect(embedTextMock).toHaveBeenCalledTimes(1);
         expect(getMemoryCount()).toBe(1);
@@ -343,6 +347,7 @@ describe('hostile-input guards (2026-07-28 audit)', () => {
         const poisoned = unitVector(0);
         poisoned[5] = NaN;
         await putEmbedding({
+            sessionId: 's1',
             text: 'Poisoned fact.',
             vector: poisoned,
             category: 'world_fact',
@@ -351,7 +356,7 @@ describe('hostile-input guards (2026-07-28 audit)', () => {
         });
         embedTextMock.mockResolvedValue(unitVector(1));
 
-        await seedMemories('key', [{ text: 'Poisoned fact.', category: 'world_fact' }]);
+        await seedMemories('key', [{ text: 'Poisoned fact.', category: 'world_fact' }], 's1');
 
         // The poisoned row failed the compat filter, so the item embedded fresh
         // instead of entering the store as a NaN-scoring vector.
@@ -390,9 +395,12 @@ describe('IndexedDB degradation paths (2026-07-28 audit)', () => {
         await addMemory('key', 'The bridge collapsed.', 'world_fact');
         expect(getMemoryCount()).toBe(1);
 
-        // Seeding still works: the cache load degrades to an empty list.
+        // Seeding still works: the cache load degrades to an empty list. A seed
+        // REPLACES the in-memory store (it activates a campaign), then embeds.
         embedTextMock.mockResolvedValue(unitVector(1));
-        await seedMemories('key', [{ text: 'Another fact.', category: 'journal' }]);
+        await seedMemories('key', [{ text: 'Another fact.', category: 'journal' }], 's1');
+        expect(getMemoryCount()).toBe(1);
+        await addMemory('key', 'A later memory.', 'world_fact');
         expect(getMemoryCount()).toBe(2);
 
         // The campaign-switch clear resolves instead of hanging the seed order.
