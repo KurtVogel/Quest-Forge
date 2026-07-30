@@ -1,4 +1,4 @@
-const DEFAULT_MAX_CLOCK = 6;
+export const DEFAULT_MAX_CLOCK = 6;
 export const FRONTS_VERSION = 2;
 
 function cleanText(value, fallback = '') {

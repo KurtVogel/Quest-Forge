@@ -9,7 +9,8 @@ import { ABILITY_NAMES, buildClassResources, normalizeAbilityScoreImprovementSta
 import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js';
-import { applyFrontAdvanceBatch, createInitialFronts, FRONTS_VERSION, normalizeEmergentFront, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
+import { applyFrontAdvanceBatch, createInitialFronts, DEFAULT_MAX_CLOCK, FRONTS_VERSION, normalizeEmergentFront, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
+import { MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX } from '../config/contentLimits.js';
 import { appendKeepsakes, deriveGiftAC } from '../engine/companionGear.js';
 import { appendRecentEncounter, buildEncounterEntry, MAX_ACTIVE_FRONTS, MAX_RECENT_ENCOUNTERS, normalizeTempoDirective } from '../engine/worldTempo.js';
 import { dedupeLocationRecords, normalizeLocationRecord, upsertLocation } from '../engine/locationRegistry.js';
@@ -507,7 +508,7 @@ const RECENT_COIN_GRANT_MESSAGE_WINDOW = 4;
 const COIN_WORD_RE = /\b(gold|silver|copper|coins?|gp|sp|cp|payment|reward|wages?|bounty|purse)\b/i;
 
 function clampCoinAmount(value) {
-    return Number.isFinite(value) ? Math.max(0, Math.min(10000, Math.trunc(value))) : 0;
+    return Number.isFinite(value) ? Math.max(0, Math.min(MAX_COIN_EVENT, Math.trunc(value))) : 0;
 }
 
 function buildCoinGrantTransaction(gold, silver, copper) {
@@ -1112,12 +1113,12 @@ function upsertNpc(npcs, payload) {
     if (!payload || (!payload.id && !payload.name)) return npcs;
     const update = pruneBlankFields({ ...payload, lastSeen: Date.now() });
     if (update.appearance) {
-        update.appearance = String(update.appearance).trim().slice(0, 600);
+        update.appearance = String(update.appearance).trim().slice(0, NPC_DOSSIER_FIELD_MAX);
     }
     // Short current-state field (like appearance, plain replace): feeds scene art,
     // the KNOWN NPCs block, and NPC RAG so generated images stop misgendering.
     if (update.gender) {
-        update.gender = String(update.gender).trim().slice(0, 40);
+        update.gender = String(update.gender).trim().slice(0, NPC_GENDER_MAX);
     }
     if (update.stanceToPlayer) {
         update.stanceToPlayer = clampNpcDossierField(update.stanceToPlayer);
@@ -2943,7 +2944,7 @@ export function gameReducer(state, action) {
                 ...(update.stage !== undefined && {
                     stage: Math.max(existing.stage || 0, Math.min((existing.stage || 0) + 1, update.stage)),
                 }),
-                maxClock: existing.maxClock || 6,
+                maxClock: existing.maxClock || DEFAULT_MAX_CLOCK,
             };
             return {
                 ...state,

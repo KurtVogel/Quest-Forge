@@ -4,6 +4,8 @@
  * campaigns keep early antagonists (e.g. a starting-town captain).
  */
 
+import { NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
+
 export const NPC_ROSTER_TIERS = new Set(['character', 'archived_creature']);
 export const NPC_KINDS = new Set(['character', 'creature', 'ephemeral']);
 
@@ -40,8 +42,10 @@ function cleanText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
-/** Journal dossier fields — full depth for player review and Scribe context. */
-export const NPC_DOSSIER_FIELD_MAX = 600;
+/** Journal dossier fields — full depth for player review and Scribe context.
+ * Canonical value lives in config/contentLimits.js; re-exported here for the
+ * roster's own consumers (npcEnrichment, tests). */
+export { NPC_DOSSIER_FIELD_MAX };
 /** Compact excerpts injected into the live DM prompt. */
 export const NPC_PROMPT_FIELD_MAX = 180;
 export const NPC_HOOK_FIELD_MAX = 200;

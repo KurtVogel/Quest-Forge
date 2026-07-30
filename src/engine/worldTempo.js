@@ -22,6 +22,7 @@
  */
 
 import { findLocationRecord, getCurrentLocationRecord } from './locationRegistry.js';
+import { DEFAULT_MAX_CLOCK } from './fronts.js';
 
 export const INTENSITY_LEVELS = ['whispers', 'indirect', 'presence', 'confrontation'];
 export const PACE_DIALS = ['slow-burn', 'standard', 'breakneck'];
@@ -50,7 +51,7 @@ export function normalizePaceDial(value) {
 /** Maximum narrative intensity a front's current clock/stage justifies. */
 export function getFrontIntensityBand(front) {
     if (!front) return 'whispers';
-    const maxClock = front.maxClock || 6;
+    const maxClock = front.maxClock || DEFAULT_MAX_CLOCK;
     const ratio = (front.clock || 0) / maxClock;
     const stage = front.stage || 0;
     if (ratio >= 1) return 'confrontation';

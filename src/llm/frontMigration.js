@@ -1,7 +1,7 @@
 import { sendMessage } from './adapter.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { normalizeFront } from '../engine/fronts.js';
-import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
+import { CAMPAIGN_PREMISE_MAX_LENGTH, CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 
 const MAX_FRONTS = 2;
@@ -58,7 +58,7 @@ export function buildFrontMigrationContext(state) {
             race: cleanText(character.race, 60),
             class: cleanText(character.class, 60),
             level: character.level || 1,
-            appearance: cleanText(character.appearance, 600),
+            appearance: cleanText(character.appearance, CHARACTER_APPEARANCE_MAX),
             origin: cleanText(character.origin || character.background || character.backstory, 1000),
             traits: (character.traits || []).slice(0, 12),
             features: (character.features || []).slice(0, 12),

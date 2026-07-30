@@ -19,6 +19,7 @@
 
 import { validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
+import { MAX_COIN_EVENT } from '../config/contentLimits.js';
 
 /** Cryptographically random integer in [min, max] — replaces Math.random() fallbacks. */
 function cryptoRandInt(min, max) {
@@ -294,12 +295,12 @@ export const EVENT_CHANNELS = [
         wire: 'sell', aliases: ['sells'], key: 'sells',
         read: raw => (Array.isArray(raw.sells) ? raw.sells : (raw.sell ? [raw.sell] : [])),
     },
-    { wire: 'gold_found', key: 'goldFound', read: raw => clamp(raw.gold_found, 0, 10000) },
-    { wire: 'gold_lost', key: 'goldLost', read: raw => clamp(raw.gold_lost, 0, 10000) },
-    { wire: 'silver_found', key: 'silverFound', read: raw => clamp(raw.silver_found, 0, 10000) },
-    { wire: 'silver_lost', key: 'silverLost', read: raw => clamp(raw.silver_lost, 0, 10000) },
-    { wire: 'copper_found', key: 'copperFound', read: raw => clamp(raw.copper_found, 0, 10000) },
-    { wire: 'copper_lost', key: 'copperLost', read: raw => clamp(raw.copper_lost, 0, 10000) },
+    { wire: 'gold_found', key: 'goldFound', read: raw => clamp(raw.gold_found, 0, MAX_COIN_EVENT) },
+    { wire: 'gold_lost', key: 'goldLost', read: raw => clamp(raw.gold_lost, 0, MAX_COIN_EVENT) },
+    { wire: 'silver_found', key: 'silverFound', read: raw => clamp(raw.silver_found, 0, MAX_COIN_EVENT) },
+    { wire: 'silver_lost', key: 'silverLost', read: raw => clamp(raw.silver_lost, 0, MAX_COIN_EVENT) },
+    { wire: 'copper_found', key: 'copperFound', read: raw => clamp(raw.copper_found, 0, MAX_COIN_EVENT) },
+    { wire: 'copper_lost', key: 'copperLost', read: raw => clamp(raw.copper_lost, 0, MAX_COIN_EVENT) },
     { wire: 'exp_awarded', key: 'expAwarded', read: raw => clamp(raw.exp_awarded, 0, 10000) },
     { wire: 'level_up', key: 'levelUp', read: raw => !!raw.level_up },
     { wire: 'rest_taken', key: 'restTaken', read: raw => (typeof raw.rest_taken === 'string' ? raw.rest_taken : null) },

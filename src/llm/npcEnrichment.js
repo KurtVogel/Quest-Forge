@@ -11,6 +11,7 @@ import {
     NPC_PLACE_FIELD_MAX,
     clampNpcDossierField,
 } from '../engine/npcRoster.js';
+import { NPC_GENDER_MAX } from '../config/contentLimits.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
@@ -220,7 +221,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
     // Appearance replaces at the reducer boundary, so enrichment must emit the
     // COMPLETE merged look (600-char clamp mirrors the per-turn Scribe path).
     if (cleanText(parsed.appearance)) update.appearance = clampNpcDossierField(parsed.appearance);
-    if (cleanText(parsed.gender)) update.gender = cleanText(parsed.gender).slice(0, 40);
+    if (cleanText(parsed.gender)) update.gender = cleanText(parsed.gender).slice(0, NPC_GENDER_MAX);
     if (cleanText(parsed.personality)) update.personality = clampNpcDossierField(parsed.personality);
     if (cleanText(parsed.goals)) update.goals = clampNpcDossierField(parsed.goals);
     if (cleanText(parsed.privateNotes)) update.privateNotes = clampNpcDossierField(parsed.privateNotes);

@@ -7,6 +7,7 @@ import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
 import { buildSpellSlots, isSpellcaster } from './spellcasting.js';
+import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 
 /**
  * Standard array for ability score assignment.
@@ -220,11 +221,11 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         ...(isSpellcaster(className) && { spellSlots: buildSpellSlots(1), sustainedSpell: null }),
         hitDice: { total: 1, remaining: 1, die: charClass.hitDie },
         conditions: [],
-        // Player-authored identity, all optional. Appearance caps at 600 to match
-        // the reducer's Scribe-merge clamp (a longer seed would truncate on the
-        // first merged update); background matches the notes/vault 2000 cap.
+        // Player-authored identity, all optional. Appearance caps at the shared
+        // Scribe-merge clamp (a longer seed would truncate on the first merged
+        // update); background matches the notes/vault 2000 cap.
         gender: String(options.gender || '').trim().slice(0, 60),
-        appearance: String(options.appearance || '').trim().slice(0, 600),
+        appearance: String(options.appearance || '').trim().slice(0, CHARACTER_APPEARANCE_MAX),
         background: String(options.background || '').trim().slice(0, 2000),
         notes: '',
         createdAt: Date.now(),

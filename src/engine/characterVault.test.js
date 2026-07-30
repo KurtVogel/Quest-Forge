@@ -56,9 +56,12 @@ describe('export round-trip', () => {
         expect(imported.character.background).toBe('Raised on the stilt-quarter canals; owes her fence twelve silver.');
 
         // Hand-edited files can't smuggle unbounded identity text past the sanitizer.
-        const oversized = sanitizeCharacter({ ...character, gender: 'x'.repeat(500), background: 'y'.repeat(5000) });
+        const oversized = sanitizeCharacter({ ...character, gender: 'x'.repeat(500), background: 'y'.repeat(5000), appearance: 'z'.repeat(5000) });
         expect(oversized.gender).toHaveLength(60);
         expect(oversized.background).toHaveLength(2000);
+        // Appearance pins the shared 600-char Scribe-merge clamp (contentLimits):
+        // a 2000-char vault allowance would silently truncate on the first merge.
+        expect(oversized.appearance).toHaveLength(600);
     });
 
     it('imports arrive rested: full HP, no conditions, fresh resources', () => {

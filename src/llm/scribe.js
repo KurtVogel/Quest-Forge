@@ -17,6 +17,7 @@ import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { captureReflection, captureScribePass } from '../dev/memoryInspectorStore.js';
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
 import { rollDie } from '../engine/dice.ts';
+import { CHARACTER_APPEARANCE_MAX, MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
 
 const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Given a DM's narrative response and the player's action that prompted it, extract any new canonical facts about the game world. Every field you output is an UNVARNISHED record: complete and frank about every fact the fiction establishes, never a censored, selective, or tastefully vague account — written in neutral, matter-of-fact language (see the REGISTER rule).
 
@@ -178,7 +179,7 @@ function describeAppliedLoot(events) {
     return parts.length ? parts.join('; ') : 'None. No coins or items were applied for this narrative.';
 }
 
-function coerceLootAmount(value, max = 10000) {
+function coerceLootAmount(value, max = MAX_COIN_EVENT) {
     const num = typeof value === 'number' ? value : parseFloat(value);
     if (!Number.isFinite(num)) return 0;
     return Math.max(0, Math.min(max, Math.trunc(num)));
@@ -198,7 +199,7 @@ function describePartyGear(state) {
         })
         .filter(Boolean)
         .join('; ');
-    return lines ? lines.slice(0, 600) : null;
+    return lines ? lines.slice(0, NPC_DOSSIER_FIELD_MAX) : null;
 }
 
 
@@ -539,7 +540,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         }
 
         if (typeof extracted.player_appearance === 'string' && extracted.player_appearance.trim()) {
-            dispatch({ type: 'UPDATE_CHARACTER', payload: { appearance: extracted.player_appearance.trim().slice(0, 600) } });
+            dispatch({ type: 'UPDATE_CHARACTER', payload: { appearance: extracted.player_appearance.trim().slice(0, CHARACTER_APPEARANCE_MAX) } });
         }
 
         // A model answering "where are we now?" with filler must not mint a canonical

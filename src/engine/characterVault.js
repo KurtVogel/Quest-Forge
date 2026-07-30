@@ -14,6 +14,7 @@ import { getMaxHitPoints, getModifier, getProficiencyBonus } from './rules.js';
 import { ABILITY_NAMES, SKILL_LABELS, buildClassResources, getAllFeaturesUpToLevel, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 import { normalizeEquippedSlots } from './equipment.js';
+import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 
 export const EXPORT_FORMAT = 'quest-forge-character';
 export const EXPORT_VERSION = 1;
@@ -26,7 +27,10 @@ const MAX_COIN = 1_000_000;
 // hand-edit exploit (e.g. +16 free max HP on an L5 fighter).
 const FIXED_AVERAGE_HP_SINCE = Date.UTC(2026, 5, 15);
 const MAX_INVENTORY_ITEMS = 200;
-const MAX_APPEARANCE_LENGTH = 2000;
+// Appearance shares the 600-char Scribe-merge clamp (contentLimits): the old
+// local 2000 cap silently truncated a long imported appearance on its FIRST
+// Scribe merge in play — the vault must not accept what the game cannot keep.
+const MAX_PORTRAIT_PROMPT_LENGTH = 2000;
 const MAX_PORTRAIT_URL_LENGTH = 2_500_000;
 
 /** Clamp to an integer in [min, max]; non-numeric input yields `fallback`. */
@@ -163,9 +167,9 @@ export function sanitizeCharacter(raw) {
         conditions: [],
         gender: String(raw.gender || '').trim().slice(0, 60),
         background: String(raw.background || '').trim().slice(0, 2000),
-        appearance: String(raw.appearance || '').trim().slice(0, MAX_APPEARANCE_LENGTH),
+        appearance: String(raw.appearance || '').trim().slice(0, CHARACTER_APPEARANCE_MAX),
         portraitUrl: sanitizeImageUrl(raw.portraitUrl),
-        portraitPrompt: String(raw.portraitPrompt || '').trim().slice(0, MAX_APPEARANCE_LENGTH),
+        portraitPrompt: String(raw.portraitPrompt || '').trim().slice(0, MAX_PORTRAIT_PROMPT_LENGTH),
         portraitUpdatedAt: Number.isFinite(raw.portraitUpdatedAt) ? raw.portraitUpdatedAt : null,
         notes: String(raw.notes || '').slice(0, 2000),
         createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
