@@ -15,6 +15,7 @@
 
 import { rollWithModifier, parseNotation, rollDice } from './dice.ts';
 import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getEquippedWeapon, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES, getSneakAttackDice } from './rules.js';
+import { validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
 
 const ABILITY_NAMES = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 
@@ -85,11 +86,15 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
                 continue;
             }
 
+            // Engine-owned companion stats win over DM-supplied numbers — the DM
+            // has no dice/stat authority here any more than in the exchange machine.
+            // A DM modifier is only a fallback for a stat-less companion, and even
+            // then it passes the enemy-stat band check (a +40 is a hallucination).
             const attackRoll = {
                 ...roll,
                 attacker: companion.name,
-                modifier: roll.modifier ?? companion.attackBonus ?? 0,
-                damage: roll.damage || companion.damage,
+                modifier: companion.attackBonus ?? validateEnemyAttackBonus(roll.modifier) ?? 0,
+                damage: companion.damage || sanitizeEnemyDamage(roll.damage),
             };
             const result = resolveNpcRoll(attackRoll, character, dispatch, inventory, enemy?.ac ?? roll.dc);
             if (!result) continue;
@@ -121,8 +126,11 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
             results.push(result);
 
             // Inline damage on a hit (npc_attack only — saves never deal weapon damage here).
+            // DM damage notation passes the enemy-stat band check: a well-formed but
+            // absurd "9d12+15" is rejected to the conservative default, same as combat.
             if (result.success && roll.type === 'npc_attack' && roll.damage) {
-                const dmg = rollAndShowDamage(roll.damage, `${roll.attacker || 'Enemy'} damage`, dispatch, { crit: result.critical });
+                const safeDamage = sanitizeEnemyDamage(roll.damage) || '1d6';
+                const dmg = rollAndShowDamage(safeDamage, `${roll.attacker || 'Enemy'} damage`, dispatch, { crit: result.critical });
                 const comp = (roll.target && roll.target !== 'player' && roll.target !== 'self')
                     ? findCompanion(roll.target)
                     : null;
@@ -526,7 +534,10 @@ function rollAndShowDamage(notation, label, dispatch, { crit = false, character 
 }
 
 function resolveNpcRoll(roll, character, dispatch, inventory, targetAC) {
-    const npcMod = roll.modifier ?? 0;
+    // Same trust boundary as the exchange machine (enemyStats.js): an out-of-band
+    // modifier is a hallucination and is REJECTED to the conservative default —
+    // this path was the one entry point where a DM "+40" reached the dice raw.
+    const npcMod = validateEnemyAttackBonus(roll.modifier) ?? 0;
 
     // Attacks against the player (targetAC == null means the player is the target)
     // respect the player's conditions: prone/restrained/blinded etc. grant the
