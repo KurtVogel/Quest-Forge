@@ -42,6 +42,23 @@
   border-color: var(--accent-primary, var(--border-primary));
 }
 
+.chat-load-earlier {
+  display: block;
+  margin: 0.25rem auto 0.75rem;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--border-primary);
+  border-radius: 999px;
+  background: var(--surface-secondary);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.chat-load-earlier:hover {
+  border-color: var(--accent-primary, var(--border-primary));
+  color: var(--text-primary);
+}
+
 .chat-empty {
   display: flex;
   flex-direction: column;

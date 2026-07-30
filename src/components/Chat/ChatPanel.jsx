@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { buildSystemPrompt } from '../../llm/promptBuilder.js';
@@ -25,6 +25,12 @@ import './Chat.css';
 
 /** How many recent (un-summarized) messages to send as LLM history. */
 const MESSAGE_WINDOW = 20;
+/**
+ * How many transcript messages mount as DOM at once. An "infinite campaign on a
+ * phone" must not mount thousands of nodes — older play is one "Load earlier"
+ * click away and still lives in saves/journal/RAG regardless.
+ */
+const RENDERED_MESSAGE_WINDOW = 150;
 const DECORATIVE_SYMBOL_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?/gu;
 
 function cleanDisplayText(text) {
@@ -36,6 +42,7 @@ export default function ChatPanel() {
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [streamingMessage, setStreamingMessage] = useState('');
+    const [renderWindow, setRenderWindow] = useState(RENDERED_MESSAGE_WINDOW);
     const [loadingStatus, setLoadingStatus] = useState('');
     const [combatNarrationRetry, setCombatNarrationRetry] = useState(0);
     const [roleplayChallenge, setRoleplayChallenge] = useState('');
@@ -58,6 +65,29 @@ export default function ChatPanel() {
     stateRef.current = state;
 
     const summarizeInFlightRef = useRef(false); // One summarize pass at a time — overlapping runs would double-journal the same range
+
+    // Streaming display paints are coalesced to one per animation frame: a raw
+    // per-chunk setState re-renders the whole transcript O(campaign × chunks)
+    // per DM turn (2026-07-30 audit). The buffer ref stays chunk-accurate; only
+    // the paint is throttled.
+    const streamPaintRafRef = useRef(0);
+
+    const cancelScheduledStreamPaint = () => {
+        if (streamPaintRafRef.current) {
+            cancelAnimationFrame(streamPaintRafRef.current);
+            streamPaintRafRef.current = 0;
+        }
+    };
+
+    // Every clear must go through here: a clear that leaves a scheduled paint
+    // behind lets the next frame resurrect the cleared text — including a
+    // withheld roll-setup narration that must stay hidden.
+    const clearStreamingDisplay = () => {
+        cancelScheduledStreamPaint();
+        setStreamingMessage('');
+    };
+
+    useEffect(() => cancelScheduledStreamPaint, []);
 
     const runAutoSummarize = async (waitsForResolution = false) => {
         if (waitsForResolution) return;
@@ -139,7 +169,7 @@ export default function ChatPanel() {
                 })
                 .finally(() => {
                     setIsLoading(false);
-                    setStreamingMessage('');
+                    clearStreamingDisplay();
                 });
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -316,15 +346,15 @@ Translate the player's committed action into the single bounded combat_exchange 
                 if (firstChunkAt === null) firstChunkAt = performance.now();
                 streamBufferRef.current += chunk;
                 if (opts.combatIntentOnly) return;
-                const buf = streamBufferRef.current;
-                // Once we hit a ```json fence, freeze the display — all remaining
-                // chunks are JSON data that parseResponse handles on the full text.
-                const fenceIdx = buf.search(/```json/i);
-                if (fenceIdx !== -1) {
-                    setStreamingMessage(buf.slice(0, fenceIdx).trimEnd());
-                } else {
-                    setStreamingMessage(buf);
-                }
+                if (streamPaintRafRef.current) return; // a paint is already scheduled for this frame
+                streamPaintRafRef.current = requestAnimationFrame(() => {
+                    streamPaintRafRef.current = 0;
+                    const buf = streamBufferRef.current;
+                    // Once we hit a ```json fence, freeze the display — all remaining
+                    // chunks are JSON data that parseResponse handles on the full text.
+                    const fenceIdx = buf.search(/```json/i);
+                    setStreamingMessage(fenceIdx !== -1 ? buf.slice(0, fenceIdx).trimEnd() : buf);
+                });
             },
             signal: abortControllerRef.current.signal,
         });
@@ -385,7 +415,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         // prose-extracted proposals the player already read; setupPhase separately
         // defers outcome mutations until dice resolve.
         const { setupPhase, hideSetup } = deriveSetupVisibility(events);
-        if (hideSetup) setStreamingMessage('');
+        if (hideSetup) clearStreamingDisplay();
         // Pre-generate a stable message ID so applyEvents can reference it as a loot source key.
         const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         if (events) {
@@ -486,8 +516,8 @@ Translate the player's committed action into the single bounded combat_exchange 
     useEffect(() => {
         const s = stateRef.current;
         if (!s.settings.apiKey || isLoading) return;
-        const cueMessage = [...(s.messages || [])].reverse()
-            .find(m => m.role === 'system' && m.narrationCue && !narratedCueIdsRef.current.has(m.id));
+        const cueMessage = (s.messages || [])
+            .findLast(m => m.role === 'system' && m.narrationCue && !narratedCueIdsRef.current.has(m.id));
         if (!cueMessage) return;
 
         narratedCueIdsRef.current.add(cueMessage.id);
@@ -507,7 +537,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         ].join(' ');
 
         setIsLoading(true);
-        setStreamingMessage('');
+        clearStreamingDisplay();
         sendToLLM(narrationRequest, null, { narrationOnly: true })
             .catch(error => {
                 if (error.name !== 'AbortError') {
@@ -522,7 +552,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             })
             .finally(() => {
                 setIsLoading(false);
-                setStreamingMessage('');
+                clearStreamingDisplay();
             });
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state.messages, isLoading]);
@@ -564,7 +594,7 @@ Translate the player's committed action into the single bounded combat_exchange 
 
         let narrative = '';
         setIsLoading(true);
-        setStreamingMessage('');
+        clearStreamingDisplay();
         setLoadingStatus('Narrating combat outcome');
         sendToLLM(combatNarrationPrompt(result), null, {
             narrationOnly: true,
@@ -622,7 +652,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             })
             .finally(() => {
                 setIsLoading(false);
-                setStreamingMessage('');
+                clearStreamingDisplay();
                 setLoadingStatus('');
             });
     // sendToLLM is intentionally driven only by the persisted exchange identity.
@@ -640,8 +670,8 @@ Translate the player's committed action into the single bounded combat_exchange 
 
     const finalizeRoleplayTurn = (playerAction) => {
         const latest = stateRef.current;
-        const finalNarration = [...(latest.messages || [])].reverse()
-            .find(message => message.role === 'assistant' && !message.hidden && message.content?.trim());
+        const finalNarration = (latest.messages || [])
+            .findLast(message => message.role === 'assistant' && !message.hidden && message.content?.trim());
         if (finalNarration) {
             runScribe({
                 playerMessage: playerAction,
@@ -706,7 +736,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
         } finally {
             setIsLoading(false);
-            setStreamingMessage('');
+            clearStreamingDisplay();
             setLoadingStatus('');
         }
     };
@@ -757,7 +787,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
         } finally {
             setIsLoading(false);
-            setStreamingMessage('');
+            clearStreamingDisplay();
             setLoadingStatus('');
         }
     };
@@ -830,7 +860,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         }
 
         setIsLoading(true);
-        setStreamingMessage('');
+        clearStreamingDisplay();
         setLoadingStatus(startedCombatIntent ? 'Interpreting combat action' : (tableTalkTurn ? 'Table talk with the DM' : ''));
 
         try {
@@ -897,8 +927,8 @@ Translate the player's committed action into the single bounded combat_exchange 
                 || !!events?.requestedRolls?.length;
             // An OOC exchange is meta conversation, not fiction: extracting facts,
             // NPC updates, or memories from it would canonize table talk.
-            const finalNarration = (waitsForResolution || tableTalkTurn) ? null : [...latest.messages].reverse()
-                .find(m => m.role === 'assistant' && !m.hidden && m.content?.trim());
+            const finalNarration = (waitsForResolution || tableTalkTurn) ? null : latest.messages
+                .findLast(m => m.role === 'assistant' && !m.hidden && m.content?.trim());
             if (finalNarration) {
                 runScribe({
                     playerMessage: trimmed,
@@ -941,7 +971,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
         } finally {
             setIsLoading(false);
-            setStreamingMessage('');
+            clearStreamingDisplay();
             setLoadingStatus('');
             // Prevent auto-focusing on mobile to stop the virtual keyboard from forcing 
             // the whole app layout to suddenly scroll up, which hides the top header.
@@ -1010,7 +1040,19 @@ Translate the player's committed action into the single bounded combat_exchange 
                     </div>
                 )}
 
-                {state.messages.map((msg) => (
+                {state.messages.length > renderWindow && (
+                    <button
+                        className="chat-load-earlier"
+                        onClick={() => setRenderWindow(w => w + RENDERED_MESSAGE_WINDOW)}
+                    >
+                        Load earlier messages ({state.messages.length - renderWindow} more)
+                    </button>
+                )}
+
+                {(state.messages.length > renderWindow
+                    ? state.messages.slice(-renderWindow)
+                    : state.messages
+                ).map((msg) => (
                     <ChatMessage key={msg.id} message={msg} />
                 ))}
 
@@ -1178,7 +1220,10 @@ function RoleplayCheckPanel({
     );
 }
 
-function ChatMessage({ message }) {
+// Memoized: message objects are immutable once appended, so a streaming-paint
+// re-render of the panel must not re-render (and re-parse markdown for) every
+// transcript message — that was O(campaign × chunks) per DM turn.
+const ChatMessage = memo(function ChatMessage({ message }) {
     const roleLabels = {
         user: 'You',
         assistant: 'Dungeon Master',
@@ -1207,5 +1252,5 @@ function ChatMessage({ message }) {
             </div>
         </div>
     );
-}
+});
 

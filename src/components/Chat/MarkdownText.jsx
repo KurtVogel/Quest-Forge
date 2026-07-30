@@ -1,9 +1,15 @@
+import { memo } from 'react';
+
 /**
  * Simple markdown renderer for chat messages.
  * Handles: **bold**, *italic*, line breaks, and paragraphs.
  * No external dependencies needed.
+ *
+ * Memoized: the regex parse is pure in `text`, and the chat transcript renders
+ * many of these — an unchanged message must not re-parse on every streaming
+ * paint of the panel.
  */
-export default function MarkdownText({ text }) {
+function MarkdownText({ text }) {
     if (!text) return null;
 
     // Split into paragraphs by double newlines
@@ -19,6 +25,8 @@ export default function MarkdownText({ text }) {
         </>
     );
 }
+
+export default memo(MarkdownText);
 
 function renderInline(text) {
     // Process inline markdown: bold, italic, bold-italic, inline code
