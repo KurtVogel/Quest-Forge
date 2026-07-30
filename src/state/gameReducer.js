@@ -12,6 +12,7 @@ import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js
 import { applyFrontAdvanceBatch, createInitialFronts, DEFAULT_MAX_CLOCK, FRONTS_VERSION, normalizeEmergentFront, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 import { MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX } from '../config/contentLimits.js';
 import { containment, tokenSet } from '../engine/textMatch.js';
+import { conversationalDistance, findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../engine/replayLedger.js';
 import { appendKeepsakes, deriveGiftAC } from '../engine/companionGear.js';
 import { appendRecentEncounter, buildEncounterEntry, MAX_ACTIVE_FRONTS, MAX_RECENT_ENCOUNTERS, normalizeTempoDirective } from '../engine/worldTempo.js';
 import { dedupeLocationRecords, normalizeLocationRecord, upsertLocation } from '../engine/locationRegistry.js';
@@ -204,7 +205,7 @@ function validateSaveState(payload) {
             .map(normalizeRollRuling).filter(Boolean).slice(-RECENT_RULING_LIMIT),
         recentChecks: sanitizeRecentChecks(payload.recentChecks),
         recentSpellCasts: Array.isArray(payload.recentSpellCasts)
-            ? payload.recentSpellCasts.filter(entry => typeof entry === 'string').slice(-8)
+            ? payload.recentSpellCasts.filter(entry => typeof entry === 'string').slice(-RECENT_SPELL_CAST_LIMIT)
             : [],
         recentRests: Array.isArray(payload.recentRests)
             ? payload.recentRests.filter(entry => typeof entry === 'string').slice(-RECENT_REST_LIMIT)
@@ -413,24 +414,6 @@ function currentMessageIndex(state) {
     return Math.max(0, (state.messages || []).length - 1);
 }
 
-/**
- * Conversational distance between two message indexes: system lines and hidden
- * roll-setup messages don't count. A single check turn burns ~5 raw messages
- * (user, hidden setup, two roll system lines, outcome), which silently expired
- * the raw-index coin windows — the DM's "very next turn" re-emission landed 8
- * raw messages later and re-paid a 20 gp fee (live finding 2026-07-22).
- */
-function conversationalDistance(messages, fromIndex, toIndex) {
-    if (!Array.isArray(messages)) return Math.max(0, toIndex - fromIndex);
-    let distance = 0;
-    for (let i = Math.max(0, fromIndex + 1); i <= Math.min(toIndex, messages.length - 1); i++) {
-        const message = messages[i];
-        if (!message || message.role === 'system' || message.hidden) continue;
-        distance += 1;
-    }
-    return distance;
-}
-
 function findRecentTransactionDuplicate(entries, transaction, sourceId, currentIndex, window = RECENT_TRANSACTION_MESSAGE_WINDOW, messages = null) {
     return normalizeRecentTransactions(entries)
         .slice()
@@ -549,6 +532,7 @@ function playerMessageSupportsRepeatCoinLoss(playerMessage) {
 // Spell replay window matches the coin-grant one: the observed failure is the DM
 // re-emitting spell_cast on the very next turn while narrating what the spell did.
 const RECENT_SPELL_CAST_MESSAGE_WINDOW = 4;
+const RECENT_SPELL_CAST_LIMIT = 8;
 
 function playerMessageRecastsSpell(spell, playerMessage) {
     const text = String(playerMessage || '').toLowerCase();
@@ -576,13 +560,6 @@ function playerMessageRequestsRest(playerMessage) {
     // "rest of the loot"/"the rest of them" is partitive, not resting.
     if (/\brest(?:s|ed|ing)?\b(?!\s+of\b)/i.test(text)) return true;
     return /\b(sleep|nap|slumber|make camp|set up camp|camp for|bed down|turn in for)\b/i.test(text);
-}
-
-function rememberRecentRest(entries, sourceId, restType, messageIndex) {
-    const key = `${String(sourceId || '').slice(0, 160)}|${restType}|${messageIndex}`;
-    const previous = (Array.isArray(entries) ? entries : [])
-        .filter(entry => typeof entry === 'string' && entry !== key);
-    return [...previous, key].slice(-RECENT_REST_LIMIT);
 }
 
 function playerMessageSupportsRepeatTransaction(item, playerMessage, verbRe) {
@@ -1642,22 +1619,20 @@ export function gameReducer(state, action) {
             const sourceId = String(meta.sourceId || '').slice(0, 160);
             const castKey = sourceId ? `${sourceId}|${spell.key}` : null;
             const recentCasts = state.recentSpellCasts || [];
-            if (castKey && recentCasts.some(entry => entry === castKey || entry.startsWith(`${castKey}|`))) return state;
+            if (findExactSourceReplay(recentCasts, castKey)) return state;
             // Cross-message replay: the DM re-emitting the same spell on a later turn
             // (narrating the aftermath of a cast it already declared) must not spend a
             // second slot. A nearby same-spell cast only counts as new when the player's
             // own message casts it again by name (or an explicit "again"-style repeat).
+            // Windows measure conversational distance, not raw index: a dice turn
+            // burns ~5 raw messages and silently expired the raw-index coin windows
+            // (proven live 2026-07-22) — the same hole existed here until 2026-07-30.
             const castMessageIndex = currentMessageIndex(state);
-            const nearbyReplay = recentCasts.some(entry => {
-                const parts = entry.split('|');
-                if (parts[1] !== spell.key) return false;
-                const entryIndex = Number(parts[2]);
-                if (!Number.isFinite(entryIndex)) return false;
-                // Conversational distance, not raw index: a dice turn burns ~5 raw
-                // messages and silently expired the raw-index coin windows (proven
-                // live 2026-07-22) — the same hole existed here until 2026-07-30.
-                const distance = conversationalDistance(state.messages, entryIndex, castMessageIndex);
-                return distance >= 0 && distance <= RECENT_SPELL_CAST_MESSAGE_WINDOW;
+            const nearbyReplay = findNearbyReplay(recentCasts, {
+                key: spell.key,
+                messages: state.messages,
+                currentIndex: castMessageIndex,
+                window: RECENT_SPELL_CAST_MESSAGE_WINDOW,
             });
             if (nearbyReplay && !playerMessageRecastsSpell(spell, meta.playerMessage)) return state;
 
@@ -1754,7 +1729,14 @@ export function gameReducer(state, action) {
                 ...state,
                 character: nextCharacter,
                 party: nextParty,
-                ...(castKey && { recentSpellCasts: [...recentCasts, `${castKey}|${castMessageIndex}`].slice(-8) }),
+                ...(castKey && {
+                    recentSpellCasts: rememberLedgerEntry(recentCasts, {
+                        sourceId,
+                        key: spell.key,
+                        messageIndex: castMessageIndex,
+                        cap: RECENT_SPELL_CAST_LIMIT,
+                    }),
+                }),
                 messages: [...state.messages, systemMessage(lines.join(' '))],
             };
         }
@@ -1788,21 +1770,27 @@ export function gameReducer(state, action) {
             // player's own message asks to rest again.
             if (restMeta.source === 'dm') {
                 const restSourceId = String(restMeta.sourceId || '').slice(0, 160);
-                const exactReplay = restSourceId && recentRests.some(entry => entry.startsWith(`${restSourceId}|`));
-                const nearbyReplay = recentRests.some(entry => {
-                    const parts = entry.split('|');
-                    if (parts[1] !== restType) return false;
-                    const entryIndex = Number(parts[2]);
-                    if (!Number.isFinite(entryIndex)) return false;
-                    // Conversational distance — same dice-turn expiry fix as the coin
-                    // ledgers (2026-07-22) and the spell ledger (2026-07-30).
-                    const distance = conversationalDistance(state.messages, entryIndex, restMessageIndex);
-                    return distance >= 0 && distance <= RECENT_REST_MESSAGE_WINDOW;
+                const exactReplay = findExactSourceReplay(recentRests, restSourceId);
+                // Conversational distance — same dice-turn expiry fix as the coin
+                // ledgers (2026-07-22) and the spell ledger (2026-07-30).
+                const nearbyReplay = findNearbyReplay(recentRests, {
+                    key: restType,
+                    messages: state.messages,
+                    currentIndex: restMessageIndex,
+                    window: RECENT_REST_MESSAGE_WINDOW,
                 });
                 if (exactReplay || (nearbyReplay && !playerMessageRequestsRest(restMeta.playerMessage))) {
                     // Re-stamp the ledger at the current index so an echo that
                     // persists past the window keeps being suppressed.
-                    return { ...state, recentRests: rememberRecentRest(recentRests, restSourceId, restType, restMessageIndex) };
+                    return {
+                        ...state,
+                        recentRests: rememberLedgerEntry(recentRests, {
+                            sourceId: restSourceId,
+                            key: restType,
+                            messageIndex: restMessageIndex,
+                            cap: RECENT_REST_LIMIT,
+                        }),
+                    };
                 }
             }
             const charClass = CLASSES[state.character.class];
@@ -1954,7 +1942,12 @@ export function gameReducer(state, action) {
                 }) : restedBase,
                 party: restedParty,
                 messages: [...state.messages, restMsg],
-                recentRests: rememberRecentRest(recentRests, restMeta.sourceId, restType, restMessageIndex),
+                recentRests: rememberLedgerEntry(recentRests, {
+                    sourceId: restMeta.sourceId,
+                    key: restType,
+                    messageIndex: restMessageIndex,
+                    cap: RECENT_REST_LIMIT,
+                }),
             };
         }
 
