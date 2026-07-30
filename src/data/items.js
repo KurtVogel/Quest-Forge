@@ -6,7 +6,7 @@
  * not the source of truth.
  */
 
-export const MAGIC_BONUS_MAX = 3;
+const MAGIC_BONUS_MAX = 3;
 
 const GP = 100;
 const SP = 10;

@@ -13,7 +13,7 @@ import { isTableTalkMessage, TABLE_TALK_RESPONSE_MODE } from '../../llm/tableTal
 import { addMemory, seedMemories, retrieveRelevant } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { curateStoryMemory } from '../../engine/storyMemory.js';
-import { captureInjection } from '../../dev/memoryInspectorStore.js';
+import { captureInjection } from '../../debug/memoryInspectorStore.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from './turnVisibility.js';

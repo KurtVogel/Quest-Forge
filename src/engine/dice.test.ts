@@ -5,16 +5,15 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-    DIE_TYPES,
     MAX_DICE_COUNT,
     parseNotation,
     rollDie,
     rollDice,
     rollNotation,
-    rollSavingThrow,
-    rollSkillCheck,
     rollWithModifier,
 } from './dice.ts';
+
+const DIE_TYPES = [4, 6, 8, 10, 12, 20, 100];
 
 describe('rollDie', () => {
     it('stays within [1, sides] for every standard die over many rolls', () => {
@@ -142,15 +141,6 @@ describe('rollNotation', () => {
 });
 
 describe('check helpers', () => {
-    it('applies proficiency only when proficient', () => {
-        const proficient = rollSkillCheck(3, 2, true);
-        expect(proficient.modifier).toBe(5);
-        const notProficient = rollSkillCheck(3, 2, false);
-        expect(notProficient.modifier).toBe(3);
-        const save = rollSavingThrow(1, 2, true);
-        expect(save.modifier).toBe(3);
-    });
-
     it('rollDice returns exactly count results in range', () => {
         const rolls = rollDice(10, 8);
         expect(rolls).toHaveLength(10);

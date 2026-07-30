@@ -24,7 +24,6 @@ import {
     clampNpcDossierField,
     classifyNpcCandidate,
     dedupeNpcRoster,
-    listArchivableFodder,
     mergeNpcDossierText,
     migrateLegacyNpc,
     normalizeNpcRecord,
@@ -1196,21 +1195,6 @@ function findTouchedNpc(after = [], payload = {}) {
 
 export function gameReducer(state, action) {
     switch (action.type) {
-        case 'SET_CHARACTER':
-            // Ensure all dynamic properties are initialized if missing
-            return {
-                ...state,
-                character: {
-                    gold: 0, silver: 0, copper: 0,
-                    exp: 0,
-                    conditions: [],
-                    ...action.payload,
-                    fightingStyle: normalizeFightingStyle(action.payload?.class, action.payload?.fightingStyle),
-                    martialArchetype: normalizeMartialArchetype(action.payload?.class, action.payload?.level, action.payload?.martialArchetype),
-                    ...normalizeAbilityScoreImprovementState(action.payload),
-                }
-            };
-
         case 'START_CHARACTER': {
             const inventory = Array.isArray(action.payload.inventory) ? action.payload.inventory : [];
             const character = {
@@ -1278,57 +1262,6 @@ export function gameReducer(state, action) {
                     ...improvedState.messages,
                     systemMessage(`**Ability Score Improvement applied:** ${summary}.${hpGain > 0 ? ` Constitution increased maximum HP by ${hpGain}.` : ''}`),
                 ],
-            };
-        }
-
-        case 'ADD_GOLD':
-            return {
-                ...state,
-                character: addCurrency(state.character, { gold: action.payload }),
-            };
-
-        case 'REMOVE_GOLD': {
-            const result = spendCurrency(state.character, { gold: action.payload });
-            if (!result.paid) {
-                return { ...state, messages: [...state.messages, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
-            }
-            return {
-                ...state,
-                character: result.character,
-            };
-        }
-
-        case 'ADD_SILVER':
-            return {
-                ...state,
-                character: addCurrency(state.character, { silver: action.payload }),
-            };
-
-        case 'REMOVE_SILVER': {
-            const result = spendCurrency(state.character, { silver: action.payload });
-            if (!result.paid) {
-                return { ...state, messages: [...state.messages, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
-            }
-            return {
-                ...state,
-                character: result.character,
-            };
-        }
-
-        case 'ADD_COPPER':
-            return {
-                ...state,
-                character: addCurrency(state.character, { copper: action.payload }),
-            };
-
-        case 'REMOVE_COPPER': {
-            const result = spendCurrency(state.character, { copper: action.payload });
-            if (!result.paid) {
-                return { ...state, messages: [...state.messages, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
-            }
-            return {
-                ...state,
-                character: result.character,
             };
         }
 
@@ -2443,14 +2376,6 @@ export function gameReducer(state, action) {
             return withInventoryAndAC(state, state.inventory.filter(i => i.id !== matchToRemove.id));
         }
 
-        case 'UPDATE_ITEM':
-            return {
-                ...state,
-                inventory: state.inventory.map(item =>
-                    item.id === action.payload.id ? { ...item, ...action.payload } : item
-                ),
-            };
-
         case 'EQUIP_ITEM': {
             const itemToEquip = state.inventory.find(i => i.id === action.payload);
             if (!itemToEquip || !isEquippableItem(itemToEquip)) return state;
@@ -2501,14 +2426,6 @@ export function gameReducer(state, action) {
             const updated = [...(state.appliedLootSourceIds || []), sourceId];
             return { ...state, appliedLootSourceIds: updated.slice(-500) };
         }
-
-        case 'UPDATE_LAST_MESSAGE':
-            return {
-                ...state,
-                messages: state.messages.map((msg, idx) =>
-                    idx === state.messages.length - 1 ? { ...msg, ...action.payload } : msg
-                ),
-            };
 
         case 'PROPOSE_ROLEPLAY_CHECK': {
             if (state.combat?.active) return state;
@@ -2645,19 +2562,6 @@ export function gameReducer(state, action) {
             };
 
         // --- World Facts ---
-        case 'ADD_WORLD_FACT': {
-            const sanitized = sanitizeWorldFactPayload(action.payload);
-            if (!sanitized) return state;
-            const fact = {
-                id: `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                timestamp: Date.now(),
-                ...sanitized,
-            };
-            const existingSets = state.worldFacts.map(f => factTokenSet(f.fact));
-            if (isNearDuplicateFact(fact.fact, existingSets)) return state;
-            return { ...state, worldFacts: [...state.worldFacts, fact] };
-        }
-
         case 'ADD_WORLD_FACTS': {
             // Bulk add, rejecting exact and near-duplicate restatements of known facts
             // (the Scribe tends to re-canonize the same truth with slight rewording).
@@ -2676,9 +2580,6 @@ export function gameReducer(state, action) {
             if (newFacts.length === 0) return state;
             return { ...state, worldFacts: [...state.worldFacts, ...newFacts] };
         }
-
-        case 'REMOVE_WORLD_FACT':
-            return { ...state, worldFacts: state.worldFacts.filter(f => f.id !== action.payload) };
 
         // --- Story Memory ---
         case 'ADD_STORY_MEMORY_CARD': {
@@ -2733,16 +2634,6 @@ export function gameReducer(state, action) {
         }
 
         // --- Hidden campaign fronts ---
-        case 'INITIALIZE_FRONTS': {
-            if ((state.fronts || []).length > 0) return state;
-            const fronts = createInitialFronts({
-                premise: action.payload?.premise || state.session?.premise || '',
-                character: state.character,
-                location: state.currentLocation,
-            });
-            return { ...state, fronts };
-        }
-
         case 'INSTALL_GENERATED_FRONTS': {
             if (action.payload?.sessionId !== state.session?.id
                 || state.session?.frontDirector?.version >= FRONTS_VERSION
@@ -2822,43 +2713,6 @@ export function gameReducer(state, action) {
                         lastEmergentCadenceId: cadenceId,
                     },
                 },
-            };
-        }
-
-        case 'MIGRATE_FRONTS': {
-            if (state.session?.frontMigration?.version >= 1 || !Array.isArray(action.payload?.fronts) || action.payload.fronts.length === 0) {
-                return state;
-            }
-            const existingFronts = state.fronts || [];
-            const existingIds = new Set(existingFronts.map(front => front.id).filter(Boolean));
-            const existingTitles = new Set(existingFronts.map(front => front.title?.toLowerCase()).filter(Boolean));
-            const additions = action.payload.fronts
-                .filter(front => !existingIds.has(front.id) && !existingTitles.has(front.title?.toLowerCase()))
-                .slice(0, Math.max(0, 3 - existingFronts.length))
-                .map(front => normalizeFront(front));
-            if (additions.length === 0) return state;
-            return {
-                ...state,
-                fronts: [...existingFronts, ...additions],
-                session: {
-                    ...state.session,
-                    frontMigration: {
-                        version: 1,
-                        migratedAt: Date.now(),
-                        contextCounts: action.payload.counts || {},
-                    },
-                    frontDirector: {
-                        ...state.session?.frontDirector,
-                        version: FRONTS_VERSION,
-                        source: 'contextual-migration',
-                        generatedAt: Date.now(),
-                        lastJournalEnd: state.session?.frontDirector?.lastJournalEnd || 0,
-                    },
-                },
-                messages: [
-                    ...state.messages,
-                    systemMessage('**The living world awakens.** Hidden pressures now grow from this campaign’s established history. Their details remain private; you will encounter only their in-world signs, choices, and consequences.'),
-                ],
             };
         }
 
@@ -2988,11 +2842,10 @@ export function gameReducer(state, action) {
             return { ...state, chronicle };
         }
 
-        // ADD_NPC and UPDATE_NPC are the same operation: upsert by id or name (see
-        // upsertNpc). Keeping one create/merge path means the per-turn Scribe and the
-        // DM's inline npc_updates can introduce a brand-new NPC the instant it appears,
-        // instead of being silently dropped until the next journal pass.
-        case 'ADD_NPC':
+        // UPDATE_NPC upserts by id or name (see upsertNpc): one create/merge path
+        // means the per-turn Scribe and the DM's inline npc_updates can introduce a
+        // brand-new NPC the instant it appears, instead of being silently dropped
+        // until the next journal pass.
         case 'UPDATE_NPC': {
             const nextNpcs = upsertNpc(state.npcs, action.payload);
             if (nextNpcs === state.npcs) return state;
@@ -3058,20 +2911,6 @@ export function gameReducer(state, action) {
             const ids = action.payload?.ids || [];
             if (ids.length === 0) return state;
             return { ...state, npcs: archiveNpcBulk(state.npcs, ids) };
-        }
-
-        case 'ARCHIVE_GENERIC_FODDER': {
-            const fodder = listArchivableFodder(state.npcs || []);
-            if (fodder.length === 0) return state;
-            const ids = new Set(fodder.map(npc => npc.id));
-            return {
-                ...state,
-                npcs: state.npcs.map(npc => (
-                    ids.has(npc.id)
-                        ? normalizeNpcRecord({ ...npc, rosterTier: 'archived_creature', kind: 'creature', pinned: false })
-                        : npc
-                )),
-            };
         }
 
         case 'SET_LOCATION': {
@@ -3322,13 +3161,6 @@ export function gameReducer(state, action) {
             }
 
             return newState;
-        }
-
-        case 'FINALIZE_VICTORY': {
-            if (!state.combat.active || !(state.combat.enemies || []).length) return state;
-            const allDefeated = state.combat.enemies.every(e => !isEnemyActive(e));
-            if (!allDefeated) return state;
-            return gameReducer(state, { type: 'END_COMBAT', payload: { autoVictory: true } });
         }
 
         case 'BEGIN_COMBAT_INTENT':

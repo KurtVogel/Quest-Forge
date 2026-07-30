@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
-import { getModifier, formatModifier, getProficiencyBonus, getAllSkills, SKILL_ABILITIES } from '../../engine/rules.js';
+import { getModifier, formatModifier, getProficiencyBonus, getAllSkills } from '../../engine/rules.js';
 import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
 import { downloadCharacterExport } from '../../engine/characterVault.js';
 import { saveRosterCharacter } from '../../state/persistence.js';

@@ -11,7 +11,7 @@ import SceneArt from '../SceneArt/SceneArt.jsx';
 import AmbientControls from '../AmbientAudio/AmbientControls.jsx';
 import CompanionsPanel from '../Companions/CompanionsPanel.jsx';
 import MemoryInspector from '../Debug/MemoryInspector.jsx';
-import { isMemoryInspectorEnabled } from '../../dev/memoryInspectorStore.js';
+import { isMemoryInspectorEnabled } from '../../debug/memoryInspectorStore.js';
 import { isMachineryReady } from '../../llm/machinery.js';
 import './Layout.css';
 

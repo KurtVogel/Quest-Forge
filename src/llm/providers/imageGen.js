@@ -213,12 +213,6 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
     return null;
 }
 
-/** Backward-compatible URL-only renderer used by existing call sites. */
-export async function generateImage(prompt, imageApiKey, options = {}) {
-    const result = await generateImageResult(prompt, imageApiKey, options);
-    return result?.url || null;
-}
-
 export async function generateSceneImageDetailed(prompt, imageApiKey, extraOptions = {}) {
     return generateImageResult(prompt, imageApiKey, {
         aspectRatio: '16:9',
@@ -242,11 +236,7 @@ export async function generatePortraitImageDetailed(prompt, imageApiKey, extraOp
     });
 }
 
-export async function generateSceneImage(prompt, imageApiKey, extraOptions = {}) {
-    const result = await generateSceneImageDetailed(prompt, imageApiKey, extraOptions);
-    return result?.url || null;
-}
-
+/** URL-only portrait wrapper (CharacterSheet's hero portrait uses it). */
 export async function generatePortraitImage(prompt, imageApiKey, extraOptions = {}) {
     const result = await generatePortraitImageDetailed(prompt, imageApiKey, extraOptions);
     return result?.url || null;

@@ -67,11 +67,13 @@ describe('world-fact near-duplicate guard', () => {
         expect(next.worldFacts).toHaveLength(1);
     });
 
-    it('applies the same guard to single-fact adds', () => {
+    it('applies the same guard to a single-entry batch', () => {
+        // The singular ADD_WORLD_FACT action was removed in the 2026-07-31
+        // dead-code sweep (never dispatched); the bulk path is the only path.
         const state = stateWithFacts(['The treaty between Harrowmont and the Guild is broken.']);
         const next = gameReducer(state, {
-            type: 'ADD_WORLD_FACT',
-            payload: { fact: 'The treaty between Harrowmont and the Guild is now broken!' },
+            type: 'ADD_WORLD_FACTS',
+            payload: [{ fact: 'The treaty between Harrowmont and the Guild is now broken!' }],
         });
         expect(next).toBe(state);
     });
@@ -102,13 +104,6 @@ describe('world-fact hostile-input type guard (2026-07-23 audit)', () => {
         expect(next.worldFacts[0].category).toBe('general');
         expect(next.worldFacts[0].fact.length).toBeLessThanOrEqual(400);
         expect(() => next.worldFacts[0].fact.toLowerCase()).not.toThrow();
-    });
-
-    it('applies the same guard to the singular ADD_WORLD_FACT path', () => {
-        const state = stateWithFacts([]);
-        expect(gameReducer(state, { type: 'ADD_WORLD_FACT', payload: { fact: 42 } })).toBe(state);
-        const next = gameReducer(state, { type: 'ADD_WORLD_FACT', payload: { fact: 'A real fact.', category: 7 } });
-        expect(next.worldFacts[0]).toMatchObject({ fact: 'A real fact.', category: 'general' });
     });
 
     it('LOAD_GAME heals poisoned saves: fixable records re-typed, unfixable dropped', () => {

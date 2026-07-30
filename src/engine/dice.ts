@@ -93,45 +93,11 @@ export function rollWithModifier(
   };
 }
 
-/**
- * Roll a skill check (d20 + ability modifier + proficiency if applicable).
- */
-export function rollSkillCheck(
-  abilityModifier: number,
-  proficiencyBonus: number = 0,
-  isProficient: boolean = false,
-  description: string = ''
-): DiceRollResult {
-  const mod = abilityModifier + (isProficient ? proficiencyBonus : 0);
-  return rollWithModifier(1, 20, mod, description || 'Skill Check');
-}
-
-/**
- * Roll initiative (d20 + DEX modifier).
- */
-export function rollInitiative(dexModifier: number, description: string = ''): DiceRollResult {
-  return rollWithModifier(1, 20, dexModifier, description || 'Initiative');
-}
-
-/**
- * Roll an ability check (d20 + ability modifier).
- */
-export function rollAbilityCheck(abilityModifier: number, description: string = ''): DiceRollResult {
-  return rollWithModifier(1, 20, abilityModifier, description || 'Ability Check');
-}
-
-/**
- * Roll a saving throw (d20 + ability modifier + proficiency if proficient).
- */
-export function rollSavingThrow(
-  abilityModifier: number,
-  proficiencyBonus: number = 0,
-  isProficient: boolean = false,
-  description: string = ''
-): DiceRollResult {
-  const mod = abilityModifier + (isProficient ? proficiencyBonus : 0);
-  return rollWithModifier(1, 20, mod, description || 'Saving Throw');
-}
+// NOTE (2026-07-31 dead-code sweep): the ceremonial wrappers rollSkillCheck /
+// rollInitiative / rollAbilityCheck / rollSavingThrow were removed. They took
+// pre-computed modifiers and bypassed condition effects entirely — trap APIs
+// nothing in the app used. Real skill/save math lives in rules.js; attack and
+// damage mechanics in combatMath.js.
 
 /**
  * Parse dice notation string like "2d6+3", "1d20", "3d8-1".
@@ -163,8 +129,3 @@ export function rollNotation(notation: string, description: string = ''): DiceRo
   const { count, sides, modifier } = parseNotation(notation);
   return rollWithModifier(count, sides, modifier, description);
 }
-
-/**
- * Standard die types available.
- */
-export const DIE_TYPES: number[] = [4, 6, 8, 10, 12, 20, 100];

@@ -14,7 +14,7 @@ import { getBackgroundConfig } from './machinery.js';
 import { classifyNpcCandidate, curateNpcsForPrompt } from '../engine/npcRoster.js';
 import { sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
-import { captureReflection, captureScribePass } from '../dev/memoryInspectorStore.js';
+import { captureReflection, captureScribePass } from '../debug/memoryInspectorStore.js';
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX, MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';

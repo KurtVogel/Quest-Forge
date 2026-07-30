@@ -151,6 +151,9 @@ describe('combat start initiative', () => {
 });
 
 describe('combat victory finalization', () => {
+    // FINALIZE_VICTORY (a never-dispatched wrapper around END_COMBAT) was removed
+    // in the 2026-07-31 dead-code sweep; these pin the same XP semantics through
+    // the real END_COMBAT path the exchange machine and applyEvents actually use.
     it('ends combat and awards fallback XP when all enemies are defeated', () => {
         const state = {
             ...makeState(),
@@ -164,32 +167,11 @@ describe('combat victory finalization', () => {
             },
         };
 
-        const next = gameReducer(state, { type: 'FINALIZE_VICTORY' });
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: { autoVictory: true } });
 
         expect(next.combat.active).toBe(false);
         expect(next.character.exp).toBeGreaterThan(0);
         expect(next.messages.some(m => m.content.includes('Experience gained'))).toBe(true);
-    });
-
-    it('does not end combat while any enemy is still alive', () => {
-        const state = {
-            ...makeState(),
-            combat: {
-                active: true,
-                enemies: [
-                    { id: 'enemy-1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' },
-                    { id: 'enemy-2', name: 'Guard', hp: 5, maxHp: 11, ac: 14, condition: 'bloodied' },
-                ],
-                turnOrder: [{ type: 'player', name: 'Astra', initiative: 14 }],
-                currentTurn: 0,
-                round: 2,
-                xpAwarded: false,
-            },
-        };
-
-        const next = gameReducer(state, { type: 'FINALIZE_VICTORY' });
-
-        expect(next).toBe(state);
     });
 
     it('awards victory XP when a foe flees instead of incentivizing execution', () => {
@@ -202,7 +184,7 @@ describe('combat victory finalization', () => {
                 turnOrder: [{ type: 'player', name: 'Astra', initiative: 14 }],
             },
         };
-        const next = gameReducer(state, { type: 'FINALIZE_VICTORY' });
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: { autoVictory: true } });
         expect(next.combat.active).toBe(false);
         expect(next.character.exp).toBeGreaterThan(0);
     });

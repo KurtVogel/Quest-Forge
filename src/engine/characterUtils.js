@@ -242,24 +242,6 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
 }
 
 /**
- * Calculate derived stats for display.
- */
-export function getDerivedStats(character) {
-    const modifiers = {};
-    for (const ability of ABILITY_NAMES) {
-        modifiers[ability] = getModifier(character.abilityScores[ability]);
-    }
-
-    return {
-        modifiers,
-        proficiencyBonus: getProficiencyBonus(character.level),
-        initiative: modifiers.dexterity,
-        passivePerception: 10 + getModifier(character.abilityScores.wisdom) +
-            (character.skillProficiencies?.includes('perception') ? getProficiencyBonus(character.level) : 0),
-    };
-}
-
-/**
  * Get starting equipment for a class.
  */
 export function getStartingEquipment(className) {

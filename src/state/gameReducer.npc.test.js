@@ -415,26 +415,8 @@ describe('gameReducer NPC archive/migration actions', () => {
         expect(next).toBe(state);
     });
 
-    it('ARCHIVE_GENERIC_FODDER sweeps unpinned generic-named creatures into the archive', () => {
-        const state = {
-            ...initialGameState,
-            npcs: [
-                { id: 'npc-1', name: 'Goblin #12', rosterTier: 'character', kind: 'creature', lastNotes: 'Killed in combat.' },
-                { id: 'npc-2', name: 'Captain Voss', rosterTier: 'character', kind: 'character' },
-            ],
-        };
-        const next = gameReducer(state, { type: 'ARCHIVE_GENERIC_FODDER' });
-        const goblin = next.npcs.find(npc => npc.id === 'npc-1');
-        const captain = next.npcs.find(npc => npc.id === 'npc-2');
-        expect(goblin.rosterTier).toBe('archived_creature');
-        expect(captain.rosterTier).toBe('character');
-    });
-
-    it('ARCHIVE_GENERIC_FODDER is a no-op when nothing qualifies', () => {
-        const state = { ...initialGameState, npcs: [{ id: 'npc-1', name: 'Captain Voss', rosterTier: 'character' }] };
-        const next = gameReducer(state, { type: 'ARCHIVE_GENERIC_FODDER' });
-        expect(next).toBe(state);
-    });
+    // ARCHIVE_GENERIC_FODDER was removed in the 2026-07-31 dead-code sweep — the
+    // live archive path is JournalPanel's suggest-fodder review + ARCHIVE_NPC_BULK.
 
     it('MIGRATE_NPC_ROSTER backfills rosterTier on legacy records missing it', () => {
         const state = { ...initialGameState, npcs: [{ id: 'npc-1', name: 'Captain Voss', disposition: 'hostile' }] };

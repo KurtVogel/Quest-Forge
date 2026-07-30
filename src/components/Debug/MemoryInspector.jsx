@@ -11,7 +11,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
-import { getInspectorSnapshot, subscribeInspector } from '../../dev/memoryInspectorStore.js';
+import { getInspectorSnapshot, subscribeInspector } from '../../debug/memoryInspectorStore.js';
 import { computeRecentHeat, isTempoWindowActive, normalizePaceDial } from '../../engine/worldTempo.js';
 import './Debug.css';
 

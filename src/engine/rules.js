@@ -383,17 +383,12 @@ export function getMaxHitPoints(className, level, conMod, classData) {
     return firstLevel + perLevel * (level - 1);
 }
 
-/**
- * Difficulty class descriptions for the DM.
- */
-export const DC_TABLE = {
-    5: 'Very Easy',
-    10: 'Easy',
-    15: 'Medium',
-    20: 'Hard',
-    25: 'Very Hard',
-    30: 'Nearly Impossible',
-};
+// NOTE (2026-07-31 dead-code sweep): the classic 5/10/15/20/25/30 DC_TABLE was
+// removed — it had zero consumers AND contradicted the shipped solo-play DC
+// ladder (8 easy under pressure / 10 standard / 12 meaningful / 15 strong
+// opposition / 18+ exceptional, see promptBuilder's roll rules). A future
+// reader wiring "the DC table" into the prompt would have regressed a settled
+// design decision.
 
 /**
  * Format a modifier for display (e.g., +3, -1, +0).

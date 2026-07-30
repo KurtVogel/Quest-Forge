@@ -805,7 +805,7 @@ describe('Scribe location + inspector-flag hygiene (2026-07-23 audit)', () => {
     });
 
     it('reports object-shaped loot/payment audits to the inspector', async () => {
-        const { getInspectorSnapshot } = await import('../dev/memoryInspectorStore.js');
+        const { getInspectorSnapshot } = await import('../debug/memoryInspectorStore.js');
         sendMessage.mockResolvedValue(extraction({
             missing_loot: { gold: 3, items: [] },
             missing_payment: { silver: 6 },
