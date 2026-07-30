@@ -127,6 +127,41 @@ describe('maybeAutoSummarize', () => {
         expect(dispatch).not.toHaveBeenCalled();
     });
 
+    it('coerces hostile field shapes: string consequences/key_decisions become arrays, junk location dropped', async () => {
+        sendMessageMock.mockResolvedValue(validSummary({
+            key_decisions: 'Refused to pay the toll',
+            consequences: 'The reeve remembers the insult',
+            location: 'null',
+        }));
+        const state = makeState(makeMessages(12));
+        const dispatch = vi.fn();
+
+        const result = await maybeAutoSummarize(state, dispatch, 0);
+
+        expect(result.index).toBe(12);
+        expect(result.journalEntry.keyDecisions).toEqual([]);
+        expect(result.journalEntry.consequences).toEqual([]);
+        // The literal "null" the prompt invites never becomes canonical — falls back to live state.
+        expect(result.journalEntry.location).toBe('Brackwater');
+        expect(dispatch.mock.calls.some(([action]) => action.type === 'SET_LOCATION')).toBe(false);
+        const entryCall = dispatch.mock.calls.find(([action]) => action.type === 'ADD_JOURNAL_ENTRY');
+        expect(Array.isArray(entryCall[0].payload.consequences)).toBe(true);
+    });
+
+    it('does not advance the index when the parsed summary carries no usable text', async () => {
+        sendMessageMock.mockResolvedValue(JSON.stringify({
+            summary: { text: 'object-valued summary' },
+            npcs_encountered: [],
+        }));
+        const state = makeState(makeMessages(10));
+        const dispatch = vi.fn();
+
+        const result = await maybeAutoSummarize(state, dispatch, 0);
+
+        expect(result).toEqual({ index: 0, journalEntry: null });
+        expect(dispatch).not.toHaveBeenCalled();
+    });
+
     it('defers an all-hidden batch instead of summarizing an empty transcript', async () => {
         const state = makeState(makeMessages(12, { hidden: true }));
         const dispatch = vi.fn();

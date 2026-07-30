@@ -45,6 +45,19 @@ function locationTokens(name) {
 const MAX_NAME_CHARS = 48;
 const MAX_NAME_TOKENS = 5;
 
+/** Filler strings a model emits for "location unchanged" — never canonical places. */
+const JUNK_LOCATION_RE = /^(null|none|undefined|unknown|unchanged|same|same place|no change|current location|n\/a|-+)\.?$/i;
+
+/**
+ * Boundary for a model-reported current location (Scribe extraction, journal
+ * summaries — both prompts invite a literal "null" for "unchanged"): drops
+ * non-strings and the filler family. Returns the trimmed usable name or null.
+ */
+export function sanitizeExtractedLocation(value) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    return text && !JUNK_LOCATION_RE.test(text) ? text : null;
+}
+
 export function isRegistrableLocationName(name) {
     const cleaned = cleanText(name, 200);
     if (!cleaned) return false;

@@ -1,5 +1,54 @@
 import { describe, expect, it } from 'vitest';
-import { buildJournalContext, normalizeLocationName } from './worldJournal.js';
+import { buildJournalContext, normalizeJournalSummary, normalizeLocationName } from './worldJournal.js';
+
+describe('normalizeJournalSummary (queue 2026-07-30)', () => {
+    it('normalizes a well-formed summary with clamped typed fields', () => {
+        const result = normalizeJournalSummary({
+            summary: '  The hero reached Brackwater.  ',
+            key_decisions: ['Refused the toll', 42, null, { a: 1 }],
+            consequences: ['The reeve remembers'],
+            location: ' Brackwater ',
+        });
+        expect(result).toEqual({
+            summary: 'The hero reached Brackwater.',
+            keyDecisions: ['Refused the toll'],
+            consequences: ['The reeve remembers'],
+            location: 'Brackwater',
+        });
+    });
+
+    it('coerces string-valued key_decisions/consequences to empty arrays (the every-turn prompt-crash shape)', () => {
+        const result = normalizeJournalSummary({
+            summary: 'Events happened.',
+            key_decisions: 'The player refused the toll',
+            consequences: 'The reeve remembers the insult',
+        });
+        expect(result.keyDecisions).toEqual([]);
+        expect(result.consequences).toEqual([]);
+    });
+
+    it('drops the journal prompt\'s own literal "null" location via the shared filler drop-list', () => {
+        expect(normalizeJournalSummary({ summary: 'S', location: 'null' }).location).toBeNull();
+        expect(normalizeJournalSummary({ summary: 'S', location: 'unchanged' }).location).toBeNull();
+        expect(normalizeJournalSummary({ summary: 'S', location: { name: 'x' } }).location).toBeNull();
+    });
+
+    it('returns null when the summary text is missing or non-string', () => {
+        expect(normalizeJournalSummary({ summary: '', consequences: [] })).toBeNull();
+        expect(normalizeJournalSummary({ summary: { text: 'x' } })).toBeNull();
+        expect(normalizeJournalSummary(null)).toBeNull();
+        expect(normalizeJournalSummary(['a'])).toBeNull();
+    });
+
+    it('caps list length and item length', () => {
+        const result = normalizeJournalSummary({
+            summary: 'S',
+            consequences: Array.from({ length: 20 }, (_, i) => `c${i}-${'x'.repeat(400)}`),
+        });
+        expect(result.consequences).toHaveLength(8);
+        expect(result.consequences[0].length).toBe(300);
+    });
+});
 
 describe('worldJournal context builder', () => {
     it('builds basic journal and NPC context', () => {
@@ -18,6 +67,17 @@ describe('worldJournal context builder', () => {
         expect(context).toContain('Fought some wolves.');
         expect(context).toContain('## KNOWN NPCs');
         expect(context).toContain('Kaldor');
+    });
+
+    it('tolerates a legacy entry with string-valued consequences instead of crashing the prompt build', () => {
+        const journal = [
+            { summary: 'Met a merchant.', consequences: 'The reeve remembers the insult', location: 'Road' },
+            { summary: 'Fought wolves.', consequences: ['Pack scattered'], location: 'Road' },
+        ];
+        const context = buildJournalContext(journal, [], 'Road');
+        expect(context).toContain('Met a merchant.');
+        expect(context).not.toContain('reeve remembers'); // string shape: skipped, not joined char-by-char
+        expect(context).toContain('[Consequences: Pack scattered]');
     });
 
     it('injects established NPC looks so the DM cannot re-invent hair, eyes, or build', () => {

@@ -12,6 +12,7 @@
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { classifyNpcCandidate, curateNpcsForPrompt } from '../engine/npcRoster.js';
+import { sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { captureReflection, captureScribePass } from '../dev/memoryInspectorStore.js';
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
@@ -200,8 +201,6 @@ function describePartyGear(state) {
     return lines ? lines.slice(0, 600) : null;
 }
 
-/** Filler strings a model emits for "location unchanged" — never canonical places. */
-const JUNK_LOCATION_RE = /^(null|none|undefined|unknown|unchanged|same|same place|no change|current location|n\/a|-+)\.?$/i;
 
 /** True when an audit field arrived with actual content (they are object-shaped). */
 function hasAuditPayload(value) {
@@ -545,8 +544,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
 
         // A model answering "where are we now?" with filler must not mint a canonical
         // place — "null"/"unchanged" as the current location was a real 2026-07-23 find.
-        const extractedLocation = typeof extracted.location === 'string' ? extracted.location.trim() : '';
-        const location = extractedLocation && !JUNK_LOCATION_RE.test(extractedLocation) ? extractedLocation : null;
+        const location = sanitizeExtractedLocation(extracted.location);
         if (location) {
             dispatch({ type: 'SET_LOCATION', payload: location });
         }

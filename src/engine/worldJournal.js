@@ -17,6 +17,7 @@ import {
     curateNpcsForPrompt,
 } from './npcRoster.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
+import { sanitizeExtractedLocation } from './locationRegistry.js';
 
 export function normalizeLocationName(loc) {
     if (!loc) return '';
@@ -28,6 +29,33 @@ export function normalizeLocationName(loc) {
 }
 
 const SUMMARIZE_EVERY = 10; // Summarize every N new messages
+
+const clampText = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+
+const toStringList = (value, maxItems, maxLen) => (Array.isArray(value) ? value : [])
+    .map(item => clampText(item, maxLen))
+    .filter(Boolean)
+    .slice(0, maxItems);
+
+/**
+ * Journal entries persist into every save and feed buildSystemPrompt each turn —
+ * a string-valued key_decisions/consequences from live Flash output must never
+ * reach ADD_JOURNAL_ENTRY's raw spread (`.join` on it crashes the prompt build
+ * every turn, and slice(-3) can never age the poisoned entry out). Typed and
+ * clamped here, the sanitizeWorldFactPayload pattern. Returns null when the
+ * summary carries no usable text — the batch retries next cadence.
+ */
+export function normalizeJournalSummary(summary) {
+    if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return null;
+    const text = clampText(summary.summary, 2000);
+    if (!text) return null;
+    return {
+        summary: text,
+        keyDecisions: toStringList(summary.key_decisions, 8, 300),
+        consequences: toStringList(summary.consequences, 8, 300),
+        location: sanitizeExtractedLocation(summary.location),
+    };
+}
 // One journal batch may not flood the never-pruned world-facts store. The per-turn
 // Scribe is budgeted at 3; a 10-message batch gets a slightly larger allowance.
 const MAX_FACTS_PER_BATCH = 5;
@@ -123,16 +151,22 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             return { index: lastSummarizedIndex, journalEntry: null }; // Don't advance — retry next time
         }
 
+        const normalized = normalizeJournalSummary(summary);
+        if (!normalized) {
+            console.warn('[Journal] Summary carried no usable text — messages NOT marked as summarized');
+            return { index: lastSummarizedIndex, journalEntry: null }; // Don't advance — retry next time
+        }
+
         const journalId = `journal-${Date.now()}`;
         const journalTimestamp = Date.now();
         const journalEntry = {
             id: journalId,
             timestamp: journalTimestamp,
-            summary: summary.summary,
-            keyDecisions: summary.key_decisions || [],
-            consequences: summary.consequences || [],
+            summary: normalized.summary,
+            keyDecisions: normalized.keyDecisions,
+            consequences: normalized.consequences,
             messageRange: [lastSummarizedIndex, messageCount],
-            location: summary.location || state.currentLocation || null,
+            location: normalized.location || state.currentLocation || null,
         };
 
         // Add journal entry
@@ -184,9 +218,10 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             dispatch({ type: 'ADD_WORLD_FACTS', payload: summary.world_facts.slice(0, MAX_FACTS_PER_BATCH) });
         }
 
-        // Update location
-        if (summary.location) {
-            dispatch({ type: 'SET_LOCATION', payload: summary.location });
+        // Update location — the journal prompt itself invites a literal "null" for
+        // "unchanged", so the shared filler drop-list is load-bearing here.
+        if (normalized.location) {
+            dispatch({ type: 'SET_LOCATION', payload: normalized.location });
         }
 
         // Mark these messages as summarized — they will be excluded from future LLM history
@@ -200,9 +235,9 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             cadence: {
                 id: `journal-${state.session?.id || 'campaign'}-${messageCount}`,
                 journalEnd: messageCount,
-                summary: summary.summary,
-                keyDecisions: summary.key_decisions || [],
-                consequences: summary.consequences || [],
+                summary: normalized.summary,
+                keyDecisions: normalized.keyDecisions,
+                consequences: normalized.consequences,
             },
         }).catch(() => {});
 
@@ -230,7 +265,9 @@ export function buildJournalContext(journal, npcs, currentLocation) {
         const recentEntries = journal.slice(-3);
         const entrySummaries = recentEntries.map((e, i) => {
             let entry = `Entry ${journal.length - recentEntries.length + i + 1}: ${e.summary}`;
-            if (e.consequences?.length) {
+            // Array belt for legacy entries persisted before normalizeJournalSummary —
+            // a string-valued consequences here crashed the prompt build every turn.
+            if (Array.isArray(e.consequences) && e.consequences.length) {
                 entry += ` [Consequences: ${e.consequences.join('; ')}]`;
             }
             return entry;
