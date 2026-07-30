@@ -15,6 +15,8 @@
  * high-clock story event, never texture.
  */
 
+import { containment, tokenSet } from './textMatch.js';
+
 export const LOCATION_TYPES = ['haven', 'settlement', 'wilderness', 'frontier', 'hostile_site'];
 export const DANGER_LEVELS = ['none', 'low', 'moderate', 'high', 'deadly'];
 export const MAX_LOCATIONS = 60;
@@ -29,12 +31,7 @@ function cleanText(value, max = 120) {
 }
 
 function locationTokens(name) {
-    const normalized = String(name || '')
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return new Set(normalized.split(' ').filter(token => token.length >= 3 && !STOP_WORDS.has(token)));
+    return tokenSet(name, { stopWords: STOP_WORDS, minLength: 3 });
 }
 
 // A place NAME is short ("Candlemire", "the old salthouse"); a scene DESCRIPTION
@@ -66,16 +63,7 @@ export function isRegistrableLocationName(name) {
 
 /** "Library landing, Clockwork Tower" names the same place as "Clockwork Tower". */
 export function isSameLocation(a, b) {
-    const ta = locationTokens(a);
-    const tb = locationTokens(b);
-    if (!ta.size || !tb.size) return false;
-    const small = ta.size <= tb.size ? ta : tb;
-    const large = ta.size <= tb.size ? tb : ta;
-    let overlap = 0;
-    for (const token of small) {
-        if (large.has(token)) overlap += 1;
-    }
-    return overlap / small.size >= 0.99;
+    return containment(locationTokens(a), locationTokens(b)) >= 0.99;
 }
 
 export function normalizeLocationType(value) {

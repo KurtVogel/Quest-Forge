@@ -1,3 +1,5 @@
+import { containment, overlapCount, tokenSet as sharedTokenSet } from './textMatch.js';
+
 const ALLOWED_TYPES = new Set([
     'callback',
     'promise',
@@ -40,40 +42,29 @@ function normalizeTextArray(value, max = MAX_TAGS) {
         .slice(0, max);
 }
 
+const STORY_STOP_WORDS = new Set([
+    'the', 'and', 'that', 'with', 'from', 'this', 'they', 'your', 'you', 'for',
+    'into', 'about', 'what', 'when', 'where', 'there', 'their', 'have', 'has',
+    'had', 'was', 'were', 'are', 'but', 'not', 'all', 'his', 'her', 'she', 'him',
+]);
+
+// Shared Unicode tokenizer (textMatch.js): the old local `[a-z0-9']{3,}`
+// matcher silently dropped every non-ASCII token, so cards about "Virtapää"
+// could never dedupe or score by name.
 function tokenSet(text) {
-    const stop = new Set([
-        'the', 'and', 'that', 'with', 'from', 'this', 'they', 'your', 'you', 'for',
-        'into', 'about', 'what', 'when', 'where', 'there', 'their', 'have', 'has',
-        'had', 'was', 'were', 'are', 'but', 'not', 'all', 'his', 'her', 'she', 'him',
-    ]);
-    return new Set(String(text || '')
-        .toLowerCase()
-        .match(/[a-z0-9']{3,}/g)
-        ?.filter(t => !stop.has(t)) || []);
+    return sharedTokenSet(text, { stopWords: STORY_STOP_WORDS, minLength: 3 });
 }
 
-function overlapScore(a, b) {
-    if (!a.size || !b.size) return 0;
-    let hits = 0;
-    for (const token of a) {
-        if (b.has(token)) hits += 1;
-    }
-    return hits;
-}
+const overlapScore = overlapCount;
 
 /** tokenSet with possessives folded ("jack's" → "jack") so subject phrasings
  * like "Jack's promise" and "Jack, the promise" compare as the same entity. */
 function meaningTokens(text) {
-    return new Set([...tokenSet(text)].map(token => token.replace(/'s$/, '')));
+    return sharedTokenSet(text, { stopWords: STORY_STOP_WORDS, minLength: 3, foldPossessives: true });
 }
 
 /** Fraction of the SMALLER set's tokens found in the larger one (0..1). */
-function tokenContainment(a, b) {
-    if (!a.size || !b.size) return 0;
-    const small = a.size <= b.size ? a : b;
-    const large = a.size <= b.size ? b : a;
-    return overlapScore(small, large) / small.size;
-}
+const tokenContainment = containment;
 
 /** The Scribe re-reports the same durable beat with fresh framing each turn
  * ("Jack's promise to Oren…" / "Jack's broken promise to Oren, now amidst…"),

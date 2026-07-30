@@ -11,6 +11,7 @@ import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.j
 import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js';
 import { applyFrontAdvanceBatch, createInitialFronts, DEFAULT_MAX_CLOCK, FRONTS_VERSION, normalizeEmergentFront, normalizeFront, normalizeFrontUpdate } from '../engine/fronts.js';
 import { MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX } from '../config/contentLimits.js';
+import { containment, tokenSet } from '../engine/textMatch.js';
 import { appendKeepsakes, deriveGiftAC } from '../engine/companionGear.js';
 import { appendRecentEncounter, buildEncounterEntry, MAX_ACTIVE_FRONTS, MAX_RECENT_ENCOUNTERS, normalizeTempoDirective } from '../engine/worldTempo.js';
 import { dedupeLocationRecords, normalizeLocationRecord, upsertLocation } from '../engine/locationRegistry.js';
@@ -325,12 +326,7 @@ function sanitizeWorldFactPayload(payload) {
 }
 
 function factTokenSet(text) {
-    const normalized = String(text || '')
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return new Set(normalized.split(' ').filter(token => token && !FACT_STOP_WORDS.has(token)));
+    return tokenSet(text, { stopWords: FACT_STOP_WORDS });
 }
 
 // A fact whose meaningful tokens are ~all contained in an existing fact (or vice
@@ -338,17 +334,7 @@ function factTokenSet(text) {
 function isNearDuplicateFact(candidate, existingSets) {
     const tokens = factTokenSet(candidate);
     if (tokens.size === 0) return true;
-    for (const existing of existingSets) {
-        if (existing.size === 0) continue;
-        const small = tokens.size <= existing.size ? tokens : existing;
-        const large = tokens.size <= existing.size ? existing : tokens;
-        let overlap = 0;
-        for (const token of small) {
-            if (large.has(token)) overlap += 1;
-        }
-        if (overlap / small.size >= 0.9) return true;
-    }
-    return false;
+    return existingSets.some(existing => containment(tokens, existing) >= 0.9);
 }
 
 const RECENT_TRANSACTION_LIMIT = 20;

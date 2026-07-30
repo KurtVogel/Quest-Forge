@@ -5,6 +5,7 @@
  */
 
 import { NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
+import { coverage, tokenSet } from './textMatch.js';
 
 export const NPC_ROSTER_TIERS = new Set(['character', 'archived_creature']);
 export const NPC_KINDS = new Set(['character', 'creature', 'ephemeral']);
@@ -63,23 +64,14 @@ const BOND_STOP_WORDS = new Set([
 ]);
 
 function meaningfulTokens(text) {
-    const normalized = String(text || '')
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return new Set(normalized.split(' ').filter(token => token && !BOND_STOP_WORDS.has(token)));
+    return tokenSet(text, { stopWords: BOND_STOP_WORDS });
 }
 
 /** True when `container` holds at least `threshold` of `contained`'s meaningful tokens. */
 function coversTokens(container, contained, threshold) {
     if (contained.size === 0) return true;
     if (container.size === 0) return false;
-    let overlap = 0;
-    for (const token of contained) {
-        if (container.has(token)) overlap += 1;
-    }
-    return overlap / contained.size >= threshold;
+    return coverage(contained, container) >= threshold;
 }
 
 /** Same containment heuristic as the world-fact dedupe: a text whose meaningful
