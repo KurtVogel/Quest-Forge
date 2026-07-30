@@ -89,8 +89,20 @@ export default function ChatPanel() {
 
     useEffect(() => cancelScheduledStreamPaint, []);
 
-    const runAutoSummarize = async (waitsForResolution = false) => {
-        if (waitsForResolution) return;
+    // One mount = one campaign (AppShell is keyed by session id). When this
+    // mount dies — campaign switch, New Game, boundary reset — abort any
+    // in-flight DM turn and refuse its late results: a stream resolving after
+    // unmount must never dispatch events into whatever campaign is live now.
+    const mountedRef = useRef(true);
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            abortControllerRef.current?.abort();
+        };
+    }, []);
+
+    const runAutoSummarize = async () => {
         if (summarizeInFlightRef.current) return;
         summarizeInFlightRef.current = true;
         try {
@@ -359,6 +371,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             signal: abortControllerRef.current.signal,
         });
         const requestFinishedAt = performance.now();
+        if (!mountedRef.current) return null; // Response landed after unmount/campaign switch — drop it
         const mode = opts.combatIntentOnly ? 'combat-intent' : (opts.narrationOnly ? 'narration-only' : 'standard');
         console.info(
             `[LLM timing] ${mode}: TTFT ${firstChunkAt === null ? 'n/a' : `${Math.round(firstChunkAt - requestStartedAt)}ms`}, total ${Math.round(requestFinishedAt - requestStartedAt)}ms`
@@ -423,7 +436,17 @@ Translate the player's committed action into the single bounded combat_exchange 
             // narration (the withheld setup) and reveal/reuse it later.
             events._setupMessageId = msgId;
             events._setupHidden = hideSetup;
+            // In a batched combat round the client already rolled AND applied HP from the
+            // inline damage, so ignore any HP deltas the DM narrated to avoid double-counting.
+            // Finalized BEFORE dispatch: this object enters the reducer store, and an
+            // object already in the store must never be mutated afterwards — what got
+            // autosaved would depend on a race with the 2s debounce.
+            if (opts.suppressHpEvents) {
+                events.damageTaken = 0;
+                events.enemyUpdates = [];
+            }
         }
+        if (!mountedRef.current) return null; // Never commit a turn into a different campaign's store
         dispatch({
             type: 'ADD_MESSAGE',
             payload: { id: msgId, role: 'assistant', content: narrative, events, hidden: hideSetup },
@@ -431,12 +454,6 @@ Translate the player's committed action into the single bounded combat_exchange 
 
         // Apply game events (damage, items, etc.)
         if (events) {
-            // In a batched combat round the client already rolled AND applied HP from the
-            // inline damage, so ignore any HP deltas the DM narrated to avoid double-counting.
-            if (opts.suppressHpEvents) {
-                events.damageTaken = 0;
-                events.enemyUpdates = [];
-            }
             // On a withheld roll-setup turn, defer outcome mutations to the post-roll
             // narration (see applyEvents) so the DM can't double-apply state across the split.
             // playerActionContext carries the original player intent into follow-up
@@ -707,6 +724,10 @@ Translate the player's committed action into the single bounded combat_exchange 
         setIsLoading(true);
         setLoadingStatus('Rolling accepted check');
         let stagedFollowUp = false;
+        // Failure recovery must know whether dice already landed: before dice,
+        // the proposal can be restored intact; after dice, restoring it would
+        // reopen the exact reroll-bargaining door the proposal system closes.
+        const rollCountBefore = stateRef.current.rollHistory?.length || 0;
         try {
             await handleRequestedRolls(proposal.rolls, {
                 getState: () => stateRef.current,
@@ -732,7 +753,15 @@ Translate the player's committed action into the single bounded combat_exchange 
             if (!stagedFollowUp) finalizeRoleplayTurn(proposal.playerAction);
         } catch (error) {
             if (error.name !== 'AbortError') {
-                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error resolving check: ${error.message}` } });
+                const diceRolled = (stateRef.current.rollHistory?.length || 0) > rollCountBefore;
+                if (diceRolled) {
+                    // The dice are final; only the outcome narration failed. Point the
+                    // player at the retry path instead of stranding them in silence.
+                    dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `The dice landed (see the roll above) but the DM's outcome response failed: ${error.message}. Say "continue" to have the DM narrate the result.` } });
+                } else {
+                    dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error resolving check: ${error.message}` } });
+                    dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
+                }
             }
         } finally {
             setIsLoading(false);
@@ -956,7 +985,8 @@ Translate the player's committed action into the single bounded combat_exchange 
                 }
             }
 
-            runAutoSummarize(waitsForResolution);
+            // A turn awaiting dice resolution summarizes after the outcome lands, not mid-split.
+            if (!waitsForResolution) runAutoSummarize();
 
         } catch (error) {
             if (startedCombatIntent) dispatch({ type: 'CANCEL_COMBAT_INTENT' });

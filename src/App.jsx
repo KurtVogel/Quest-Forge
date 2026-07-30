@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { GameProvider, useGameState, useGame } from './state/GameContext.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import AppShell from './components/Layout/AppShell.jsx';
 import CharacterCreation from './components/CharacterSheet/CharacterCreation.jsx';
 import SettingsModal from './components/Settings/SettingsModal.jsx';
@@ -64,7 +65,10 @@ function StartScreen() {
     }
   };
 
+  const [loadingSlot, setLoadingSlot] = useState(null);
+
   const handleLoadSave = async (slotId, isCloud = false) => {
+    if (loadingSlot) return; // A double-click must not dispatch LOAD_GAME twice
     setLoadError('');
     // An expired/absent session used to fall through to the LOCAL branch,
     // find nothing, and silently do nothing (2026-07-25 audit).
@@ -72,18 +76,23 @@ function StartScreen() {
       setLoadError('Sign in with Google to load cloud saves — your session has expired or you are signed out.');
       return;
     }
-    let savedState = null;
-    if (isCloud) {
-      savedState = await loadGameFromCloud(state.user.uid, slotId);
-    } else {
-      savedState = await loadGame(slotId);
-    }
+    setLoadingSlot(slotId);
+    try {
+      const savedState = isCloud
+        ? await loadGameFromCloud(state.user.uid, slotId)
+        : await loadGame(slotId);
 
-    if (savedState) {
-      clearImageCache();
-      dispatch({ type: 'LOAD_GAME', payload: savedState });
-    } else {
-      setLoadError('That save could not be loaded — details in the browser console.');
+      if (savedState) {
+        clearImageCache();
+        dispatch({ type: 'LOAD_GAME', payload: savedState });
+      } else {
+        setLoadError('That save could not be loaded — details in the browser console.');
+      }
+    } catch (e) {
+      console.error('Failed to load save', e);
+      setLoadError(e?.message || 'That save could not be loaded — details in the browser console.');
+    } finally {
+      setLoadingSlot(null);
     }
   };
 
@@ -219,9 +228,20 @@ function AppContent() {
   return (
     <>
       {showStartScreen && <StartScreen />}
-      {showCharacterCreation && <CharacterCreation />}
-      {state.character && <AppShell />}
-      {state.ui.isSettingsOpen && <SettingsModal />}
+      {showCharacterCreation && (
+        <ErrorBoundary label="Character Creation">
+          <CharacterCreation />
+        </ErrorBoundary>
+      )}
+      {/* Keyed by session so loading a different save mid-session remounts the
+          whole shell — ChatPanel's mount-scoped refs (RAG seeding, journal
+          baseline, narration dedupe) assume one mount = one campaign. */}
+      {state.character && <AppShell key={state.session?.id ?? 'no-session'} />}
+      {state.ui.isSettingsOpen && (
+        <ErrorBoundary label="Settings">
+          <SettingsModal />
+        </ErrorBoundary>
+      )}
     </>
   );
 }
@@ -229,7 +249,12 @@ function AppContent() {
 export default function App() {
   return (
     <GameProvider>
-      <AppContent />
+      {/* Root boundary INSIDE the provider: a render crash anywhere below shows
+          the recovery UI while the in-memory game state (and the debounced
+          autosave that reads it) survives. */}
+      <ErrorBoundary label="Quest Forge">
+        <AppContent />
+      </ErrorBoundary>
     </GameProvider>
   );
 }
