@@ -1,6 +1,7 @@
 /**
  * Persistence layer using LocalStorage (settings) and IndexedDB (game saves).
  */
+import { CURRENT_SAVE_VERSION } from './migrations.js';
 
 const SETTINGS_KEY = 'rpg-client-settings';
 const DB_NAME = 'rpg-client-saves';
@@ -79,11 +80,13 @@ function openDB() {
 const MAX_SAVED_ROLLS = 50;
 
 /**
- * Save-format version stamped into every persisted state payload. Bump it when
- * the shape changes in a way loaders must branch on; `validateSaveState` keeps
- * normalizing defensively either way.
+ * Save-format version stamped into every persisted state payload. Owned by the
+ * load-time migration pipeline (state/migrations.js), which version-gates its
+ * one-time era migrations on this stamp; `validateSaveState` keeps normalizing
+ * defensively either way. Kept under the historical SAVE_VERSION name for
+ * existing consumers.
  */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = CURRENT_SAVE_VERSION;
 
 /**
  * Build the persistable snapshot of the game state. Shared by BOTH save paths

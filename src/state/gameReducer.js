@@ -5,7 +5,7 @@ import { computeACFromInventory, getModifier } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItem, normalizeItemKey, parseMagicBonusFromName } from '../data/items.js';
 import { rollDie, rollNotation, rollWithModifier } from '../engine/dice.ts';
-import { ABILITY_NAMES, buildClassResources, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../engine/characterUtils.js';
+import { ABILITY_NAMES, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../engine/characterUtils.js';
 import { awardExperience, estimateCombatExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { addCurrency, spendCurrency, formatCurrency } from '../engine/currency.js';
 import { isEquippableItem, normalizeEquippedSlots } from '../engine/equipment.js';
@@ -31,19 +31,29 @@ import {
     NPC_DURABLE_TEXT_FIELDS,
 } from '../engine/npcRoster.js';
 import { clampEnemyAC, clampEnemyCurrentHP, clampEnemyHP, enemyHealthCondition, normalizeEnemyAttackProfile, normalizeEnemyConditions, sanitizeLoadedEnemy, validateEnemySaveBonus } from '../engine/enemyStats.js';
-import { COMBAT_PHASES, isCompanionActive, isEnemyActive, mergeCharacterUpdates, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
+import { COMBAT_PHASES, isEnemyActive, mergeCharacterUpdates, normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 import { appendRecentCheck, buildRecentCheckEntry, normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../engine/roleplayCheck.js';
 import {
     applyArcaneRecovery,
     chooseSlotLevel,
-    isSpellcaster,
     refillSpellSlots,
     resolveSpellForCharacter,
-    sanitizeSpellSlots,
     spellHealingNotation,
     spendSpellSlot,
     summarizeSpellSlots,
 } from '../engine/spellcasting.js';
+import { initialGameState } from './initialState.js';
+import { migrateLoadedSave } from './migrations.js';
+import {
+    applyDeath,
+    applyEarlyDefeat,
+    isLowLevelSolo,
+    reviveCharacter,
+    systemMessage,
+    withCondition,
+} from './handlers/shared.js';
+
+export { initialGameState };
 
 function sanitizeStoredExchangeResult(result) {
     if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
@@ -81,51 +91,16 @@ function sanitizeStoredExchangeResult(result) {
 /**
  * Validate and sanitize a loaded save state, filling in missing fields with safe defaults.
  * Protects against corrupted or old-format saves.
+ *
+ * The character deliberately passes through UNTOUCHED here: the one
+ * character-heal path (shape backfill → numeric/spell heal → AC → pending
+ * level-ups → dying-solo heal) lives in migrations.js and runs on this
+ * validated result. Healing it here too was the old double-heal, whose second
+ * result was discarded.
  */
-/** Casters loaded from any-era saves get an authoritative slot table and a sane sustained spell. */
-function healLoadedCharacter(character) {
-    if (!character || typeof character !== 'object') return null;
-    // Progression-critical fields must be real numbers: a string level/exp from a
-    // corrupted or hand-edited save survives every downstream read until the first
-    // XP award string-concatenates ("3" + 1 = "31") and persists the corruption
-    // into the next save (2026-07-28 audit). Numeric strings coerce; junk falls
-    // back to a sane floor.
-    const toInt = (value, fallback) => {
-        const n = Number(value);
-        return Number.isFinite(n) ? Math.trunc(n) : fallback;
-    };
-    const level = Math.min(MAX_CHARACTER_LEVEL, Math.max(1, toInt(character.level, 1)));
-    const maxHP = Math.max(1, toInt(character.maxHP, 10));
-    // abilityScores must be a plain object with the six canonical numeric scores —
-    // a missing/non-object value throws in buildCharacterBlock's Object.entries on
-    // every prompt build (2026-07-29 audit). Junk keys drop, junk values reset to 10.
-    const rawScores = character.abilityScores && typeof character.abilityScores === 'object' && !Array.isArray(character.abilityScores)
-        ? character.abilityScores
-        : {};
-    const abilityScores = Object.fromEntries(ABILITY_NAMES.map(name => [name, Math.max(1, toInt(rawScores[name], 10))]));
-    const healed = {
-        ...character,
-        level,
-        exp: Math.max(0, toInt(character.exp, 0)),
-        maxHP,
-        currentHP: Math.min(maxHP, Math.max(0, toInt(character.currentHP, maxHP))),
-        abilityScores,
-    };
-    if (!isSpellcaster(healed.class)) return healed;
-    const sustained = healed.sustainedSpell && typeof healed.sustainedSpell === 'object' && healed.sustainedSpell.key
-        ? healed.sustainedSpell
-        : null;
-    return {
-        ...healed,
-        spellSlots: sanitizeSpellSlots(level, healed.spellSlots),
-        sustainedSpell: sustained,
-    };
-}
-
 function validateSaveState(payload) {
     return {
         ...payload,
-        character: healLoadedCharacter(payload.character),
         inventory: Array.isArray(payload.inventory) ? payload.inventory : [],
         // narrationCue is an ephemeral request created by a player-triggered mechanic
         // (Second Wind / healing potion). Its visible system result belongs in the save,
@@ -274,16 +249,6 @@ function withInventoryAndAC(state, newInventory) {
     };
 }
 
-function systemMessage(content, extra = {}) {
-    return {
-        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        timestamp: Date.now(),
-        role: 'system',
-        content,
-        ...extra,
-    };
-}
-
 function isPlayerCombatTurn(combat) {
     if (!combat?.active) return false;
     if (combat.phase) return combat.phase === COMBAT_PHASES.AWAITING_PLAYER;
@@ -292,10 +257,6 @@ function isPlayerCombatTurn(combat) {
 
 function isBonusActionConsumable(item) {
     return item?.actionType === 'bonus' || item?.consumableType === 'healing';
-}
-
-function normalizeInventory(inventory = []) {
-    return inventory.map(item => normalizeItem(item));
 }
 
 function normalizeRefToken(value) {
@@ -626,15 +587,6 @@ function findInventoryItemByRef(inventory, ref, { preferEquipped = false } = {})
     return candidates.find(i => equipmentKindMatches(i, kind)) || null;
 }
 
-function applyPendingLevelUpsOnLoad(character) {
-    if (!character) return { character, messages: [] };
-
-    // Old saves may have banked enough XP under a previous threshold curve.
-    // Run the same engine-owned progression pass used by ADD_EXP, but only
-    // on load and without adding any new XP.
-    return awardExperience(character, 0);
-}
-
 /** Decrement a stackable item by `qty`, removing it entirely when the stack is exhausted. */
 function consumeItem(inventory, itemId, qty = 1) {
     return inventory.flatMap(item => {
@@ -691,36 +643,6 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
     };
 }
 
-/** Mark a character as dead (3 failed death saves or a fatal narrative event). */
-function applyDeath(character) {
-    return { ...character, isDead: true, dying: false, deathSaves: { successes: 0, failures: 0 } };
-}
-
-function isLowLevelSolo(character, party = []) {
-    // "Solo" means no companion who can actually fight — a party whose only
-    // companion is downed leaves the hero exactly as exposed as having none.
-    // Must match terminalState's semantic in combatExchange.js, or the exchange
-    // can close combat as a defeat-setback while this reducer starts death saves.
-    return !!character && (character.level ?? 1) <= 2 && !(party || []).some(isCompanionActive);
-}
-
-function withCondition(character, condition) {
-    const conditions = character.conditions || [];
-    if (conditions.some(c => c.toLowerCase() === condition.toLowerCase())) return character;
-    return { ...character, conditions: [...conditions, condition] };
-}
-
-/** Convert an early low-level knockout into a setback instead of campaign-ending death. */
-function applyEarlyDefeat(character) {
-    return withCondition({
-        ...character,
-        currentHP: 0,
-        dying: false,
-        lowLevelDefeat: true,
-        deathSaves: { successes: 0, failures: 0 },
-    }, 'Unconscious');
-}
-
 /**
  * End the caster's sustained spell (combat over, rest taken): drop the buff,
  * strip its condition from whoever carried it, and recompute AC without it.
@@ -745,105 +667,6 @@ function clearSustainedSpellState(character, party, inventory) {
     });
     return { character: nextCharacter, party: nextParty };
 }
-
-/** Bring a dying/stable character back to consciousness (healing or a nat-20 death save). */
-function reviveCharacter(character) {
-    return {
-        ...character,
-        dying: false,
-        lowLevelDefeat: false,
-        deathSaves: { successes: 0, failures: 0 },
-        conditions: (character.conditions || []).filter(c => c.toLowerCase() !== 'unconscious'),
-    };
-}
-
-export const initialGameState = {
-    character: null, // Should include gold: 0, silver: 0, copper: 0
-    inventory: [],
-    messages: [],
-    rollHistory: [],
-    quests: [],
-    journal: [],
-    chronicle: [], // Player-facing saga chapters retold from real play — NEVER injected into the DM prompt or RAG
-    npcs: [],
-    worldFacts: [], // Canonical world facts that never get compressed — [{id, fact, category, timestamp}]
-    storyMemory: [], // Compact dramatic callback cards — narrative-only memory, never mechanics
-    fronts: [], // Hidden campaign clocks/threats — injected into the DM prompt, never shown directly to the player
-    party: [], // Companions currently traveling with the player
-    currentLocation: null,
-    locations: [], // Canonical location records (alias-folded) — profiles + front-theater membership for the tempo system
-    recentEncounters: [], // Last few closed fights (enemies/location/outcome) — variety fatigue + heat input
-    worldTempo: null, // Engine-owned pacing state: the current cadence tempo directive (window, intensity, timing die)
-    pendingRoleplayCheck: null, // Reload-safe out-of-combat check proposal; no dice exist yet
-    appliedLootSourceIds: [], // Message IDs whose gold/item loot has already been applied — prevents double-grant
-    recentPurchases: [], // Recent one-shot purchase signatures — prevents cross-turn LLM replays from double-charging
-    recentSales: [], // Sale twin of recentPurchases — prevents replayed sells from double-removing/double-paying
-    recentCoinGrants: [], // Coin twin of recentPurchases — prevents a reward re-emitted on a later turn from paying twice
-    recentCoinLosses: [], // Spend-side twin of recentCoinGrants — prevents a payment re-emitted on a later turn from charging twice
-    recentRulings: [], // Roleplay-check rulings that ended without dice — injected so the DM cannot re-propose overruled/set-aside checks from scratch
-    recentChecks: [], // Compact out-of-combat check-proposal ledger — heat input for diceless-but-tense arcs (chases, heists)
-    recentSpellCasts: [], // "sourceId|spellKey" replay guard so a re-parsed spell_cast never double-spends a slot
-    recentRests: [], // "sourceId|restType|messageIndex" replay guard — a DM re-emitting rest_taken must not re-run the rest
-    combat: {
-        active: false,
-        enemies: [],
-        turnOrder: [],
-        currentTurn: 0,
-        round: 1,
-        xpAwarded: false, // true once any XP is earned during a fight (gates the End-Combat fallback)
-        bonusActionUsed: false,
-        phase: null,
-        openingActorIds: [],
-        queuedExchange: null,
-        lastExchangeResult: null,
-        resolvedExchangeIds: [],
-        surprise: 'none',
-        flankedEnemyIds: [], // Enemy ids under a standing flank — the engine keeps applying attack advantage across exchanges until the flank breaks
-    },
-    session: {
-        id: null,
-        name: '',
-        createdAt: null,
-        lastSaved: null,
-        prunedMessageCount: 0, // How many messages have been summarized and excluded from LLM history
-    },
-
-    user: {
-        uid: null,
-        email: null,
-        isGuest: false,
-        isAuthLoading: true, // Start true while Firebase checks token
-    },
-    settings: {
-        llmProvider: 'gemini',
-        apiKey: '',
-        geminiApiKey: '', // Gemini machinery key (RAG/Scribe/journal) — required when the DM provider is not Gemini
-        imageApiKey: '', // xAI (Grok) key for scene-art image generation — separate from the chat key
-        model: 'gemini-3.1-pro-preview',
-        preset: 'classicFantasy',
-        ruleset: 'simplified5e',
-        paceDial: 'standard', // Campaign pace setpoint: slow-burn | standard | breakneck (world-tempo thermostat)
-        customSystemPrompt: `
-Run a gritty, mature, low-fantasy RPG for an adult player with adult tastes. The world is dangerous, morally complex, and grounded. Use vivid, sensory narration for violence, fear, injury, intimacy, poverty, power, and consequence. Prioritize the narrative's depth over conventional social pleasantries or emotional comfort.
-
-ONLY call for a roll when the action is meaningfully uncertain, difficult, opposed, or dangerous, and when both success and failure would change the situation. If the outcome is obvious, low-stakes, mostly flavor, or you are unsure whether a roll is warranted, narrate the natural result instead of rolling. Do NOT stack the odds of every action against the player by rolling everything.
-
-Player agency is strict: never dictate the player character’s words, thoughts, feelings, or actions. Narrate the world and consequences, usually in 1-2 short paragraphs. Use 3 only for major openings, big consequences, intimate/important NPC moments, or climactic outcomes. Then ask “What do you do?” when the scene needs the player’s next move.
-
-Reward clever plans with advantage, easier stakes, or automatic success when appropriate.
-
-Adult themes, romance, sexuality, cruelty, corruption, and dark humor may appear when they arise naturally from character dynamics and player choices. Treat NPCs as people with independent motives, desires and agendas.
-
-Adult sensuality and explicit sex are part of the world, but they must emerge from scene logic, character dynamics, tension, attraction, privacy, opportunity, and player choices. Sexualize ONLY when appropriate, NOT by default.
-
-When and if intimate and sexual situations genuinely arise, describe them with explicitness and raw detail, including the dialogue. Savor these moments fully. Do not fade to black, let user act within the scene in every turn. Use all the c, f, p, t, a, etc. words.`,
-    },
-    ui: {
-        isSettingsOpen: false,
-        isCharacterCreationOpen: false,
-        isSaveLoadOpen: false,
-    },
-};
 
 /** How many disposition shifts to keep per NPC — enough to show an arc, bounded for state size. */
 const MAX_NPC_HISTORY = 10;
@@ -3358,135 +3181,32 @@ export function gameReducer(state, action) {
 
         // --- Bulk Load ---
         case 'LOAD_GAME': {
-            const loadedInventory = normalizeInventory(action.payload.inventory || []);
-            // Auto-equip armor/shield if nothing of that type is equipped (fixes old saves)
-            const hasEquippedArmor = loadedInventory.some(i => i.equipped && i.type === 'armor' && !i.isShield);
-            const hasEquippedShield = loadedInventory.some(i => i.equipped && (i.type === 'shield' || i.isShield));
-            if (!hasEquippedArmor || !hasEquippedShield) {
-                for (const item of loadedInventory) {
-                    if (!hasEquippedArmor && item.type === 'armor' && !item.isShield && item.baseAC) {
-                        item.equipped = true;
-                        break;
-                    }
-                }
-                for (const item of loadedInventory) {
-                    if (!hasEquippedShield && (item.type === 'shield' || item.isShield)) {
-                        item.equipped = true;
-                        break;
-                    }
-                }
-            }
-            // Collapse invalid equipped combinations from older saves: one active weapon,
-            // one armor, one shield, and no shield while a two-handed weapon is active.
-            const normalizedEquippedInventory = normalizeEquippedSlots(loadedInventory);
-            const loadedCharacter = action.payload.character;
-            // Recalculate AC on load to fix stale saves
-            // Backfill new character fields for old saves
-            const rawBackfilledCharacter = loadedCharacter ? {
-                skillProficiencies: [],
-                expertiseSkills: [],
-                classResources: loadedCharacter.class ? buildClassResources(loadedCharacter.class, loadedCharacter.level || 1) : {},
-                hitDice: {
-                    total: loadedCharacter.level || 1,
-                    remaining: loadedCharacter.level || 1,
-                    die: CLASSES[loadedCharacter.class]?.hitDie || 8,
-                },
-                ...loadedCharacter,
-                fightingStyle: normalizeFightingStyle(loadedCharacter.class, loadedCharacter.fightingStyle),
-                martialArchetype: normalizeMartialArchetype(loadedCharacter.class, loadedCharacter.level, loadedCharacter.martialArchetype),
-                ...normalizeAbilityScoreImprovementState(loadedCharacter),
-            } : loadedCharacter;
-            // Casters from any-era saves get an authoritative slot table (and a sane
-            // sustained spell) BEFORE AC recompute and pending level-ups, both of
-            // which read those fields.
-            const spellHealedCharacter = healLoadedCharacter(rawBackfilledCharacter);
-            if (spellHealedCharacter) {
-                spellHealedCharacter.armorClass = computeACFromInventory(normalizedEquippedInventory, spellHealedCharacter);
-            }
-            const pendingProgression = applyPendingLevelUpsOnLoad(spellHealedCharacter);
-            let backfilledCharacter = pendingProgression.character;
-            // Validate required state shape
-            const validated = validateSaveState(action.payload);
-            // Heal saves stranded by the old reducer/engine low-level-solo divergence:
-            // a level<=2 hero left dying OUTSIDE combat with no battle-ready companion
-            // was owed the defeat-setback, not an unreachable death-save spiral.
-            if (backfilledCharacter?.dying
-                && !action.payload.combat?.active
-                && isLowLevelSolo(backfilledCharacter, validated.party)) {
-                backfilledCharacter = applyEarlyDefeat(backfilledCharacter);
-            }
-            // One-time notice for pre-2026-07-19 Fighter saves: the legacy flat "level
-            // bonus" (+1 hit/damage per level past 1st, cap +3) is retired — Fighting
-            // Styles, Champion crits, and Extra Attack carry the martial identity now
-            // (DECISIONS.md 2026-07-19). Never ship a mid-campaign nerf silently.
-            const levelBonusNotice = [];
-            if (backfilledCharacter?.class === 'fighter'
-                && (backfilledCharacter.level || 1) >= 2
-                && !backfilledCharacter.levelBonusRetired) {
-                backfilledCharacter = { ...backfilledCharacter, levelBonusRetired: true };
-                levelBonusNotice.push(systemMessage(
-                    'Balance update: the Fighter\'s flat level bonus to hit and damage has been retired. Your edge now comes from your Fighting Style, Champion critical range, Extra Attack, Action Surge, and Second Wind — no other class carried a hidden flat bonus, and now neither does yours.'
-                ));
-            }
-            const loadedSession = {
-                ...initialGameState.session,
-                ...action.payload.session,
-                // Derive the summarization boundary from the messages actually present
-                // (summarized messages are a contiguous prefix). This self-heals a stale
-                // index from a trimmed cloud save or an older save format.
-                prunedMessageCount: (validated.messages || []).filter(m => m?.summarized).length,
-            };
-            let loadedFronts = Array.isArray(action.payload.fronts)
-                ? action.payload.fronts.map(f => normalizeFront(f))
-                : [];
-            // Heal pre-serializer saves: local saves before 2026-07-03 never persisted
-            // fronts, so every reloaded campaign silently lost its hidden world clocks.
-            // An established campaign must never run front-less — reseed the deterministic
-            // local pressure, and drop the generation/upgrade marker that described the
-            // lost front web so Settings → "Upgrade to Dynamic World" becomes available
-            // again to rebuild rich fronts from campaign canon. Cadence watermarks
-            // (lastCadenceId/lastJournalEnd) are kept so old cadences cannot replay.
-            if (loadedFronts.length === 0 && backfilledCharacter) {
-                loadedFronts = createInitialFronts({
-                    premise: loadedSession.premise,
-                    character: backfilledCharacter,
-                    location: action.payload.currentLocation || null,
-                });
-                if (loadedSession.frontDirector) {
-                    const { generationVersion: _lostGeneration, source: _lostSource, ...directorRest } = loadedSession.frontDirector;
-                    loadedSession.frontDirector = directorRest;
-                }
-            }
+            // Hostile-shape defense (validateSaveState) first, then the ordered,
+            // versioned migration pipeline (migrations.js) — which owns the ONE
+            // character-heal path plus the inventory/session/fronts heals and
+            // stamps CURRENT_SAVE_VERSION. Assembly below layers live-session
+            // fields on top: the live user is kept verbatim, live settings win
+            // over the save's (older saves have stale/missing values), the NPC
+            // roster is deduped/legacy-migrated with companion records minted,
+            // and UI state resets.
+            const save = migrateLoadedSave(validateSaveState(action.payload));
             return {
-                ...validated,
-                // Use the normalized + migrated inventory (auto-equipped armor/shield and the
-                // single-active-weapon collapse). Previously these were computed for AC only
-                // and discarded, leaving the raw saved inventory — so the migrations never applied.
-                inventory: normalizedEquippedInventory,
-                character: backfilledCharacter,
-                messages: [...validated.messages, ...pendingProgression.messages, ...levelBonusNotice],
+                ...save,
                 user: state.user,
                 settings: {
                     ...initialGameState.settings,
-                    ...(action.payload.settings || {}),
+                    ...(save.settings || {}),
                     ...state.settings,
                 },
-                // Backfill new fields for old saves that don't have them.
-                // worldFacts comes from validateSaveState so the poisoned-fact heal
-                // (non-string fact/category) is never bypassed by this raw override.
-                worldFacts: validated.worldFacts,
-                fronts: loadedFronts,
-                session: loadedSession,
                 // Companion relationship records ride the NPC roster; mint any that
                 // pre-parity saves are missing so every current companion has one.
                 // dedupeNpcRoster first folds records that forked before the
                 // namesMatch containment rule ("Saima" vs "Saima Aallotar").
-                // validated.npcs, not the raw payload — the entry-shape guard
-                // (null entries, non-string names) must not be bypassed here,
-                // the same raw-override class as the worldFacts fix above.
-                npcs: (validated.party || []).reduce(
+                // save.npcs comes through validateSaveState, so the entry-shape
+                // guard (null entries, non-string names) is never bypassed here.
+                npcs: (save.party || []).reduce(
                     (npcs, companion) => ensureCompanionRosterRecord(npcs, companion),
-                    dedupeNpcRoster(validated.npcs.map(npc => migrateLegacyNpc(npc)))
+                    dedupeNpcRoster(save.npcs.map(npc => migrateLegacyNpc(npc)))
                 ),
                 ui: { ...initialGameState.ui },
             };

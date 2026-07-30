@@ -34,6 +34,7 @@ const {
     deleteRosterCharacter,
     autoSave,
     loadAutoSave,
+    SAVE_VERSION,
 } = await import('./persistence.js');
 
 describe('settings (localStorage)', () => {
@@ -142,7 +143,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         expect(loaded.appliedLootSourceIds).toEqual(['msg-1']);
         expect(loaded.recentPurchases).toEqual([expect.objectContaining({ signature: 'dagger|1|200', itemKey: 'dagger' })]);
         expect(loaded.recentSales).toEqual([expect.objectContaining({ signature: 'torch|2|1', itemKey: 'torch' })]);
-        expect(loaded.saveVersion).toBe(2);
+        expect(loaded.saveVersion).toBe(SAVE_VERSION);
     });
 
     it('persists future top-level state fields by default (spread, not whitelist)', async () => {

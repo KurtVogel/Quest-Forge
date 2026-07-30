@@ -69,6 +69,7 @@ vi.mock('firebase/firestore', () => {
 
 const firestore = await import('firebase/firestore');
 const { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud } = await import('./cloudSync.js');
+const { SAVE_VERSION } = await import('./persistence.js');
 
 function makeGameState(overrides = {}) {
     return {
@@ -121,7 +122,7 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         expect(loaded.settings.apiKey).toBeUndefined();
         expect(loaded.settings.geminiApiKey).toBeUndefined();
         expect(loaded.user).toBeUndefined();
-        expect(loaded.saveVersion).toBe(2);
+        expect(loaded.saveVersion).toBe(SAVE_VERSION);
     });
 
     it('splits an oversized save into chunks and reassembles it on load', async () => {
