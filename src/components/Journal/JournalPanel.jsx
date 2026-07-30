@@ -81,10 +81,11 @@ export default function JournalPanel({ isOpen, onClose }) {
 
     const handleArchiveSelected = () => {
         if (selectedCount === 0) return;
-        dispatch({ type: 'ARCHIVE_NPC_BULK', payload: { ids: [...selectedIds] } });
+        const archiveAction = { type: 'ARCHIVE_NPC_BULK', payload: { ids: [...selectedIds] } };
+        dispatch(archiveAction);
         setSelectedIds(new Set());
         setReviewMessage(`Archived ${selectedCount} entries.`);
-        flushAutoSave({ npcBulkArchiveIds: [...selectedIds] }).catch(() => {});
+        flushAutoSave({ action: archiveAction }).catch(() => {});
     };
 
     const handleDeepen = async (npc) => {
@@ -96,8 +97,9 @@ export default function JournalPanel({ isOpen, onClose }) {
         setEnrichingId(npc.id);
         try {
             const update = await enrichNpcProfile({ state, npc, settings: state.settings });
-            dispatch({ type: 'UPDATE_NPC', payload: update });
-            await flushAutoSave({ npcUpdate: update });
+            const updateAction = { type: 'UPDATE_NPC', payload: update };
+            dispatch(updateAction);
+            await flushAutoSave({ action: updateAction });
         } catch (error) {
             setEnrichError(error.message || 'Failed to deepen NPC memory.');
         } finally {
@@ -115,10 +117,11 @@ export default function JournalPanel({ isOpen, onClose }) {
                 title: chapterTitle,
                 onProgress: setChronicleStatus,
             });
-            dispatch({ type: 'ADD_CHRONICLE_CHAPTER', payload: chapter });
+            const chapterAction = { type: 'ADD_CHRONICLE_CHAPTER', payload: chapter };
+            dispatch(chapterAction);
             setChapterTitle('');
             setChronicleStatus('Chapter written.');
-            await flushAutoSave({ chronicleChapter: chapter });
+            await flushAutoSave({ action: chapterAction });
         } catch (error) {
             setChronicleStatus(error.message || 'The chronicler failed.');
         } finally {
@@ -149,7 +152,7 @@ export default function JournalPanel({ isOpen, onClose }) {
                 bypassCache: !!npc.portraitUrl, // reroll must paint a genuinely new image
             });
             if (!result?.url) throw new Error('No portrait returned.');
-            dispatch({
+            const portraitAction = {
                 type: 'SET_NPC_PORTRAIT',
                 payload: {
                     id: npc.id,
@@ -157,15 +160,9 @@ export default function JournalPanel({ isOpen, onClose }) {
                     portraitPrompt: prompt,
                     portraitProvider: result.provider || '',
                 },
-            });
-            await flushAutoSave({
-                npcPortrait: {
-                    id: npc.id,
-                    portraitUrl: result.url,
-                    portraitPrompt: prompt,
-                    portraitProvider: result.provider || '',
-                },
-            });
+            };
+            dispatch(portraitAction);
+            await flushAutoSave({ action: portraitAction });
         } catch (error) {
             setEnrichError(error.message || 'Portrait failed.');
         } finally {

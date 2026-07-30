@@ -3,7 +3,7 @@
  */
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useReducer, useEffect, useCallback, useState, useRef } from 'react';
-import { appendChronicleChapter, applyNpcPortrait, archiveNpcBulk, gameReducer, initialGameState, mergeNpcUpdate } from './gameReducer.js';
+import { gameReducer, initialGameState } from './gameReducer.js';
 import { loadSettings, saveSettings, autoSave } from './persistence.js';
 import { PROVIDERS } from '../llm/adapter.js';
 import { initializeFirebase } from '../config/firebase.js';
@@ -59,33 +59,17 @@ export function GameProvider({ children }) {
         window.__QF_STATE__ = snapshot;
     }, [state]);
 
-    const flushAutoSave = useCallback(async ({ npcUpdate = null, npcBulkArchiveIds = null, npcPortrait = null, chronicleChapter = null } = {}) => {
+    const flushAutoSave = useCallback(async ({ action = null } = {}) => {
         let current = stateRef.current;
         if (!current?.session?.id || !current.character) return;
 
-        // The hints re-apply a just-dispatched change: stateRef predates the
-        // dispatch's re-render, so a hint-less flush would persist stale state.
-        if (npcUpdate) {
-            current = {
-                ...current,
-                npcs: mergeNpcUpdate(current.npcs || [], npcUpdate),
-            };
-        } else if (Array.isArray(npcBulkArchiveIds) && npcBulkArchiveIds.length > 0) {
-            current = {
-                ...current,
-                npcs: archiveNpcBulk(current.npcs, npcBulkArchiveIds),
-            };
-        } else if (npcPortrait) {
-            current = {
-                ...current,
-                npcs: applyNpcPortrait(current.npcs || [], npcPortrait),
-            };
-        } else if (chronicleChapter) {
-            current = {
-                ...current,
-                chronicle: appendChronicleChapter(current.chronicle, chronicleChapter),
-            };
-        }
+        // stateRef predates the just-dispatched change's re-render, so a bare
+        // flush would persist stale state. The caller passes the SAME action it
+        // just dispatched and we replay it through the pure reducer — this works
+        // for ANY action, unlike the old named-hint chain where an unknown hint
+        // was a silent no-op (how the first chronicle chapter vanished,
+        // DECISIONS.md 2026-07-26).
+        if (action) current = gameReducer(current, action);
 
         const saved = await autoSave({
             ...current,
@@ -102,7 +86,11 @@ export function GameProvider({ children }) {
     // believe a key was configured when it wasn't.
     useEffect(() => {
         const saved = saveSettings(state.settings);
-        if (!saved) showSaveToast('save-error');
+        if (!saved) {
+            // Deferred: a synchronous setState inside an effect cascades renders.
+            const timer = setTimeout(() => showSaveToast('save-error'), 0);
+            return () => clearTimeout(timer);
+        }
     }, [state.settings, showSaveToast]);
 
     // Flush the debounced autosave when the tab is backgrounded or closed. On phones
@@ -162,50 +150,58 @@ export function GameProvider({ children }) {
         };
     }, [state.settings.firebaseConfig]);
 
-    // Auto-save game state when significant changes happen (debounced)
+    // Auto-save game state when persisted fields change (debounced).
+    //
+    // INVERTED TRIGGER (2026-07-30 review P0-5): serializeGameState persists every
+    // top-level field by default (spread-plus-strip), but the old opt-in dependency
+    // array silently missed a dozen persisted fields — all six replay ledgers,
+    // locations, worldTempo, recentEncounters, recentRulings — so actions touching
+    // only those (APPLY_TEMPO_DIRECTIVE, CLAIM_LOOT_SOURCE, TAKE_REST's replay
+    // guard...) never scheduled a save, and a killed browser resurrected the exact
+    // double-charge bugs the ledgers exist to prevent. `chronicle` shipped broken
+    // through the same wiring once already. Now: any change to any field the
+    // serializer persists schedules the save; only the deliberately-excluded
+    // fields are skipped. A new state field can no longer forget to persist.
+    const autosaveTimerRef = useRef(null);
+    const lastAutosaveSeenRef = useRef(null);
     useEffect(() => {
-        if (state.session.id && state.character) {
-            const timer = setTimeout(() => {
-                // Stamp the exact time of save so cross-device sync can pick the newest file
-                const timestampedState = {
-                    ...state,
-                    session: {
-                        ...state.session,
-                        updatedAt: new Date().toISOString()
-                    }
-                };
-
-                // Autosaves are deliberately local-per-device: each browser keeps its own
-                // "Continue" session. Only manual saves sync to the cloud (SettingsModal).
-                // The toast must reflect reality: a quota error or broken IndexedDB
-                // otherwise means silent progress loss behind a green checkmark.
-                autoSave(timestampedState).then(saved => showSaveToast(saved ? 'local' : 'save-error'));
-            }, 2000);
-            return () => clearTimeout(timer);
+        const prev = lastAutosaveSeenRef.current;
+        lastAutosaveSeenRef.current = state;
+        if (!state.session.id || !state.character) return;
+        // `user`/`ui` are stripped by serializeGameState; `settings` persists
+        // separately via saveSettings (the save's embedded settings copy may lag
+        // a keystroke behind — harmless, LOAD_GAME merges live settings on top).
+        // A change touching ONLY those fields neither schedules a save nor
+        // resets a pending debounce timer.
+        if (prev) {
+            let gameplayChanged = false;
+            for (const key of new Set([...Object.keys(prev), ...Object.keys(state)])) {
+                if (key === 'user' || key === 'ui' || key === 'settings') continue;
+                if (prev[key] !== state[key]) { gameplayChanged = true; break; }
+            }
+            if (!gameplayChanged) return;
         }
-    // Autosave is intentionally keyed to gameplay state, not every state object field.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [
-        state.character,
-        state.inventory,
-        state.messages,
-        state.rollHistory,
-        state.quests,
-        state.party,
-        state.combat,
-        state.fronts,
-        state.pendingRoleplayCheck,
-        state.npcs,
-        state.journal,
-        state.chronicle,
-        state.worldFacts,
-        state.storyMemory,
-        state.currentLocation,
-        state.session.id,
-        state.session.frontDirector,
-        state.user?.uid,
-        showSaveToast,
-    ]);
+        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = setTimeout(() => {
+            autosaveTimerRef.current = null;
+            // Save the LATEST state at fire time, stamped so cross-device sync
+            // can pick the newest file.
+            const current = stateRef.current;
+            if (!current?.session?.id || !current.character) return;
+            const timestampedState = {
+                ...current,
+                session: { ...current.session, updatedAt: new Date().toISOString() },
+            };
+            // Autosaves are deliberately local-per-device: each browser keeps its own
+            // "Continue" session. Only manual saves sync to the cloud (SettingsModal).
+            // The toast must reflect reality: a quota error or broken IndexedDB
+            // otherwise means silent progress loss behind a green checkmark.
+            autoSave(timestampedState).then(saved => showSaveToast(saved ? 'local' : 'save-error'));
+        }, 2000);
+    }, [state, showSaveToast]);
+    useEffect(() => () => {
+        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    }, []);
 
     return (
         <GameContext.Provider value={state}>
