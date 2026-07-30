@@ -15,10 +15,14 @@ const providers = {
 /** Transient failures worth retrying: rate limits, server hiccups, dropped connections. */
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
+// fetch() rejects with a TypeError on network failure (no HTTP status at all), but
+// so does any programming bug inside a provider — retrying those only masks the bug
+// behind ~3s of pointless backoff. Match the browsers' network-failure messages.
+const NETWORK_FAILURE_RE = /failed to fetch|networkerror|load failed|network request failed/i;
+
 function isRetryableError(error) {
     if (RETRYABLE_STATUS.has(error?.status)) return true;
-    // fetch() rejects with TypeError on network failures (no HTTP status at all)
-    return error instanceof TypeError;
+    return error instanceof TypeError && NETWORK_FAILURE_RE.test(error?.message || '');
 }
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));

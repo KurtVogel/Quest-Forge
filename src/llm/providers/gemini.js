@@ -233,7 +233,12 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
     }
 
     // A truncated stream looks complete but is missing its tail — usually the JSON
-    // event block. Surface it as an error so the turn is retried, not half-applied.
+    // event block. A clean close that never delivered a finishReason is the same
+    // failure (dropped connection, proxy close, or a mid-stream error payload as
+    // the final event) — the lenient no-reason pass is only right for non-streaming.
+    if (!finishReason) {
+        throw new Error('The connection dropped mid-response — the reply is incomplete. Please retry.');
+    }
     assertCompleteResponse(finishReason);
     return fullText;
 }

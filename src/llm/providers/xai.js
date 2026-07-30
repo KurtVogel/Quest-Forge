@@ -75,7 +75,11 @@ export async function sendXaiMessage({ apiKey, model, systemPrompt, messageHisto
 
     const data = await response.json();
     assertCompleteResponse(data.choices?.[0]?.finish_reason);
-    return data.choices?.[0]?.message?.content || '';
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+        throw new Error('No response generated. The model may have been blocked or returned empty.');
+    }
+    return content;
 }
 
 /**
@@ -138,7 +142,12 @@ export async function streamXaiMessage({ apiKey, model, systemPrompt, messageHis
     }
 
     // A truncated stream looks complete but is missing its tail — usually the JSON
-    // event block. Surface it as an error so the turn is retried, not half-applied.
+    // event block. A clean close that never delivered a finish_reason is the same
+    // failure (dropped connection or proxy close) — the lenient no-reason pass is
+    // only right for non-streaming.
+    if (!finishReason) {
+        throw new Error('The connection dropped mid-response — the reply is incomplete. Please retry.');
+    }
     assertCompleteResponse(finishReason);
     return fullText;
 }

@@ -200,6 +200,17 @@ describe('streamGeminiMessage', () => {
         await expect(streamGeminiMessage({ ...SEND_ARGS, onChunk: vi.fn() })).rejects.toThrow(/MAX_TOKENS/);
     });
 
+    it('throws when the stream closes cleanly without ever delivering a finish reason', async () => {
+        // A dropped connection / proxy close ends the SSE body early with done=true;
+        // the partial text must not be returned as a complete DM turn.
+        const chunks = [
+            sseEvent({ candidates: [{ content: { parts: [{ text: 'You step into' }] } }] }),
+        ];
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse(chunks)));
+
+        await expect(streamGeminiMessage({ ...SEND_ARGS, onChunk: vi.fn() })).rejects.toThrow(/connection dropped/);
+    });
+
     it('stamps .status onto streaming HTTP errors', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(
             { error: { message: 'Quota exceeded.' } },

@@ -127,6 +127,23 @@ describe('sendMessage retry/backoff', () => {
         expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
     });
 
+    it('retries a fetch network-failure TypeError', async () => {
+        vi.useFakeTimers();
+        sendGeminiMessage
+            .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+            .mockResolvedValueOnce('recovered');
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini' });
+        await vi.advanceTimersByTimeAsync(2000);
+        await expect(promise).resolves.toBe('recovered');
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry a programming TypeError thrown inside a provider', async () => {
+        sendGeminiMessage.mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'text')"));
+        await expect(sendMessage({ ...baseOptions, provider: 'gemini' })).rejects.toThrow('Cannot read properties');
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
+    });
+
     it('gives up after two retries and surfaces the error', async () => {
         vi.useFakeTimers();
         const transient = Object.assign(new Error('rate limited'), { status: 429 });

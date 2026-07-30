@@ -61,6 +61,14 @@ describe('sendXaiMessage', () => {
         expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer xai-bare-token');
     });
 
+    it('throws instead of returning an empty string when a stop response carries no text', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            choices: [{ finish_reason: 'stop', message: { content: '' } }],
+        })));
+
+        await expect(sendXaiMessage(SEND_ARGS)).rejects.toThrow(/No response generated/);
+    });
+
     it('throws a retryable truncation error on finish_reason "length"', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
             choices: [{ finish_reason: 'length', message: { content: 'Half a rep' } }],
@@ -114,5 +122,12 @@ describe('streamXaiMessage', () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse(chunks)));
 
         await expect(streamXaiMessage({ ...SEND_ARGS, onChunk: vi.fn() })).rejects.toThrow(/truncated/);
+    });
+
+    it('throws when the stream closes cleanly without ever delivering a finish_reason', async () => {
+        const chunks = [sseEvent({ choices: [{ delta: { content: 'You step into' } }] })];
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse(chunks)));
+
+        await expect(streamXaiMessage({ ...SEND_ARGS, onChunk: vi.fn() })).rejects.toThrow(/connection dropped/);
     });
 });

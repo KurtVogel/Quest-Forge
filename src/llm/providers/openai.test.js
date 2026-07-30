@@ -66,6 +66,14 @@ describe('sendOpenAIMessage', () => {
         await expect(sendOpenAIMessage(SEND_ARGS)).rejects.toThrow(/truncated/);
     });
 
+    it('throws instead of returning an empty string when a stop response carries no text', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            choices: [{ finish_reason: 'stop', message: { content: '' } }],
+        })));
+
+        await expect(sendOpenAIMessage(SEND_ARGS)).rejects.toThrow(/No response generated/);
+    });
+
     it('throws on an unexpected finish reason such as content_filter', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
             choices: [{ finish_reason: 'content_filter', message: { content: 'Partial' } }],
@@ -120,6 +128,13 @@ describe('streamOpenAIMessage', () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse(chunks)));
 
         await expect(streamOpenAIMessage({ ...SEND_ARGS, onChunk: vi.fn() })).rejects.toThrow(/truncated/);
+    });
+
+    it('throws when the stream closes cleanly without ever delivering a finish_reason', async () => {
+        const chunks = [sseEvent({ choices: [{ delta: { content: 'You step into' } }] })];
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse(chunks)));
+
+        await expect(streamOpenAIMessage({ ...SEND_ARGS, onChunk: vi.fn() })).rejects.toThrow(/connection dropped/);
     });
 
     it('stamps .status onto streaming HTTP errors', async () => {
