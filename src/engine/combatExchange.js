@@ -5,20 +5,25 @@
  * envelope, rolls every die, and returns one immutable mechanics plan. The reducer applies
  * that plan in one dispatch; narration happens afterwards from the stored result.
  */
-import { parseNotation, rollWithModifier } from './dice.ts';
+import { rollWithModifier } from './dice.ts';
 import {
     combineRollModifiers,
     computeACFromInventory,
     getConditionRollEffects,
-    getEquippedWeapon,
     getIncapacitatingCondition,
     getModifier,
     getSavingThrowModifier,
     getSkillModifier,
     getWeaponAttackBonus,
     getWeaponDamageNotation,
-    getSneakAttackDice,
 } from './rules.js';
+import {
+    applyUncannyDodge,
+    conditionAwareAttackModifiers,
+    isCriticalNatural,
+    rollD20Kept as rollD20,
+    rollDamage,
+} from './combatMath.js';
 import { sanitizeEnemyDamage, validateEnemyAttackBonus, validateEnemySaveBonus, enemyHealthCondition, normalizeEnemyConditions } from './enemyStats.js';
 import {
     chooseSlotLevel,
@@ -292,16 +297,6 @@ function applyEnemyConditionDelta(enemy, delta, events) {
     if (removed.length > 0) events?.push({ type: 'note', text: `${enemy.name} is no longer: ${removed.join(', ')}.` });
 }
 
-function conditionAwareAttackModifiers(attackerConditions, targetConditions, baseAdvantage = false, baseDisadvantage = false) {
-    const attacker = getConditionRollEffects(attackerConditions, 'attack');
-    const target = getConditionRollEffects(targetConditions, 'incomingAttack');
-    return combineRollModifiers(baseAdvantage, baseDisadvantage, {
-        advantage: attacker.advantage || target.advantage,
-        disadvantage: attacker.disadvantage || target.disadvantage,
-        sources: [...attacker.sources, ...target.sources],
-    });
-}
-
 function rulingFlags(ruling) {
     return {
         advantage: ruling?.mode === 'advantage',
@@ -350,87 +345,6 @@ function companionHealthStatus(companion) {
 function makeExchangeId(kind, combat) {
     const uuid = globalThis.crypto?.randomUUID?.();
     return uuid ? `${kind}-${uuid}` : `${kind}-${Date.now()}-${combat?.round || 1}`;
-}
-
-function rollD20(modifier, description, advantage = false, disadvantage = false) {
-    if (advantage && disadvantage) {
-        advantage = false;
-        disadvantage = false;
-    }
-    if (!advantage && !disadvantage) {
-        const roll = rollWithModifier(1, 20, modifier, description);
-        return { roll, natural: roll.rolls[0], detail: '' };
-    }
-    const first = rollWithModifier(1, 20, modifier, description);
-    const second = rollWithModifier(1, 20, modifier, `${description} (second die)`);
-    const useFirst = advantage ? first.rolls[0] >= second.rolls[0] : first.rolls[0] <= second.rolls[0];
-    const kept = useFirst ? first : second;
-    return {
-        roll: kept,
-        natural: kept.rolls[0],
-        detail: `d20 ${first.rolls[0]}, ${second.rolls[0]} → ${kept.rolls[0]}`,
-    };
-}
-
-function shouldUseGreatWeaponFighting(character, inventory) {
-    if (character?.class !== 'fighter' || character.fightingStyle !== 'greatWeaponFighting') return false;
-    const weapon = getEquippedWeapon(inventory);
-    return !!weapon && !weapon.ranged && weapon.twoHanded;
-}
-
-function rollDamage(notation, description, { critical = false, character = null, inventory = [], advantage = false, disadvantage = false, hasAlly = false } = {}) {
-    let parsed;
-    try {
-        parsed = parseNotation(notation);
-    } catch {
-        parsed = { count: 1, sides: 4, modifier: 0 };
-        notation = '1d4';
-    }
-    const roll = rollWithModifier(critical ? parsed.count * 2 : parsed.count, parsed.sides, parsed.modifier, description);
-    const rerolls = [];
-    if (character && shouldUseGreatWeaponFighting(character, inventory) && parsed.sides > 2) {
-        roll.rolls = roll.rolls.map(value => {
-            if (value > 2) return value;
-            const replacement = rollWithModifier(1, parsed.sides, 0, `${description} reroll`).rolls[0];
-            rerolls.push(`${value}→${replacement}`);
-            return replacement;
-        });
-        roll.subtotal = roll.rolls.reduce((sum, value) => sum + value, 0);
-        roll.total = roll.subtotal + parsed.modifier;
-    }
-    // Rogue Sneak Attack (in-combat)
-    let sneakAttackDetail = null;
-    if (character && character.class === 'rogue') {
-        const weapon = getEquippedWeapon(inventory);
-        const sneakAttackDice = getSneakAttackDice(character, weapon, advantage, disadvantage, hasAlly);
-        if (sneakAttackDice > 0) {
-            const saDiceCount = critical ? sneakAttackDice * 2 : sneakAttackDice;
-            const saRolls = [];
-            let saTotal = 0;
-            for (let i = 0; i < saDiceCount; i++) {
-                const r = rollWithModifier(1, 6, 0, 'Sneak Attack').rolls[0];
-                saRolls.push(r);
-                saTotal += r;
-            }
-            roll.total += saTotal;
-            sneakAttackDetail = {
-                diceCount: saDiceCount,
-                rolls: saRolls,
-                total: saTotal,
-            };
-        }
-    }
-
-    return { roll, total: Math.max(0, roll.total), notation, rerolls, sneakAttackDetail };
-}
-
-function championCritical(character, natural) {
-    return natural === 20 || (
-        natural === 19
-        && character?.class === 'fighter'
-        && (character.level || 1) >= 3
-        && character.martialArchetype === 'champion'
-    );
 }
 
 function eventMessage(event) {
@@ -1082,7 +996,7 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
                 modifiers.disadvantage
             );
             rolls.push(attack.roll);
-            const critical = championCritical(character, attack.natural);
+            const critical = isCriticalNatural(character, attack.natural);
             const hit = attack.natural !== 1 && (critical || attack.roll.total >= enemy.ac);
             let damage = 0;
             let sneakAttackDetail = null;
@@ -1274,10 +1188,10 @@ function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions
         rolls.push(damageRoll.roll);
         damage = damageRoll.total;
         
-        if (targetType === 'player' && character?.class === 'rogue' && (character?.level >= 5) && damage > 0 && uncannyDodgeState && !uncannyDodgeState.used) {
-            damage = Math.floor(damage / 2);
-            uncannyDodgeState.used = true;
-            uncannyDodgeApplied = true;
+        if (targetType === 'player') {
+            const dodge = applyUncannyDodge(character, damage, uncannyDodgeState);
+            damage = dodge.damage;
+            uncannyDodgeApplied = dodge.applied;
         }
 
         if (targetType === 'player') {

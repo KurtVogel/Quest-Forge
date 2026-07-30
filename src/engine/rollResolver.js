@@ -13,9 +13,10 @@
  * `target`/`damage` fall back to the original two-step flow (DM applies HP).
  */
 
-import { rollWithModifier, parseNotation, rollDice } from './dice.ts';
-import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getEquippedWeapon, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES, getSneakAttackDice } from './rules.js';
+import { rollWithModifier } from './dice.ts';
+import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES } from './rules.js';
 import { validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
+import { applyUncannyDodge, conditionAwareAttackModifiers, isCriticalNatural, rollD20Kept, rollDamage } from './combatMath.js';
 
 const ABILITY_NAMES = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 
@@ -64,6 +65,10 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
 
     const results = [];
     let appliedHp = false;
+    // Uncanny Dodge (Rogue 5+) — once per roll batch, mirroring the exchange
+    // machine's once-per-turn reaction (parity fix: the rogue previously took
+    // full damage from every out-of-combat npc_attack).
+    const uncannyDodgeState = { used: false };
 
     for (const roll of requestedRolls) {
         const isNpcRoll = roll.type === 'npc_attack' || roll.type === 'npc_save';
@@ -96,7 +101,9 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
                 modifier: companion.attackBonus ?? validateEnemyAttackBonus(roll.modifier) ?? 0,
                 damage: companion.damage || sanitizeEnemyDamage(roll.damage),
             };
-            const result = resolveNpcRoll(attackRoll, character, dispatch, inventory, enemy?.ac ?? roll.dc);
+            // Target-side condition parity with the exchange machine: a prone or
+            // restrained foe grants the companion's attack advantage out of combat too.
+            const result = resolveNpcRoll(attackRoll, character, dispatch, inventory, enemy?.ac ?? roll.dc, enemy?.conditions);
             if (!result) continue;
             results.push(result);
 
@@ -138,9 +145,18 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
                     comp.hp = Math.max(0, (comp.hp ?? 0) - dmg.total);
                     Object.assign(result, { damage: dmg.total, targetName: comp.name, targetHp: comp.hp, targetMaxHp: comp.maxHp });
                 } else {
-                    playerHp = Math.max(0, playerHp - dmg.total);
-                    playerDamageTaken += dmg.total;
-                    Object.assign(result, { damage: dmg.total, targetName: character?.name || 'you', targetHp: playerHp, targetMaxHp: playerMaxHp, targetIsPlayer: true });
+                    // Uncanny Dodge parity: a Rogue 5+ halves one incoming hit per
+                    // batch, exactly like the exchange machine's once-per-turn reaction.
+                    const dodge = applyUncannyDodge(character, dmg.total, uncannyDodgeState);
+                    if (dodge.applied) {
+                        dispatch({
+                            type: 'ADD_MESSAGE',
+                            payload: { role: 'system', content: `**Uncanny Dodge** — ${character?.name || 'The rogue'} twists aside and halves the blow: ${dmg.total} → **${dodge.damage}** damage.` },
+                        });
+                    }
+                    playerHp = Math.max(0, playerHp - dodge.damage);
+                    playerDamageTaken += dodge.damage;
+                    Object.assign(result, { damage: dodge.damage, targetName: character?.name || 'you', targetHp: playerHp, targetMaxHp: playerMaxHp, targetIsPlayer: true, ...(dodge.applied && { uncannyDodgeApplied: true }) });
                 }
                 appliedHp = true;
             }
@@ -157,9 +173,22 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
             // that enemy's LIVE AC, never a DM-supplied dc — mirroring how enemy attacks always
             // use the player's live AC. Falls back to roll.dc only with no tracked target.
             const targetEnemyForAc = isAttack && roll.target ? findEnemy(roll.target) : null;
-            const effectiveRoll = (targetEnemyForAc && Number.isFinite(targetEnemyForAc.ac))
+            let effectiveRoll = (targetEnemyForAc && Number.isFinite(targetEnemyForAc.ac))
                 ? { ...roll, dc: targetEnemyForAc.ac }
                 : roll;
+            // Target-side condition parity: attacking a prone/restrained tracked foe
+            // grants advantage out of combat too (attacker-side conditions are
+            // combined inside resolvePlayerRoll, so only the target side adds here).
+            if (targetEnemyForAc?.conditions?.length) {
+                const targetEff = getConditionRollEffects(targetEnemyForAc.conditions, 'incomingAttack');
+                if (targetEff.advantage || targetEff.disadvantage) {
+                    effectiveRoll = {
+                        ...effectiveRoll,
+                        advantage: !!effectiveRoll.advantage || targetEff.advantage,
+                        disadvantage: !!effectiveRoll.disadvantage || targetEff.disadvantage,
+                    };
+                }
+            }
             const resolved = resolvePlayerRoll(effectiveRoll, character, dispatch, inventory);
             const list = Array.isArray(resolved) ? resolved : (resolved ? [resolved] : []);
             const damageNotation = isAttack
@@ -431,62 +460,36 @@ export async function handleRequestedRolls(requestedRolls, {
  */
 function rollWithAdvantage(count, sides, modifier, description, advantage, disadvantage) {
     if ((advantage || disadvantage) && count === 1 && sides === 20) {
-        const r1 = rollWithModifier(1, 20, modifier, description);
-        const r2 = rollWithModifier(1, 20, modifier, description);
-        const useFirst = advantage ? r1.rolls[0] >= r2.rolls[0] : r1.rolls[0] <= r2.rolls[0];
-        const kept = useFirst ? r1 : r2;
-        kept.advantageDetail = ` (d20: ${r1.rolls[0]}, ${r2.rolls[0]} → kept ${kept.rolls[0]})`;
-        return kept;
+        // Kernel note: advantage AND disadvantage now cancel to one die (correct
+        // 5e; the old copy quietly kept the advantage bias when a DM emitted both).
+        const { roll, first, second } = rollD20Kept(modifier, description, advantage, disadvantage, { secondDescription: description });
+        roll.advantageDetail = first != null ? ` (d20: ${first}, ${second} → kept ${roll.rolls[0]})` : '';
+        return roll;
     }
     const result = rollWithModifier(count, sides, modifier, description);
     result.advantageDetail = '';
     return result;
 }
 
-function shouldUseGreatWeaponFighting(character, inventory = []) {
-    if (character?.class !== 'fighter' || character.fightingStyle !== 'greatWeaponFighting') return false;
-    const weapon = getEquippedWeapon(inventory);
-    return !!weapon && !weapon.ranged && weapon.twoHanded;
-}
-
-function isChampionCritical(character, die) {
-    return character?.class === 'fighter'
-        && character.level >= 3
-        && character.martialArchetype === 'champion'
-        && die >= 19;
-}
-
 function applyPlayerAttackCritical(character, result) {
     const die = result.rolls?.[0];
-    if (isChampionCritical(character, die)) {
+    if (!result.isCritical && isCriticalNatural(character, die)) {
         result.isCritical = true;
         result.criticalThreshold = die === 19 ? 'Champion 19-20' : undefined;
     }
     return !!result.isCritical;
 }
 
-function rollDamageWithStyle(notation, label, { crit = false, character = null, inventory = [] } = {}) {
-    const { count, sides, modifier } = parseNotation(notation);
-    const diceCount = crit ? count * 2 : count;
-    const result = rollWithModifier(diceCount, sides, modifier, label);
-
-    if (shouldUseGreatWeaponFighting(character, inventory) && sides > 2) {
-        const rerolls = [];
-        result.rolls = result.rolls.map((roll) => {
-            if (roll > 2) return roll;
-            const rerolled = rollWithModifier(1, sides, 0, `${label} reroll`);
-            const kept = rerolled.rolls[0];
-            rerolls.push(`${roll}->${kept}`);
-            return kept;
-        });
-        if (rerolls.length > 0) {
-            result.subtotal = result.rolls.reduce((sum, roll) => sum + roll, 0);
-            result.total = result.subtotal + result.modifier;
-            result.fightingStyleDetail = `; Great Weapon Fighting rerolls: ${rerolls.join(', ')}`;
-        }
+/** Kernel-backed damage roll that preserves this file's display contract (fightingStyleDetail string, throw-on-invalid). */
+function rollDamageWithStyle(notation, label, { crit = false, character = null, inventory = [], includeSneakAttack = false, advantage = false, disadvantage = false, hasAlly = false } = {}) {
+    const out = rollDamage(notation, label, {
+        critical: crit, character, inventory, advantage, disadvantage, hasAlly,
+        onInvalid: 'throw', includeSneakAttack,
+    });
+    if (out.rerolls.length > 0) {
+        out.roll.fightingStyleDetail = `; Great Weapon Fighting rerolls: ${out.rerolls.map(r => r.replace('→', '->')).join(', ')}`;
     }
-
-    return result;
+    return out;
 }
 
 /**
@@ -496,28 +499,20 @@ function rollDamageWithStyle(notation, label, { crit = false, character = null, 
  */
 function rollAndShowDamage(notation, label, dispatch, { crit = false, character = null, inventory = [], advantage = false, disadvantage = false, hasAlly = false } = {}) {
     let result;
+    let saDetail = null;
     try {
-        result = rollDamageWithStyle(notation, label, { crit, character, inventory });
+        const out = rollDamageWithStyle(notation, label, { crit, character, inventory, includeSneakAttack: true, advantage, disadvantage, hasAlly });
+        result = out.roll;
+        saDetail = out.sneakAttackDetail;
     } catch (e) {
         console.error('[RollResolver] Bad damage notation:', notation, e);
         result = rollWithModifier(1, 4, 0, label); // safe fallback
     }
 
     const baseMod = result.modifier;
-
-    // Rogue Sneak Attack (out-of-combat)
-    let sneakAttackDetail = '';
-    if (character && character.class === 'rogue') {
-        const weapon = getEquippedWeapon(inventory);
-        const sneakAttackDice = getSneakAttackDice(character, weapon, advantage, disadvantage, hasAlly);
-        if (sneakAttackDice > 0) {
-            const saDiceCount = crit ? sneakAttackDice * 2 : sneakAttackDice;
-            const saRolls = rollDice(saDiceCount, 6);
-            const saTotal = saRolls.reduce((sum, r) => sum + r, 0);
-            result.total += saTotal;
-            sneakAttackDetail = `, +**${saTotal}** Sneak Attack (${saDiceCount}d6: ${saRolls.join(', ')})`;
-        }
-    }
+    const sneakAttackDetail = saDetail
+        ? `, +**${saDetail.total}** Sneak Attack (${saDetail.diceCount}d6: ${saDetail.rolls.join(', ')})`
+        : '';
 
     dispatch({ type: 'ADD_ROLL', payload: result });
 
@@ -533,7 +528,7 @@ function rollAndShowDamage(notation, label, dispatch, { crit = false, character 
     return { total: result.total };
 }
 
-function resolveNpcRoll(roll, character, dispatch, inventory, targetAC) {
+function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetConditions = null) {
     // Same trust boundary as the exchange machine (enemyStats.js): an out-of-band
     // modifier is a hallucination and is REJECTED to the conservative default —
     // this path was the one entry point where a DM "+40" reached the dice raw.
@@ -541,13 +536,20 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC) {
 
     // Attacks against the player (targetAC == null means the player is the target)
     // respect the player's conditions: prone/restrained/blinded etc. grant the
-    // attacker advantage; an invisible player imposes disadvantage.
+    // attacker advantage; an invisible player imposes disadvantage. Attacks against
+    // a tracked enemy (companion attacks) get the same target-side treatment via
+    // the shared kernel — parity with the exchange machine (2026-07-30).
     let effAdvantage = roll.advantage;
     let effDisadvantage = roll.disadvantage;
     let condNote = '';
     if (roll.type === 'npc_attack' && targetAC == null && character) {
         const condEffects = getConditionRollEffects(character.conditions, 'incomingAttack');
         const eff = combineRollModifiers(roll.advantage, roll.disadvantage, condEffects);
+        effAdvantage = eff.advantage;
+        effDisadvantage = eff.disadvantage;
+        condNote = eff.note ? ` (target${eff.note})` : '';
+    } else if ((roll.type === 'npc_attack' || roll.type === 'companion_attack') && Array.isArray(targetConditions) && targetConditions.length > 0) {
+        const eff = conditionAwareAttackModifiers([], targetConditions, roll.advantage, roll.disadvantage);
         effAdvantage = eff.advantage;
         effDisadvantage = eff.disadvantage;
         condNote = eff.note ? ` (target${eff.note})` : '';
@@ -598,7 +600,8 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC) {
 
 function resolveDamageRoll(roll, character, dispatch, inventory = []) {
     try {
-        const result = rollDamageWithStyle(roll.notation || '1d4', roll.description || 'Damage Roll', { character, inventory });
+        // Generic damage rolls never include Sneak Attack — that is an attack rider.
+        const { roll: result } = rollDamageWithStyle(roll.notation || '1d4', roll.description || 'Damage Roll', { character, inventory });
         const baseMod = result.modifier;
 
         dispatch({ type: 'ADD_ROLL', payload: result });

@@ -711,3 +711,60 @@ describe('standalone damage_roll malformed-notation catch (queue 2026-07-08)', (
         errorSpy.mockRestore();
     });
 });
+
+describe('exchange-machine parity via the combat math kernel (2026-07-30)', () => {
+    it('Uncanny Dodge halves one incoming npc_attack per batch for a Rogue 5+', () => {
+        // Rogue L5, no armor: AC 10 + DEX 3 = 13.
+        const rogue = {
+            class: 'rogue',
+            level: 5,
+            currentHP: 30,
+            maxHP: 30,
+            abilityScores: { strength: 10, dexterity: 16, constitution: 12, intelligence: 10, wisdom: 10, charisma: 10 },
+        };
+        // Attack 1: to-hit 18 (hit) → 2d6 = 5,5 = 10 → halved to 5.
+        // Attack 2: to-hit 19 (hit) → 2d6 = 4,4 = 8 → NOT halved (once per batch).
+        rollQueue.push(18, 5, 5, 19, 4, 4);
+        const { results, dispatch } = runWithContext([
+            { type: 'npc_attack', attacker: 'Bandit', damage: '2d6' },
+            { type: 'npc_attack', attacker: 'Second Bandit', damage: '2d6' },
+        ], { character: rogue });
+
+        expect(results[0]).toMatchObject({ damage: 5, uncannyDodgeApplied: true, targetIsPlayer: true });
+        expect(results[1].damage).toBe(8);
+        expect(results[1].uncannyDodgeApplied).toBeUndefined();
+        expect(messagesFrom(dispatch)).toContain('Uncanny Dodge');
+        // HP flush reflects 5 + 8, not 10 + 8.
+        expect(results[0].targetHp).toBe(25);
+        expect(results[1].targetHp).toBe(17);
+    });
+
+    it('a companion attack against a prone enemy rolls with advantage (target-side conditions)', () => {
+        // Advantage draws two d20s: 4 and 17, keeps 17 → 17 + 4 = 21 vs AC 12 (hit).
+        // Damage 1d8 = 6.
+        rollQueue.push(4, 17, 6);
+        const { results } = runWithContext([
+            { type: 'companion_attack', attackerId: 'comp-1', target: 'enemy-1' },
+        ], {
+            party: [{ id: 'comp-1', name: 'Kaarina', hp: 18, maxHp: 18, ac: 15, attackBonus: 4, damage: '1d8' }],
+            combat: { enemies: [{ id: 'enemy-1', name: 'Marauder', hp: 20, maxHp: 20, ac: 12, conditions: ['prone'] }] },
+        });
+
+        expect(results[0]).toMatchObject({ success: true, damage: 6, targetName: 'Marauder' });
+        expect(results[0].targetHp).toBe(14);
+    });
+
+    it('a player attack against a restrained tracked enemy gains advantage', () => {
+        // Advantage: d20s 3 and 16 → keep 16; +5 (STR 3 + prof 2) = 21 vs AC 14; damage 1d4+3 unarmed? use dagger.
+        rollQueue.push(3, 16, 4);
+        const { results } = runWithContext([
+            { type: 'attack_roll', skill: 'attack', target: 'enemy-1' },
+        ], {
+            inventory: [{ id: 'dagger', type: 'weapon', damage: '1d4', finesse: false, equipped: true }],
+            combat: { enemies: [{ id: 'enemy-1', name: 'Cultist', hp: 10, maxHp: 10, ac: 14, conditions: ['restrained'] }] },
+        });
+
+        expect(results[0].success).toBe(true);
+        expect(results[0].damage).toBeGreaterThan(0);
+    });
+});
