@@ -369,7 +369,7 @@ export async function handleRequestedRolls(requestedRolls, {
                 : '';
 
             const hpNote = appliedHp
-                ? ` Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken, damage_dealt, or enemy_updates for them.`
+                ? ` Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken or enemy_updates for them.`
                 : '';
 
             const lootNote = formatPendingLootNote(pendingLoot);

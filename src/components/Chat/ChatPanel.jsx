@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, memo } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { buildSystemPrompt } from '../../llm/promptBuilder.js';
-import { parseResponse, applyEvents, detectPreNarratedOutcome, normalizeEvents, detectSemanticTextRolls } from '../../llm/responseParser.js';
+import { parseResponse, detectPreNarratedOutcome, normalizeEvents, detectSemanticTextRolls } from '../../llm/responseParser.js';
+import { applyEvents } from '../../state/applyEvents.js';
 import { handleRequestedRolls } from '../../engine/rollResolver.js';
 import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
@@ -379,6 +380,16 @@ Translate the player's committed action into the single bounded combat_exchange 
 
         const parsed = parseResponse(fullResponse);
         const narrative = parsed.narrative;
+        // Unrepairable JSON means the DM's mechanical events were dropped. That
+        // must be VISIBLE — a silently vanished event block reads as "the DM gave
+        // me nothing", and channels without a Scribe backstop (combat_start,
+        // spell_cast, conditions) had no signal at all before this.
+        if (parsed.eventsDropped && !opts.narrationOnly && !opts.tableTalk) {
+            dispatch({
+                type: 'ADD_MESSAGE',
+                payload: { role: 'system', content: 'The DM\'s mechanical events could not be read this turn (malformed data) — the story above stands, but no game state changed. If something seemed granted or started here, ask the DM to restate it.' },
+            });
+        }
         // Table talk pauses the world: whatever a disobedient DM appends, no events
         // exist on an OOC turn — no rolls, loot, quests, or NPC/state mutations.
         let events = (opts.narrationOnly || opts.tableTalk) ? null : parsed.events;

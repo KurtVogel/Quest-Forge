@@ -8,7 +8,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { sendMessage } = vi.hoisted(() => ({ sendMessage: vi.fn() }));
 vi.mock('./adapter.js', () => ({ sendMessage }));
 
-import { parseResponse, detectPreNarratedOutcome, applyEvents, detectSemanticTextRolls } from './responseParser.js';
+import { parseResponse, detectPreNarratedOutcome, detectSemanticTextRolls } from './responseParser.js';
+import { applyEvents } from '../state/applyEvents.js';
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 
 const fence = (obj) => '```json\n' + JSON.stringify(obj, null, 2) + '\n```';

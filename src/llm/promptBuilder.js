@@ -288,7 +288,10 @@ const NARRATIVE_RULES = `## GAME MECHANICS (Narrative Mode)
 - High rolls (15+) = success with flair, Medium (8-14) = partial success or success with complication, Low (1-7) = failure
 - Combat is resolved narratively — describe the flow of battle rather than tracking exact HP`;
 
-const RESPONSE_FORMAT = `## RESPONSE FORMAT
+// Exported for the eventChannels registry agreement test: the JSON example
+// below and the registry must never drift apart (the damage_dealt lesson —
+// a channel the DM was instructed to emit while the engine silently ignored it).
+export const RESPONSE_FORMAT = `## RESPONSE FORMAT
 
 Respond with immersive narrative text, but keep turn cadence playable. Default to 1-2 short paragraphs per response. Use 3 paragraphs only for major scene openings, big consequences, intimate/important NPC moments, or climactic combat outcomes. Never use 4+ paragraphs unless the player explicitly asks for a longer passage.
 
@@ -301,7 +304,6 @@ When game events occur, include a structured JSON block at the END of your respo
     { "type": "saving_throw", "skill": "dexterity", "dc": 12, "description": "Leap clear of the collapsing scaffold", "reason": "A sudden external hazard must be resisted", "opposition": "The collapsing structure", "failure_stakes": "The character is caught in the fall", "difficulty_reason": "Meaningful but ordinary physical danger" },
     { "type": "damage_roll", "notation": "1d8+3", "description": "Out-of-combat damage only" }
   ],
-  "damage_dealt": 0,
   "damage_taken": 0,
   "starting_items": [
     { "name": "Mother's old lute", "description": "The battered instrument carried from home", "equipped": false }
