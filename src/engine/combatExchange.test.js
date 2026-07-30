@@ -13,7 +13,10 @@ const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
 
 vi.mock('./dice.ts', () => {
     let id = 0;
-    const draw = () => (rollQueue.length ? rollQueue.shift() : 10);
+    const draw = () => {
+        if (!rollQueue.length) throw new Error('dice queue exhausted — a test under-queued its rolls');
+        return rollQueue.shift();
+    };
     const parseNotation = notation => {
         const match = String(notation).replace(/\s+/g, '').match(/^(\d+)d(\d+)([+-]\d+)?$/i);
         if (!match) throw new Error(`Invalid notation: ${notation}`);
@@ -215,7 +218,7 @@ describe('combat exchange validation', () => {
 
 describe('engine-owned exchange resolution', () => {
     it('resolves the player first and gives a slain foe no attack slot', () => {
-        rollQueue.push(20, 8);
+        rollQueue.push(20, 8, 7); // nat 20 crit → 2d8+3 damage (8+7+3=18) fells the 5 HP goblin before its slot
         const plan = planCombatExchange(state({ enemies: [enemy('Goblin', { hp: 5, maxHp: 5 })] }), exchange());
 
         expect(plan.ok).toBe(true);
@@ -735,7 +738,7 @@ describe('Opening Initiative', () => {
                 ],
             },
         });
-        rollQueue.push(1, 20, 6); // Fast misses; Ally crits and damages Fast
+        rollQueue.push(1, 20, 6, 2); // Fast nat-1 misses; Ally nat-20 crits Fast for 2d6+1 (6+2+1=9)
         const plan = planOpeningExchange(openingState);
         expect(plan.ok).toBe(true);
         expect(plan.payload.result.events.map(event => event.actor)).toEqual(['Fast', 'Ally']);
@@ -804,28 +807,33 @@ describe('Rogue Combat Features', () => {
             character: { class: 'rogue', level: 2 },
         });
 
-        // 1. Valid: 1 attack slot
+        // 1. Valid: 1 attack slot — player nat-1 misses; the Goblin's default
+        // attack (2+4=6 vs the hero's unarmored AC 11) misses too.
         const oneSlot = normalizeCombatExchange({
             player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }] }],
         });
+        rollQueue.push(1, 2);
         expect(planCombatExchange(rogueL2, oneSlot).ok).toBe(true);
 
-        // 2. Valid: 1 attack + 1 dash (Cunning Action)
+        // 2. Valid: 1 attack + 1 dash (Cunning Action) — same miss/miss dice.
         const attackAndDash = normalizeCombatExchange({
             player_slots: [
                 { action: 'attack', strikes: [{ target: 'Goblin' }] },
                 { action: 'dash' }
             ],
         });
+        rollQueue.push(1, 2);
         expect(planCombatExchange(rogueL2, attackAndDash).ok).toBe(true);
 
-        // 3. Valid: 1 attack + 1 stealth check (Cunning Action)
+        // 3. Valid: 1 attack + 1 stealth check (Cunning Action) — attack nat-1
+        // misses, stealth d20 5, Goblin misses.
         const attackAndStealth = normalizeCombatExchange({
             player_slots: [
                 { action: 'attack', strikes: [{ target: 'Goblin' }] },
                 { action: 'check', skill: 'stealth', dc: 10 }
             ],
         });
+        rollQueue.push(1, 5, 2);
         expect(planCombatExchange(rogueL2, attackAndStealth).ok).toBe(true);
 
         // 4. Invalid: 2 attack slots (no Action Surge)
@@ -964,7 +972,8 @@ describe('spellcasting v1 combat exchanges', () => {
 
     it('resolves a multi-target save spell with one shared damage roll, half on success', () => {
         // Damage 6d6 first (queue 6x3=18), then two saves: 4 (+2=6, fail) and 18 (+2=20, save).
-        rollQueue.push(3, 3, 3, 3, 3, 3, 4, 18);
+        // Both foes survive and default-attack the player: 2+4=6 misses AC 11 twice.
+        rollQueue.push(3, 3, 3, 3, 3, 3, 4, 18, 2, 2);
         const plan = planCombatExchange(
             wizardState({ enemies: [enemy(`A`, { hp: 30, maxHp: 30 }), enemy(`B`, { hp: 30, maxHp: 30 })] }),
             normalizeCombatExchange({
@@ -998,7 +1007,9 @@ describe('spellcasting v1 combat exchanges', () => {
     });
 
     it('clamps an over-targeted single-target spell to its first target instead of rejecting the turn', () => {
-        rollQueue.push(2); // one save for the clamped target only — 2 + 2 = 4 vs DC, fail
+        // One save for the clamped target only — 2 + 2 = 4 vs DC, fail. A falls
+        // unconscious and loses its action; B and C default-attack (2+4=6 misses AC 11).
+        rollQueue.push(2, 2, 2);
         const plan = planCombatExchange(
             wizardState({ enemies: [enemy(`A`), enemy(`B`), enemy(`C`)] }),
             normalizeCombatExchange({
@@ -1017,7 +1028,8 @@ describe('spellcasting v1 combat exchanges', () => {
 
     it('lets a cleric pair a bonus-action heal with a normal action, but never two action spells', () => {
         // Sacred flame attack roll 15 (+6=21 hits), damage 2d8 (4,4), healing word 1d4 (3).
-        rollQueue.push(15, 4, 4, 3);
+        // The wounded Goblin still default-attacks: 2+4=6 misses the cleric's AC 10.
+        rollQueue.push(15, 4, 4, 3, 2);
         const hurt = clericState({ character: { currentHP: 10 } });
         const plan = planCombatExchange(hurt, normalizeCombatExchange({
             player_slots: [
@@ -1040,7 +1052,9 @@ describe('spellcasting v1 combat exchanges', () => {
     });
 
     it('heals a downed companion back to their feet mid-exchange', () => {
-        rollQueue.push(2); // 1d4 = 2, +3 WIS = 5
+        // Heal 1d4 = 2, +3 WIS = 5. The revived Jorun then default-attacks the Goblin
+        // (3+2=5 misses AC 12) and the Goblin default-attacks (2+4=6 misses AC 10).
+        rollQueue.push(2, 3, 2);
         const withCompanion = clericState({
             party: [{ id: `jorun`, name: `Jorun`, hp: 0, maxHp: 12, ac: 14, status: `downed`, conditions: [] }],
         });
@@ -1071,7 +1085,9 @@ describe('spellcasting v1 combat exchanges', () => {
     });
 
     it('turns undead: destroys weak undead at cleric 5, frightens the strong, spends Channel Divinity', () => {
-        rollQueue.push(3, 3); // both saves fail (3+2=5 vs DC 14)
+        // Both saves fail (3+2=5 vs DC 14). The frightened Wight still default-attacks
+        // at disadvantage (two d20s: 2, 3 → keeps 2; 2+4=6 misses the cleric's AC 10).
+        rollQueue.push(3, 3, 2, 3);
         const undeadFight = clericState({
             enemies: [
                 enemy(`Skeleton`, { hp: 13, maxHp: 13, isUndead: true }),
@@ -1236,5 +1252,151 @@ describe('standing flank persistence', () => {
             enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
         }));
         expect(plan.payload.flankedEnemyIds).toEqual(['Goblin']);
+    });
+});
+
+describe('defend stance semantics (persisted vs same-exchange)', () => {
+    it('a persisted enemy defend flag imposes disadvantage on this exchange\'s player attack, then resets', () => {
+        // planCombatExchange copies `defending` straight from persisted combat.enemies
+        // (~line 1425), so a defend committed LAST exchange bites now: the player's
+        // attack rolls two d20s and keeps the LOW die — 18 would have hit (23 vs
+        // AC 12), the kept 5 (10 vs AC 12) misses. The flag then resets for every
+        // enemy before foes choose their new actions (~line 1503), so the goblin's
+        // own attack this exchange is a normal single roll: 15+4=19 hits the hero's
+        // unarmored AC 11 for 1d6(4)+2 = 6.
+        rollQueue.push(18, 5, 15, 4);
+        const plan = planCombatExchange(state({ enemies: [enemy('Goblin', { defending: true })] }), exchange());
+
+        const playerAttack = plan.payload.result.events.find(e => e.type === 'attack' && e.actor === 'Vesa');
+        expect(playerAttack).toMatchObject({ hit: false, natural: 5 });
+        expect(playerAttack.mode).toContain('d20 18, 5');
+        const goblinAttack = plan.payload.result.events.find(e => e.actor === 'Goblin');
+        expect(goblinAttack).toMatchObject({ hit: true, damage: 6 });
+        expect(plan.payload.playerDamage).toBe(6);
+        // The enemy chose attack this exchange, so no defend flag persists onward.
+        expect(plan.payload.enemies[0].defending).toBe(false);
+    });
+
+    it('an enemy defend declared THIS exchange protects only the NEXT exchange\'s attacks', () => {
+        // Same-exchange: the player resolves BEFORE the enemy declares its stance,
+        // so the attack is one straight d20 — 12+5=17 hits AC 12 for 1d8(3)+3 = 6.
+        rollQueue.push(12, 3);
+        const first = planCombatExchange(state(), exchange({
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+        const firstAttack = first.payload.result.events.find(e => e.type === 'attack');
+        expect(firstAttack).toMatchObject({ hit: true, damage: 6, natural: 12 });
+        expect(firstAttack.mode).toBe(''); // straight roll — no advantage/disadvantage detail
+        expect(first.payload.enemies[0].defending).toBe(true); // lands in the committed post-state
+
+        // Feed the committed enemies into the next exchange: NOW the defend bites —
+        // two d20s, low kept (16 would have hit; the kept 3 → 8 misses AC 12).
+        rollQueue.push(16, 3);
+        const second = planCombatExchange(
+            state({ enemies: first.payload.enemies }),
+            exchange({ enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }] })
+        );
+        const secondAttack = second.payload.result.events.find(e => e.type === 'attack');
+        expect(secondAttack).toMatchObject({ hit: false, natural: 3 });
+        expect(secondAttack.mode).toContain('d20 16, 3');
+    });
+
+    it('a companion defend stance gives enemy attacks against it disadvantage in the SAME exchange', () => {
+        // Companion stances are same-exchange (resolveCompanions sets the flag before
+        // resolveEnemies reads it, ~line 1254) — the asymmetry with enemy defend above
+        // is deliberate. Two d20s, low kept: 17 would hit Wit's AC 13, the kept 4 misses.
+        rollQueue.push(17, 4);
+        const plan = planCombatExchange(state({
+            party: [{ id: 'wit', name: 'Wit', hp: 10, maxHp: 10, ac: 13, attackBonus: 3, damage: '1d6+1', status: 'healthy' }],
+        }), normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            companion_intents: [{ companion_id: 'wit', action: 'defend' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'wit' }],
+        }));
+
+        const attack = plan.payload.result.events.find(e => e.type === 'attack');
+        expect(attack).toMatchObject({ actor: 'Goblin', target: 'Wit', hit: false, natural: 4 });
+        expect(attack.mode).toContain('d20 17, 4');
+        expect(plan.payload.party.find(c => c.id === 'wit').hp).toBe(10);
+        expect(plan.payload.result.summary).toContain('Wit takes a defensive stance');
+    });
+});
+
+describe('surrender and interact resolution', () => {
+    it('an enemy surrender flips its status, denies it an attack, and ends the last-foe fight as victory', () => {
+        const plan = planCombatExchange(state(), normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'surrender' }],
+        }));
+
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.enemies[0].combatStatus).toBe('surrendered');
+        expect(plan.payload.result.events.some(e => e.type === 'attack')).toBe(false);
+        expect(plan.payload.result.summary).toContain('Goblin surrenders and leaves the fight');
+        // The surrendered goblin was the last active enemy → terminal victory,
+        // with the snapshot keeping it alive at full HP.
+        expect(plan.payload.result.terminal).toBe('victory');
+        expect(plan.payload.result.postState.enemies[0]).toMatchObject({ status: 'surrendered', hp: 10 });
+        expect(plan.payload.rolls).toHaveLength(0); // no dice existed anywhere in the exchange
+    });
+
+    it('a player interact slot resolves without dice as a narrative note', () => {
+        const plan = planCombatExchange(state(), normalizeCombatExchange({
+            player_slots: [{ action: 'interact', description: 'Wrench the portcullis lever' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+
+        expect(plan.ok).toBe(true);
+        // resolvePlayerSlots has no dedicated interact branch: it falls through to
+        // the generic non-attack note.
+        expect(plan.payload.result.events[0]).toMatchObject({
+            type: 'note',
+            text: 'Vesa uses their action to interact.',
+        });
+        expect(plan.payload.rolls).toHaveLength(0);
+        expect(plan.payload.result.terminal).toBeNull();
+    });
+});
+
+describe('critical hit dice doubling (live exchange path)', () => {
+    it('a natural 20 doubles the weapon damage dice exactly', () => {
+        // Longsword 1d8+3 crits as 2d8+3: queued crit dice 6 and 5 → 6+5+3 = 14.
+        rollQueue.push(20, 6, 5);
+        const plan = planCombatExchange(state({ enemies: [enemy('Goblin', { hp: 30, maxHp: 30 })] }), exchange({
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+
+        const attack = plan.payload.result.events.find(e => e.type === 'attack');
+        expect(attack).toMatchObject({ critical: true, hit: true, damage: 14, remainingHp: 16, maxHp: 30 });
+        expect(plan.payload.enemies[0].hp).toBe(16);
+        // The single damage roll carries BOTH crit dice.
+        const damageRoll = plan.payload.rolls[1];
+        expect(damageRoll.rolls).toEqual([6, 5]);
+        expect(damageRoll.total).toBe(14);
+    });
+
+    it('doubles Sneak Attack dice on a crit with exact totals', () => {
+        const rogueL3 = state({
+            character: { class: 'rogue', level: 3, abilityScores: { ...character().abilityScores, dexterity: 16 } },
+            enemies: [enemy('Goblin', { hp: 30, maxHp: 30 })],
+        });
+        rogueL3.inventory = [{ id: 'dagger', name: 'Dagger', type: 'weapon', finesse: true, damage: '1d4', equipped: true }];
+        // Advantage keeps the 20 → crit. Dagger 1d4 doubles to 2d4 (3+2), +3 DEX = 8.
+        // Sneak Attack 2d6 doubles to saDiceCount = 4 d6 (6,5,4,3) = 18. Total 26.
+        rollQueue.push(20, 5, 3, 2, 6, 5, 4, 3);
+        const plan = planCombatExchange(rogueL3, normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'advantage', reason: 'The goblin is blinded by lantern glare' },
+            }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+
+        const attack = plan.payload.result.events.find(e => e.type === 'attack');
+        expect(attack).toMatchObject({ critical: true, hit: true, damage: 26, remainingHp: 4 });
+        expect(attack.sneakAttackDetail).toEqual({ diceCount: 4, rolls: [6, 5, 4, 3], total: 18 });
+        expect(plan.payload.result.summary).toContain('Includes **18** Sneak Attack damage (4d6: 6, 5, 4, 3)');
+        expect(plan.payload.enemies[0].hp).toBe(4);
     });
 });

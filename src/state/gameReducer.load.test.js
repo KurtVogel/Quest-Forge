@@ -560,15 +560,53 @@ describe('LOAD_GAME progression-field heal (2026-07-28 audit)', () => {
         expect(next.character.level).toBe(20);
     });
 
-    it('leaves an honest banked-XP save alone (the level-up-on-load path)', () => {
+    it('applies banked XP exactly on load: 6500 XP from level 1 lands at level 5 with 0 left over', () => {
         const next = gameReducer(initialGameState, {
             type: 'LOAD_GAME',
             payload: corruptedSave({ level: 1, exp: 6500, maxHP: 12, currentHP: 12 }),
         });
 
-        // The banked XP either stays banked or has been applied by the load path —
-        // either way it must still be a number, never a string.
-        expect(typeof next.character.exp).toBe('number');
-        expect(next.character.level).toBeGreaterThanOrEqual(1);
+        // XP_THRESHOLDS (progression.js): 300 → L2, 600 → L3, 1800 → L4, 3800 → L5
+        // consumes exactly 6500; the 7500 needed for L6 stops the chain at 0 XP.
+        expect(next.character.level).toBe(5);
+        expect(next.character.exp).toBe(0);
+        // Fighter d10, CON 14: floor(10/2)+1+2 = +8 HP per level-up, fully healed
+        // each time — 12 + 4 × 8 = 44.
+        expect(next.character.maxHP).toBe(44);
+        expect(next.character.currentHP).toBe(44);
+        // Level 4 crossed → one earned ASI, none applied yet.
+        expect(next.character.pendingAbilityScoreImprovements).toBe(1);
+        expect(next.character.abilityScoreImprovementsApplied).toBe(0);
+    });
+});
+
+describe('LOAD_GAME live-session invariants (user + settings)', () => {
+    it('keeps the live user verbatim and lets live settings win over the save\'s', () => {
+        const liveState = {
+            ...initialGameState,
+            user: { uid: 'live-uid', email: 'vesa@example.com' },
+            settings: { ...initialGameState.settings, paceDial: 'breakneck', apiKey: 'live-key' },
+        };
+        const next = gameReducer(liveState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...baseCharacter, exp: 0 },
+                inventory: [],
+                messages: [],
+                user: { uid: 'stale-save-uid', email: 'someone-else@example.com' },
+                settings: { paceDial: 'slow-burn', apiKey: 'stale-key', llmProvider: 'openai', legacyOnlyKey: 'kept' },
+            },
+        });
+
+        // LOAD_GAME merge semantics (gameReducer.js ~3656-3661): `user: state.user`
+        // — the live auth reference verbatim, never the save's stale copy...
+        expect(next.user).toBe(liveState.user);
+        // ...and settings spread initial ← save ← LIVE, so every live key wins.
+        expect(next.settings.paceDial).toBe('breakneck');
+        expect(next.settings.apiKey).toBe('live-key');
+        expect(next.settings.llmProvider).toBe('gemini'); // live default beats the save's 'openai'
+        // A save-only key absent from live settings survives the merge: saved
+        // settings fill gaps, they never override.
+        expect(next.settings.legacyOnlyKey).toBe('kept');
     });
 });

@@ -26,7 +26,10 @@ vi.mock('./dice.ts', () => {
             isCritFail: rolls.length === 1 && rolls[0] === 1,
         };
     };
-    const draw = () => (rollQueue.length ? rollQueue.shift() : 10);
+    const draw = () => {
+        if (!rollQueue.length) throw new Error('dice queue exhausted — a test under-queued its rolls');
+        return rollQueue.shift();
+    };
     const parseNotation = (notation) => {
         const m = String(notation).replace(/\s+/g, '').match(/^(\d+)d(\d+)([+-]\d+)?$/i);
         if (!m) throw new Error(`Invalid dice notation: "${notation}"`);

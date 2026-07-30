@@ -411,13 +411,46 @@ describe('active combat event authority', () => {
 });
 
 describe('detectPreNarratedOutcome', () => {
-    it('flags outcome language', () => {
-        expect(detectPreNarratedOutcome('You hit the goblin and it falls dead.')).toBe(true);
-        expect(detectPreNarratedOutcome('Your blade strikes true!')).toBe(true);
+    it('flags true pre-narrated outcomes', () => {
+        const preNarrated = [
+            'You hit the goblin and it falls dead.',
+            'Your blade strikes true!',
+            'You slay the last bandit before he can scream.',
+            'A critical hit! The ogre staggers backward.',
+            'You successfully pick the lock and slip inside.',
+        ];
+        for (const narrative of preNarrated) {
+            expect(detectPreNarratedOutcome(narrative), narrative).toBe(true);
+        }
     });
 
-    it('does not flag neutral narration', () => {
-        expect(detectPreNarratedOutcome('The goblin eyes you warily, blade half-raised.')).toBe(false);
+    it('does not flag neutral setup narration', () => {
+        const neutral = [
+            'The goblin eyes you warily, blade half-raised.',
+            'You swing your blade at the goblin as it lunges toward you.',
+            '"You\'ll never hit me from up there!" the archer jeers.',
+        ];
+        for (const narrative of neutral) {
+            expect(detectPreNarratedOutcome(narrative), narrative).toBe(false);
+        }
+    });
+
+    it('still flags legitimate narration that merely contains an outcome phrase (pinned current behavior)', () => {
+        // KNOWN-BLUNT: the detector is a plain lowercase substring scan over
+        // OUTCOME_KEYWORDS, so legit dialogue, past-tense recaps, and roll-free
+        // perception prose that happen to contain a keyword false-positive. Pinned
+        // as-is — sharpening the detector is a source change out of scope here.
+        const bluntFalsePositives = [
+            // KNOWN-BLUNT: NPC dialogue about someone else's marksmanship ('strikes true').
+            '"Every arrow he fires strikes true," the innkeeper says of the marksman.',
+            // KNOWN-BLUNT: past-context recap ('you kill' matches inside 'you killed').
+            'The wanted poster names the raider you killed at the ford last winter.',
+            // KNOWN-BLUNT: perception prose with no roll in play ('you notice').
+            'You notice the door is locked, its hinges rusted shut.',
+        ];
+        for (const narrative of bluntFalsePositives) {
+            expect(detectPreNarratedOutcome(narrative), narrative).toBe(true);
+        }
     });
 });
 

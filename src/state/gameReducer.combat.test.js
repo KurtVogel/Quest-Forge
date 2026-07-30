@@ -4,7 +4,10 @@ const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
 
 vi.mock('../engine/dice.ts', () => {
     let id = 0;
-    const draw = () => (rollQueue.length ? rollQueue.shift() : 10);
+    const draw = () => {
+        if (!rollQueue.length) throw new Error('dice queue exhausted — a test under-queued its rolls');
+        return rollQueue.shift();
+    };
     const makeResult = (rolls, modifier, description) => {
         const subtotal = rolls.reduce((sum, roll) => sum + roll, 0);
         return {
