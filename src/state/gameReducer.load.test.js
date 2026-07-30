@@ -116,6 +116,87 @@ const baseCharacter = {
     conditions: [],
 };
 
+describe('LOAD_GAME entry-shape guards (queue 2026-07-29)', () => {
+    // A JSON round-trip mints `null` from an undefined array hole (cloud saves are
+    // one) — a single null entry in any of these crashed buildSystemPrompt on every
+    // turn: q.status, buildPartyBlock's c.status, buildRecentRollsBlock's
+    // r.rolls.join, the journal's consequences.join, namesMatch on an npc name.
+    const poisonedSave = () => ({
+        character: { ...baseCharacter },
+        inventory: [],
+        messages: [],
+        quests: [null, { id: 'q1', name: 'Find the ledger', status: 'active' }],
+        party: [null, { id: 'c1', name: 'Terho', hp: 10, maxHp: 10, ac: 13, level: 1, affinity: 50 }],
+        rollHistory: [
+            null,
+            { description: 'Stealth check', total: 17, rolls: [15], modifier: 2 },
+            { description: 'rolls went missing', total: 9 },
+        ],
+        journal: [
+            null,
+            { summary: 'Reached Brackwater.', consequences: 'The reeve remembers', keyDecisions: 'Refused the toll' },
+            { summary: 'Fought wolves.', consequences: ['Pack scattered'], keyDecisions: [] },
+        ],
+        npcs: [null, { name: 42, disposition: 'wary' }, { name: '  ', disposition: 'wary' }, { name: 'Mother Sorsa', disposition: 'neutral' }],
+    });
+
+    it('drops null/malformed entries and heals legacy string-valued journal lists', () => {
+        const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: poisonedSave() });
+
+        expect(next.quests).toHaveLength(1);
+        expect(next.party).toHaveLength(1);
+        expect(next.rollHistory).toHaveLength(1);
+        expect(next.journal).toHaveLength(2);
+        expect(next.journal[0].consequences).toEqual([]);
+        expect(next.journal[0].keyDecisions).toEqual([]);
+        expect(next.journal[1].consequences).toEqual(['Pack scattered']);
+        // Junk npc entries dropped; the companion-parity heal minting Terho's
+        // roster record is expected behavior (DECISIONS.md 2026-07-23).
+        expect(next.npcs.map(n => n.name)).toEqual(['Mother Sorsa', 'Terho']);
+    });
+
+    it('heals a character with missing or non-object abilityScores to the six canonical scores', () => {
+        const { abilityScores: _dropped, ...scoreless } = baseCharacter;
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: { ...poisonedSave(), character: scoreless },
+        });
+        expect(next.character.abilityScores).toEqual({
+            strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
+        });
+
+        const junkScores = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: { ...poisonedSave(), character: { ...baseCharacter, abilityScores: { strength: '16', dexterity: {}, junk: 99 } } },
+        });
+        expect(junkScores.character.abilityScores).toEqual({
+            strength: 16, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10,
+        });
+    });
+
+    it('builds a system prompt from the healed state without throwing', async () => {
+        const { buildSystemPrompt } = await import('../llm/promptBuilder.js');
+        const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: poisonedSave() });
+        const prompt = buildSystemPrompt({
+            character: next.character,
+            inventory: next.inventory,
+            quests: next.quests,
+            rollHistory: next.rollHistory,
+            journal: next.journal,
+            npcs: next.npcs,
+            party: next.party,
+            currentLocation: next.currentLocation,
+            combat: next.combat,
+            worldFacts: next.worldFacts,
+            ruleset: 'simplified5e',
+        });
+        expect(prompt).toContain('Find the ledger');
+        expect(prompt).toContain('Terho');
+        expect(prompt).toContain('Stealth check');
+        expect(prompt).toContain('Reached Brackwater.');
+    });
+});
+
 describe('LOAD_GAME progression migrations', () => {
     it('does not replay saved mechanic narration cues after Continue or Load', () => {
         const next = gameReducer(initialGameState, {

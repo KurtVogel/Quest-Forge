@@ -94,12 +94,20 @@ function healLoadedCharacter(character) {
     };
     const level = Math.min(MAX_CHARACTER_LEVEL, Math.max(1, toInt(character.level, 1)));
     const maxHP = Math.max(1, toInt(character.maxHP, 10));
+    // abilityScores must be a plain object with the six canonical numeric scores —
+    // a missing/non-object value throws in buildCharacterBlock's Object.entries on
+    // every prompt build (2026-07-29 audit). Junk keys drop, junk values reset to 10.
+    const rawScores = character.abilityScores && typeof character.abilityScores === 'object' && !Array.isArray(character.abilityScores)
+        ? character.abilityScores
+        : {};
+    const abilityScores = Object.fromEntries(ABILITY_NAMES.map(name => [name, Math.max(1, toInt(rawScores[name], 10))]));
     const healed = {
         ...character,
         level,
         exp: Math.max(0, toInt(character.exp, 0)),
         maxHP,
         currentHP: Math.min(maxHP, Math.max(0, toInt(character.currentHP, maxHP))),
+        abilityScores,
     };
     if (!isSpellcaster(healed.class)) return healed;
     const sustained = healed.sustainedSpell && typeof healed.sustainedSpell === 'object' && healed.sustainedSpell.key
@@ -134,10 +142,31 @@ function validateSaveState(payload) {
                     return restoredMessage;
                 })
             : [],
-        rollHistory: Array.isArray(payload.rollHistory) ? payload.rollHistory : [],
-        quests: Array.isArray(payload.quests) ? payload.quests : [],
-        journal: Array.isArray(payload.journal) ? payload.journal : [],
-        npcs: Array.isArray(payload.npcs) ? payload.npcs : [],
+        // Entry-shape guards (2026-07-29 audit): a JSON round-trip mints `null` from
+        // an undefined array hole, and one null entry in any of these crashes
+        // buildSystemPrompt (q.status / c.status / r.rolls.join / journal .join /
+        // namesMatch on a non-string npc name) on EVERY turn — same class as the
+        // 07-25 messages fix above.
+        rollHistory: Array.isArray(payload.rollHistory)
+            ? payload.rollHistory.filter(r => r && typeof r === 'object' && Array.isArray(r.rolls))
+            : [],
+        quests: Array.isArray(payload.quests)
+            ? payload.quests.filter(q => q && typeof q === 'object')
+            : [],
+        journal: Array.isArray(payload.journal)
+            ? payload.journal
+                .filter(e => e && typeof e === 'object')
+                // Heal entries persisted before normalizeJournalSummary: a string-valued
+                // consequences/keyDecisions crashed the prompt build / Journal panel.
+                .map(e => ({
+                    ...e,
+                    keyDecisions: Array.isArray(e.keyDecisions) ? e.keyDecisions : [],
+                    consequences: Array.isArray(e.consequences) ? e.consequences : [],
+                }))
+            : [],
+        npcs: Array.isArray(payload.npcs)
+            ? payload.npcs.filter(n => n && typeof n === 'object' && typeof n.name === 'string' && n.name.trim())
+            : [],
         // Heal poisoned saves: a pre-guard non-string fact/category crashed prompt
         // building on every turn — re-type what's fixable, drop what isn't.
         worldFacts: (Array.isArray(payload.worldFacts) ? payload.worldFacts : [])
@@ -150,7 +179,9 @@ function validateSaveState(payload) {
             ? payload.storyMemory.map(m => normalizeStoryMemoryCard(m)).filter(Boolean)
             : [],
         fronts: Array.isArray(payload.fronts) ? payload.fronts.map(f => normalizeFront(f)) : [],
-        party: Array.isArray(payload.party) ? payload.party : [],
+        party: Array.isArray(payload.party)
+            ? payload.party.filter(c => c && typeof c === 'object')
+            : [],
         currentLocation: payload.currentLocation || null,
         locations: Array.isArray(payload.locations)
             ? dedupeLocationRecords(payload.locations.map(record => normalizeLocationRecord(record)).filter(Boolean))
@@ -3618,9 +3649,12 @@ export function gameReducer(state, action) {
                 // pre-parity saves are missing so every current companion has one.
                 // dedupeNpcRoster first folds records that forked before the
                 // namesMatch containment rule ("Saima" vs "Saima Aallotar").
+                // validated.npcs, not the raw payload — the entry-shape guard
+                // (null entries, non-string names) must not be bypassed here,
+                // the same raw-override class as the worldFacts fix above.
                 npcs: (validated.party || []).reduce(
                     (npcs, companion) => ensureCompanionRosterRecord(npcs, companion),
-                    dedupeNpcRoster((action.payload.npcs || []).map(npc => migrateLegacyNpc(npc)))
+                    dedupeNpcRoster(validated.npcs.map(npc => migrateLegacyNpc(npc)))
                 ),
                 ui: { ...initialGameState.ui },
             };
