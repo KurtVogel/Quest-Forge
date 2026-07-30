@@ -4,8 +4,53 @@ One-screen answer to "what's been in the works lately?" for any agent starting a
 session. **Update this at the end of any session that ships or decides something** —
 replace stale entries, don't let it grow. For deeper history run `git log --oneline -20`.
 
-_Last updated: 2026-07-28 (audit-fix: all eight P2s from the day's two scheduled
-audits — vector-memory-rag, story-memory, inventory-economy, progression)._
+_Last updated: 2026-07-30 (audit-fix: all eight findings from the 07-29 + 07-30
+scheduled audits — providers-adapter, prompt-building, memory-journal,
+chat-orchestration)._
+
+## Audit-fix 2026-07-30: 3-P1 + 5-P2 batch cleared (queue emptied again)
+
+The two most recent scheduled audits (2026-07-29 providers-adapter + prompt-building,
+2026-07-30 memory-journal + chat-orchestration) filed 3 P1s + 5 P2s; all eight fixed
+in four commits, one per subsystem. 1227 tests + lint + build green, deployed.
+
+1. **Stream truncation guard closed (P1)** — all three streaming providers treated a
+   stream that never delivered a finish reason as complete: a premature clean close
+   (flaky network/proxy, or a Gemini mid-stream error payload) returned the partial
+   text as a full DM turn, silently eating the trailing JSON event block. Streams now
+   throw "connection dropped mid-response"; non-streaming keeps the lenient pass.
+   Plus: openai/xai non-stream empty-stop responses now throw like gemini, and
+   `isRetryableError` no longer retries programming TypeErrors (narrowed to the
+   browsers' fetch network-failure messages).
+2. **Journal-entry poison brick (P1)** — a string-valued `consequences`/`key_decisions`
+   from live Flash output persisted via ADD_JOURNAL_ENTRY's raw spread, then
+   `.join` threw in buildJournalContext → prompt build crashed EVERY turn, permanently
+   (slice(-3) can never age it out). New `normalizeJournalSummary` boundary before any
+   dispatch; buildJournalContext belt; validateSaveState heals already-poisoned saves.
+   The journal location channel also gained the Scribe's junk drop-list (shared
+   `sanitizeExtractedLocation` in locationRegistry.js) — the journal prompt itself
+   invites a literal "null" that was becoming a canonical place.
+3. **Save entry-shape guards (P2)** — null entries in quests/party/rollHistory/journal
+   and non-string npc names (a JSON round-trip mints null from an undefined hole;
+   cloud saves are one) each crashed buildSystemPrompt every turn. Per-entry drops in
+   validateSaveState + the six canonical numeric abilityScores guaranteed on load.
+   **The new tests caught a real bypass:** LOAD_GAME's npc wire read the RAW payload
+   (the 07-23 worldFacts raw-override class), crashing migrateLegacyNpc on a null
+   entry before any guard — now routed through validated.npcs.
+4. **Chat streaming perf (P1) + render window (P2)** — every streamed chunk re-rendered
+   the entire transcript (unmemoized ChatMessage, MarkdownText re-parsing per chunk).
+   Streaming paints now coalesce to one per animation frame (every clear routes
+   through clearStreamingDisplay so a scheduled paint can never resurrect withheld
+   setup text), ChatMessage/MarkdownText are memoized, the transcript mounts only the
+   last 150 messages with a "Load earlier" affordance, and the reverse().find()
+   full-copy sweeps are findLast. Live-verified on a seeded 170-message autosave
+   (seed removed after): 150 mounted → 170 on click, button self-removes, zero
+   console errors.
+
+**The strengthening queue is empty again.** Carried watch items unchanged:
+stance-stutter self-clean on the Saima save (other browser profile), Scribe gender
+backfill on pre-gender campaigns, Grok art respecting the gender tag, Aune
+appearance-thinning LOOKS baseline snapshot next playtest.
 
 ## Audit-fix 2026-07-28: eight-P2 batch cleared (queue emptied)
 
