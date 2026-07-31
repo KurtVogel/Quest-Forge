@@ -52,25 +52,46 @@ The LLM **narrates and declares game events; it never rolls dice or mutates stat
 
 ```
 src/
-  state/       gameReducer.js (~40 actions; source of truth), GameContext.jsx,
+  state/       gameReducer.js (59-line dispatcher over handlers/; source of truth),
+               handlers/ (per-domain reducer handler maps: character, economy, inventory,
+               combat, companions, npcs, quests, worldMemory, fronts, resources,
+               spellcasting, messages, session + shared.js helpers),
+               applyEvents.js (normalized DM events → dispatches: setup deferral,
+               combat lockout, coin/loot suppression), migrations.js (versioned
+               save-migration pipeline LOAD_GAME runs), GameContext.jsx,
                persistence.js (localStorage + IndexedDB), cloudSync.js (Firestore), auth.js
   engine/      dice.ts (crypto dice), rules.js (5e math: modifiers, AC, skills),
+               combatMath.js (THE attack/damage kernel: adv/dis d20s, crit rule, GWF,
+               Sneak Attack, Uncanny Dodge, condition combining — shared by
+               combatExchange AND rollResolver; new class features go here once),
+               textMatch.js (shared fuzzy tokenizer/containment behind all four
+               dedupe sites), replayLedger.js (pipe-string ledgers + conversationalDistance),
                currency.js, progression.js (XP / leveling / HP), characterUtils.js (character creation),
                characterVault.js (hero export/import + roster sanitizer), rollResolver.js,
-               fronts.js (hidden campaign clocks), worldJournal.js, vectorMemory.js (RAG),
-               storyMemory.js (dramatic callback curator), worldTempo.js (pacing thermostat +
-               tempo directives), locationRegistry.js (canonical places + theaters),
+               fronts.js (hidden campaign clocks), worldJournal.js, vectorMemory.js (RAG,
+               campaign-keyed embedding cache), storyMemory.js (dramatic callback curator),
+               worldTempo.js (pacing thermostat + tempo directives),
+               locationRegistry.js (canonical places + theaters),
                spellcasting.js (spell slots + casting math)
-  llm/         adapter.js (provider routing + model list), promptBuilder.js (system prompt),
-               turnOrchestrator.js (the async DM-turn pipeline ChatPanel drives),
-               responseParser.js (event extraction), scribe.js (background extractor),
-               chronicler.js (player-facing saga retelling), providers/{gemini,openai,imageGen}.js,
+  llm/         adapter.js (provider routing + model list), promptBuilder.js (system prompt,
+               PROMPT_CHAR_BUDGET tripwire), eventChannels.js (THE event-contract registry:
+               every DM JSON channel declared once; agreement test keeps it in sync with
+               RESPONSE_FORMAT), turnOrchestrator.js (the async DM-turn pipeline ChatPanel
+               drives — testable without the DOM), responseParser.js (text→JSON extraction
+               + prose detectors only), scribe.js (background extractor),
+               chronicler.js (player-facing saga retelling),
+               providers/{openaiCompatible,gemini,openai,xai,imageGen}.js
+               (openai/xai are thin instantiations of the shared factory),
                utils/jsonExtractor.js
   data/        classes.js, races.js, items.js, spells.js, presets.js
-  components/   Chat (orchestrator), Combat, CharacterSheet, Inventory, Quests, Journal,
+  components/   Chat (UI + effects; turn pipeline lives in llm/turnOrchestrator.js),
+               Combat, CharacterSheet, Inventory, Quests, Journal,
                Companions, DiceRoller, SceneArt, Settings, Layout,
                AmbientAudio (user-supplied MP3 player — no procedural/auto audio)
-  config/      firebase.js (user-supplied config)
+  config/      firebase.js (user-supplied config), contentLimits.js (shared clamp
+               constants: dossier/appearance 600, coin event cap, gender 40, premise 8000)
+  debug/       memoryInspectorStore.js (flag-gated runtime inspector store)
+  dev/         dev-only tooling; production imports of it are lint-banned (main.jsx exempt)
 ```
 
 ## Subsystems worth knowing
@@ -119,8 +140,8 @@ src/
 - `dice.ts` is the only TypeScript file; everything else is JS/JSX. `tsconfig.json` exists but the app is **not** type-checked in CI.
 - Player-facing dice must stay crypto-random (`crypto.getRandomValues`, via `dice.ts`) — never `Math.random()`. This is the project's "the LLM can't cheat the dice" guarantee.
 - **Missing-events nudge (2026-07-22):** a DM response with NO JSON block at a contract moment (the one-time premise opening, or completed-agreement phrasing) triggers one JSON-only follow-up hard-whitelisted to `quest_updates` + opening `starting_items` — the only channels without a Scribe audit backstop (`components/Chat/missingEventsNudge.js`). Coin/check turns are excluded by design; makes weak-JSON DMs (Grok) safe at those moments.
-- **One-shot mechanics invariant (DECISIONS.md 2026-07-21):** every DM-writable channel that mutates numeric/mechanical state MUST ship with an exact-amount/one-shot prompt contract, same-message sourceId idempotency, AND a cross-message replay ledger in the same commit (`recentPurchases`/`recentSales`/`recentCoinGrants`/`recentCoinLosses`/`recentSpellCasts`/`recentRests` are the pattern; combat uses `exchangeId`). The DM re-emitting an already-applied event on later turns is a proven, recurring failure mode — never add a new event channel without its ledger. Since 2026-07-22 the COIN ledgers compare signatures by total copper value (denomination drift — "12 silver" recapped as "1 gold 2 silver" — is the same transaction) and measure their replay windows in conversational distance (system lines and hidden roll-setup messages never age the guard; a dice turn burns ~5 raw messages and silently expired the old raw-index window). Apply the same pattern to the spell/rest ledgers on first observed failure. Deliberate prompt-only exceptions (XP, out-of-combat damage/healing) are documented in that DECISIONS entry with reasons.
-- **New persisted top-level state fields need BOTH autosave wires (DECISIONS.md 2026-07-26):** an entry in GameContext's debounced-autosave dependency array AND (if a handler flushes explicitly after dispatch) a real `flushAutoSave` hint — the flush reads a pre-dispatch state ref, so an unknown hint is a silent no-op and the field never persists. `chronicle` shipped broken both ways before this was caught live.
+- **One-shot mechanics invariant (DECISIONS.md 2026-07-21):** every DM-writable channel that mutates numeric/mechanical state MUST ship with an exact-amount/one-shot prompt contract, same-message sourceId idempotency, AND a cross-message replay ledger in the same commit (`recentPurchases`/`recentSales`/`recentCoinGrants`/`recentCoinLosses`/`recentSpellCasts`/`recentRests` are the pattern; combat uses `exchangeId`). The DM re-emitting an already-applied event on later turns is a proven, recurring failure mode — never add a new event channel without its ledger. Since 2026-07-22 the COIN ledgers compare signatures by total copper value (denomination drift — "12 silver" recapped as "1 gold 2 silver" — is the same transaction), and since 2026-07-30 EVERY ledger (coins, purchases, sales, spells, rests) measures its replay window in conversational distance (system lines and hidden roll-setup messages never age the guard; a dice turn burns ~5 raw messages and silently expired the old raw-index windows). The pipe-string ledger machinery lives in `engine/replayLedger.js`. Deliberate prompt-only exceptions (XP, out-of-combat damage/healing) are documented in that DECISIONS entry with reasons. Adding a DM event channel itself is now one registry entry in `llm/eventChannels.js` — an agreement test fails if the registry and the prompt's RESPONSE_FORMAT example drift apart in either direction.
+- **Autosave persists new state fields by construction (DECISIONS.md 2026-07-30, obsoleting the 2026-07-26 "BOTH wires" rule):** the debounced autosave triggers on ANY change to any persisted top-level field (only `user`/`ui`/`settings` are skipped, matching serializeGameState), and `flushAutoSave({ action })` replays the just-dispatched action through the pure reducer instead of a hand-maintained hint chain. A new field needs NO wiring to persist — the `chronicle`-class silent-loss bug is structurally gone.
 - `responseParser.js`, `scribe.js`, and `jsonExtractor.js` carry a lot of hard-won resilience against LLM output quirks. Edit carefully — regressions here break the game loop silently.
 - `npm run lint` is expected to pass. Keep it clean when changing code.
 - Windows-first repo (paths, `install.cmd`).

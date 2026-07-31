@@ -8,6 +8,59 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-30/31 · The ultra-review fix campaign: structural fixes over per-incident patching (autosave by construction, event-channel registry, combat kernel, campaign-keyed RAG, reducer domain split).**
+A six-lens architecture review (docs/ULTRA_REVIEW_2026-07-30.md) found that most recurring
+audit findings were the SAME bug classes re-fixed one incident at a time — copies of one
+invariant drifting apart. Every fix in this campaign targets the class, not the instance.
+Settled choices, each of which obsoletes an older per-incident rule:
+
+1. **Autosave is inverted (obsoletes the 2026-07-26 "BOTH wires" rule):** the debounced
+   autosave fires on ANY change to any persisted top-level field — the trigger now matches
+   serializeGameState's spread-plus-strip contract instead of an opt-in dependency array
+   that had silently missed every replay ledger, `locations`, and `worldTempo`.
+   `flushAutoSave({ action })` replays the dispatched action through the pure reducer;
+   the named-hint chain (unknown hint = silent no-op, the chronicle-loss class) is gone.
+2. **The DM event contract lives in ONE registry (`llm/eventChannels.js`):** every wire
+   channel declared once with uniform element-shape guards; an agreement test parses the
+   RESPONSE_FORMAT example and fails on drift in either direction. The dead `damage_dealt`
+   channel (advertised to the DM, ignored by the engine for months) is removed — that
+   class cannot recur. `applyEvents` (dispatch policy) moved to `state/`; responseParser
+   is parsing + prose detectors only. Missing outside-combat DC defaults to 10 everywhere
+   (the parser's 15 contradicted the prompt's own "never default 15" ladder). An
+   unrepairable event block now posts a visible system line instead of vanishing.
+3. **Combat math has one kernel (`engine/combatMath.js`):** adv/dis d20s, the crit rule,
+   GWF rerolls, Sneak Attack, condition combining, Uncanny Dodge — shared by the exchange
+   machine and rollResolver, which had already drifted (no condition effects on
+   out-of-combat companion attacks; no Uncanny Dodge outside combat — both fixed, tested).
+   New class features are written once, in the kernel.
+4. **RAG embeddings are campaign-keyed (`[sessionId, text]`, EMBED_DB v4):** the old
+   text-only key made a full wipe the only safe campaign switch, so ChatPanel wiped on
+   every mount and the persisted cache was PRODUCTION-UNREACHABLE — every reload
+   re-embedded the whole corpus. Now seeding activates a campaign and loads only its rows;
+   switch-back costs zero API calls. AppShell is keyed by session id so an in-session
+   Load Game remounts ChatPanel (its mount-scoped refs assumed one mount = one campaign —
+   cross-campaign memory contamination otherwise), and in-flight turns abort on unmount.
+5. **Every replay ledger measures conversational distance** (spells and rests had the
+   proven raw-index dice-turn expiry bug "deferred until observed" — deferral rejected:
+   the failure class was already proven on a sibling ledger). Shared machinery in
+   `engine/replayLedger.js`; shared constants in `config/contentLimits.js` (the 600-char
+   dossier cap was four literals plus a contradictory 2000 in characterVault — vault
+   aligned to 600 so imported heroes stop silently truncating on first Scribe merge).
+6. **The reducer is a dispatcher over per-domain handler modules** (`state/handlers/`,
+   59-line gameReducer.js), with save healing extracted to a versioned
+   `state/migrations.js` pipeline that finally READS the saveVersion stamp. ChatPanel's
+   async turn pipeline is a DOM-free module (`llm/turnOrchestrator.js`) with integration
+   tests over the real parser + reducer. openai/xai providers are instantiations of one
+   `openaiCompatible.js` factory (the stream-truncation guard now exists once).
+7. **Lint enforces what convention used to:** dice.ts is actually linted
+   (typescript-eslint), `varsIgnorePattern` narrowed from `^[A-Z_]` (which exempted every
+   dead ALL_CAPS constant) to `^_` with `react/jsx-uses-vars`, production imports of
+   `src/dev/` are banned (inspector store moved to `src/debug/`), and prompt size has a
+   measured tripwire (`PROMPT_CHAR_BUDGET` 160k chars; maxed-out campaign measured at
+   ~139k ≈ 34k tokens on 2026-07-30). Dead code removed: 15 never-dispatched reducer
+   actions, the dice.ts modifier-wrapper trap APIs, and DC_TABLE (which encoded the
+   repudiated classic DC ladder).
+
 **2026-07-27 · An accepted flanking ruling persists engine-side across exchanges (`combat.flankedEnemyIds`), not re-adjudicated per round.**
 Live finding (Vesa): flanking advantage granted via `situational_ruling` lasted exactly one
 exchange — the DM had to re-emit the identical ruling every round and reliably forgot, so an

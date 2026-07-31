@@ -886,6 +886,53 @@ UI; the dead `signInAsGuest` function is now removed from `auth.js` too. Guest U
 per-device, so guest cloud saves would never have synced across devices — removal was the
 right call. Signed-out play (local saves) remains fully supported.
 
+### Ultra-review leftovers (2026-07-31): the deferred P2s — status: `idea` (each independent)
+The 2026-07-30 six-lens review (docs/ULTRA_REVIEW_2026-07-30.md) was fixed in full at
+P0/P1 level (see DECISIONS.md 2026-07-30/31); these P2s were deliberately deferred and
+remain worth doing, roughly in value order:
+- **Context slicing / selector hooks:** GameContext serves one monolithic state value, so
+  every dispatch re-renders every panel; the transcript survives on memo. Split the
+  provider into slices or adopt use-context-selector-style hooks. Related quick wins:
+  mount JournalPanel conditionally (it runs its filters while returning null), buffer
+  SettingsModal text inputs as local drafts committed on blur (today each keystroke is a
+  full reducer pass + localStorage serialize — the firebaseConfig field in the same file
+  already does it right).
+- **Autosave write cost:** the full message history is rewritten to IndexedDB every
+  debounce tick — O(campaign) per turn, monotonically slower on phones. Consider an
+  append-only messages store keyed by session, or snapshot-plus-tail.
+- **Cloud chunked READ transaction:** the write path is transactional but load reads
+  metadata + chunks in two steps; a concurrent save from another device presents as
+  "no save exists" with only a console log. Retry-once on chunk mismatch + surface a
+  distinct error.
+- **Chronicler resumability:** a mid-run failure discards all completed passages
+  (re-billed DM tokens on retry). Return `{passages, completedThrough}` or stream via
+  onProgress.
+- **engine→llm layering:** outOfCombatRollPolicy, vectorMemory, worldJournal are
+  LLM-calling services filed under engine/, making the engine↔llm boundary un-lintable.
+  Move them (or bless a documented "machinery-backed engine" band) and add the
+  no-restricted-imports rule.
+- **Companion matching semantics:** ADD_COMPANION dedupes case-insensitively but
+  UPDATE/REMOVE match case-sensitive exact — a DM emitting "yrsa" for "Yrsa" silently
+  no-ops. One findCompanion helper with roster semantics; also store `npcId` on the
+  companion instead of fuzzy name-joins in two render paths.
+- **UI re-implements engine gift rules:** InventoryPanel recomputes gear-gift legality to
+  disable buttons; export one `evaluateGearGift(item, companion)` from companionGear and
+  consume it in both the reducer and the button.
+- **Modal accessibility:** no dialog roles/focus traps/Escape handling on the five
+  overlays; no aria-live on the streaming transcript. One shared Modal component.
+- **jsonExtractor backward anchor walk** is not string-aware (same class as the 07-14 P0,
+  half-fixed); repairJson's comma-strip regex runs before the string-aware pass. Fix when
+  a golden fixture demonstrates it.
+- **imageGen failure-path caching:** when xAI fails repeatedly, the Gemini fallback
+  re-bills per attempt; cache the fallback result under the preferred key with a short
+  TTL (keep the "never block a better provider" intent).
+- **Scribe mega-call blast radius:** the per-turn Scribe carries ten concerns in one JSON
+  response; one malformed reply silently loses all ten. A golden-fixture test for
+  "mangled-but-repairable Scribe output still applies the loot audit" is cheap insurance.
+- **detectPreNarratedOutcome** is a blunt substring scan with pinned KNOWN-BLUNT false
+  positives (see responseParser.test.js) — candidate for the semantic-audit treatment
+  outOfCombatRollPolicy got.
+
 ---
 
 ## Launch & Monetization (pre-public engineering, from Cowork research 2026-07-09)

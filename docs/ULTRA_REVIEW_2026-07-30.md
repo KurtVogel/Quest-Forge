@@ -1,5 +1,11 @@
 # Ultra-Critical Codebase Review — 2026-07-30
 
+> **STATUS 2026-07-31: FIXED.** Every P0 and P1 below (and most P2s) was applied in the
+> 2026-07-30→31 fix campaign — see DECISIONS.md 2026-07-30/31 for the settled choices and
+> STATUS.md for the shipped summary. The deliberately deferred P2s are catalogued in
+> IDEAS.md under "Ultra-review leftovers (2026-07-31)". This file is kept as the review
+> record; its "attack order" section is historical.
+
 Six parallel deep reviews (state layer, engine, LLM layer, components, test suite,
 cross-cutting seams) over master @ `0726fac`. Every P0 below was independently
 re-verified against live source before inclusion. Line numbers are exact as of this
