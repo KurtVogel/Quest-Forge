@@ -1,0 +1,298 @@
+/**
+ * Inventory: add/remove items, consumable use (engine-rolled healing), and
+ * equip/unequip including the by-ref resolution used by DM equipment_changes.
+ */
+import { normalizeItem, normalizeItemKey } from '../../data/items.js';
+import { isEquippableItem, normalizeEquippedSlots } from '../../engine/equipment.js';
+import { rollNotation } from '../../engine/dice.ts';
+import { gameReducer } from '../gameReducer.js';
+import {
+    companionStatus,
+    consumeItem,
+    isPlayerCombatTurn,
+    mintOwnedItem,
+    normalizeCompanion,
+    normalizeRefToken,
+    reviveCharacter,
+    systemMessage,
+    withInventoryAndAC,
+} from './shared.js';
+
+function isBonusActionConsumable(item) {
+    return item?.actionType === 'bonus' || item?.consumableType === 'healing';
+}
+
+function equipmentKindMatches(item, kind) {
+    const k = String(kind || '').toLowerCase();
+    if (!k) return false;
+    if (k === 'armor') return item.type === 'armor' && !item.isShield;
+    if (k === 'shield') return item.type === 'shield' || item.isShield;
+    if (k === 'weapon') return item.type === 'weapon';
+    return false;
+}
+
+function findInventoryItemByRef(inventory, ref, { preferEquipped = false } = {}) {
+    const payload = typeof ref === 'string' ? { name: ref } : (ref || {});
+    const candidates = preferEquipped
+        ? [...inventory].sort((a, b) => Number(!!b.equipped) - Number(!!a.equipped))
+        : inventory;
+
+    const id = payload.itemId || payload.id;
+    if (id) {
+        const byId = candidates.find(i => i.id === id);
+        if (byId) return byId;
+    }
+
+    const itemKey = normalizeItemKey(payload.itemKey || payload.key || '');
+    if (itemKey) {
+        const byKey = candidates.find(i => i.itemKey === itemKey);
+        if (byKey) return byKey;
+    }
+
+    const name = payload.name || payload.item || '';
+    const nameKey = normalizeItemKey(name);
+    if (nameKey) {
+        const byNameKey = candidates.find(i => i.itemKey === nameKey);
+        if (byNameKey) return byNameKey;
+    }
+
+    const nameToken = normalizeRefToken(name);
+    if (nameToken) {
+        const byName = candidates.find(i =>
+            normalizeRefToken(i.name) === nameToken ||
+            normalizeRefToken(i.itemKey) === nameToken
+        );
+        if (byName) return byName;
+    }
+
+    const kind = payload.type || payload.slot || payload.category || name;
+    return candidates.find(i => equipmentKindMatches(i, kind)) || null;
+}
+
+export const handlers = {
+    ADD_ITEM(state, action) {
+        // The engine mints item ids and owns equip placement. A DM/Scribe payload
+        // carrying `id` could collide with an existing entry (double-delete on
+        // REMOVE_ITEM), and `equipped: true` would displace the hero's active
+        // weapon/armor through normalizeEquippedSlots' preferred-item path,
+        // bypassing the deliberate empty-slot-only auto-equip (2026-07-28 audit).
+        // Premise starting items are the one sanctioned equip-on-add channel and
+        // declare it via `equipOnAdd`.
+        const equipOnAdd = !Array.isArray(action.payload) && action.payload?.equipOnAdd === true;
+        const newItem = mintOwnedItem(normalizeItem(action.payload), { equipOnAdd });
+        // Auto-equip armor/shields if no other of that type is currently equipped
+        if (!newItem.equipped) {
+            const isArmor = newItem.type === 'armor' && !newItem.isShield;
+            const isShield = newItem.type === 'shield' || newItem.isShield;
+            const hasEquippedTwoHandedWeapon = state.inventory.some(i => i.equipped && i.type === 'weapon' && i.twoHanded);
+            if (isArmor && !state.inventory.some(i => i.equipped && i.type === 'armor' && !i.isShield)) {
+                newItem.equipped = true;
+            }
+            if (isShield && !hasEquippedTwoHandedWeapon && !state.inventory.some(i => i.equipped && (i.type === 'shield' || i.isShield))) {
+                newItem.equipped = true;
+            }
+        }
+        return withInventoryAndAC(state, normalizeEquippedSlots([...state.inventory, newItem], newItem.equipped ? newItem.id : null));
+    },
+
+    USE_ITEM(state, action) {
+        // Player-initiated consumable use. The engine owns the dice and HP; the
+        // resulting system message also informs the DM (it enters the LLM history),
+        // so the DM narrates the act on its next turn without re-applying anything.
+        // Payload is an item id, or { itemId, targetId } to administer a healing
+        // consumable to a companion (out of combat only).
+        const usePayload = action.payload && typeof action.payload === 'object'
+            ? action.payload
+            : { itemId: action.payload };
+        const item = state.inventory.find(i => i.id === usePayload.itemId);
+        if (!item) return state;
+        const usesBonusAction = isBonusActionConsumable(item);
+
+        // Administer a healing consumable to a companion: same engine-rolled
+        // healing, revives downed (never dead) — mirrors the player path below.
+        if (usePayload.targetId && item.consumableType === 'healing' && item.healing) {
+            const companion = (state.party || []).find(c => c.id === usePayload.targetId);
+            if (!companion) return state;
+            if (state.combat.active) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`Administering a ${item.name} to ${companion.name} mid-fight is not supported — use healing magic in your combat turn, or wait until the fight ends.`)],
+                };
+            }
+            if (companion.status === 'dead') {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`The ${item.name} cannot help the dead.`)],
+                };
+            }
+            const companionMaxHp = companion.maxHp || companion.hp || 1;
+            if ((companion.hp ?? 0) >= companionMaxHp) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`${companion.name} is already at full health — you keep the ${item.name}.`)],
+                };
+            }
+            const wasDown = (companion.hp ?? 0) <= 0;
+            // item.healing is untrusted (LLM items_found / imported hero files pass it
+            // through unvalidated) — a malformed notation must reject the use visibly,
+            // not throw out of the reducer. The item is kept, nothing is consumed.
+            let roll;
+            try {
+                roll = rollNotation(item.healing, item.name);
+            } catch {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`**${item.name}** has an invalid healing formula (${item.healing}) and cannot be used.`)],
+                };
+            }
+            const healedTo = Math.min(companionMaxHp, (companion.hp || 0) + roll.total);
+            const gained = healedTo - (companion.hp || 0);
+            return {
+                ...state,
+                party: state.party.map(c => c.id === companion.id
+                    ? normalizeCompanion({ hp: healedTo, status: companionStatus(healedTo, companionMaxHp) }, c)
+                    : c),
+                inventory: consumeItem(state.inventory, item.id),
+                rollHistory: [...state.rollHistory, roll],
+                messages: [
+                    ...state.messages,
+                    systemMessage(
+                        `You give ${companion.name} a **${item.name}** — they recover **${gained} HP** (now ${healedTo}/${companionMaxHp})${wasDown ? ' and are back on their feet' : ''}. ${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`,
+                        {
+                            narrationCue: {
+                                type: 'player_mechanic',
+                                mechanic: item.name,
+                                effect: `${companion.name} recovered ${gained} HP${wasDown ? ' and regained consciousness' : ''}`,
+                                actionType: 'action',
+                            },
+                        }
+                    ),
+                ],
+            };
+        }
+
+        // Healing consumables resolve fully client-side with real dice.
+        if (item.consumableType === 'healing' && item.healing) {
+            if (state.character.isDead) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`The ${item.name} cannot help the dead.`)],
+                };
+            }
+            if (state.character.currentHP >= state.character.maxHP) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`You're already at full health — you keep the ${item.name}.`)],
+                };
+            }
+            if (usesBonusAction && state.combat.active && !isPlayerCombatTurn(state.combat)) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`**${item.name}** is a bonus action — drink it on your turn.`)],
+                };
+            }
+            if (usesBonusAction && state.combat.active && state.combat.bonusActionUsed) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`**Bonus action already used** — ${item.name} can wait until your next turn.`)],
+                };
+            }
+            // Same untrusted-notation guard as the companion path above.
+            let roll;
+            try {
+                roll = rollNotation(item.healing, item.name);
+            } catch {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`**${item.name}** has an invalid healing formula (${item.healing}) and cannot be used.`)],
+                };
+            }
+            const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total);
+            const gained = healed - state.character.currentHP;
+            const healedCharacter = healed > 0
+                ? reviveCharacter({ ...state.character, currentHP: healed })
+                : { ...state.character, currentHP: healed };
+            return {
+                ...state,
+                character: healedCharacter,
+                combat: usesBonusAction && state.combat.active
+                    ? { ...state.combat, bonusActionUsed: true }
+                    : state.combat,
+                inventory: consumeItem(state.inventory, item.id),
+                rollHistory: [...state.rollHistory, roll],
+                messages: [
+                    ...state.messages,
+                    systemMessage(
+                        `You drink a **${item.name}**${usesBonusAction ? ' *(bonus action)*' : ''} and recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${usesBonusAction && state.combat.active ? 'Your main action is still available. ' : ''}${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`,
+                        {
+                            narrationCue: {
+                                type: 'player_mechanic',
+                                mechanic: item.name,
+                                effect: `recovered ${gained} HP`,
+                                actionType: usesBonusAction ? 'bonus action' : 'action',
+                            },
+                        }
+                    ),
+                ],
+            };
+        }
+
+        // Other consumables have narrative effects — consume one and let the DM react.
+        if (item.type === 'consumable') {
+            return {
+                ...state,
+                inventory: consumeItem(state.inventory, item.id),
+                messages: [...state.messages, systemMessage(`🧴 You use a **${item.name}**.`)],
+            };
+        }
+
+        return state;
+    },
+
+    REMOVE_ITEM(state, action) {
+        return withInventoryAndAC(state, state.inventory.filter(item => item.id !== action.payload));
+    },
+
+    REMOVE_ITEM_BY_NAME(state, action) {
+        const nameToRemove = (action.payload || '').toLowerCase();
+        const matchToRemove = state.inventory.find(i => i.name?.toLowerCase() === nameToRemove);
+        if (!matchToRemove) {
+            console.warn(`[Reducer] Could not find item to remove by name: "${action.payload}"`);
+            return state;
+        }
+        return withInventoryAndAC(state, state.inventory.filter(i => i.id !== matchToRemove.id));
+    },
+
+    EQUIP_ITEM(state, action) {
+        const itemToEquip = state.inventory.find(i => i.id === action.payload);
+        if (!itemToEquip || !isEquippableItem(itemToEquip)) return state;
+
+        const updatedInv = state.inventory.map(item => {
+            if (item.id === action.payload) return { ...item, equipped: true };
+            return item;
+        });
+
+        return withInventoryAndAC(state, normalizeEquippedSlots(updatedInv, action.payload));
+    },
+
+    EQUIP_ITEM_BY_REF(state, action) {
+        const item = findInventoryItemByRef(state.inventory, action.payload);
+        return item
+            ? gameReducer(state, { type: 'EQUIP_ITEM', payload: item.id })
+            : state;
+    },
+
+    UNEQUIP_ITEM(state, action) {
+        const updatedInvUneq = state.inventory.map(item =>
+            item.id === action.payload ? { ...item, equipped: false } : item
+        );
+        return withInventoryAndAC(state, updatedInvUneq);
+    },
+
+    UNEQUIP_ITEM_BY_REF(state, action) {
+        const item = findInventoryItemByRef(state.inventory, action.payload, { preferEquipped: true });
+        return item
+            ? gameReducer(state, { type: 'UNEQUIP_ITEM', payload: item.id })
+            : state;
+    },
+};

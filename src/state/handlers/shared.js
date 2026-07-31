@@ -2,7 +2,22 @@
  * Helpers shared by multiple reducer domains and the save-migration pipeline
  * (migrations.js). Single-domain helpers live in their domain module instead.
  */
-import { isCompanionActive } from '../../engine/combatExchange.js';
+import { computeACFromInventory } from '../../engine/rules.js';
+import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName } from '../../data/items.js';
+import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
+import { appendKeepsakes } from '../../engine/companionGear.js';
+import { NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX } from '../../config/contentLimits.js';
+import { COMBAT_PHASES, isCompanionActive } from '../../engine/combatExchange.js';
+import {
+    appendBondMoments,
+    appendCallbackHooks,
+    clampNpcDossierField,
+    classifyNpcCandidate,
+    mergeNpcDossierText,
+    namesMatch,
+    normalizeNpcRecord,
+    NPC_DURABLE_TEXT_FIELDS,
+} from '../../engine/npcRoster.js';
 
 export function systemMessage(content, extra = {}) {
     return {
@@ -53,4 +68,432 @@ export function reviveCharacter(character) {
         deathSaves: { successes: 0, failures: 0 },
         conditions: (character.conditions || []).filter(c => c.toLowerCase() !== 'unconscious'),
     };
+}
+
+/**
+ * Return a new state with inventory updated and AC recalculated if needed.
+ * Centralizes the repeated pattern across ADD_ITEM, REMOVE_ITEM, EQUIP_ITEM, etc.
+ */
+export function withInventoryAndAC(state, newInventory) {
+    const ac = state.character
+        ? computeACFromInventory(newInventory, state.character)
+        : null;
+    return {
+        ...state,
+        inventory: newInventory,
+        character: state.character
+            ? { ...state.character, armorClass: ac }
+            : state.character,
+    };
+}
+
+export function isPlayerCombatTurn(combat) {
+    if (!combat?.active) return false;
+    if (combat.phase) return combat.phase === COMBAT_PHASES.AWAITING_PLAYER;
+    return combat.turnOrder?.[combat.currentTurn]?.type === 'player';
+}
+
+export function normalizeRefToken(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// World facts are hostile LLM input persisted forever: a non-string fact/category
+// spread raw into the store used to crash buildSystemPrompt on every later turn
+// (2026-07-23 audit). Explicit whitelist, typed, clamped — never spread the payload.
+const WORLD_FACT_MAX_LENGTH = 400;
+const WORLD_FACT_CATEGORY_MAX_LENGTH = 40;
+
+export function sanitizeWorldFactPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    const fact = typeof payload.fact === 'string' ? payload.fact.trim().slice(0, WORLD_FACT_MAX_LENGTH) : '';
+    if (!fact) return null;
+    const category = (typeof payload.category === 'string' && payload.category.trim())
+        ? payload.category.trim().slice(0, WORLD_FACT_CATEGORY_MAX_LENGTH)
+        : 'general';
+    return { fact, category };
+}
+
+export const RECENT_TRANSACTION_LIMIT = 20;
+
+// Explicit repeat-intent phrasing: "another", "one/two/a few more", "more of those", etc.
+export const REPEAT_TRANSACTION_RE = /\b(another|second|same|again|(?:one|two|three|four|five|six|a couple(?: of)?|a few|several|some)\s+more|more of (?:those|these|them))\b/i;
+
+export function sanitizeRecentTransaction(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const signature = String(entry.signature || '').slice(0, 200);
+    if (!signature) return null;
+    return {
+        signature,
+        itemKey: String(entry.itemKey || '').slice(0, 100),
+        name: String(entry.name || '').slice(0, 160),
+        quantity: Number.isFinite(entry.quantity) ? Math.max(1, Math.trunc(entry.quantity)) : 1,
+        priceCp: Number.isFinite(entry.priceCp) ? Math.max(0, Math.trunc(entry.priceCp)) : 0,
+        sourceId: String(entry.sourceId || '').slice(0, 160),
+        messageIndex: Number.isInteger(entry.messageIndex) ? Math.max(0, entry.messageIndex) : 0,
+        timestamp: Number.isFinite(entry.timestamp) ? entry.timestamp : Date.now(),
+        status: entry.status === 'ignored' ? 'ignored' : 'applied',
+    };
+}
+
+export function normalizeRecentTransactions(entries) {
+    return (Array.isArray(entries) ? entries : [])
+        .map(sanitizeRecentTransaction)
+        .filter(Boolean)
+        .slice(-RECENT_TRANSACTION_LIMIT);
+}
+
+export function currentMessageIndex(state) {
+    return Math.max(0, (state.messages || []).length - 1);
+}
+
+/**
+ * Build a store-ready inventory item from an untrusted (already-normalized) payload.
+ * The engine mints ids and owns equip placement: a DM/Scribe `id` could collide with
+ * an existing entry (double-delete on REMOVE_ITEM), and `equipped: true` would
+ * displace the hero's active gear (2026-07-28 audit; extended to PURCHASE_ITEM
+ * 2026-07-30 — the purchase path spread the payload AFTER its minted defaults).
+ * Premise starting items are the one sanctioned equip-on-add channel (`equipOnAdd`).
+ */
+export function mintOwnedItem(normalizedItem, { equipOnAdd = false, quantity } = {}) {
+    const {
+        id: _untrustedId,
+        equipped: _untrustedEquipped,
+        equipOnAdd: _equipFlag,
+        ...safe
+    } = normalizedItem;
+    return {
+        id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        quantity: 1,
+        ...safe,
+        ...(quantity != null ? { quantity } : {}),
+        equipped: equipOnAdd,
+    };
+}
+
+export const RECENT_SPELL_CAST_LIMIT = 8;
+
+export const RECENT_REST_LIMIT = 8;
+
+/** Decrement a stackable item by `qty`, removing it entirely when the stack is exhausted. */
+export function consumeItem(inventory, itemId, qty = 1) {
+    return inventory.flatMap(item => {
+        if (item.id !== itemId) return [item];
+        const remaining = (item.quantity || 1) - qty;
+        return remaining > 0 ? [{ ...item, quantity: remaining }] : [];
+    });
+}
+
+/**
+ * End the caster's sustained spell (combat over, rest taken): drop the buff,
+ * strip its condition from whoever carried it, and recompute AC without it.
+ */
+export function clearSustainedSpellState(character, party, inventory) {
+    const sustained = character?.sustainedSpell;
+    if (!sustained) return { character, party };
+    let nextCharacter = { ...character, sustainedSpell: null };
+    if (sustained.condition && sustained.targetType !== 'companion') {
+        nextCharacter.conditions = (nextCharacter.conditions || [])
+            .filter(c => String(c).toLowerCase() !== String(sustained.condition).toLowerCase());
+    }
+    nextCharacter = { ...nextCharacter, armorClass: computeACFromInventory(inventory || [], nextCharacter) };
+    const nextParty = (party || []).map(companion => {
+        if (companion.id !== sustained.targetId) return companion;
+        const { spellAcBonus: _droppedBonus, ...cleaned } = companion;
+        if (sustained.condition) {
+            cleaned.conditions = (cleaned.conditions || [])
+                .filter(c => String(c).toLowerCase() !== String(sustained.condition).toLowerCase());
+        }
+        return cleaned;
+    });
+    return { character: nextCharacter, party: nextParty };
+}
+
+/** How many disposition shifts to keep per NPC — enough to show an arc, bounded for state size. */
+const MAX_NPC_HISTORY = 10;
+
+function clampNumber(value, min, max, fallback) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function defaultCompanionDamage(weapon = '') {
+    const w = String(weapon || '').toLowerCase();
+    if (w.includes('great') || w.includes('maul')) return '2d6+2';
+    if (w.includes('longsword') || w.includes('battleaxe') || w.includes('warhammer')) return '1d8+2';
+    if (w.includes('shortsword') || w.includes('scimitar') || w.includes('mace')) return '1d6+2';
+    if (w.includes('dagger')) return '1d4+2';
+    if (w.includes('bow') || w.includes('crossbow')) return '1d6+2';
+    return '1d4+1';
+}
+
+// Companion gear (COMPANION_GEAR_SPEC.md): one abstract weapon expressed through stats.
+// On a weapon change the engine rederives damage dice from the catalog (D3/D5) and the
+// magic bonus from the name (D4); the flat damage bonus is companion competence, not
+// level — preserve the existing trailing +N, default +2 (balance verdict 2026-07-19).
+const COMPANION_DAMAGE_DICE = /\d*d\d+/i;
+const COMPANION_FLAT_DAMAGE_DEFAULT = 2;
+
+function parseTrailingFlatBonus(damage) {
+    const match = String(damage || '').trim().match(/([+-]\d+)\s*$/);
+    if (!match) return null;
+    const n = Number(match[1]);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(8, Math.trunc(n)));
+}
+
+function deriveCompanionWeaponProfile(weapon, existingDamage, payloadDamage) {
+    const weaponBonus = clampMagicBonus(parseMagicBonusFromName(weapon));
+    const flatBonus = parseTrailingFlatBonus(existingDamage)
+        ?? parseTrailingFlatBonus(payloadDamage)
+        ?? COMPANION_FLAT_DAMAGE_DEFAULT;
+    const itemKey = normalizeItemKey(weapon);
+    const catalog = itemKey ? ITEM_CATALOG[itemKey] : null;
+    if (catalog?.type === 'weapon' && COMPANION_DAMAGE_DICE.test(catalog.damage || '')) {
+        // Recognized catalog mechanics override LLM-supplied dice (D5). Versatile
+        // weapons use the one-handed die — companions don't model hands.
+        const damage = flatBonus > 0 ? `${catalog.damage}+${flatBonus}` : catalog.damage;
+        return { damage, weaponBonus };
+    }
+    const fallback = (typeof payloadDamage === 'string' && payloadDamage.trim())
+        ? payloadDamage.trim().slice(0, 20)
+        : defaultCompanionDamage(weapon);
+    return { damage: fallback, weaponBonus };
+}
+
+export function companionStatus(hp, maxHp) {
+    if (hp <= 0) return 'downed';
+    const pct = maxHp > 0 ? hp / maxHp : 1;
+    if (pct <= 0.25) return 'critical';
+    if (pct <= 0.5) return 'bloodied';
+    return 'healthy';
+}
+
+export function normalizeCompanion(payload = {}, existing = {}) {
+    const merged = { ...existing, ...payload };
+    const hasExplicitStatus = Object.prototype.hasOwnProperty.call(payload, 'status');
+    const level = clampNumber(merged.level, 1, MAX_CHARACTER_LEVEL, existing.level || 1);
+    const maxHp = clampNumber(merged.maxHp ?? merged.maxHP, 1, 999, existing.maxHp || 20);
+    const hp = clampNumber(merged.hp, 0, maxHp, existing.hp ?? maxHp);
+    const weapon = String(merged.weapon || existing.weapon || 'Dagger').trim().slice(0, 60) || 'Dagger';
+    const attackBonus = clampNumber(
+        merged.attackBonus ?? merged.modifier,
+        -5,
+        15,
+        existing.attackBonus ?? Math.min(8, 2 + Math.ceil(level / 3))
+    );
+    // The weapon-rederivation branch fires ONLY when the payload actually changes the
+    // weapon — a rest or heal update passing { hp, status } must never touch damage.
+    const weaponChanged = typeof payload.weapon === 'string' && payload.weapon.trim() !== ''
+        && payload.weapon.trim().toLowerCase() !== String(existing.weapon || '').trim().toLowerCase();
+    let damage;
+    let weaponBonus;
+    if (weaponChanged) {
+        const derived = deriveCompanionWeaponProfile(
+            weapon,
+            existing.damage,
+            typeof payload.damage === 'string' ? payload.damage : ''
+        );
+        damage = derived.damage;
+        weaponBonus = derived.weaponBonus;
+    } else {
+        damage = merged.damage || existing.damage || defaultCompanionDamage(weapon);
+        weaponBonus = clampMagicBonus(Number(existing.weaponBonus) || 0);
+    }
+
+    return {
+        id: merged.id || `companion-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        name: String(merged.name || existing.name || 'Companion').trim().slice(0, 40),
+        role: merged.role || existing.role || 'ally',
+        affinity: clampNumber(merged.affinity, 0, 100, existing.affinity ?? 50),
+        level,
+        maxHp,
+        hp,
+        // Absolute AC cap 21 (balance verdict 2026-07-19): a maxed hero tops out ~21-23,
+        // so a generously geared companion stays at-or-below that ceiling. No per-update
+        // delta clamp — "unarmored → plate" is a legitimate +6 jump.
+        ac: clampNumber(merged.ac, 1, 21, existing.ac || 12),
+        weapon,
+        attackBonus,
+        damage,
+        weaponBonus,
+        status: hasExplicitStatus
+            ? (merged.status || companionStatus(hp, maxHp))
+            : (existing.status === 'dead' ? 'dead' : companionStatus(hp, maxHp)),
+        conditions: Array.isArray(merged.conditions) ? merged.conditions : (existing.conditions || []),
+        notes: merged.notes || existing.notes || '',
+        appearance: merged.appearance || existing.appearance || '',
+        // Sentimental gifts as a durable capped list (never wholesale replaced):
+        // per-update `keepsake` beats append; restatements drop by containment.
+        keepsakes: appendKeepsakes(existing.keepsakes, [
+            ...(Array.isArray(payload.keepsakes) ? payload.keepsakes : []),
+            ...(typeof payload.keepsake === 'string' ? [payload.keepsake] : []),
+        ]),
+    };
+}
+
+/**
+ * Companion relationship memory lives in the NPC roster ("one system owns all
+ * bonds", DECISIONS.md 2026-07-23): the party record keeps combat mechanics and
+ * affinity, while the matching roster NPC record carries stanceToPlayer /
+ * bondMoments / dossier prose — captured by the Scribe's npc_updates exactly as
+ * for any NPC. Joining the party guarantees that record exists; an existing
+ * record is left untouched (the Scribe keeps it current, and re-seeding could
+ * clobber a richer dossier with defaults).
+ */
+export function ensureCompanionRosterRecord(npcs = [], companion) {
+    const name = String(companion?.name || '').trim();
+    if (!name) return npcs;
+    if (npcs.some(npc => namesMatch(npc.name, name))) return npcs;
+    return mergeNpcUpdate(npcs, {
+        name,
+        kind: 'character',
+        rosterEligible: true,
+        disposition: 'friendly',
+        lastNotes: `Traveling with the hero as a party companion (${companion.role || 'ally'}).`,
+        ...(companion.appearance ? { appearance: companion.appearance } : {}),
+    });
+}
+
+/**
+ * Strip blank fields ('', null, undefined) from an NPC payload so a thin update can
+ * never erase detail that's already known. Once an NPC's personality, goal, or secret
+ * is on record, a later turn that simply omits it leaves it intact — continuity wins
+ * over churn.
+ */
+function pruneBlankFields(payload) {
+    const out = {};
+    for (const [key, value] of Object.entries(payload)) {
+        if (value === '' || value === null || value === undefined) continue;
+        out[key] = value;
+    }
+    return out;
+}
+
+/**
+ * Upsert an NPC into the tracker — the single source of truth for NPC writes.
+ * - Match by id when one is supplied, otherwise (or as a fallback) by case-insensitive
+ *   name — the per-turn Scribe and the DM's inline npc_updates only ever know the name.
+ * - On a match, merge just the non-blank fields the caller supplied.
+ * - With no match and a name to track them by, create a fresh record with defaults.
+ * - Every touch stamps lastSeen, so the prompt's "recently active" ordering reflects the
+ *   turn the NPC actually appeared rather than the last 10-message journal pass.
+ * This is what lets a just-met NPC be created the moment they appear instead of waiting
+ * for a journal summary to happen to mention them.
+ */
+export function mergeNpcUpdate(npcs, payload) {
+    return upsertNpc(npcs, payload);
+}
+
+export function upsertNpc(npcs, payload) {
+    if (!payload || (!payload.id && !payload.name)) return npcs;
+    const update = pruneBlankFields({ ...payload, lastSeen: Date.now() });
+    if (update.appearance) {
+        update.appearance = String(update.appearance).trim().slice(0, NPC_DOSSIER_FIELD_MAX);
+    }
+    // Short current-state field (like appearance, plain replace): feeds scene art,
+    // the KNOWN NPCs block, and NPC RAG so generated images stop misgendering.
+    if (update.gender) {
+        update.gender = String(update.gender).trim().slice(0, NPC_GENDER_MAX);
+    }
+    if (update.stanceToPlayer) {
+        update.stanceToPlayer = clampNpcDossierField(update.stanceToPlayer);
+    }
+    // Bond moments are append-only history: a turn's `bondMoment` (or an enrichment
+    // batch of `bondMoments`) joins the existing record — it can never replace it.
+    const bondAdditions = [];
+    if (update.bondMoment) {
+        bondAdditions.push(update.bondMoment);
+        delete update.bondMoment;
+    }
+    if (update.bondMoments) {
+        if (Array.isArray(update.bondMoments)) bondAdditions.push(...update.bondMoments);
+        delete update.bondMoments;
+    }
+
+    const idx = npcs.findIndex(n =>
+        (payload.id && n.id === payload.id) ||
+        (payload.name && namesMatch(n.name, payload.name))
+    );
+
+    const existing = idx !== -1 ? npcs[idx] : null;
+    const classified = classifyNpcCandidate(payload, existing);
+
+    if (idx !== -1) {
+        if (!classified.allowRoster && existing.rosterTier !== 'character' && !existing.pinned) {
+            return npcs;
+        }
+        // Record a genuine disposition shift between known stances (skip the initial
+        // 'unknown' → X establishment) so the relationship's arc is preserved. A friend
+        // turning hostile — or an enemy won over — is exactly the beat the DM and player
+        // should remember.
+        if (update.disposition && existing.disposition &&
+            existing.disposition !== 'unknown' &&
+            update.disposition !== existing.disposition) {
+            const history = Array.isArray(existing.relationshipHistory) ? existing.relationshipHistory : [];
+            update.relationshipHistory = [
+                ...history,
+                { from: existing.disposition, to: update.disposition, at: Date.now(), note: update.lastNotes || '' },
+            ].slice(-MAX_NPC_HISTORY);
+        }
+        if (bondAdditions.length > 0) {
+            update.bondMoments = appendBondMoments(existing.bondMoments, bondAdditions);
+        }
+        // Durable dossier prose accumulates: a per-turn fragment appends to the
+        // record, a restatement is dropped, and only a complete rewrite that carries
+        // the known record may replace it. The immediate scene can never erase an
+        // NPC's personality, goals, secrets, or their history with the hero.
+        for (const field of NPC_DURABLE_TEXT_FIELDS) {
+            if (update[field]) {
+                update[field] = mergeNpcDossierText(existing[field], update[field]);
+            }
+        }
+        if (update.callbackHooks) {
+            update.callbackHooks = appendCallbackHooks(existing.callbackHooks, update.callbackHooks);
+        }
+        const nameToKeep = (update.name && update.name.length > (existing.name || '').length) ? update.name : existing.name;
+        const merged = normalizeNpcRecord({
+            ...existing,
+            ...update,
+            name: nameToKeep,
+            rosterTier: classified.rosterTier || existing.rosterTier || 'character',
+            kind: classified.kind || existing.kind || 'character',
+            importance: classified.importance,
+            pinned: update.pinned ?? existing.pinned,
+        });
+        return npcs.map((npc, i) => (i === idx ? merged : npc));
+    }
+
+    // No match — only create roster-worthy characters.
+    if (!payload.name || !classified.allowRoster) return npcs;
+    if (bondAdditions.length > 0) {
+        update.bondMoments = appendBondMoments([], bondAdditions);
+    }
+    if (update.callbackHooks) {
+        update.callbackHooks = appendCallbackHooks([], update.callbackHooks);
+    }
+    return [...npcs, normalizeNpcRecord({
+        id: `npc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        firstMet: Date.now(),
+        disposition: 'unknown',
+        personality: '',
+        goals: '',
+        secrets: '',
+        knownFacts: [],
+        basedIn: null,
+        lastLocation: null,
+        relationshipHistory: [],
+        agenda: '',
+        relationshipTension: '',
+        stanceToPlayer: '',
+        bondMoments: [],
+        trust: null,
+        privateNotes: '',
+        callbackHooks: [],
+        pinned: false,
+        ...update,
+        rosterTier: classified.rosterTier || 'character',
+        kind: classified.kind || 'character',
+        importance: classified.importance,
+    })];
 }
