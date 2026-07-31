@@ -64,13 +64,25 @@ function buildPurchaseTransaction(payload = {}) {
     };
 }
 
-function findRecentTransactionDuplicate(entries, transaction, sourceId, currentIndex, window = RECENT_TRANSACTION_MESSAGE_WINDOW, messages = null) {
+/** Base narration-message id of a compound sourceId ("msg-1:scribe-loot:payment" → "msg-1"). */
+function sourceBaseOf(sourceId) {
+    return String(sourceId || '').split(':')[0];
+}
+
+function findRecentTransactionDuplicate(entries, transaction, sourceId, currentIndex, window = RECENT_TRANSACTION_MESSAGE_WINDOW, messages = null, { excludeSameBase = false } = {}) {
+    const base = sourceBaseOf(sourceId);
     return normalizeRecentTransactions(entries)
         .slice()
         .reverse()
         .find(entry => {
             if (entry.signature !== transaction.signature) return false;
             if (sourceId && entry.sourceId === sourceId) return true;
+            // Audit dispatches arrive already reconciled against their own narration
+            // message's applied events (scribe.js does the subtraction in code), so a
+            // same-base entry is the portion the engine already accounted for — not a
+            // duplicate of this dispatch. Without this, a genuine engine-computed
+            // shortfall that happens to equal the event-path amount would be eaten.
+            if (excludeSameBase && base && sourceBaseOf(entry.sourceId) === base) return false;
             const distance = messages
                 ? conversationalDistance(messages, entry.messageIndex, currentIndex)
                 : currentIndex - entry.messageIndex;
@@ -189,11 +201,17 @@ export const handlers = {
         const transaction = buildCoinGrantTransaction(gold, silver, copper);
         const sourceId = String(meta.sourceId || '').slice(0, 160);
         const messageIndex = currentMessageIndex(state);
+        // Audit grants are engine-reconciled shortfalls: same-message entries are
+        // already subtracted (skip them as duplicates), and no player-phrasing
+        // bypass applies — the repeat-intent escape hatch is for the DM event path,
+        // where the player explicitly asks for more coin on a later turn.
+        const isAudit = meta.audit === true || meta.announce === 'audit';
         const duplicate = findRecentTransactionDuplicate(
-            state.recentCoinGrants, transaction, sourceId, messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW, state.messages
+            state.recentCoinGrants, transaction, sourceId, messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW, state.messages,
+            { excludeSameBase: isAudit }
         );
         const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
-        if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatCoinGrant(meta.playerMessage))) {
+        if (duplicate && (exactSourceReplay || isAudit || !playerMessageSupportsRepeatCoinGrant(meta.playerMessage))) {
             return {
                 ...state,
                 recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
@@ -262,11 +280,14 @@ export const handlers = {
     },
 
     // Scribe payment audit: the narrative showed the hero completing a payment that the
-    // DM never emitted as a coin-loss event. Deduct it, clamped to the purse — never
-    // below zero — and say so visibly. Same-message idempotency is owned by the caller
-    // via a CLAIM_LOOT_SOURCE-claimed sourceId, mirroring the loot-recovery path;
-    // cross-message replays share the recentCoinLosses ledger with APPLY_COIN_LOSS so
-    // a payment the DM already evented (or the audit already settled) is never taken twice.
+    // event path never fully deducted. The dispatched amount is ALREADY the engine-
+    // reconciled shortfall for its own narration message (scribe.js subtracts the
+    // applied losses in code), so same-base ledger entries are excluded from duplicate
+    // matching. Cross-message duplicates suppress UNCONDITIONALLY — the audit is a
+    // backstop, never a payer of record, and it gets no player-phrasing bypass: the
+    // player's message on an audited turn is the very message that initiated the
+    // already-counted payment, so the old bypass fired on exactly the turns being
+    // double-charged (live 2026-07-31 "gave 1 gp, charged twice" finding).
     AUDIT_COIN_PAYMENT(state, action) {
         const meta = action.payload?._meta || {};
         const gold = clampCoinAmount(action.payload?.gold);
@@ -278,13 +299,10 @@ export const handlers = {
         const sourceId = String(meta.sourceId || '').slice(0, 160);
         const messageIndex = currentMessageIndex(state);
         const duplicate = findRecentTransactionDuplicate(
-            state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW, state.messages
+            state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW, state.messages,
+            { excludeSameBase: true }
         );
-        // Exact same-source replay suppresses unconditionally — the sibling
-        // APPLY_COIN_LOSS has this short-circuit; without it a repeat-intent
-        // player message let the SAME audited payment charge twice.
-        const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
-        if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatCoinLoss(meta.playerMessage))) {
+        if (duplicate) {
             return {
                 ...state,
                 recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),

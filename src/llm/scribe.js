@@ -98,30 +98,28 @@ Rules:
 const LOOT_AUDIT_RULES = `
 
 ADDITIONAL TASK — LOOT & PAYMENT PERSISTENCE AUDIT:
-The game engine persists coins and items ONLY from structured events; anything narrated but not emitted as an event silently vanishes. Compare the DM narrative against the EVENTS ALREADY APPLIED section of the user message and report acquisitions the narrative established that the engine did not apply, as one extra top-level field:
-"missing_loot": { "gold": 0, "silver": 0, "copper": 0, "items": [{ "name": "exact item name from the narrative", "quantity": 1 }] }
-Also report coins the narrative shows the hero PAYING OUT that the engine never deducted, as another top-level field:
-"missing_payment": { "gold": 0, "silver": 0, "copper": 0 }
+The game engine persists coins and items ONLY from structured events; anything narrated but not emitted as an event silently vanishes. Your task here is pure OBSERVATION: report what THIS DM narrative shows changing hands, at the full narrated amounts. The engine deterministically reconciles your report against the events it already applied — NEVER do that subtraction yourself, and never omit a coin movement just because EVENTS ALREADY APPLIED lists it.
+Report the coins and items the narrative shows the hero ACQUIRING, as one extra top-level field:
+"narrated_loot": { "gold": 0, "silver": 0, "copper": 0, "items": [{ "name": "exact item name from the narrative", "quantity": 1 }] }
+Also report the coins the narrative shows the hero PAYING OUT, as another top-level field:
+"narrated_payment": { "gold": 0, "silver": 0, "copper": 0 }
 
-Loot audit rules:
+Loot rules:
 - Report ONLY acquisitions the DM NARRATIVE explicitly completes for the hero: taken, pocketed, looted, claimed, received, handed over. The player's own message is never sufficient evidence — the DM narrative must confirm the acquisition happened.
-- Anything listed under EVENTS ALREADY APPLIED is NOT missing. Report only the shortfall (narrative grants coins and a ring, events applied only the coins -> report only the ring).
 - Never report offers, prices, rewards merely promised, goods only seen or described, another character's possessions, or attempts/intentions.
 - Never report coins or items the narrative merely recalls, recounts, splits, or admires from an EARLIER scene — only acquisitions completed for the first time in THIS narrative. A reward being counted, divided, or mentioned again was already granted when it was first handed over.
 - Hospitality consumed on the spot is not an acquisition: a poured drink, a served meal, food and ale enjoyed at the table never become inventory. Report provisions only when the narrative has the hero pack, pocket, or carry them away.
 - Exact amounts only. If the narrative gives no specific number ("a handful of coins"), omit that coin field entirely — never estimate.
-- Denominations are sacred: report coins in the EXACT denomination the narrative names and NEVER convert between them — "thirty silver pieces" is "silver": 30 (never "gold": 30), "fifty silver" is "silver": 50, "two gold crowns" is "gold": 2. This applies to missing_payment identically.
+- Denominations are sacred: report coins in the EXACT denomination the narrative names and NEVER convert between them — "thirty silver pieces" is "silver": 30 (never "gold": 30), "fifty silver" is "silver": 50, "two gold crowns" is "gold": 2. This applies to narrated_payment identically.
 - Purchases and sales are engine transactions handled elsewhere; never report coins or goods exchanged in a purchase or sale — in either direction.
 - The HERO'S CURRENT INVENTORY line lists what the hero already owns. Using, drawing, lighting, striking, wearing, or retrieving an owned item is NOT an acquisition — "she takes out her flint and steel and strikes a spark" grants nothing. Report an item the hero already owns ONLY when the narrative explicitly completes acquiring an ADDITIONAL copy (a second rope, another potion).
 
-Payment audit rules:
+Payment rules:
 - Report a payment ONLY when the DM narrative explicitly completes it: the hero counts out, hands over, or drops the coins and the other party takes them. Intentions, promises, IOUs, haggling, and prices merely quoted are never payments.
-- Anything listed under EVENTS ALREADY APPLIED as a coin loss or purchase is NOT missing.
 - Copy narrated amounts digit-exactly; spelled-out numbers convert exactly ("six silver" is "silver": 6, "a dozen coppers" is "copper": 12). Never round, estimate, or infer an amount the narrative does not state.
-- Shortfalls count: when the narrative names an exact price the hero completes paying and EVENTS ALREADY APPLIED shows a SMALLER coin loss for that same payment, report exactly the difference (narrative says six silver paid, events applied silver -4 -> "missing_payment": { "silver": 2 }). Never re-report the part already deducted.
 - Never re-report a payment the narrative merely recalls, confirms, defends, or references from an EARLIER scene — only payments completed for the first time in THIS narrative. "You already paid the six silver" is a recollection, not a new payment.
-- Exact amounts only; never estimate. A wrongly deducted coin is worse than a missed one — certainty is required.
-- When in doubt, omit. Omit "missing_loot" and "missing_payment" entirely when nothing is missing.
+- Exact amounts only; never estimate. A wrongly reported coin is worse than a missed one — certainty is required.
+- When in doubt, omit. Omit "narrated_loot" and "narrated_payment" entirely when this narrative moves no coins or items.
 
 Also report gear the narrative shows the hero handing to a COMPANION that the companion accepts and takes up, when the engine applied no matching companion update, as another top-level field:
 "missing_gear_handoffs": [{ "companion": "exact companion name", "item": "exact item name", "kind": "weapon" }]
@@ -277,17 +275,66 @@ function applyMissingGearHandoffs(missing, lootAudit, dispatch) {
     if (applied > 0) console.log(`[Scribe] Gear-handoff audit applied ${applied} narrated handoff(s).`);
 }
 
+/** Coin totals (in copper) the event path already applied for this narration.
+ * Purchases/sales carry an explicit priceCp only when the DM supplied one; the
+ * conservative direction is to count what we can see — the audit then under-
+ * corrects rather than double-charges. */
+function appliedCoinCp(events) {
+    const n = value => (Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0);
+    if (!events) return { gainCp: 0, lossCp: 0 };
+    let gainCp = n(events.goldFound) * 100 + n(events.silverFound) * 10 + n(events.copperFound);
+    let lossCp = n(events.goldLost) * 100 + n(events.silverLost) * 10 + n(events.copperLost);
+    for (const purchase of events.purchases || []) lossCp += n(purchase?.priceCp);
+    for (const sale of events.sells || []) gainCp += n(sale?.priceCp);
+    return { gainCp, lossCp };
+}
+
+const auditItemToken = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Identity tokens for every item the event path already granted this narration. */
+function appliedItemTokens(events) {
+    const tokens = new Set();
+    const add = entry => {
+        if (!entry) return;
+        const values = typeof entry === 'string'
+            ? [entry]
+            : [entry.name, entry.itemKey, entry.key, entry.item?.name, entry.item?.itemKey];
+        for (const value of values) {
+            const token = auditItemToken(value);
+            if (token) tokens.add(token);
+        }
+    };
+    for (const list of [events?.itemsFound, events?.startingItems, events?.purchases]) {
+        (list || []).forEach(add);
+    }
+    return tokens;
+}
+
+/** Split a copper total back into canonical denominations so no single field
+ * hits the per-denomination clamp in the reducer. */
+function cpToCoins(totalCp) {
+    return {
+        gold: Math.floor(totalCp / 100),
+        silver: Math.floor((totalCp % 100) / 10),
+        copper: totalCp % 10,
+    };
+}
+
 /**
- * Apply Scribe-detected narrated-but-unapplied loot. Idempotent per sourceId via
- * CLAIM_LOOT_SOURCE, clamped by the engine, and announced with a visible system
- * message so both the player and the DM's future context see the correction.
+ * Reconcile the Scribe's narrated-loot OBSERVATION against the events the engine
+ * already applied for this narration, and grant only the deterministic shortfall.
+ * The Scribe reports full narrated totals; the subtraction happens HERE, in code —
+ * the old contract asked the LLM to report "only the shortfall" and its arithmetic
+ * failures were a live double-grant/double-charge source (2026-07-31). Idempotent
+ * per sourceId via CLAIM_LOOT_SOURCE, clamped by the engine, and announced with a
+ * visible system message so the player sees every correction.
  */
-function applyMissingLoot(missing, lootAudit, dispatch, playerMessage = '') {
-    if (!missing || typeof missing !== 'object') return;
-    const gold = coerceLootAmount(missing.gold);
-    const silver = coerceLootAmount(missing.silver);
-    const copper = coerceLootAmount(missing.copper);
-    const items = (Array.isArray(missing.items) ? missing.items : [])
+function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
+    if (!narrated || typeof narrated !== 'object') return;
+    const gold = coerceLootAmount(narrated.gold);
+    const silver = coerceLootAmount(narrated.silver);
+    const copper = coerceLootAmount(narrated.copper);
+    const items = (Array.isArray(narrated.items) ? narrated.items : [])
         .map(entry => {
             const name = String((typeof entry === 'string' ? entry : entry?.name) || '').trim().slice(0, 80);
             if (!name) return null;
@@ -299,7 +346,7 @@ function applyMissingLoot(missing, lootAudit, dispatch, playerMessage = '') {
         .slice(0, 4);
     if (gold <= 0 && silver <= 0 && copper <= 0 && items.length === 0) return;
 
-    const { sourceId, getState } = lootAudit;
+    const { sourceId, getState, appliedEvents } = lootAudit;
     if (!sourceId) return;
     if ((getState?.()?.appliedLootSourceIds || []).includes(sourceId)) {
         console.warn(`[Scribe] Loot audit for ${sourceId} already applied; skipping.`);
@@ -307,22 +354,38 @@ function applyMissingLoot(missing, lootAudit, dispatch, playerMessage = '') {
     }
     dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: sourceId });
 
+    const narratedCp = gold * 100 + silver * 10 + copper;
+    const shortfallCp = Math.max(0, narratedCp - appliedCoinCp(appliedEvents).gainCp);
+    // Denominations are preserved when nothing was applied; a partial shortfall is
+    // value math and pays out in canonical coins (formatCurrency normalizes anyway).
+    const grant = shortfallCp === narratedCp ? { gold, silver, copper } : cpToCoins(shortfallCp);
+
+    const knownTokens = appliedItemTokens(appliedEvents);
+    const missingItems = items.filter(item => {
+        const alreadyApplied = [item.name, item.itemKey]
+            .map(auditItemToken)
+            .some(token => token && knownTokens.has(token));
+        if (alreadyApplied) console.warn(`[Scribe] Narrated item "${item.name}" already granted by the event path; skipping.`);
+        return !alreadyApplied;
+    });
+
     // Coins route through the replay-guarded grant so a reward the DM re-narrates on a
     // later turn (already suppressed on the event path) cannot re-enter via the audit.
-    // The reducer announces the recovery (or the suppression) itself.
-    if (gold > 0 || silver > 0 || copper > 0) {
+    // The reducer announces the recovery (or the suppression) itself. Audits never
+    // carry playerMessage: the repeat-intent bypass belongs to the DM event path.
+    if (shortfallCp > 0) {
         dispatch({
             type: 'ADD_COIN_GRANT',
             payload: {
-                gold, silver, copper,
-                _meta: { sourceId, announce: 'audit', ...(playerMessage && { playerMessage }) },
+                ...grant,
+                _meta: { sourceId, announce: 'audit', audit: true },
             },
         });
     }
-    for (const item of items) dispatch({ type: 'ADD_ITEM', payload: item });
+    for (const item of missingItems) dispatch({ type: 'ADD_ITEM', payload: item });
 
-    if (items.length > 0) {
-        const parts = items.map(item => (item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name));
+    if (missingItems.length > 0) {
+        const parts = missingItems.map(item => (item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name));
         dispatch({
             type: 'ADD_MESSAGE',
             payload: {
@@ -331,22 +394,29 @@ function applyMissingLoot(missing, lootAudit, dispatch, playerMessage = '') {
             },
         });
     }
-    console.log(`[Scribe] Loot audit recovered: gold ${gold}, silver ${silver}, copper ${copper}, items ${items.length}`);
+    if (shortfallCp > 0 || missingItems.length > 0) {
+        console.log(`[Scribe] Loot audit recovered: ${shortfallCp} cp shortfall, items ${missingItems.length}`);
+    }
 }
 
 /**
- * Scribe payment audit twin: coins the narrative shows the hero paying out that never
- * became a coin-loss event. The reducer clamps the deduction to the purse and posts a
- * visible system line; idempotency is a claimed per-message sourceId, like loot recovery.
+ * Payment twin of reconcileNarratedLoot: the Scribe reports the TOTAL coins the
+ * narrative shows the hero paying out; the engine subtracts the losses the event
+ * path already applied for this same narration and deducts only the shortfall.
+ * This is what killed the live "paid once, charged twice" bug — the second charge
+ * was this audit re-reporting an already-evented payment and slipping past the
+ * ledger via the repeat-payment player-phrasing bypass. The reducer still clamps
+ * the deduction to the purse and posts a visible system line; idempotency is a
+ * claimed per-message sourceId, like loot recovery.
  */
-function applyMissingPayment(missing, lootAudit, dispatch, playerMessage = '') {
-    if (!missing || typeof missing !== 'object') return;
-    const gold = coerceLootAmount(missing.gold);
-    const silver = coerceLootAmount(missing.silver);
-    const copper = coerceLootAmount(missing.copper);
+function reconcileNarratedPayment(narrated, lootAudit, dispatch) {
+    if (!narrated || typeof narrated !== 'object') return;
+    const gold = coerceLootAmount(narrated.gold);
+    const silver = coerceLootAmount(narrated.silver);
+    const copper = coerceLootAmount(narrated.copper);
     if (gold <= 0 && silver <= 0 && copper <= 0) return;
 
-    const { sourceId, getState } = lootAudit;
+    const { sourceId, getState, appliedEvents } = lootAudit;
     if (!sourceId) return;
     const paymentSourceId = `${sourceId}:payment`;
     if ((getState?.()?.appliedLootSourceIds || []).includes(paymentSourceId)) {
@@ -354,17 +424,25 @@ function applyMissingPayment(missing, lootAudit, dispatch, playerMessage = '') {
         return;
     }
     dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: paymentSourceId });
-    // The reducer checks the shared recentCoinLosses ledger, so a payment the DM
-    // already evented on a nearby turn cannot be deducted a second time through
-    // the audit backstop (and vice versa).
+
+    const narratedCp = gold * 100 + silver * 10 + copper;
+    const shortfallCp = Math.max(0, narratedCp - appliedCoinCp(appliedEvents).lossCp);
+    if (shortfallCp <= 0) {
+        console.log(`[Scribe] Payment audit: narrated ${narratedCp} cp already fully deducted by the event path.`);
+        return;
+    }
+    const charge = shortfallCp === narratedCp ? { gold, silver, copper } : cpToCoins(shortfallCp);
+    // The reducer checks the shared recentCoinLosses ledger for OTHER messages'
+    // charges; same-message accounting already happened right here, and audits
+    // get no player-phrasing bypass.
     dispatch({
         type: 'AUDIT_COIN_PAYMENT',
         payload: {
-            gold, silver, copper,
-            _meta: { sourceId: paymentSourceId, ...(playerMessage && { playerMessage }) },
+            ...charge,
+            _meta: { sourceId: paymentSourceId, audit: true },
         },
     });
-    console.log(`[Scribe] Payment audit settled: gold ${gold}, silver ${silver}, copper ${copper}`);
+    console.log(`[Scribe] Payment audit settled: ${shortfallCp} cp shortfall.`);
 }
 
 /**
@@ -475,7 +553,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     ? `KNOWN PLAYER-RELATIONSHIP STANCES (each NPC's established personal stance toward the hero — stanceToPlayer updates must merge with these, never shrink them to this turn's fragment):\n${knownStances}`
                     : null,
                 lootAudit
-                    ? `EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN (anything listed here is NOT missing): ${describeAppliedLoot(lootAudit.appliedEvents)}`
+                    ? `EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN (the engine reconciles narrated_loot/narrated_payment against these itself — for the gear-handoff audit, anything listed here is NOT missing): ${describeAppliedLoot(lootAudit.appliedEvents)}`
                     : null,
                 ownedInventory
                     ? `HERO'S CURRENT INVENTORY (already owned — using, drawing, or lighting these is NOT an acquisition): ${ownedInventory}`
@@ -562,8 +640,8 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         }
 
         if (lootAudit) {
-            applyMissingLoot(extracted.missing_loot, lootAudit, dispatch, playerMessage);
-            applyMissingPayment(extracted.missing_payment, lootAudit, dispatch, playerMessage);
+            reconcileNarratedLoot(extracted.narrated_loot, lootAudit, dispatch);
+            reconcileNarratedPayment(extracted.narrated_payment, lootAudit, dispatch);
             applyMissingGearHandoffs(extracted.missing_gear_handoffs, lootAudit, dispatch);
         }
 
@@ -573,10 +651,10 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             cards: storyMemory,
             playerAppearance: typeof extracted.player_appearance === 'string' && !!extracted.player_appearance.trim(),
             location,
-            // missing_loot/missing_payment are OBJECTS, not arrays — Array.isArray
+            // narrated_loot/narrated_payment are OBJECTS, not arrays — Array.isArray
             // kept both inspector flags permanently false (2026-07-23 audit).
-            lootAudited: !!(lootAudit && hasAuditPayload(extracted.missing_loot)),
-            paymentAudited: !!(lootAudit && hasAuditPayload(extracted.missing_payment)),
+            lootAudited: !!(lootAudit && hasAuditPayload(extracted.narrated_loot)),
+            paymentAudited: !!(lootAudit && hasAuditPayload(extracted.narrated_payment)),
             gearAudited: !!(lootAudit && Array.isArray(extracted.missing_gear_handoffs) && extracted.missing_gear_handoffs.length > 0),
         });
     } catch (e) {

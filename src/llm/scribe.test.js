@@ -412,13 +412,13 @@ describe('Scribe loot persistence audit', () => {
 
     const settings = { apiKey: 'test-key', llmProvider: 'gemini' };
 
-    function scribeResponse(missingLoot) {
+    function scribeResponse(narratedLoot) {
         return JSON.stringify({
             world_facts: [],
             npc_updates: [],
             story_memory: [],
             location: null,
-            ...(missingLoot !== undefined && { missing_loot: missingLoot }),
+            ...(narratedLoot !== undefined && { narrated_loot: narratedLoot }),
         });
     }
 
@@ -504,7 +504,7 @@ describe('Scribe loot persistence audit', () => {
         expect(sendMessage.mock.calls[0][0].userMessage).not.toContain("HERO'S CURRENT INVENTORY");
     });
 
-    it('grants missing coins and items once, claims the source, and announces it', async () => {
+    it('grants narrated coins and items once, claims the source, and announces it', async () => {
         sendMessage.mockResolvedValue(scribeResponse({
             gold: 23,
             copper: 4,
@@ -526,7 +526,7 @@ describe('Scribe loot persistence audit', () => {
             payload: expect.objectContaining({
                 gold: 23,
                 copper: 4,
-                _meta: expect.objectContaining({ sourceId: 'msg-1:scribe-loot', announce: 'audit' }),
+                _meta: expect.objectContaining({ sourceId: 'msg-1:scribe-loot', announce: 'audit', audit: true }),
             }),
         }));
         expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_ITEM', payload: { name: 'Jeweled circlet', quantity: 1 } });
@@ -570,7 +570,7 @@ describe('Scribe loot persistence audit', () => {
         expect(dispatch).not.toHaveBeenCalled();
     });
 
-    it('does nothing when missing_loot is absent or malformed', async () => {
+    it('does nothing when narrated_loot is absent or malformed', async () => {
         sendMessage.mockResolvedValue(scribeResponse());
         const dispatch = vi.fn();
         await runScribe({
@@ -616,10 +616,10 @@ describe('Scribe loot persistence audit', () => {
         expect(addItemCalls[0][0].payload.quantity).toBe(20);
     });
 
-    it('settles a narrated payment via AUDIT_COIN_PAYMENT with its own claimed source', async () => {
+    it('settles a narrated payment via AUDIT_COIN_PAYMENT with its own claimed source, without a player-phrasing bypass', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             world_facts: [], npc_updates: [], story_memory: [], location: null,
-            missing_payment: { gold: 5 },
+            narrated_payment: { gold: 5 },
         }));
         const dispatch = vi.fn();
 
@@ -636,15 +636,85 @@ describe('Scribe loot persistence audit', () => {
             type: 'AUDIT_COIN_PAYMENT',
             payload: {
                 gold: 5, silver: 0, copper: 0,
-                _meta: { sourceId: 'msg-1:scribe-loot:payment', playerMessage: 'I pay the ferryman.' },
+                _meta: { sourceId: 'msg-1:scribe-loot:payment', audit: true },
             },
         });
+    });
+
+    it('never re-charges a payment the event path already deducted for the same narration (live 2026-07-31 double-charge)', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            narrated_payment: { gold: 1 },
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I give 1 gp to the beggar.',
+            dmNarrative: 'You press the gold piece into her palm; she clutches it, stunned.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                appliedEvents: { goldLost: 1, purchases: [], sells: [] },
+            }),
+        });
+
+        expect(dispatch).toHaveBeenCalledWith({ type: 'CLAIM_LOOT_SOURCE', payload: 'msg-1:scribe-loot:payment' });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'AUDIT_COIN_PAYMENT' }));
+    });
+
+    it('charges only the engine-computed shortfall of a partially-evented payment', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            narrated_payment: { silver: 6 },
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I pay the six silver.',
+            dmNarrative: 'You count six silver onto the counter.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                appliedEvents: { silverLost: 4, purchases: [], sells: [] },
+            }),
+        });
+
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: {
+                gold: 0, silver: 2, copper: 0,
+                _meta: { sourceId: 'msg-1:scribe-loot:payment', audit: true },
+            },
+        });
+    });
+
+    it('never re-grants coins or items the event path already applied for the same narration', async () => {
+        sendMessage.mockResolvedValue(scribeResponse({
+            gold: 23,
+            items: [{ name: 'Jeweled circlet', quantity: 1 }, { name: 'Silver ring', quantity: 1 }],
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I loot the tomb.',
+            dmNarrative: 'You pocket 23 gold, a jeweled circlet, and a silver ring.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                appliedEvents: { goldFound: 23, itemsFound: [{ name: 'Jeweled circlet' }], purchases: [], sells: [], startingItems: [] },
+            }),
+        });
+
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
+        const addItemCalls = dispatch.mock.calls.filter(([action]) => action.type === 'ADD_ITEM');
+        expect(addItemCalls).toHaveLength(1);
+        expect(addItemCalls[0][0].payload.name).toBe('Silver ring');
     });
 
     it('skips an already-claimed payment audit so retries cannot double-deduct', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             world_facts: [], npc_updates: [], story_memory: [], location: null,
-            missing_payment: { gold: 5 },
+            narrated_payment: { gold: 5 },
         }));
         const dispatch = vi.fn();
 
@@ -807,8 +877,8 @@ describe('Scribe location + inspector-flag hygiene (2026-07-23 audit)', () => {
     it('reports object-shaped loot/payment audits to the inspector', async () => {
         const { getInspectorSnapshot } = await import('../debug/memoryInspectorStore.js');
         sendMessage.mockResolvedValue(extraction({
-            missing_loot: { gold: 3, items: [] },
-            missing_payment: { silver: 6 },
+            narrated_loot: { gold: 3, items: [] },
+            narrated_payment: { silver: 6 },
         }));
         const dispatch = vi.fn();
         await runScribe({

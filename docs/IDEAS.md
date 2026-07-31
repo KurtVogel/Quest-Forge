@@ -749,7 +749,7 @@ a cup in narration. Consumed-in-scene hospitality (drinks poured, meals shared, 
 loot; the audit prompt should exclude items consumed or enjoyed within the same scene and only grant
 durable take-away goods/coin the narrative says the hero *keeps*.
 
-### Narrated-payment (coin-loss) audit — status: `implemented 2026-07-12` (Scribe `missing_payment` + `AUDIT_COIN_PAYMENT`, auto-deduct clamped to purse with visible system line — chose auto-deduct over one-click confirm since amounts must be exact-only and the line is visible)
+### Narrated-payment (coin-loss) audit — status: `implemented 2026-07-12` (Scribe `missing_payment` + `AUDIT_COIN_PAYMENT`, auto-deduct clamped to purse with visible system line — chose auto-deduct over one-click confirm since amounts must be exact-only and the line is visible); reworked 2026-07-31 to observation totals (`narrated_payment`) + engine-side reconciliation after a live same-turn double-charge — see DECISIONS.md 2026-07-31
 The loot audit only *grants* shortfalls, never deducts, so a DM that narrates "you hand over
 twelve silver" without a `gold_lost`/`purchase` event silently inflates the purse (observed with
 Grok: wage backfilled by the audit, debt payment never deducted → net +12 sp phantom coin).

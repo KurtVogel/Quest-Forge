@@ -103,7 +103,21 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         dispatch({ type: 'TAKE_DAMAGE', payload: events.damageTaken });
     }
 
-    if (events.healing > 0 && !suppressResourceHealing) {
+    // One owner per effect: when this same response carries an engine-owned recovery
+    // transaction (a rest, or a spell the engine rolls healing for), a loose `healing`
+    // delta is the DM narrating that transaction's effect — applying both healed twice.
+    // The prompt already forbids the pairing; enforce it here like the purchase/coin
+    // guard below. This holds even when the rest/cast itself gets replay-suppressed:
+    // an echoed rest must not sneak its healing in through the loose channel either.
+    const restOwnsHealing = (events.restTaken === 'short' || events.restTaken === 'long') && events.healing > 0;
+    const spellOwnsHealing = (events.spellCasts || []).length > 0 && events.healing > 0;
+    if (restOwnsHealing) {
+        console.warn('[applyEvents] Ignored loose healing emitted alongside rest_taken — the rest already owns recovery.');
+    } else if (spellOwnsHealing) {
+        console.warn('[applyEvents] Ignored loose healing emitted alongside spell_cast — the engine rolls spell healing itself.');
+    }
+
+    if (events.healing > 0 && !suppressResourceHealing && !restOwnsHealing && !spellOwnsHealing) {
         dispatch({ type: 'HEAL', payload: events.healing });
     }
 

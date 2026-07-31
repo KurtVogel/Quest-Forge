@@ -6,8 +6,23 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-07-31 (ultra-review fix campaign: all P0s + P1s from the six-lens
-review shipped; 1,263 tests green; deployed)._
+_Last updated: 2026-07-31 (coin double-charge root-cause fix: audit backstops now
+observe-and-reconcile deterministically; 1,272 tests green)._
+
+## Coin/heal double-application root cause fixed 2026-07-31 (Vesa live finding)
+
+Paying an NPC 1 gp charged twice in one DM turn: the event path deducted once, then the
+async Scribe payment audit re-reported the same payment and slipped past the ledger via
+the repeat-payment player-phrasing bypass (a payment turn's message always contains a
+payment verb). Structural fix, not another patch (full rationale: DECISIONS.md
+2026-07-31): the Scribe now reports narrated TOTALS (`narrated_loot`/`narrated_payment`)
+and the engine subtracts what it already applied for that narration — LLM observes,
+engine does arithmetic; audits lost the player-phrasing ledger bypass entirely;
+same-base ledger entries are excluded from audit duplicate matching so genuine
+shortfalls still land; and `applyEvents` suppresses loose `healing` alongside
+`rest_taken`/`spell_cast` (both heal engine-side — the rest/heal flavor of the same
+double). Not yet observed in live play since the fix — watch the next session's
+coin turns.
 
 ## Ultra-review fix campaign 2026-07-30→31 (Vesa: "do all of those fixes")
 

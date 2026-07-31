@@ -705,6 +705,80 @@ describe('AUDIT_COIN_PAYMENT', () => {
     });
 });
 
+describe('audit ledger policy: no player-phrasing bypass, same-base reconciliation (2026-07-31 double-charge fix)', () => {
+    function addMessages(state, count, prefix = 'audit-msg') {
+        let next = state;
+        for (let i = 0; i < count; i++) {
+            next = gameReducer(next, {
+                type: 'ADD_MESSAGE',
+                payload: { id: `${prefix}-${i}`, role: 'assistant', content: `Filler line ${i}.` },
+            });
+        }
+        return next;
+    }
+
+    it('suppresses a cross-message audit duplicate even when the player message initiates a payment', () => {
+        // The live bug: "I give 1 gp..." always contains a payment verb, so the old
+        // repeat-intent bypass fired on exactly the turns the audit was re-charging.
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-1' } },
+        });
+        const later = addMessages(paid, 1);
+        const audited = gameReducer(later, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-2:scribe-loot:payment', playerMessage: 'I tip her two silver.' } },
+        });
+        expect(audited.character.silver).toBe(8); // charged once — the audit is a backstop, never a payer of record
+        expect(audited.messages.at(-1).content).toMatch(/Duplicate payment ignored/);
+    });
+
+    it('lets an engine-reconciled same-message shortfall through despite an equal event-path charge', () => {
+        // Event path deducted 2s for msg-A; the narrative showed 4s total, so the
+        // reconciled audit legitimately charges the remaining 2s under the same base.
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-A' } },
+        });
+        const audited = gameReducer(paid, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { silver: 2, _meta: { sourceId: 'msg-A:scribe-loot:payment', audit: true } },
+        });
+        expect(audited.character.silver).toBe(6);
+        expect(audited.messages.at(-1).content).toMatch(/Payment settled from narration/);
+    });
+
+    it('audit coin grants get no repeat-phrasing bypass on cross-message duplicates', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 10, _meta: { sourceId: 'msg-r-1' } },
+        });
+        const later = addMessages(granted, 1);
+        const audited = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 10, _meta: { sourceId: 'msg-r-2:scribe-loot', announce: 'audit', audit: true, playerMessage: 'I collect another 10 gold reward.' } },
+        });
+        expect(audited.character.gold).toBe(state.character.gold + 10); // once, not twice
+        expect(audited.recentCoinGrants.at(-1).status).toBe('ignored');
+    });
+
+    it('a same-base reconciled audit grant is not eaten by its event-path twin', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 10, _meta: { sourceId: 'msg-A' } },
+        });
+        const audited = gameReducer(granted, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 10, _meta: { sourceId: 'msg-A:scribe-loot', announce: 'audit', audit: true } },
+        });
+        expect(audited.character.gold).toBe(state.character.gold + 20);
+    });
+});
+
 describe('coin replay guards: denomination drift + conversational window (2026-07-22 live finding)', () => {
     function addMessage(state, message) {
         return gameReducer(state, { type: 'ADD_MESSAGE', payload: message });

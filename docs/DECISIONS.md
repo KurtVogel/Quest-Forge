@@ -8,6 +8,34 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-07-31 · Audit backstops observe; the engine reconciles (kills the same-turn coin double-charge class).**
+Live finding (Vesa): giving 1 gp to an NPC deducted 1 gp when the DM's event applied AND
+again after the DM's output — the Scribe payment audit re-reporting the already-evented
+payment, only sometimes caught by the ledger. Two structural flaws compounded: (1) the
+audit contract asked the LLM to do the subtraction ("report only the shortfall vs EVENTS
+ALREADY APPLIED") — arithmetic the engine holds both numbers for; (2) the recentCoinLosses
+replay guard's repeat-payment player-phrasing bypass fires on essentially EVERY audited
+payment turn, because the player's own message is what initiated the payment ("I give
+1 gp…" always contains a payment verb) — the reducer tests had only covered neutral
+phrasing. Settled design, the DM↔engine contract applied to the audit layer:
+1. **The Scribe reports narrated TOTALS** (`narrated_loot`/`narrated_payment`, replacing
+   `missing_loot`/`missing_payment`); `scribe.js` subtracts the coin value the event path
+   already applied for that same narration message (loose deltas + purchase/sale priceCp)
+   and dispatches only the deterministic shortfall. Narrated items are identity-filtered
+   against applied items the same way. LLM = observation, engine = arithmetic.
+2. **Audits get NO player-phrasing ledger bypass** (`AUDIT_COIN_PAYMENT` suppresses any
+   cross-message duplicate unconditionally; audit-flagged `ADD_COIN_GRANT` likewise, and
+   audit dispatches no longer carry `playerMessage` at all). The bypass survives only on
+   the DM event path, where "another one" phrasing legitimately means a repeat trade.
+3. **Same-base-message ledger entries are excluded from audit duplicate matching**
+   (`excludeSameBase` in the economy handler): an engine-reconciled shortfall equal in
+   value to the event-path charge is the remaining half of ONE payment, not a duplicate.
+4. **One owner per effect in `applyEvents`:** loose `healing` is suppressed when the same
+   response carries `rest_taken` (the rest owns recovery) or `spell_cast` (the engine
+   rolls spell healing). The prompt already forbade the pairing; now the engine enforces
+   it, like the purchase/loose-coin guard — and it holds even when the rest/cast itself is
+   replay-suppressed, so an echoed rest cannot sneak its healing in through the loose channel.
+
 **2026-07-30/31 · The ultra-review fix campaign: structural fixes over per-incident patching (autosave by construction, event-channel registry, combat kernel, campaign-keyed RAG, reducer domain split).**
 A six-lens architecture review (docs/ULTRA_REVIEW_2026-07-30.md) found that most recurring
 audit findings were the SAME bug classes re-fixed one incident at a time — copies of one

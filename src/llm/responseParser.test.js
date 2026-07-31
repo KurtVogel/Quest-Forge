@@ -626,6 +626,18 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'HEAL', payload: 3 });
     });
 
+    it('suppresses loose healing emitted alongside rest_taken — the rest owns recovery', () => {
+        const dispatch = run({ healing: 7, rest_taken: 'short' });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'HEAL' }));
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'TAKE_REST', payload: 'short' }));
+    });
+
+    it('suppresses loose healing emitted alongside spell_cast — the engine rolls spell healing', () => {
+        const dispatch = run({ healing: 9, spell_cast: { spell: 'Cure Wounds' } });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'HEAL' }));
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'CAST_SPELL' }));
+    });
+
     it('dispatches CAST_SPELL for a spell_cast event with bounded fields', () => {
         const dispatch = run({ spell_cast: { spell: 'Cure Wounds', slot_level: 99, target: 'Jorun' } });
         expect(dispatch).toHaveBeenCalledWith({
