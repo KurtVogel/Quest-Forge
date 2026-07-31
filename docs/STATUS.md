@@ -8,7 +8,7 @@ lives in git history and the settled outcomes in DECISIONS.md).
 
 _Last updated: 2026-07-31 (coin double-charge root-cause fix + three live playtest
 runs validating it; audits now observe → engine reconciles → stand-down on any
-evented coin movement; 1,277 tests green)._
+evented coin movement; 1,277 tests green; deployed to hosting)._
 
 ## Coin/heal double-application root cause fixed 2026-07-31 (Vesa live finding)
 
