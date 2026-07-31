@@ -6,8 +6,9 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-07-31 (coin double-charge root-cause fix: audit backstops now
-observe-and-reconcile deterministically; 1,272 tests green)._
+_Last updated: 2026-07-31 (coin double-charge root-cause fix + three live playtest
+runs validating it; audits now observe → engine reconciles → stand-down on any
+evented coin movement; 1,277 tests green)._
 
 ## Coin/heal double-application root cause fixed 2026-07-31 (Vesa live finding)
 
@@ -15,14 +16,21 @@ Paying an NPC 1 gp charged twice in one DM turn: the event path deducted once, t
 async Scribe payment audit re-reported the same payment and slipped past the ledger via
 the repeat-payment player-phrasing bypass (a payment turn's message always contains a
 payment verb). Structural fix, not another patch (full rationale: DECISIONS.md
-2026-07-31): the Scribe now reports narrated TOTALS (`narrated_loot`/`narrated_payment`)
-and the engine subtracts what it already applied for that narration — LLM observes,
-engine does arithmetic; audits lost the player-phrasing ledger bypass entirely;
-same-base ledger entries are excluded from audit duplicate matching so genuine
-shortfalls still land; and `applyEvents` suppresses loose `healing` alongside
-`rest_taken`/`spell_cast` (both heal engine-side — the rest/heal flavor of the same
-double). Not yet observed in live play since the fix — watch the next session's
-coin turns.
+2026-07-31): the Scribe now reports narrated TOTALS (`narrated_loot`/`narrated_payment`);
+audits act on PURE OMISSIONS only (any evented coin movement for that narration → the
+audit stands down — the ferry-toll playtest showed change-making makes gross-vs-net
+amounts ambiguous, so partial top-ups were removed); audits lost the player-phrasing
+ledger bypass entirely; the coin reducers gained a recap-bundle guard (a new event that
+swallows a recent charge/grant whole is stripped to its remainder, visibly); and
+`applyEvents` suppresses loose `healing` alongside `rest_taken`/`spell_cast` (both heal
+engine-side — the rest/heal flavor of the same double).
+
+Validated live with `scripts/playtest_economy_doublecharge.cjs` (headless Chrome +
+real Gemini, reads GEMINI_API_KEY from .env): kobold gold loot, 1-gp alms (the exact
+original repro — charged once), fountain toss, atomic buy/sell, ferry toll, inn room +
+long rest (healed once), and two recap-bait turns (zero movement). The run watches the
+purse DOM for 16 s after every turn so the async audit's late deduction shows as its
+own delta; report + console land in `test-results/playtest_economy/`.
 
 ## Ultra-review fix campaign 2026-07-30→31 (Vesa: "do all of those fixes")
 

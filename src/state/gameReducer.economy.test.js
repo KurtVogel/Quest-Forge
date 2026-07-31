@@ -779,6 +779,83 @@ describe('audit ledger policy: no player-phrasing bypass, same-base reconciliati
     });
 });
 
+describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beggar\'s gold again)', () => {
+    function addMessages(state, count, prefix = 'bundle-msg') {
+        let next = state;
+        for (let i = 0; i < count; i++) {
+            next = gameReducer(next, {
+                type: 'ADD_MESSAGE',
+                payload: { id: `${prefix}-${i}`, role: 'assistant', content: `Filler line ${i}.` },
+            });
+        }
+        return next;
+    }
+
+    it('strips a recent payment bundled into a new coin loss and charges only the remainder', () => {
+        // Live repro: gave 1 gp to the beggar (evented), then the fountain response
+        // bundled "gold_lost": 1 + "copper_lost": 3 — 103 cp, a novel signature.
+        const state = makeState({ character: { gold: 5, silver: 0, copper: 10 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 1, _meta: { sourceId: 'msg-beggar', playerMessage: 'I give 1 gold piece to the beggar.' } },
+        });
+        const later = addMessages(paid, 1);
+        const bundled = gameReducer(later, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 1, copper: 3, _meta: { sourceId: 'msg-fountain', playerMessage: 'I toss 3 copper coins into the wishing fountain and make a wish.' } },
+        });
+        expect(bundled.character.gold).toBe(4); // one gold total, not two
+        expect(bundled.character.copper).toBe(7);
+        expect(bundled.messages.at(-1).content).toMatch(/Adjusted a bundled coin charge/);
+    });
+
+    it('keeps the full charge when the player names the repeated denomination', () => {
+        const state = makeState({ character: { gold: 5, silver: 0, copper: 10 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 1, _meta: { sourceId: 'msg-1', playerMessage: 'I pay him a gold piece.' } },
+        });
+        const later = addMessages(paid, 1);
+        const second = gameReducer(later, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 1, copper: 3, _meta: { sourceId: 'msg-2', playerMessage: 'I hand her a gold piece and three coppers for the lot.' } },
+        });
+        expect(second.character.gold).toBe(3); // intentional second gold payment stands
+        expect(second.character.copper).toBe(7);
+    });
+
+    it('keeps the full charge outside the replay window', () => {
+        const state = makeState({ character: { gold: 5, silver: 0, copper: 10 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 1, _meta: { sourceId: 'msg-1' } },
+        });
+        const later = addMessages(paid, 6);
+        const second = gameReducer(later, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 1, copper: 3, _meta: { sourceId: 'msg-2', playerMessage: 'I drop the coins in the box.' } },
+        });
+        expect(second.character.gold).toBe(3);
+        expect(second.character.copper).toBe(7);
+    });
+
+    it('strips a recent reward bundled into a new coin grant', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 10, _meta: { sourceId: 'msg-reward' } },
+        });
+        const later = addMessages(granted, 1);
+        const bundled = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 10, silver: 5, _meta: { sourceId: 'msg-find', playerMessage: 'I check under the floorboard.' } },
+        });
+        expect(bundled.character.gold).toBe(state.character.gold + 10); // reward once
+        expect(bundled.character.silver).toBe(5);
+        expect(bundled.messages.at(-1).content).toMatch(/Adjusted a bundled coin grant/);
+    });
+});
+
 describe('coin replay guards: denomination drift + conversational window (2026-07-22 live finding)', () => {
     function addMessage(state, message) {
         return gameReducer(state, { type: 'ADD_MESSAGE', payload: message });

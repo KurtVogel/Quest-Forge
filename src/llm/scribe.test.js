@@ -662,7 +662,7 @@ describe('Scribe loot persistence audit', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'AUDIT_COIN_PAYMENT' }));
     });
 
-    it('charges only the engine-computed shortfall of a partially-evented payment', async () => {
+    it('stands down on a partially-evented payment — an evented payment owns its amount, no top-ups', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             world_facts: [], npc_updates: [], story_memory: [], location: null,
             narrated_payment: { silver: 6 },
@@ -679,13 +679,32 @@ describe('Scribe loot persistence audit', () => {
             }),
         });
 
-        expect(dispatch).toHaveBeenCalledWith({
-            type: 'AUDIT_COIN_PAYMENT',
-            payload: {
-                gold: 0, silver: 2, copper: 0,
-                _meta: { sourceId: 'msg-1:scribe-loot:payment', audit: true },
-            },
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'AUDIT_COIN_PAYMENT' }));
+    });
+
+    it('stands down on a change-making payment (pay 1 gold, get 8 silver back — the 2026-07-31 ferry-toll playtest case)', async () => {
+        // The DM evented the toll as gold_lost 1 + silver_found 8 (net 2 silver).
+        // The Scribe conflated gross and net and reported ~120 cp paid; arithmetic
+        // top-ups charged the phantom 20 cp — stand-down is the fix.
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            narrated_payment: { gold: 1, silver: 2 },
+            narrated_loot: { silver: 8 },
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I pay the ferryman 2 silver and cross the river.',
+            dmNarrative: 'You hand him a gold piece; he counts back eight silver and poles you across.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                appliedEvents: { goldLost: 1, silverFound: 8, purchases: [], sells: [] },
+            }),
         });
+
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'AUDIT_COIN_PAYMENT' }));
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
     });
 
     it('never re-grants coins or items the event path already applied for the same narration', async () => {

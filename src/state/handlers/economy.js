@@ -185,6 +185,64 @@ function playerMessageSupportsRepeatTransaction(item, playerMessage, verbRe) {
     return REPEAT_TRANSACTION_RE.test(text) && /\b(one|it|that|those|these|them|same)\b/i.test(text);
 }
 
+const DENOMINATION_WORD_RE = {
+    gold: /\b(gold|gp)\b/i,
+    silver: /\b(silver|sp)\b/i,
+    copper: /\b(copper|coppers|cp)\b/i,
+};
+
+/** Decompose `targetCp` exactly into the payload's available denominations.
+ * Greedy is exact here because 100/10/1 divide each other. Returns the component
+ * coins, or null when the payload's coins cannot express the value. */
+function decomposeWithin(targetCp, { gold, silver, copper }) {
+    const g = Math.min(gold, Math.floor(targetCp / 100));
+    let rem = targetCp - g * 100;
+    const s = Math.min(silver, Math.floor(rem / 10));
+    rem -= s * 10;
+    const c = Math.min(copper, rem);
+    rem -= c;
+    return rem === 0 ? { gold: g, silver: s, copper: c } : null;
+}
+
+/**
+ * Recap-bundle guard (2026-07-31 playtest): the DM sometimes bundles a coin
+ * movement it already evented on a recent turn INTO a new event ("gold_lost": 1
+ * re-recapping the beggar's gold + "copper_lost": 3 for the fountain), producing
+ * a novel total the value-signature duplicate check cannot match. When a recent
+ * APPLIED ledger entry's value fits entirely inside the incoming amounts, strip
+ * that component and apply only the remainder — unless the player's own message
+ * names a denomination of the stripped part (an intentional repeat names its
+ * coin). Player-favorable by design: a false positive under-moves coin visibly;
+ * the old behavior silently double-charged.
+ */
+function stripBundledReplay(entries, amounts, playerMessage, currentIndex, window, messages) {
+    const totalCp = amounts.gold * 100 + amounts.silver * 10 + amounts.copper;
+    const text = String(playerMessage || '');
+    for (const entry of normalizeRecentTransactions(entries).slice().reverse()) {
+        if (entry.status !== 'applied') continue;
+        if (!(entry.priceCp > 0 && entry.priceCp < totalCp)) continue;
+        const distance = messages
+            ? conversationalDistance(messages, entry.messageIndex, currentIndex)
+            : currentIndex - entry.messageIndex;
+        if (!(distance >= 0 && distance <= window)) continue;
+        const component = decomposeWithin(entry.priceCp, amounts);
+        if (!component) continue;
+        const namesStrippedCoin = ['gold', 'silver', 'copper'].some(
+            denom => component[denom] > 0 && DENOMINATION_WORD_RE[denom].test(text)
+        );
+        if (namesStrippedCoin) continue;
+        return {
+            strippedCp: entry.priceCp,
+            remainder: {
+                gold: amounts.gold - component.gold,
+                silver: amounts.silver - component.silver,
+                copper: amounts.copper - component.copper,
+            },
+        };
+    }
+    return null;
+}
+
 export const handlers = {
     // One narrative coin grant (found/received coins) as a single replay-guarded unit.
     // The DM sometimes re-emits an already-paid reward on a later turn while narrating
@@ -221,14 +279,28 @@ export const handlers = {
                 ],
             };
         }
-        const messages = meta.announce === 'audit'
-            ? [...state.messages, systemMessage(`**Coins recovered from narration:** ${transaction.item.name} added to your purse.`)]
-            : state.messages;
+        // Recap-bundle guard, gain side: a new grant that swallows a recent reward
+        // whole ("the 10 gold reward plus 5 silver you find now") must only pay the
+        // new part. Audit grants skip this — they already stood down in scribe.js
+        // unless the event path granted nothing at all.
+        const bundled = isAudit ? null : stripBundledReplay(
+            state.recentCoinGrants, { gold, silver, copper }, meta.playerMessage,
+            messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW, state.messages
+        );
+        const grant = bundled ? bundled.remainder : { gold, silver, copper };
+        const grantTransaction = bundled
+            ? buildCoinGrantTransaction(grant.gold, grant.silver, grant.copper)
+            : transaction;
+        const messages = [
+            ...state.messages,
+            ...(bundled ? [systemMessage(`Adjusted a bundled coin grant — ${formatCurrency(bundled.strippedCp)} of it repeats a reward already received moments ago; granted ${formatCurrency(grantTransaction.priceCp)}.`)] : []),
+            ...(meta.announce === 'audit' ? [systemMessage(`**Coins recovered from narration:** ${grantTransaction.item.name} added to your purse.`)] : []),
+        ];
         return {
             ...state,
-            character: addCurrency(state.character, { gold, silver, copper }),
-            recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex),
-            messages,
+            character: addCurrency(state.character, grant),
+            recentCoinGrants: rememberTransaction(state.recentCoinGrants, grantTransaction, sourceId, messageIndex),
+            messages: messages.length > state.messages.length ? messages : state.messages,
         };
     },
 
@@ -263,19 +335,33 @@ export const handlers = {
                 ],
             };
         }
-        const recentCoinLosses = rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex);
-        const result = spendCurrency(state.character, { gold, silver, copper });
+        // No exact duplicate — but the charge may be a recap BUNDLE that swallows a
+        // recent payment whole (novel total, so the signature check can't see it).
+        const bundled = stripBundledReplay(
+            state.recentCoinLosses, { gold, silver, copper }, meta.playerMessage,
+            messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW, state.messages
+        );
+        const charge = bundled ? bundled.remainder : { gold, silver, copper };
+        const chargeTransaction = bundled
+            ? buildCoinLossTransaction(charge.gold, charge.silver, charge.copper)
+            : transaction;
+        const bundleNote = bundled
+            ? [systemMessage(`Adjusted a bundled coin charge — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago; charged ${formatCurrency(chargeTransaction.priceCp)}.`)]
+            : [];
+        const recentCoinLosses = rememberTransaction(state.recentCoinLosses, chargeTransaction, sourceId, messageIndex);
+        const result = spendCurrency(state.character, charge);
         if (!result.paid) {
             return {
                 ...state,
                 recentCoinLosses,
-                messages: [...state.messages, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)],
+                messages: [...state.messages, ...bundleNote, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)],
             };
         }
         return {
             ...state,
             character: result.character,
             recentCoinLosses,
+            messages: bundleNote.length > 0 ? [...state.messages, ...bundleNote] : state.messages,
         };
     },
 

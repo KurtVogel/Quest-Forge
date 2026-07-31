@@ -112,11 +112,13 @@ Loot rules:
 - Exact amounts only. If the narrative gives no specific number ("a handful of coins"), omit that coin field entirely — never estimate.
 - Denominations are sacred: report coins in the EXACT denomination the narrative names and NEVER convert between them — "thirty silver pieces" is "silver": 30 (never "gold": 30), "fifty silver" is "silver": 50, "two gold crowns" is "gold": 2. This applies to narrated_payment identically.
 - Purchases and sales are engine transactions handled elsewhere; never report coins or goods exchanged in a purchase or sale — in either direction.
+- Change returned from the hero's own payment is never an acquisition: when the hero pays with a larger coin and gets change back, report nothing in narrated_loot for the change.
 - The HERO'S CURRENT INVENTORY line lists what the hero already owns. Using, drawing, lighting, striking, wearing, or retrieving an owned item is NOT an acquisition — "she takes out her flint and steel and strikes a spark" grants nothing. Report an item the hero already owns ONLY when the narrative explicitly completes acquiring an ADDITIONAL copy (a second rope, another potion).
 
 Payment rules:
 - Report a payment ONLY when the DM narrative explicitly completes it: the hero counts out, hands over, or drops the coins and the other party takes them. Intentions, promises, IOUs, haggling, and prices merely quoted are never payments.
 - Copy narrated amounts digit-exactly; spelled-out numbers convert exactly ("six silver" is "silver": 6, "a dozen coppers" is "copper": 12). Never round, estimate, or infer an amount the narrative does not state.
+- Change-making: when the hero pays with a larger coin and receives change (hands over a gold piece for a 2-silver fare and gets 8 silver back), report the NET price actually paid — "silver": 2 — never the gross coin handed over, and never add the fare on top of the coin.
 - Never re-report a payment the narrative merely recalls, confirms, defends, or references from an EARLIER scene — only payments completed for the first time in THIS narrative. "You already paid the six silver" is a recollection, not a new payment.
 - Exact amounts only; never estimate. A wrongly reported coin is worse than a missed one — certainty is required.
 - When in doubt, omit. Omit "narrated_loot" and "narrated_payment" entirely when this narrative moves no coins or items.
@@ -310,24 +312,17 @@ function appliedItemTokens(events) {
     return tokens;
 }
 
-/** Split a copper total back into canonical denominations so no single field
- * hits the per-denomination clamp in the reducer. */
-function cpToCoins(totalCp) {
-    return {
-        gold: Math.floor(totalCp / 100),
-        silver: Math.floor((totalCp % 100) / 10),
-        copper: totalCp % 10,
-    };
-}
-
 /**
  * Reconcile the Scribe's narrated-loot OBSERVATION against the events the engine
- * already applied for this narration, and grant only the deterministic shortfall.
- * The Scribe reports full narrated totals; the subtraction happens HERE, in code —
- * the old contract asked the LLM to report "only the shortfall" and its arithmetic
- * failures were a live double-grant/double-charge source (2026-07-31). Idempotent
- * per sourceId via CLAIM_LOOT_SOURCE, clamped by the engine, and announced with a
- * visible system message so the player sees every correction.
+ * already applied for this narration. The Scribe reports full narrated totals;
+ * the accounting happens HERE, in code — the old contract asked the LLM to report
+ * "only the shortfall" and its arithmetic failures were a live double-grant/
+ * double-charge source (2026-07-31). Coin recovery is all-or-nothing: if the
+ * event path applied ANY coin gain for this narration, the DM demonstrably
+ * evented the grant and owns its amount — no top-ups (the same-day playtest
+ * showed change-making narrations make gross-vs-net amounts ambiguous to the
+ * Scribe). Idempotent per sourceId via CLAIM_LOOT_SOURCE, clamped by the engine,
+ * and announced with a visible system message so the player sees every correction.
  */
 function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     if (!narrated || typeof narrated !== 'object') return;
@@ -355,10 +350,13 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: sourceId });
 
     const narratedCp = gold * 100 + silver * 10 + copper;
-    const shortfallCp = Math.max(0, narratedCp - appliedCoinCp(appliedEvents).gainCp);
-    // Denominations are preserved when nothing was applied; a partial shortfall is
-    // value math and pays out in canonical coins (formatCurrency normalizes anyway).
-    const grant = shortfallCp === narratedCp ? { gold, silver, copper } : cpToCoins(shortfallCp);
+    // Stand-down rule: any applied coin gain means the DM evented this grant —
+    // recover coins only on PURE omission, in the narrated denominations.
+    const { gainCp } = appliedCoinCp(appliedEvents);
+    const coinShortfallCp = gainCp > 0 ? 0 : narratedCp;
+    if (narratedCp > 0 && gainCp > 0) {
+        console.log(`[Scribe] Loot audit: event path already applied a ${gainCp} cp gain for this narration — standing down on coins.`);
+    }
 
     const knownTokens = appliedItemTokens(appliedEvents);
     const missingItems = items.filter(item => {
@@ -373,11 +371,11 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     // later turn (already suppressed on the event path) cannot re-enter via the audit.
     // The reducer announces the recovery (or the suppression) itself. Audits never
     // carry playerMessage: the repeat-intent bypass belongs to the DM event path.
-    if (shortfallCp > 0) {
+    if (coinShortfallCp > 0) {
         dispatch({
             type: 'ADD_COIN_GRANT',
             payload: {
-                ...grant,
+                gold, silver, copper,
                 _meta: { sourceId, announce: 'audit', audit: true },
             },
         });
@@ -394,20 +392,23 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
             },
         });
     }
-    if (shortfallCp > 0 || missingItems.length > 0) {
-        console.log(`[Scribe] Loot audit recovered: ${shortfallCp} cp shortfall, items ${missingItems.length}`);
+    if (coinShortfallCp > 0 || missingItems.length > 0) {
+        console.log(`[Scribe] Loot audit recovered: ${coinShortfallCp} cp shortfall, items ${missingItems.length}`);
     }
 }
 
 /**
  * Payment twin of reconcileNarratedLoot: the Scribe reports the TOTAL coins the
- * narrative shows the hero paying out; the engine subtracts the losses the event
- * path already applied for this same narration and deducts only the shortfall.
- * This is what killed the live "paid once, charged twice" bug — the second charge
- * was this audit re-reporting an already-evented payment and slipping past the
- * ledger via the repeat-payment player-phrasing bypass. The reducer still clamps
- * the deduction to the purse and posts a visible system line; idempotency is a
- * claimed per-message sourceId, like loot recovery.
+ * narrative shows the hero paying out; the engine deducts them ONLY when the
+ * event path applied no coin loss at all for this same narration (pure omission
+ * recovery). This is what killed the live "paid once, charged twice" bug — the
+ * second charge was this audit re-reporting an already-evented payment and
+ * slipping past the ledger via the repeat-payment player-phrasing bypass. No
+ * partial top-ups either: the 2026-07-31 playtest's ferry toll ("hand over a
+ * gold piece, take 8 silver change") showed gross-vs-net payment amounts are
+ * ambiguous to the Scribe, so an evented payment's amount is the DM's alone.
+ * The reducer still clamps the deduction to the purse and posts a visible
+ * system line; idempotency is a claimed per-message sourceId, like loot recovery.
  */
 function reconcileNarratedPayment(narrated, lootAudit, dispatch) {
     if (!narrated || typeof narrated !== 'object') return;
@@ -426,23 +427,22 @@ function reconcileNarratedPayment(narrated, lootAudit, dispatch) {
     dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: paymentSourceId });
 
     const narratedCp = gold * 100 + silver * 10 + copper;
-    const shortfallCp = Math.max(0, narratedCp - appliedCoinCp(appliedEvents).lossCp);
-    if (shortfallCp <= 0) {
-        console.log(`[Scribe] Payment audit: narrated ${narratedCp} cp already fully deducted by the event path.`);
+    const { lossCp } = appliedCoinCp(appliedEvents);
+    if (lossCp > 0) {
+        console.log(`[Scribe] Payment audit: event path already applied a ${lossCp} cp loss for this narration — standing down.`);
         return;
     }
-    const charge = shortfallCp === narratedCp ? { gold, silver, copper } : cpToCoins(shortfallCp);
     // The reducer checks the shared recentCoinLosses ledger for OTHER messages'
     // charges; same-message accounting already happened right here, and audits
     // get no player-phrasing bypass.
     dispatch({
         type: 'AUDIT_COIN_PAYMENT',
         payload: {
-            ...charge,
+            gold, silver, copper,
             _meta: { sourceId: paymentSourceId, audit: true },
         },
     });
-    console.log(`[Scribe] Payment audit settled: ${shortfallCp} cp shortfall.`);
+    console.log(`[Scribe] Payment audit settled: ${narratedCp} cp (no coin loss was evented for this narration).`);
 }
 
 /**

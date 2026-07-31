@@ -36,6 +36,27 @@ phrasing. Settled design, the DM↔engine contract applied to the audit layer:
    it, like the purchase/loose-coin guard — and it holds even when the rest/cast itself is
    replay-suppressed, so an echoed rest cannot sneak its healing in through the loose channel.
 
+Live-playtest addendum (same day, three headless runs of
+`scripts/playtest_economy_doublecharge.cjs` — kobold loot, alms, fountain toss,
+buy/sell, ferry toll, inn + long rest, recap-bait turns):
+5. **Audits recover PURE OMISSIONS only (stand-down).** The subtraction contract above
+   still top-upped a partially-evented payment, and the ferry toll proved narrated
+   amounts ambiguous under change-making: the DM evented `gold_lost: 1, silver_found: 8`
+   (net 2 sp — correct), the Scribe reported ~120 cp gross paid, and the engine "settled"
+   a phantom 20 cp. Now ANY applied coin loss for the audited narration makes the payment
+   audit stand down entirely (same for gains on the loot side; item recovery unaffected)
+   — an evented transaction's amount belongs to the DM event alone. The Scribe prompt
+   also gained explicit change-making rules (report the NET fare, change is never loot).
+6. **Recap-bundle guard in the coin reducers.** The fountain turn re-charged the beggar's
+   gold because the DM bundled it INTO the new event (`gold_lost: 1, copper_lost: 3` =
+   103 cp — a novel total the value-signature ledger cannot match; this hole predates the
+   audit rework). When an incoming loss/grant strictly contains a recent APPLIED entry
+   whose value decomposes exactly into the incoming denominations, the reducer strips that
+   component and applies only the remainder with a visible "Adjusted a bundled coin
+   charge/grant" line — unless the player's own message names the repeated denomination
+   (an intentional repeat names its coin). Player-favorable: a false positive under-moves
+   coin visibly; the old behavior silently double-charged.
+
 **2026-07-30/31 · The ultra-review fix campaign: structural fixes over per-incident patching (autosave by construction, event-channel registry, combat kernel, campaign-keyed RAG, reducer domain split).**
 A six-lens architecture review (docs/ULTRA_REVIEW_2026-07-30.md) found that most recurring
 audit findings were the SAME bug classes re-fixed one incident at a time — copies of one
