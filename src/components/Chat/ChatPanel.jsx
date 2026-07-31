@@ -1,31 +1,20 @@
 import { useState, useRef, useEffect, memo } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
-import { buildSystemPrompt } from '../../llm/promptBuilder.js';
-import { parseResponse, detectPreNarratedOutcome, normalizeEvents, detectSemanticTextRolls } from '../../llm/responseParser.js';
-import { applyEvents } from '../../state/applyEvents.js';
-import { handleRequestedRolls } from '../../engine/rollResolver.js';
-import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../../engine/outOfCombatRollPolicy.js';
+import { createTurnRunner } from '../../llm/turnOrchestrator.js';
+import { playerAuthorityRollCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
-import { maybeAutoSummarize } from '../../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownStances, runScribe } from '../../llm/scribe.js';
-import { isTableTalkMessage, TABLE_TALK_RESPONSE_MODE } from '../../llm/tableTalk.js';
-import { addMemory, seedMemories, retrieveRelevant } from '../../engine/vectorMemory.js';
+import { isTableTalkMessage } from '../../llm/tableTalk.js';
+import { addMemory, seedMemories } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
-import { curateStoryMemory } from '../../engine/storyMemory.js';
-import { captureInjection } from '../../debug/memoryInspectorStore.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
-import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from './turnVisibility.js';
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
-import { buildNudgePrompt, detectMissingEventsCue, extractNudgeEventFields } from './missingEventsNudge.js';
-import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../../engine/roleplayCheck.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
 import './Chat.css';
 
-/** How many recent (un-summarized) messages to send as LLM history. */
-const MESSAGE_WINDOW = 20;
 /**
  * How many transcript messages mount as DOM at once. An "infinite campaign on a
  * phone" must not mount thousands of nodes — older play is one "Load earlier"
@@ -53,10 +42,9 @@ export default function ChatPanel() {
     const [showJumpToLatest, setShowJumpToLatest] = useState(false);
     const abortControllerRef = useRef(null);
     const inputRef = useRef(null);
-    const lastSummarizedRef = useRef(state.session?.prunedMessageCount || 0);
     const hasPrimedRef = useRef(false); // Ensure session priming only fires once per mount
     const memorySeededRef = useRef(false); // Ensure RAG seeding only fires once per mount
-    const streamBufferRef = useRef(''); // Accumulated streaming text for JSON fence detection
+    const pendingStreamTextRef = useRef(''); // Latest fence-frozen display text from the turn runner
     const narratedCueIdsRef = useRef(new Set()); // Mechanic system messages already given an LLM flavor beat
     const narratedCombatExchangeIdsRef = useRef(new Set()); // Prevent duplicate narration calls for one mechanics commit
     const frontGenerationSessionRef = useRef(null); // One private generation request per fresh campaign at a time
@@ -65,12 +53,10 @@ export default function ChatPanel() {
     const stateRef = useRef(state);
     stateRef.current = state;
 
-    const summarizeInFlightRef = useRef(false); // One summarize pass at a time — overlapping runs would double-journal the same range
-
     // Streaming display paints are coalesced to one per animation frame: a raw
     // per-chunk setState re-renders the whole transcript O(campaign × chunks)
-    // per DM turn (2026-07-30 audit). The buffer ref stays chunk-accurate; only
-    // the paint is throttled.
+    // per DM turn (2026-07-30 audit). The turn runner supplies chunk-accurate
+    // display text; only the paint is throttled.
     const streamPaintRafRef = useRef(0);
 
     const cancelScheduledStreamPaint = () => {
@@ -103,25 +89,37 @@ export default function ChatPanel() {
         };
     }, []);
 
-    const runAutoSummarize = async () => {
-        if (summarizeInFlightRef.current) return;
-        summarizeInFlightRef.current = true;
-        try {
-            const result = await maybeAutoSummarize(stateRef.current, dispatch, lastSummarizedRef.current);
-            lastSummarizedRef.current = result.index;
-            const machineryKey = getMachineryGeminiKey(stateRef.current.settings);
-            if (result.journalEntry && machineryKey) {
-                const journalText = result.journalEntry.location
-                    ? `[Location: ${result.journalEntry.location}] ${result.journalEntry.summary}`
-                    : result.journalEntry.summary;
-                await addMemory(machineryKey, journalText, 'journal', result.journalEntry.location).catch(() => {});
-            }
-        } catch (e) {
-            console.error('[Journal RAG Seeding] Failed:', e);
-        } finally {
-            summarizeInFlightRef.current = false;
-        }
-    };
+    // The async turn pipeline (sendToLLM, roleplay-check flow, missing-events
+    // nudge, auto-summarize) lives in llm/turnOrchestrator.js as a plain,
+    // unit-tested module. One runner per mount = one campaign; every dep reads
+    // through stable refs/setters so the first-render instance never goes stale.
+    const runnerRef = useRef(null);
+    if (!runnerRef.current) {
+        runnerRef.current = createTurnRunner({
+            getState: () => stateRef.current,
+            dispatch,
+            streamMessage,
+            sendMessage,
+            isMounted: () => mountedRef.current,
+            setAbortController: (controller) => { abortControllerRef.current = controller; },
+            onStreamChunkText: (text) => {
+                pendingStreamTextRef.current = text;
+                if (streamPaintRafRef.current) return; // a paint is already scheduled for this frame
+                streamPaintRafRef.current = requestAnimationFrame(() => {
+                    streamPaintRafRef.current = 0;
+                    setStreamingMessage(pendingStreamTextRef.current);
+                });
+            },
+            clearStreamingDisplay,
+            setLoading: setIsLoading,
+            onStatus: setLoadingStatus,
+            resetRoleplayChallengeUi: () => {
+                setRoleplayChallenge('');
+                setShowRoleplayChallenge(false);
+            },
+        });
+    }
+    const runner = runnerRef.current;
 
     /**
      * Sticky-bottom scrolling: follow the feed only while the reader is already at
@@ -176,7 +174,7 @@ export default function ChatPanel() {
 
             // The authored premise and live starting inventory are already in the system
             // prompt. The one-time opening also reconciles explicit premise possessions.
-            sendToLLM(buildCampaignOpeningPrompt(), null, { openingScene: true })
+            runner.sendToLLM(buildCampaignOpeningPrompt(), null, { openingScene: true })
                 .catch(e => {
                     console.warn('[Priming] Session start priming failed:', e);
                 })
@@ -242,305 +240,6 @@ export default function ChatPanel() {
             });
     }, []); // Only on mount
 
-    /**
-     * Build the system prompt from current state, with optional RAG memories injected.
-     */
-    const buildCurrentSystemPrompt = (retrievedMemories = [], storyMemory = []) => {
-        const s = stateRef.current;
-        return buildSystemPrompt({
-            character: s.character,
-            inventory: s.inventory,
-            quests: s.quests,
-            rollHistory: s.rollHistory,
-            preset: s.settings.preset,
-            ruleset: s.settings.ruleset,
-            customSystemPrompt: s.settings.customSystemPrompt,
-            journal: s.journal,
-            npcs: s.npcs,
-            party: s.party,
-            currentLocation: s.currentLocation,
-            combat: s.combat,
-            worldFacts: s.worldFacts || [],
-            fronts: s.fronts || [],
-            worldTempo: s.worldTempo || null,
-            recentEncounters: s.recentEncounters || [],
-            recentChecks: s.recentChecks || [],
-            paceDial: s.settings.paceDial,
-            messageCount: (s.messages || []).length,
-            storyMemory,
-            retrievedMemories,
-            premise: s.session?.premise,
-            recentRulings: pruneRecentRulings(s.recentRulings, {
-                messageCount: (s.messages || []).length,
-                location: s.currentLocation,
-            }),
-        });
-    };
-
-    /**
-     * Build the sliding-window message history for the LLM.
-     * Only sends the last MESSAGE_WINDOW un-summarized messages.
-     * Older messages have been captured in journal entries and world facts.
-     */
-    const buildMessageHistory = () => buildMessageWindow(stateRef.current.messages, MESSAGE_WINDOW);
-
-    /**
-     * Send a message to the LLM and process the response.
-     * Returns the parsed events (or null).
-     * @param {string} userMessage
-     * @param {string} [originalPlayerMessage] - The player's actual input (for Scribe)
-     */
-    const sendToLLM = async (userMessage, originalPlayerMessage, opts = {}) => {
-        const s = stateRef.current;
-
-        // RAG: retrieve memories relevant to the current scene (machinery key —
-        // embeddings are Gemini-only regardless of the DM provider).
-        // Include location and combat context for better retrieval relevance
-        const machineryKey = getMachineryGeminiKey(s.settings);
-        let retrievedMemories = [];
-        let dramaticMemories = [];
-        if (originalPlayerMessage && machineryKey) {
-            const sceneContext = [
-                originalPlayerMessage,
-                s.currentLocation && `Location: ${s.currentLocation}`,
-                s.combat?.active && `In combat with: ${s.combat.enemies.map(e => e.name).join(', ')}`,
-            ].filter(Boolean).join('. ');
-            retrievedMemories = await retrieveRelevant(machineryKey, sceneContext).catch(() => []);
-            dramaticMemories = curateStoryMemory({
-                memories: s.storyMemory || [],
-                query: sceneContext,
-                location: s.currentLocation || '',
-                npcs: s.npcs || [],
-            });
-        } else if (originalPlayerMessage) {
-            dramaticMemories = curateStoryMemory({
-                memories: s.storyMemory || [],
-                query: originalPlayerMessage,
-                location: s.currentLocation || '',
-                npcs: s.npcs || [],
-            });
-        }
-        if (originalPlayerMessage) {
-            // Scores/similarities are dropped once the prompt string is built —
-            // keep the latest copy for the read-only Memory Inspector panel.
-            captureInjection({
-                playerMessage: originalPlayerMessage,
-                location: s.currentLocation,
-                retrieved: retrievedMemories,
-                curated: dramaticMemories,
-            });
-        }
-
-        const baseSystemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories);
-        let systemPrompt = baseSystemPrompt;
-        if (opts.combatIntentOnly) {
-            systemPrompt = `${baseSystemPrompt}\n\n## CURRENT RESPONSE MODE — COMBAT INTENT ONLY
-Translate the player's committed action into the single bounded combat_exchange required by the live combat rules. Return ONLY the trailing fenced JSON event block: no narrative, setup, outcome, commentary, or prose outside the JSON. Keep descriptions brief. The engine will resolve mechanics and make a separate narration-only request from the authoritative result.`;
-        } else if (opts.tableTalk) {
-            // Deterministic OOC contract: some DM providers (Grok in live play) never
-            // break character on their own and steamroll "DM, ..." into scene prose.
-            systemPrompt = `${baseSystemPrompt}\n\n${TABLE_TALK_RESPONSE_MODE}`;
-        }
-        const messageHistory = buildMessageHistory();
-
-        abortControllerRef.current = new AbortController();
-        streamBufferRef.current = '';
-        const requestStartedAt = performance.now();
-        let firstChunkAt = null;
-
-        const fullResponse = await streamMessage({
-            provider: s.settings.llmProvider,
-            apiKey: s.settings.apiKey,
-            model: s.settings.model,
-            systemPrompt,
-            messageHistory,
-            userMessage,
-            onChunk: (chunk) => {
-                if (firstChunkAt === null) firstChunkAt = performance.now();
-                streamBufferRef.current += chunk;
-                if (opts.combatIntentOnly) return;
-                if (streamPaintRafRef.current) return; // a paint is already scheduled for this frame
-                streamPaintRafRef.current = requestAnimationFrame(() => {
-                    streamPaintRafRef.current = 0;
-                    const buf = streamBufferRef.current;
-                    // Once we hit a ```json fence, freeze the display — all remaining
-                    // chunks are JSON data that parseResponse handles on the full text.
-                    const fenceIdx = buf.search(/```json/i);
-                    setStreamingMessage(fenceIdx !== -1 ? buf.slice(0, fenceIdx).trimEnd() : buf);
-                });
-            },
-            signal: abortControllerRef.current.signal,
-        });
-        const requestFinishedAt = performance.now();
-        if (!mountedRef.current) return null; // Response landed after unmount/campaign switch — drop it
-        const mode = opts.combatIntentOnly ? 'combat-intent' : (opts.narrationOnly ? 'narration-only' : 'standard');
-        console.info(
-            `[LLM timing] ${mode}: TTFT ${firstChunkAt === null ? 'n/a' : `${Math.round(firstChunkAt - requestStartedAt)}ms`}, total ${Math.round(requestFinishedAt - requestStartedAt)}ms`
-        );
-
-        const parsed = parseResponse(fullResponse);
-        const narrative = parsed.narrative;
-        // Unrepairable JSON means the DM's mechanical events were dropped. That
-        // must be VISIBLE — a silently vanished event block reads as "the DM gave
-        // me nothing", and channels without a Scribe backstop (combat_start,
-        // spell_cast, conditions) had no signal at all before this.
-        if (parsed.eventsDropped && !opts.narrationOnly && !opts.tableTalk) {
-            dispatch({
-                type: 'ADD_MESSAGE',
-                payload: { role: 'system', content: 'The DM\'s mechanical events could not be read this turn (malformed data) — the story above stands, but no game state changed. If something seemed granted or started here, ask the DM to restate it.' },
-            });
-        }
-        // Table talk pauses the world: whatever a disobedient DM appends, no events
-        // exist on an OOC turn — no rolls, loot, quests, or NPC/state mutations.
-        let events = (opts.narrationOnly || opts.tableTalk) ? null : parsed.events;
-        opts.onNarrative?.(narrative);
-
-        // A combat_exchange with no live combat has no machine to resolve it; left in
-        // place it hides the narration AND dead-ends in a silent plan rejection —
-        // the whole response vanishes (playtest #10 finding: DM emitted a death_save
-        // exchange after END_COMBAT closed the fight with the hero dying).
-        if (dropOrphanCombatExchange(events, !!s.combat?.active)) {
-            console.warn('[ChatPanel] Dropped a combat_exchange emitted outside active combat; narrating normally.');
-        }
-
-        // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text
-        if (!opts.narrationOnly && !opts.tableTalk && (!events || !events.requestedRolls?.length) && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
-            const semanticRolls = await detectSemanticTextRolls(narrative, s.settings);
-            if (semanticRolls && semanticRolls.length > 0) {
-                console.warn('[ChatPanel] Scribe detected text-based rolls semantically:', semanticRolls);
-                // Merge the detected rolls into any existing events — replacing the whole
-                // object would silently drop loot/quest/NPC events the response carried.
-                const detected = normalizeEvents({ requested_rolls: semanticRolls });
-                if (events) {
-                    events.requestedRolls = detected.requestedRolls;
-                } else {
-                    events = detected;
-                }
-                events._textRollDetected = true;
-            }
-        }
-
-        if (events?.requestedRolls?.length > 0 && originalPlayerMessage && !s.combat?.active) {
-            const review = await reviewOutsideCombatRolls(events.requestedRolls, originalPlayerMessage, narrative, s.settings);
-            events.requestedRolls = review.acceptedRolls;
-            if (review.rejectedRolls.length > 0) {
-                events._playerAuthorityRollRejected = true;
-                console.warn('[ChatPanel] Rejected a check that overrides player-authored portrayal; requesting a no-roll roleplay response.');
-            }
-            const preNarrated = review.preNarrated !== undefined ? review.preNarrated : detectPreNarratedOutcome(narrative);
-            if (preNarrated) {
-                events._preNarratedOutcome = true;
-                console.warn('[ChatPanel] DM pre-narrated outcome before roll — correction will be injected with roll results.');
-            }
-        }
-
-        // Withheld-setup policy lives in turnVisibility.js (unit-tested): narration
-        // with pending rolls is superseded by the post-roll beat and hidden, EXCEPT
-        // prose-extracted proposals the player already read; setupPhase separately
-        // defers outcome mutations until dice resolve.
-        const { setupPhase, hideSetup } = deriveSetupVisibility(events);
-        if (hideSetup) clearStreamingDisplay();
-        // Pre-generate a stable message ID so applyEvents can reference it as a loot source key.
-        const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        if (events) {
-            // Let callers staging a roleplay-check proposal recover this response's
-            // narration (the withheld setup) and reveal/reuse it later.
-            events._setupMessageId = msgId;
-            events._setupHidden = hideSetup;
-            // In a batched combat round the client already rolled AND applied HP from the
-            // inline damage, so ignore any HP deltas the DM narrated to avoid double-counting.
-            // Finalized BEFORE dispatch: this object enters the reducer store, and an
-            // object already in the store must never be mutated afterwards — what got
-            // autosaved would depend on a race with the 2s debounce.
-            if (opts.suppressHpEvents) {
-                events.damageTaken = 0;
-                events.enemyUpdates = [];
-            }
-        }
-        if (!mountedRef.current) return null; // Never commit a turn into a different campaign's store
-        dispatch({
-            type: 'ADD_MESSAGE',
-            payload: { id: msgId, role: 'assistant', content: narrative, events, hidden: hideSetup },
-        });
-
-        // Apply game events (damage, items, etc.)
-        if (events) {
-            // On a withheld roll-setup turn, defer outcome mutations to the post-roll
-            // narration (see applyEvents) so the DM can't double-apply state across the split.
-            // playerActionContext carries the original player intent into follow-up
-            // calls (post-roll outcomes) where originalPlayerMessage is deliberately
-            // absent — so the transaction replay guard can still honor an explicit
-            // "I buy another one" when the purchase lands after dice.
-            applyEvents(events, dispatch, () => stateRef.current, {
-                setupPhase,
-                lootSourceId: msgId,
-                playerMessage: originalPlayerMessage || opts.playerActionContext,
-            });
-            if (events.location && !s.combat?.active && !events.combatExchange) {
-                dispatch({ type: 'SET_LOCATION', payload: events.location });
-            }
-        }
-
-        // RAG: embed any new world facts the DM emitted this turn (per response).
-        // The per-turn Scribe + narrative embedding run once in handleSend on the FINAL
-        // narrated outcome, so they capture results rather than withheld setup text.
-        // Skip on a setup turn (pending rolls) — those facts ride on the outcome narration.
-        if (!setupPhase && !s.combat?.active && events?.worldFacts?.length > 0 && machineryKey) {
-            for (const f of events.worldFacts) {
-                addMemory(machineryKey, f.fact, f.category || 'world_fact', events?.location || s.currentLocation).catch(() => {});
-            }
-        }
-
-        // Missing-events nudge (IDEAS 2026-07-11): a no-JSON response at a contract
-        // moment loses quest_updates/starting_items forever — the only channels with
-        // no Scribe audit backstop. Recovery is one JSON-only follow-up, whitelisted.
-        if (!opts.narrationOnly && !opts.tableTalk && !opts.combatIntentOnly
-            && !stateRef.current.combat?.active
-            && !(events?.requestedRolls?.length > 0)) { // a text-detected check owns this turn
-            const nudgeCue = detectMissingEventsCue({
-                hadEventBlock: !!parsed.events,
-                openingScene: !!opts.openingScene,
-                playerMessage: originalPlayerMessage || opts.playerActionContext || '',
-                narrative,
-                combatActive: !!stateRef.current.combat?.active,
-            });
-            if (nudgeCue) await recoverMissingEvents(nudgeCue, narrative, msgId);
-        }
-
-        return events;
-    };
-
-    /**
-     * One cheap JSON-only follow-up for a prose-only contract moment. The reply is
-     * hard-whitelisted (missingEventsNudge.js) and re-shaped through the real parser
-     * before applying, so nothing beyond quest_updates/starting_items can enter.
-     */
-    const recoverMissingEvents = async (cue, narrative, lootSourceId) => {
-        try {
-            const s = stateRef.current;
-            const response = await sendMessage({
-                provider: s.settings.llmProvider,
-                apiKey: s.settings.apiKey,
-                model: s.settings.model,
-                systemPrompt: buildCurrentSystemPrompt([], []),
-                messageHistory: buildMessageHistory(),
-                userMessage: buildNudgePrompt(cue, narrative),
-                temperature: 0.2,
-            });
-            const rawFields = extractNudgeEventFields(response, cue);
-            if (!rawFields) return;
-            const synthetic = parseResponse('```json\n' + JSON.stringify(rawFields) + '\n```');
-            if (!synthetic.events) return;
-            applyEvents(synthetic.events, dispatch, () => stateRef.current, {
-                lootSourceId: `${lootSourceId}:nudge`,
-            });
-            console.warn(`[ChatPanel] Missing-events nudge recovered ${Object.keys(rawFields).join(' + ')} (${cue.reason} cue).`);
-        } catch (error) {
-            // Recovery is best-effort — a failed nudge must never block the turn.
-            console.warn('[ChatPanel] Missing-events nudge failed:', error.message || error);
-        }
-    };
-
     useEffect(() => {
         const s = stateRef.current;
         if (!s.settings.apiKey || isLoading) return;
@@ -566,7 +265,7 @@ Translate the player's committed action into the single bounded combat_exchange 
 
         setIsLoading(true);
         clearStreamingDisplay();
-        sendToLLM(narrationRequest, null, { narrationOnly: true })
+        runner.sendToLLM(narrationRequest, null, { narrationOnly: true })
             .catch(error => {
                 if (error.name !== 'AbortError') {
                     dispatch({
@@ -624,7 +323,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         setIsLoading(true);
         clearStreamingDisplay();
         setLoadingStatus('Narrating combat outcome');
-        sendToLLM(combatNarrationPrompt(result), null, {
+        runner.sendToLLM(combatNarrationPrompt(result), null, {
             narrationOnly: true,
             onNarrative: text => { narrative = text; },
         })
@@ -665,7 +364,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                         addMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
                     }
                 }
-                runAutoSummarize();
+                runner.runAutoSummarize();
             })
             .catch(error => {
                 if (error.name !== 'AbortError') {
@@ -687,181 +386,21 @@ Translate the player's committed action into the single bounded combat_exchange 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state.combat?.phase, state.combat?.lastExchangeResult?.exchangeId, isLoading, combatNarrationRetry]);
 
-    const stageRoleplayCheck = (rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null } = {}) => {
-        const proposal = buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed, preNarrated, loot, setupNarrative, setupMessageId });
-        if (!proposal) return false;
-        dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
-        setRoleplayChallenge('');
-        setShowRoleplayChallenge(false);
-        return true;
+    // The roleplay-check accept/challenge/change flow lives in the turn runner;
+    // these handlers keep only the component-side UI guards (isLoading, the
+    // challenge textarea text) and delegate everything else.
+    const handleAcceptRoleplayCheck = () => {
+        if (isLoading) return;
+        runner.acceptRoleplayCheck();
     };
 
-    const finalizeRoleplayTurn = (playerAction) => {
-        const latest = stateRef.current;
-        const finalNarration = (latest.messages || [])
-            .findLast(message => message.role === 'assistant' && !message.hidden && message.content?.trim());
-        if (finalNarration) {
-            runScribe({
-                playerMessage: playerAction,
-                dmNarrative: finalNarration.content,
-                settings: latest.settings,
-                dispatch,
-                knownAppearances: buildKnownAppearances(latest, playerAction, finalNarration.content),
-                knownStances: buildKnownStances(latest, playerAction, finalNarration.content),
-                // Post-roll outcomes are where narrated loot most often loses its
-                // events (the withheld setup already dropped them by design).
-                lootAudit: (!latest.combat?.active && finalNarration.id) ? {
-                    sourceId: `${finalNarration.id}:scribe-loot`,
-                    appliedEvents: finalNarration.events || null,
-                    getState: () => stateRef.current,
-                } : null,
-            }).catch(() => {});
-            const machineryKey = getMachineryGeminiKey(latest.settings);
-            if (machineryKey) {
-                const loc = latest.currentLocation;
-                const narrativeText = loc
-                    ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
-                    : finalNarration.content.slice(0, 500);
-                addMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
-            }
-        }
-        runAutoSummarize();
-    };
-
-    const handleAcceptRoleplayCheck = async () => {
-        const proposal = stateRef.current.pendingRoleplayCheck;
-        if (!proposal || isLoading) return;
-        dispatch({ type: 'CLEAR_ROLEPLAY_CHECK' });
-        setIsLoading(true);
-        setLoadingStatus('Rolling accepted check');
-        let stagedFollowUp = false;
-        // Failure recovery must know whether dice already landed: before dice,
-        // the proposal can be restored intact; after dice, restoring it would
-        // reopen the exact reroll-bargaining door the proposal system closes.
-        const rollCountBefore = stateRef.current.rollHistory?.length || 0;
-        try {
-            await handleRequestedRolls(proposal.rolls, {
-                getState: () => stateRef.current,
-                dispatch,
-                sendToLLM,
-                playerAction: proposal.playerAction,
-                preNarrated: proposal.preNarrated,
-                setupNarrative: proposal.setupNarrative,
-                onFollowUpRolls: (rolls, meta) => {
-                    // Carry declared-but-unapplied loot into the re-staged proposal so the
-                    // eventual roll-free outcome still gets the grant-or-deny reminder.
-                    // A follow-up response is itself a withheld setup — carry its narration
-                    // the same way so chained checks don't erase fiction either.
-                    stagedFollowUp = stageRoleplayCheck(rolls, meta.playerAction || proposal.playerAction, {
-                        preNarrated: meta.preNarrated,
-                        loot: meta.pendingLoot || null,
-                        setupNarrative: meta.setupNarrative || '',
-                        setupMessageId: meta.setupMessageId || null,
-                    });
-                },
-                pendingLoot: proposal.loot,
-            });
-            if (!stagedFollowUp) finalizeRoleplayTurn(proposal.playerAction);
-        } catch (error) {
-            if (error.name !== 'AbortError') {
-                const diceRolled = (stateRef.current.rollHistory?.length || 0) > rollCountBefore;
-                if (diceRolled) {
-                    // The dice are final; only the outcome narration failed. Point the
-                    // player at the retry path instead of stranding them in silence.
-                    dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `The dice landed (see the roll above) but the DM's outcome response failed: ${error.message}. Say "continue" to have the DM narrate the result.` } });
-                } else {
-                    dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error resolving check: ${error.message}` } });
-                    dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
-                }
-            }
-        } finally {
-            setIsLoading(false);
-            clearStreamingDisplay();
-            setLoadingStatus('');
-        }
-    };
-
-    const handleChallengeRoleplayCheck = async () => {
-        const proposal = stateRef.current.pendingRoleplayCheck;
-        const challenge = roleplayChallenge.trim();
-        if (!proposal || proposal.challengeUsed || !challenge || isLoading) return;
-        dispatch({ type: 'CLEAR_ROLEPLAY_CHECK' });
-        dispatch({ type: 'ADD_MESSAGE', payload: { role: 'user', content: `**Roll challenge:** ${challenge}` } });
-        setIsLoading(true);
-        setLoadingStatus('DM reconsidering the ruling');
-        try {
-            const events = await sendToLLM(
-                buildRoleplayChallengePrompt(proposal, challenge),
-                proposal.playerAction
-            );
-            if (events?.requestedRolls?.length > 0) {
-                // Upheld/revised rulings are JSON-only responses; the original withheld
-                // setup is still the scene the player never saw, so carry it forward.
-                stageRoleplayCheck(events.requestedRolls, proposal.playerAction, {
-                    challengeUsed: true,
-                    preNarrated: events._preNarratedOutcome,
-                    loot: proposal.loot,
-                    setupNarrative: proposal.setupNarrative,
-                    setupMessageId: proposal.setupMessageId,
-                });
-            } else {
-                // The DM withdrew (or its re-proposal was policy-rejected): this
-                // objective is settled without dice. Record it so the DM cannot
-                // re-propose the same check from scratch a few turns later.
-                const latest = stateRef.current;
-                const ruling = buildRollRulingRecord(proposal, 'withdrawn', {
-                    messageCount: (latest.messages || []).length,
-                    location: latest.currentLocation,
-                    challenge,
-                });
-                if (ruling) dispatch({ type: 'RECORD_ROLL_RULING', payload: ruling });
-                if (events?._playerAuthorityRollRejected) {
-                    await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
-                }
-                finalizeRoleplayTurn(proposal.playerAction);
-            }
-        } catch (error) {
-            if (error.name !== 'AbortError') {
-                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error challenging check: ${error.message}` } });
-                dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
-            }
-        } finally {
-            setIsLoading(false);
-            clearStreamingDisplay();
-            setLoadingStatus('');
-        }
+    const handleChallengeRoleplayCheck = () => {
+        if (isLoading) return;
+        runner.challengeRoleplayCheck(roleplayChallenge);
     };
 
     const handleChangeRoleplayApproach = () => {
-        // No dice will ever resolve this setup, so reveal it instead of erasing its
-        // fiction — unless it pre-narrated an outcome that never happened.
-        const proposal = stateRef.current.pendingRoleplayCheck;
-        const setupMessage = proposal?.setupMessageId
-            ? stateRef.current.messages.find(m => m.id === proposal.setupMessageId)
-            : null;
-        const revealSetup = !!(setupMessage?.hidden && setupMessage.content?.trim() && !proposal.preNarrated);
-        if (revealSetup) dispatch({ type: 'REVEAL_MESSAGE', payload: { id: proposal.setupMessageId } });
-        if (proposal) {
-            // A set-aside ruling still binds the DM: an ordinary proposal must return
-            // unchanged on a retry, and an upheld final ruling stays final.
-            const ruling = buildRollRulingRecord(proposal, 'set_aside', {
-                messageCount: (stateRef.current.messages || []).length,
-                location: stateRef.current.currentLocation,
-            });
-            if (ruling) dispatch({ type: 'RECORD_ROLL_RULING', payload: ruling });
-        }
-        dispatch({ type: 'CLEAR_ROLEPLAY_CHECK' });
-        dispatch({
-            type: 'ADD_MESSAGE',
-            payload: {
-                role: 'system',
-                content: revealSetup
-                    ? 'The proposed check is set aside; the scene above stands, but no dice were rolled. Describe a different approach.'
-                    : 'The proposed check is set aside. Describe a different approach; no dice were rolled.',
-            },
-        });
-        setRoleplayChallenge('');
-        setShowRoleplayChallenge(false);
+        runner.changeRoleplayApproach();
     };
 
     /**
@@ -905,7 +444,7 @@ Translate the player's committed action into the single bounded combat_exchange 
 
         try {
             let dmNarrative = '';
-            const events = await sendToLLM(trimmed, trimmed, {
+            const events = await runner.sendToLLM(trimmed, trimmed, {
                 combatIntentOnly: startedCombatIntent,
                 tableTalk: tableTalkTurn,
                 onNarrative: text => { dmNarrative = text; },
@@ -925,14 +464,14 @@ Translate the player's committed action into the single bounded combat_exchange 
                 // A hidden setup rides the proposal so its fiction survives: re-woven into
                 // the post-roll outcome, or revealed if the player changes approach.
                 // Prose-detected checks stay visible, so they carry no setup payload.
-                stageRoleplayCheck(events.requestedRolls, trimmed, {
+                runner.stageRoleplayCheck(events.requestedRolls, trimmed, {
                     preNarrated: events._preNarratedOutcome,
                     loot: routed.proposalLoot,
                     setupNarrative: events._setupHidden ? dmNarrative : '',
                     setupMessageId: events._setupHidden ? events._setupMessageId : null,
                 });
             } else if (routed.route === TURN_ROUTES.AUTHORITY_CORRECTION) {
-                await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
+                await runner.sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
             }
             if (startedCombatIntent && !combatIntentHandled) {
                 dispatch({ type: 'CANCEL_COMBAT_INTENT' });
@@ -955,7 +494,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                     'Do not state healing numbers or slot counts; the system line already reported them.',
                     castResults ? `Engine result to interpret fictionally: ${castResults}]` : ']',
                 ].join(' ');
-                await sendToLLM(castNarrationRequest, null, { narrationOnly: true });
+                await runner.sendToLLM(castNarrationRequest, null, { narrationOnly: true });
             }
 
             // Extract world-state from the FINAL narrated outcome (where the real facts
@@ -997,7 +536,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
 
             // A turn awaiting dice resolution summarizes after the outcome lands, not mid-split.
-            if (!waitsForResolution) runAutoSummarize();
+            if (!waitsForResolution) runner.runAutoSummarize();
 
         } catch (error) {
             if (startedCombatIntent) dispatch({ type: 'CANCEL_COMBAT_INTENT' });
