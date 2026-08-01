@@ -42,13 +42,13 @@ it under Process notes.
 
 | Feature ID | Scope (primary files) | Last audited |
 |---|---|---|
-| dice-engine | `engine/dice.ts` | 2026-07-21 |
+| dice-engine | `engine/dice.ts` | 2026-08-01 |
 | rules-math | `engine/rules.js` | 2026-07-26 |
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-07-28 |
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-07-27 |
 | prompt-building | `llm/promptBuilder.js` | 2026-07-29 |
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-07-23 |
-| combat-exchange | `engine/combatExchange.js`, reducer combat phases, opening initiative | 2026-07-25 |
+| combat-exchange | `engine/combatExchange.js`, `engine/combatMath.js`, `state/handlers/combat.js`, opening initiative | 2026-07-25 |
 | enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-07-27 |
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-07-22 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-07-23 |
@@ -60,9 +60,9 @@ it under Process notes.
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-07-26 |
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-07-28 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-07-25 |
-| scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-07-22 |
+| scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-08-01 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-07-29 |
-| chat-orchestration | `components/Chat/ChatPanel.jsx` (`sendToLLM`, `applyEvents`, message window) | 2026-07-30 |
+| chat-orchestration | `components/Chat/ChatPanel.jsx`, `llm/turnOrchestrator.js` (turn pipeline, `applyEvents`, message window) | 2026-07-30 |
 
 ## Coverage Snapshot
 
@@ -200,6 +200,13 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P2** (memory-journal, 2026-07-30): `if (summary.location)` (`worldJournal.js:188`) lacks the Scribe's 07-23 junk-string drop-list while the journal prompt itself invites the literal string `"null"` ("Current location name or null if unchanged") — becomes canonical `currentLocation`, mints a location-registry record, and persists into `journalEntry.location`; share the drop-list from `scribe.js:532-534`. *Fixed 2026-07-30: drop-list moved to `locationRegistry.js` as `sanitizeExtractedLocation`; Scribe and journal both share it; literal-"null" journal test.*
 - [x] **P1** (chat-orchestration, 2026-07-30): every streamed chunk re-renders the ENTIRE transcript — `setStreamingMessage` per chunk (`ChatPanel.jsx:315-327`) re-renders all `ChatMessage`s (no `React.memo`, `:1013-1015,1181`) and `MarkdownText` re-parses regex markdown for every message per chunk (`MarkdownText.jsx:10-61`); O(campaign × chunks) per DM turn on the "infinite campaign on a phone" target. Reducer is already memo-friendly — add `React.memo(ChatMessage)` + an rAF/16ms throttle on the streaming display. *Fixed 2026-07-30: streaming paints coalesce to one per animation frame (every clear routes through clearStreamingDisplay so a scheduled paint can't resurrect cleared/withheld text); ChatMessage and MarkdownText memoized. Live-verified, zero console errors.*
 - [x] **P2** (chat-orchestration, 2026-07-30): no render window on the transcript — every message ever mounts as DOM (hidden ones still mount, returning null) and four `[...messages].reverse().find()` copies run per turn (`ChatPanel.jsx:489,643,900,770`); `slice(-150)` + "Load earlier" and `findLast` sweeps. *Fixed 2026-07-30: last-150 render window with a "Load earlier messages (N more)" affordance (live-verified on a seeded 170-message save: 150 mounted → 170 after click, button self-removes); the three remaining reverse().find() copies are now findLast.*
+- [ ] **P1** (scene-art, 2026-08-01): the scene image cache can essentially never hit — the key is the full composed prompt (`imageGen.js:100`) but scene prompts are written fresh by an LLM per click (`composeScenePrompt` is non-deterministic), so a repeat Visualize on an unchanged scene pays a machinery call + a full generation and then inserts ANOTHER full-res 1k base64 data URL into the 10-entry Map (scenes skip downscaling by design, pinned at `imageGen.test.js:292`) — megabytes retained on the phone target for a near-zero hit rate. Key scene entries on their inputs (last-narration message id + location + mode + target) so a repeat click short-circuits *before* the compose call, or stop caching scenes — `llm/providers/imageGen.js:100-107`, `components/SceneArt/SceneArt.jsx:190-214`.
+- [ ] **P2** (scene-art, 2026-08-01): `cacheSet`'s LRU eviction — the only thing bounding image-cache memory — has no test; nothing asserts the Map stays at `IMAGE_CACHE_MAX` or that the oldest entry is the one evicted — `llm/providers/imageGen.js:36-43`.
+- [ ] **P2** (scene-art, 2026-08-01): the composed prompt is capped only on the Pollinations tier (`POLLINATIONS_PROMPT_MAX`); the xAI and Gemini request bodies send whatever the art director returned, unbounded — mirror the slice on both — `llm/providers/imageGen.js:120,163`.
+- [ ] **P2** (scene-art, 2026-08-01): `composeScenePrompt` sorts NPCs by recency, `.slice(0, 4)`, *then* `.filter(n => n.name)` — a nameless roster entry in the top 4 silently shrinks the cast the art director is told about; filter before slicing — `llm/scribe.js:914-917`.
+- [ ] **P2** (dice-engine, 2026-08-01): live `rollHistory` grows unbounded — all six appends are `[...state.rollHistory, roll]` with no cap while only 50 are persisted, 5 reach the prompt and 20 render; `DicePanel.jsx:21` also copies+reverses the whole history every render. Cap at the reducer (match `MAX_SAVED_ROLLS`) and drop the copy — `state/handlers/messages.js:82`, `combat.js:131,259`, `inventory.js:156,222`, `resources.js:150`, `components/DiceRoller/DicePanel.jsx:21`.
+- [ ] **P2** (dice-engine, 2026-08-01): `parseNotation` caps `count` at `MAX_DICE_COUNT` but leaves `sides` unbounded — `"1d999999999"` is valid notation and reaches the dice engine via the un-sanitized LLM `roll.damage` on a non-weapon attack roll (`rollResolver.js:196`); blast radius is a self-favoring one-shot on an enemy, but the bound is missing for the same reason `MAX_DICE_COUNT` exists. Add a symmetric `MAX_DIE_SIDES` + an oversized-sides test — `engine/dice.ts:115`.
+- [ ] **P2** (dice-engine, 2026-08-01): hot callers build and discard full `DiceRollResult` objects per die — Sneak Attack loops `rollWithModifier(1,6,…).rolls[0]` up to 20× on a crit L20 rogue (two `Date.now()` + a notation string each), and `rollDice` makes one `crypto.getRandomValues` call + one `Uint32Array(1)` allocation per die; `rollDice(n, 6)` / a batched draw replaces both — `engine/combatMath.js:142-146`, `engine/dice.ts:57-66`.
 - [x] **P2** (progression, 2026-07-28): hostile-input paths untested — negative/NaN/string XP amounts, `awardExperience(null)`, `getExperienceThreshold(0/-1/NaN/25)`, unknown class (hitDie 8 default), `estimateCombatExperience` with object-valued stats (NaN sum → silent 0-award, safe but unpinned) — `engine/progression.test.js`. *Fixed 2026-07-28: full suite added; `estimateCombatExperience` also hardened directly (coerces stats, skips non-object entries and non-array input) rather than leaning on awardExperience's downstream NaN→0.*
 
 ## Entry template
@@ -224,6 +231,36 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-01 — dice-engine + scene-art (Lap 3: performance & token budget)
+
+`npm test`: 1283 passing / 76 files.
+
+Rotation excluded (last 6, local ∪ origin — identical this run): memory-journal, chat-orchestration (07-30), prompt-building, providers-adapter (07-29), inventory-economy, progression (07-28 #2), story-memory, vector-memory-rag (07-28), enemy-stats-conditions, response-parsing (07-27), character-vault, rules-math (07-26). Oldest eligible → **dice-engine** (07-21); the 07-22 tie hidden-fronts/scene-art broke to lowest coverage → **scene-art** (85.21 < 87.93). Coverage snapshot is 4 days old — not re-run.
+
+### dice-engine (`engine/dice.ts`) — Lap 3: performance & token budget
+- **Scope examined:** `dice.ts` end to end; every consumer (`combatMath.js`, `state/handlers/{combat,inventory,resources,spellcasting}.js`, `rollResolver.js`, `characterUtils.js`, `scribe.js` timing die); the whole `rollHistory` lifecycle — 6 append sites → `serializeGameState`'s `MAX_SAVED_ROLLS` → `buildRecentRollsBlock(slice(-5))` → `DicePanel.jsx`; `dice.test.ts` (19 tests).
+- **Findings:**
+  - **Verified strong:** `MAX_DICE_COUNT`/backstop DoS hardening and rejection sampling (07-21) are both boundary-tested; prompt exposure is capped at 5 rolls; the save caps at 50. Token cost of this feature is negligible.
+  - **P2 (live `rollHistory` grows unbounded):** all six appends are `[...state.rollHistory, roll]` with no cap (`handlers/messages.js:82`, `combat.js:131,259`, `inventory.js:156,222`, `resources.js:150`) — only *serialization* caps (50), the prompt takes 5, and the panel shows 20, so nothing ever reads past 50. `DicePanel.jsx:21` also copies **and reverses the entire history** on every render (the class the 07-30 chat-orchestration sweep closed). Cap at the reducer so live state, save, and prompt agree.
+  - **P2 (per-die crypto call + throwaway wrappers):** `rollDice` calls `rollDie` per die → one `crypto.getRandomValues` + one `Uint32Array(1)` allocation each, and the hottest callers discard the wrapper: Sneak Attack loops `rollWithModifier(1,6,…).rolls[0]` per die (up to 20 on a crit L20 rogue, `combatMath.js:142-146`), each building a full `DiceRollResult` with two `Date.now()` and a notation string. `rollDice(n, 6)` is one call, one array. Micro (µs-scale), but free.
+  - **P2 (asymmetric bound — `sides` uncapped):** `parseNotation` caps `count` at `MAX_DICE_COUNT` but leaves `sides` unbounded (`dice.ts:115`), so `"1d999999999"` is valid notation. Live reach is narrow: enemy/companion damage passes `sanitizeEnemyDamage` (sides gated to 4/6/8/10/12) and `USE_ITEM` healing clamps to maxHP, but `rollResolver.js:196` hands an LLM-authored `roll.damage` through raw for a non-weapon attack roll — a self-favoring one-shot on an enemy, not player harm. Add a symmetric `MAX_DIE_SIDES` for the same reason `MAX_DICE_COUNT` exists.
+  - **P2 (coverage):** nothing asserts an oversized `sides`; the crit-headroom test pins `count` only.
+- **Suggested improvements:** (1) reducer-level `rollHistory` cap + drop the DicePanel full copy/reverse; (2) `MAX_DIE_SIDES`; (3) batch the Sneak Attack draw through `rollDice`.
+
+### scene-art (`llm/providers/imageGen.js`, `composeScenePrompt`, portraits) — Lap 3: performance & token budget
+- **Scope examined:** `imageGen.js` end to end (cache/LRU, three-tier chain, `downscaleDataUrl`); `SceneArt.jsx` generate flow; the three portrait call sites (`JournalPanel.jsx:150`, `CharacterSheet.jsx:141`, `CharacterCreation.jsx:157`); `composeScenePrompt`/`preserveSceneSituation`/`ART_DIRECTOR_PROMPT` (`scribe.js:866-941`); portrait persistence (`handlers/npcs.js:16`, `npcRoster.js:426`); `imageGen.test.js` (20 tests).
+- **Findings:**
+  - **Verified strong (token/payload budget):** composition is on-demand, never per turn; `preserveSceneSituation` caps the situation at 1800 chars head+tail; NPC lines capped at 4; Pollinations sliced at 1500 before URL-encoding; portraits downscale to 480×640 q0.82 **by default in `generatePortraitImageDetailed`**, so the base64 that reaches saves/hero files/Firestore chunks is already compact at all three call sites; scene images live in component state only, never persisted.
+  - **P1 (the scene cache can essentially never hit — it costs memory and buys nothing):** the key is the full composed prompt (`imageGen.js:100`), but in scene mode that prompt is *written fresh by an LLM on every click* (`composeScenePrompt`, non-deterministic) — two Visualize clicks on an identical, unchanged scene produce different prompt text, miss the cache, and each pays a machinery call **plus** a full image generation. Only the portrait path (deterministic prompt from appearance + gender) can hit. Every scene miss then inserts a **full-resolution 1k base64 data URL** into the 10-entry Map (scenes deliberately skip downscaling, pinned by `imageGen.test.js:292`) — megabytes retained in the tab on the phone target, for a hit rate near zero. Either key the scene entry on its *inputs* (last-narration message id + location + mode + target) so a repeat click short-circuits **before** the compose call, or stop caching scenes and reclaim the memory. `imageGen.test.js:125` passes the identical prompt string twice, which is exactly why the real-world miss is invisible to the suite.
+  - **P2 (the memory bound itself is untested):** `cacheSet`'s LRU eviction branch (`imageGen.js:36-43`) is the only thing holding the cache at `IMAGE_CACHE_MAX` — no test asserts the size cap or that the *oldest* entry is the one dropped.
+  - **P2 (composed prompt uncapped on the paid tiers):** only Pollinations slices; the xAI and Gemini request bodies send whatever the art director returned (`imageGen.js:120,163`). The prompt asks for 100–170 words, but a drifting/looping model's output goes to the wire unbounded — one `slice()` mirrors `POLLINATIONS_PROMPT_MAX`.
+  - **P2 (nameless NPC eats a frame slot):** `composeScenePrompt` sorts by recency, `.slice(0, 4)`, *then* `.filter(n => n.name)` (`scribe.js:914-917`) — a nameless roster entry inside the top 4 silently shrinks the cast the art director is told about. Filter before slicing.
+- **Suggested improvements:** (1) rekey the scene cache on its inputs (or drop scene caching); (2) cap the composed prompt for xAI/Gemini; (3) LRU-eviction test; (4) filter-before-slice.
+
+### Process notes
+- **Registry amended (no feature gained/lost):** the reducer has since split into `state/handlers/*` (+ `state/migrations.js`, `state/initialState.js`), and `engine/combatMath.js`, `engine/replayLedger.js`, `llm/turnOrchestrator.js` were extracted. Scope cells refreshed for combat-exchange and chat-orchestration; other cells still resolve (gameReducer re-exports the handlers).
+- The working tree carried unrelated uncommitted changes (`CharacterCreation.jsx`, `classes.js`, `abilityGuidance.js`, `STATUS.md`) from a normal session — left untouched; only this log was committed.
 
 ## 2026-07-30 — memory-journal + chat-orchestration (memory-journal closes Lap 2: hostile input; chat-orchestration opens Lap 3: performance & token budget)
 
