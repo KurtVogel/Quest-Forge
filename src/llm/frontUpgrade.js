@@ -119,7 +119,7 @@ export async function upgradeCampaignFrontsV2(state) {
         model: state.settings.model,
         systemPrompt: FRONT_UPGRADE_PROMPT,
         messageHistory: [],
-        userMessage: JSON.stringify(context, null, 2),
+        userMessage: JSON.stringify(context),
         temperature: 0.7, // creative front invention, but inside a strict JSON schema
     });
     const sanitized = sanitizeFrontUpgrade(parseUpgradeResponse(response), existingFronts);

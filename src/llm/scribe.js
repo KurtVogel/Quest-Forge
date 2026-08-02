@@ -738,13 +738,52 @@ Rules:
 - stanceToPlayer evolves slowly off-screen: refine or drift it only when established events support it, and emit the complete stance (it replaces the record). Never invent romance or hostility the canon does not support.
 - Keep everything compact. Omit empty arrays when nothing changes.`;
 
+function reflectionText(value, maxLength) {
+    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+// The reflection reasons about who an NPC is and where their bond is heading — it
+// never needs portraits, embeddings, or full histories. A raw roster entry carries
+// portraitUrl base64 data URLs (~60 KB each; 12 portraits measured 846 KB of
+// context on every journal cadence), so the record must be projected, never
+// spread: any new roster field stays out of this payload until listed here.
+function projectNpcForReflection(npc = {}) {
+    const projected = {
+        name: reflectionText(npc.name, 100),
+        gender: reflectionText(npc.gender, 40),
+        disposition: reflectionText(npc.disposition, 100),
+        personality: reflectionText(npc.personality, 400),
+        goals: reflectionText(npc.goals, 500),
+        secrets: reflectionText(npc.secrets, 500),
+        agenda: reflectionText(npc.agenda, 500),
+        relationshipTension: reflectionText(npc.relationshipTension, 400),
+        stanceToPlayer: reflectionText(npc.stanceToPlayer, 500),
+        lastNotes: reflectionText(npc.lastNotes || npc.notes, 400),
+        callbackHooks: (Array.isArray(npc.callbackHooks) ? npc.callbackHooks : [])
+            .slice(-3)
+            .map(hook => reflectionText(hook, 200))
+            .filter(Boolean),
+        bondMoments: (Array.isArray(npc.bondMoments) ? npc.bondMoments : [])
+            .slice(-2)
+            .map(moment => reflectionText(moment?.text || moment, 240))
+            .filter(Boolean),
+        basedIn: reflectionText(npc.basedIn, 120),
+        lastLocation: reflectionText(npc.lastLocation, 120),
+    };
+    for (const key of Object.keys(projected)) {
+        const value = projected[key];
+        if (!value || (Array.isArray(value) && value.length === 0)) delete projected[key];
+    }
+    return projected;
+}
+
 export async function runNpcFrontReflection({ state, dispatch, cadence = null }) {
     const background = getBackgroundConfig(state?.settings);
     if (!background.apiKey) return;
     const npcs = curateNpcsForPrompt(state.npcs || [], {
         location: state.currentLocation,
         limit: 12,
-    });
+    }).map(projectNpcForReflection);
     const fronts = state.fronts || [];
     if (npcs.length === 0 && fronts.length === 0) return;
 
@@ -784,7 +823,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             systemPrompt: REFLECTION_SYSTEM_PROMPT,
             temperature: 0.4, // grounded reflection with a little invention for hooks
             messageHistory: [],
-            userMessage: JSON.stringify(context, null, 2),
+            userMessage: JSON.stringify(context),
         });
 
         const jsonMatch = extractBalancedJson(response, 'npc_updates')

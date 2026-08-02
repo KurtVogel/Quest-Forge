@@ -58,9 +58,9 @@ describe('established campaign Fronts v2 upgrade', () => {
         expect(result.enrichments).toHaveLength(1);
         expect(result.newFronts).toHaveLength(1);
         const request = sendMessage.mock.calls[0][0];
-        expect(request.userMessage).toContain('"name": "Vesa"');
-        expect(request.userMessage).toContain('"class": "fighter"');
-        expect(request.userMessage).toContain('"level": 3');
+        expect(request.userMessage).toContain('"name":"Vesa"');
+        expect(request.userMessage).toContain('"class":"fighter"');
+        expect(request.userMessage).toContain('"level":3');
         expect(request.systemPrompt).toContain('Do not rename, replace, resolve, rewrite, or reset');
     });
 

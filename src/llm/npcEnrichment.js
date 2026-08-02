@@ -180,7 +180,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
         ...background,
         systemPrompt: ENRICH_SYSTEM_PROMPT,
         messageHistory: [],
-        userMessage: JSON.stringify(context, null, 2),
+        userMessage: JSON.stringify(context),
         temperature: 0.4, // grounded agenda inference with a little invention
     });
 

@@ -369,6 +369,67 @@ describe('cadenced living-world reflection', () => {
         const cardsCall = dispatch.mock.calls.find(([action]) => action.type === 'ADD_STORY_MEMORY_CARDS');
         expect(cardsCall[0].payload).toHaveLength(2);
     });
+
+    it('projects NPC records into the reflection payload — no portrait fields, bounded size, compact JSON', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({ npc_updates: [], front_advances: [], story_memory: [] }));
+        // Worst-case roster entries: full dossiers, deep histories, and 60 KB portrait
+        // data URLs — the exact shape that measured 846 KB before projection.
+        const npcs = Array.from({ length: 12 }, (_, i) => ({
+            id: `npc-${i}`,
+            name: `Councillor ${i}`,
+            rosterTier: 'character',
+            gender: 'woman',
+            disposition: 'wary',
+            personality: 'Sharp-tongued, exacting, keeps a private tally of favors. '.repeat(20),
+            goals: 'Wants the harbor ledgers sealed before the audit.',
+            secrets: 'Owes the harbormaster a debt she cannot repay.',
+            agenda: 'Stall the audit until the spring tides.',
+            relationshipTension: 'Resents the hero prying into guild business.',
+            stanceToPlayer: 'Coolly professional, privately impressed.',
+            lastNotes: 'Argued with the hero at the customs gate.',
+            callbackHooks: ['hook one', 'hook two', 'hook three', 'hook four', 'hook five'],
+            bondMoments: Array.from({ length: 10 }, (_, j) => ({ text: `Shared moment ${j} on the quay.` })),
+            relationshipHistory: Array.from({ length: 20 }, () => ({ from: 'wary', to: 'hostile' })),
+            knownFacts: Array.from({ length: 30 }, (_, j) => `Long-established fact ${j} about the councillor.`),
+            portraitUrl: 'data:image/jpeg;base64,' + 'A'.repeat(60000),
+            portraitPrompt: 'a stern councillor in guild robes',
+        }));
+        const dispatch = vi.fn();
+        await runNpcFrontReflection({
+            state: {
+                settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+                session: { id: 'campaign' },
+                fronts: [{ id: 'front-road', status: 'active' }],
+                npcs, journal: [], worldFacts: [], party: [],
+            },
+            dispatch,
+            cadence: { id: 'journal-campaign-40', journalEnd: 40, summary: 'Politics simmer.' },
+        });
+
+        const payload = sendMessage.mock.calls[0][0].userMessage;
+        expect(payload).not.toContain('portrait');
+        expect(payload).not.toContain('base64');
+        // Compact JSON: no pretty-printed indentation in the machinery payload.
+        expect(payload).toBe(JSON.stringify(JSON.parse(payload)));
+
+        const ALLOWED_NPC_KEYS = new Set([
+            'name', 'gender', 'disposition', 'personality', 'goals', 'secrets',
+            'agenda', 'relationshipTension', 'stanceToPlayer', 'lastNotes',
+            'callbackHooks', 'bondMoments', 'basedIn', 'lastLocation',
+        ]);
+        const context = JSON.parse(payload);
+        expect(context.npcs).toHaveLength(12);
+        for (const npc of context.npcs) {
+            for (const key of Object.keys(npc)) {
+                expect(ALLOWED_NPC_KEYS.has(key), `unexpected reflection NPC field: ${key}`).toBe(true);
+            }
+            expect(npc.callbackHooks.length).toBeLessThanOrEqual(3);
+            expect(npc.bondMoments.length).toBeLessThanOrEqual(2);
+        }
+        // Payload ceiling: 12 worst-case records must stay in the tens of KB,
+        // not hundreds — the regression net the portrait dump lacked.
+        expect(payload.length).toBeLessThan(30000);
+    });
 });
 
 describe('scene-art prompt composition', () => {

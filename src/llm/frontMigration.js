@@ -182,7 +182,7 @@ export async function generateContextualFronts(state) {
         model: state.settings.model,
         systemPrompt: FRONT_MIGRATION_PROMPT,
         messageHistory: [],
-        userMessage: JSON.stringify(context, null, 2),
+        userMessage: JSON.stringify(context),
         temperature: 0.7, // creative front invention, but inside a strict JSON schema
     });
     const extracted = extractBalancedJson(String(response || ''), 'fronts');
