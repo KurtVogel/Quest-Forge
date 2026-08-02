@@ -1007,6 +1007,19 @@ use raw message indexes with the same 4-message window — no observed failure y
 same inflation applies to any post-roll turn. Apply the established pattern if a replay
 slips through either ledger in play.
 
+### [strengthening] Spend `publicHints` as a "don't repeat this symptom" tempo line — status: `idea` (2026-08-02)
+Each cadence appends the symptom it permitted to the front's `publicHints` (cap 6 × 240
+chars, `engine/fronts.js:235-237`), and the DM's own `front_updates` can add more — but
+since the world-tempo redesign nothing re-injects them into the DM prompt. They ride every
+save and are read only by the dev MemoryInspector and the migration/upgrade contexts:
+write-mostly state. Meanwhile the tempo block hands the DM a fresh `suggestedSymptom` with
+no memory of what the front already surfaced, so the same pressure can express itself the
+same way twice (refugees, again). One line in `buildWorldTempoBlock` — "this pressure has
+already shown itself as: … — express it differently now" — costs ~1-2 sentences of prompt,
+turns dead state into pacing texture, and would make repeated symptoms visibly impossible.
+Why: cheapest available upgrade to how *varied* the hidden world feels, and it retires a
+persisted field that currently earns nothing. Alternative if rejected: shrink the cap.
+
 ### Low-level death-save lethality with a companion present — status: `observation` (playtest #11, 2026-07-22)
 The low-level solo 0-HP mercy (non-lethal setback) correctly does NOT apply when a
 battle-ready companion is present (`isCompanionActive`, DECISIONS.md 2026-07-17) — so a
