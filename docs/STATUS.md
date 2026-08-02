@@ -6,8 +6,32 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-01 (class ability-score recommendations on the creation screen;
-1,283 tests green)._
+_Last updated: 2026-08-02 (Scribe reflection payload projection + 30-turn live playtest,
+zero product bugs; 1,284 tests green; deployed)._
+
+## Scribe payload P1 + 30-turn live playtest 2026-08-02 (autonomous overnight session)
+
+The 2026-08-02 strengthening P1 is fixed: the journal-cadence reflection was shipping RAW
+NPC roster records — portraitUrl base64 data URLs and all — measured 846 KB (~217k tokens)
+with 12 portraits, every cadence, silently killable by TPM rejection. `projectNpcForReflection`
+(scribe.js) now projects 14 clamped dossier fields with portraits/histories structurally
+excluded; all five machinery contexts dropped JSON pretty-printing (~10%); a worst-case
+payload test pins the key set, bars portrait*/base64, and caps the payload at 30 KB.
+Both companion P2s ticked in SCHEDULED_STRENGTHENING.md.
+
+Then a 30-turn live playtest (production build + real Gemini, extended
+`scripts/playtest_full_session.cjs` with a new seg4: memory probes + second fight + gold
+flows): **zero product bugs found.** Verified live: skill-check proposals (roll / challenge /
+change approach), two combats through the exchange machine (incl. a provider 503 recovered
+via the designed Retry), gated + victory loot audits, exact-price purchases, coin ledger
+visibly rejecting a DM re-emit of a 40 gp grant ("Duplicate coin grant ignored"), overnight
+rest + short rest + level-up HP math (12→20, AC 19), premise-grounded front generation with
+a front (Odo's flight) actually driving the fiction, memory probes recalling seg1 events
+in character, journal cadence + the NEW projected reflection advancing clocks live,
+round-trip persistence, legacy front heal, Dynamic World upgrade, and manual saves.
+Four harness flaws fixed in the playtest script itself (dead-target picker, Settings tab
+navigation, Save Game selector, name-independent save-row check). Full logs + screenshots:
+`test-results/full_session/`.
 
 ## Ability-score recommendations at creation 2026-08-01 (Vesa: "average player doesn't
 know which class uses which")
@@ -101,17 +125,11 @@ campaign re-embeds once** on its first post-update load (old cache rows are unre
 by design), then caching works properly forever — including across campaign switches,
 which used to re-embed every time.
 
-## Audit-fix 2026-07-30: 3-P1 + 5-P2 batch cleared (queue emptied)
+## Strengthening queue & watch items
 
-The two prior scheduled audits (2026-07-29 providers-adapter + prompt-building,
-2026-07-30 memory-journal + chat-orchestration) filed 3 P1s + 5 P2s; all eight fixed:
-stream truncation guard (partial streams threw instead of silently eating the JSON event
-block), journal-entry poison brick heal, save entry-shape guards (which caught a real
-LOAD_GAME raw-payload bypass), chat streaming perf (coalesced paints, memoized
-transcript, 150-message render window).
-
-**The scheduled-strengthening queue is empty.** Carried watch items (need live play /
-Vesa's eyes): stance-stutter self-clean on the Saima save (other browser profile),
-Scribe gender backfill on pre-gender campaigns, Grok art respecting the gender tag,
-Aune appearance-thinning LOOKS baseline snapshot next playtest, L1-death balance
-observation (waiting for more real play).
+Open in SCHEDULED_STRENGTHENING.md after the 2026-08-02 session: 2 P1s (scene-art
+image cache that can never hit; worldTempo windows still on raw message indices instead
+of conversationalDistance) + 7 P2s. Carried watch items (need live play / Vesa's eyes):
+stance-stutter self-clean on the Saima save (other browser profile), Scribe gender
+backfill on pre-gender campaigns, Grok art respecting the gender tag, Aune
+appearance-thinning LOOKS baseline snapshot next playtest, L1-death balance observation.

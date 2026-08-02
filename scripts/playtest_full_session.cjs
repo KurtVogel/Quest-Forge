@@ -70,7 +70,7 @@ async function qfState(page) {
             fronts: (s.fronts || []).map(f => ({ id: f.id, title: f.title, clock: f.clock, stage: f.stage })),
             combat: s.combat?.active ? {
                 phase: s.combat.phase, round: s.combat.round,
-                enemies: (s.combat.enemies || []).map(e => ({ n: e.name, hp: e.hp, st: e.combatStatus })),
+                enemies: (s.combat.enemies || []).map(e => ({ n: e.name, hp: e.hp, st: e.combatStatus, cond: e.condition })),
             } : null,
             pendingCheck: s.pendingRoleplayCheck ? {
                 rolls: (s.pendingRoleplayCheck.rolls || []).map(r => `${r.skill || r.type} DC ${r.dc}`),
@@ -209,7 +209,9 @@ async function resolveCombat(page, maxIters = 14) {
         const s = await qfState(page);
         if (!s?.combat) return i;
         if (s.combat.phase === 'awaiting_player') {
-            const target = s.combat.enemies.find(e => e.st === 'active');
+            // combatStatus stays 'active' on a corpse by design (death is hp/condition);
+            // a live target needs hp > 0 and not condition 'dead'.
+            const target = s.combat.enemies.find(e => e.st === 'active' && (e.hp ?? 0) > 0 && e.cond !== 'dead');
             if (!target) {
                 // Everyone down but combat still open — look for an End Combat control.
                 const ended = await clickByText(page, 'button', 'End Combat');
@@ -534,6 +536,20 @@ const SEGMENTS = {
         { a: "I take what I found to whoever passes for the watch in Brackwater and tell them exactly what happened at the warehouse." },
         { a: "I return to the Gilded Eel, order a proper meal this time, and raise a quiet toast to a job done. What's the mood in the tavern tonight?" },
     ],
+    // seg4: memory recall probes + a second fight + gold in/out. Brings the
+    // played total to 30 turns and lands past a journal cadence, so the
+    // Scribe reflection and front clocks run live during the session.
+    seg4: [
+        { a: "Over breakfast I ask the barkeep to remind me of everything that's happened since I arrived in Brackwater — the rats, Odo, the warehouse. I want the tale as the town tells it now." },
+        { a: "I ask the barkeep what he remembers about me personally — does he recall what I did for his cellar, and has my credit here improved for it?" },
+        { a: "I spend some of my hard-won coin properly: I buy a round for the tavern regulars and pay for another night of my room in advance. Count my coin carefully." },
+        { a: "A shout from the street — trouble at the docks again. I grab my sword and go see what it is." },
+        { a: "If anyone hostile is at the docks, I don't wait for them to pick the moment — I wade in, blade out." },
+        { a: "After the dust settles I check the fallen and the nearby crates for anything worth taking, and pocket whatever coin I find." },
+        { a: "I go find Odo Ferrin and ask him plainly: is our debt settled in full, and will he vouch for me with the watch about the warehouse business?" },
+        { scroll: true, a: "I ask the watch whether there's a posted reward for breaking the warehouse crew, and I give my account with Odo's word behind me." },
+        { a: "Back at the Eel I ask for parchment and ink and write to my old caravan company about settling in Brackwater — listing out loud, as I write, everything I now know about this town and the people in it." },
+    ],
 };
 
 async function phasePlay(segName) {
@@ -591,6 +607,9 @@ async function phasePersist() {
     note('persist', 'Opening Settings to make a manual save.');
     await clickByText(page, '.header-btn', 'Settings');
     await delay(1200);
+    // The save UI lives on the Saves tab (Settings opens on AI Provider).
+    await clickByText(page, '.tab-button', 'Saves');
+    await delay(800);
     await page.evaluate(() => {
         const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
         const nameInput = inputs.find(i => (i.placeholder || '').toLowerCase().includes('save') || (i.placeholder || '').toLowerCase().includes('name'));
@@ -600,10 +619,16 @@ async function phasePersist() {
         }
     });
     await delay(400);
-    const savedClicked = await clickByText(page, 'button', 'Save');
-    note('persist', savedClicked ? 'Save clicked.' : 'Save button not found!');
+    // 'Save' alone matches the "Saves" tab button first — target the real control.
+    const savedClicked = await clickByText(page, 'button.btn-primary', 'Save Game');
+    note('persist', savedClicked ? 'Save Game clicked.' : 'Save Game button not found!');
     await delay(3500);
-    const savesList = await page.evaluate(() => document.body.innerText.match(/playtest-manual[^\n]*/)?.[0] || '(not listed)');
+    // The name input is React-controlled and may ignore the injected value (the
+    // save name is optional anyway) — assert a save ROW exists, not its name.
+    const savesList = await page.evaluate(() => {
+        const row = document.querySelector('.saves-list .save-slot');
+        return row ? row.querySelector('.save-name')?.textContent?.trim() || '(unnamed row)' : '(no save row)';
+    });
     note('persist', `Manual save row: ${savesList}`);
     await shot(page, '20_settings_saves');
     await page.keyboard.press('Escape');
@@ -661,6 +686,9 @@ async function phasePersist() {
     note('persist', 'Attempting Settings → Dynamic World upgrade.');
     await clickByText(page, '.header-btn', 'Settings');
     await delay(1200);
+    // The upgrade section lives on the Game tab.
+    await clickByText(page, '.tab-button', 'Game');
+    await delay(800);
     const upgradeClicked = await page.evaluate(() => {
         const btn = Array.from(document.querySelectorAll('button'))
             .find(b => /dynamic|living world|upgrade/i.test(b.textContent));
