@@ -5,6 +5,10 @@
  * `features` — text descriptions granted at each level (shown on character sheet, sent to LLM)
  * `resources` — tracked per-rest abilities with real mechanical backing
  * `numSkillChoices` — how many skills the player picks at character creation
+ * `abilityGuidance` — creation-time advice: `priority` orders all six abilities
+ *   best-first for this class (the standard array is offered in that order), and
+ *   `notes` explains WHY in terms of what this engine actually does with the score.
+ *   Advice only — the player is free to ignore it.
  */
 
 export const CLASSES = {
@@ -14,6 +18,28 @@ export const CLASSES = {
         hitDie: 10,
         primaryAbility: 'strength',
         savingThrows: ['strength', 'constitution'],
+        abilityGuidance: {
+            priority: ['strength', 'constitution', 'dexterity', 'wisdom', 'charisma', 'intelligence'],
+            notes: {
+                strength: 'Your attack and damage rolls with melee weapons — how often you hit and how hard.',
+                constitution: 'Hit points at every level, and one of your two saving-throw proficiencies.',
+                dexterity: 'Initiative order. Your heavy armour ignores Dexterity for AC, so it matters less here.',
+                wisdom: 'Perception, and the saves that resist fear and charm.',
+                charisma: 'Intimidating or talking your way out of a fight.',
+                intelligence: 'Rarely called for as a Fighter — the safest place for your lowest score.',
+            },
+            // Archery fights at range: the bow rolls off Dexterity, so the whole
+            // spread flips. Chosen on the previous step, so it is known here.
+            byFightingStyle: {
+                archery: {
+                    priority: ['dexterity', 'constitution', 'strength', 'wisdom', 'charisma', 'intelligence'],
+                    notes: {
+                        dexterity: 'Attack and damage with your bow (plus initiative) — Archery makes this your main stat.',
+                        strength: 'Melee weapons, shoving and hauling — a backup once you fight at range.',
+                    },
+                },
+            },
+        },
         armorProficiencies: ['light', 'medium', 'heavy', 'shields'],
         weaponProficiencies: ['simple', 'martial'],
         skillChoices: ['acrobatics', 'athletics', 'intimidation', 'perception', 'survival', 'animalHandling'],
@@ -85,6 +111,17 @@ export const CLASSES = {
         hitDie: 6,
         primaryAbility: 'intelligence',
         savingThrows: ['intelligence', 'wisdom'],
+        abilityGuidance: {
+            priority: ['intelligence', 'constitution', 'dexterity', 'wisdom', 'charisma', 'strength'],
+            notes: {
+                intelligence: 'Your spell attack bonus and the save DC enemies must beat — every spell you cast runs on it.',
+                constitution: 'You have the smallest hit die (d6); Constitution is what keeps you standing.',
+                dexterity: 'You wear no armour, so your AC is 10 + Dexterity. Also initiative.',
+                wisdom: 'Your second saving-throw proficiency, and Perception.',
+                charisma: 'Only for social scenes — your magic never uses it.',
+                strength: 'A Wizard almost never rolls Strength. The safest place for your lowest score.',
+            },
+        },
         armorProficiencies: [],
         weaponProficiencies: ['daggers', 'darts', 'slings', 'quarterstaffs', 'light crossbows'],
         skillChoices: ['arcana', 'history', 'insight', 'investigation', 'medicine', 'religion'],
@@ -122,6 +159,17 @@ export const CLASSES = {
         hitDie: 8,
         primaryAbility: 'dexterity',
         savingThrows: ['dexterity', 'intelligence'],
+        abilityGuidance: {
+            priority: ['dexterity', 'constitution', 'wisdom', 'intelligence', 'charisma', 'strength'],
+            notes: {
+                dexterity: 'Attack and damage with rapier and bow, your AC in light armour, initiative and Stealth.',
+                constitution: 'Hit points at every level — you fight up close with a d8 hit die.',
+                wisdom: 'Perception and Insight, the checks a scout makes most, plus the most common saves.',
+                intelligence: 'Investigation, and your second saving-throw proficiency.',
+                charisma: 'Deception and Persuasion, if you play the con artist rather than the burglar.',
+                strength: 'Finesse weapons use Dexterity instead — safe to dump.',
+            },
+        },
         armorProficiencies: ['light'],
         weaponProficiencies: ['simple', 'hand crossbows', 'longswords', 'rapiers', 'shortswords'],
         skillChoices: ['acrobatics', 'athletics', 'deception', 'insight', 'intimidation', 'investigation', 'perception', 'performance', 'persuasion', 'sleightOfHand', 'stealth'],
@@ -154,6 +202,17 @@ export const CLASSES = {
         hitDie: 8,
         primaryAbility: 'wisdom',
         savingThrows: ['wisdom', 'charisma'],
+        abilityGuidance: {
+            priority: ['wisdom', 'constitution', 'strength', 'dexterity', 'charisma', 'intelligence'],
+            notes: {
+                wisdom: 'Your spell attack bonus, the save DC enemies must beat, and how much your healing restores.',
+                constitution: 'Hit points at every level — you stand in the front line beside the fighters.',
+                strength: 'Swinging your mace when the spell slots run dry.',
+                dexterity: 'Your scale mail caps its AC bonus at +2, so a little goes a long way. Also initiative.',
+                charisma: 'Persuasion, and your second saving-throw proficiency.',
+                intelligence: 'Least used by a Cleric — the safest place for your lowest score.',
+            },
+        },
         armorProficiencies: ['light', 'medium', 'shields'],
         weaponProficiencies: ['simple'],
         skillChoices: ['history', 'insight', 'medicine', 'persuasion', 'religion'],

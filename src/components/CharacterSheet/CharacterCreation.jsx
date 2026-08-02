@@ -6,6 +6,7 @@ import { listRosterCharacters, saveRosterCharacter, deleteRosterCharacter } from
 import { RACES, RACE_LIST } from '../../data/races.js';
 import { CLASSES, CLASS_LIST } from '../../data/classes.js';
 import { SKILL_ABILITIES, computeACFromInventory, getModifier, getProficiencyBonus, getSkillModifier } from '../../engine/rules.js';
+import { getAbilityGuidance } from '../../engine/abilityGuidance.js';
 import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
 import { buildPortraitPrompt } from './portraitPrompt.js';
@@ -92,6 +93,17 @@ export default function CharacterCreation() {
     const assignedValues = new Set(Object.values(statAssignment));
     const availableValues = STANDARD_ARRAY.filter(v => !assignedValues.has(v));
     const allStatsAssigned = ABILITY_NAMES.every(a => statAssignment[a] !== undefined);
+
+    // Which ability a class lives on is invisible to a first-time player, so the
+    // stats step recommends a spread (and says why) instead of leaving them to guess.
+    const abilityGuidance = useMemo(
+        () => getAbilityGuidance(charClass, { fightingStyle }),
+        [charClass, fightingStyle],
+    );
+
+    const handleApplyRecommendedStats = () => {
+        if (abilityGuidance) setStatAssignment({ ...abilityGuidance.recommended });
+    };
 
     // Skills logic
     const classData = charClass ? CLASSES[charClass] : null;
@@ -440,6 +452,27 @@ export default function CharacterCreation() {
                                     </button>
                                 ))}
                             </div>
+                        </div>
+                    )}
+
+                    {currentStep === 'class' && (
+                        <div className="creation-step">
+                            <h3>Choose your class</h3>
+                            <div className="creation-grid">
+                                {CLASS_LIST.map(c => (
+                                    <button
+                                        key={c}
+                                        className={`creation-card ${charClass === c ? 'selected' : ''}`}
+                                        onClick={() => handleClassSelect(c)}
+                                    >
+                                        <div className="card-name">{CLASSES[c].name}</div>
+                                        <div className="card-desc">{CLASSES[c].description}</div>
+                                        <div className="card-bonus">Hit Die: d{CLASSES[c].hitDie}</div>
+                                    </button>
+                                ))}
+                            </div>
+                            {/* Lives here, not on the race step: the choice depends on the
+                                class picked above, and it steers the next step's advice. */}
                             {charClass === 'fighter' && (
                                 <>
                                     <h3>Choose your fighting style</h3>
@@ -460,56 +493,75 @@ export default function CharacterCreation() {
                         </div>
                     )}
 
-                    {currentStep === 'class' && (
-                        <div className="creation-step">
-                            <h3>Choose your class</h3>
-                            <div className="creation-grid">
-                                {CLASS_LIST.map(c => (
-                                    <button
-                                        key={c}
-                                        className={`creation-card ${charClass === c ? 'selected' : ''}`}
-                                        onClick={() => handleClassSelect(c)}
-                                    >
-                                        <div className="card-name">{CLASSES[c].name}</div>
-                                        <div className="card-desc">{CLASSES[c].description}</div>
-                                        <div className="card-bonus">Hit Die: d{CLASSES[c].hitDie}</div>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
                     {currentStep === 'stats' && (
                         <div className="creation-step">
                             <h3>Assign ability scores</h3>
                             <p className="creation-hint">Click an ability, then click a value to assign it. Standard array: {STANDARD_ARRAY.join(', ')}</p>
-                            <div className="stat-assignment">
-                                {ABILITY_NAMES.map(ability => (
-                                    <div key={ability} className="stat-row">
-                                        <span className="stat-label">{ABILITY_SHORT[ability]}</span>
-                                        {statAssignment[ability] !== undefined ? (
-                                            <button
-                                                className="stat-value assigned"
-                                                onClick={() => handleUnassignStat(ability)}
-                                            >
-                                                {statAssignment[ability]}
-                                                <span className="stat-remove">✕</span>
-                                            </button>
-                                        ) : (
-                                            <div className="stat-choices">
-                                                {availableValues.map(v => (
-                                                    <button
-                                                        key={v}
-                                                        className="stat-choice"
-                                                        onClick={() => handleAssignStat(ability, v)}
-                                                    >
-                                                        {v}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
+                            {abilityGuidance && (
+                                <div className="stat-recommendation">
+                                    <div className="stat-rec-text">
+                                        <div className="stat-rec-title">
+                                            Recommended for a {classData.name}
+                                            {charClass === 'fighter' && CLASSES.fighter.fightingStyles[fightingStyle]
+                                                ? ` (${CLASSES.fighter.fightingStyles[fightingStyle].label})`
+                                                : ''}
+                                        </div>
+                                        <div className="stat-rec-order">
+                                            {abilityGuidance.priority.map((a, i) => (
+                                                <span key={a} className={`stat-rec-chip${i === 0 ? ' primary' : ''}`}>
+                                                    {ABILITY_SHORT[a]} {abilityGuidance.recommended[a]}
+                                                </span>
+                                            ))}
+                                        </div>
                                     </div>
-                                ))}
+                                    <button className="stat-rec-apply" onClick={handleApplyRecommendedStats}>
+                                        Use this spread
+                                    </button>
+                                </div>
+                            )}
+                            <div className="stat-assignment">
+                                {ABILITY_NAMES.map(ability => {
+                                    const rank = abilityGuidance ? abilityGuidance.priority.indexOf(ability) : -1;
+                                    const suggested = abilityGuidance?.recommended[ability];
+                                    const racialBonus = raceData?.abilityBonuses?.[ability];
+                                    return (
+                                        <div key={ability} className="stat-row">
+                                            <div className="stat-row-main">
+                                                <span className="stat-label">{ABILITY_SHORT[ability]}</span>
+                                                {rank === 0 && <span className="stat-rec-tag primary">Primary</span>}
+                                                {rank === 1 && <span className="stat-rec-tag">Secondary</span>}
+                                                {racialBonus > 0 && (
+                                                    <span className="stat-race-bonus">{raceData.name} +{racialBonus}</span>
+                                                )}
+                                                {statAssignment[ability] !== undefined ? (
+                                                    <button
+                                                        className="stat-value assigned"
+                                                        onClick={() => handleUnassignStat(ability)}
+                                                    >
+                                                        {statAssignment[ability]}
+                                                        <span className="stat-remove">✕</span>
+                                                    </button>
+                                                ) : (
+                                                    <div className="stat-choices">
+                                                        {availableValues.map(v => (
+                                                            <button
+                                                                key={v}
+                                                                className={`stat-choice${v === suggested ? ' recommended' : ''}`}
+                                                                title={v === suggested ? `Recommended for a ${classData.name}` : undefined}
+                                                                onClick={() => handleAssignStat(ability, v)}
+                                                            >
+                                                                {v}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {abilityGuidance?.notes[ability] && (
+                                                <p className="stat-why">{abilityGuidance.notes[ability]}</p>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                     )}

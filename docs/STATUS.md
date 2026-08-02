@@ -6,9 +6,26 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-07-31 (coin double-charge root-cause fix + three live playtest
-runs validating it; audits now observe → engine reconciles → stand-down on any
-evented coin movement; 1,277 tests green; deployed to hosting)._
+_Last updated: 2026-08-01 (class ability-score recommendations on the creation screen;
+1,283 tests green)._
+
+## Ability-score recommendations at creation 2026-08-01 (Vesa: "average player doesn't
+know which class uses which")
+
+The "Assign ability scores" step now tells the player what the class actually runs on.
+`CLASSES[x].abilityGuidance` declares a best-first `priority` over all six abilities plus
+a per-ability `notes` line written in terms of what THIS engine does with the score (spell
+DC, AC under your armour type, HP per level, saving-throw proficiencies).
+`engine/abilityGuidance.js` pairs the priority with the standard array into a concrete
+recommended spread; the step shows a banner ("Recommended for a Fighter (Archery): DEX 15
+· CON 14 · …") with a one-click **Use this spread**, PRIMARY/SECONDARY tags, a racial-bonus
+chip on affected rows, the suggested value ringed among the choice buttons, and the why-line
+under each row. Advice only — every value stays freely assignable.
+
+Fighter guidance flips for the Archery style (DEX-first). That exposed a live bug: the
+fighting-style picker was nested in the **race** step, gated on a class chosen a step
+later, so on a first pass it never rendered and every Fighter silently took Defense. It
+now sits under the class grid where it belongs.
 
 ## Coin/heal double-application root cause fixed 2026-07-31 (Vesa live finding)
 
