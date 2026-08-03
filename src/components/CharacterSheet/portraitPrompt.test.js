@@ -40,6 +40,19 @@ describe('buildNpcPortraitPrompt', () => {
         expect(prompt).toContain('Context: Runs the Kuusisaari ferry crossing.');
     });
 
+    it('rides the registered race inside the identity tag — "(goblin woman)"', () => {
+        const prompt = buildNpcPortraitPrompt({
+            name: 'Vex',
+            race: 'goblin',
+            gender: 'woman',
+            appearance: 'Scrawny, sharp-eared, ash-grey skin.',
+        });
+        expect(prompt).toContain('Vex (goblin woman)');
+
+        const raceOnly = buildNpcPortraitPrompt({ name: 'Snagg', race: 'goblin', appearance: 'Wiry.' });
+        expect(raceOnly).toContain('Snagg (goblin)');
+    });
+
     it('never leaks privateNotes into the painter context', () => {
         const prompt = buildNpcPortraitPrompt({
             name: 'Onni Rautakallio',

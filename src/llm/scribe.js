@@ -38,6 +38,7 @@ Output ONLY valid JSON:
       "secrets": "hidden info (only if newly hinted at or revealed)",
       "appearance": "concrete physical/visual description — build, body proportions, face, hair, clothing, distinguishing features (only if newly described)",
       "gender": "the character's gender exactly as the fiction establishes or makes clearly apparent — 'woman', 'man', or the fiction's own wording. Capture it the FIRST time it is knowable; afterwards omit unless the fiction changes it",
+      "race": "the character's race/species exactly as the fiction establishes it — 'goblin', 'human', 'elf', 'dwarf', 'half-orc', or the fiction's own wording. Capture it the FIRST time it is knowable; afterwards omit unless the fiction changes it",
       "basedIn": "place they are currently rooted — town they command, post they hold, territory they haunt. Update when fiction relocates or reassigns them; omit if unknown",
       "lastLocation": "where they were in this specific exchange (only if mentioned)",
       "agenda": "what this NPC is likely trying to accomplish next (only if implied or revealed)",
@@ -85,6 +86,7 @@ Rules:
 - Use kind "character" and rosterEligible true only for named people worth tracking across sessions (dialogue, rivalry, debt, secrets, recurring villains, quest givers). Use kind "creature" or "ephemeral" with rosterEligible false for nameless combat fodder, generic goblins/guards, or one-line minions that should not enter the durable roster.
 - Capture "appearance"/"player_appearance" from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation AND the DM's own long-term visual continuity, so accuracy matters.
 - "gender" is a first-class continuity field: pronouns, titles ("the widow", "the young man"), and explicit statements all establish it. A character whose gender is knowable but unrecorded WILL get misrendered in generated art, so capture it as soon as the fiction shows it — this is exempt from the extraction budget like appearance.
+- "race" is the same kind of continuity field: when the narrative names a character's race or species ("the goblin merchant", "a dwarven smith", "an elf in traveling leathers"), record it so portraits, scene art, and later prose keep rendering the right species. Exempt from the extraction budget like gender. Record only what the fiction states — never guess a race from a name.
 - This is an adult game: body proportions and intimate, sensual, unflattering, or even embarrassing anatomical details the fiction establishes (a heavy backside, wide hips, a soft belly, body hair anywhere) are canonical visual continuity exactly like a scar or white hair. Record them frankly, completely, and at full specificity — never sanitize, euphemize, tone down, or silently omit them. For many players this continuity IS the point.
 - REGISTER: write every record in plain, neutral anatomical language — backside/buttocks, breasts, chest, hips, genitals — never in profanity or crude slang, no matter how coarsely the player or DM phrased it. Translating vocabulary is NOT censoring content: keep the full detail, size, and specificity of what the fiction established. "Notably large buttocks" preserves a crude description completely; "curvy", a vague compliment, or dropping the detail loses canon and is forbidden. Neutral wording, complete facts.
 - When KNOWN APPEARANCES lists a character and this turn adds or changes a visual detail, emit their appearance as the COMPLETE updated description: start from the known look and weave in what this turn established. Drop or alter a known detail ONLY when the fiction explicitly changed it (haircut, dye, disguise, wound, healing, new gear). NEVER emit just the new fragment — "a fresh scar on his cheek" alone would erase the white hair, the build, everything else on record. When merging, never launder the record: an intimate or unflattering detail already in KNOWN APPEARANCES stays in the merged description at full specificity until the fiction explicitly changes it — if the old record used crude slang, restate that detail in neutral anatomical wording (see REGISTER), but never blur, shrink, or drop it. As you merge, reconcile the description into clean prose: drop duplicate adjectives and resolve contradictions rather than stacking them ("scrawny ... scrawny ... large backside" should become one coherent line like "a scrawny goblin with notably large buttocks"), but never lose a distinct established detail in the process. If this turn adds nothing visually new for them, omit the field entirely.
@@ -462,8 +464,8 @@ export function buildKnownAppearances({ character, npcs = [] } = {}, ...texts) {
         const name = String(npc?.name || '').trim();
         if (!name || !npc.appearance?.trim()) continue;
         if (!haystack.includes(name.toLowerCase())) continue;
-        const gender = String(npc.gender || '').trim();
-        entries.push(`${name}${gender ? ` (${gender})` : ''}: ${npc.appearance.trim().slice(0, 240)}`);
+        const identity = [String(npc.race || '').trim(), String(npc.gender || '').trim()].filter(Boolean).join(' ');
+        entries.push(`${name}${identity ? ` (${identity})` : ''}: ${npc.appearance.trim().slice(0, 240)}`);
     }
     return entries.length > 0 ? entries.join('\n') : null;
 }
@@ -751,6 +753,7 @@ function projectNpcForReflection(npc = {}) {
     const projected = {
         name: reflectionText(npc.name, 100),
         gender: reflectionText(npc.gender, 40),
+        race: reflectionText(npc.race, 40),
         disposition: reflectionText(npc.disposition, 100),
         personality: reflectionText(npc.personality, 400),
         goals: reflectionText(npc.goals, 500),
@@ -955,9 +958,11 @@ export async function composeScenePrompt({ situation, character, npcs = [], comb
         .slice(0, 4)
         .filter(n => n.name);
     for (const n of recentNpcs) {
-        const gender = n.gender?.trim() || '';
+        // Race rides inside the same inviolable tag as gender — "(goblin woman)"
+        // keys both the species and the gender rule in the art director prompt.
+        const identity = [n.race?.trim(), n.gender?.trim()].filter(Boolean).join(' ');
         const desc = n.appearance?.trim() || `${n.disposition || ''} NPC`.trim();
-        lines.push(`NPC — ${n.name}${gender ? ` (${gender})` : ''}: ${desc}`);
+        lines.push(`NPC — ${n.name}${identity ? ` (${identity})` : ''}: ${desc}`);
     }
 
     if (combat?.active && combat.enemies?.length > 0) {

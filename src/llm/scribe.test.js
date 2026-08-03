@@ -379,6 +379,7 @@ describe('cadenced living-world reflection', () => {
             name: `Councillor ${i}`,
             rosterTier: 'character',
             gender: 'woman',
+            race: 'human',
             disposition: 'wary',
             personality: 'Sharp-tongued, exacting, keeps a private tally of favors. '.repeat(20),
             goals: 'Wants the harbor ledgers sealed before the audit.',
@@ -413,7 +414,7 @@ describe('cadenced living-world reflection', () => {
         expect(payload).toBe(JSON.stringify(JSON.parse(payload)));
 
         const ALLOWED_NPC_KEYS = new Set([
-            'name', 'gender', 'disposition', 'personality', 'goals', 'secrets',
+            'name', 'gender', 'race', 'disposition', 'personality', 'goals', 'secrets',
             'agenda', 'relationshipTension', 'stanceToPlayer', 'lastNotes',
             'callbackHooks', 'bondMoments', 'basedIn', 'lastLocation',
         ]);

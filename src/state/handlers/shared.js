@@ -6,7 +6,7 @@ import { computeACFromInventory } from '../../engine/rules.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
-import { NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX } from '../../config/contentLimits.js';
+import { NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_RACE_MAX } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isCompanionActive } from '../../engine/combatExchange.js';
 import {
     appendBondMoments,
@@ -395,6 +395,9 @@ export function upsertNpc(npcs, payload) {
     // the KNOWN NPCs block, and NPC RAG so generated images stop misgendering.
     if (update.gender) {
         update.gender = String(update.gender).trim().slice(0, NPC_GENDER_MAX);
+    }
+    if (update.race) {
+        update.race = String(update.race).trim().slice(0, NPC_RACE_MAX);
     }
     if (update.stanceToPlayer) {
         update.stanceToPlayer = clampNpcDossierField(update.stanceToPlayer);

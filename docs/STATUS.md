@@ -6,7 +6,19 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-03 (front resolution + aftermath + foe fatigue; 1,300 tests green)._
+_Last updated: 2026-08-03 (dice log removed + NPC race field; 1,304 tests green)._
+
+## Dice log removed + NPC race on character cards 2026-08-03 (Vesa)
+
+The read-only Dice Log sidebar panel is gone (`components/DiceRoller/` deleted, unmounted
+from AppShell) — `rollHistory` state stays untouched since it feeds the DM prompt's recent
+rolls block and turn logic. NPCs now carry a `race` roster field ("goblin", "elf" — 40-char
+plain-replace, `NPC_RACE_MAX`) mirroring `gender` end-to-end: Scribe extraction
+(budget-exempt, never guessed from a name), reducer clamp, DM `npc_updates` contract,
+"Deepen memory" backfill, reflection projection, and an identity tag beside gender
+everywhere — "(goblin woman)" in KNOWN NPCs, NPC RAG, scene art, and portrait prompts —
+plus a race chip on the Journal character card. Existing records simply lack the field
+until the Scribe or Deepen memory records it.
 
 ## Front resolution, aftermath & foe fatigue 2026-08-03 (Vesa: "ichor ghouls in EVERY dungeon")
 

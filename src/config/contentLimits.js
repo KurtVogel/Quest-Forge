@@ -20,6 +20,10 @@ export const MAX_COIN_EVENT = 10000;
  * wording) — reducer boundary and NPC enrichment share the cap. */
 export const NPC_GENDER_MAX = 40;
 
+/** Short plain-replace roster race/species field ("goblin", "human", "half-orc")
+ * — reducer boundary and NPC enrichment share the cap, like gender. */
+export const NPC_RACE_MAX = 40;
+
 export function normalizeCampaignPremise(value) {
     return String(value || '').trim().slice(0, CAMPAIGN_PREMISE_MAX_LENGTH);
 }

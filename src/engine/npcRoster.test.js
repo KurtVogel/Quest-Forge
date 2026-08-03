@@ -47,6 +47,16 @@ describe('formatNpcEmbeddingText', () => {
         });
         expect(text).toContain('Maera (woman, wary)');
     });
+
+    it('carries registered race beside gender so retrieval keeps the species', () => {
+        const text = formatNpcEmbeddingText({
+            name: 'Snagg',
+            race: 'goblin',
+            gender: 'man',
+            disposition: 'wary',
+        });
+        expect(text).toContain('Snagg (goblin man, wary)');
+    });
 });
 
 describe('player-relationship memory (stanceToPlayer + bondMoments)', () => {

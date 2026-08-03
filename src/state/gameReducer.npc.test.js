@@ -74,6 +74,26 @@ describe('gameReducer NPC roster gating', () => {
         expect(overlong.npcs[0].gender).toHaveLength(40);
     });
 
+    it('registers and clamps a race field on the roster record', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Snagg',
+                disposition: 'wary',
+                lastNotes: 'The goblin fence in the undermarket.',
+                race: '  goblin  ',
+            },
+        });
+        expect(next.npcs).toHaveLength(1);
+        expect(next.npcs[0].race).toBe('goblin');
+
+        const overlong = gameReducer(next, {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Snagg', race: 'x'.repeat(200) },
+        });
+        expect(overlong.npcs[0].race).toHaveLength(40);
+    });
+
     it('promotes relationship tension into story memory', () => {
         const next = gameReducer(initialGameState, {
             type: 'UPDATE_NPC',

@@ -19,16 +19,17 @@ export function buildPortraitPrompt(character, appearance, equippedItems = []) {
 
 /**
  * Portrait prompt for a roster NPC, built from Scribe-captured continuity:
- * the registered gender rides beside the name ("(woman)" — the same
- * inviolable-gender convention as scene art) and the merged appearance
+ * the registered race + gender ride beside the name ("(goblin woman)" — the
+ * same inviolable-gender convention as scene art) and the merged appearance
  * record is the likeness. lastNotes gives the painter role context;
  * privateNotes stays private by design.
  */
 export function buildNpcPortraitPrompt(npc) {
-    const gender = npc.gender?.trim() ? ` (${npc.gender.trim()})` : '';
+    const identity = [npc.race?.trim(), npc.gender?.trim()].filter(Boolean).join(' ');
+    const tag = identity ? ` (${identity})` : '';
     const role = String(npc.lastNotes || npc.notes || '').trim();
     return [
-        `Waist-up character portrait of ${npc.name}${gender}.`,
+        `Waist-up character portrait of ${npc.name}${tag}.`,
         String(npc.appearance || '').trim(),
         role ? `Context: ${role.slice(0, 200)}` : '',
         PORTRAIT_STYLE,

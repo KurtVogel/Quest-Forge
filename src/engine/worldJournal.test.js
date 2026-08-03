@@ -109,6 +109,22 @@ describe('worldJournal context builder', () => {
         expect(ungendered).toContain('**Kaldor** (friendly)');
     });
 
+    it('shows registered race beside gender so the species never drifts', () => {
+        const npcs = [{
+            name: 'Snagg',
+            race: 'goblin',
+            gender: 'man',
+            disposition: 'wary',
+            lastNotes: 'Fence in the undermarket.',
+            lastSeen: 1000,
+        }];
+        const context = buildJournalContext([], npcs, 'Brackwater');
+        expect(context).toContain('**Snagg** (goblin man, wary)');
+
+        const raceOnly = buildJournalContext([], [{ name: 'Grubb', race: 'goblin', disposition: 'hostile', lastNotes: 'Warren chief.', lastSeen: 1000 }], 'Brackwater');
+        expect(raceOnly).toContain('**Grubb** (goblin, hostile)');
+    });
+
     it('injects the NPC\'s personal stance toward the hero and their shared history', () => {
         const npcs = [{
             name: 'Maren',

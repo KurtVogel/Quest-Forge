@@ -34,10 +34,11 @@ function describeEntity(target) {
     }
     if (target.type === 'npc') {
         const n = target.entity;
+        const identity = [n.race, n.gender].filter(Boolean).join(' ');
         return [
-            // The registered gender rides right beside the name — the art
-            // director's inviolable-gender rule keys on this "(woman)" tag.
-            `${n.name}${n.gender ? ` (${n.gender})` : ''}, ${n.disposition || 'NPC'}`,
+            // The registered race + gender ride right beside the name — the art
+            // director's inviolable-gender rule keys on this "(goblin woman)" tag.
+            `${n.name}${identity ? ` (${identity})` : ''}, ${n.disposition || 'NPC'}`,
             n.appearance || n.lastNotes || n.notes,
             n.lastLocation && `Last seen at ${n.lastLocation}.`,
         ].filter(Boolean).join('. ');

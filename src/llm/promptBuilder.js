@@ -369,7 +369,7 @@ When game events occur, include a structured JSON block at the END of your respo
     { "fact": "The village of Thornhaven has been burned by the Iron Claw bandits.", "category": "location" }
   ],
   "npc_updates": [
-    { "name": "<culture-grounded NPC name>", "gender": "woman", "disposition": "friendly", "lastNotes": "Gave the player a room and hinted at a missing merchant", "basedIn": "Millhaven", "lastLocation": "The Rusty Flagon, Millhaven", "stanceToPlayer": "Grateful for the rescue and quietly charmed by the hero's easy humor", "bondMoment": "The hero flirted while paying for the room; she laughed and undercharged him" }
+    { "name": "<culture-grounded NPC name>", "gender": "woman", "race": "human", "disposition": "friendly", "lastNotes": "Gave the player a room and hinted at a missing merchant", "basedIn": "Millhaven", "lastLocation": "The Rusty Flagon, Millhaven", "stanceToPlayer": "Grateful for the rescue and quietly charmed by the hero's easy humor", "bondMoment": "The hero flirted while paying for the room; she laughed and undercharged him" }
   ],
   "front_updates": [
     { "id": "front-local-pressure", "clock": 1, "stage": 1, "publicHints": ["Refugees whisper that the north road is watched."], "notes": "Advanced because the party spent a night away from the road." },
@@ -434,6 +434,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - For roster-worthy people include \`kind: "character"\` and \`rosterEligible: true\`. For fodder omit npc_updates entirely.
 - Always include \`name\` and \`lastNotes\` for roster entries; include other fields only when newly learned
 - Include \`gender\` the first time a character's gender is established or apparent ("woman", "man", or the fiction's own wording) — it anchors portraits, scene art, and pronoun consistency for the rest of the campaign
+- Include \`race\` the first time a character's race/species is established ("goblin", "human", "elf", "dwarf", or the fiction's own wording) — it keeps portraits, scene art, and later prose rendering the right species
 - When an exchange meaningfully shifts how an NPC personally regards the hero — flirtation, gratitude, growing trust or attraction, an insult, a betrayal — include \`stanceToPlayer\` (their complete current personal stance toward the hero, from their side) and \`bondMoment\` (one line recording the moment itself). Play established stances consistently: an NPC listed with \`toward the hero:\` in KNOWN NPCs remembers that history in every scene.
 - \`stanceToPlayer\` is a REWRITE of the whole record, not a note about this exchange: start from the \`toward the hero:\` stance shown in KNOWN NPCs, keep every part that still holds IN ITS EXISTING WORDING, integrate what this exchange changed, and drop only feelings this exchange genuinely superseded. A fragment describing just this turn ("appreciates his discretion tonight") gets APPENDED to the stored stance and leaves the contradicted old feelings standing beside it — emit the full revised stance or omit the field.
 

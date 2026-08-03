@@ -3,7 +3,6 @@ import { useGame, useSaveToast } from '../../state/GameContext.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import ChatPanel from '../Chat/ChatPanel.jsx';
 import CharacterSheet from '../CharacterSheet/CharacterSheet.jsx';
-import DicePanel from '../DiceRoller/DicePanel.jsx';
 import InventoryPanel from '../Inventory/InventoryPanel.jsx';
 import QuestPanel from '../Quests/QuestPanel.jsx';
 import JournalPanel from '../Journal/JournalPanel.jsx';
@@ -97,9 +96,6 @@ export default function AppShell() {
                     </aside>
 
                     <aside className="sidebar sidebar-right">
-                        <ErrorBoundary label="Dice Log">
-                            <DicePanel />
-                        </ErrorBoundary>
                         <ErrorBoundary label="Quests">
                             <QuestPanel />
                         </ErrorBoundary>
