@@ -132,9 +132,17 @@ with escalation steps and a "grim portent" (what happens if nobody interferes).
   autosaves front-only changes. A cadence alone is explicitly not a reason to advance.
 - The DM is instructed to leak **symptoms** (refugees, price spikes, a missing NPC) every
   few scenes. Investigation is rewarded; ignoring has real consequences; nothing rails the player.
+- **Shipped resolution + aftermath (2026-08-03, DECISIONS.md):** the DM can now END a
+  decisively-defeated front (`front_updates` status "resolved" + epitaph); the engine
+  canonizes it one-shot (world fact revealing the title as the payoff, 🕰️ system line,
+  theaters retired, tempo window cancelled, `resolvedAtMessage` stamp), a RECENT VICTORY
+  tempo line makes the absence felt for ~40 messages, and `llm/frontAftermath.js` proposes
+  0–2 flavor-divergent successor pressures from the vacuum (empty = clean victory is
+  first-class). Plus deterministic FOE FATIGUE variety pressure from the encounter ledger.
 - Remaining work: real-provider campaign play should tune how often symptoms surface, whether
   faction intersections feel organic, and whether ten-message cadence movement is too slow or
-  fast. Consider milestone XP only after front resolution is proven reliable in real play.
+  fast. Milestone XP is now unblocked pending live proof that resolution fires reliably in
+  real play (mechanics shipped 2026-08-03; watch item in STATUS.md).
 - Why: player agency stays absolute, but the world is *up to something* — the "behind the
   scenes goings-on" feel. Vesa considers this the killer feature for going public.
 
@@ -240,6 +248,18 @@ adapt to play), but a cheap guard is possible: include each front stub's one-lin
 clocks/portents) in the WORLD TEMPO block, or add a reflection rule that reconciles narrated
 faction relations against front `relationships` and updates them explicitly. Watch whether
 real campaigns accumulate contradictory faction lore before adding anything.
+
+### Scenery/motif fatigue beyond combat foes — status: `idea` (2026-08-03)
+Foe fatigue (shipped 2026-08-03) is deterministic because END_COMBAT hands the engine
+structured enemy names. The *scenery* half of Vesa's repetition complaint — giant
+sarcophagi and black-ichor set-dressing recurring across unrelated dungeons — has no
+structured source: motifs live in prose. Cheap option if repetition persists: the Scribe's
+existing `location_profile` extraction could also tag 1–2 dominant imagery motifs per
+hostile site ("sarcophagi", "ichor", "bone-piles"), the engine counts motif recurrence
+across DISTINCT locations exactly like foe families, and the tempo block renders a
+MOTIF FATIGUE line. Zero new LLM calls (rides the per-turn Scribe), deterministic
+counting. Wait for live play with the 2026-08-03 layer first — the RAG never-transplant
+rule + FOE FATIGUE + RECENT VICTORY may already be enough.
 
 ### Location-transition recall ledger — status: `shipped` (2026-06-23)
 Journal entries now store `location`; the DM prompt receives a deterministic

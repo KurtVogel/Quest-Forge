@@ -9,6 +9,7 @@ import { isTableTalkMessage } from '../../llm/tableTalk.js';
 import { addMemory, seedMemories } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
+import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/frontAftermath.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
@@ -48,6 +49,7 @@ export default function ChatPanel() {
     const narratedCueIdsRef = useRef(new Set()); // Mechanic system messages already given an LLM flavor beat
     const narratedCombatExchangeIdsRef = useRef(new Set()); // Prevent duplicate narration calls for one mechanics commit
     const frontGenerationSessionRef = useRef(null); // One private generation request per fresh campaign at a time
+    const aftermathFrontRef = useRef(null); // One aftermath request per resolved front at a time
 
     // Use a ref to always read the latest state inside async callbacks
     const stateRef = useRef(state);
@@ -202,6 +204,31 @@ export default function ChatPanel() {
                 if (frontGenerationSessionRef.current === sessionId) frontGenerationSessionRef.current = null;
             });
     }, [state.session?.id, state.session?.frontDirector?.version, state.settings.apiKey, state.messages.length, state.combat?.active, dispatch]);
+
+    /**
+     * Front aftermath: a resolved front leaves a pending flag; a private DM-model
+     * call decides what the victory leaves behind (0–2 successor pressures, often
+     * none). Fire-and-forget like initial front generation — the reducer's
+     * one-shot pending guard makes a late or duplicate result harmless, and a
+     * failed call retries on the next dependency change.
+     */
+    useEffect(() => {
+        const s = stateRef.current;
+        const pending = s.session?.pendingFrontAftermath;
+        if (!pending || !shouldGenerateFrontAftermath(s) || aftermathFrontRef.current === pending.frontId) return;
+        const sessionId = s.session.id;
+        const frontId = pending.frontId;
+        aftermathFrontRef.current = frontId;
+        generateFrontAftermath(s)
+            .then(fronts => {
+                dispatch({ type: 'INSTALL_AFTERMATH_FRONTS', payload: { sessionId, frontId, fronts } });
+                console.info(`[Fronts] Aftermath of ${frontId}: ${fronts.length} successor pressure(s) proposed.`);
+            })
+            .catch(error => {
+                console.warn('[Fronts] Aftermath generation failed; will retry:', error.message || error);
+                if (aftermathFrontRef.current === frontId) aftermathFrontRef.current = null;
+            });
+    }, [state.session?.pendingFrontAftermath?.frontId, state.settings.apiKey, state.combat?.active, dispatch]);
 
     /**
      * RAG seeding: embed all existing world facts and journal summaries once on mount.

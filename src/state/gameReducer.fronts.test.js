@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
-import { createInitialFronts } from '../engine/fronts.js';
+import { createInitialFronts, normalizeFront } from '../engine/fronts.js';
 
 const character = {
     name: 'Astra',
@@ -427,5 +427,162 @@ describe('hidden campaign fronts', () => {
             version: 2, generationVersion: 2, source: 'existing-campaign-upgrade', lastJournalEnd: 20,
         });
         expect(gameReducer(upgraded, action)).toBe(upgraded);
+    });
+});
+
+describe('front resolution (DECISIONS.md 2026-08-03)', () => {
+    const resolvableState = () => ({
+        ...initialGameState,
+        session: { id: 'campaign' },
+        messages: [
+            { role: 'assistant', content: 'The matriarch falls.' },
+            { role: 'user', content: 'We burn the brood.' },
+        ],
+        fronts: [
+            {
+                id: 'front-brood', title: 'The Mill Brood', goal: 'Claim the valley.', stakes: 'The valley starves.',
+                grimPortents: ['Raids begin.', 'The mill falls.', 'The valley empties.'],
+                clock: 5, maxClock: 6, stage: 2, status: 'active', publicHints: [],
+                faction: { name: 'The Brood', goal: 'Feed.', stance: 'Hostile', relationships: [] },
+            },
+            {
+                id: 'front-guild', title: 'The Salt Guild', goal: 'Corner the trade.', stakes: 'Prices strangle the town.',
+                grimPortents: ['One.', 'Two.', 'Three.'],
+                clock: 1, maxClock: 6, stage: 0, status: 'active', publicHints: [],
+            },
+        ],
+        locations: [
+            { name: 'The Old Mill', theaterFrontIds: ['front-brood'] },
+            { name: 'Saltmarket', theaterFrontIds: ['front-guild', 'front-brood'] },
+        ],
+        worldTempo: { directive: { frontId: 'front-brood', maxIntensity: 'confrontation', grantedAtMessage: 0, activatesAtMessage: 0, expiresAtMessage: 99 }, lastCadenceId: 'cad-1' },
+    });
+
+    const resolveAction = {
+        type: 'UPDATE_FRONT',
+        payload: { id: 'front-brood', status: 'resolved', notes: 'The hero slew the matriarch and burned the brood.' },
+    };
+
+    it('canonizes the victory: world fact, payoff system line, resolution record, aftermath flag', () => {
+        const next = gameReducer(resolvableState(), resolveAction);
+        expect(next.fronts[0]).toMatchObject({ id: 'front-brood', status: 'resolved', resolvedAtMessage: 2 });
+        expect(next.fronts[0].resolution).toContain('slew the matriarch');
+        expect(next.worldFacts.some(f => f.fact.includes('"The Mill Brood"') && f.fact.includes('ended'))).toBe(true);
+        const lastMessage = next.messages[next.messages.length - 1];
+        expect(lastMessage.role).toBe('system');
+        expect(lastMessage.content).toContain('The Mill Brood');
+        expect(next.session.pendingFrontAftermath).toMatchObject({ frontId: 'front-brood', title: 'The Mill Brood' });
+    });
+
+    it('retires the resolved front from theaters and cancels its granted tempo window', () => {
+        const next = gameReducer(resolvableState(), resolveAction);
+        expect(next.locations.find(l => l.name === 'The Old Mill').theaterFrontIds).toEqual([]);
+        expect(next.locations.find(l => l.name === 'Saltmarket').theaterFrontIds).toEqual(['front-guild']);
+        expect(next.worldTempo.directive).toBeNull();
+    });
+
+    it('is one-shot: re-emitting resolved fires no second fact, line, or aftermath flag', () => {
+        const resolved = gameReducer(resolvableState(), resolveAction);
+        const cleared = { ...resolved, session: { ...resolved.session, pendingFrontAftermath: null } };
+        const again = gameReducer(cleared, resolveAction);
+        expect(again.worldFacts).toHaveLength(resolved.worldFacts.length);
+        expect(again.messages).toHaveLength(resolved.messages.length);
+        expect(again.session.pendingFrontAftermath).toBeNull();
+    });
+
+    it('keeps the resolution record through normalizeFront on save reload paths', () => {
+        const resolved = gameReducer(resolvableState(), resolveAction);
+        const roundTripped = JSON.parse(JSON.stringify(resolved.fronts[0]));
+        expect(normalizeFront(roundTripped)).toMatchObject({
+            status: 'resolved',
+            resolvedAtMessage: 2,
+            resolution: expect.stringContaining('matriarch'),
+        });
+    });
+});
+
+describe('aftermath front install', () => {
+    const pendingState = () => ({
+        ...initialGameState,
+        session: { id: 'campaign', pendingFrontAftermath: { frontId: 'front-brood', title: 'The Mill Brood', resolvedAt: 1 } },
+        fronts: [
+            { id: 'front-brood', title: 'The Mill Brood', goal: 'Claim.', stakes: 'Loss.', grimPortents: ['A.', 'B.', 'C.'], clock: 6, maxClock: 6, stage: 3, status: 'resolved', publicHints: [] },
+            { id: 'front-guild', title: 'The Salt Guild', goal: 'Corner.', stakes: 'Squeeze.', grimPortents: ['A.', 'B.', 'C.'], clock: 1, maxClock: 6, stage: 0, status: 'active', publicHints: [] },
+        ],
+    });
+    const proposal = (title, factionName) => ({
+        title,
+        goal: 'Claim the vacuum the brood left.',
+        stakes: 'The valley trades one master for another.',
+        grimPortents: ['Scouts arrive.', 'A tithe is demanded.', 'A holdout burns.'],
+        faction: { name: factionName, goal: 'Rule the valley.', stance: 'Indifferent to the hero' },
+        reason: 'Power vacuum after the brood fell.',
+    });
+
+    it('installs validated successors at clock 0, clears the pending flag, and stays within the 3-active cap', () => {
+        const next = gameReducer(pendingState(), {
+            type: 'INSTALL_AFTERMATH_FRONTS',
+            payload: {
+                sessionId: 'campaign',
+                frontId: 'front-brood',
+                fronts: [proposal('The Reeve of Ashes', 'The Gray Reeve'), proposal('The Second Claim', 'Claimant Band'), proposal('The Third Claim', 'Third Band')],
+            },
+        });
+        expect(next.session.pendingFrontAftermath).toBeNull();
+        const added = next.fronts.filter(f => f.id.startsWith('front-aftermath-'));
+        expect(added).toHaveLength(2); // room = min(2, 3 - 1 active)
+        expect(added[0]).toMatchObject({ title: 'The Reeve of Ashes', clock: 0, stage: 0, status: 'active' });
+    });
+
+    it('accepts an empty aftermath (a clean victory) and still clears the pending flag', () => {
+        const next = gameReducer(pendingState(), {
+            type: 'INSTALL_AFTERMATH_FRONTS',
+            payload: { sessionId: 'campaign', frontId: 'front-brood', fronts: [] },
+        });
+        expect(next.session.pendingFrontAftermath).toBeNull();
+        expect(next.fronts).toHaveLength(2);
+    });
+
+    it('drops cross-session, wrong-front, duplicate-flavor, and post-clear results', () => {
+        const state = pendingState();
+        expect(gameReducer(state, {
+            type: 'INSTALL_AFTERMATH_FRONTS',
+            payload: { sessionId: 'other', frontId: 'front-brood', fronts: [proposal('New', 'Faction')] },
+        })).toBe(state);
+        expect(gameReducer(state, {
+            type: 'INSTALL_AFTERMATH_FRONTS',
+            payload: { sessionId: 'campaign', frontId: 'front-guild', fronts: [proposal('New', 'Faction')] },
+        })).toBe(state);
+
+        // A successor duplicating a live faction/title is rejected by validation.
+        const duped = gameReducer(state, {
+            type: 'INSTALL_AFTERMATH_FRONTS',
+            payload: { sessionId: 'campaign', frontId: 'front-brood', fronts: [proposal('The Salt Guild', 'Anyone')] },
+        });
+        expect(duped.fronts).toHaveLength(2);
+        expect(duped.session.pendingFrontAftermath).toBeNull();
+
+        // Once cleared, a late duplicate result is a no-op.
+        expect(gameReducer(duped, {
+            type: 'INSTALL_AFTERMATH_FRONTS',
+            payload: { sessionId: 'campaign', frontId: 'front-brood', fronts: [proposal('New', 'Faction')] },
+        })).toBe(duped);
+    });
+
+    it('installs nothing when the active web is already full', () => {
+        const state = pendingState();
+        state.fronts = [
+            state.fronts[0],
+            ...['a', 'b', 'c'].map(key => ({
+                id: `front-${key}`, title: `Front ${key}`, goal: 'G.', stakes: 'S.',
+                grimPortents: ['A.', 'B.', 'C.'], clock: 1, maxClock: 6, stage: 0, status: 'active', publicHints: [],
+            })),
+        ];
+        const next = gameReducer(state, {
+            type: 'INSTALL_AFTERMATH_FRONTS',
+            payload: { sessionId: 'campaign', frontId: 'front-brood', fronts: [proposal('The Reeve of Ashes', 'The Gray Reeve')] },
+        });
+        expect(next.fronts).toHaveLength(4);
+        expect(next.session.pendingFrontAftermath).toBeNull();
     });
 });

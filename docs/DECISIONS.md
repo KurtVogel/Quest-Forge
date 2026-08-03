@@ -8,6 +8,53 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-03 · Front resolution is a first-class canonized event; victories leave aftermath, not silence — and foes fatigue.**
+Vesa's live finding: two similar ichor-ghoul-sarcophagus dungeons miles apart, and no way
+to make "I want this storyline OVER" stick. Root causes: (1) `status: "resolved"` existed
+in the engine but the DM was never shown the field — a defeated front stayed active at
+clock cap in the confrontation band forever; (2) resolution had zero downstream effects —
+no canon, no world reaction, no replacement pressure; (3) nothing pushed back on the
+memory layer's motif attractor (similar scene context retrieves past ghoul prose, which
+writes more ghoul canon — self-reinforcing). Settled design:
+1. **The DM resolves; the reflection still cannot.** `front_updates` with
+   `"status": "resolved"` + a short `notes` epitaph, documented in RESPONSE_FORMAT and the
+   WORLD TEMPO instructions with a strict bar: the pressure ITSELF is finished (destroyed,
+   disbanded, redeemed, permanently neutralized on-screen) — winning one battle or
+   clearing one symptom softens the clock instead. The cadence reflection remains
+   forbidden from resolving (a background summarizer must never end a storyline).
+2. **Resolution is a one-shot engine transition with side effects** (UPDATE_FRONT):
+   stamps `resolvedAtMessage`/`resolution` (both survive normalizeFront, so reloads keep
+   them), retires the front from every location's theater list, cancels a granted tempo
+   window pointed at it, mints a world fact naming the threat, and posts a 🕰️ system
+   line. **Privacy ends at resolution by design**: revealing the front's title once the
+   player has beaten it is the DM-notes payoff moment — proof the clockwork was real —
+   and world-fact canon keeps later scenes (and the Scribe) honest about the victory.
+   Re-emitted `resolved` on later turns hits the already-resolved branch and is inert.
+3. **The world visibly reacts:** a `RECENT VICTORY` line rides the world-tempo block for
+   ~40 messages (`RESOLVED_ECHO_WINDOW_MESSAGES`) — show the absence concretely (relief,
+   reopened roads, easing prices, vacuum talk), never resurrect it, never field a
+   lookalike, haunted places stay free.
+4. **Aftermath, not hydra-heads:** resolution sets `session.pendingFrontAftermath`; a
+   background DM-model call (`llm/frontAftermath.js`, the frontDirector pattern) proposes
+   0–2 successor pressures grounded in the resolved front's concrete consequences
+   (survivors, debts, vacuum claimants). An EMPTY answer is a first-class outcome — if
+   every victory sprouts a successor, resolving feels pointless. Flavor divergence is
+   mandatory (never a reskin: different species, imagery, methods, mood — the direct
+   anti-ichor-ghoul rule). `INSTALL_AFTERMATH_FRONTS` re-validates every proposal via
+   `normalizeEmergentFront`, is one-shot per resolution (pending-flag + session guards,
+   late/duplicate results inert), and only tops the web back up to ≤3 active fronts.
+5. **Foe fatigue is deterministic, not another LLM plea:** the encounter ledger grew
+   6→10 and stamps `foeFamilies` (singularized head noun — "Ichor Ghoul 2" → "ghoul";
+   legacy entries parse from the summary string). A family fielded in ≥3 ledger fights
+   renders a hard `FOE FATIGUE` line: field something different unless the player hunts
+   them or canon requires them HERE. The RAG block's existing "never transplant creatures
+   from elsewhere" rule covers the scenery half.
+Prompt-only exception note (2026-07-21 invariant): `front_updates` mutates no
+numeric/mechanical player state and resolution is engine-idempotent, so no replay ledger
+is needed — the one-shot transition IS the guard.
+
+---
+
 **2026-07-31 · Audit backstops observe; the engine reconciles (kills the same-turn coin double-charge class).**
 Live finding (Vesa): giving 1 gp to an NPC deducted 1 gp when the DM's event applied AND
 again after the DM's output — the Scribe payment audit re-reporting the already-evented

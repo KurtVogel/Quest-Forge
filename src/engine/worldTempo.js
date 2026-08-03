@@ -30,8 +30,12 @@ export const PACE_DIALS = ['slow-burn', 'standard', 'breakneck'];
 export const TEMPO_TIMING_DIE_SIDES = 5;
 /** A granted window dies on its own if the next cadence never arrives. */
 export const TEMPO_WINDOW_MESSAGES = 24;
-export const MAX_RECENT_ENCOUNTERS = 6;
+export const MAX_RECENT_ENCOUNTERS = 10;
 export const MAX_ACTIVE_FRONTS = 4;
+/** A foe family fielded in this many ledger encounters is fatigued — the DM must vary. */
+export const FOE_FATIGUE_THRESHOLD = 3;
+/** How long (in messages) a resolved front's absence keeps being echoed to the DM. */
+export const RESOLVED_ECHO_WINDOW_MESSAGES = 40;
 
 const INTENSITY_GUIDANCE = {
     whispers: 'rumors, atmosphere, prices, and secondhand news only — the pressure has NO on-screen presence',
@@ -86,14 +90,30 @@ export function summarizeEncounterEnemies(enemies = []) {
         .join(', ');
 }
 
+/**
+ * The head noun of a foe name, singularized — the token that groups a monster
+ * family: "ichor ghoul" / "Ghoul 2" / "ghouls" all key to "ghoul". Imperfect
+ * for irregular plurals ("wolves"), which is fine: this powers a variety
+ * nudge, not an exact count.
+ */
+export function foeFamilyKey(name) {
+    const words = cleanText(name, 60).toLowerCase().replace(/\s+\d+$/, '').split(/\s+/).filter(Boolean);
+    if (words.length === 0) return '';
+    let head = words[words.length - 1];
+    if (head.length > 3 && head.endsWith('s') && !head.endsWith('ss')) head = head.slice(0, -1);
+    return head;
+}
+
 /** Build the ledger entry END_COMBAT appends (cap MAX_RECENT_ENCOUNTERS). */
 export function buildEncounterEntry(state, payload = {}) {
     const outcome = payload.defeat ? 'defeat' : payload.escaped ? 'escaped' : 'victory';
+    const enemies = state.combat?.enemies || [];
     return {
         at: Date.now(),
         messageIndex: (state.messages || []).length,
         location: cleanText(state.currentLocation, 120) || null,
-        enemies: summarizeEncounterEnemies(state.combat?.enemies || []),
+        enemies: summarizeEncounterEnemies(enemies),
+        foeFamilies: [...new Set(enemies.map(enemy => foeFamilyKey(enemy?.name)).filter(Boolean))].slice(0, 8),
         outcome,
     };
 }
@@ -101,6 +121,42 @@ export function buildEncounterEntry(state, payload = {}) {
 export function appendRecentEncounter(list = [], entry) {
     if (!entry || !entry.enemies) return list;
     return [...(Array.isArray(list) ? list : []), entry].slice(-MAX_RECENT_ENCOUNTERS);
+}
+
+function entryFoeFamilies(entry) {
+    if (Array.isArray(entry?.foeFamilies) && entry.foeFamilies.length > 0) return entry.foeFamilies;
+    // Pre-ledger-upgrade entries only stored the display summary ("2× ichor ghoul, hound").
+    return String(entry?.enemies || '')
+        .split(',')
+        .map(part => foeFamilyKey(part.replace(/^\s*\d+×\s*/, '')))
+        .filter(Boolean);
+}
+
+/**
+ * Foe families the recent-encounter ledger shows being fielded again and again
+ * ("ichor ghouls in EVERY dungeon" — the 2026-08-03 repetition complaint).
+ * Counts distinct encounters per family, not bodies; deterministic, no LLM.
+ */
+export function computeFoeFatigue(recentEncounters = []) {
+    const counts = new Map();
+    for (const entry of Array.isArray(recentEncounters) ? recentEncounters : []) {
+        for (const family of new Set(entryFoeFamilies(entry))) {
+            counts.set(family, (counts.get(family) || 0) + 1);
+        }
+    }
+    return [...counts.entries()]
+        .filter(([, count]) => count >= FOE_FATIGUE_THRESHOLD)
+        .sort((a, b) => b[1] - a[1])
+        .map(([family, count]) => ({ family, count }));
+}
+
+/** Fronts whose resolution is recent enough that the DM should still show the aftermath. */
+export function recentlyResolvedFronts(fronts = [], messageCount = 0) {
+    return (Array.isArray(fronts) ? fronts : [])
+        .filter(front => front?.status === 'resolved'
+            && Number.isFinite(front.resolvedAtMessage)
+            && front.resolvedAtMessage >= messageCount - RESOLVED_ECHO_WINDOW_MESSAGES)
+        .slice(-2);
 }
 
 const HEAT_LEVELS = ['calm', 'lively', 'high'];
@@ -292,7 +348,8 @@ export function buildWorldTempoBlock({
     solo = false,
 } = {}) {
     const activeFronts = fronts.filter(f => (f.status || 'active') === 'active');
-    if (activeFronts.length === 0 && recentEncounters.length === 0) return '';
+    const resolvedEchoes = recentlyResolvedFronts(fronts, messageCount);
+    if (activeFronts.length === 0 && recentEncounters.length === 0 && resolvedEchoes.length === 0) return '';
 
     const dial = normalizePaceDial(paceDial);
     const lines = [];
@@ -327,11 +384,25 @@ export function buildWorldTempoBlock({
     }
     lines.push('The player may always seek danger on their own ("I go hunt goblins") — honor player-initiated risk normally; this section only limits UNPROVOKED intrusions.');
 
+    if (resolvedEchoes.length > 0) {
+        // The persistent-world payoff: a won front's absence must be FELT, not
+        // merely stop being mentioned. Titles are already table canon here —
+        // resolution minted a world fact revealing them.
+        for (const front of resolvedEchoes) {
+            lines.push(`RECENT VICTORY: the pressure "${front.title}" has been ENDED${front.resolution ? ` (${front.resolution})` : ''}. Show its absence concretely wherever the fiction touches what it threatened — relief, reopened roads, easing prices, rebuilding, talk of who moves into the vacuum. Never resurrect it, never field a lookalike threat with the same creatures or imagery, and let places it haunted stay free unless a NEW, distinct pressure claims them on-screen.`);
+        }
+    }
+
     if (recentEncounters.length > 0) {
         const recent = recentEncounters.slice(-4)
             .map(entry => `${entry.enemies}${entry.location ? ` (${entry.location}` : ' ('}${entry.location ? `, ${entry.outcome})` : `${entry.outcome})`}`)
             .join('; ');
         lines.push(`Recent fights: ${recent}. Do not repeat near-identical encounters — vary, escalate, or let places stay cleared once won.`);
+        const fatigue = computeFoeFatigue(recentEncounters);
+        if (fatigue.length > 0) {
+            const list = fatigue.map(({ family, count }) => `${family}-type foes in ${count} of the last ${recentEncounters.length} fights`).join('; ');
+            lines.push(`FOE FATIGUE: ${list}. This bestiary is exhausted — unless the player deliberately hunts them or established canon requires them in THIS exact place, field something different: new species, new imagery, new tactics, new mood. Distant locations must not share one monster ecology.`);
+        }
     }
 
     if (solo) {

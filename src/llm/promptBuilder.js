@@ -372,7 +372,8 @@ When game events occur, include a structured JSON block at the END of your respo
     { "name": "<culture-grounded NPC name>", "gender": "woman", "disposition": "friendly", "lastNotes": "Gave the player a room and hinted at a missing merchant", "basedIn": "Millhaven", "lastLocation": "The Rusty Flagon, Millhaven", "stanceToPlayer": "Grateful for the rescue and quietly charmed by the hero's easy humor", "bondMoment": "The hero flirted while paying for the room; she laughed and undercharged him" }
   ],
   "front_updates": [
-    { "id": "front-local-pressure", "clock": 1, "stage": 1, "publicHints": ["Refugees whisper that the north road is watched."], "notes": "Advanced because the party spent a night away from the road." }
+    { "id": "front-local-pressure", "clock": 1, "stage": 1, "publicHints": ["Refugees whisper that the north road is watched."], "notes": "Advanced because the party spent a night away from the road." },
+    { "id": "front-defeated-pressure", "status": "resolved", "notes": "The hero slew the pack matriarch beneath the mill and burned the brood; the raids on the valley are over." }
   ],
   "memory_updates": [
     { "id": "mem-id", "used": true, "status": "active", "salience": 3 }
@@ -441,6 +442,9 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - OBEY THE TEMPO: when the section says the world is QUIET, introduce no unprovoked new threats or pressure symptoms — quiet scenes are complete scenes. When it grants a permission, surface at most that ONE symptom, at or below the stated intensity. Player-initiated risk ("I go hunt goblins") is always honored normally and never counts against the tempo.
 - A private cadenced director owns ordinary off-screen clock movement. Do not increment a front merely because time passed or it was ignored in this response.
 - Use \`front_updates\` only for an immediate, response-established change: the player meaningfully helps/hinders/resolves a pressure, or the narration makes a new symptom concretely visible. Keep any clock/stage change to one step at most.
+- **RESOLVING A FRONT:** when THIS response's fiction has the player decisively END a pressure — its driving force destroyed, disbanded, redeemed, or permanently neutralized on-screen — emit \`front_updates\` with that front's id, \`"status": "resolved"\`, and a short \`notes\` epitaph stating how it ended. This is how a victory becomes permanent: the engine canonizes it, announces it to the player, and keeps that world honest afterward. Never leave a genuinely defeated pressure unresolved.
+- Resolution is for the pressure itself being finished, not for winning one battle, clearing one symptom, or driving it off temporarily — if it can regroup and keep pursuing its goal, soften the clock instead. Resolved is final: never advance, revive, or re-emit a resolved front.
+- After a resolution (see any RECENT VICTORY line), the world visibly relaxes where that pressure operated. Show the absence; do not backfill it with a similar threat.
 - Put only in-world symptoms in \`publicHints\` (rumors, refugees, price spikes, missing NPCs, strange patrols). These are safe to echo in narration. Keep hidden planning details in \`notes\`.
 
 ## STORY MEMORY UPDATE INSTRUCTIONS

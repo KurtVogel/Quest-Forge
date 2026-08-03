@@ -133,6 +133,13 @@ export function normalizeFront(front = {}, existing = null) {
     const clock = clampInt(front.clock, 0, maxClock, existing?.clock || 0);
     const grimPortents = normalizeTextArray(front.grimPortents || front.grim_portents, existing?.grimPortents || []);
     const stage = clampInt(front.stage, 0, grimPortents.length || maxClock, existing?.stage || 0);
+    // Resolution record (set once by the reducer when a front resolves): loaded
+    // saves re-normalize every front, so these must survive normalization or
+    // the world-tempo "recent victory" echo dies on the first reload.
+    const resolvedAtMessageRaw = Number(front.resolvedAtMessage ?? front.resolved_at_message);
+    const resolvedAtMessage = Number.isFinite(resolvedAtMessageRaw)
+        ? Math.max(0, Math.round(resolvedAtMessageRaw))
+        : (existing?.resolvedAtMessage ?? null);
 
     return {
         id: cleanText(front.id, existing?.id || `front-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
@@ -150,7 +157,22 @@ export function normalizeFront(front = {}, existing = null) {
         lastAdvanceDelta: clampInt(front.lastAdvanceDelta ?? front.last_advance_delta, -1, 1, existing?.lastAdvanceDelta ?? 0),
         notes: cleanText(front.notes, existing?.notes || ''),
         faction: normalizeFaction(front.faction, existing?.faction || null),
+        resolvedAtMessage,
+        resolution: cleanText(front.resolution, existing?.resolution || '').slice(0, 240),
     };
+}
+
+/**
+ * The canonical world fact minted when a front resolves. Front dossiers are
+ * private while active, but a resolution the player fought for is a payoff:
+ * the threat's name becomes table canon, so later scenes (and the Scribe)
+ * treat the victory as established history instead of quietly forgetting it.
+ */
+export function buildFrontResolutionFact(front, note = '') {
+    const title = cleanText(front?.title, 'A hidden threat');
+    const detail = cleanText(note) || cleanText(front?.resolution);
+    const base = `The threat known as "${title}" has ended, resolved through the hero's actions.`;
+    return (detail ? `${base} ${detail}` : base).slice(0, 400);
 }
 
 export function normalizeFrontUpdate(update = {}) {

@@ -20,7 +20,7 @@ const noDevImports = {
 }
 
 export default defineConfig([
-  globalIgnores(['dist', 'coverage']),
+  globalIgnores(['dist', 'coverage', 'test-results']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

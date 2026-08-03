@@ -11,6 +11,10 @@ import {
     normalizePaceDial,
     normalizeTempoDirective,
     summarizeEncounterEnemies,
+    computeFoeFatigue,
+    foeFamilyKey,
+    recentlyResolvedFronts,
+    FOE_FATIGUE_THRESHOLD,
     MAX_RECENT_ENCOUNTERS,
 } from './worldTempo.js';
 
@@ -258,9 +262,9 @@ describe('encounter ledger', () => {
         expect(buildEncounterEntry(state, { escaped: true }).outcome).toBe('escaped');
 
         let list = [];
-        for (let i = 0; i < 10; i++) list = appendRecentEncounter(list, { enemies: `foe ${i}`, messageIndex: i });
+        for (let i = 0; i < MAX_RECENT_ENCOUNTERS + 2; i++) list = appendRecentEncounter(list, { enemies: `foe ${i}`, messageIndex: i });
         expect(list).toHaveLength(MAX_RECENT_ENCOUNTERS);
-        expect(list[0].enemies).toBe('foe 4');
+        expect(list[0].enemies).toBe('foe 2');
     });
 });
 
@@ -324,5 +328,94 @@ describe('world tempo prompt block', () => {
 
     it('returns empty with no fronts and no encounters', () => {
         expect(buildWorldTempoBlock({ fronts: [], recentEncounters: [] })).toBe('');
+    });
+});
+
+describe('foe fatigue (2026-08-03 "ichor ghouls in every dungeon")', () => {
+    it('groups a monster family by singularized head noun', () => {
+        expect(foeFamilyKey('Ichor Ghoul 2')).toBe('ghoul');
+        expect(foeFamilyKey('ghouls')).toBe('ghoul');
+        expect(foeFamilyKey('Scarred Hound')).toBe('hound');
+        expect(foeFamilyKey('')).toBe('');
+    });
+
+    it('counts distinct encounters per family, using stored families or the legacy summary string', () => {
+        const encounters = [
+            { enemies: '2× ichor ghoul', foeFamilies: ['ghoul'] },
+            { enemies: '3× Ghoul, Scarred Hound' }, // legacy entry: parsed from the summary
+            { enemies: 'Ghoul Priest', foeFamilies: ['ghoul'] },
+            { enemies: 'Bandit', foeFamilies: ['bandit'] },
+        ];
+        const fatigue = computeFoeFatigue(encounters);
+        expect(fatigue).toEqual([{ family: 'ghoul', count: 3 }]);
+        expect(FOE_FATIGUE_THRESHOLD).toBe(3);
+    });
+
+    it('stamps foeFamilies on new encounter entries', () => {
+        const entry = buildEncounterEntry({
+            messages: [], currentLocation: 'Old Crypt',
+            combat: { enemies: [{ name: 'Ichor Ghoul 1' }, { name: 'Ichor Ghoul 2' }, { name: 'Scarred Hound' }] },
+        }, {});
+        expect(entry.foeFamilies).toEqual(['ghoul', 'hound']);
+    });
+
+    it('renders a FOE FATIGUE line when a family saturates the ledger', () => {
+        const encounters = [
+            { enemies: '2× ghoul', foeFamilies: ['ghoul'], messageIndex: 1, outcome: 'victory' },
+            { enemies: 'ghoul', foeFamilies: ['ghoul'], messageIndex: 3, outcome: 'victory' },
+            { enemies: '3× ghoul', foeFamilies: ['ghoul'], messageIndex: 5, outcome: 'victory' },
+        ];
+        const block = buildWorldTempoBlock({
+            fronts: [front()], heat: { level: 'calm', reasons: [] }, messageCount: 10, recentEncounters: encounters,
+        });
+        expect(block).toContain('FOE FATIGUE: ghoul-type foes in 3 of the last 3 fights');
+        expect(block).toContain('field something different');
+    });
+
+    it('stays silent below the threshold', () => {
+        const block = buildWorldTempoBlock({
+            fronts: [front()], heat: { level: 'calm', reasons: [] }, messageCount: 10,
+            recentEncounters: [
+                { enemies: 'ghoul', foeFamilies: ['ghoul'], messageIndex: 1, outcome: 'victory' },
+                { enemies: 'bandit', foeFamilies: ['bandit'], messageIndex: 3, outcome: 'victory' },
+            ],
+        });
+        expect(block).not.toContain('FOE FATIGUE');
+    });
+});
+
+describe('resolved-front victory echo', () => {
+    const resolvedFront = front({
+        id: 'front-brood', title: 'The Mill Brood', status: 'resolved',
+        resolvedAtMessage: 20, resolution: 'The matriarch is dead.',
+    });
+
+    it('selects only recently resolved fronts', () => {
+        expect(recentlyResolvedFronts([resolvedFront], 30)).toHaveLength(1);
+        expect(recentlyResolvedFronts([resolvedFront], 100)).toHaveLength(0); // echo expired
+        expect(recentlyResolvedFronts([front()], 30)).toHaveLength(0); // active fronts never echo
+        expect(recentlyResolvedFronts([front({ status: 'resolved' })], 30)).toHaveLength(0); // legacy resolve without a stamp
+    });
+
+    it('renders the RECENT VICTORY aftermath instruction, revealing the now-canon title', () => {
+        const block = buildWorldTempoBlock({
+            fronts: [resolvedFront, front()],
+            heat: { level: 'calm', reasons: [] },
+            messageCount: 30,
+        });
+        expect(block).toContain('RECENT VICTORY: the pressure "The Mill Brood" has been ENDED');
+        expect(block).toContain('The matriarch is dead.');
+        expect(block).toContain('Never resurrect it');
+        // The resolved front is no longer a live stub the DM can front_update.
+        expect(block).not.toContain('front-brood (');
+    });
+
+    it('renders the echo even when the resolved front was the only front and there are no encounters', () => {
+        const block = buildWorldTempoBlock({
+            fronts: [resolvedFront],
+            heat: { level: 'calm', reasons: [] },
+            messageCount: 30,
+        });
+        expect(block).toContain('RECENT VICTORY');
     });
 });

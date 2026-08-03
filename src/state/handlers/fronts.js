@@ -4,6 +4,7 @@
  */
 import {
     applyFrontAdvanceBatch,
+    buildFrontResolutionFact,
     DEFAULT_MAX_CLOCK,
     FRONTS_VERSION,
     normalizeEmergentFront,
@@ -12,6 +13,8 @@ import {
 } from '../../engine/fronts.js';
 import { MAX_ACTIVE_FRONTS, normalizeTempoDirective } from '../../engine/worldTempo.js';
 import { upsertLocation } from '../../engine/locationRegistry.js';
+import { gameReducer } from '../gameReducer.js';
+import { systemMessage } from './shared.js';
 
 export const handlers = {
     INSTALL_GENERATED_FRONTS(state, action) {
@@ -159,9 +162,83 @@ export const handlers = {
             }),
             maxClock: existing.maxClock || DEFAULT_MAX_CLOCK,
         };
+        // Resolution is a one-way, one-time transition with side effects; a DM
+        // re-emitting "resolved" on later turns hits the already-resolved branch
+        // and changes nothing beyond the plain field update.
+        const resolvingNow = update.status === 'resolved' && (existing.status || 'active') === 'active';
+        let updatedFront = normalizeFront(boundedUpdate, existing);
+        if (resolvingNow) {
+            updatedFront = normalizeFront({
+                ...updatedFront,
+                resolvedAtMessage: (state.messages || []).length,
+                resolution: update.notes || '',
+            }, updatedFront);
+        }
+        let next = {
+            ...state,
+            fronts: fronts.map((front, i) => i === idx ? updatedFront : front),
+        };
+        if (!resolvingNow) return next;
+
+        // A dead pressure holds no territory: free its theaters so a future,
+        // different front can claim those places without inheriting the flavor.
+        next.locations = (state.locations || []).map(record =>
+            (record.theaterFrontIds || []).includes(existing.id)
+                ? { ...record, theaterFrontIds: record.theaterFrontIds.filter(id => id !== existing.id) }
+                : record);
+        // Cancel any granted-but-unspent symptom window pointed at this front.
+        if (next.worldTempo?.directive?.frontId === existing.id) {
+            next.worldTempo = { ...next.worldTempo, directive: null };
+        }
+        // The payoff reveal: the private clockwork surfaces as table canon
+        // exactly once, at the moment the player has earned it.
+        next.messages = [...(next.messages || []), systemMessage(
+            `🕰️ **The world shifts: "${updatedFront.title}" has ended.** A hidden pressure that has been moving against you since it first stirred is now broken for good — this victory is part of the campaign's canon.`
+        )];
+        // Aftermath hook: a background director decides (later, outside the
+        // reducer) whether this specific victory leaves survivors, debts, or a
+        // power vacuum — or was simply, cleanly won.
+        next.session = {
+            ...next.session,
+            pendingFrontAftermath: {
+                frontId: existing.id,
+                title: updatedFront.title,
+                resolvedAt: Date.now(),
+            },
+        };
+        return gameReducer(next, {
+            type: 'ADD_WORLD_FACTS',
+            payload: [{ fact: buildFrontResolutionFact(updatedFront, update.notes), category: 'event' }],
+        });
+    },
+
+    INSTALL_AFTERMATH_FRONTS(state, action) {
+        const payload = action.payload || {};
+        const pending = state.session?.pendingFrontAftermath;
+        // One-shot per resolution: only the pending front's own generation may
+        // land, and it lands once — stale or cross-session results are dropped.
+        if (!pending || payload.sessionId !== state.session?.id || payload.frontId !== pending.frontId) return state;
+        const session = { ...state.session, pendingFrontAftermath: null };
+        const fronts = state.fronts || [];
+        const activeCount = fronts.filter(f => (f.status || 'active') === 'active').length;
+        // Successors top the web back up toward the creation-size 2–3, never
+        // beyond: a crowded world doesn't need the vacuum filled.
+        const room = Math.min(2, Math.max(0, 3 - activeCount));
+        const additions = [];
+        for (const proposal of (Array.isArray(payload.fronts) ? payload.fronts : []).slice(0, 2)) {
+            if (additions.length >= room) break;
+            const front = normalizeEmergentFront(proposal, [...fronts, ...additions]);
+            if (!front) continue;
+            additions.push(normalizeFront({
+                ...front,
+                id: `front-aftermath-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            }, front));
+        }
+        // Private like every front: no system line, the player only ever feels it.
         return {
             ...state,
-            fronts: fronts.map((front, i) => i === idx ? normalizeFront(boundedUpdate, front) : front),
+            session,
+            ...(additions.length > 0 && { fronts: [...fronts, ...additions] }),
         };
     },
 
