@@ -56,8 +56,8 @@ it under Process notes.
 | story-memory | `engine/storyMemory.js` | 2026-07-28 |
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-07-28 |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-04 |
-| cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-07-25 |
-| character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-07-26 |
+| cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-08-04 |
+| character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-08-04 |
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-07-28 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-08-04 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-08-01 |
@@ -224,6 +224,10 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P1** (persistence, 2026-08-04): `GameContext.jsx` is 0% covered — the inverted-trigger diff loop, the action-replay `flushAutoSave` (the 2026-07-30 P0 fix), and the hide flush have no regression net; extract the diff + replay logic to a testable module (the `turnVisibility.js` pattern) — `state/GameContext.jsx:62-82,167-201`.
 - [ ] **P2** (persistence, 2026-08-04): autosave write amplification — `flushOnHide` rewrites the full snapshot on every tab-hide even when nothing changed since the last save, and a `flushAutoSave` caller double-writes (the dispatch schedules the 2s debounce; the explicit flush saves immediately; neither cancels the other) — dirty-flag the hide flush, cancel the pending debounce timer inside `flushAutoSave` — `state/GameContext.jsx:100-116,184-200`.
 - [ ] **P2** (quests, 2026-08-04): the ACTIVE QUESTS block is the only accretion block with no count cap (facts 15, NPCs 8+overflow, journal −3) — all active quests × 800-char parser-clamped descriptions ride the dynamic prompt segment every turn, and the budget-tripwire worst case models only 10×300 chars; cap at newest N + overflow line and/or clamp the rendered description (~250, panel keeps full), and fold the duplicate `Active quests in progress:` reminder — `llm/promptBuilder.js:761,858`, `promptBuilder.test.js:626-631`.
+- [ ] **P1** (cloud-sync, 2026-08-04): cloud listing and saving download payloads they never use — `listCloudSaves`'s `getDocs` fetches every save doc whole, so each inline `payload` (up to 300k chars/doc, autosave doc included) crosses the network before `delete data.payload` discards it client-side, at every signed-in app boot and saves-dialog open; `saveGameToCloud`'s transaction also `get`s the full previous doc just for `payloadChunks`. One structural fix closes all three: always store the payload in the `chunks` subcollection (inline = 1 chunk) so parent docs are metadata-only, which also deletes the inline/chunked dual path — `state/cloudSync.js:98-100,177-190`, `App.jsx:45`, `SettingsModal.jsx:43,83`.
+- [ ] **P2** (cloud-sync, 2026-08-04): nothing pins the parent-doc shape (`payload: null` + `payloadChunks: N` on chunked saves) or that a save list never returns payload content — the 08-02 payload-shape test pattern is missing here — `cloudSync.test.js`.
+- [ ] **P2** (character-vault, 2026-08-04): hero import admits portraits ~25-45× larger than the game generates — `MAX_PORTRAIT_URL_LENGTH` is 2.5M chars while generated portraits downscale to 480×640 JPEG (~60-110k chars base64), and imports are never re-downscaled; an oversized hand-imported portrait then rides the roster entry, every campaign autosave snapshot (2-4×/turn), and cloud saves (can single-handedly push a save into chunking). Downscale on import via `downscaleDataUrl` (degrade, don't reject) or drop the ceiling to ~300k — `engine/characterVault.js:34,43-49`, `llm/providers/imageGen.js:226-237`.
+- [ ] **P2** (character-vault, 2026-08-04): `sanitizeImageUrl`'s boundaries are untested — no case for an over-ceiling data URL (stripped to ''), nor for a hand-edited data URL with embedded whitespace/newlines failing the regex and silently dropping the portrait — `engine/characterVault.js:43-49`, `characterVault.test.js:94-109,268-275`.
 - [ ] **P2** (quests, 2026-08-04): `REMOVE_QUEST` is the quests handler's untested function (functions 75%), and the panel's complete-by-bare-id-string path (`QuestPanel.jsx:25` → matched string ref) is pinned only in its unmatched no-op form — `state/handlers/quests.js:81-86`, `gameReducer.quests.test.js:77-85`.
 - [x] **P2** (progression, 2026-07-28): hostile-input paths untested — negative/NaN/string XP amounts, `awardExperience(null)`, `getExperienceThreshold(0/-1/NaN/25)`, unknown class (hitDie 8 default), `estimateCombatExperience` with object-valued stats (NaN sum → silent 0-award, safe but unpinned) — `engine/progression.test.js`. *Fixed 2026-07-28: full suite added; `estimateCombatExperience` also hardened directly (coerces stats, skips non-object entries and non-array input) rather than leaning on awardExperience's downstream NaN→0.*
 
@@ -249,6 +253,31 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-04 — cloud-sync + character-vault (Lap 3: performance & token budget) — second run
+
+`npm test`: 1300 passing / 76 files
+
+### cloud-sync
+- **Scope examined:** `state/cloudSync.js` (all 227 lines), `state/auth.js`, callers in `App.jsx:40-57,82` and `SettingsModal.jsx:43,83,112,135,179,286`; tests `cloudSync.test.js`, `cloudSync.nodb.test.js`.
+- **Findings:**
+  - **P1** — cloud listing and saving download payloads they never use, three ways. `listCloudSaves` fetches every save doc **whole** with `getDocs` — the inline `payload` string (up to 300k chars per doc) crosses the network before `delete data.payload` discards it client-side (`cloudSync.js:177-184`; the web SDK has no field projection), and the excluded autosave doc is downloaded too since its filter is also client-side (`:187`). This runs at every signed-in app boot (`App.jsx:45`) and every saves-dialog open/refresh. Third way: `saveGameToCloud`'s transaction `get`s the full previous save doc just to read `payloadChunks` (`:98-99`) — up to another 300 KB per manual save. One structural change closes all three AND deletes the inline/chunked dual code path: always store the payload in the `chunks` subcollection (inline = 1 chunk), leaving parent docs metadata-only — `getDocs` on the parent collection never descends into subcollections. The exact cloud twin of this morning's local `listSaves` P1.
+  - **P2 (tests)** — nothing pins the parent-doc shape (`payload: null` + `payloadChunks: N` on chunked saves) or that a metadata list never returns payload content; the payload-shape/ceiling test pattern (08-02) is absent here, which is what would catch a regression re-inlining payloads into list reads.
+  - Healthy under this lens otherwise: chunk splitting is surrogate-safe and linear, the transactional stale-chunk sweep is correct for both shrink and delete, and `auth.js` remains a thin 3-function wrapper (0% coverage, known and accepted — not re-filed).
+- **Suggested improvements:** (1) metadata-only parent docs via always-chunk (also simplifies: one storage shape, one load path); (2) a parent-doc-shape + list-content test; (3) nothing else — manual-save frequency makes the remaining costs (stringify on UI thread, Date allocations in the sort) negligible.
+
+### character-vault
+- **Scope examined:** `engine/characterVault.js` (all 231 lines), `engine/characterUtils.js`, roster flows (`persistence.js` roster store, `CharacterCreation.jsx:54-71,211-212,247-262`, `CharacterSheet.jsx:107,141-153`), the portrait pipeline in `imageGen.js:53-82,226-243`; tests `characterVault.test.js` (20 cases), `characterUtils.test.js`.
+- **Findings:**
+  - **P2** — hero import admits portraits ~25-45× larger than the game ever generates: `MAX_PORTRAIT_URL_LENGTH` allows a 2.5M-char data URL (`characterVault.js:34`) while generated portraits are downscaled to 480×640 JPEG q0.82 (~60-110k chars base64, `imageGen.js:232-234`), and the import path never re-downscales. A hand-imported bloated portrait then rides the roster entry, **every campaign autosave snapshot** (2-4 full rewrites per turn — compounding this morning's persistence finding), and cloud saves, where it alone can push a save into chunking. `downscaleDataUrl` already exists — run imports through it (degrade, don't reject; old exports keep working) or drop the ceiling to ~300k.
+  - **P2 (tests)** — `sanitizeImageUrl`'s boundaries are untested: the safe-kept and `javascript:`-stripped cases are pinned (`characterVault.test.js:94-109,268-275`) but nothing covers an over-ceiling URL stripping to `''` or a hand-edited data URL with embedded whitespace failing the regex — both silently drop the portrait, which is the intended-but-unpinned degradation.
+  - Healthy under this lens otherwise: sanitize/rebuild is one linear pass at import-click frequency, derived fields are rebuilt not trusted (the file's core guarantee, re-verified intact), and export files are small apart from the portrait field. The wizard's roster load on mount fetches whole entries portraits-included, but roster sizes keep it trivial.
+- **Suggested improvements:** (1) downscale-on-import for `portraitUrl`; (2) boundary tests for `sanitizeImageUrl`; (3) optional: compact (non-pretty) export JSON was considered and rejected — hand-editability of hero files is a feature the vault's own docs lean on.
+
+### Process notes
+- Second run today at Vesa's request ("do one more round") — rotation honored against the union including this morning's entry: cloud-sync was the oldest eligible (2026-07-25), character-vault beat rules-math on the coverage tie-break (88.75 vs 92.41).
+- Coverage Snapshot refreshed this morning (2026-08-04) — not re-run.
+- Registry unchanged.
 
 ## 2026-08-04 — persistence + quests (Lap 3: performance & token budget)
 
