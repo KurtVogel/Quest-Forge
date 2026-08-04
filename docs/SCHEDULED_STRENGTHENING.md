@@ -55,11 +55,11 @@ it under Process notes.
 | memory-journal | `engine/worldJournal.js` | 2026-07-30 |
 | story-memory | `engine/storyMemory.js` | 2026-07-28 |
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-07-28 |
-| persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-07-25 |
+| persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-04 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-07-25 |
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-07-26 |
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-07-28 |
-| quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-07-25 |
+| quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-08-04 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-08-01 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-07-29 |
 | chat-orchestration | `components/Chat/ChatPanel.jsx`, `llm/turnOrchestrator.js` (turn pipeline, `applyEvents`, message window) | 2026-07-30 |
@@ -70,31 +70,31 @@ Refreshed by the audit **at most weekly** (when older than 7 days), via:
 `npm.cmd install --no-save @vitest/coverage-v8 && npx.cmd vitest run --coverage --coverage.all --coverage.include='src/**/*.{js,jsx,ts}'`
 Used only to bias feature picking toward weak spots; per-file statement % for registry files.
 
-**2026-07-28** (1182 tests / 71 files passing). % Statements per registry file:
+**2026-08-04** (1300 tests / 76 files passing). % Statements per registry file:
 
 | Feature ID | File | % Stmts |
 |---|---|---|
-| dice-engine | `engine/dice.ts` | 95.00 |
-| rules-math | `engine/rules.js` | 92.46 |
-| progression | `engine/progression.js` | 97.91 |
-| response-parsing | `responseParser.js` / `jsonExtractor.js` | 95.52 / 95.06 |
-| prompt-building | `promptBuilder.js` | 98.66 |
-| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 81.79 / 100 |
-| combat-exchange | `combatExchange.js` | 82.90 |
+| dice-engine | `engine/dice.ts` | absent from this v8 report (tooling quirk — same class as currency.js; its own `dice.test.ts` suite passes) |
+| rules-math | `engine/rules.js` | 92.41 |
+| progression | `engine/progression.js` | 100 |
+| response-parsing | `responseParser.js` / `jsonExtractor.js` | 94.68 / 95.06 |
+| prompt-building | `promptBuilder.js` | 97.43 |
+| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 81.35 / 100 |
+| combat-exchange | `combatExchange.js` / `combatMath.js` | 84.35 / 91.22 |
 | enemy-stats-conditions | `enemyStats.js` | 97.40 |
-| hidden-fronts | `fronts.js` / `frontDirector.js` / `frontUpgrade.js` | 89.38 / 90.69 / 87.93 |
-| scribe | `scribe.js` | 81.13 |
-| memory-journal | `worldJournal.js` | 98.97 |
-| story-memory | `storyMemory.js` | 96.45 |
-| vector-memory-rag | `vectorMemory.js` | 93.38 |
-| persistence | `persistence.js` | 86.58 |
+| hidden-fronts | `fronts.js` / `frontDirector.js` / `frontUpgrade.js` / `worldTempo.js` | 90.75 / 90.69 / 87.93 / 97.88 |
+| scribe | `scribe.js` | 83.85 |
+| memory-journal | `worldJournal.js` | 100 |
+| story-memory | `storyMemory.js` | 97.70 |
+| vector-memory-rag | `vectorMemory.js` | 96.69 |
+| persistence | `persistence.js` | 86.58 (`GameContext.jsx` 0 — the whole autosave orchestration is untested) |
 | cloud-sync | `cloudSync.js` / `auth.js` | 96.26 / 0 (auth.js untested — thin Firebase wrapper) |
-| character-vault | `characterVault.js` / `characterUtils.js` | 88.75 / 89.15 |
-| inventory-economy | `items.js` / `equipment.js` | 98.36 / 100 (currency.js absent from v8 report — tooling quirk, has its own passing test file) |
-| quests | (part of `gameReducer.js`, 85.85 overall) | — |
-| scene-art | `imageGen.js` | 85.21 |
-| providers-adapter | `adapter.js` / `gemini.js` / `openai.js` / `xai.js` | 100 / 91.08 / 98.14 / 92.59 |
-| chat-orchestration | `ChatPanel.jsx` | 0 (no component test file exists) |
+| character-vault | `characterVault.js` / `characterUtils.js` | 88.75 / 96.20 |
+| inventory-economy | `items.js` / `equipment.js` / `handlers/inventory.js` | 98.36 / 100 / 74.21 (currency.js absent from v8 report — tooling quirk, has its own passing test file) |
+| quests | `state/handlers/quests.js` (direct file since the 2026-07-31 handlers split) | 92.30 |
+| scene-art | `imageGen.js` | 88.28 |
+| providers-adapter | `adapter.js` / `gemini.js` / `openaiCompatible.js` | 100 / 91.26 / 98.33 (openai.js / xai.js absent from v8 report — same quirk; both have passing test files) |
+| chat-orchestration | `ChatPanel.jsx` / `turnOrchestrator.js` | 0 / 59.24 (turnOrchestrator extracted 2026-07-31; the DOM-free pipeline is only part-covered) |
 
 ## Open Findings Queue
 
@@ -220,6 +220,11 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (roll-resolution, 2026-08-03): the hidden roll-summary message is write-only ballast — dispatched "for context" (`rollResolver.js:379-382`) but excluded by every consumer (`turnVisibility.js:77`, `worldJournal.js:123`, `chronicler.js:45`, `sessionPriming.js:8`, `frontDirector.js:63`, `handlers/fronts.js:25`) and never rendered, while the same summary rides the follow-up user message four lines later. Permanent per-check save growth for zero readers; delete the dispatch or drop its `hidden` flag.
 - [ ] **P2** (roll-resolution, 2026-08-03): the 08-02 machinery-compaction sweep missed the roll path — `outOfCombatRollPolicy.js:70` and `roleplayCheck.js:192` still pretty-print (`null, 2`), and the arbiter ships the full unclamped `dmNarrative` (`outOfCombatRollPolicy.js:68`) on every check turn; compact both and clamp the narrative (~2k, Scribe-family parity).
 - [ ] **P2** (roll-resolution, 2026-08-03): nothing asserts the roll-arbiter's request payload — all ten LLM-path tests check returned verdicts only and the single `toHaveBeenCalledWith` checks provider/model; add a field-set + size-ceiling assertion mirroring the 08-02 reflection payload test — `outOfCombatRollPolicy.test.js:174`.
+- [ ] **P1** (persistence, 2026-08-04): `listSaves()` materializes every manual save's FULL campaign state at every app boot and saves-dialog open — save records embed `state` (multi-MB on mature campaigns; cloud chunking exists because they exceed 1 MiB) and `getAll()` fetches whole records just to render ~15 metadata fields — `persistence.js:201`, `App.jsx:27`, `SettingsModal.jsx:37,79,276`. Split the payload from the metadata (state in its own store/record, DB v3) so listing reads metadata only.
+- [ ] **P1** (persistence, 2026-08-04): `GameContext.jsx` is 0% covered — the inverted-trigger diff loop, the action-replay `flushAutoSave` (the 2026-07-30 P0 fix), and the hide flush have no regression net; extract the diff + replay logic to a testable module (the `turnVisibility.js` pattern) — `state/GameContext.jsx:62-82,167-201`.
+- [ ] **P2** (persistence, 2026-08-04): autosave write amplification — `flushOnHide` rewrites the full snapshot on every tab-hide even when nothing changed since the last save, and a `flushAutoSave` caller double-writes (the dispatch schedules the 2s debounce; the explicit flush saves immediately; neither cancels the other) — dirty-flag the hide flush, cancel the pending debounce timer inside `flushAutoSave` — `state/GameContext.jsx:100-116,184-200`.
+- [ ] **P2** (quests, 2026-08-04): the ACTIVE QUESTS block is the only accretion block with no count cap (facts 15, NPCs 8+overflow, journal −3) — all active quests × 800-char parser-clamped descriptions ride the dynamic prompt segment every turn, and the budget-tripwire worst case models only 10×300 chars; cap at newest N + overflow line and/or clamp the rendered description (~250, panel keeps full), and fold the duplicate `Active quests in progress:` reminder — `llm/promptBuilder.js:761,858`, `promptBuilder.test.js:626-631`.
+- [ ] **P2** (quests, 2026-08-04): `REMOVE_QUEST` is the quests handler's untested function (functions 75%), and the panel's complete-by-bare-id-string path (`QuestPanel.jsx:25` → matched string ref) is pinned only in its unmatched no-op form — `state/handlers/quests.js:81-86`, `gameReducer.quests.test.js:77-85`.
 - [x] **P2** (progression, 2026-07-28): hostile-input paths untested — negative/NaN/string XP amounts, `awardExperience(null)`, `getExperienceThreshold(0/-1/NaN/25)`, unknown class (hitDie 8 default), `estimateCombatExperience` with object-valued stats (NaN sum → silent 0-award, safe but unpinned) — `engine/progression.test.js`. *Fixed 2026-07-28: full suite added; `estimateCombatExperience` also hardened directly (coerces stats, skips non-object entries and non-array input) rather than leaning on awardExperience's downstream NaN→0.*
 
 ## Entry template
@@ -244,6 +249,32 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-04 — persistence + quests (Lap 3: performance & token budget)
+
+`npm test`: 1300 passing / 76 files (run as the coverage refresh — full suite, all green)
+
+### persistence
+- **Scope examined:** `state/persistence.js` (all 342 lines), `state/GameContext.jsx` (autosave debounce, inverted trigger, `flushAutoSave` action-replay, hide flush), the boot reads in `App.jsx:22-38`, `SettingsModal.jsx` call sites; tests `persistence.test.js` (33 cases).
+- **Findings:**
+  - **P1** — `listSaves()` materializes every manual save's **full campaign state** to build a metadata list. Save records embed `state` (`persistence.js:151-160`) and `listSaves` fetches them with `getAll()` (`:201`), so every app boot (`App.jsx:27`) and every saves-dialog open (`SettingsModal.jsx:37,79,276`) deserializes every slot whole — multi-MB each on mature campaigns (cloud chunking exists precisely because these payloads exceed Firestore's 1 MiB), on the phone target, to render ~15 fields that already sit top-level on the record. IDB offers no projection: the fix is structural (state in its own store/record, DB v3; `saveGame` writes both in one tx).
+  - **P1 (tests)** — `GameContext.jsx` is 0% covered: the inverted-trigger diff loop (`:167-201`), the action-replay `flushAutoSave` (`:62-82` — the mechanism that fixed the chronicle-vanishing P0, DECISIONS.md 2026-07-30), and the visibilitychange/pagehide flush (`:100-116`) all have no regression net. This is the layer whose last two bugs were silent data loss; extract the diff + replay logic to a pure module (the `turnVisibility.js` pattern).
+  - **P2** — write amplification around the (deliberate) full-snapshot design: a DM turn fires the debounced full-state autosave ~2-4× (message add + applyEvents burst, Scribe dispatches, journal cadence), each a synchronous structured clone of the whole state — NPC portraits (~60 KB base64 each) included — inside `put()`; `flushOnHide` adds an unconditional rewrite on every tab-hide even when nothing changed since the last save; and a `flushAutoSave` caller (JournalPanel) double-writes because the dispatch also schedules the 2s debounce and neither cancels the other. Not proposing to revisit snapshot persistence (settled, DECISIONS.md 2026-07-30) — a dirty-flag on the hide flush and a debounce-cancel in `flushAutoSave` are cheap inside the design.
+- **Suggested improvements:** (1) split save metadata from the state payload so listing stops materializing campaigns; (2) extract + test the autosave orchestration; (3) dirty-flag/cancel the redundant writes; (4) a payload-composition test in the 08-02 payload-ceiling pattern (asserts portraits ride the autosave — today nothing pins what an autosave weighs).
+
+### quests
+- **Scope examined:** `state/handlers/quests.js` (all 89 lines), `normalizeQuestUpdate` + the cap-8 registry entry (`llm/eventChannels.js:178-202,313`), `applyEvents.js:318-330` routing, `buildQuestBlock`/`buildActiveConstraints` (`promptBuilder.js:140-144,760-761,852-858`), `QuestPanel.jsx`; tests `gameReducer.quests.test.js` (7), parser/prompt quest cases.
+- **Findings:**
+  - **P2** — the ACTIVE QUESTS block is the only accretion block with **no count cap**: world facts cap at 15, KNOWN NPCs at 8 + overflow line, journal at `slice(-3)`, but `buildQuestBlock` renders every active quest with its full parser-clamped description (800 chars, `eventChannels.js:194`) in the dynamic (uncached) prompt segment every turn. The DM is told to open quests aggressively ("even an informal handshake") and stale arcs never auto-close, so long campaigns accumulate; the `PROMPT_CHAR_BUDGET` worst case models 10 × 300-char quests (`promptBuilder.test.js:626-631`) — well under half the per-quest worst case the parser admits.
+  - **P2** — `buildActiveConstraints` re-lists every active quest name as `Active quests in progress: …` (`promptBuilder.js:858`) — a duplicate of the block rendered ~700 lines earlier in the same prompt.
+  - **P2 (tests)** — `REMOVE_QUEST` is the handler file's one untested function (functions 75%, lines 82-84 — both panel ✕ buttons ride it); the panel's complete-by-bare-id path is pinned only in its unmatched no-op form.
+  - Healthy under this lens otherwise: parser cap 8/turn, typed/clamped fields, upsert dedupe, and the completed-stays-closed rule (2026-07-23) all verified in place; the O(n) `normalizeRefToken` scans are trivial at quest-list scale.
+- **Suggested improvements:** (1) cap the block (newest ~12 + overflow line) and/or clamp the rendered description to ~250 chars (panel and save keep the full text); (2) drop or cap the duplicate constraints reminder; (3) REMOVE_QUEST + bare-id completion tests.
+
+### Process notes
+- Coverage Snapshot refreshed (was 2026-07-28, 7 days old, and predated the 2026-07-31 handlers split). `dice.ts`, `currency.js`, `openai.js`, `xai.js` are absent from this v8 report (tooling quirk; each has its own passing suite). New in the snapshot: `turnOrchestrator.js` (59.24%) and `handlers/inventory.js` (74.21%) as the weakest spots of their features.
+- Verified the three oldest open queue items still reproduce (scene cache still keyed on the full composed prompt, `imageGen.js:100`; no `MAX_DIE_SIDES`, `dice.ts:115`; `rollHistory` appends still uncapped, `handlers/messages.js:82`) — left open.
+- Registry unchanged — no subsystems gained or lost; quests now maps to the post-split `state/handlers/quests.js`.
 
 ## 2026-08-03 — combat-exchange + roll-resolution (Lap 3: performance & token budget)
 
