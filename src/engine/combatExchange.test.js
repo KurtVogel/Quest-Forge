@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     COMBAT_PHASES,
     combatNarrationPrompt,
+    exchangeEventLines,
+    exchangeSummary,
     normalizeCombatExchange,
     planCombatExchange,
     planOpeningExchange,
@@ -242,13 +244,31 @@ describe('engine-owned exchange resolution', () => {
 
         expect(plan.payload.enemies[0].hp).toBe(10);
         expect(plan.payload.result.terminal).toBeNull();
-        expect(plan.payload.result.summary).toContain('Cave-Worg remains alive at 10/32 HP');
+        expect(exchangeSummary(plan.payload.result)).toContain('Cave-Worg remains alive at 10/32 HP');
 
         const prompt = combatNarrationPrompt(plan.payload.result);
         expect(prompt).toContain('The terminal state is mechanically authoritative: ongoing');
         expect(prompt).toContain('COMBAT IS STILL ACTIVE');
         expect(prompt).toContain('ALIVE AND ACTIVE: Cave-Worg — 10/32 HP');
         expect(prompt).toContain('Never describe an ALIVE AND ACTIVE combatant as dead');
+    });
+
+    it('stores events only on the result — the summary is derived, never persisted', () => {
+        rollQueue.push(15, 7, 1);
+        const intent = exchange();
+        const plan = planCombatExchange(state(), intent);
+
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.result).not.toHaveProperty('summary');
+        expect(Array.isArray(plan.payload.result.events)).toBe(true);
+        // The narration prompt's RESOLVED EVENTS block derives from the same events.
+        expect(combatNarrationPrompt(plan.payload.result)).toContain(exchangeEventLines(plan.payload.result)[0]);
+    });
+
+    it('derives lines from a legacy summary-string result (pre-2026-08-04 in-flight saves)', () => {
+        const legacy = { exchangeId: 'x', summary: '**A attacks B** — Hit.\n**B attacks A** — Miss.' };
+        expect(exchangeEventLines(legacy)).toEqual(['**A attacks B** — Hit.', '**B attacks A** — Miss.']);
+        expect(exchangeSummary(legacy)).toBe('**A attacks B** — Hit.\n**B attacks A** — Miss.');
     });
 
     it('resolves a non-attack Dodge turn and imposes disadvantage on the enemy', () => {
@@ -327,7 +347,7 @@ describe('engine-owned exchange resolution', () => {
 
         expect(attack.mode).toContain('d20 4, 12');
         expect(attack.mode).toContain('DM ruling — advantage: Wit threatens it from the opposite side');
-        expect(plan.payload.result.summary).toContain('Wit threatens it from the opposite side');
+        expect(exchangeSummary(plan.payload.result)).toContain('Wit threatens it from the opposite side');
     });
 
     it('cancels an accepted advantage against condition disadvantage', () => {
@@ -606,7 +626,7 @@ describe('engine-owned exchange resolution', () => {
             rolled: 21, // 20 + stealth mod (+1)
             natural: 20,
         });
-        expect(plan.payload.result.summary).toContain('Success (Critical Success / Natural 20)');
+        expect(exchangeSummary(plan.payload.result)).toContain('Success (Critical Success / Natural 20)');
     });
 });
 
@@ -629,8 +649,8 @@ describe('Guard stance', () => {
         expect(attack).toMatchObject({ actor: 'Goblin', target: 'Torvald', hit: true, damage: 6, intercepted: true });
         expect(plan.payload.playerDamage).toBe(0);
         expect(plan.payload.party.find(companion => companion.id === 'tor').hp).toBe(12);
-        expect(plan.payload.result.summary).toContain('gives up their attack to shield the hero');
-        expect(plan.payload.result.summary).toContain('guard — Torvald intercepts the blow meant for the hero');
+        expect(exchangeSummary(plan.payload.result)).toContain('gives up their attack to shield the hero');
+        expect(exchangeSummary(plan.payload.result)).toContain('guard — Torvald intercepts the blow meant for the hero');
     });
 
     it('also redirects the default missing-intent enemy attack', () => {
@@ -715,7 +735,7 @@ describe('Guard stance', () => {
         const plan = planCombatExchange(state({ party: [guardian({ conditions: ['stunned'] })] }), intent);
         const attack = plan.payload.result.events.find(event => event.type === 'attack');
 
-        expect(plan.payload.result.summary).toContain('Torvald is stunned and cannot guard the hero');
+        expect(exchangeSummary(plan.payload.result)).toContain('Torvald is stunned and cannot guard the hero');
         expect(attack).toMatchObject({ target: 'Vesa' });
         expect(attack.intercepted).toBeUndefined();
         expect(plan.payload.playerDamage).toBe(6);
@@ -895,7 +915,7 @@ describe('Rogue Combat Features', () => {
             rolls: [4, 5],
             total: 9,
         });
-        expect(plan.payload.result.summary).toContain('Includes **9** Sneak Attack damage');
+        expect(exchangeSummary(plan.payload.result)).toContain('Includes **9** Sneak Attack damage');
     });
 
     it('applies Uncanny Dodge to the first hit on a level 5+ Rogue in an exchange', () => {
@@ -944,7 +964,7 @@ describe('Rogue Combat Features', () => {
             uncannyDodgeApplied: false,
         });
 
-        expect(plan.payload.result.summary).toContain('halved by Uncanny Dodge');
+        expect(exchangeSummary(plan.payload.result)).toContain('halved by Uncanny Dodge');
     });
 });
 
@@ -986,7 +1006,7 @@ describe('spellcasting v1 combat exchanges', () => {
         const [a, b] = plan.payload.enemies;
         expect(a.hp).toBe(12); // failed save: full 18
         expect(b.hp).toBe(21); // saved: half of 18 = 9
-        expect(plan.payload.result.summary).toContain(`save vs Fireball`);
+        expect(exchangeSummary(plan.payload.result)).toContain(`save vs Fireball`);
     });
 
     it('applies a control condition on a failed save and rejects casts with no slots left', () => {
@@ -1022,7 +1042,7 @@ describe('spellcasting v1 combat exchanges', () => {
         expect(a.conditions).toContain(`unconscious`);
         expect(b.conditions || []).not.toContain(`unconscious`);
         expect(c.conditions || []).not.toContain(`unconscious`);
-        expect(plan.payload.result.summary).toContain(`Sleep affects only one target`);
+        expect(exchangeSummary(plan.payload.result)).toContain(`Sleep affects only one target`);
         expect(plan.payload.characterUpdates.spellSlots[1].used).toBe(1);
     });
 
@@ -1318,7 +1338,7 @@ describe('defend stance semantics (persisted vs same-exchange)', () => {
         expect(attack).toMatchObject({ actor: 'Goblin', target: 'Wit', hit: false, natural: 4 });
         expect(attack.mode).toContain('d20 17, 4');
         expect(plan.payload.party.find(c => c.id === 'wit').hp).toBe(10);
-        expect(plan.payload.result.summary).toContain('Wit takes a defensive stance');
+        expect(exchangeSummary(plan.payload.result)).toContain('Wit takes a defensive stance');
     });
 });
 
@@ -1332,7 +1352,7 @@ describe('surrender and interact resolution', () => {
         expect(plan.ok).toBe(true);
         expect(plan.payload.enemies[0].combatStatus).toBe('surrendered');
         expect(plan.payload.result.events.some(e => e.type === 'attack')).toBe(false);
-        expect(plan.payload.result.summary).toContain('Goblin surrenders and leaves the fight');
+        expect(exchangeSummary(plan.payload.result)).toContain('Goblin surrenders and leaves the fight');
         // The surrendered goblin was the last active enemy → terminal victory,
         // with the snapshot keeping it alive at full HP.
         expect(plan.payload.result.terminal).toBe('victory');
@@ -1396,7 +1416,7 @@ describe('critical hit dice doubling (live exchange path)', () => {
         const attack = plan.payload.result.events.find(e => e.type === 'attack');
         expect(attack).toMatchObject({ critical: true, hit: true, damage: 26, remainingHp: 4 });
         expect(attack.sneakAttackDetail).toEqual({ diceCount: 4, rolls: [6, 5, 4, 3], total: 18 });
-        expect(plan.payload.result.summary).toContain('Includes **18** Sneak Attack damage (4d6: 6, 5, 4, 3)');
+        expect(exchangeSummary(plan.payload.result)).toContain('Includes **18** Sneak Attack damage (4d6: 6, 5, 4, 3)');
         expect(plan.payload.enemies[0].hp).toBe(4);
     });
 });

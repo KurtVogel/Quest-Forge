@@ -102,4 +102,23 @@ describe('buildMessageWindow', () => {
     it('tolerates missing content on system messages', () => {
         expect(buildMessageWindow([msg('system', undefined)], 5)).toEqual([]);
     });
+
+    it('drops combat-exchange result lines even though they match the roll-line keep rule', () => {
+        // A full exchange (hero + companions + 4 foes) used to eat ~8 of 20 window
+        // slots per round; the narration prompt already carries these lines as
+        // RESOLVED EVENTS (DECISIONS.md 2026-08-04).
+        const history = [
+            msg('user', 'I attack the worg.'),
+            msg('system', '**Astra attacks Worg** — Rolled **17** vs AC 13; **Hit for 8 damage.**', { exchangeLine: true }),
+            msg('system', '**Worg attacks Astra** — Rolled **9** vs AC 16; Miss.', { exchangeLine: true }),
+            msg('system', 'Stealth (DC 12): Rolled **14** — Success!'),
+            msg('assistant', 'Steel rings against fur and fury.'),
+        ];
+        const window = buildMessageWindow(history, 20);
+        expect(window.map(m => m.content)).toEqual([
+            'I attack the worg.',
+            'Stealth (DC 12): Rolled **14** — Success!',
+            'Steel rings against fur and fury.',
+        ]);
+    });
 });

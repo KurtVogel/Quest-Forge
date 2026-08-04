@@ -66,7 +66,11 @@ export function dropOrphanCombatExchange(events, combatActive) {
  * setups were intentionally superseded by authoritative roll/exchange results —
  * sending them back can bias the narrator toward a pre-rolled outcome), and
  * system chatter EXCEPT engine roll-result lines, which the DM needs to narrate
- * from. System lines travel as `user` role — providers only accept user/assistant.
+ * from. Combat-exchange result lines (`exchangeLine`) are the exception to that
+ * exception (DECISIONS.md 2026-08-04): the narration call receives them as
+ * RESOLVED EVENTS and the narration prose then owns the fiction, so keeping
+ * them here starved the window (~8 of 20 slots per round with a full field).
+ * System lines travel as `user` role — providers only accept user/assistant.
  *
  * @param {Array<object>} messages - full chat history from state.
  * @param {number} windowSize - max messages to keep (MESSAGE_WINDOW).
@@ -74,7 +78,7 @@ export function dropOrphanCombatExchange(events, combatActive) {
  */
 export function buildMessageWindow(messages, windowSize) {
     const unsummarized = (messages || []).filter(m => {
-        if (m.summarized || m.hidden) return false;
+        if (m.summarized || m.hidden || m.exchangeLine) return false;
         if (m.role === 'system') {
             return /rolled \*\*/i.test(m.content || '');
         }

@@ -413,6 +413,34 @@ describe('atomic combat exchange lifecycle', () => {
         expect(statusIdx).toBeGreaterThan(rollIdx);
     });
 
+    it('emits one exchange-tagged system message per resolved event and stores no derived summary', () => {
+        // Pins the exchange's message footprint (2026-08-03 P2): one message per
+        // EVENT — an event text containing a newline stays a single chat message —
+        // each tagged `exchangeLine` so the DM window can drop it, and the
+        // persisted result carries events only (summary derives at read time).
+        const events = [
+            { type: 'note', text: 'Torvald gives up their attack to shield the hero —\nenemy attacks aimed at the hero strike Torvald instead.' },
+            { type: 'note', text: 'Goblin defends and gives up its attack.' },
+        ];
+        const payload = {
+            exchangeId: 'exchange-footprint',
+            enemies: [{ id: 'e1', name: 'Goblin', hp: 7, maxHp: 7, ac: 12, condition: 'healthy', combatStatus: 'active' }],
+            party: makeState().party,
+            playerDamage: 0,
+            deathSaveNatural: null,
+            rolls: [],
+            consumeActionSurge: false,
+            result: { exchangeId: 'exchange-footprint', kind: 'exchange', round: 2, terminal: null, events },
+        };
+        const before = activeState();
+        const committed = gameReducer(before, { type: 'APPLY_COMBAT_EXCHANGE', payload });
+        const added = committed.messages.slice(before.messages.length);
+        expect(added).toHaveLength(events.length);
+        expect(added.every(m => m.role === 'system' && m.exchangeLine === true)).toBe(true);
+        expect(added[0].content).toContain('\n');
+        expect(committed.combat.lastExchangeResult).not.toHaveProperty('summary');
+    });
+
     it('locks an in-flight intent and safely unlocks it without committing mechanics', () => {
         const start = activeState();
         const locked = gameReducer(start, { type: 'BEGIN_COMBAT_INTENT' });

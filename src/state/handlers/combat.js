@@ -14,7 +14,7 @@ import {
     normalizeEnemyConditions,
     validateEnemySaveBonus,
 } from '../../engine/enemyStats.js';
-import { COMBAT_PHASES, isEnemyActive, mergeCharacterUpdates, reconcileStartingCombatExchange } from '../../engine/combatExchange.js';
+import { COMBAT_PHASES, exchangeEventLines, isEnemyActive, mergeCharacterUpdates, reconcileStartingCombatExchange } from '../../engine/combatExchange.js';
 import { appendRecentEncounter, buildEncounterEntry } from '../../engine/worldTempo.js';
 import { initialGameState } from '../initialState.js';
 import { gameReducer } from '../gameReducer.js';
@@ -231,11 +231,13 @@ export const handlers = {
             next = gameReducer(next, { type: 'TAKE_DAMAGE', payload: payload.playerDamage });
         }
 
-        const resultMessages = String(payload.result.summary || '')
-            .split('\n')
-            .map(line => line.trim())
-            .filter(Boolean)
-            .map(line => systemMessage(line));
+        // One message per resolved EVENT (not per '\n' — an event text containing a
+        // newline must stay one chat message). Tagged `exchangeLine` so the DM's
+        // sliding window can drop them: the narration prompt already carries these
+        // exact lines as RESOLVED EVENTS, and afterwards the narration prose owns
+        // the fiction (DECISIONS.md 2026-08-04).
+        const resultMessages = exchangeEventLines(payload.result)
+            .map(line => systemMessage(line, { exchangeLine: true }));
         // The inner DEATH_SAVE_RESULT / TAKE_DAMAGE dispatches append their own status
         // lines ("X is defeated", "X falls!"). Those must render AFTER the exchange's
         // roll summary — the dice caused the defeat, so the reader sees them first.

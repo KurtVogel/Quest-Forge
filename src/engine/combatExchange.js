@@ -375,6 +375,23 @@ function eventMessage(event) {
     return event.text || `${event.actor} ${event.type}.`;
 }
 
+/**
+ * One rendered line per resolved event. The result object stores only the
+ * events (single source of truth — DECISIONS.md 2026-08-04); message lines and
+ * the narration prompt's RESOLVED EVENTS block are derived at read time.
+ * Legacy results persisted before the change carry a `summary` string instead.
+ */
+export function exchangeEventLines(result) {
+    if (Array.isArray(result?.events) && result.events.length > 0) {
+        return result.events.map(eventMessage).map(line => String(line || '').trim()).filter(Boolean);
+    }
+    return String(result?.summary || '').split('\n').map(line => line.trim()).filter(Boolean);
+}
+
+export function exchangeSummary(result) {
+    return exchangeEventLines(result).join('\n');
+}
+
 function enemySnapshot(enemy) {
     const status = (enemy.hp ?? 0) <= 0 || enemy.condition === 'dead'
         ? 'defeated'
@@ -406,7 +423,6 @@ function makeResult(kind, exchangeId, round, events, terminal, {
         round,
         terminal,
         events,
-        summary: events.map(eventMessage).join('\n'),
         postState: {
             player: character ? {
                 name: character.name || 'Player',
@@ -1138,11 +1154,11 @@ function resolveCompanions({ exchange, enemies, companions, events, rolls, onlyI
     }
 }
 
-function resolveEnemyAttack({ enemy, targetRef, character, inventory, companions, playerHp, playerDodging, situationalRuling, events, rolls, uncannyDodgeState }) {
+function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions, playerHp, playerDodging, situationalRuling, events, rolls, uncannyDodgeState }) {
     let targetType = 'player';
     let target = character;
     let targetName = character.name || 'Player';
-    let targetAc = computeACFromInventory(inventory, character) ?? character.armorClass ?? 10;
+    let targetAc = playerAc;
     let targetDisadvantage = playerDodging;
     let targetConditions = character.conditions;
     let intercepted = false;
@@ -1225,6 +1241,10 @@ function resolveEnemies({ state, exchange, enemies, companions, playerHp, player
     // resolve the same turn across multiple calls (planOpeningExchange goes actor by
     // actor) must pass one shared state object for the whole turn.
     uncannyDodgeState = uncannyDodgeState || { used: false };
+    // Character and inventory are fixed for the duration of this call (a cast that
+    // changes AC substitutes a new state object before we're invoked), so the hero's
+    // AC is computed once instead of per enemy attack.
+    const playerAc = computeACFromInventory(state.inventory || [], state.character) ?? state.character.armorClass ?? 10;
     for (const enemy of enemies) {
         if (!isEnemyActive(enemy)) continue;
         if (onlyIds && !onlyIds.has(enemy.id)) continue;
@@ -1262,7 +1282,7 @@ function resolveEnemies({ state, exchange, enemies, companions, playerHp, player
             enemy,
             targetRef: intent.target,
             character: state.character,
-            inventory: state.inventory || [],
+            playerAc,
             companions,
             playerHp,
             playerDodging,
@@ -1565,7 +1585,7 @@ export function combatNarrationPrompt(result) {
         postState || '- No combatant snapshot available; obey each event\'s remaining-HP statement exactly.',
         '',
         'RESOLVED EVENTS:',
-        result.summary,
+        exchangeSummary(result),
         ']'
     ].join('\n');
 }
