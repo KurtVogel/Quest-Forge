@@ -6,7 +6,27 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-03 (front resolution + aftermath + foe fatigue; 1,300 tests green)._
+_Last updated: 2026-08-04 (strengthening-queue P1 batch: combat window, tempo distance, storage split; 1,320 tests green)._
+
+## Strengthening-queue P1 batch 2026-08-04 (5 P1s + 5 sibling P2s fixed)
+
+All open P1s but one cleared from SCHEDULED_STRENGTHENING.md (DECISIONS.md 2026-08-04 ×3):
+**(1) Combat window starvation** — exchange result lines are tagged `exchangeLine` and
+dropped from the DM's 20-message window (narration prompt stays the sole carrier; chat
+rendering unchanged); `lastExchangeResult` stores events only (summary/lines derived at
+read time, newline-safe), hero AC computed once per enemy pass, footprint tests added.
+**(2) World tempo on conversational distance** — timing die, tempo window, heat window,
+and victory echo now measure conversational messages (dice-turn chatter no longer opens
+windows early or cools fresh fights); legacy raw-index directives derive on read.
+**(3) Storage split** — IndexedDB v3 separates save metadata from payloads (one-time
+in-upgrade migration; listing never materializes campaigns), cloud saves are chunks-always
+with metadata-only parent docs (legacy inline docs still load until re-saved).
+**(4) Autosave policy extracted** to `state/autosavePolicy.js` with tests (the previously
+0%-covered inverted trigger + action-replay flush), hide flush dirty-gated, explicit flush
+cancels the debounce it supersedes. Remaining queue: 1 P1 (scene-art cache-that-never-hits)
++ 15 P2s. **Watch items: first cloud save on an existing campaign re-writes as 1 chunk
+(needs deployed chunks rules — repo rules already have them); first app boot after deploy
+runs the IndexedDB v2→v3 migration — worth a quick Continue-and-load sanity check.**
 
 ## Front resolution, aftermath & foe fatigue 2026-08-03 (Vesa: "ichor ghouls in EVERY dungeon")
 
@@ -68,9 +88,9 @@ navigation, Save Game selector, name-independent save-row check). Full logs + sc
 
 ## Strengthening queue & watch items
 
-Open in SCHEDULED_STRENGTHENING.md after the 2026-08-02 session: 2 P1s (scene-art
-image cache that can never hit; worldTempo windows still on raw message indices instead
-of conversationalDistance) + 7 P2s. Carried watch items (need live play / Vesa's eyes):
+Open in SCHEDULED_STRENGTHENING.md after the 2026-08-04 fix batch: 1 P1 (scene-art
+image cache that can never hit) + 15 P2s (scene-art ×3, dice-engine ×3, hidden-fronts ×2,
+roll-resolution ×3, quests ×2, character-vault ×2). Carried watch items (need live play / Vesa's eyes):
 stance-stutter self-clean on the Saima save (other browser profile), Scribe gender
 backfill on pre-gender campaigns, Grok art respecting the gender tag, Aune
 appearance-thinning LOOKS baseline snapshot next playtest, L1-death balance observation.

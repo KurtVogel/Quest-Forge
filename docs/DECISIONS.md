@@ -8,6 +8,54 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-04 · Combat-exchange result lines leave the DM's message window; the result stores events only.**
+Amends the 2026-07-30-era "keep engine roll-result lines in the window" rule for ACTIVE
+COMBAT: every `APPLY_COMBAT_EXCHANGE` system line is tagged `exchangeLine: true` and
+`buildMessageWindow` drops tagged lines even though they match the `Rolled **` keep-rule.
+Why: every exchange reached the DM twice — the summary lines occupied window slots (hero +
+2 companions + 4 foes ≈ 8 of 20 per round, evicting narrative continuity by round 3) AND
+the narration call re-sent the identical lines as RESOLVED EVENTS. The narration prompt is
+the authoritative carrier; after narration, the DM's own prose owns the fiction. Chat
+rendering is unchanged — players still see every line. Out-of-combat roll-result lines
+keep their window seat (the DM narrates from them; there is no second carrier there).
+Same commit: `makeResult` no longer stores a derived `summary` string — `lastExchangeResult`
+persists events only and `exchangeEventLines`/`exchangeSummary` (combatExchange.js) derive
+text at read time (legacy summary-string results still parse), the reducer emits one
+message per EVENT so an event text containing a newline stays one chat message, and
+`resolveEnemies` computes the hero's AC once per call instead of per enemy attack.
+
+**2026-08-04 · World-tempo windows count conversational distance, not raw message indices.**
+Extends the 2026-07-30 "every replay window measures conversational distance" decision to
+the pacing system, which still counted raw indices: the 0–4-scene timing die assumed 2 raw
+messages per scene (a dice turn burns ~5, so windows opened after ~1 real scene), the
+24-message window expired ~2.5× early, and `computeRecentHeat`'s 15-message window aged
+fights out so fast the thermostat read calm right after violence. Now: a tempo directive
+stores its grant anchor plus `activationDistance`/`expiryDistance` in conversational
+messages (system lines and hidden setups never advance the countdown; scene ≈ 2
+conversational messages), `isTempoWindowActive`/`computeRecentHeat`/`recentlyResolvedFronts`
+measure via `conversationalDistance` (replayLedger.js) with the raw-difference fallback
+when no messages array is supplied, and the resolved-front victory echo (~40) is
+conversational too. Legacy directives with raw `activatesAtMessage`/`expiresAtMessage`
+derive distances on read — erring LONGER, the direction the fix wants. The numeric
+constants kept their values: they were designed assuming 2 messages per scene, which is
+exactly what conversational counting delivers.
+
+**2026-08-04 · Save payloads live apart from save metadata on BOTH storage paths.**
+Listing saves must never download or materialize campaign state (multi-MB on mature
+campaigns; it happened at every app boot and saves-dialog open). Local: IndexedDB v3
+splits each slot into a metadata-only `saves` record plus a `savePayloads` record, written
+in one transaction; a one-time in-upgrade cursor migrates v2 records; `loadGame` falls
+back to a legacy embedded-state record if a payload is ever missing. Cloud: the payload
+ALWAYS lives in the `chunks` subcollection (a small save = 1 chunk), the parent doc is
+metadata-only (`payload: null` + `payloadChunks: N`), which also deleted the inline/chunked
+dual write path and made the save transaction's previous-doc read cheap; legacy inline
+docs still load via the `payload` fallback until re-saved. Deployed firestore.rules must
+allow the `chunks` match for EVERY save now, not just large ones (the repo's rules already
+do). Same sweep: GameContext's autosave logic (inverted-trigger diff, action-replay flush)
+extracted to testable `state/autosavePolicy.js`, the hide flush is dirty-flag-gated so an
+idle tab switch stops rewriting an unchanged snapshot, and an explicit flush cancels the
+pending debounce write it supersedes.
+
 **2026-08-03 · Front resolution is a first-class canonized event; victories leave aftermath, not silence — and foes fatigue.**
 Vesa's live finding: two similar ichor-ghoul-sarcophagus dungeons miles apart, and no way
 to make "I want this storyline OVER" stick. Root causes: (1) `status: "resolved"` existed

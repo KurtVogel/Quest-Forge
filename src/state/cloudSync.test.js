@@ -110,11 +110,11 @@ beforeEach(() => {
 });
 
 describe('saveGameToCloud / loadGameFromCloud', () => {
-    it('round-trips a small save inline, keeping fronts and full messages, stripping secrets', async () => {
+    it('round-trips a small save as one chunk, keeping fronts and full messages, stripping secrets', async () => {
         expect(await saveGameToCloud('u1', 'slot-1', makeGameState())).toBe(true);
         const main = firestore.__store.get('users/u1/saves/slot-1');
-        expect(main.payloadChunks).toBe(0);
-        expect(chunkPaths()).toHaveLength(0);
+        expect(main.payloadChunks).toBe(1);
+        expect(chunkPaths()).toHaveLength(1);
 
         const loaded = await loadGameFromCloud('u1', 'slot-1');
         expect(loaded.fronts).toHaveLength(1);
@@ -123,6 +123,18 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         expect(loaded.settings.geminiApiKey).toBeUndefined();
         expect(loaded.user).toBeUndefined();
         expect(loaded.saveVersion).toBe(SAVE_VERSION);
+    });
+
+    it('keeps the parent doc metadata-only: payload null + payloadChunks N, no payload content (2026-08-04)', async () => {
+        // listCloudSaves used to download every save's full inline payload at
+        // every boot just to delete it client-side.
+        await saveGameToCloud('u1', 'slot-1', makeGameState());
+        const main = firestore.__store.get('users/u1/saves/slot-1');
+        expect(main.payload).toBeNull();
+        expect(main.payloadChunks).toBe(1);
+        // No state content may leak into the parent doc under any key.
+        expect(JSON.stringify(main)).not.toContain('Hi there');
+        expect(JSON.stringify(main)).not.toContain('Withering Tide');
     });
 
     it('splits an oversized save into chunks and reassembles it on load', async () => {
@@ -142,11 +154,23 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         // A corrupted payload parsing to a primitive/array passed callers'
         // truthy checks and reached LOAD_GAME as a non-save value.
         await saveGameToCloud('u1', 'slot-corrupt', makeGameState());
-        const main = firestore.__store.get('users/u1/saves/slot-corrupt');
+        const [chunkPath] = chunkPaths();
         for (const junk of ['"corrupted string"', '42', '[1,2,3]', 'null']) {
-            main.payload = junk;
+            firestore.__store.get(chunkPath).data = junk;
             expect(await loadGameFromCloud('u1', 'slot-corrupt')).toBeNull();
         }
+    });
+
+    it('still loads a legacy inline doc (payloadChunks 0, embedded payload) until it is re-saved', async () => {
+        firestore.__store.set('users/u1/saves/legacy-slot', {
+            slotId: 'legacy-slot', name: 'Old Cloud Save', payloadChunks: 0,
+            payload: JSON.stringify({ character: { name: 'Legacy Hero' }, currentLocation: 'Old Keep' }),
+        });
+        const loaded = await loadGameFromCloud('u1', 'legacy-slot');
+        expect(loaded.character.name).toBe('Legacy Hero');
+        // A corrupt legacy inline payload still degrades to null.
+        firestore.__store.get('users/u1/saves/legacy-slot').payload = '[1,2,3]';
+        expect(await loadGameFromCloud('u1', 'legacy-slot')).toBeNull();
     });
 
     it('never splits a surrogate pair at a chunk boundary', async () => {
@@ -163,14 +187,14 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         expect(loaded.messages[0].content).toBe('💀'.repeat(200000));
     });
 
-    it('clears stale chunks when a chunked save shrinks back to inline', async () => {
+    it('clears stale chunks when a large save shrinks back to a single chunk', async () => {
         await saveGameToCloud('u1', 'slot-1', makeHugeGameState());
-        expect(chunkPaths().length).toBeGreaterThan(0);
+        expect(chunkPaths().length).toBeGreaterThan(1);
 
         await saveGameToCloud('u1', 'slot-1', makeGameState());
-        expect(chunkPaths()).toHaveLength(0);
+        expect(chunkPaths()).toHaveLength(1);
         const main = firestore.__store.get('users/u1/saves/slot-1');
-        expect(main.payloadChunks).toBe(0);
+        expect(main.payloadChunks).toBe(1);
         expect((await loadGameFromCloud('u1', 'slot-1')).messages).toHaveLength(2);
     });
 

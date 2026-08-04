@@ -200,6 +200,66 @@ describe('deleteSave', () => {
     });
 });
 
+/** Read a raw record straight from the store, bypassing the module's API. */
+function readRawRecord(storeName, key) {
+    return new Promise((resolve, reject) => {
+        const req = globalThis.indexedDB.open('rpg-client-saves');
+        req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction(storeName, 'readonly');
+            const get = tx.objectStore(storeName).get(key);
+            get.onsuccess = () => { db.close(); resolve(get.result); };
+            get.onerror = () => { db.close(); reject(get.error); };
+        };
+        req.onerror = () => reject(req.error);
+    });
+}
+
+describe('metadata/payload split (DB v3, 2026-08-04)', () => {
+    it('stores the saves record metadata-only — the full state lives in savePayloads', async () => {
+        // listSaves() used to materialize every save's multi-MB state at every
+        // app boot and dialog open just to render ~15 metadata fields.
+        await saveGame('slot-1', makeGameState());
+        const metadata = await readRawRecord('saves', 'slot-1');
+        expect(metadata.state).toBeUndefined();
+        expect(metadata).toMatchObject({ slotId: 'slot-1', characterName: 'Astra', messageCount: 2 });
+        const payload = await readRawRecord('savePayloads', 'slot-1');
+        expect(payload.state.character.name).toBe('Astra');
+    });
+
+    it('migrates a v2 database in place: payload moves out, loads and lists keep working', async () => {
+        // Hand-build a legacy v2 database with an embedded-state record.
+        await new Promise((resolve, reject) => {
+            const req = globalThis.indexedDB.open('rpg-client-saves', 2);
+            req.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                db.createObjectStore('saves', { keyPath: 'slotId' });
+                db.createObjectStore('characters', { keyPath: 'id' });
+            };
+            req.onsuccess = () => {
+                const db = req.result;
+                const tx = db.transaction('saves', 'readwrite');
+                tx.objectStore('saves').put({
+                    slotId: 'legacy-slot', name: 'Old Save', characterName: 'Legacy Hero',
+                    savedAt: 1, messageCount: 2,
+                    state: { character: { name: 'Legacy Hero' }, currentLocation: 'Old Keep' },
+                });
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onabort = () => { db.close(); reject(tx.error); };
+            };
+            req.onerror = () => reject(req.error);
+        });
+
+        // First module API call opens at v3 and runs the one-time migration.
+        const loaded = await loadGame('legacy-slot');
+        expect(loaded.currentLocation).toBe('Old Keep');
+        const metadata = await readRawRecord('saves', 'legacy-slot');
+        expect(metadata.state).toBeUndefined();
+        expect(metadata.characterName).toBe('Legacy Hero');
+        expect((await listSaves()).map(s => s.slotId)).toEqual(['legacy-slot']);
+    });
+});
+
 describe('character roster', () => {
     function makeHero(overrides = {}) {
         return { id: 'hero-1', name: 'Astra', race: 'human', class: 'fighter', level: 3, ...overrides };

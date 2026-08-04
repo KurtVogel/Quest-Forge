@@ -4,6 +4,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useReducer, useEffect, useCallback, useState, useRef } from 'react';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { buildAutosaveSnapshot, hasGameplayChange } from './autosavePolicy.js';
 import { loadSettings, saveSettings, autoSave } from './persistence.js';
 import { PROVIDERS } from '../llm/adapter.js';
 import { initializeFirebase } from '../config/firebase.js';
@@ -59,25 +60,28 @@ export function GameProvider({ children }) {
         window.__QF_STATE__ = snapshot;
     }, [state]);
 
+    // Declared here (before flushAutoSave) so the explicit flush can cancel a
+    // pending debounce write. `autosaveDirtyRef` tracks whether anything changed
+    // since the last landed save — the hide flush consults it so backgrounding
+    // an idle tab doesn't rewrite an unchanged multi-MB snapshot (2026-08-04 P2).
+    const autosaveTimerRef = useRef(null);
+    const autosaveDirtyRef = useRef(false);
+
     const flushAutoSave = useCallback(async ({ action = null } = {}) => {
-        let current = stateRef.current;
-        if (!current?.session?.id || !current.character) return;
-
-        // stateRef predates the just-dispatched change's re-render, so a bare
-        // flush would persist stale state. The caller passes the SAME action it
-        // just dispatched and we replay it through the pure reducer — this works
-        // for ANY action, unlike the old named-hint chain where an unknown hint
-        // was a silent no-op (how the first chronicle chapter vanished,
-        // DECISIONS.md 2026-07-26).
-        if (action) current = gameReducer(current, action);
-
-        const saved = await autoSave({
-            ...current,
-            session: {
-                ...current.session,
-                updatedAt: new Date().toISOString(),
-            },
-        });
+        // The snapshot replays the just-dispatched action through the pure
+        // reducer (see buildAutosaveSnapshot), so a debounce timer scheduled by
+        // EARLIER changes is fully covered by this write — cancel it.
+        const snapshot = buildAutosaveSnapshot(stateRef.current, { action });
+        if (!snapshot) return;
+        if (autosaveTimerRef.current) {
+            clearTimeout(autosaveTimerRef.current);
+            autosaveTimerRef.current = null;
+        }
+        const source = stateRef.current;
+        const saved = await autoSave(snapshot);
+        // Only a flush without a replay can prove the live state is clean: with
+        // an action, the action's own re-render marks dirty again anyway.
+        if (saved && !action && stateRef.current === source) autosaveDirtyRef.current = false;
         showSaveToast(saved ? 'local' : 'save-error');
     }, [showSaveToast]);
 
@@ -100,12 +104,14 @@ export function GameProvider({ children }) {
     useEffect(() => {
         const flushOnHide = () => {
             if (document.visibilityState !== 'hidden') return;
-            const current = stateRef.current;
-            if (!current?.session?.id || !current.character) return;
-            autoSave({
-                ...current,
-                session: { ...current.session, updatedAt: new Date().toISOString() },
-            });
+            // Nothing changed since the last landed save → nothing to protect;
+            // don't rewrite the full snapshot on every tab switch.
+            if (!autosaveDirtyRef.current) return;
+            const snapshot = buildAutosaveSnapshot(stateRef.current);
+            if (!snapshot) return;
+            autosaveDirtyRef.current = false;
+            // If the write fails (and the page survives), the state is still dirty.
+            autoSave(snapshot).then(saved => { if (!saved) autosaveDirtyRef.current = true; });
         };
         document.addEventListener('visibilitychange', flushOnHide);
         window.addEventListener('pagehide', flushOnHide);
@@ -162,41 +168,33 @@ export function GameProvider({ children }) {
     // through the same wiring once already. Now: any change to any field the
     // serializer persists schedules the save; only the deliberately-excluded
     // fields are skipped. A new state field can no longer forget to persist.
-    const autosaveTimerRef = useRef(null);
     const lastAutosaveSeenRef = useRef(null);
     useEffect(() => {
         const prev = lastAutosaveSeenRef.current;
         lastAutosaveSeenRef.current = state;
         if (!state.session.id || !state.character) return;
-        // `user`/`ui` are stripped by serializeGameState; `settings` persists
-        // separately via saveSettings (the save's embedded settings copy may lag
-        // a keystroke behind — harmless, LOAD_GAME merges live settings on top).
-        // A change touching ONLY those fields neither schedules a save nor
-        // resets a pending debounce timer.
-        if (prev) {
-            let gameplayChanged = false;
-            for (const key of new Set([...Object.keys(prev), ...Object.keys(state)])) {
-                if (key === 'user' || key === 'ui' || key === 'settings') continue;
-                if (prev[key] !== state[key]) { gameplayChanged = true; break; }
-            }
-            if (!gameplayChanged) return;
-        }
+        // The diff itself lives in autosavePolicy.js (testable): a change
+        // touching ONLY user/ui/settings neither schedules a save nor resets a
+        // pending debounce timer.
+        if (prev && !hasGameplayChange(prev, state)) return;
+        autosaveDirtyRef.current = true;
         if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = setTimeout(() => {
             autosaveTimerRef.current = null;
             // Save the LATEST state at fire time, stamped so cross-device sync
             // can pick the newest file.
-            const current = stateRef.current;
-            if (!current?.session?.id || !current.character) return;
-            const timestampedState = {
-                ...current,
-                session: { ...current.session, updatedAt: new Date().toISOString() },
-            };
+            const source = stateRef.current;
+            const snapshot = buildAutosaveSnapshot(source);
+            if (!snapshot) return;
             // Autosaves are deliberately local-per-device: each browser keeps its own
             // "Continue" session. Only manual saves sync to the cloud (SettingsModal).
             // The toast must reflect reality: a quota error or broken IndexedDB
             // otherwise means silent progress loss behind a green checkmark.
-            autoSave(timestampedState).then(saved => showSaveToast(saved ? 'local' : 'save-error'));
+            autoSave(snapshot).then(saved => {
+                // Clean only if nothing changed while the write was in flight.
+                if (saved && stateRef.current === source) autosaveDirtyRef.current = false;
+                showSaveToast(saved ? 'local' : 'save-error');
+            });
         }, 2000);
     }, [state, showSaveToast]);
     useEffect(() => () => {

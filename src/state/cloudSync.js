@@ -81,11 +81,15 @@ export async function saveGameToCloud(uid, slotId, gameState) {
             isAuto: slotId === AUTOSAVE_SLOT
         };
 
-        // The state is stored as a stringified JSON blob (avoids Firestore's nested
-        // object limits/index explosion) beside the metadata used by the list view.
+        // The state is stored as a stringified JSON blob (avoids Firestore's
+        // nested object limits/index explosion), ALWAYS in the `chunks`
+        // subcollection — a small save is simply 1 chunk. The parent doc stays
+        // metadata-only, so listing saves and the transaction's previous-doc
+        // read never download payload bytes (2026-08-04; this also deleted the
+        // old inline/chunked dual write path). Legacy inline docs still load
+        // via the payload fallback in loadGameFromCloud until re-saved.
         const payload = JSON.stringify(trimmedState);
-        const inline = payload.length <= CHUNK_CHAR_LIMIT;
-        const chunks = inline ? [] : splitPayload(payload);
+        const chunks = splitPayload(payload);
 
         // The previous save's chunk count is read INSIDE the transaction: two
         // devices saving the same slot near-simultaneously (Vesa's multi-machine
@@ -97,7 +101,7 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         await runTransaction(db, async (transaction) => {
             const existingSnap = await transaction.get(saveDocRef);
             const previousChunkCount = existingSnap.exists() ? (existingSnap.data().payloadChunks || 0) : 0;
-            transaction.set(saveDocRef, { ...metadata, payload: inline ? payload : null, payloadChunks: chunks.length });
+            transaction.set(saveDocRef, { ...metadata, payload: null, payloadChunks: chunks.length });
             chunks.forEach((data, index) => {
                 transaction.set(doc(chunksCollection(uid, slotId), String(index)), { index, data });
             });
@@ -106,16 +110,15 @@ export async function saveGameToCloud(uid, slotId, gameState) {
             }
         });
 
-        console.log(`Cloud save successful: ${slotId} (${payload.length} chars${payload.length > CHUNK_CHAR_LIMIT ? ', chunked' : ''})`);
+        console.log(`Cloud save successful: ${slotId} (${payload.length} chars, ${chunks.length} chunk${chunks.length === 1 ? '' : 's'})`);
         return true;
     } catch (e) {
         console.error("Cloud save failed:", e);
         if (e?.code === 'permission-denied') {
             console.error(
-                "Cloud save hint: large saves are stored in a `chunks` subcollection. " +
-                "If this campaign recently grew past one document, your Firebase project's " +
-                "firestore.rules predate that — redeploy the repo's firestore.rules " +
-                "(match /users/{userId}/saves/{saveId}/chunks/{chunkId})."
+                "Cloud save hint: every save's payload is stored in a `chunks` subcollection. " +
+                "If your Firebase project's firestore.rules predate that, redeploy the repo's " +
+                "firestore.rules (match /users/{userId}/saves/{saveId}/chunks/{chunkId})."
             );
         }
         return false;

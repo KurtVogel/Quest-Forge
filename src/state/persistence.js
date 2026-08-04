@@ -5,8 +5,11 @@ import { CURRENT_SAVE_VERSION } from './migrations.js';
 
 const SETTINGS_KEY = 'rpg-client-settings';
 const DB_NAME = 'rpg-client-saves';
-const DB_VERSION = 2;
+// v3 (2026-08-04): save payloads split out of the metadata records so listing
+// saves never materializes full campaign states (multi-MB on mature campaigns).
+const DB_VERSION = 3;
 const STORE_NAME = 'saves';
+const PAYLOAD_STORE = 'savePayloads';
 const ROSTER_STORE = 'characters';
 const AUTOSAVE_SLOT = '__autosave__';
 
@@ -72,6 +75,25 @@ function openDB() {
             if (!db.objectStoreNames.contains(ROSTER_STORE)) {
                 db.createObjectStore(ROSTER_STORE, { keyPath: 'id' });
             }
+            if (!db.objectStoreNames.contains(PAYLOAD_STORE)) {
+                db.createObjectStore(PAYLOAD_STORE, { keyPath: 'slotId' });
+                // v2 → v3: move each save's full state payload out of its
+                // metadata record, one-time, inside the versionchange
+                // transaction (the open blocks until the cursor finishes).
+                const saves = event.target.transaction.objectStore(STORE_NAME);
+                const payloads = event.target.transaction.objectStore(PAYLOAD_STORE);
+                saves.openCursor().onsuccess = (cursorEvent) => {
+                    const cursor = cursorEvent.target.result;
+                    if (!cursor) return;
+                    const record = cursor.value;
+                    if (record?.state) {
+                        payloads.put({ slotId: record.slotId, state: record.state });
+                        const { state: _state, ...metadata } = record;
+                        cursor.update(metadata);
+                    }
+                    cursor.continue();
+                };
+            }
         };
     });
 }
@@ -133,14 +155,15 @@ export function buildSaveMetadata(gameState) {
 }
 
 /**
- * Save game state to a named slot.
- * Keeps the FULL message history (IndexedDB has no practical size cap) and caps rollHistory.
+ * Save game state to a named slot: a metadata-only record in `saves` plus the
+ * full state payload in `savePayloads`, committed in ONE transaction (listing
+ * must never see a slot whose payload write failed). Keeps the FULL message
+ * history (IndexedDB has no practical size cap) and caps rollHistory.
  */
 export async function saveGame(slotId, gameState) {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
+        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE], 'readwrite');
 
         const savedMessages = gameState.messages || [];
         // prunedMessageCount indexes into the array we actually persist. Summarized messages
@@ -148,25 +171,28 @@ export async function saveGame(slotId, gameState) {
         // `m?.` belt: a null entry in live state must not brick every autosave.
         const prunedMessageCount = savedMessages.filter(m => m?.summarized).length;
 
-        const saveData = {
+        const metadataRequest = tx.objectStore(STORE_NAME).put({
             slotId,
             ...buildSaveMetadata(gameState),
             savedAt: Date.now(),
             messageCount: savedMessages.length,
+        });
+        const payloadRequest = tx.objectStore(PAYLOAD_STORE).put({
+            slotId,
             state: {
                 ...serializeGameState(gameState),
                 session: { ...gameState.session, prunedMessageCount },
             },
-        };
+        });
 
-        const request = store.put(saveData);
-        // Resolve on COMMIT (tx.oncomplete), not on the put's onsuccess. Otherwise a read
+        // Resolve on COMMIT (tx.oncomplete), not on the puts' onsuccess. Otherwise a read
         // fired right after (e.g. the saves dialog refreshing itself) can race the
         // not-yet-committed write and miss it — the list looks unchanged, so you click
         // Save again... and again. (See SettingsModal handleSave.)
-        request.onerror = () => reject(request.error);
+        metadataRequest.onerror = () => reject(metadataRequest.error);
+        payloadRequest.onerror = () => reject(payloadRequest.error);
         tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+        tx.onabort = () => { db.close(); reject(tx.error || metadataRequest.error || payloadRequest.error); };
     });
 }
 
@@ -176,11 +202,18 @@ export async function saveGame(slotId, gameState) {
 export async function loadGame(slotId) {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const store = tx.objectStore(STORE_NAME);
-        const request = store.get(slotId);
+        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE], 'readonly');
+        const request = tx.objectStore(PAYLOAD_STORE).get(slotId);
         request.onsuccess = () => {
-            resolve(request.result?.state || null);
+            if (request.result?.state) {
+                resolve(request.result.state);
+                return;
+            }
+            // Belt: a record whose payload never migrated/landed still loads
+            // from the legacy embedded-state metadata record.
+            const legacyRequest = tx.objectStore(STORE_NAME).get(slotId);
+            legacyRequest.onsuccess = () => resolve(legacyRequest.result?.state || null);
+            legacyRequest.onerror = () => reject(legacyRequest.error);
         };
         request.onerror = () => reject(request.error);
         tx.oncomplete = () => db.close();
@@ -236,11 +269,12 @@ export async function listSaves() {
 export async function deleteSave(slotId) {
     const db = await openDB();
     return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
-        const request = store.delete(slotId);
+        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE], 'readwrite');
+        const request = tx.objectStore(STORE_NAME).delete(slotId);
+        const payloadRequest = tx.objectStore(PAYLOAD_STORE).delete(slotId);
         // Resolve on COMMIT (see saveGame) so a refresh read after a delete sees it gone.
         request.onerror = () => reject(request.error);
+        payloadRequest.onerror = () => reject(payloadRequest.error);
         tx.oncomplete = () => { db.close(); resolve(); };
         tx.onabort = () => { db.close(); reject(tx.error || request.error); };
     });
