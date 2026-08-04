@@ -106,6 +106,7 @@ export function createTurnRunner({
             recentChecks: s.recentChecks || [],
             paceDial: s.settings.paceDial,
             messageCount: (s.messages || []).length,
+            messages: s.messages || [],
             storyMemory,
             retrievedMemories,
             premise: s.session?.premise,

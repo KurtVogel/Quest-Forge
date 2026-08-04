@@ -12,7 +12,8 @@
 import { useSyncExternalStore } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getInspectorSnapshot, subscribeInspector } from '../../debug/memoryInspectorStore.js';
-import { computeRecentHeat, isTempoWindowActive, normalizePaceDial } from '../../engine/worldTempo.js';
+import { computeRecentHeat, isTempoWindowActive, normalizePaceDial, tempoDirectiveDistances } from '../../engine/worldTempo.js';
+import { conversationalDistance } from '../../engine/replayLedger.js';
 import './Debug.css';
 
 function formatAgo(timestamp) {
@@ -54,7 +55,11 @@ export default function MemoryInspector({ isOpen, onClose }) {
     const messageCount = (state.messages || []).length;
     const heat = computeRecentHeat(state);
     const directive = state.worldTempo?.directive || null;
-    const windowActive = isTempoWindowActive(directive, messageCount);
+    const windowActive = isTempoWindowActive(directive, messageCount, state.messages);
+    const directiveDistances = directive ? tempoDirectiveDistances(directive) : null;
+    const directiveDistance = directive && Number.isFinite(directive.grantedAtMessage)
+        ? conversationalDistance(state.messages || [], directive.grantedAtMessage - 1, messageCount)
+        : 0;
     const cards = state.storyMemory || [];
     const cardCounts = cards.reduce((acc, card) => {
         acc[card.type] = (acc[card.type] || 0) + 1;
@@ -138,10 +143,10 @@ export default function MemoryInspector({ isOpen, onClose }) {
                                         <div className="mi-kv">
                                             <span>Timing die:</span>{' '}
                                             {windowActive
-                                                ? `window OPEN (messages ${directive.activatesAtMessage}–${directive.expiresAtMessage}, now ${messageCount})`
-                                                : messageCount < directive.activatesAtMessage
-                                                    ? `counting down — opens at message ${directive.activatesAtMessage} (now ${messageCount})`
-                                                    : `window expired at message ${directive.expiresAtMessage}`}
+                                                ? `window OPEN (conversational ${directiveDistances.activation}–${directiveDistances.expiry} past grant, now ${directiveDistance})`
+                                                : directiveDistance < directiveDistances.activation
+                                                    ? `counting down — opens ${directiveDistances.activation} conversational messages past grant (now ${directiveDistance})`
+                                                    : `window expired ${directiveDistances.expiry} conversational messages past grant (now ${directiveDistance})`}
                                         </div>
                                     )}
                                     {directive.suggestedSymptom && <div className="mi-kv"><span>Suggested symptom:</span> {directive.suggestedSymptom}</div>}

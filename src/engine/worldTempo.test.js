@@ -14,8 +14,10 @@ import {
     computeFoeFatigue,
     foeFamilyKey,
     recentlyResolvedFronts,
+    tempoDirectiveDistances,
     FOE_FATIGUE_THRESHOLD,
     MAX_RECENT_ENCOUNTERS,
+    TEMPO_WINDOW_MESSAGES,
 } from './worldTempo.js';
 
 const front = (overrides = {}) => ({
@@ -84,6 +86,24 @@ describe('recent heat', () => {
             recentEncounters: [{ enemies: 'ghoul', messageIndex: 2 }],
         });
         expect(heat.score).toBe(0);
+    });
+
+    it('measures the heat window conversationally — system chatter cannot cool a fresh fight', () => {
+        // 16 raw messages after the fight, but 14 are exchange/system lines: the
+        // fight is only 2 conversational messages old and must still read hot.
+        // The raw-index window (15) wrongly aged this out (2026-08-02 P1).
+        const messages = [
+            ...Array.from({ length: 10 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user' })),
+            ...Array.from({ length: 14 }, () => ({ role: 'system', content: 'Rolled **12** …' })),
+            { role: 'user' }, { role: 'assistant' },
+        ];
+        const heat = computeRecentHeat({
+            ...baseState,
+            messages,
+            recentEncounters: [{ enemies: 'ghoul', messageIndex: 10 }],
+        });
+        expect(heat.score).toBeGreaterThanOrEqual(3);
+        expect(heat.reasons.join(' ')).toMatch(/fight/);
     });
 
     it('treats a single recent check as routine, not heat', () => {
@@ -163,8 +183,9 @@ describe('tempo directive normalization', () => {
         expect(directive.frontId).toBe('front-v2-1');
         // clock 2/6 → indirect band; the requested confrontation is clamped down.
         expect(directive.maxIntensity).toBe('indirect');
-        expect(directive.activatesAtMessage).toBe(34); // 30 + 2 scenes × 2 messages
-        expect(directive.expiresAtMessage).toBeGreaterThan(directive.activatesAtMessage);
+        expect(directive.grantedAtMessage).toBe(30);
+        expect(directive.activationDistance).toBe(4); // 2 scenes × 2 conversational messages
+        expect(directive.expiryDistance).toBeGreaterThan(directive.activationDistance);
     });
 
     it('degrades unknown fronts and garbage to a quiet directive', () => {
@@ -238,10 +259,38 @@ describe('tempo directive normalization', () => {
 
     it('window activity respects activation and expiry', () => {
         const directive = normalizeTempoDirective({ front_id: 'front-v2-1' }, ctx);
+        // No messages array → raw-difference fallback from the grant anchor (30).
         expect(isTempoWindowActive(directive, 33)).toBe(false); // die still counting down
         expect(isTempoWindowActive(directive, 34)).toBe(true);
-        expect(isTempoWindowActive(directive, directive.expiresAtMessage + 1)).toBe(false);
+        expect(isTempoWindowActive(directive, 30 + 4 + TEMPO_WINDOW_MESSAGES + 1)).toBe(false);
         expect(isTempoWindowActive(null, 34)).toBe(false);
+    });
+
+    it('counts the timing die in CONVERSATIONAL messages — dice-turn chatter never advances it', () => {
+        const directive = normalizeTempoDirective({ front_id: 'front-v2-1' }, { ...ctx, messageCount: 4 });
+        expect(directive.activationDistance).toBe(4);
+        const conv = role => ({ role, content: 'x' });
+        const sys = () => ({ role: 'system', content: 'Stealth: Rolled **14** — Success!' });
+        const hidden = () => ({ role: 'assistant', content: 'withheld setup', hidden: true });
+        // 4 pre-grant messages, then a check-heavy stretch: 8 raw post-grant
+        // messages but only 2 conversational — the window must NOT open yet.
+        const checkHeavy = [conv('user'), conv('assistant'), conv('user'), conv('assistant'),
+            conv('user'), hidden(), sys(), sys(), sys(), hidden(), sys(), conv('assistant')];
+        expect(isTempoWindowActive(directive, checkHeavy.length, checkHeavy)).toBe(false);
+        // Two more real scenes reach activation distance 4.
+        const later = [...checkHeavy, conv('user'), conv('assistant')];
+        expect(isTempoWindowActive(directive, later.length, later)).toBe(true);
+    });
+
+    it('keeps a legacy raw-index directive working via derived distances', () => {
+        const legacy = {
+            frontId: 'front-v2-1', maxIntensity: 'indirect',
+            grantedAtMessage: 10, activatesAtMessage: 14, expiresAtMessage: 34,
+        };
+        expect(tempoDirectiveDistances(legacy)).toEqual({ activation: 4, expiry: 24 });
+        expect(isTempoWindowActive(legacy, 13)).toBe(false);
+        expect(isTempoWindowActive(legacy, 14)).toBe(true);
+        expect(isTempoWindowActive(legacy, 35)).toBe(false);
     });
 });
 

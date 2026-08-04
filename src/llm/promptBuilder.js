@@ -35,7 +35,7 @@ export const PROMPT_CHAR_BUDGET = 160000;
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages }) {
     /** Named [{name, text}] parts — joined in push order; names feed the DEV size log only. */
     const namedParts = [];
     const parts = {
@@ -104,6 +104,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         paceDial,
         heat: computeRecentHeat({
             messageCount: messageCount || 0,
+            messages: messages || null,
             combat,
             character,
             recentEncounters: recentEncounters || [],
@@ -112,6 +113,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         }),
         recentEncounters: recentEncounters || [],
         messageCount: messageCount || 0,
+        messages: messages || null,
         combatActive: !!combat?.active,
         solo: !!character && (!party || party.length === 0),
     });

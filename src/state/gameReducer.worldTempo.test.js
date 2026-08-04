@@ -104,7 +104,8 @@ describe('APPLY_TEMPO_DIRECTIVE', () => {
         expect(next.worldTempo.directive).toMatchObject({
             frontId: 'front-v2-1',
             maxIntensity: 'indirect', // clock 2/6 band clamps the requested confrontation
-            activatesAtMessage: 22,
+            grantedAtMessage: 20,
+            activationDistance: 2, // 1 scene × 2 conversational messages
         });
     });
 

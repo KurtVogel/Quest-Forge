@@ -22,20 +22,38 @@
  */
 
 import { findLocationRecord, getCurrentLocationRecord } from './locationRegistry.js';
+import { conversationalDistance } from './replayLedger.js';
 import { DEFAULT_MAX_CLOCK } from './fronts.js';
 
 export const INTENSITY_LEVELS = ['whispers', 'indirect', 'presence', 'confrontation'];
 export const PACE_DIALS = ['slow-burn', 'standard', 'breakneck'];
 /** Sides of the timing die: rollDie(TEMPO_TIMING_DIE_SIDES) - 1 → 0–4 scene delay. */
 export const TEMPO_TIMING_DIE_SIDES = 5;
-/** A granted window dies on its own if the next cadence never arrives. */
+/**
+ * A granted window dies on its own if the next cadence never arrives.
+ * All tempo windows are measured in CONVERSATIONAL distance (system lines and
+ * hidden roll-setup messages don't count — DECISIONS.md 2026-07-30 / 2026-08-04):
+ * a dice turn burns ~5 raw messages, which made raw-index windows expire ~2.5×
+ * early on check-heavy stretches. A scene ≈ 2 conversational messages.
+ */
 export const TEMPO_WINDOW_MESSAGES = 24;
 export const MAX_RECENT_ENCOUNTERS = 10;
 export const MAX_ACTIVE_FRONTS = 4;
 /** A foe family fielded in this many ledger encounters is fatigued — the DM must vary. */
 export const FOE_FATIGUE_THRESHOLD = 3;
-/** How long (in messages) a resolved front's absence keeps being echoed to the DM. */
+/** How long (in conversational messages) a resolved front's absence keeps being echoed to the DM. */
 export const RESOLVED_ECHO_WINDOW_MESSAGES = 40;
+
+/**
+ * Conversational distance since an anchor stamped as "message count at the
+ * time" (encounter ledger, directive grants, front resolutions): the first
+ * message appended after the stamp sits at index `anchorIndex`, so counting
+ * starts there. Without a messages array, degrades to the raw difference.
+ */
+function distanceSince(messages, anchorIndex, messageCount) {
+    if (!Array.isArray(messages)) return Math.max(0, messageCount - anchorIndex);
+    return conversationalDistance(messages, anchorIndex - 1, messageCount);
+}
 
 const INTENSITY_GUIDANCE = {
     whispers: 'rumors, atmosphere, prices, and secondhand news only — the pressure has NO on-screen presence',
@@ -151,11 +169,11 @@ export function computeFoeFatigue(recentEncounters = []) {
 }
 
 /** Fronts whose resolution is recent enough that the DM should still show the aftermath. */
-export function recentlyResolvedFronts(fronts = [], messageCount = 0) {
+export function recentlyResolvedFronts(fronts = [], messageCount = 0, messages = null) {
     return (Array.isArray(fronts) ? fronts : [])
         .filter(front => front?.status === 'resolved'
             && Number.isFinite(front.resolvedAtMessage)
-            && front.resolvedAtMessage >= messageCount - RESOLVED_ECHO_WINDOW_MESSAGES)
+            && distanceSince(messages, front.resolvedAtMessage, messageCount) <= RESOLVED_ECHO_WINDOW_MESSAGES)
         .slice(-2);
 }
 
@@ -174,6 +192,7 @@ function heatLevel(score) {
 export function computeRecentHeat(state, { window = 15 } = {}) {
     const reasons = [];
     let score = 0;
+    const messages = Array.isArray(state.messages) ? state.messages : null;
     const messageCount = Number.isFinite(state.messageCount)
         ? state.messageCount
         : (state.messages || []).length;
@@ -184,7 +203,8 @@ export function computeRecentHeat(state, { window = 15 } = {}) {
     }
 
     const recentFights = (state.recentEncounters || [])
-        .filter(entry => Number.isFinite(entry?.messageIndex) && entry.messageIndex >= messageCount - window);
+        .filter(entry => Number.isFinite(entry?.messageIndex)
+            && distanceSince(messages, entry.messageIndex, messageCount) <= window);
     if (recentFights.length > 0) {
         score += Math.min(7, 3 + (recentFights.length - 1) * 2);
         reasons.push(recentFights.length === 1 ? 'a fight within the last few scenes' : `${recentFights.length} fights within the last few scenes`);
@@ -208,7 +228,8 @@ export function computeRecentHeat(state, { window = 15 } = {}) {
     // One check is routine and scores nothing; the contribution caps below the
     // combat weights so diceless tension alone never reads as post-battle heat.
     const recentChecks = (state.recentChecks || [])
-        .filter(entry => Number.isFinite(entry?.messageIndex) && entry.messageIndex >= messageCount - window);
+        .filter(entry => Number.isFinite(entry?.messageIndex)
+            && distanceSince(messages, entry.messageIndex, messageCount) <= window);
     if (recentChecks.length >= 2) {
         const hardestDc = Math.max(...recentChecks.map(entry => entry.dc || 0));
         score += Math.min(3, recentChecks.length - 1) + (hardestDc >= 15 ? 1 : 0);
@@ -216,11 +237,13 @@ export function computeRecentHeat(state, { window = 15 } = {}) {
     }
 
     const directive = state.worldTempo?.directive;
-    if (directive?.frontId && Number.isFinite(directive.activatesAtMessage)
-        && directive.activatesAtMessage >= messageCount - window
-        && directive.activatesAtMessage <= messageCount) {
-        score += 1;
-        reasons.push('a pressure symptom was recently permitted');
+    if (directive?.frontId && Number.isFinite(directive.grantedAtMessage)) {
+        const { activation } = tempoDirectiveDistances(directive);
+        const distance = distanceSince(messages, directive.grantedAtMessage, messageCount);
+        if (distance >= activation && distance - activation <= window) {
+            score += 1;
+            reasons.push('a pressure symptom was recently permitted');
+        }
     }
 
     score = Math.max(0, Math.min(10, score));
@@ -270,8 +293,8 @@ export function normalizeTempoDirective(raw, {
         rationale: cleanText(raw?.rationale),
         quietHook: cleanText(raw?.quiet_hook || raw?.quietHook),
         grantedAtMessage: messageCount,
-        activatesAtMessage: messageCount,
-        expiresAtMessage: messageCount + TEMPO_WINDOW_MESSAGES,
+        activationDistance: 0,
+        expiryDistance: TEMPO_WINDOW_MESSAGES,
     };
     if (!raw || typeof raw !== 'object') return quiet;
 
@@ -308,8 +331,6 @@ export function normalizeTempoDirective(raw, {
     }
 
     const delay = Number.isFinite(timingDelay) ? Math.max(0, Math.min(TEMPO_TIMING_DIE_SIDES - 1, Math.round(timingDelay))) : 0;
-    // The timing die counts scenes (player+DM message pairs), not raw messages.
-    const activatesAtMessage = messageCount + delay * 2;
 
     return {
         frontId,
@@ -319,17 +340,37 @@ export function normalizeTempoDirective(raw, {
         rationale: cleanText(raw.rationale),
         quietHook: '',
         grantedAtMessage: messageCount,
-        activatesAtMessage,
-        expiresAtMessage: messageCount + TEMPO_WINDOW_MESSAGES,
+        // The timing die counts scenes: one scene ≈ one player+DM pair ≈ 2
+        // CONVERSATIONAL messages past the grant anchor. Dice-turn system
+        // chatter never advances the countdown (2026-08-02 P1).
+        activationDistance: delay * 2,
+        expiryDistance: TEMPO_WINDOW_MESSAGES,
     };
 }
 
+/**
+ * A directive's activation/expiry as conversational distances from its grant
+ * anchor. Legacy directives (pre-2026-08-04) stored raw activate/expire message
+ * indices instead; deriving distances from those errs long, which is the
+ * direction the fix wants (raw windows expired early).
+ */
+export function tempoDirectiveDistances(directive) {
+    const granted = Number.isFinite(directive?.grantedAtMessage) ? directive.grantedAtMessage : 0;
+    const activation = Number.isFinite(directive?.activationDistance)
+        ? directive.activationDistance
+        : Math.max(0, (Number.isFinite(directive?.activatesAtMessage) ? directive.activatesAtMessage : granted) - granted);
+    const expiry = Number.isFinite(directive?.expiryDistance)
+        ? directive.expiryDistance
+        : Math.max(activation, (Number.isFinite(directive?.expiresAtMessage) ? directive.expiresAtMessage : granted) - granted);
+    return { activation, expiry };
+}
+
 /** Is the directive's window open for the current message count? */
-export function isTempoWindowActive(directive, messageCount) {
-    return !!(directive?.frontId
-        && Number.isFinite(messageCount)
-        && messageCount >= directive.activatesAtMessage
-        && messageCount <= directive.expiresAtMessage);
+export function isTempoWindowActive(directive, messageCount, messages = null) {
+    if (!directive?.frontId || !Number.isFinite(messageCount) || !Number.isFinite(directive.grantedAtMessage)) return false;
+    const { activation, expiry } = tempoDirectiveDistances(directive);
+    const distance = distanceSince(messages, directive.grantedAtMessage, messageCount);
+    return distance >= activation && distance <= expiry;
 }
 
 /**
@@ -344,11 +385,12 @@ export function buildWorldTempoBlock({
     heat = null,
     recentEncounters = [],
     messageCount = 0,
+    messages = null,
     combatActive = false,
     solo = false,
 } = {}) {
     const activeFronts = fronts.filter(f => (f.status || 'active') === 'active');
-    const resolvedEchoes = recentlyResolvedFronts(fronts, messageCount);
+    const resolvedEchoes = recentlyResolvedFronts(fronts, messageCount, messages);
     if (activeFronts.length === 0 && recentEncounters.length === 0 && resolvedEchoes.length === 0) return '';
 
     const dial = normalizePaceDial(paceDial);
@@ -369,7 +411,7 @@ export function buildWorldTempoBlock({
     }
 
     const directive = worldTempo?.directive || null;
-    const windowActive = !combatActive && isTempoWindowActive(directive, messageCount);
+    const windowActive = !combatActive && isTempoWindowActive(directive, messageCount, messages);
     const permittedFront = windowActive ? activeFronts.find(f => f.id === directive.frontId) : null;
 
     if (permittedFront) {
