@@ -179,4 +179,20 @@ describe('reviewOutsideCombatRolls LLM-arbiter path', () => {
         expect(sendMessage).not.toHaveBeenCalled();
         expect(review.acceptedRolls).toEqual([roll]);
     });
+
+    it('ships a compact, clamped request payload (2026-08-03 queue P2)', async () => {
+        // The arbiter blocks every check turn — the payload must stay bounded
+        // (Scribe-family parity, 08-02 pattern) and un-pretty-printed.
+        sendMessage.mockResolvedValue(JSON.stringify({ rolls_evaluation: [{ index: 0, approved: true }] }));
+        const hugeNarrative = 'n'.repeat(50_000);
+        const hugeAction = 'a'.repeat(50_000);
+        await reviewOutsideCombatRolls([roll], hugeAction, hugeNarrative, SETTINGS);
+
+        const { userMessage } = sendMessage.mock.calls[0][0];
+        expect(userMessage.length).toBeLessThan(6000); // 2k action + 2k narrative + rolls
+        expect(userMessage).not.toContain('\n  '); // no pretty-printed JSON indentation
+        const rollsJson = userMessage.match(/Proposed rolls: (.*)$/s)?.[1];
+        const parsed = JSON.parse(rollsJson);
+        expect(Object.keys(parsed[0]).sort()).toEqual(['dc', 'description', 'index', 'skill', 'type'].sort());
+    });
 });

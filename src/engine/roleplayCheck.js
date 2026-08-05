@@ -189,7 +189,7 @@ Original player action:
 ${text(proposal?.playerAction, 4000)}
 
 Proposed check:
-${JSON.stringify(compactRolls, null, 2)}
+${JSON.stringify(compactRolls)}
 
 Player's challenge:
 ${text(challenge, 2000)}

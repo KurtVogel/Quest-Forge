@@ -64,10 +64,12 @@ Output ONLY valid JSON:
 
 Output ONLY the JSON, no prose outside the JSON.`;
 
+    // Compact JSON + clamped narrative (Scribe-family parity, 2026-08-03 audit):
+    // this runs on EVERY check turn, blocking the roll.
     const userMessage = [
-        `Player action: ${playerMessage}`,
-        `DM narrative: ${dmNarrative}`,
-        `Proposed rolls: ${JSON.stringify(rolls.map((r, i) => ({ index: i, type: r.type, skill: r.skill || r.ability, description: r.description, dc: r.dc })), null, 2)}`
+        `Player action: ${String(playerMessage || '').slice(0, 2000)}`,
+        `DM narrative: ${String(dmNarrative || '').slice(0, 2000)}`,
+        `Proposed rolls: ${JSON.stringify(rolls.map((r, i) => ({ index: i, type: r.type, skill: r.skill || r.ability, description: r.description, dc: r.dc })))}`
     ].join('\n\n');
 
     try {

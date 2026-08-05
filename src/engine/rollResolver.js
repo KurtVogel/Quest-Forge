@@ -371,15 +371,13 @@ export async function handleRequestedRolls(requestedRolls, {
         dispatch,
     });
 
-    // Auto follow-up: send roll results back to DM and get outcome narration
+    // Auto follow-up: send roll results back to DM and get outcome narration.
+    // The summary rides ONLY the follow-up user message below — the old extra
+    // hidden system dispatch was write-only ballast: excluded by every consumer
+    // (window, journal, chronicler, priming, fronts) and never rendered, pure
+    // per-check save growth (2026-08-03 audit).
     if (rollResults.length > 0) {
         const summary = formatRollSummary(rollResults);
-
-        // Add as a hidden system message for context
-        dispatch({
-            type: 'ADD_MESSAGE',
-            payload: { role: 'system', content: summary, hidden: true },
-        });
 
         // Auto-trigger follow-up: DM narrates the outcome
         console.log('[RollResolver] 🔄 Auto-triggering follow-up LLM call with roll results');
