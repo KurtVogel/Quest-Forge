@@ -49,7 +49,7 @@ it under Process notes.
 | prompt-building | `llm/promptBuilder.js` | 2026-07-29 |
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-08-03 |
 | combat-exchange | `engine/combatExchange.js`, `engine/combatMath.js`, `state/handlers/combat.js`, opening initiative | 2026-08-03 |
-| enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-07-27 |
+| enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-08-05 |
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-08-02 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-08-02 |
 | memory-journal | `engine/worldJournal.js` | 2026-07-30 |
@@ -58,7 +58,7 @@ it under Process notes.
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-04 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-08-04 |
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-08-04 |
-| inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-07-28 |
+| inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-08-05 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-08-04 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-08-01 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-07-29 |
@@ -229,6 +229,9 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (character-vault, 2026-08-04): hero import admits portraits ~25-45× larger than the game generates — `MAX_PORTRAIT_URL_LENGTH` is 2.5M chars while generated portraits downscale to 480×640 JPEG (~60-110k chars base64), and imports are never re-downscaled; an oversized hand-imported portrait then rides the roster entry, every campaign autosave snapshot (2-4×/turn), and cloud saves (can single-handedly push a save into chunking). Downscale on import via `downscaleDataUrl` (degrade, don't reject) or drop the ceiling to ~300k — `engine/characterVault.js:34,43-49`, `llm/providers/imageGen.js:226-237`.
 - [ ] **P2** (character-vault, 2026-08-04): `sanitizeImageUrl`'s boundaries are untested — no case for an over-ceiling data URL (stripped to ''), nor for a hand-edited data URL with embedded whitespace/newlines failing the regex and silently dropping the portrait — `engine/characterVault.js:43-49`, `characterVault.test.js:94-109,268-275`.
 - [ ] **P2** (quests, 2026-08-04): `REMOVE_QUEST` is the quests handler's untested function (functions 75%), and the panel's complete-by-bare-id-string path (`QuestPanel.jsx:25` → matched string ref) is pinned only in its unmatched no-op form — `state/handlers/quests.js:81-86`, `gameReducer.quests.test.js:77-85`.
+- [ ] **P2** (enemy-stats-conditions, 2026-08-05): `sanitizeLoadedEnemy` starts from `{...enemy}` — arbitrary unknown keys on a hostile/stale save's enemies survive sanitization unbounded and persist through every autosave; whitelist-project the known fields (characterVault pattern) — `engine/enemyStats.js:115-127`.
+- [ ] **P2** (inventory-economy, 2026-08-05): `buildInventoryBlock` has no cap on item count — every distinct item rides the dynamic prompt every turn with full annotations (~700-1000 tokens/turn at 60+ items); cap the Carried list (~25) with an overflow line, equipped stays complete — `llm/promptBuilder.js:730-756`.
+- [ ] **P2** (inventory-economy, 2026-08-05): `handlers/inventory.js` untested load-bearing branches — REMOVE_ITEM (:253), REMOVE_ITEM_BY_NAME (:257-263), non-healing consumable use (:241-249), ADD_ITEM auto-equip armor/shield incl. the two-handed shield refusal (:84-93), `equipmentKindMatches` (:27-31), by-id ref resolution (:42-43), dead-hero self-potion guard (:177); auto-equip first.
 - [ ] **P1** (rules-math, 2026-08-05): non-catalog armor/shield stats unclamped end to end — `normalizeItem`'s `...source` spread passes arbitrary `baseAC`/`shieldAC`/`acBonus` through (`items.js:164-166`), no boundary in `equipment.js`/`characterVault.js`, and `getArmorClass` computes it raw: a hallucinated/hand-imported `{armorType:'heavy', baseAC:30, acBonus:10}` gives the hero AC 40 permanently. Hero is the only combatant with no AC ceiling (companions clamp 21, enemies band-validated). Clamp at `normalizeItem` — `engine/rules.js:34-62`, `data/items.js:164-166`.
 - [ ] **P2** (rules-math, 2026-08-05): non-catalog armor with `baseAC` but no `armorType` → `getArmorClass` default branch ignores baseAC (AC = 10+dex) while `promptBuilder.js:736` tells the DM `[AC N, unknown armor]` — DM and engine disagree; default/infer the armorType — `engine/rules.js:49-50`.
 - [ ] **P2** (rules-math, 2026-08-05): `getWeaponDamageNotation`'s malformed-notation path returns the bare fallback without the ability/style/magic modifier — junk `damage` field deals flat 1d4 while unarmed gets 1d4+STR — `engine/rules.js:181-183`.
@@ -259,6 +262,31 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-05 — enemy-stats-conditions + inventory-economy (Lap 3: performance & token budget) — second run
+
+`npm test`: 1320 passing / 77 files
+
+### enemy-stats-conditions
+- **Scope examined:** `engine/enemyStats.js` end to end; `enemy_condition_updates` flow (nested in `combat_exchange`, `combatExchange.js:113,182-186` — correctly matches the RESPONSE_FORMAT example's nesting); `eventChannels.js` combat_start enemy normalization; `UPDATE_ENEMY`'s HP-only allowlist (`handlers/combat.js:327-345`); scoped v8 coverage (enemyStats 97.4%).
+- **Findings:**
+  - Lap-lens clean bill: pure small-N validation, nothing hot; prompt-side condition text is bounded (9 supported conditions, exchange caps 30/30). The boundary story is genuinely strong — combat_start validates, UPDATE_ENEMY allowlists HP only, conditions always re-derive from HP.
+  - **P2**: `sanitizeLoadedEnemy` starts from `{...enemy}` — arbitrary unknown keys on a hostile/stale save's enemy objects survive "sanitization" unbounded (a 1 MB junk field persists through every autosave for the rest of the fight and re-loads forever). Contrast `characterVault`'s rebuild-from-known-fields policy on the identical trust boundary. Whitelist-project the ~13 known fields (+ clamped `description` if the UI wants it) — `engine/enemyStats.js:115-127`.
+  - **P2** (polish): `normalizeEnemyConditions`' `.slice(0, 10)` can never trigger (9 supported conditions post-dedupe) — a cap that suggests protection it doesn't provide; and `SUPPORTED_ENEMY_CONDITIONS` silently excludes `exhausted`/`exhaustion` which `CONDITION_EFFECTS` supports — deliberate-looking (check-only effect; enemies rarely make checks) but undocumented, so a DM's "exhausted ogre" drops the condition with no trace — `enemyStats.js:23-26,34`, `rules.js:285-286`.
+- **Suggested improvements:** (1) whitelist projection in `sanitizeLoadedEnemy`; (2) one comment line documenting the exhausted exclusion (or support it — it already has effects defined); drop the dead slice or set it to the set's size.
+
+### inventory-economy
+- **Scope examined:** `state/handlers/inventory.js` end to end (the snapshot's weakest registry file, 74.21%); `data/items.js` normalizeItem + `describeCatalogForPrompt`; `engine/equipment.js`; `buildInventoryBlock` (`promptBuilder.js:730-756`) + Scribe's `describeOwnedInventory` (`scribe.js:140-150`); per-line v8 coverage.
+- **Findings:**
+  - Good lap news first: `ITEM_CATALOG_BLOCK` is built once at module load (already optimized, comment documents it), and the Scribe's per-turn inventory context is clamped at 800 chars.
+  - **P2** (lap): `buildInventoryBlock` has NO cap on item count — every distinct item rides the dynamic prompt segment every turn with full stat/value annotations (`[1d8 slashing, +1 hit]`, `[value 2 gp]`…). With quests already queued for the same treatment (2026-08-04), this is the last uncapped accretion block; a hoarder campaign at 60+ items pays ~700–1000 tokens/turn. Cap the **Carried** list (equipped stays complete) at ~25 with an "and N more minor items" overflow line — `llm/promptBuilder.js:730-756`.
+  - **P2** (test depth): the 26% uncovered in `handlers/inventory.js` is concentrated in real behavior, not error noise — per-line v8: `REMOVE_ITEM` (:253) and `REMOVE_ITEM_BY_NAME` (:257-263) entirely untested, the non-healing consumable path (:241-249), ADD_ITEM's auto-equip-into-empty-slot branches for armor AND shield incl. the two-handed-weapon shield refusal (:84-93), `equipmentKindMatches` (:27-31), by-id ref resolution (:42-43), the name-token fallback (:61-65), and the dead-hero self-potion guard (:177). The auto-equip branches are load-bearing (the 2026-07-28 displacement fix's sanctioned counterpart) and pinned nowhere.
+  - **P2** (design, Lap 4 preview): `EQUIP_ITEM_BY_REF`/`UNEQUIP_ITEM_BY_REF` re-enter `gameReducer` recursively (`handlers/inventory.js:8,281,295`) — the only handlers importing the dispatcher that dispatches to them; works, but inverts the layering for a one-line delegation.
+- **Suggested improvements:** (1) carried-list cap + overflow line; (2) a focused suite for the named branches (auto-equip first); (3) inline the EQUIP_ITEM body or extract a shared helper instead of reducer re-entry.
+
+### Process notes
+- Second run today at user request. Rotation honored: picks were the two least-recently-audited eligible features (07-27, then the 07-28 tie broken toward `handlers/inventory.js`'s 74.21% — the snapshot's weakest registry number).
+- Queue verification: 2026-08-01 P2 (`MAX_DIE_SIDES`) and 2026-08-03 P2 (hidden roll-summary ballast) both verified still open.
 
 ## 2026-08-05 — rules-math + response-parsing (Lap 3: performance & token budget)
 
