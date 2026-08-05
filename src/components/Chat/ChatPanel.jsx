@@ -11,6 +11,8 @@ import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js'
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/frontAftermath.js';
 import { generateAbsenceDrift, shouldGenerateAbsenceDrift } from '../../llm/absenceDrift.js';
+import { generateRegionalFronts, shouldGenerateRegionalFronts } from '../../llm/regionalFronts.js';
+import { formatSecrecyTag } from '../../engine/storyMemory.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
@@ -52,6 +54,7 @@ export default function ChatPanel() {
     const frontGenerationSessionRef = useRef(null); // One private generation request per fresh campaign at a time
     const aftermathFrontRef = useRef(null); // One aftermath request per resolved front at a time
     const absenceDriftRef = useRef(null); // One absence-drift request per qualifying return at a time
+    const regionalFrontsRef = useRef(null); // One native-pressure generation per newly entered region at a time
 
     // Use a ref to always read the latest state inside async callbacks
     const stateRef = useRef(state);
@@ -259,6 +262,31 @@ export default function ChatPanel() {
     }, [state.session?.pendingAbsenceDrift?.key, state.settings.apiKey, state.combat?.active, dispatch]);
 
     /**
+     * Regional front seeding (world-tempo component 9, DECISIONS.md 2026-08-05):
+     * entering a genuinely new named region raises a one-shot marker; a private
+     * DM-model call proposes 1–2 pressures NATIVE to that land, installed with
+     * the arrival place as their theater. Same fire-and-forget contract as the
+     * other living-world directors.
+     */
+    useEffect(() => {
+        const s = stateRef.current;
+        const pending = s.session?.pendingRegionalFronts;
+        if (!pending || !shouldGenerateRegionalFronts(s) || regionalFrontsRef.current === pending.key) return;
+        const sessionId = s.session.id;
+        const key = pending.key;
+        regionalFrontsRef.current = key;
+        generateRegionalFronts(s)
+            .then(fronts => {
+                dispatch({ type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId, key, fronts } });
+                console.info(`[LivingWorld] Native pressures for ${pending.region}: ${fronts.length} proposed.`);
+            })
+            .catch(error => {
+                console.warn('[LivingWorld] Regional front seeding failed; will retry:', error.message || error);
+                if (regionalFrontsRef.current === key) regionalFrontsRef.current = null;
+            });
+    }, [state.session?.pendingRegionalFronts?.key, state.settings.apiKey, state.combat?.active, dispatch]);
+
+    /**
      * RAG seeding: embed all existing world facts and journal summaries once on mount.
      * New memories are added incrementally as play continues.
      */
@@ -270,7 +298,9 @@ export default function ChatPanel() {
         memorySeededRef.current = true; // Prevent concurrent attempts
 
         const items = [
-            ...(s.worldFacts || []).map(f => ({ text: f.fact, category: f.category || 'world_fact' })),
+            // Secret facts/cards keep their knower boundary inside the embedded
+            // text, so a RAG hit re-surfaces the SECRET tag along with the canon.
+            ...(s.worldFacts || []).map(f => ({ text: `${formatSecrecyTag(f.knownBy)}${f.fact}`, category: f.category || 'world_fact' })),
             ...(s.journal || []).map(j => ({ text: j.summary, category: 'journal', location: j.location })),
             ...(s.npcs || []).filter(n => n.lastNotes || n.notes).map(n => ({
                 text: `${n.name} (${n.disposition || 'unknown'}): ${n.lastNotes || n.notes}`,
@@ -278,7 +308,7 @@ export default function ChatPanel() {
                 location: n.basedIn || n.lastLocation,
             })),
             ...(s.storyMemory || []).map(m => ({
-                text: `${m.subject ? `${m.subject}: ` : ''}${m.text}`,
+                text: `${formatSecrecyTag(m.knownBy)}${m.subject ? `${m.subject}: ` : ''}${m.text}`,
                 category: `story_${m.type || 'callback'}`,
                 location: m.location,
             })),

@@ -179,7 +179,9 @@ describe('promptBuilder wiring', () => {
 
     it('omits them entirely when absent', () => {
         const prompt = buildSystemPrompt({ currentLocation: 'Aldermill', messages: [], messageCount: 0 });
-        expect(prompt).not.toContain('WHILE YOU WERE AWAY');
-        expect(prompt).not.toContain('REGIONAL HEARSAY');
+        // Rule 9 references REGIONAL HEARSAY by name, so assert on the block
+        // headers — the sections themselves must be absent.
+        expect(prompt).not.toContain('## WHILE YOU WERE AWAY — PRIVATE');
+        expect(prompt).not.toContain('## REGIONAL HEARSAY — PRIVATE');
     });
 });

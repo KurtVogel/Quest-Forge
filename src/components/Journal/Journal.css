@@ -693,6 +693,14 @@
     border-bottom: 1px solid var(--border-subtle);
 }
 
+/* Front-resolution ceremony nudge: a closed arc invites a chapter close. */
+.chronicle-suggested {
+    padding: 0.4rem 0.6rem;
+    border-left: 3px solid var(--accent-gold, #c9a227);
+    background: rgba(201, 162, 39, 0.08);
+    border-radius: 0 4px 4px 0;
+}
+
 .chronicle-compose-row {
     display: flex;
     gap: 0.5rem;

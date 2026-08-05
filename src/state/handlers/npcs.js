@@ -4,9 +4,9 @@
  */
 import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
-import { findLocationRecord, upsertLocation } from '../../engine/locationRegistry.js';
+import { collectKnownRegions, findLocationRecord, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
-import { ABSENCE_DRIFT_MIN_AWAY, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand } from '../../engine/worldTempo.js';
+import { ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { upsertNpc } from './shared.js';
 
@@ -165,6 +165,7 @@ export const handlers = {
             fronts: state.fronts,
             recentEncounters: state.recentEncounters,
             recentHearsay: state.recentHearsay,
+            storyMemory: state.storyMemory,
             locations,
             locationName: name,
             messages: state.messages,
@@ -267,10 +268,43 @@ export const handlers = {
         return gameReducer(next, { type: 'ADD_WORLD_FACTS', payload: [{ fact, category: 'event' }] });
     },
 
-    // Scribe-classified profile for an already-known place (type/danger/theater).
+    // Scribe-classified profile for an already-known place (type/danger/theater/
+    // region). A profile naming a region NEW to the whole registry — while the
+    // hero stands there and at least one OTHER region is already known (the
+    // first-ever region is home and never seeds) — raises the one-shot
+    // regional-front marker (DECISIONS.md 2026-08-05 ×2, world-tempo
+    // component 9): a genuinely new land gets its own native pressures.
     UPDATE_LOCATION_PROFILE(state, action) {
         const { name, profile } = action.payload || {};
         if (!name || !profile || typeof profile !== 'object') return state;
-        return { ...state, locations: upsertLocation(state.locations || [], name, profile) };
+        const priorRegions = collectKnownRegions(state.locations || []);
+        const locations = upsertLocation(state.locations || [], name, profile);
+        const next = { ...state, locations };
+
+        const region = String(profile.region || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+        if (!region) return next;
+        const hereIdx = findLocationRecord(locations, state.currentLocation);
+        const classifiedIdx = findLocationRecord(locations, name);
+        if (hereIdx === -1 || classifiedIdx === -1 || locations[hereIdx].id !== locations[classifiedIdx].id) return next;
+        // The record's STORED region is authoritative (first value wins): a
+        // re-classification that lost to an earlier canon region seeds nothing.
+        if (!isSameRegion(locations[classifiedIdx].region, region)) return next;
+        if (priorRegions.length === 0) return next; // home region — never seeded
+        if (priorRegions.some(known => isSameRegion(known, region))) return next;
+        if ((state.session?.seededRegions || []).some(known => isSameRegion(known, region))) return next;
+        if (state.session?.pendingRegionalFronts) return next;
+        const activeFronts = (state.fronts || []).filter(f => (f.status || 'active') === 'active').length;
+        if (activeFronts >= MAX_ACTIVE_FRONTS) return next;
+
+        next.session = {
+            ...next.session,
+            pendingRegionalFronts: {
+                key: `${region.toLowerCase()}|${(state.messages || []).length}`,
+                region,
+                locationName: locations[classifiedIdx].name,
+                atMessage: (state.messages || []).length,
+            },
+        };
+        return next;
     },
 };

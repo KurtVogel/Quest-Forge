@@ -156,8 +156,12 @@ the Settings pace dial, the BG1 opening rule, and inspector readouts. Theaters g
 placing a directive symptom somewhere records that place as the front's home; away from a known
 home a front reaches the player as news only. Verified same day: identical Aldermill premise
 opened with an urgent recruitment hook before vs. frost/porridge/rumor-as-atmosphere after.
-**Component 9 (regional front seeding for genuinely new distant regions) is the deliberate
-v2 leftover** — needs "new region" detection; theater/news-travel covers immersion meanwhile.
+**Component 9 (regional front seeding) shipped 2026-08-05** (DECISIONS.md 2026-08-05 ×2):
+"new region" detection rides the Scribe's `location_profile.region` classification — a
+region name new to the whole registry (first-ever region = home, never seeded) raises a
+one-shot marker, `llm/regionalFronts.js` proposes 1–2 flavor-divergent NATIVE pressures on
+the DM model, and `INSTALL_REGIONAL_FRONTS` installs them born-invisible with the arrival
+place as theater, capped by MAX_ACTIVE_FRONTS, region marked seeded even on an empty result.
 Original design notes below.
 Full rationale + settled sub-decisions in DECISIONS.md 2026-07-14 ("World-tempo pacing
 architecture"). The problem: every campaign escalates to violence in ~7 turns (both keyed eval
@@ -268,10 +272,11 @@ firsthand/secondhand/legend, once-per-(deed, place) `recentHearsay` ledger, `## 
 HEARSAY — PRIVATE` block), `llm/absenceDrift.js` (background DM-model director off the
 one-shot `session.pendingAbsenceDrift` marker, `INSTALL_ABSENCE_DRIFT` complete-or-nothing
 install, `## WHILE YOU WERE AWAY — PRIVATE` block), and `lastVisitedMessage`
-departure/arrival stamps on location records. **Still open from the original design:** the
-Scribe `witnessed` flag so high-salience story-memory cards become a third hearsay source
-(public deeds beyond fights — a wedding vow, a public accusation), and a memory-inspector
-readout for the living-world state. Original notes below.
+departure/arrival stamps on location records. **Same-day round two (DECISIONS.md
+2026-08-05 ×2):** the Scribe `witnessed` flag shipped — salience ≥4 witnessed non-secret
+story cards are now the third hearsay source — alongside the epistemics layer (`knownBy`
+secrets that never travel). **Still open:** a memory-inspector readout for the
+living-world state (pending markers, hearsay ledger, seeded regions). Original notes below.
 Today a return visit relies on RAG recalling what a place *was* — nothing makes the place
 have **moved** in the meantime, and nothing makes the hero's deeds travel ahead of them.
 Two halves of one system, both triggered by the same event: SET_LOCATION arriving at a
@@ -321,17 +326,23 @@ queries, complementing semantic RAG. New journal chunks seed into RAG mid-sessio
 alone missed immediate pre-arrival events after the 20-message window slid. Pair with
 `npm run eval:memory` for regression.
 
-### Campaign milestone XP tied to front/act completion — status: `idea`
-Milestone XP on resolving a front beat, complementing per-combat XP.
+### Campaign milestone XP tied to front/act completion — status: `shipped` (2026-08-05)
+**Shipped as the front-resolution payoff ceremony** (DECISIONS.md 2026-08-05 ×2):
+`getFrontResolutionMilestoneXp` = 50% of the current level's XP threshold (rpg-balance-master
+ruling — two resolutions = exactly one level-up at any level 1–19), awarded engine-side in
+the one-shot resolution transition, never via the LLM's exp_awarded channel. Paired with a
+Chronicle chapter-close nudge (`session.chapterCloseSuggested` → golden hint in the
+Chronicle tab, consumed when a chapter is written).
 
 ### Campaign Chronicle — chapter-close retelling as one continuous story — status: v1 `shipped` (2026-07-26)
 **Shipped 2026-07-26** exactly per the design below (DECISIONS.md 2026-07-26): Chronicle tab
 in the World Journal, player-initiated "Close chapter" retelling the span since the last
 chapter from the ACTUAL play messages (chunked, previous-passage tail threaded for
 continuity, DM model), markdown export, strictly player-facing (never DM prompt/RAG),
-unvarnished + clinical-register prompt. Still open from the original notes: offering a
-chapter close automatically when a front resolves or a major quest completes, milestone-XP
-pairing as a chapter-close ceremony, and a chapter illustration via scene art.
+unvarnished + clinical-register prompt. **2026-08-05: the chapter-close offer on front
+resolution AND the milestone-XP pairing shipped** as the payoff ceremony (DECISIONS.md
+2026-08-05 ×2). Still open from the original notes: a chapter illustration via scene art,
+and offering a close on major quest completion.
 When the player closes a major chapter (player-initiated "close chapter", or offered when a
 front resolves / a major quest completes), a chronicler pass writes that span of play as a
 single naturally flowing narrative — a readable saga chapter, accumulated into a "Chronicle"

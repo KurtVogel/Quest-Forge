@@ -96,6 +96,27 @@ export function pickMergedCardText(existingText = '', incomingText = '') {
     return fragment ? existingText : incomingText;
 }
 
+/** "public"/"everyone" in a knowers list means the info is NOT secret. */
+const PUBLIC_KNOWER_RE = /^(public|everyone|everybody|all|common knowledge)$/i;
+
+/**
+ * Epistemics boundary (DECISIONS.md 2026-08-05 ×2): a non-empty knownBy list
+ * marks information as PRIVATE to exactly those people. Empty/absent = common
+ * knowledge. Any "public"-style entry clears the whole list — the extractor
+ * saying "everyone knows" must never render as a secret known to "everyone".
+ */
+export function normalizeKnownBy(value) {
+    const list = normalizeTextArray(value, MAX_LINKED_NPCS);
+    if (list.some(name => PUBLIC_KNOWER_RE.test(name))) return [];
+    return list;
+}
+
+/** "[SECRET — known only to: X, Y] " prefix, or '' for common knowledge. */
+export function formatSecrecyTag(knownBy) {
+    const list = Array.isArray(knownBy) ? knownBy.map(v => cleanText(v)).filter(Boolean).slice(0, MAX_LINKED_NPCS) : [];
+    return list.length > 0 ? `[SECRET — known only to: ${list.join(', ')}] ` : '';
+}
+
 export function normalizeStoryMemoryCard(card = {}, existing = null) {
     const now = Date.now();
     const text = cleanText(card.text || card.memory || card.note, existing?.text || '').slice(0, MAX_TEXT_LENGTH);
@@ -106,8 +127,19 @@ export function normalizeStoryMemoryCard(card = {}, existing = null) {
     const type = ALLOWED_TYPES.has(aliasedType) ? aliasedType : 'callback';
     const rawStatus = cleanText(card.status, existing?.status || 'active');
     const status = ALLOWED_STATUS.has(rawStatus) ? rawStatus : 'active';
+    // Conditional keys: an update that omits the field must not wipe the
+    // stored value through the {...existing, ...card} merge spread.
+    const knownBy = normalizeKnownBy(card.knownBy ?? card.known_by ?? existing?.knownBy);
+    const witnessed = card.witnessed !== undefined ? !!card.witnessed : !!existing?.witnessed;
+    // Reducer-stamped at card birth; ages witnessed deeds for regional hearsay.
+    const firstSeenMessage = Number.isFinite(card.firstSeenMessage)
+        ? card.firstSeenMessage
+        : (Number.isFinite(existing?.firstSeenMessage) ? existing.firstSeenMessage : undefined);
 
     return {
+        ...(knownBy.length > 0 && { knownBy }),
+        ...(witnessed && { witnessed: true }),
+        ...(Number.isFinite(firstSeenMessage) && { firstSeenMessage }),
         id: cleanText(card.id, existing?.id || `mem-${now}-${Math.random().toString(36).slice(2, 7)}`),
         type,
         text,
@@ -225,10 +257,10 @@ export function buildStoryMemoryPromptBlock(memories = []) {
         // Array.isArray, not just ?.length — a string value has .length but no .join.
         const npcs = Array.isArray(m.linkedNpcNames) && m.linkedNpcNames.length ? ` | NPCs: ${m.linkedNpcNames.join(', ')}` : '';
         const loc = m.location ? ` | location: ${m.location}` : '';
-        return `- (${m.type}; salience ${m.salience}/5${subject}${npcs}${loc}) ${m.text}`;
+        return `- ${formatSecrecyTag(m.knownBy)}(${m.type}; salience ${m.salience}/5${subject}${npcs}${loc}) ${m.text}`;
     }).join('\n');
 
     return `## DRAMATIC CALLBACK OPPORTUNITIES
-These are compact story memories that may matter now. Use at most ONE naturally if it improves the scene. Do not force a callback, do not explain this memory system, and do not slow the turn down just to prove you remember something. If you visibly pay off or resolve one, mark it with memory_updates in the JSON.
+These are compact story memories that may matter now. Use at most ONE naturally if it improves the scene. Do not force a callback, do not explain this memory system, and do not slow the turn down just to prove you remember something. If you visibly pay off or resolve one, mark it with memory_updates in the JSON. A memory tagged SECRET is known ONLY to the people listed — no other character may reference or act on it.
 ${lines}`;
 }

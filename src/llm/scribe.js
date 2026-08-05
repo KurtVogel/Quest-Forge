@@ -24,7 +24,7 @@ const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Giv
 Output ONLY valid JSON:
 {
   "world_facts": [
-    { "fact": "A canonical statement of something now true in this world", "category": "lore|character|location|event|relationship" }
+    { "fact": "A canonical statement of something now true in this world", "category": "lore|character|location|event|relationship", "knownBy": ["ONLY for private information: exactly who knows it (use 'the hero' for the player) — omit entirely for common knowledge"] }
   ],
   "npc_updates": [
     {
@@ -59,12 +59,14 @@ Output ONLY valid JSON:
       "emotionalCharge": 0,
       "linkedNpcNames": ["exact NPC names"],
       "location": "place tied to the memory if any",
+      "knownBy": ["ONLY for private information: exactly who knows it (use 'the hero' for the player) — omit entirely for common knowledge"],
+      "witnessed": false,
       "source": "scribe"
     }
   ],
   "player_appearance": "concrete physical/visual description of the PLAYER's character, only if newly described this turn — otherwise omit",
   "location": "Current location if changed, or null",
-  "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly" }
+  "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly", "region": "the broader named land/realm/region this place belongs to, ONLY if the fiction establishes one (e.g. 'the Icebound Coast') — omit otherwise, never invent" }
 }
 
 Rules:
@@ -74,6 +76,7 @@ Rules:
 - DO record outcomes: "The goblin captain Rarg is dead", "The village of Millhaven burned to the ground"
 - Story memory is for emotionally or dramatically useful callbacks: promises, debts, named objects, scars, injuries, insults, flirtation, fears, private vows, unresolved clues, player-authored proper nouns, foreshadowing, NPC agendas, and relationship tension. A card must earn its slot: if you cannot picture the DM paying it off in a later scene, do not write it.
 - Capture player-authored canon from the player's action when it concerns their own compatible backstory, vows, names, and personal attachments the DM should remember later.
+- INFORMATION BOUNDARIES: when a fact or memory is PRIVATE — a secret, a confession, a hidden plan, something established behind closed doors or away from other ears — set "knownBy" to exactly the people who know it (use "the hero" for the player character; include eavesdroppers the narrative shows). Omit "knownBy" entirely for common knowledge; never write "everyone" into it. On story_memory, set "witnessed": true ONLY when the moment happened in front of uninvolved bystanders in a public or semi-public place (a market brawl, a tavern accusation, a wedding vow) — such moments can travel as gossip. Omit it for private moments.
 - A player message is not authoritative evidence about external reality. Do not turn player-asserted creatures, objects, exits, relationships, events, enemy behavior, or outcomes into world_facts, NPC updates, or playerCanon unless the DM narrative explicitly accepts or establishes them.
 - When AUTHORITATIVE ENGINE STATE is provided, it overrides the prose. Never record a combatant dead, alive, fled, surrendered, victorious, or defeated contrary to that state.
 - Keep story_memory compact; do not duplicate ordinary world_facts unless the memory has callback value.
@@ -634,7 +637,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                 type: 'UPDATE_LOCATION_PROFILE',
                 payload: {
                     name: locationProfile.name,
-                    profile: { type: locationProfile.type, danger: locationProfile.danger },
+                    profile: { type: locationProfile.type, danger: locationProfile.danger, region: locationProfile.region },
                 },
             });
         }

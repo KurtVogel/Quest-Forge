@@ -8,6 +8,45 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-05 ×2 · Living-world program round two: epistemics, the resolution ceremony, witnessed hearsay, and regional front seeding.**
+Four features shipped as one program on top of the same-day living-world system.
+**(1) Epistemics layer — characters only know what they could know.** Root cause of NPCs
+"knowing" secrets: one omniscient DM context with nothing saying who knows what; the fix
+changes the failure mode from "the model must infer" to "the model must obey a label"
+(structure beats vibes, the intensity-band principle). Story cards and world facts carry
+`knownBy` (Scribe-captured at extraction, zero new LLM calls; "public"-style entries clear
+the list via `normalizeKnownBy`; conditional keys so merges never wipe stored values);
+prompt rendering prefixes `[SECRET — known only to: …]` in WORLD FACTS, DRAMATIC CALLBACKS,
+and RAG-embedded text; CRITICAL RULE 9 states the boundary (narrator omniscient, characters
+not; hero's unspoken thoughts known to no one; knowledge spreads only through the fiction —
+hearsay is the legitimate propagation channel); the KNOWN NPCs header marks `secret:`/
+`agenda:` as that NPC's private interior. The narrator deliberately KEEPS seeing secrets —
+hiding them would break continuity; the boundary rides with the information instead.
+**(2) Front-resolution payoff ceremony.** Milestone XP is engine-computed
+(`getFrontResolutionMilestoneXp` = 50% of the current level's threshold, rpg-balance-master
+ruling: two resolutions = exactly one level at any level 1–19, always outsizes a fight,
+never routed through the LLM's exp_awarded channel; the resolution's one-shot guard is the
+replay ledger), and the 🕰️ line now invites a Chronicle chapter close, backed by
+`session.chapterCloseSuggested` rendering a golden nudge in the Chronicle tab, consumed by
+ADD_CHRONICLE_CHAPTER.
+**(3) Witnessed hearsay.** Scribe marks `witnessed: true` on story moments that happened
+before uninvolved bystanders; cards get a reducer-stamped `firstSeenMessage` birth index;
+`selectRegionalHearsay` gains a third deed source — salience ≥4 witnessed non-secret cards —
+so a public accusation or wedding vow travels like a battle does. Secrets never travel,
+whatever their salience: knownBy and witnessed are the two ends of one axis.
+**(4) Regional front seeding (world-tempo component 9, the v2 leftover).** "New region"
+detection is fiction-grounded: the Scribe's `location_profile` gains `region`; a profile
+naming a region NEW to the whole registry — while the hero stands there, at least one OTHER
+region is known (the first-ever region is home and never seeds), the region survives the
+first-value-wins canon rule, and the front web has room — raises one-shot
+`session.pendingRegionalFronts`. A background DM-model director (`llm/regionalFronts.js`,
+frontAftermath pattern, reusing its proposal sanitizer) proposes 1–2 pressures NATIVE to
+that land (mandatory flavor divergence, born invisible at clock 0, not aimed at the hero);
+`INSTALL_REGIONAL_FRONTS` validates via normalizeEmergentFront, caps at MAX_ACTIVE_FRONTS,
+stamps the arrival place as each front's theater (gated local from day one), and marks the
+region seeded even on an empty result — one shot per region, ever. Home fronts keep ticking
+untouched; returning home is absence drift's job.
+
 **2026-08-05 · The world keeps living while you're away: absence drift + traveling rumor (engine owns truth and scheduling, LLM owns the retelling).**
 Shipped both halves of the same-day IDEAS.md entry as one system triggered by one event —
 SET_LOCATION arriving at a DIFFERENT canonical location record (alias re-statements of the

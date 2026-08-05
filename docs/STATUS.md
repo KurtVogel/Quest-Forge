@@ -6,7 +6,28 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-05 evening (living-world system shipped: absence drift + traveling rumor; 1,391 tests green)._
+_Last updated: 2026-08-05 night (living-world round two: epistemics, resolution ceremony, witnessed hearsay, regional seeding; 1,407 tests green)._
+
+## Living-world round two 2026-08-05 (four features, DECISIONS.md 2026-08-05 ×2)
+
+**(1) Epistemics layer** — story cards + world facts carry Scribe-captured `knownBy`;
+prompt renders `[SECRET — known only to: …]` tags (WORLD FACTS, callbacks, RAG text);
+CRITICAL RULE 9: characters only know what they could know, the hero's unspoken thoughts
+are known to no one, knowledge spreads only through the fiction; KNOWN NPCs marks
+`secret:`/`agenda:` as private interior. **(2) Payoff ceremony** — front resolution now
+awards engine-computed milestone XP (50% of current level threshold; two resolutions = one
+level, rpg-balance-master ruling in agent memory) and nudges a Chronicle chapter close
+(session flag → golden hint, consumed on write). **(3) Witnessed hearsay** — Scribe marks
+public moments `witnessed`; salience ≥4 non-secret witnessed cards travel as the third
+rumor source (secrets never travel). **(4) Regional front seeding** (world-tempo
+component 9 done) — Scribe `location_profile.region`; a registry-new region (first-ever =
+home, never seeded) one-shot-triggers `llm/regionalFronts.js` (DM model) proposing 1–2
+native, flavor-divergent, born-invisible pressures; installed with the arrival place as
+theater, capped at 4 active, region marked seeded even on an empty result. **Watch items:
+next campaign, (a) tell one NPC a secret and check a stranger doesn't echo it; (b) resolve
+a front — expect XP line + level pacing + Chronicle nudge; (c) travel to a named new land —
+look for `[LivingWorld] Native pressures for …` in the console and that the new fronts
+stay whispers-gated outside their theater.**
 
 ## The world keeps living while you're away 2026-08-05 (absence drift + traveling rumor)
 

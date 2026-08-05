@@ -141,6 +141,37 @@ describe('selectRegionalHearsay', () => {
     it('returns nothing without a location name', () => {
         expect(selectRegionalHearsay({ fronts: [resolvedFront()], messages: msgs(40), messageIndex: 40 }).items).toHaveLength(0);
     });
+
+    it('lets a witnessed high-salience story moment travel, but never a secret', () => {
+        const at = HEARSAY_MIN_TRAVEL_DISTANCE + 10;
+        const { items } = selectRegionalHearsay({
+            storyMemory: [
+                { id: 'mem-1', text: 'Accused the magistrate of theft before the market crowd', witnessed: true, salience: 4, firstSeenMessage: 0, location: 'Mill Row' },
+                { id: 'mem-2', text: 'Plans to rob the tithe wagon', witnessed: true, salience: 5, firstSeenMessage: 0, knownBy: ['the hero'] },
+                { id: 'mem-3', text: 'A private kindness', witnessed: false, salience: 5, firstSeenMessage: 0 },
+                { id: 'mem-4', text: 'Minor witnessed chatter', witnessed: true, salience: 2, firstSeenMessage: 0 },
+            ],
+            locationName: 'Saltmarsh',
+            messages: msgs(at),
+            messageIndex: at,
+        });
+        expect(items).toHaveLength(1);
+        expect(items[0].text).toContain('Accused the magistrate');
+        expect(items[0].grade).toBe('secondhand');
+    });
+
+    it('a witnessed moment at THIS place is firsthand local memory', () => {
+        const { items } = selectRegionalHearsay({
+            storyMemory: [
+                { id: 'mem-1', text: 'Won the archery purse at the fair', witnessed: true, salience: 4, firstSeenMessage: 30, location: 'Saltmarsh' },
+            ],
+            locationName: 'Saltmarsh',
+            messages: msgs(33),
+            messageIndex: 33,
+        });
+        expect(items).toHaveLength(1);
+        expect(items[0].grade).toBe('firsthand');
+    });
 });
 
 describe('hearsay ledger boundaries', () => {

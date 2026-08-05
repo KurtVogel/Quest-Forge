@@ -5,6 +5,7 @@
 import { computeACFromInventory } from '../../engine/rules.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
+import { normalizeKnownBy } from '../../engine/storyMemory.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
 import { NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isCompanionActive } from '../../engine/combatExchange.js';
@@ -121,7 +122,10 @@ export function sanitizeWorldFactPayload(payload) {
     const category = (typeof payload.category === 'string' && payload.category.trim())
         ? payload.category.trim().slice(0, WORLD_FACT_CATEGORY_MAX_LENGTH)
         : 'general';
-    return { fact, category };
+    // Epistemics boundary (DECISIONS.md 2026-08-05 ×2): a non-empty knownBy
+    // marks the fact as private to exactly those people. Always present in the
+    // output so a hostile save's junk value gets overwritten on load.
+    return { fact, category, knownBy: normalizeKnownBy(payload.knownBy ?? payload.known_by) };
 }
 
 export const RECENT_TRANSACTION_LIMIT = 20;

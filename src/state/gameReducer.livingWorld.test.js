@@ -163,6 +163,215 @@ describe('INSTALL_ABSENCE_DRIFT', () => {
     });
 });
 
+describe('epistemics capture in the reducer', () => {
+    it('ADD_WORLD_FACTS keeps a knower list and clears public-style entries', () => {
+        const state = gameReducer(initialGameState, {
+            type: 'ADD_WORLD_FACTS',
+            payload: [
+                { fact: 'The mayor forged the tithe ledger', category: 'event', knownBy: ['Marta', 'the hero'] },
+                { fact: 'The ferry sank in spring', category: 'event', knownBy: ['everyone'] },
+            ],
+        });
+        expect(state.worldFacts[0].knownBy).toEqual(['Marta', 'the hero']);
+        expect(state.worldFacts[1].knownBy).toEqual([]);
+    });
+
+    it('ADD_STORY_MEMORY_CARD stamps firstSeenMessage at birth and keeps it on merge', () => {
+        let state = { ...initialGameState, messages: Array.from({ length: 7 }, (_, i) => ({ role: 'user', content: `m${i}` })) };
+        state = gameReducer(state, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { text: 'Accused the magistrate before the crowd', type: 'callback', witnessed: true, salience: 4 },
+        });
+        expect(state.storyMemory[0].firstSeenMessage).toBe(7);
+        expect(state.storyMemory[0].witnessed).toBe(true);
+
+        state = { ...state, messages: [...state.messages, { role: 'assistant', content: 'later' }] };
+        state = gameReducer(state, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { text: 'Accused the magistrate before the crowd, loudly', type: 'callback' },
+        });
+        expect(state.storyMemory).toHaveLength(1);
+        expect(state.storyMemory[0].firstSeenMessage).toBe(7);
+        expect(state.storyMemory[0].witnessed).toBe(true);
+    });
+});
+
+describe('front-resolution payoff ceremony', () => {
+    const resolvableState = () => ({
+        ...initialGameState,
+        messages: msgs(10),
+        session: { ...initialGameState.session, id: 'campaign-1' },
+        character: {
+            name: 'Rauha', race: 'human', class: 'cleric', level: 3, exp: 0,
+            maxHP: 20, currentHP: 20,
+            abilityScores: { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
+        },
+        fronts: [{
+            id: 'front-brood', title: 'The Mill Brood', status: 'active',
+            clock: 5, maxClock: 6, stage: 2, grimPortents: ['a', 'b', 'c'],
+            goal: 'Overrun the mill', stakes: 'The mill falls',
+        }],
+    });
+
+    it('awards engine-computed milestone XP and raises the chapter-close nudge, one-shot', () => {
+        const next = gameReducer(resolvableState(), {
+            type: 'UPDATE_FRONT',
+            payload: { id: 'front-brood', status: 'resolved', notes: 'burned out of the cellar' },
+        });
+        // L3 threshold is 1800 → milestone 900.
+        expect(next.character.exp).toBe(900);
+        expect(next.messages.some(m => m.role === 'system' && m.content.includes('campaign milestone'))).toBe(true);
+        expect(next.messages.some(m => m.role === 'system' && m.content.includes('Chronicle tab'))).toBe(true);
+        expect(next.session.chapterCloseSuggested).toMatchObject({ frontId: 'front-brood', title: 'The Mill Brood' });
+
+        // Re-emitting "resolved" on a later turn must not pay twice.
+        const replay = gameReducer(next, {
+            type: 'UPDATE_FRONT',
+            payload: { id: 'front-brood', status: 'resolved', notes: 'burned out of the cellar' },
+        });
+        expect(replay.character.exp).toBe(900);
+    });
+
+    it('two resolutions at the same level are exactly one level-up', () => {
+        const state = {
+            ...resolvableState(),
+            fronts: [
+                ...resolvableState().fronts,
+                { id: 'front-ledger', title: 'The Grey Ledger', status: 'active', clock: 5, maxClock: 6, stage: 2, grimPortents: ['a', 'b', 'c'], goal: 'Own the debts', stakes: 'Debt slavery' },
+            ],
+        };
+        let next = gameReducer(state, { type: 'UPDATE_FRONT', payload: { id: 'front-brood', status: 'resolved' } });
+        expect(next.character.level).toBe(3);
+        next = gameReducer(next, { type: 'UPDATE_FRONT', payload: { id: 'front-ledger', status: 'resolved' } });
+        expect(next.character.level).toBe(4);
+        expect(next.character.exp).toBe(0);
+    });
+
+    it('writing a chronicle chapter consumes the nudge', () => {
+        const resolved = gameReducer(resolvableState(), {
+            type: 'UPDATE_FRONT',
+            payload: { id: 'front-brood', status: 'resolved' },
+        });
+        const written = gameReducer(resolved, {
+            type: 'ADD_CHRONICLE_CHAPTER',
+            payload: { text: 'And so the brood burned.', title: 'Chapter 1', fromIndex: 0, toIndex: 9 },
+        });
+        expect(written.session.chapterCloseSuggested).toBeNull();
+    });
+});
+
+describe('regional front seeding', () => {
+    const proposal = (title, factionName) => ({
+        title,
+        goal: 'Control the ice roads',
+        stakes: 'The coast starves',
+        grimPortents: ['tolls rise', 'a village empties', 'open seizure'],
+        faction: { name: factionName, goal: 'Own every sled route' },
+        reason: 'native to the coast',
+    });
+
+    const traveled = () => {
+        let state = { ...initialGameState, session: { ...initialGameState.session, id: 'campaign-1' }, messages: msgs(20) };
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
+        state = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Aldermill', profile: { type: 'settlement', danger: 'low', region: 'the Riverlands' } },
+        });
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Fort Halla' });
+        return state;
+    };
+
+    it('never seeds the first-ever region (home), and seeds a genuinely new one', () => {
+        let state = traveled();
+        expect(state.session.pendingRegionalFronts).toBeUndefined();
+
+        state = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Fort Halla', profile: { type: 'frontier', danger: 'moderate', region: 'the Icebound Coast' } },
+        });
+        expect(state.session.pendingRegionalFronts).toMatchObject({
+            region: 'the Icebound Coast',
+            locationName: 'Fort Halla',
+        });
+    });
+
+    it('does not seed for a known region, from afar, or past the active-front cap', () => {
+        let state = traveled();
+        // Same region as home → no marker.
+        const sameRegion = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Fort Halla', profile: { region: 'the Riverlands' } },
+        });
+        expect(sameRegion.session.pendingRegionalFronts).toBeUndefined();
+
+        // Classifying a place the hero is NOT at → no marker.
+        const elsewhere = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Aldermill', profile: { region: 'the Riverlands' } },
+        });
+        expect(elsewhere.session.pendingRegionalFronts).toBeUndefined();
+
+        // Full front web → no marker.
+        const full = {
+            ...state,
+            fronts: Array.from({ length: 4 }, (_, i) => ({ id: `f${i}`, title: `F${i}`, status: 'active' })),
+        };
+        const capped = gameReducer(full, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },
+        });
+        expect(capped.session.pendingRegionalFronts).toBeUndefined();
+    });
+
+    it('INSTALL_REGIONAL_FRONTS installs validated natives with the arrival theater, one-shot', () => {
+        let state = traveled();
+        state = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },
+        });
+        const key = state.session.pendingRegionalFronts.key;
+
+        const installed = gameReducer(state, {
+            type: 'INSTALL_REGIONAL_FRONTS',
+            payload: { sessionId: 'campaign-1', key, fronts: [proposal('The Sled Toll', 'Kettu Syndicate'), { title: 'Junk' }] },
+        });
+        expect(installed.session.pendingRegionalFronts).toBeNull();
+        expect(installed.session.seededRegions).toContain('the Icebound Coast');
+        const regional = installed.fronts.find(f => f.title === 'The Sled Toll');
+        expect(regional.clock).toBe(0);
+        const halla = installed.locations.find(r => r.name === 'Fort Halla');
+        expect(halla.theaterFrontIds).toContain(regional.id);
+
+        // Replay after the marker is spent: dropped.
+        expect(gameReducer(installed, {
+            type: 'INSTALL_REGIONAL_FRONTS',
+            payload: { sessionId: 'campaign-1', key, fronts: [proposal('Again', 'Again Clan')] },
+        })).toBe(installed);
+
+        // A region that was seeded (even emptily) never re-triggers.
+        const again = gameReducer(installed, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },
+        });
+        expect(again.session.pendingRegionalFronts).toBeNull();
+    });
+
+    it('marks the region seeded even when every proposal fails validation', () => {
+        let state = traveled();
+        state = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },
+        });
+        const empty = gameReducer(state, {
+            type: 'INSTALL_REGIONAL_FRONTS',
+            payload: { sessionId: 'campaign-1', key: state.session.pendingRegionalFronts.key, fronts: [{ title: 'Junk' }] },
+        });
+        expect(empty.session.pendingRegionalFronts).toBeNull();
+        expect(empty.session.seededRegions).toContain('the Icebound Coast');
+        expect(empty.fronts).toEqual(state.fronts);
+    });
+});
+
 describe('LOAD_GAME sanitation', () => {
     it('sanitizes the hearsay ledger from hostile saves', () => {
         const loaded = gameReducer(initialGameState, {

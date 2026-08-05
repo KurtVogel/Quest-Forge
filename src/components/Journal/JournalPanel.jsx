@@ -221,6 +221,7 @@ export default function JournalPanel({ isOpen, onClose }) {
                             status={chronicleStatus}
                             onWrite={handleWriteChapter}
                             onExport={handleExportChronicle}
+                            suggestedTitle={state.session?.chapterCloseSuggested?.title || null}
                         />
                     )}
                     {tab === 'npcs' && (
@@ -288,7 +289,7 @@ export default function JournalPanel({ isOpen, onClose }) {
     );
 }
 
-function ChronicleTab({ chapters, messages, chapterTitle, onChapterTitle, writing, status, onWrite, onExport }) {
+function ChronicleTab({ chapters, messages, chapterTitle, onChapterTitle, writing, status, onWrite, onExport, suggestedTitle }) {
     const lastChronicled = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) : -1;
     const pendingCount = collectChapterMessages(messages, lastChronicled + 1).length;
     const canWrite = pendingCount >= CHRONICLE_MIN_MESSAGES;
@@ -296,6 +297,12 @@ function ChronicleTab({ chapters, messages, chapterTitle, onChapterTitle, writin
     return (
         <div className="chronicle-tab">
             <div className="chronicle-compose">
+                {suggestedTitle && canWrite && !writing && (
+                    <p className="journal-hint chronicle-suggested">
+                        🕰️ The fall of “{suggestedTitle}” just closed a major arc — a fitting
+                        moment to close this chapter of the saga.
+                    </p>
+                )}
                 <p className="journal-hint">
                     Close a chapter to have the chronicler retell your play since the last one as
                     a continuous saga — written from the actual scenes, kept forever, never shown

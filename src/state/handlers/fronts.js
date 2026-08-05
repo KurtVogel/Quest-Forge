@@ -12,6 +12,7 @@ import {
     normalizeFrontUpdate,
 } from '../../engine/fronts.js';
 import { MAX_ACTIVE_FRONTS, normalizeTempoDirective } from '../../engine/worldTempo.js';
+import { awardExperience, getFrontResolutionMilestoneXp } from '../../engine/progression.js';
 import { upsertLocation } from '../../engine/locationRegistry.js';
 import { gameReducer } from '../gameReducer.js';
 import { systemMessage } from './shared.js';
@@ -193,17 +194,36 @@ export const handlers = {
         // The payoff reveal: the private clockwork surfaces as table canon
         // exactly once, at the moment the player has earned it.
         next.messages = [...(next.messages || []), systemMessage(
-            `🕰️ **The world shifts: "${updatedFront.title}" has ended.** A hidden pressure that has been moving against you since it first stirred is now broken for good — this victory is part of the campaign's canon.`
+            `🕰️ **The world shifts: "${updatedFront.title}" has ended.** A hidden pressure that has been moving against you since it first stirred is now broken for good — this victory is part of the campaign's canon. A major arc just closed: the Journal's Chronicle tab is ready to retell it as a chapter of your saga.`
         )];
+        // Milestone XP (DECISIONS.md 2026-08-05 ×2, rpg-balance-master ruling):
+        // engine-computed from the character's CURRENT level at this exact
+        // moment — never via the LLM's exp_awarded channel. The resolution's
+        // own one-shot guard is the replay ledger.
+        if (next.character) {
+            const awarded = awardExperience(
+                next.character,
+                getFrontResolutionMilestoneXp(next.character.level),
+                { reason: `campaign milestone — "${updatedFront.title}" ended` }
+            );
+            next.character = awarded.character;
+            next.messages = [...next.messages, ...awarded.messages];
+        }
         // Aftermath hook: a background director decides (later, outside the
         // reducer) whether this specific victory leaves survivors, debts, or a
-        // power vacuum — or was simply, cleanly won.
+        // power vacuum — or was simply, cleanly won. chapterCloseSuggested is
+        // the Chronicle tab's ceremony nudge, cleared when a chapter is written.
         next.session = {
             ...next.session,
             pendingFrontAftermath: {
                 frontId: existing.id,
                 title: updatedFront.title,
                 resolvedAt: Date.now(),
+            },
+            chapterCloseSuggested: {
+                frontId: existing.id,
+                title: updatedFront.title,
+                at: Date.now(),
             },
         };
         return gameReducer(next, {
@@ -240,6 +260,42 @@ export const handlers = {
             session,
             ...(additions.length > 0 && { fronts: [...fronts, ...additions] }),
         };
+    },
+
+    /**
+     * One-shot install of a new region's native pressures (world-tempo
+     * component 9, DECISIONS.md 2026-08-05 ×2). The region is marked seeded
+     * even when every proposal fails validation — one shot per region, no
+     * retry loops. Additions are capped by MAX_ACTIVE_FRONTS and born with
+     * the arrival place as their theater, so existing gating keeps them
+     * local from day one.
+     */
+    INSTALL_REGIONAL_FRONTS(state, action) {
+        const payload = action.payload || {};
+        const pending = state.session?.pendingRegionalFronts;
+        if (!pending || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
+        const seededRegions = [...(state.session?.seededRegions || []), pending.region].slice(-12);
+        const session = { ...state.session, pendingRegionalFronts: null, seededRegions };
+        const fronts = state.fronts || [];
+        const activeCount = fronts.filter(f => (f.status || 'active') === 'active').length;
+        const room = Math.min(2, Math.max(0, MAX_ACTIVE_FRONTS - activeCount));
+        const additions = [];
+        for (const proposal of (Array.isArray(payload.fronts) ? payload.fronts : []).slice(0, 2)) {
+            if (additions.length >= room) break;
+            const front = normalizeEmergentFront(proposal, [...fronts, ...additions]);
+            if (!front) continue;
+            additions.push(normalizeFront({
+                ...front,
+                id: `front-region-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            }, front));
+        }
+        if (additions.length === 0) return { ...state, session };
+        let locations = state.locations || [];
+        for (const front of additions) {
+            locations = upsertLocation(locations, pending.locationName, { theaterFrontIds: [front.id] });
+        }
+        // Private like every front: no system line, the player only ever feels it.
+        return { ...state, session, fronts: [...fronts, ...additions], locations };
     },
 
     APPLY_FRONT_ADVANCE_BATCH(state, action) {

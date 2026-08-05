@@ -74,7 +74,10 @@ export const handlers = {
         if (!card) return state;
         const idx = findStoryMemoryMatch(state.storyMemory || [], card);
         if (idx === -1) {
-            return { ...state, storyMemory: [...(state.storyMemory || []), card] };
+            // Message-index birth stamp: regional hearsay measures a witnessed
+            // deed's age in conversational messages, which wall-clock can't do.
+            const born = { ...card, firstSeenMessage: (state.messages || []).length };
+            return { ...state, storyMemory: [...(state.storyMemory || []), born] };
         }
         const existing = state.storyMemory[idx];
         return {
@@ -147,6 +150,10 @@ export const handlers = {
     ADD_CHRONICLE_CHAPTER(state, action) {
         const chronicle = appendChronicleChapter(state.chronicle, action.payload);
         if (chronicle === (state.chronicle || [])) return state;
-        return { ...state, chronicle };
+        // Writing a chapter consumes the front-resolution ceremony nudge.
+        const session = state.session?.chapterCloseSuggested
+            ? { ...state.session, chapterCloseSuggested: null }
+            : state.session;
+        return { ...state, chronicle, session };
     },
 };

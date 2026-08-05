@@ -8,7 +8,7 @@ import { formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifie
 import { getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
-import { buildStoryMemoryPromptBlock } from '../engine/storyMemory.js';
+import { buildStoryMemoryPromptBlock, formatSecrecyTag } from '../engine/storyMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
 import { formatCurrency } from '../engine/currency.js';
 import { CLASSES } from '../data/classes.js';
@@ -257,6 +257,8 @@ Your role is to create an immersive, reactive, and fair narrative experience.
 7. **HONOR THE WORLD FACTS.** The WORLD FACTS section contains canonical truths established during play. You MUST treat these as absolute — do not contradict them. If a character is listed as dead, they are dead. If a place burned down, it burned down.
 
 8. **HONOR THE CAMPAIGN PREMISE.** If a CAMPAIGN PREMISE section is present, it is the player's authored foundation for this story — the setting, the character's situation, and the proper nouns (places, names, factions) they brought to the table. Treat every detail in it as permanent canon, exactly as binding as the WORLD FACTS. Never forget, rename, or contradict a place or name the premise establishes (e.g. a home city the character was exiled from remains real for the whole campaign). Weave it into the world as the story unfolds.
+
+9. **INFORMATION HAS BOUNDARIES — CHARACTERS ONLY KNOW WHAT THEY COULD KNOW.** You, the narrator, see everything in this prompt; the characters do NOT. Anything tagged \`[SECRET — known only to: …]\`, an NPC's own \`secret:\`, \`agenda:\`, and private motives, hidden front state, and the hero's unspoken thoughts, feelings, and plans are unknown to every character not listed or present when they were established. A character who was not there and was never told must not reference such information, hint at it, or conveniently act around it. Knowledge spreads ONLY through the fiction: someone reveals it on-screen, it is overheard, or it plausibly traveled (a REGIONAL HEARSAY section shows what has). When in doubt, the character does not know — play the ignorance honestly, even when it would be dramatic for them to know.
 
 ${NPC_NAME_DIVERSITY_RULES}
 
@@ -894,7 +896,9 @@ function buildWorldFactsBlock(worldFacts) {
     for (const f of shown) {
         const cat = typeof f.category === 'string' && f.category ? f.category : 'general';
         if (!byCategory[cat]) byCategory[cat] = [];
-        byCategory[cat].push(String(f.fact ?? ''));
+        // Secret facts carry their knower list right on the line — the narrator
+        // keeps the canon, the CHARACTERS get the boundary (rule 9).
+        byCategory[cat].push(`${formatSecrecyTag(f.knownBy)}${String(f.fact ?? '')}`);
     }
     const lines = Object.entries(byCategory)
         .map(([cat, facts]) => `**[${cat.toUpperCase()}]**\n${facts.map(f => `- ${f}`).join('\n')}`)

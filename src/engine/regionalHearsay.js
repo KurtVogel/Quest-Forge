@@ -74,10 +74,14 @@ function ledgerHas(recentHearsay, deedKey, locKey) {
  * place the hero just arrived. Pure; the SET_LOCATION handler wires it.
  * Returns { items, ledgerEntries } — empty items means no line this arrival.
  */
+/** Salience floor for a witnessed story moment to travel as gossip. */
+export const HEARSAY_MIN_CARD_SALIENCE = 4;
+
 export function selectRegionalHearsay({
     fronts = [],
     recentEncounters = [],
     recentHearsay = [],
+    storyMemory = [],
     locations = [],
     locationName,
     messages = null,
@@ -103,6 +107,27 @@ export function selectRegionalHearsay({
         consider(`front:${front.id}`, {
             text: `the hero ending the pressure known as "${cleanText(front.title, 90)}"${front.resolution ? ` (${cleanText(front.resolution, 160)})` : ''}`,
             grade: gradeFor({ local: false, age }),
+        });
+    }
+
+    // Witnessed story moments next (DECISIONS.md 2026-08-05 ×2): a public
+    // accusation, a wedding vow, a market-square humiliation — the Scribe marks
+    // `witnessed` at extraction, so non-combat deeds travel too. Secrets
+    // (knownBy) never do, whatever their salience.
+    const publicMoments = (Array.isArray(storyMemory) ? storyMemory : [])
+        .filter(card => card && card.witnessed && card.text
+            && !(Array.isArray(card.knownBy) && card.knownBy.length > 0)
+            && (card.salience || 0) >= HEARSAY_MIN_CARD_SALIENCE
+            && card.status !== 'dormant'
+            && Number.isFinite(card.firstSeenMessage))
+        .reverse();
+    for (const card of publicMoments) {
+        const local = card.location ? sameSpot(locations, card.location, here) : false;
+        const age = distanceSince(messages, card.firstSeenMessage, messageIndex);
+        if (!local && age < HEARSAY_MIN_TRAVEL_DISTANCE) continue;
+        consider(`card:${card.id}`, {
+            text: cleanText(card.text, 220),
+            grade: gradeFor({ local, age }),
         });
     }
 

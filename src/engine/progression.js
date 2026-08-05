@@ -26,6 +26,20 @@ export function isMaxLevel(level) {
     return Math.max(1, Number(level) || 1) >= MAX_CHARACTER_LEVEL;
 }
 
+/**
+ * Milestone XP for decisively ending a hidden campaign front (DECISIONS.md
+ * 2026-08-05 ×2, rpg-balance-master ruling): half the XP gap from the
+ * character's current level to the next, so two resolutions with no other XP
+ * are exactly one level-up at any level 1–19. Scales with the non-flat
+ * threshold table where any flat number would be trivial at L15 and a full
+ * level dump at L1; always outsizes a single fight (combat XP clamps at
+ * 25–300 per enemy). Engine-computed only — never routed through the
+ * LLM-declared exp_awarded channel.
+ */
+export function getFrontResolutionMilestoneXp(level) {
+    return Math.round(0.5 * getExperienceThreshold(Math.max(1, Number(level) || 1)));
+}
+
 function createSystemMessage(kind, content) {
     return {
         id: `msg-${Date.now()}-${kind}-${Math.random().toString(36).slice(2, 7)}`,

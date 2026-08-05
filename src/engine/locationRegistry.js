@@ -95,7 +95,28 @@ export function normalizeLocationRecord(record = {}, existing = null) {
         lastVisitedMessage: Number.isFinite(record.lastVisitedMessage)
             ? record.lastVisitedMessage
             : (Number.isFinite(existing?.lastVisitedMessage) ? existing.lastVisitedMessage : null),
+        // The broader named land this place belongs to (Scribe-classified,
+        // DECISIONS.md 2026-08-05 ×2) — drives regional front seeding. The
+        // FIRST fiction-established value wins: a place's region is canon, and
+        // a later re-classification must not mint a phantom "new region".
+        region: existing?.region || cleanText(record.region, 60) || null,
     };
+}
+
+/** "the Icebound Coast" and "Icebound Coast, the frozen north" are one region. */
+export function isSameRegion(a, b) {
+    if (!a || !b) return false;
+    return containment(locationTokens(a), locationTokens(b)) >= 0.99;
+}
+
+/** Distinct region names known to the registry (first occurrence wins). */
+export function collectKnownRegions(locations = []) {
+    const regions = [];
+    for (const record of locations || []) {
+        const region = cleanText(record?.region, 60);
+        if (region && !regions.some(known => isSameRegion(known, region))) regions.push(region);
+    }
+    return regions;
 }
 
 /**
