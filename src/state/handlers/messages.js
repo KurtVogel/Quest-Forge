@@ -9,6 +9,7 @@ import {
     RECENT_RULING_LIMIT,
     sanitizePendingRoleplayCheck,
 } from '../../engine/roleplayCheck.js';
+import { appendRollHistory } from './shared.js';
 
 export const handlers = {
     ADD_MESSAGE(state, action) {
@@ -79,7 +80,7 @@ export const handlers = {
     ADD_ROLL(state, action) {
         return {
             ...state,
-            rollHistory: [...state.rollHistory, action.payload],
+            rollHistory: appendRollHistory(state.rollHistory, action.payload),
         };
     },
 };

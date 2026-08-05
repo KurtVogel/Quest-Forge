@@ -15,7 +15,7 @@
  * mocks queue per-die values against exactly those entry points.
  */
 
-import { rollWithModifier, parseNotation } from './dice.ts';
+import { rollDice, rollWithModifier, parseNotation } from './dice.ts';
 import { getEquippedWeapon, getSneakAttackDice, getConditionRollEffects, combineRollModifiers } from './rules.js';
 
 /**
@@ -137,13 +137,8 @@ export function rollDamage(notation, description, {
         const sneakAttackDice = getSneakAttackDice(character, weapon, advantage, disadvantage, hasAlly);
         if (sneakAttackDice > 0) {
             const saDiceCount = critical ? sneakAttackDice * 2 : sneakAttackDice;
-            const saRolls = [];
-            let saTotal = 0;
-            for (let i = 0; i < saDiceCount; i++) {
-                const r = rollWithModifier(1, 6, 0, 'Sneak Attack').rolls[0];
-                saRolls.push(r);
-                saTotal += r;
-            }
+            const saRolls = rollDice(saDiceCount, 6);
+            const saTotal = saRolls.reduce((sum, r) => sum + r, 0);
             roll.total += saTotal;
             sneakAttackDetail = {
                 diceCount: saDiceCount,

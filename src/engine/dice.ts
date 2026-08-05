@@ -24,6 +24,10 @@ let rollIdCounter = 0;
 // "9999999d6" must fail loudly like "1d0" does instead of looping the tab to death.
 // 100 dice covers every legitimate game roll with a wide margin.
 export const MAX_DICE_COUNT = 100;
+// Symmetric bound for the other notation axis: "1d999999999" is valid syntax and
+// reached the engine via un-sanitized LLM damage fields (a self-favoring one-shot).
+// d100 is the largest real die; 1000 leaves absurd-but-harmless headroom.
+export const MAX_DIE_SIDES = 1000;
 // Looser engine-level backstop so internal doubling (crit rolls take parsed.count * 2)
 // can never trip it — this catches programming errors, not LLM input.
 const DICE_COUNT_BACKSTOP = 1000;
@@ -34,7 +38,7 @@ const DICE_COUNT_BACKSTOP = 1000;
 export function rollDie(sides: number): number {
   // `x % 0` is NaN in JS and NaN is sticky through every downstream sum —
   // a corrupted "1d0" profile must fail loudly here, not poison HP math silently.
-  if (!Number.isInteger(sides) || sides <= 0) {
+  if (!Number.isInteger(sides) || sides <= 0 || sides > MAX_DIE_SIDES) {
     throw new Error(`Invalid die: d${sides}`);
   }
   // Rejection-sample away the modulo bias: raw Uint32 % sides slightly favors low
@@ -58,9 +62,22 @@ export function rollDice(count: number, sides: number): number[] {
   if (!Number.isInteger(count) || count < 1 || count > DICE_COUNT_BACKSTOP) {
     throw new Error(`Invalid dice count: ${count}`);
   }
+  if (!Number.isInteger(sides) || sides <= 0 || sides > MAX_DIE_SIDES) {
+    throw new Error(`Invalid die: d${sides}`);
+  }
+  // One batched crypto draw for the whole pool (rollDie allocated a Uint32Array
+  // per die). Same rejection sampling as rollDie: values past the truncated
+  // final cycle are discarded and redrawn, so fairness is bit-identical.
+  const limit = 0x100000000 - (0x100000000 % sides);
   const results: number[] = [];
-  for (let i = 0; i < count; i++) {
-    results.push(rollDie(sides));
+  const array = new Uint32Array(count);
+  while (results.length < count) {
+    crypto.getRandomValues(array);
+    for (let i = 0; i < array.length && results.length < count; i++) {
+      if (array[i] < limit) {
+        results.push((array[i] % sides) + 1);
+      }
+    }
   }
   return results;
 }
@@ -112,7 +129,7 @@ export function parseNotation(notation: string): { count: number; sides: number;
   // The regex accepts "0d6", "1d0", and "9999999d6"; the first two would silently
   // produce empty or NaN rolls downstream, the last would freeze the tab rolling
   // millions of dice. Reject all of them like any other malformed notation.
-  if (count < 1 || sides < 1 || count > MAX_DICE_COUNT) {
+  if (count < 1 || sides < 1 || count > MAX_DICE_COUNT || sides > MAX_DIE_SIDES) {
     throw new Error(`Invalid dice notation: "${notation}"`);
   }
   return {

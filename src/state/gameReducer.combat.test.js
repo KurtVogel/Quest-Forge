@@ -26,6 +26,7 @@ vi.mock('../engine/dice.ts', () => {
     };
     return {
         rollDie: () => draw(),
+        rollDice: (count) => Array.from({ length: count }, draw),
         rollWithModifier: (count, sides, modifier = 0, description = '') =>
             makeResult(Array.from({ length: count }, draw), modifier, description),
         rollNotation: (notation, description = '') => makeResult([draw()], 0, description || notation),

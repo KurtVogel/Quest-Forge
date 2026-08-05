@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     MAX_DICE_COUNT,
+    MAX_DIE_SIDES,
     parseNotation,
     rollDie,
     rollDice,
@@ -122,6 +123,16 @@ describe('parseNotation', () => {
         expect(() => parseNotation(`${MAX_DICE_COUNT + 1}d6`)).toThrow(/Invalid dice notation/);
         // The boundary itself stays valid.
         expect(parseNotation(`${MAX_DICE_COUNT}d6`).count).toBe(MAX_DICE_COUNT);
+    });
+
+    it('rejects absurd die sizes symmetrically (2026-08-01 queue P2)', () => {
+        // "1d999999999" was valid notation and reached the engine via
+        // un-sanitized LLM damage fields — a self-favoring one-shot.
+        expect(() => parseNotation('1d999999999')).toThrow(/Invalid dice notation/);
+        expect(() => parseNotation(`1d${MAX_DIE_SIDES + 1}`)).toThrow(/Invalid dice notation/);
+        expect(parseNotation(`1d${MAX_DIE_SIDES}`).sides).toBe(MAX_DIE_SIDES);
+        expect(() => rollDie(MAX_DIE_SIDES + 1)).toThrow(/Invalid die/);
+        expect(() => rollDice(2, MAX_DIE_SIDES + 1)).toThrow(/Invalid die/);
     });
 });
 

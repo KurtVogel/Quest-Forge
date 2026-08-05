@@ -8,6 +8,7 @@ import { rollDie, rollNotation } from '../../engine/dice.ts';
 import { applyArcaneRecovery, refillSpellSlots, summarizeSpellSlots } from '../../engine/spellcasting.js';
 import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
 import {
+    appendRollHistory,
     companionStatus,
     currentMessageIndex,
     isPlayerCombatTurn,
@@ -147,7 +148,7 @@ export const handlers = {
                 combat: usesBonusAction && state.combat.active
                     ? { ...state.combat, bonusActionUsed: true }
                     : state.combat,
-                rollHistory: [...state.rollHistory, roll],
+                rollHistory: appendRollHistory(state.rollHistory, roll),
                 messages: [
                     ...state.messages,
                     systemMessage(

@@ -18,7 +18,7 @@ export default function DicePanel() {
                     {state.rollHistory.length === 0 ? (
                         <div className="dice-log-empty">No rolls yet</div>
                     ) : (
-                        [...state.rollHistory].reverse().slice(0, 20).map((roll) => (
+                        state.rollHistory.slice(-20).reverse().map((roll) => (
                             <div
                                 key={roll.id}
                                 className={`dice-log-entry ${roll.isCritical ? 'crit' : ''} ${roll.isCritFail ? 'critfail' : ''}`}

@@ -18,7 +18,7 @@ import { COMBAT_PHASES, exchangeEventLines, isEnemyActive, mergeCharacterUpdates
 import { appendRecentEncounter, buildEncounterEntry } from '../../engine/worldTempo.js';
 import { initialGameState } from '../initialState.js';
 import { gameReducer } from '../gameReducer.js';
-import { clearSustainedSpellState, reviveCharacter, systemMessage } from './shared.js';
+import { appendRollHistory, clearSustainedSpellState, reviveCharacter, systemMessage } from './shared.js';
 
 function canonicalCombatEnemyId(enemy, index, usedIds) {
     const fragment = String(enemy?.id || enemy?.name || index + 1)
@@ -128,7 +128,7 @@ export const handlers = {
                 resolvedExchangeIds: [],
                 flankedEnemyIds: [],
             },
-            rollHistory: [...state.rollHistory, playerInitiativeRoll],
+            rollHistory: appendRollHistory(state.rollHistory, playerInitiativeRoll),
             messages: [
                 ...state.messages,
                 systemMessage(`**Initiative** — ${state.character?.name || 'You'} rolled **${playerInitiativeRoll.total}** (d20: ${playerInitiativeRoll.rolls.join(', ')}${dexMod ? `, DEX ${dexMod >= 0 ? '+' : ''}${dexMod}` : ''}).`),
@@ -258,7 +258,7 @@ export const handlers = {
             ...next,
             character,
             party: Array.isArray(payload.party) ? payload.party : next.party,
-            rollHistory: [...next.rollHistory, ...(Array.isArray(payload.rolls) ? payload.rolls : [])],
+            rollHistory: appendRollHistory(next.rollHistory, Array.isArray(payload.rolls) ? payload.rolls : []),
             messages: [...next.messages.slice(0, preExchangeMessageCount), ...resultMessages, ...statusMessages],
             combat: {
                 ...next.combat,

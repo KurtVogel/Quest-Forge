@@ -9,6 +9,7 @@ import { gameReducer } from '../gameReducer.js';
 import {
     companionStatus,
     consumeItem,
+    appendRollHistory,
     isPlayerCombatTurn,
     mintOwnedItem,
     normalizeCompanion,
@@ -153,7 +154,7 @@ export const handlers = {
                     ? normalizeCompanion({ hp: healedTo, status: companionStatus(healedTo, companionMaxHp) }, c)
                     : c),
                 inventory: consumeItem(state.inventory, item.id),
-                rollHistory: [...state.rollHistory, roll],
+                rollHistory: appendRollHistory(state.rollHistory, roll),
                 messages: [
                     ...state.messages,
                     systemMessage(
@@ -219,7 +220,7 @@ export const handlers = {
                     ? { ...state.combat, bonusActionUsed: true }
                     : state.combat,
                 inventory: consumeItem(state.inventory, item.id),
-                rollHistory: [...state.rollHistory, roll],
+                rollHistory: appendRollHistory(state.rollHistory, roll),
                 messages: [
                     ...state.messages,
                     systemMessage(

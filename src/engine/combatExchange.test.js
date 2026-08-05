@@ -47,6 +47,7 @@ vi.mock('./dice.ts', () => {
                 isCritFail: count === 1 && sides === 20 && rolls[0] === 1,
             };
         },
+        rollDice: (count) => Array.from({ length: count }, draw),
     };
 });
 
