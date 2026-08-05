@@ -35,25 +35,32 @@ export function getArmorClass(dexMod, armor = null, shield = false) {
     let ac = 10 + dexMod; // Unarmored
 
     if (armor) {
-        const armorBonus = armor.acBonus || armor.magicBonus || 0;
+        // normalizeItem clamps these at the trust boundary, but saves predating
+        // the clamps (LOAD_GAME does not re-normalize inventory) can still carry
+        // unbounded non-catalog stats — re-clamp so hero AC has a ceiling on
+        // every path. Ceilings mirror plate (18) and +3 magic.
+        const baseAC = Number.isFinite(armor.baseAC) ? Math.min(18, armor.baseAC) : armor.baseAC;
+        const armorBonus = Math.min(3, armor.acBonus || armor.magicBonus || 0);
         switch (armor.armorType) {
             case 'light':
-                ac = armor.baseAC + dexMod + armorBonus;
+                ac = baseAC + dexMod + armorBonus;
                 break;
             case 'medium':
-                ac = armor.baseAC + Math.min(dexMod, 2) + armorBonus;
+                ac = baseAC + Math.min(dexMod, 2) + armorBonus;
                 break;
             case 'heavy':
-                ac = armor.baseAC + armorBonus;
+                ac = baseAC + armorBonus;
                 break;
             default:
-                ac = 10 + dexMod;
+                // Unknown armorType but a real baseAC: honor it medium-style so
+                // the engine agrees with the [AC N] line the DM prompt shows.
+                ac = Number.isFinite(baseAC) ? baseAC + Math.min(dexMod, 2) + armorBonus : 10 + dexMod;
         }
     }
 
     if (shield) {
         if (typeof shield === 'object') {
-            ac += (shield.shieldAC || 2) + (shield.acBonus || shield.magicBonus || 0);
+            ac += Math.min(3, shield.shieldAC || 2) + Math.min(3, shield.acBonus || shield.magicBonus || 0);
         } else {
             ac += 2;
         }
@@ -160,7 +167,7 @@ export function getWeaponAttackBonus(character, inventory = []) {
         : 0;
     return abilityMod
         + (proficient ? getProficiencyBonus(character.level) : 0)
-        + (weapon?.attackBonus || weapon?.magicBonus || 0)
+        + Math.min(3, weapon?.attackBonus || weapon?.magicBonus || 0)
         + styleBonus;
 }
 
@@ -168,7 +175,7 @@ export function getWeaponDamageNotation(character, inventory = [], fallback = '1
     const weapon = getEquippedWeapon(inventory);
     const dice = weapon?.damage || fallback;
     const abilityMod = getWeaponAbilityModifier(character, weapon);
-    const itemBonus = weapon?.damageBonus || weapon?.magicBonus || 0;
+    const itemBonus = Math.min(3, weapon?.damageBonus || weapon?.magicBonus || 0);
     const styleBonus = character?.class === 'fighter'
         && character.fightingStyle === 'dueling'
         && weapon
@@ -179,7 +186,9 @@ export function getWeaponDamageNotation(character, inventory = [], fallback = '1
     const modifier = abilityMod + itemBonus + styleBonus;
 
     if (!/^\d+d\d+/i.test(String(dice))) {
-        return fallback;
+        // Junk damage notation falls back to fists, but keeps the wielder's
+        // modifier — a broken weapon should not hit softer than a bare hand.
+        return `${fallback}${modifier >= 0 ? '+' : ''}${modifier}`;
     }
 
     return `${dice}${modifier >= 0 ? '+' : ''}${modifier}`;

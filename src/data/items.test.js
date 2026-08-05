@@ -41,4 +41,33 @@ describe('item catalog normalization', () => {
         const item = normalizeItem({ name: 'Debt Token', valueCp: -500 });
         expect(item.valueCp).toBe(0);
     });
+
+    it('clamps non-catalog armor stats so the hero cannot equip AC 40', () => {
+        const item = normalizeItem({
+            name: 'Godplate of the Ancients',
+            type: 'armor',
+            armorType: 'heavy',
+            baseAC: 30,
+            acBonus: 10,
+        });
+        expect(item.baseAC).toBe(18); // plate ceiling
+        expect(item.acBonus).toBe(3); // magic ceiling
+    });
+
+    it('infers armorType from baseAC so the engine honors non-catalog armor', () => {
+        expect(normalizeItem({ name: 'Padded Vest', type: 'armor', baseAC: 12 }).armorType).toBe('light');
+        expect(normalizeItem({ name: 'Bone Harness', type: 'armor', baseAC: 14 }).armorType).toBe('medium');
+        expect(normalizeItem({ name: 'Dread Carapace', type: 'armor', baseAC: 17 }).armorType).toBe('heavy');
+        // Junk baseAC is dropped entirely rather than kept as NaN.
+        expect(normalizeItem({ name: 'Mist Cloak', type: 'armor', baseAC: 'lots' }).baseAC).toBeUndefined();
+    });
+
+    it('clamps non-catalog shield and weapon bonuses at the normalize boundary', () => {
+        const shield = normalizeItem({ name: 'Tower of Heaven', type: 'shield', shieldAC: 9, acBonus: 8 });
+        expect(shield.shieldAC).toBe(3);
+        expect(shield.acBonus).toBe(3);
+        const blade = normalizeItem({ name: 'Kingslayer Edge', type: 'weapon', damage: '1d8', attackBonus: 20, damageBonus: -5 });
+        expect(blade.attackBonus).toBe(3);
+        expect(blade.damageBonus).toBe(0); // negative junk zeroed
+    });
 });

@@ -145,6 +145,13 @@ function applyMagicName(item) {
 // coin-grant clamp (10,000 gp) so no single item outweighs the largest legal payout.
 const MAX_ITEM_QUANTITY = 999;
 const MAX_ITEM_VALUE_CP = 1000000;
+// AC/attack stats on non-catalog gear are LLM- or import-authored; the hero is
+// the only combatant with no other ceiling (companions clamp at 21, enemies are
+// band-validated), so bound them here. Ceilings mirror the best catalog gear:
+// plate 18, shield 2 (+1 headroom), magic bonuses ≤ +3.
+const MAX_ARMOR_BASE_AC = 18;
+const MAX_SHIELD_AC = 3;
+const ARMOR_TYPES = ['light', 'medium', 'heavy'];
 
 export function normalizeItem(raw = {}) {
     const source = typeof raw === 'string' ? { name: raw } : { ...raw };
@@ -186,9 +193,29 @@ export function normalizeItem(raw = {}) {
         normalized.valueCp = Math.max(0, Math.min(MAX_ITEM_VALUE_CP, Math.trunc(normalized.valueCp)));
     }
 
+    normalized.attackBonus = clampMagicBonus(normalized.attackBonus);
+    normalized.damageBonus = clampMagicBonus(normalized.damageBonus);
+    normalized.acBonus = clampMagicBonus(normalized.acBonus);
+
+    if (normalized.type === 'armor') {
+        if (Number.isFinite(normalized.baseAC)) {
+            normalized.baseAC = Math.max(0, Math.min(MAX_ARMOR_BASE_AC, Math.trunc(normalized.baseAC)));
+            // getArmorClass ignores baseAC without a recognized armorType; infer
+            // from the catalog's bands so the AC the DM prompt advertises is the
+            // AC the engine computes.
+            if (!ARMOR_TYPES.includes(normalized.armorType)) {
+                normalized.armorType = normalized.baseAC <= 12 ? 'light' : normalized.baseAC <= 15 ? 'medium' : 'heavy';
+            }
+        } else {
+            delete normalized.baseAC;
+        }
+    }
+
     if (normalized.type === 'shield') {
         normalized.isShield = true;
-        normalized.shieldAC = Number.isFinite(normalized.shieldAC) ? normalized.shieldAC : 2;
+        normalized.shieldAC = Number.isFinite(normalized.shieldAC)
+            ? Math.max(0, Math.min(MAX_SHIELD_AC, Math.trunc(normalized.shieldAC)))
+            : 2;
     }
 
     return applyMagicName(normalized);

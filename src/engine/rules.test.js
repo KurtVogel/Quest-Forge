@@ -157,6 +157,18 @@ describe('armor class', () => {
         expect(computeACFromInventory(null, fighter)).toBe(11); // 10 + DEX 1
         expect(computeACFromInventory({ 0: { type: 'armor', baseAC: 16, equipped: true } }, fighter)).toBe(11);
     });
+
+    it('clamps runaway non-catalog armor and shield stats from a stale save', () => {
+        // Hallucinated AC-40 kit: baseAC clamps to plate (18), bonuses to +3.
+        expect(getArmorClass(0, { armorType: 'heavy', baseAC: 30, acBonus: 10 })).toBe(21);
+        expect(getArmorClass(0, null, { shieldAC: 9, acBonus: 8 })).toBe(16); // 10 + 3 + 3
+    });
+
+    it('honors baseAC medium-style when armorType is missing', () => {
+        // The DM prompt advertises [AC 14] for this item; the engine must agree.
+        expect(getArmorClass(3, { baseAC: 14 })).toBe(16); // 14 + DEX capped at 2
+        expect(getArmorClass(1, {})).toBe(11); // no baseAC at all → unarmored
+    });
 });
 
 describe('getEquippedWeapon', () => {
@@ -183,6 +195,18 @@ describe('fighter fighting styles', () => {
         expect(getWeaponDamageNotation({ ...fighter, fightingStyle: 'dueling' }, sword)).toBe('1d8+5');
         expect(getWeaponDamageNotation({ ...fighter, fightingStyle: 'dueling' }, bow)).toBe('1d8+1');
         expect(getWeaponDamageNotation({ ...fighter, fightingStyle: 'dueling' }, greatsword)).toBe('2d6+3');
+    });
+});
+
+describe('weapon stat bounds', () => {
+    it('keeps the wielder modifier when weapon damage notation is junk', () => {
+        const junk = [{ type: 'weapon', category: 'martialMelee', damage: 'special', equipped: true }];
+        expect(getWeaponDamageNotation(fighter, junk)).toBe('1d4+3'); // STR 3, not bare 1d4
+    });
+
+    it('clamps a runaway item attackBonus from a stale save to +3', () => {
+        const cheat = [{ type: 'weapon', category: 'martialMelee', damage: '1d8', attackBonus: 20, equipped: true }];
+        expect(getWeaponAttackBonus(fighter, cheat)).toBe(8); // STR 3 + prof 2 + clamp 3
     });
 });
 
