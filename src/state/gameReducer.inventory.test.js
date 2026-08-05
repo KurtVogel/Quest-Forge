@@ -418,7 +418,74 @@ describe('END_COMBAT downed-companion messaging', () => {
     });
 });
 
+describe('item removal (2026-08-05 queue P2 — previously untested)', () => {
+    it('REMOVE_ITEM removes by id and recomputes AC', () => {
+        const next = gameReducer(makeState(), { type: 'REMOVE_ITEM', payload: 'armor-1' });
+        expect(next.inventory.find(i => i.id === 'armor-1')).toBeUndefined();
+        // Chain mail (16) + shield (2) → unarmored 10 + DEX 1 + shield 2.
+        expect(next.character.armorClass).toBe(13);
+    });
+
+    it('REMOVE_ITEM_BY_NAME matches case-insensitively and recomputes AC', () => {
+        const next = gameReducer(makeState(), { type: 'REMOVE_ITEM_BY_NAME', payload: 'chain mail' });
+        expect(next.inventory.find(i => i.id === 'armor-1')).toBeUndefined();
+        expect(next.character.armorClass).toBe(13);
+    });
+
+    it('REMOVE_ITEM_BY_NAME is a no-op for an unknown name', () => {
+        const state = makeState();
+        const next = gameReducer(state, { type: 'REMOVE_ITEM_BY_NAME', payload: 'Crown of Nothing' });
+        expect(next.inventory).toHaveLength(state.inventory.length);
+    });
+});
+
+describe('non-healing consumables and the dead-hero guard', () => {
+    it('consumes a narrative-effect consumable without touching HP', () => {
+        const state = makeState();
+        state.inventory.push({ id: 'oil-1', name: 'Flask of Oil', type: 'consumable', quantity: 2 });
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: 'oil-1' });
+        expect(next.inventory.find(i => i.id === 'oil-1').quantity).toBe(1);
+        expect(next.character.currentHP).toBe(state.character.currentHP);
+        expect(next.messages.at(-1).content).toContain('Flask of Oil');
+    });
+
+    it('refuses a healing potion for a dead hero and keeps the potion', () => {
+        const state = makeState();
+        state.character = { ...state.character, isDead: true, currentHP: 0 };
+        state.inventory.push(makePotion());
+        const next = gameReducer(state, { type: 'USE_ITEM', payload: 'potion-1' });
+        expect(next.inventory.find(i => i.id === 'potion-1')).toBeDefined();
+        expect(next.character.currentHP).toBe(0);
+        expect(next.messages.at(-1).content).toContain('cannot help the dead');
+    });
+});
+
+describe('by-ref resolution branches', () => {
+    it('EQUIP_ITEM_BY_REF resolves by explicit itemId', () => {
+        const state = makeState();
+        state.inventory.push({ id: 'axe-1', name: 'Handaxe', type: 'weapon', damage: '1d6', equipped: false });
+        const next = gameReducer(state, { type: 'EQUIP_ITEM_BY_REF', payload: { itemId: 'axe-1' } });
+        expect(next.inventory.find(i => i.id === 'axe-1').equipped).toBe(true);
+        expect(next.inventory.find(i => i.id === 'weapon-1').equipped).toBe(false); // one active weapon
+    });
+
+    it('UNEQUIP_ITEM_BY_REF matches by generic weapon kind', () => {
+        const next = gameReducer(makeState(), { type: 'UNEQUIP_ITEM_BY_REF', payload: { type: 'weapon' } });
+        expect(next.inventory.find(i => i.id === 'weapon-1').equipped).toBe(false);
+    });
+});
+
 describe('ADD_ITEM trust boundary (2026-07-28 audit)', () => {
+    it('auto-equips a found shield into an empty shield slot', () => {
+        const state = makeState();
+        state.inventory = state.inventory.filter(i => i.id !== 'shield-1'); // empty the slot
+        const next = gameReducer(state, {
+            type: 'ADD_ITEM',
+            payload: { name: 'Battered Shield', itemKey: 'shield' },
+        });
+        expect(next.inventory.find(i => i.name?.includes('Shield')).equipped).toBe(true);
+        expect(next.character.armorClass).toBe(18); // chain mail 16 (heavy, no DEX) + shield 2
+    });
     it('ignores a DM-supplied equipped:true so found loot cannot displace active gear', () => {
         const state = makeState();
         const next = gameReducer(state, {

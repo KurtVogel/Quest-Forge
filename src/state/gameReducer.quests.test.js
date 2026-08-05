@@ -85,6 +85,28 @@ describe('quest identity', () => {
     });
 });
 
+describe('REMOVE_QUEST and bare-id completion (2026-08-04 queue P2)', () => {
+    it('REMOVE_QUEST deletes exactly the referenced quest (both panel ✕ buttons ride this)', () => {
+        let state = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q-keep', name: 'Keep Me' } });
+        state = gameReducer(state, { type: 'ADD_QUEST', payload: { id: 'q-drop', name: 'Drop Me' } });
+        const next = gameReducer(state, { type: 'REMOVE_QUEST', payload: 'q-drop' });
+        expect(next.quests).toHaveLength(1);
+        expect(next.quests[0].id).toBe('q-keep');
+        // Unknown id is a harmless no-op.
+        expect(gameReducer(next, { type: 'REMOVE_QUEST', payload: 'q-gone' }).quests).toHaveLength(1);
+    });
+
+    it('completes a quest by MATCHED bare id string (the panel button path)', () => {
+        const added = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { id: 'quest-debt', name: 'Collect the Debt' },
+        });
+        const next = gameReducer(added, { type: 'COMPLETE_QUEST', payload: 'quest-debt' });
+        expect(next.quests).toHaveLength(1);
+        expect(next.quests[0]).toMatchObject({ id: 'quest-debt', status: 'completed' });
+    });
+});
+
 describe('finished quests stay closed (documented 2026-07-23)', () => {
     it('a new quest reusing a completed quest name opens a NEW arc instead of reopening the old one', () => {
         const state = {
