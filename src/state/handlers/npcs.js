@@ -6,7 +6,7 @@ import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRe
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { collectKnownRegions, findLocationRecord, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
-import { ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand } from '../../engine/worldTempo.js';
+import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { upsertNpc } from './shared.js';
 
@@ -182,8 +182,14 @@ export const handlers = {
         };
 
         // Absence drift: a long-enough return raises the one-shot marker the
-        // background director (llm/absenceDrift.js) fires from.
-        if (awayDistance !== null && awayDistance >= ABSENCE_DRIFT_MIN_AWAY && !state.session?.pendingAbsenceDrift) {
+        // background director (llm/absenceDrift.js) fires from. Cooldown: one
+        // drift per homecoming, not one per stale record the return stroll
+        // re-touches (2026-08-05 live playtest fired two within a few turns).
+        const lastDriftAt = state.session?.absenceDrift?.arrivedAtMessage;
+        const driftCoolingDown = Number.isFinite(lastDriftAt)
+            && distanceSince(state.messages, lastDriftAt, messageIndex) < ABSENCE_DRIFT_COOLDOWN_MESSAGES;
+        if (awayDistance !== null && awayDistance >= ABSENCE_DRIFT_MIN_AWAY
+            && !state.session?.pendingAbsenceDrift && !driftCoolingDown) {
             next.session = {
                 ...next.session,
                 pendingAbsenceDrift: {

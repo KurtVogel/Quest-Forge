@@ -260,6 +260,51 @@ describe('front-resolution payoff ceremony', () => {
     });
 });
 
+describe('region name validation (2026-08-05 live playtest findings)', () => {
+    it('rejects locality junk the Scribe emitted live and keeps real region names', async () => {
+        const { sanitizeRegionName } = await import('../engine/locationRegistry.js');
+        // Every junk value the first live playtest actually produced:
+        expect(sanitizeRegionName('the docks', 'The docks')).toBeNull();
+        expect(sanitizeRegionName('the coast', 'Netsholm')).toBeNull();
+        expect(sanitizeRegionName('the district', 'The Gilded Eel')).toBeNull();
+        // Real region names survive:
+        expect(sanitizeRegionName('the Rimefell Marches', 'a fortified waystation')).toBe('the Rimefell Marches');
+        expect(sanitizeRegionName('Vale of Reeds', 'Brackwater')).toBe('Vale of Reeds');
+        // The place itself is never its own region; sentences are not names.
+        expect(sanitizeRegionName('Fort Halla', 'Fort Halla')).toBeNull();
+        expect(sanitizeRegionName('a long miserable stretch of frozen upland country', 'X')).toBeNull();
+    });
+
+    it('strips junk regions at the reducer boundary', () => {
+        const state = gameReducer(initialGameState, {
+            type: 'SET_LOCATION',
+            payload: { name: 'The docks', profile: { type: 'settlement', region: 'the docks' } },
+        });
+        expect(state.locations[0].region).toBeNull();
+    });
+});
+
+describe('absence-drift cooldown (2026-08-05 live playtest finding)', () => {
+    it('one drift per homecoming: a recent install suppresses re-triggers on nearby stale records', () => {
+        let state = gameReducer(atMessages(initialGameState, 0), { type: 'SET_LOCATION', payload: 'Gilded Eel' });
+        state = gameReducer(atMessages(state, 5), { type: 'SET_LOCATION', payload: 'Old Docks' });
+        state = gameReducer(atMessages(state, 10), { type: 'SET_LOCATION', payload: 'Far Fen' });
+        // A drift just installed for the Gilded Eel return at message 50.
+        state = {
+            ...atMessages(state, 54),
+            session: {
+                ...state.session,
+                pendingAbsenceDrift: null,
+                absenceDrift: { locationName: 'Gilded Eel', arrivedAtMessage: 50, awayDistance: 40, developments: [], fact: 'x', frontSymptom: null },
+            },
+        };
+        // Re-touching another stale record (Old Docks, last visited msg 10) 4
+        // messages later must NOT raise a second marker.
+        const next = gameReducer(state, { type: 'SET_LOCATION', payload: 'Old Docks' });
+        expect(next.session.pendingAbsenceDrift ?? null).toBeNull();
+    });
+});
+
 describe('regional front seeding', () => {
     const proposal = (title, factionName) => ({
         title,

@@ -6,7 +6,25 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-05 night (living-world round two: epistemics, resolution ceremony, witnessed hearsay, regional seeding; 1,407 tests green)._
+_Last updated: 2026-08-06 (living-world LIVE playtest: 8/8 verdicts passed, 3 calibrations fixed; 1,410 tests green)._
+
+## Living-world live playtest 2026-08-06 (28 turns, real Gemini, all verdicts green)
+
+`scripts/playtest_living_world.cjs` (new; local production build via `npm run preview`,
+puppeteer, logs + screenshots in `test-results/living_world/`): a five-act scripted session —
+secret confession → public accusation → travel → new region → long-absence return →
+stranger probe. **Every engine verdict passed**: the confession was captured with
+`knownBy: ["the hero", "Marta Weck"]` on card + facts; a stranger asked "what do folk say
+about me?" answered with street gossip and NO trace of the secret (automated PASS); visit
+stamps tracked every move; the return to the Gilded Eel triggered absence drift at
+awayDistance 42 and installed 2 NPC developments + a quiet price-rise fact; a real fight
+became a live firsthand hearsay offer; the premise's region names flowed into the registry;
+and the seeding trigger + install + cap all fired. Three calibration findings, fixed
+same-night (DECISIONS.md 2026-08-06): Scribe region-field junk → `sanitizeRegionName`
+properness boundary; public-deed salience/witnessed under-marking → Scribe rule; drift
+call per stale record on homecoming → 20-message cooldown. **Watch item: the fixes are
+prompt+engine — next live run should confirm regional seeding fires for the REAL region
+now that junk can't fill the front web first.**
 
 ## Living-world round two 2026-08-05 (four features, DECISIONS.md 2026-08-05 ×2)
 

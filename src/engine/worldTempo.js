@@ -52,6 +52,12 @@ export const RESOLVED_ECHO_WINDOW_MESSAGES = 40;
 export const ABSENCE_DRIFT_MIN_AWAY = 30;
 export const ABSENCE_DRIFT_WINDOW_MESSAGES = 12;
 export const MAX_DRIFT_DEVELOPMENTS = 2;
+/**
+ * A homecoming stroll re-touches several stale records in a row; without a
+ * cooldown each fired its own background DM-model call (two within a few
+ * turns in the 2026-08-05 live playtest). One drift per return, not per door.
+ */
+export const ABSENCE_DRIFT_COOLDOWN_MESSAGES = 20;
 
 /**
  * Conversational distance since an anchor stamped as "message count at the

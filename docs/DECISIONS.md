@@ -8,6 +8,30 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-06 · Region names are validated by properness, not by record collision (first live playtest's findings).**
+The first living-world live playtest (28 turns, real Gemini, `scripts/playtest_living_world.cjs`,
+logs in `test-results/living_world/`) passed all eight engine verdicts — secret knownBy
+capture, the stranger-probe PASS (no leak), visit stamps, absence-drift trigger + install,
+live hearsay offer, region capture, seeding trigger — but exposed three calibrations, all
+fixed same-night: **(1)** the Scribe filled `location_profile.region` with localities on
+nearly every classification ("the docks", "the coast", "the district"), which
+false-triggered regional seeding for "the docks" and filled the front web before the real
+region arrived. Fix: `sanitizeRegionName` at the registry boundary — a region must be a
+≤4-token NAME, not the place itself, with at least one token outside a generic place-noun
+set (docks/coast/district/quarter/…). Deliberately NOT a "matches an existing location
+record" check: real regions get visited as locations too ("Rimefell Marches" was both), so
+record collision would reject the genuine article; properness separates "the docks" from
+"the Rimefell Marches" cleanly on the live data. Town-name-as-region ("Brackwater") is
+accepted — it behaves as the home region and stays harmless. Prompt tightened to match.
+**(2)** The hero's deliberate public deed (the scripted tavern accusation) was extracted at
+salience 1 without `witnessed`, while scene texture got `witnessed: true` — the salience
+floor correctly kept junk out of the rumor pool, but real deeds under-travel. Scribe rule
+now: witnessed marks the HERO'S OWN publicly-seen deeds only, and a deliberate public act
+before a crowd is salience 4–5. **(3)** A homecoming stroll re-touching several stale
+records fired one background drift call per record (two live).
+`ABSENCE_DRIFT_COOLDOWN_MESSAGES` (20 conversational) now makes it one drift per
+homecoming, not one per door.
+
 **2026-08-05 ×2 · Living-world program round two: epistemics, the resolution ceremony, witnessed hearsay, and regional front seeding.**
 Four features shipped as one program on top of the same-day living-world system.
 **(1) Epistemics layer — characters only know what they could know.** Root cause of NPCs

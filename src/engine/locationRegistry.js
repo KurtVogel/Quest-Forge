@@ -99,8 +99,40 @@ export function normalizeLocationRecord(record = {}, existing = null) {
         // DECISIONS.md 2026-08-05 ×2) — drives regional front seeding. The
         // FIRST fiction-established value wins: a place's region is canon, and
         // a later re-classification must not mint a phantom "new region".
-        region: existing?.region || cleanText(record.region, 60) || null,
+        // sanitizeRegionName rejects locality junk ("the docks") at every path,
+        // including load-time re-normalization of polluted saves.
+        region: sanitizeRegionName(existing?.region, name) || sanitizeRegionName(record.region, name) || null,
     };
+}
+
+/**
+ * Generic place-noun heads a REGION name cannot consist of alone. The first
+ * live playtest (2026-08-05) had the Scribe filling `region` with localities —
+ * "the docks", "the coast", "the district" — which false-triggered regional
+ * front seeding. A real region name ("Rimefell Marches", "Vale of Reeds")
+ * always carries at least one distinctive proper token beyond these.
+ */
+const GENERIC_PLACE_TOKENS = new Set([
+    'dock', 'docks', 'coast', 'coastline', 'shore', 'district', 'quarter', 'ward',
+    'harbor', 'harbour', 'port', 'market', 'square', 'street', 'alley', 'waterfront',
+    'town', 'city', 'village', 'outskirts', 'region', 'area', 'land', 'lands',
+    'north', 'south', 'east', 'west', 'countryside', 'wilds', 'wilderness',
+    'hills', 'mountains', 'forest', 'woods', 'river', 'valley', 'plains', 'fields',
+]);
+
+/**
+ * Boundary for a model-reported region: must be a short NAME (≤4 meaningful
+ * tokens), must not be the classified place itself, and must carry at least
+ * one non-generic token. Returns the cleaned region or null.
+ */
+export function sanitizeRegionName(value, placeName = '') {
+    const region = cleanText(value, 60);
+    if (!region || JUNK_LOCATION_RE.test(region)) return null;
+    const tokens = locationTokens(region);
+    if (tokens.size === 0 || tokens.size > 4) return null;
+    if (placeName && isSameLocation(region, placeName)) return null;
+    if ([...tokens].every(token => GENERIC_PLACE_TOKENS.has(token))) return null;
+    return region;
 }
 
 /** "the Icebound Coast" and "Icebound Coast, the frozen north" are one region. */
