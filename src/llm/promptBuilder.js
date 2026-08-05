@@ -748,9 +748,28 @@ function buildInventoryBlock(inventory, character) {
         block += `\n**Equipped:** ${equipped.map(formatItem).join(', ')}`;
     }
     if (carried.length) {
-        block += `\n**Carried:** ${carried.map(formatItem).join(', ')}`;
+        // Equipped stays complete; the Carried list is capped — a hoarder
+        // campaign at 60+ items paid ~1k tokens/turn in full stat annotations
+        // (2026-08-05 audit). Mechanically relevant items keep priority, the
+        // most recent minor items fill the rest, and the overflow count keeps
+        // the DM from treating omitted gear as lost.
+        let shown = carried;
+        let overflow = '';
+        if (carried.length > CARRIED_PROMPT_CAP) {
+            const mechanical = carried.filter(isMechanicalItem);
+            const minor = carried.filter(i => !isMechanicalItem(i));
+            shown = [...mechanical, ...minor.slice(-Math.max(0, CARRIED_PROMPT_CAP - mechanical.length))].slice(0, CARRIED_PROMPT_CAP);
+            overflow = `, …and ${carried.length - shown.length} more minor items (still owned; full list in the Inventory panel)`;
+        }
+        block += `\n**Carried:** ${shown.map(formatItem).join(', ')}${overflow}`;
     }
     return block;
+}
+
+const CARRIED_PROMPT_CAP = 25;
+
+function isMechanicalItem(i) {
+    return !!(i.damage || i.baseAC || i.isShield || i.type === 'shield' || i.type === 'consumable' || i.magicBonus);
 }
 
 // Genuinely static (closes over nothing but the app's item catalog data), so
@@ -759,8 +778,27 @@ const ITEM_CATALOG_BLOCK = `## ITEM CATALOG (common mechanical items)
 Use itemKey for shop purchases and ordinary loot when possible. Catalog: ${describeCatalogForPrompt()}
 Magic equipment: add "magicBonus": 1, 2, or 3 only.`;
 
+// The parser admits 800-char descriptions and the DM is told to open quests
+// aggressively, so long campaigns accumulate — this was the last uncapped
+// accretion block beside inventory (2026-08-04 audit). The panel and the save
+// keep every quest at full length; only the per-turn prompt rendering is capped.
+const QUEST_PROMPT_CAP = 12;
+const QUEST_DESC_PROMPT_MAX = 250;
+
 function buildQuestBlock(quests) {
-    return `## ACTIVE QUESTS\n${quests.map(q => `- **${q.name}** [id: ${q.id}]: ${q.description || 'No details'}`).join('\n')}`;
+    const shown = quests.slice(-QUEST_PROMPT_CAP);
+    const omitted = quests.slice(0, quests.length - shown.length);
+    const clampDesc = (text) => {
+        const desc = String(text || 'No details');
+        return desc.length > QUEST_DESC_PROMPT_MAX ? `${desc.slice(0, QUEST_DESC_PROMPT_MAX).trimEnd()}…` : desc;
+    };
+    const lines = shown.map(q => `- **${q.name}** [id: ${q.id}]: ${clampDesc(q.description)}`).join('\n');
+    // Omitted quests keep their names in view so the DM can still close them
+    // (and never re-opens a duplicate) without paying for their descriptions.
+    const overflow = omitted.length
+        ? `\n- …plus ${omitted.length} older active quest(s), tracked and still open: ${omitted.map(q => q.name).join(', ')}`
+        : '';
+    return `## ACTIVE QUESTS\n${lines}${overflow}`;
 }
 
 function buildRecentRollsBlock(rolls) {
@@ -853,12 +891,9 @@ function buildWorldFactsBlock(worldFacts) {
  */
 function buildActiveConstraints(quests, worldFacts, character, party) {
     const reminders = [];
-
-    // Active quests as pressure reminders
-    const active = (quests || []).filter(q => q.status === 'active');
-    if (active.length > 0) {
-        reminders.push(`Active quests in progress: ${active.map(q => q.name).join(', ')}`);
-    }
+    // (Active quests are NOT re-listed here — the ACTIVE QUESTS block a few
+    // hundred lines up already carries them; the duplicate name list was pure
+    // token spend — 2026-08-04 audit.)
 
     // Scan world facts for active threats (simple keyword detection)
     const threatKeywords = ['hunting', 'pursuing', 'wants the player dead', 'deadline', 'before the', 'bounty', 'wanted'];

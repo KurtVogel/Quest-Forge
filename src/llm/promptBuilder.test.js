@@ -383,6 +383,25 @@ describe('inventory block', () => {
         expect(text).toContain('NOT proficient');
     });
 
+    it('caps the Carried list, prioritizing mechanical items and keeping equipped complete', () => {
+        // 2026-08-05 audit: a hoarder campaign paid ~1k tokens/turn in carried
+        // annotations. 30 misc trinkets + 2 unequipped mechanical items → the
+        // mechanical items always render, the oldest trinkets overflow.
+        const inventory = [
+            { id: 'sword', name: 'Spare Longsword', type: 'weapon', damage: '1d8', equipped: false },
+            { id: 'potion', name: 'Healing Potion', type: 'consumable', equipped: false },
+            ...Array.from({ length: 30 }, (_, i) => ({ id: `t${i}`, name: `Trinket ${i}`, type: 'gear', equipped: false })),
+            { id: 'armor', name: 'Chain Mail', type: 'armor', armorType: 'heavy', baseAC: 16, equipped: true },
+        ];
+        const text = prompt({ inventory });
+        expect(text).toContain('Chain Mail'); // equipped always complete
+        expect(text).toContain('Spare Longsword');
+        expect(text).toContain('Healing Potion');
+        expect(text).toContain('Trinket 29'); // newest minor kept
+        expect(text).not.toContain('Trinket 0'); // oldest minor overflowed
+        expect(text).toContain('…and 7 more minor items (still owned; full list in the Inventory panel)');
+    });
+
     it('is omitted when inventory is empty', () => {
         const text = prompt({ inventory: [] });
         expect(text).not.toContain('## INVENTORY');
@@ -405,6 +424,26 @@ describe('quest block', () => {
     it('is omitted when there are no active quests', () => {
         const text = prompt({ quests: [{ id: 'q1', name: 'Done', status: 'completed' }] });
         expect(text).not.toContain('## ACTIVE QUESTS');
+    });
+
+    it('caps the rendered block at the newest 12, keeping older names in an overflow line', () => {
+        const quests = Array.from({ length: 15 }, (_, i) => ({
+            id: `q${i}`, name: `Quest ${i}`, description: `Details ${i}`, status: 'active',
+        }));
+        const text = prompt({ quests });
+        // Newest 12 render fully; the 3 oldest keep name-only presence.
+        expect(text).toContain('**Quest 14**');
+        expect(text).toContain('**Quest 3**');
+        expect(text).not.toContain('**Quest 2**');
+        expect(text).toContain('…plus 3 older active quest(s), tracked and still open: Quest 0, Quest 1, Quest 2');
+    });
+
+    it('clamps a parser-max description to ~250 chars in the prompt only', () => {
+        const text = prompt({
+            quests: [{ id: 'q1', name: 'Long tale', description: 'x'.repeat(800), status: 'active' }],
+        });
+        expect(text).toContain('x'.repeat(250) + '…');
+        expect(text).not.toContain('x'.repeat(251));
     });
 });
 
@@ -454,10 +493,12 @@ describe('world facts block', () => {
 });
 
 describe('active constraints (DM reminders)', () => {
-    it('reminds the DM of active quests', () => {
+    it('does not duplicate the quest list the ACTIVE QUESTS block already carries', () => {
+        // 2026-08-04 audit: the reminder re-listed every active quest name a few
+        // hundred lines below the full block — pure token spend.
         const text = prompt({ quests: [{ id: 'q1', name: 'Find the relic', status: 'active' }] });
-        expect(text).toContain('## DM REMINDERS — MAINTAIN THESE PRESSURES');
-        expect(text).toContain('Active quests in progress: Find the relic');
+        expect(text).toContain('## ACTIVE QUESTS');
+        expect(text).not.toContain('Active quests in progress');
     });
 
     it('surfaces world facts matching threat keywords', () => {
