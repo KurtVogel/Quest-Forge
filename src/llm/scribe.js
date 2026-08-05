@@ -950,10 +950,12 @@ export async function composeScenePrompt({ situation, character, npcs = [], comb
     }
 
     // NPCs likely in frame: most recently active first, capped for prompt size.
-    const recentNpcs = [...npcs]
+    // Filter BEFORE the cap — a nameless roster entry in the top 4 must not
+    // silently shrink the cast the art director is told about.
+    const recentNpcs = npcs
+        .filter(n => n.name)
         .sort((a, b) => (b.lastSeen || b.firstMet || 0) - (a.lastSeen || a.firstMet || 0))
-        .slice(0, 4)
-        .filter(n => n.name);
+        .slice(0, 4);
     for (const n of recentNpcs) {
         const gender = n.gender?.trim() || '';
         const desc = n.appearance?.trim() || `${n.disposition || ''} NPC`.trim();

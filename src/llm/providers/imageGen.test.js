@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearImageCache, generateSceneImageDetailed, generatePortraitImageDetailed } from './imageGen.js';
+import { clearImageCache, generateSceneImageDetailed, generatePortraitImageDetailed, peekCachedImage } from './imageGen.js';
 
 const xaiOk = (b64 = 'dGVzdA==') => ({
     ok: true,
@@ -77,6 +77,64 @@ describe('scene image provider reporting', () => {
             provider: 'pollinations',
             fallbackReason: expect.stringContaining('xai-http-401'),
         });
+    });
+});
+
+describe('input-keyed scene cache (2026-08-01 queue P1)', () => {
+    beforeEach(() => {
+        clearImageCache();
+        vi.restoreAllMocks();
+    });
+
+    it('hits on the same cacheKey even when the composed prompt differs', async () => {
+        // Scene prompts are LLM-composed and never byte-identical — the key is
+        // the render's inputs, so a repeat Visualize on an unchanged scene hits.
+        const fetchMock = vi.fn().mockResolvedValue(xaiOk());
+        vi.stubGlobal('fetch', fetchMock);
+        const first = await generateSceneImageDetailed('Composed prompt A', 'xai-key', { cacheKey: 'scene|msg-1|Tavern' });
+        const second = await generateSceneImageDetailed('Composed prompt B, reworded by the LLM', 'xai-key', { cacheKey: 'scene|msg-1|Tavern' });
+        expect(second).toEqual(first);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('peekCachedImage probes without generating, honoring provider preference', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
+        expect(peekCachedImage('scene|msg-1|Tavern', { imageApiKey: 'xai-key' })).toBeNull();
+        const rendered = await generateSceneImageDetailed('Prompt', 'xai-key', { cacheKey: 'scene|msg-1|Tavern' });
+        expect(peekCachedImage('scene|msg-1|Tavern', { imageApiKey: 'xai-key' })).toEqual(rendered);
+        // Different provider preference (no keys → pollinations) must NOT
+        // return the xAI-cached entry — better-provider retries stay possible.
+        expect(peekCachedImage('scene|msg-1|Tavern', {})).toBeNull();
+    });
+
+    it('bypassCache rerolls and the new image replaces the cached entry', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(xaiOk('dGVzdA=='))
+            .mockResolvedValueOnce(xaiOk('bmV3ZXI='));
+        vi.stubGlobal('fetch', fetchMock);
+        const first = await generateSceneImageDetailed('Prompt', 'xai-key', { cacheKey: 'k' });
+        const rerolled = await generateSceneImageDetailed('Prompt', 'xai-key', { cacheKey: 'k', bypassCache: true });
+        expect(rerolled.url).not.toBe(first.url);
+        expect(peekCachedImage('k', { imageApiKey: 'xai-key' }).url).toBe(rerolled.url);
+    });
+
+    it('evicts the oldest entry once the cache exceeds its cap (2026-08-01 queue P2)', async () => {
+        vi.stubGlobal('fetch', vi.fn());
+        // Pollinations path (no keys) — no network needed, distinct cache keys.
+        for (let i = 0; i <= 10; i++) {
+            await generateSceneImageDetailed(`Scene ${i}`, '', { cacheKey: `k${i}` });
+        }
+        expect(peekCachedImage('k0', {})).toBeNull(); // oldest evicted at 11
+        expect(peekCachedImage('k1', {})).not.toBeNull();
+        expect(peekCachedImage('k10', {})).not.toBeNull();
+    });
+
+    it('caps a runaway composed prompt before it rides the POST request body (2026-08-01 queue P2)', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(xaiOk());
+        vi.stubGlobal('fetch', fetchMock);
+        await generateSceneImageDetailed('x'.repeat(20000), 'xai-key');
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.prompt.length).toBe(4000);
     });
 });
 

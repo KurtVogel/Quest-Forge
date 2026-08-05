@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
-import { generatePortraitImageDetailed, generateSceneImageDetailed } from '../../llm/providers/imageGen.js';
+import { generatePortraitImageDetailed, generateSceneImageDetailed, peekCachedImage } from '../../llm/providers/imageGen.js';
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
 import { namesMatch } from '../../engine/npcRoster.js';
 import { composeScenePrompt } from '../../llm/scribe.js';
@@ -187,10 +187,27 @@ export default function SceneArt() {
 
             // The "current situation" is the DM's latest narrated moment — the richest
             // visual text in the app. Fall back to the newest journal summary, then location.
-            const lastNarration = [...(state.messages || [])].reverse()
-                .find(m => m.role === 'assistant' && !m.hidden && m.content?.trim())?.content;
+            const lastNarrationMsg = [...(state.messages || [])].reverse()
+                .find(m => m.role === 'assistant' && !m.hidden && m.content?.trim());
+            const lastNarration = lastNarrationMsg?.content;
             const lastJournal = state.journal?.length ? state.journal[state.journal.length - 1].summary : '';
             const situation = (lastNarration || lastJournal || `The scene at ${location}.`).trim();
+
+            // Scene prompts are LLM-composed and never byte-identical, so the
+            // cache is keyed on the render's INPUTS: an unchanged scene must
+            // short-circuit BEFORE paying the compose call (2026-08-01 audit P1).
+            const sceneCacheKey = `scene|${lastNarrationMsg?.id || 'no-narration'}|${location}`;
+            if (!reroll) {
+                const cached = peekCachedImage(sceneCacheKey, {
+                    imageApiKey: state.settings.imageApiKey,
+                    geminiApiKey: genOptions.geminiApiKey,
+                });
+                if (cached) {
+                    setCurrentImage({ url: cached.url, caption: location, shape: 'scene' });
+                    setGenerationNotice(fallbackNotice(cached));
+                    return;
+                }
+            }
 
             // Scribe composes the prompt from the situation + known visual details.
             const composed = await composeScenePrompt({
@@ -211,7 +228,7 @@ export default function SceneArt() {
                 'Grounded cinematic dark-fantasy realism, professional concept art, anatomically coherent figures, detailed materials, dramatic natural lighting, not cartoonish or childlike, no text, no watermark.',
             ].filter(Boolean).join(' ');
 
-            const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey, genOptions);
+            const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey, { ...genOptions, cacheKey: sceneCacheKey });
             if (result) {
                 setCurrentImage({ url: result.url, caption: location, shape: 'scene' });
                 setGenerationNotice(fallbackNotice(result));

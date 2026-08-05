@@ -30,6 +30,11 @@ const GEMINI_IMAGE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/
 // URL limits and the <img> then fails silently (never fetched, no error event).
 const POLLINATIONS_PROMPT_MAX = 1500;
 
+// Backstop for the POST providers too: the art director is instructed to stay
+// short, but a runaway composed prompt must not ride the xAI/Gemini request
+// bodies unbounded either.
+const PROVIDER_PROMPT_MAX = 4000;
+
 /**
  * Insert or update a cache entry with LRU eviction (max IMAGE_CACHE_MAX entries).
  */
@@ -90,6 +95,7 @@ async function downscaleDataUrl(dataUrl, { maxWidth, maxHeight, quality = 0.82 }
  */
 async function generateImageResult(prompt, imageApiKey, options = {}) {
     if (!prompt) return null;
+    prompt = String(prompt).slice(0, PROVIDER_PROMPT_MAX);
 
     const normalizedImageApiKey = normalizeXaiApiKey(imageApiKey);
     const geminiApiKey = (options.geminiApiKey || '').trim();
@@ -97,7 +103,12 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
     const resolution = options.resolution || '1k';
     const fallbackWidth = options.fallbackWidth || 1280;
     const fallbackHeight = options.fallbackHeight || 720;
-    const baseCacheKey = `${aspectRatio}|${resolution}|${prompt.toLowerCase().trim()}`;
+    // options.cacheKey lets the caller key on the render's INPUTS instead of
+    // the finished prompt. Scene prompts are written fresh by an LLM per click,
+    // so a prompt-derived key could never hit for them — every repeat Visualize
+    // paid a compose call + a full generation and pushed another full-res
+    // base64 into the cache (2026-08-01 audit P1).
+    const baseCacheKey = options.cacheKey || `${aspectRatio}|${resolution}|${prompt.toLowerCase().trim()}`;
     const preferredProvider = normalizedImageApiKey ? 'xai' : (geminiApiKey ? 'gemini' : 'pollinations');
     const preferredCacheKey = `${preferredProvider}|${baseCacheKey}`;
     // bypassCache is the reroll affordance: generation is the point of the
@@ -240,6 +251,20 @@ export async function generatePortraitImageDetailed(prompt, imageApiKey, extraOp
 export async function generatePortraitImage(prompt, imageApiKey, extraOptions = {}) {
     const result = await generatePortraitImageDetailed(prompt, imageApiKey, extraOptions);
     return result?.url || null;
+}
+
+/**
+ * Probe the cache by an input-derived key (see options.cacheKey) WITHOUT
+ * generating — lets SceneArt short-circuit before the compose call. Honors the
+ * provider-chain preference, so a cached fallback-provider result never blocks
+ * a retry on a better provider.
+ */
+export function peekCachedImage(cacheKey, { imageApiKey, geminiApiKey } = {}) {
+    if (!cacheKey) return null;
+    const preferred = normalizeXaiApiKey(imageApiKey)
+        ? 'xai'
+        : ((geminiApiKey || '').trim() ? 'gemini' : 'pollinations');
+    return IMAGE_CACHE.get(`${preferred}|${cacheKey}`) || null;
 }
 
 /**
