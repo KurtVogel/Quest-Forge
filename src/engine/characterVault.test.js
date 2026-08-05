@@ -108,6 +108,32 @@ describe('export round-trip', () => {
         expect(imported.character.portraitPrompt).toBe('Waist-up dwarf fighter portrait.');
         expect(imported.character.portraitUpdatedAt).toBe(12345);
     });
+
+    it('strips an over-ceiling portrait but imports the hero (2026-08-04 queue P2)', () => {
+        // Generated portraits are ~60-110k chars; a hand-bloated data URL must
+        // not ride every autosave snapshot. Degradation is silent by design —
+        // one click regenerates the portrait.
+        const { character, inventory } = makeFighter();
+        const bloated = `data:image/jpeg;base64,${'A'.repeat(400_000)}`;
+        const file = JSON.stringify(buildCharacterExport({ ...character, portraitUrl: bloated }, inventory));
+        const imported = parseCharacterExport(file);
+        expect(imported.character.portraitUrl).toBe('');
+        expect(imported.character.name).toBe(character.name);
+    });
+
+    it('strips a hand-edited data URL with embedded whitespace instead of keeping it', () => {
+        const { character, inventory } = makeFighter();
+        const mangled = 'data:image/png;base64,iVBOR\nw0KGgo AAAA==';
+        const file = JSON.stringify(buildCharacterExport({ ...character, portraitUrl: mangled }, inventory));
+        expect(parseCharacterExport(file).character.portraitUrl).toBe('');
+    });
+
+    it('keeps a generated-size portrait under the new ceiling', () => {
+        const { character, inventory } = makeFighter();
+        const normal = `data:image/jpeg;base64,${'B'.repeat(110_000)}`;
+        const file = JSON.stringify(buildCharacterExport({ ...character, portraitUrl: normal }, inventory));
+        expect(parseCharacterExport(file).character.portraitUrl).toBe(normal);
+    });
 });
 
 describe('parseCharacterExport rejections', () => {

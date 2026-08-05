@@ -20,6 +20,11 @@ const DAMAGE_MOD_MAX = 15;
 const AC_MIN = 1;
 const AC_MAX = 25;
 const HP_MAX = 999;
+// NOTE: `exhausted`/`exhaustion` is deliberately absent even though
+// CONDITION_EFFECTS defines it — its only effect is check disadvantage and
+// enemies never make checks, so a DM's "exhausted ogre" drops the condition
+// (visible on the enemy card as simply not listed) rather than carrying a
+// mechanical no-op through every exchange.
 const SUPPORTED_ENEMY_CONDITIONS = new Set([
     'poisoned', 'blinded', 'frightened', 'restrained', 'prone',
     'invisible', 'stunned', 'paralyzed', 'unconscious',
@@ -28,10 +33,11 @@ const SUPPORTED_ENEMY_CONDITIONS = new Set([
 /** Bounded, normalized conditions that the combat engine knows how to resolve. */
 export function normalizeEnemyConditions(value) {
     if (!Array.isArray(value)) return [];
+    // No count cap needed: the supported-set filter + dedupe already bounds
+    // the result at the set's size.
     return [...new Set(value
         .map(condition => String(condition || '').trim().toLowerCase())
-        .filter(condition => SUPPORTED_ENEMY_CONDITIONS.has(condition)))]
-        .slice(0, 10);
+        .filter(condition => SUPPORTED_ENEMY_CONDITIONS.has(condition)))];
 }
 
 /** A to-hit bonus within the allowed band, or undefined (→ engine default) if absurd/out-of-range. */
@@ -112,8 +118,11 @@ export function sanitizeLoadedEnemy(enemy) {
     if (!enemy || typeof enemy !== 'object' || Array.isArray(enemy)) return null;
     const maxHp = clampEnemyHP(enemy.maxHp ?? enemy.hp);
     const hp = clampEnemyCurrentHP(enemy.hp, maxHp);
+    // Whitelist projection (the characterVault rebuild policy on the same trust
+    // boundary): the old `{...enemy}` spread let arbitrary unknown keys on a
+    // hostile/stale save survive "sanitization" unbounded and re-persist through
+    // every autosave for the rest of the fight.
     const cleaned = {
-        ...enemy,
         id: enemy.id == null ? undefined : String(enemy.id).slice(0, 120),
         name: String(enemy.name || 'Enemy').trim().slice(0, 100) || 'Enemy',
         hp,
@@ -125,11 +134,14 @@ export function sanitizeLoadedEnemy(enemy) {
         defending: !!enemy.defending,
         isUndead: !!enemy.isUndead,
     };
+    if (typeof enemy.initiative === 'number' && Number.isFinite(enemy.initiative)) {
+        cleaned.initiative = enemy.initiative;
+    }
     const ab = validateEnemyAttackBonus(enemy.attackBonus);
     const dmg = sanitizeEnemyDamage(enemy.damage);
     const sb = validateEnemySaveBonus(enemy.saveBonus);
-    if (ab === undefined) delete cleaned.attackBonus; else cleaned.attackBonus = ab;
-    if (dmg === undefined) delete cleaned.damage; else cleaned.damage = dmg;
-    if (sb === undefined) delete cleaned.saveBonus; else cleaned.saveBonus = sb;
+    if (ab !== undefined) cleaned.attackBonus = ab;
+    if (dmg !== undefined) cleaned.damage = dmg;
+    if (sb !== undefined) cleaned.saveBonus = sb;
     return cleaned;
 }

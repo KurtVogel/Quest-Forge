@@ -207,6 +207,29 @@ describe('sanitizeLoadedEnemy', () => {
         expect(sanitizeLoadedEnemy('goblin')).toBe(null);
         expect(sanitizeLoadedEnemy([{ name: 'goblin' }])).toBe(null);
     });
+
+    it('drops unknown keys entirely — whitelist projection (2026-08-05 queue P2)', () => {
+        // The old {...enemy} spread let a 1 MB junk field on a hostile save
+        // survive "sanitization" and re-persist through every autosave.
+        const cleaned = sanitizeLoadedEnemy({
+            name: 'Ghoul',
+            hp: 10,
+            maxHp: 10,
+            initiative: 14,
+            saveBonus: 3,
+            junkPayload: 'x'.repeat(1000),
+            __proto__injection: { evil: true },
+            portraitUrl: 'data:image/png;base64,AAAA',
+        });
+        expect(cleaned.initiative).toBe(14); // known fields survive
+        expect(cleaned.saveBonus).toBe(3);
+        expect(cleaned.junkPayload).toBeUndefined();
+        expect(cleaned.portraitUrl).toBeUndefined();
+        expect(Object.keys(cleaned).sort()).toEqual([
+            'ac', 'combatStatus', 'condition', 'conditions', 'defending',
+            'hp', 'id', 'initiative', 'isUndead', 'maxHp', 'name', 'saveBonus',
+        ].sort());
+    });
 });
 
 describe('enemyHealthCondition thresholds', () => {

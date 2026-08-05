@@ -31,7 +31,12 @@ const MAX_INVENTORY_ITEMS = 200;
 // local 2000 cap silently truncated a long imported appearance on its FIRST
 // Scribe merge in play — the vault must not accept what the game cannot keep.
 const MAX_PORTRAIT_PROMPT_LENGTH = 2000;
-const MAX_PORTRAIT_URL_LENGTH = 2_500_000;
+// Generated portraits are downscaled to 480×640 JPEG (~60-110k chars base64,
+// imageGen.js) before they ever reach a hero file; the old 2.5M ceiling let a
+// hand-bloated import ride every campaign autosave snapshot 2-4×/turn and
+// single-handedly push a cloud save into chunking (2026-08-04 audit). An
+// over-ceiling portrait is stripped — the hero imports fine, one click regenerates.
+const MAX_PORTRAIT_URL_LENGTH = 300_000;
 
 /** Clamp to an integer in [min, max]; non-numeric input yields `fallback`. */
 function clampInt(value, min, max, fallback) {
