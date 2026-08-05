@@ -43,9 +43,9 @@ it under Process notes.
 | Feature ID | Scope (primary files) | Last audited |
 |---|---|---|
 | dice-engine | `engine/dice.ts` | 2026-08-01 |
-| rules-math | `engine/rules.js` | 2026-07-26 |
+| rules-math | `engine/rules.js` | 2026-08-05 |
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-07-28 |
-| response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-07-27 |
+| response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-08-05 |
 | prompt-building | `llm/promptBuilder.js` | 2026-07-29 |
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-08-03 |
 | combat-exchange | `engine/combatExchange.js`, `engine/combatMath.js`, `state/handlers/combat.js`, opening initiative | 2026-08-03 |
@@ -229,6 +229,12 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (character-vault, 2026-08-04): hero import admits portraits ~25-45× larger than the game generates — `MAX_PORTRAIT_URL_LENGTH` is 2.5M chars while generated portraits downscale to 480×640 JPEG (~60-110k chars base64), and imports are never re-downscaled; an oversized hand-imported portrait then rides the roster entry, every campaign autosave snapshot (2-4×/turn), and cloud saves (can single-handedly push a save into chunking). Downscale on import via `downscaleDataUrl` (degrade, don't reject) or drop the ceiling to ~300k — `engine/characterVault.js:34,43-49`, `llm/providers/imageGen.js:226-237`.
 - [ ] **P2** (character-vault, 2026-08-04): `sanitizeImageUrl`'s boundaries are untested — no case for an over-ceiling data URL (stripped to ''), nor for a hand-edited data URL with embedded whitespace/newlines failing the regex and silently dropping the portrait — `engine/characterVault.js:43-49`, `characterVault.test.js:94-109,268-275`.
 - [ ] **P2** (quests, 2026-08-04): `REMOVE_QUEST` is the quests handler's untested function (functions 75%), and the panel's complete-by-bare-id-string path (`QuestPanel.jsx:25` → matched string ref) is pinned only in its unmatched no-op form — `state/handlers/quests.js:81-86`, `gameReducer.quests.test.js:77-85`.
+- [ ] **P1** (rules-math, 2026-08-05): non-catalog armor/shield stats unclamped end to end — `normalizeItem`'s `...source` spread passes arbitrary `baseAC`/`shieldAC`/`acBonus` through (`items.js:164-166`), no boundary in `equipment.js`/`characterVault.js`, and `getArmorClass` computes it raw: a hallucinated/hand-imported `{armorType:'heavy', baseAC:30, acBonus:10}` gives the hero AC 40 permanently. Hero is the only combatant with no AC ceiling (companions clamp 21, enemies band-validated). Clamp at `normalizeItem` — `engine/rules.js:34-62`, `data/items.js:164-166`.
+- [ ] **P2** (rules-math, 2026-08-05): non-catalog armor with `baseAC` but no `armorType` → `getArmorClass` default branch ignores baseAC (AC = 10+dex) while `promptBuilder.js:736` tells the DM `[AC N, unknown armor]` — DM and engine disagree; default/infer the armorType — `engine/rules.js:49-50`.
+- [ ] **P2** (rules-math, 2026-08-05): `getWeaponDamageNotation`'s malformed-notation path returns the bare fallback without the ability/style/magic modifier — junk `damage` field deals flat 1d4 while unarmed gets 1d4+STR — `engine/rules.js:181-183`.
+- [ ] **P1** (response-parsing, 2026-08-05): unfenced-JSON fallback anchors only `'requested_rolls'` — an unfenced response carrying any other channel (incl. the no-backstop `combat_start`/`spell_cast`/`combat_exchange`) drops ALL events silently and leaks raw JSON into displayed narrative → journal/RAG; widen to an anchor list via `parseJsonObjectLoose` — `llm/responseParser.js:111`.
+- [ ] **P2** (response-parsing, 2026-08-05): `detectSemanticTextRolls`' gate matches bare `\bcheck\b`/`\bsave\b` in ordinary prose, so many no-roll narrations pay a blocking Flash-Lite round trip before the turn commits; require request-shape proximity (roll/make/attempt near check/save, or a DC digit) + log hit rate — `llm/responseParser.js:199`, `llm/turnOrchestrator.js:246`.
+- [ ] **P2** (response-parsing, 2026-08-05): `repairJson`'s trailing-comma strip (`/,\s*([}\]])/g`) is not string-aware — mutates string values containing `", }"`/`", ]"` during repair; the same function's closing logic was made string-aware 2026-07-14, the comma pass was missed — `llm/utils/jsonExtractor.js:106`.
 - [x] **P2** (progression, 2026-07-28): hostile-input paths untested — negative/NaN/string XP amounts, `awardExperience(null)`, `getExperienceThreshold(0/-1/NaN/25)`, unknown class (hitDie 8 default), `estimateCombatExperience` with object-valued stats (NaN sum → silent 0-award, safe but unpinned) — `engine/progression.test.js`. *Fixed 2026-07-28: full suite added; `estimateCombatExperience` also hardened directly (coerces stats, skips non-object entries and non-array input) rather than leaning on awardExperience's downstream NaN→0.*
 
 ## Entry template
@@ -253,6 +259,29 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-05 — rules-math + response-parsing (Lap 3: performance & token budget)
+
+`npm test`: 1320 passing / 77 files
+
+### rules-math
+- **Scope examined:** `engine/rules.js` end to end; `rules.test.js` (55 tests); consumer sweep (promptBuilder, combatExchange, combatMath, rollResolver, all state handlers, CharacterSheet/Screen); `normalizeItem` + `equipment.js` boundary check for armor stats.
+- **Findings:**
+  - Perf/token clean bill on the lap lens itself: pure O(1) math, no hot-path allocations that matter, no token-bearing output. The real findings are boundary gaps found while tracing consumers.
+  - **P1**: non-catalog armor/shield stats are UNCLAMPED end to end — `normalizeItem` spreads `...source` through (`items.js:164-166`), `equipment.js` and `characterVault.js` never mention `baseAC`/`shieldAC` (grep-confirmed), and `getArmorClass` (`rules.js:34-62`) computes whatever arrives. A DM-hallucinated or hand-edited-import item `{type:'armor', armorType:'heavy', baseAC:30, acBonus:10}` equips normally and gives the hero AC 40, permanently. Contrast: companion AC clamps at 21 absolute, enemy stats are band-validated in `enemyStats.js`. The hero — the character whose AC gates every enemy attack roll — is the only combatant with no ceiling.
+  - **P2**: non-catalog armor with `baseAC` but no `armorType` hits `getArmorClass`'s `default:` branch → AC = 10+dex, silently ignoring `baseAC` — while `promptBuilder.js:736` advertises the same item to the DM as `[AC 14, unknown armor]`. DM and engine disagree about the hero's AC; the player sees armor equipped that does nothing — `rules.js:49-50`.
+  - **P2**: `getWeaponDamageNotation`'s malformed-notation path (`rules.js:181-183`) returns the bare fallback (`'1d4'`) WITHOUT the ability/style/magic modifier — a weapon whose `damage` field is junk ("special", "d6") deals flat 1d4 while bare fists get 1d4+STR. Inconsistent and silently weaker.
+  - **P2** (lap): `getAllSkills` duplicates `getSkillModifier`'s formula inline (drift risk — one already fixed a floor the other lacked, 2026-07-14 pattern) and recomputes `getProficiencyBonus` 18× per call, called per render unmemoized at two sheet sites. Cost is trivial; the duplication is the point.
+- **Suggested improvements:** (1) clamp non-catalog `baseAC` (≤18, plate) / `shieldAC` (≤3) / `acBonus` (≤3) in `normalizeItem` or `computeACFromInventory` — mirror the companion-AC-21 decision; (2) default missing `armorType` to `'medium'` (or infer from baseAC) so baseAC is honored and prompt/engine agree; (3) apply the modifier to the fallback notation; (4) make `getAllSkills` delegate to `getSkillModifier`.
+
+### response-parsing
+- **Scope examined:** `responseParser.js` + `utils/jsonExtractor.js` end to end; `responseParser.test.js` (87 tests) + `jsonExtractor.test.js`; call-flow through `turnOrchestrator.js:190-300`; extractor call-site census (10 files).
+- **Findings:**
+  - **P1**: the unfenced-JSON fallback anchors ONLY on `'requested_rolls'` (`responseParser.js:111`) — an unfenced response whose events are any other channel drops ALL events silently AND leaks the raw JSON into the displayed narrative, which then flows into journal summaries and RAG as prose. Worst case is exactly the channels with no Scribe backstop (`combat_start`, `spell_cast`, `combat_exchange` — the turnOrchestrator:223 comment's own list); an unfenced `combat_exchange` mid-combat dead-ends the turn. Unfenced output is a known Grok behavior class this fallback exists for — it just only covers one of ~20 channels.
+  - **P2** (lap): `detectSemanticTextRolls`' cheap gate (`responseParser.js:199`) matches bare `\bcheck\b`/`\bsave\b`/`\broll\b` in ordinary prose — "he checks his ledger", "saved the harvest" (verb-form miss aside) — so a large share of no-roll narrations pay a blocking Flash-Lite round trip that delays the turn's commit/autosave/Scribe (awaited at `turnOrchestrator.js:246` before ADD_MESSAGE). DECISIONS.md 2026-06-22 settled *extraction* must be semantic — the gate is fair game: require request-shape proximity (roll/make/attempt within ~40 chars of check/save, or a DC digit) and log the hit rate.
+  - **P2** (lap): four unconditional `console.log`s per ordinary turn, including a 200-char response tail and the full raw JSON on repair failure (`responseParser.js:106-107,135-136,172`) — permanent production console churn on the phone target; gate behind the memory-inspector debug flag.
+  - **P2**: `repairJson`'s trailing-comma strip (`/,\s*([}\]])/g`, `jsonExtractor.js:106`) is not string-aware — a string VALUE containing `, }` or `, ]` (dialogue in a quest description) gets mutated during repair, corrupting content or failing an otherwise-repairable block. The closing-brace logic in the same function was made string-aware 2026-07-14; the comma pass was missed.
+- **Suggested improvements:** (1) widen the unfenced fallback to a small anchor list of high-value channel keys (`combat_exchange`, `combat_start`, `spell_cast`, `quest_updates`…) via the existing `parseJsonObjectLoose` anchors param, keeping the narrative slice; (2) tighten + instrument the semantic gate; (3) string-aware comma strip (walk once, reuse the existing in-string scanner); (4) debug-gate the logs.
 
 ## 2026-08-04 — cloud-sync + character-vault (Lap 3: performance & token budget) — second run
 
