@@ -6,7 +6,7 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-05 (strengthening-queue P1 batch #2: hero-AC clamps, unfenced-JSON rescue, scene cache, prompt caps; 1,340 tests green)._
+_Last updated: 2026-08-05 (strengthening queue cleared to 1 open item: P1 batch + full P2 sweep; 1,359 tests green)._
 
 ## Strengthening-queue P1 batch #2 2026-08-05 (3 P1s + 9 sibling P2s fixed)
 
@@ -22,11 +22,21 @@ logs debug-gated. **(3) Scene-art cache keyed on inputs** (narration id + locati
 `peekCachedImage` probing before the compose call; POST prompt cap; art-director cast
 filter-before-slice; LRU tests. **(4) Prompt accretion caps** — ACTIVE QUESTS (newest 12 +
 name-only overflow, 250-char prompt descriptions, duplicate reminder dropped) and
-INVENTORY Carried (25, mechanical-first, "still owned" overflow). Remaining queue: 0 P1s +
-~13 P2s (mostly test-depth: inventory handler branches, REMOVE_QUEST, sanitizeImageUrl
-boundaries; plus rollHistory cap, sanitizeLoadedEnemy whitelist, portrait
-downscale-on-import). **Watch item: next Grok campaign, confirm unfenced non-roll events
-now apply (look for the "Parsed unfenced JSON (anchor: …)" console warn).**
+INVENTORY Carried (25, mechanical-first, "still owned" overflow).
+
+Same-day P2 sweep (5 more commits) then cleared the rest of the queue: live `rollHistory`
+capped at 50 via shared `appendRollHistory` (all six append sites) + `MAX_DIE_SIDES`
+(1000) + batched one-call crypto draws in `rollDice`; `sanitizeLoadedEnemy` is whitelist
+projection (junk keys on hostile saves no longer survive, key set pinned); hero-import
+portrait ceiling dropped to 300k chars (generated portraits are 60-110k) with
+`sanitizeImageUrl` boundaries pinned; location-registry eviction is least-recently-visited
+with theater records immune (FIFO was evicting the founding town and silently disabling
+front intensity clamps); the write-only hidden roll-summary dispatch is deleted and the
+roll-arbiter payload compacted/clamped/pinned; inventory handler branches + REMOVE_QUEST
+pinned. **Queue is now 1 open item** — the `publicHints` design question (shrink vs spend
+as a "do not repeat" tempo line), which needs Vesa's call. **Watch item: next Grok
+campaign, confirm unfenced non-roll events now apply (look for the "Parsed unfenced JSON
+(anchor: …)" console warn).**
 
 ## Strengthening-queue P1 batch 2026-08-04 (5 P1s + 5 sibling P2s fixed)
 
