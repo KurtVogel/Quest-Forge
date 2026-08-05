@@ -6,7 +6,27 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-04 (strengthening-queue P1 batch: combat window, tempo distance, storage split; 1,320 tests green)._
+_Last updated: 2026-08-05 (strengthening-queue P1 batch #2: hero-AC clamps, unfenced-JSON rescue, scene cache, prompt caps; 1,340 tests green)._
+
+## Strengthening-queue P1 batch #2 2026-08-05 (3 P1s + 9 sibling P2s fixed)
+
+Every open P1 in SCHEDULED_STRENGTHENING.md cleared, in 4 commits (DECISIONS.md 2026-08-05 ×3):
+**(1) Hero gear stat clamps** — `normalizeItem` bounds non-catalog baseAC/shieldAC/AC-and-
+weapon bonuses (AC-40 hallucinated plate is dead), infers missing armorType from baseAC
+bands; rules.js re-clamps defensively for stale saves; junk weapon notation keeps the
+wielder's modifier. **(2) Unfenced-JSON rescue on every channel** — parser anchors derived
+from the EVENT_CHANNELS registry (was requested_rolls-only; other channels dropped events
+and leaked JSON into narrative/RAG); repairJson comma strip string-aware; semantic roll
+gate request-shaped (no more blocking Flash-Lite calls on bare "check"); per-turn parser
+logs debug-gated. **(3) Scene-art cache keyed on inputs** (narration id + location) with
+`peekCachedImage` probing before the compose call; POST prompt cap; art-director cast
+filter-before-slice; LRU tests. **(4) Prompt accretion caps** — ACTIVE QUESTS (newest 12 +
+name-only overflow, 250-char prompt descriptions, duplicate reminder dropped) and
+INVENTORY Carried (25, mechanical-first, "still owned" overflow). Remaining queue: 0 P1s +
+~13 P2s (mostly test-depth: inventory handler branches, REMOVE_QUEST, sanitizeImageUrl
+boundaries; plus rollHistory cap, sanitizeLoadedEnemy whitelist, portrait
+downscale-on-import). **Watch item: next Grok campaign, confirm unfenced non-roll events
+now apply (look for the "Parsed unfenced JSON (anchor: …)" console warn).**
 
 ## Strengthening-queue P1 batch 2026-08-04 (5 P1s + 5 sibling P2s fixed)
 
@@ -45,32 +65,14 @@ a hard `FOE FATIGUE` variety line. Also: eslint now ignores stray `test-results/
 live play yet — **watch item: next campaign, resolve a front for real and check the aftermath
 generation + victory echo land.**
 
-## Scribe payload P1 + 30-turn live playtest 2026-08-02 (autonomous overnight session)
-
-The 2026-08-02 strengthening P1 is fixed: the journal-cadence reflection was shipping RAW
-NPC roster records — portraitUrl base64 data URLs and all — measured 846 KB (~217k tokens)
-with 12 portraits, every cadence, silently killable by TPM rejection. `projectNpcForReflection`
-(scribe.js) now projects 14 clamped dossier fields with portraits/histories structurally
-excluded; all five machinery contexts dropped JSON pretty-printing (~10%); a worst-case
-payload test pins the key set, bars portrait*/base64, and caps the payload at 30 KB.
-Both companion P2s ticked in SCHEDULED_STRENGTHENING.md.
-
-Then a 30-turn live playtest (production build + real Gemini, extended
-`scripts/playtest_full_session.cjs` with a new seg4: memory probes + second fight + gold
-flows): **zero product bugs found.** Verified live: skill-check proposals (roll / challenge /
-change approach), two combats through the exchange machine (incl. a provider 503 recovered
-via the designed Retry), gated + victory loot audits, exact-price purchases, coin ledger
-visibly rejecting a DM re-emit of a 40 gp grant ("Duplicate coin grant ignored"), overnight
-rest + short rest + level-up HP math (12→20, AC 19), premise-grounded front generation with
-a front (Odo's flight) actually driving the fiction, memory probes recalling seg1 events
-in character, journal cadence + the NEW projected reflection advancing clocks live,
-round-trip persistence, legacy front heal, Dynamic World upgrade, and manual saves.
-Four harness flaws fixed in the playtest script itself (dead-target picker, Settings tab
-navigation, Save Game selector, name-independent save-row check). Full logs + screenshots:
-`test-results/full_session/`.
-
 ## Earlier (details in git history + DECISIONS.md)
 
+- **2026-08-02 — Scribe reflection payload P1 + 30-turn live playtest:** reflection now
+  ships `projectNpcForReflection` projections (was raw roster incl. portrait base64,
+  846 KB measured); machinery contexts dropped pretty-printing; 30 KB payload-ceiling test.
+  Then a 30-turn production-build playtest (`scripts/playtest_full_session.cjs`, real
+  Gemini): zero product bugs — checks, two combats, loot/coin ledgers, rests, level-up,
+  fronts, memory probes, persistence all verified live; logs in `test-results/full_session/`.
 - **2026-08-01 — Ability-score recommendations at creation:** `CLASSES[x].abilityGuidance`
   + `engine/abilityGuidance.js` pair a best-first priority with the standard array; banner
   with one-click spread, per-row why-lines. Advice only. Also moved the Fighter

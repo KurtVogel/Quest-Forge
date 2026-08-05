@@ -8,6 +8,45 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-05 · Hero gear stats are clamped at every trust boundary (the companion-AC-21 decision, applied to the hero).**
+The hero was the only combatant with no stat ceiling: companions clamp at AC 21, enemies
+are band-validated, but a DM-hallucinated or hand-imported non-catalog item
+(`{armorType:'heavy', baseAC:30, acBonus:10}`) equipped normally and set hero AC to 40
+permanently. Now `normalizeItem` clamps non-catalog `baseAC` ≤18 (plate), `shieldAC` ≤3,
+and `acBonus`/`attackBonus`/`damageBonus` ≤3 (the magic ceiling) — covering DM events AND
+vault imports, which both route through it — and infers a missing `armorType` from the
+catalog's baseAC bands so the AC the prompt advertises is the AC the engine computes.
+`getArmorClass`/`getWeaponAttackBonus`/`getWeaponDamageNotation` re-clamp defensively
+because LOAD_GAME never re-normalizes inventory (stale saves). Field-level clamps, NOT a
+total-AC cap: plate+3 with shield+3 and Shield of Faith legitimately exceeds 21 — the
+companion cap number doesn't transfer, only its principle.
+
+**2026-08-05 · Unfenced-JSON rescue anchors are derived from the event-channel registry.**
+The unfenced fallback anchored only on `requested_rolls`; any other channel emitted
+unfenced (a known Grok behavior class) dropped ALL events silently and leaked raw JSON
+into displayed narrative → journal → RAG. Anchors are now `EVENT_CHANNELS` wires + aliases
+filtered to snake_case — derived, so the list cannot drift from the contract (the
+eventChannels agreement-test principle), and plain-word wires (`location`, `healing`,
+`purchase`…) are deliberately excluded because they occur in ordinary prose. Same commit:
+`repairJson`'s trailing-comma strip is string-aware (dialogue containing `", }"` is content,
+not syntax), the semantic-roll gate requires request-shaped prose (verb near check/save, a
+DC digit, or d20) instead of paying a blocking Flash-Lite round trip on bare `check`, and
+the parser's per-turn console logs are gated behind the memory-inspector flag.
+
+**2026-08-05 · Scene-art cache keys on render inputs, not the composed prompt.**
+Scene prompts are LLM-composed per click and never byte-identical, so the prompt-derived
+key could never hit — every repeat Visualize paid a compose call + full generation while
+retaining full-res base64 for a ~0% hit rate. Scene renders pass
+`cacheKey = scene|<last-narration message id>|<location>` and SceneArt probes via
+`peekCachedImage` BEFORE the compose call. Reroll still bypasses (generation is the point
+of the feature) and its result replaces the cached entry; the provider-preference prefix
+still lets a cached fallback render be retried on a better provider. Focus/custom modes
+keep prompt-derived keys — their prompts are deterministic. Also: prompt-cap backstop
+(4000 chars) on the xAI/Gemini POST bodies mirroring the Pollinations slice, and the last
+two uncapped prompt accretion blocks got caps (ACTIVE QUESTS newest-12 + name-only
+overflow + 250-char prompt-side descriptions; INVENTORY Carried 25 with mechanical items
+prioritized and an explicit "still owned" overflow count — equipped always complete).
+
 **2026-08-04 · Combat-exchange result lines leave the DM's message window; the result stores events only.**
 Amends the 2026-07-30-era "keep engine roll-result lines in the window" rule for ACTIVE
 COMBAT: every `APPLY_COMBAT_EXCHANGE` system line is tagged `exchangeLine: true` and
