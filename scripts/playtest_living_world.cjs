@@ -418,10 +418,16 @@ async function main() {
     // --- Final report -------------------------------------------------------
     const finalState = await lwState(page);
     note('report', 'FINAL LIVING-WORLD STATE', { state: finalState });
+    const allRegions = (finalState?.locations || []).map(l => l.region).filter(Boolean);
     const verdicts = {
         secretCaptured: (finalState?.secretCards?.length || 0) + (finalState?.secretFacts?.length || 0) > 0,
         witnessedCaptured: (finalState?.witnessedCards?.length || 0) > 0,
-        regionsRecorded: (finalState?.locations || []).some(l => l.region),
+        regionsRecorded: allRegions.length > 0,
+        // Post-3c00875: seeding must fire for the REAL region, and sanitizeRegionName
+        // must have kept locality junk ("the docks", "the coast") out of the registry.
+        realRegionSeeded: (finalState?.seededRegions || []).some(r => /rimefell/i.test(r))
+            || /rimefell/i.test(finalState?.pendingRegionalFronts?.region || ''),
+        noJunkRegions: allRegions.every(r => !/^the\s+(docks?|coast|district|quarter|market|square|hills?|harbou?r|port)\b/i.test(r)),
         regionalSeedingTriggered: (finalState?.seededRegions?.length || 0) > 0 || !!finalState?.pendingRegionalFronts,
         hearsayOfferedAnywhere: (finalState?.recentHearsay?.length || 0) > 0,
         absenceDriftTriggered: !!finalState?.absenceDrift || !!finalState?.pendingAbsenceDrift,

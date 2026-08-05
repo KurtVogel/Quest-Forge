@@ -130,7 +130,12 @@ export function normalizeStoryMemoryCard(card = {}, existing = null) {
     // Conditional keys: an update that omits the field must not wipe the
     // stored value through the {...existing, ...card} merge spread.
     const knownBy = normalizeKnownBy(card.knownBy ?? card.known_by ?? existing?.knownBy);
-    const witnessed = card.witnessed !== undefined ? !!card.witnessed : !!existing?.witnessed;
+    // witnessed and knownBy are mutually exclusive; when the extractor emits
+    // both (2026-08-06 live playtest: a public accusation carried
+    // knownBy ["the hero"]), secrecy wins — a secret must never travel as
+    // hearsay, while an under-traveled public deed is only lost color.
+    const witnessed = knownBy.length === 0
+        && (card.witnessed !== undefined ? !!card.witnessed : !!existing?.witnessed);
     // Reducer-stamped at card birth; ages witnessed deeds for regional hearsay.
     const firstSeenMessage = Number.isFinite(card.firstSeenMessage)
         ? card.firstSeenMessage

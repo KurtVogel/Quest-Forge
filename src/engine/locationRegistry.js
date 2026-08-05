@@ -120,10 +120,17 @@ const GENERIC_PLACE_TOKENS = new Set([
     'hills', 'mountains', 'forest', 'woods', 'river', 'valley', 'plains', 'fields',
 ]);
 
+/** Function words that carry no properness signal in a region name. */
+const REGION_FILLER_WORDS = new Set(['the', 'a', 'an', 'of', 'and']);
+
 /**
  * Boundary for a model-reported region: must be a short NAME (≤4 meaningful
- * tokens), must not be the classified place itself, and must carry at least
- * one non-generic token. Returns the cleaned region or null.
+ * tokens), must not be the classified place itself, must carry at least one
+ * non-generic token, AND must read as a proper name — at least one non-filler
+ * word capital-initial. The second live playtest (2026-08-06) had all-lowercase
+ * descriptions ("the coastal artery", "the coastal mudflats") slip past the
+ * generic-token test and seed native fronts; real region names are always
+ * capitalized in the fiction they come from. Returns the cleaned region or null.
  */
 export function sanitizeRegionName(value, placeName = '') {
     const region = cleanText(value, 60);
@@ -132,6 +139,9 @@ export function sanitizeRegionName(value, placeName = '') {
     if (tokens.size === 0 || tokens.size > 4) return null;
     if (placeName && isSameLocation(region, placeName)) return null;
     if ([...tokens].every(token => GENERIC_PLACE_TOKENS.has(token))) return null;
+    const hasProperToken = region.split(/\s+/)
+        .some(word => !REGION_FILLER_WORDS.has(word.toLowerCase()) && /^\p{Lu}/u.test(word));
+    if (!hasProperToken) return null;
     return region;
 }
 

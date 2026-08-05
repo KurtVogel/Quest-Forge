@@ -47,6 +47,21 @@ describe('story card epistemics fields', () => {
         expect(publicCard.knownBy).toBeUndefined();
     });
 
+    it('knownBy strips witnessed — secrecy wins the contradiction (2026-08-06 live run)', () => {
+        // The second live playtest captured a PUBLIC tavern accusation with
+        // knownBy ["the hero"]: witnessed and knownBy are mutually exclusive,
+        // and a mismarked secret must never travel as regional hearsay.
+        const contradictory = normalizeStoryMemoryCard({
+            text: 'Publicly accused Odo Ferrin of an unpaid debt before the whole tavern',
+            type: 'callback',
+            witnessed: true,
+            knownBy: ['the hero'],
+            salience: 4,
+        });
+        expect(contradictory.knownBy).toEqual(['the hero']);
+        expect(contradictory.witnessed).toBeUndefined();
+    });
+
     it('an update that omits the fields keeps stored values through the merge spread', () => {
         const secret = normalizeStoryMemoryCard({
             text: 'Confessed the forged deed to Marta',

@@ -8,6 +8,29 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-06 ×2 · Second live playtest: properness includes capitalization, regions are where you ARE, and secrecy beats witnessed.**
+The second 28-turn live run (same harness, stricter verdicts: `realRegionSeeded` +
+`noJunkRegions`) re-passed the whole first-run slate — secret probe PASS again, absence
+drift installed 2 developments + a fact on the return, "the docks"-class junk gone — and
+caught three deeper calibrations, fixed same-day: **(1) All-lowercase descriptions slipped
+the generic-token net**: "the coastal artery" and "the coastal mudflats" were recorded as
+regions and the artery seeded 2 native fronts, filling the 4-front cap. `sanitizeRegionName`
+now also requires at least one capital-initial non-filler token — on live data every real
+region name ("the Rimefell Marches", "Vale of Reeds") is capitalized in the fiction it
+comes from, and every leaked junk value was lowercase description. **(2) Region
+misattribution poisons the home rule**: the Scribe tagged Brackwater (premise: Vale of
+Reeds) with "the Rimefell Marches" — a distant land merely *mentioned* in the scene.
+First-value-wins locked it in, first-region-is-home made Rimefell "home", so arriving in
+the real Rimefell Marches never seeded. Prompt fix (engine can't judge semantics): region
+is the land THIS place itself lies in, never a mentioned/destination land, must be a
+capitalized proper name. Watch item for run three. **(3) witnessed and knownBy are mutually
+exclusive, and secrecy wins**: the public tavern accusation was captured with
+`knownBy: ["the hero"]`, which blocked it from the rumor pool. Scribe rule states the
+exclusivity (a crowd-witnessed deed is public even if it failed or was shut down); the
+engine backstop in `normalizeStoryMemoryCard` strips `witnessed` whenever `knownBy` is
+non-empty — a mismarked secret that travels as hearsay violates the epistemics promise,
+while an under-traveled public deed is only lost color.
+
 **2026-08-06 · Region names are validated by properness, not by record collision (first live playtest's findings).**
 The first living-world live playtest (28 turns, real Gemini, `scripts/playtest_living_world.cjs`,
 logs in `test-results/living_world/`) passed all eight engine verdicts — secret knownBy

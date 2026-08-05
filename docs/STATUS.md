@@ -6,7 +6,23 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-06 (living-world LIVE playtest: 8/8 verdicts passed, 3 calibrations fixed; 1,410 tests green)._
+_Last updated: 2026-08-06 (SECOND live playtest: 8/10 stricter verdicts, 3 deeper calibrations fixed; 1,412 tests green)._
+
+## Second live playtest 2026-08-06 (28 turns, stricter verdicts — DECISIONS.md 2026-08-06 ×2)
+
+Re-run of the same harness with two verdicts added: `realRegionSeeded` (the ACTUAL region,
+not just any) and `noJunkRegions`. First-run fixes held: secret probe PASS again, absence
+drift installed on the return, "the docks"-class junk gone, 8/10 green. The two failures
+were the point — three deeper findings, all fixed same-day with tests: **(1)**
+all-lowercase junk ("the coastal artery") passed the generic-token net and seeded fronts →
+`sanitizeRegionName` now requires a capital-initial proper token; **(2)** the Scribe tagged
+Brackwater with a *mentioned* distant region, which became "home" and blocked real-region
+seeding → Scribe rule: region = the land THIS place lies in, never a
+mentioned/destination land (prompt-only — **watch item for run three**); **(3)** the
+public accusation carried `knownBy: ["the hero"]`, blocking it from the rumor pool →
+witnessed/knownBy declared mutually exclusive, engine strips `witnessed` when `knownBy`
+is present (secrecy wins). Also confirmed honest-negative: a fully peaceful run produces
+zero hearsay offers — no fights, no resolved fronts, no traveling deeds is correct behavior.
 
 ## Living-world live playtest 2026-08-06 (28 turns, real Gemini, all verdicts green)
 

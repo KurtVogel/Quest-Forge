@@ -275,6 +275,17 @@ describe('region name validation (2026-08-05 live playtest findings)', () => {
         expect(sanitizeRegionName('a long miserable stretch of frozen upland country', 'X')).toBeNull();
     });
 
+    it('rejects all-lowercase descriptions — the 2026-08-06 live-run leak', async () => {
+        const { sanitizeRegionName } = await import('../engine/locationRegistry.js');
+        // Both slipped past the generic-token test in the second live playtest
+        // and "the coastal artery" seeded 2 native fronts:
+        expect(sanitizeRegionName('the coastal artery', 'Netsholm')).toBeNull();
+        expect(sanitizeRegionName('the coastal mudflats', 'Drowned Anchor')).toBeNull();
+        // A leading article carries no properness; the inner proper token does.
+        expect(sanitizeRegionName('the Rimefell Marches', 'Fallow\'s End')).toBe('the Rimefell Marches');
+        expect(sanitizeRegionName('Brackwater', 'The Gilded Eel')).toBe('Brackwater');
+    });
+
     it('strips junk regions at the reducer boundary', () => {
         const state = gameReducer(initialGameState, {
             type: 'SET_LOCATION',
