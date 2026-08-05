@@ -261,6 +261,49 @@ MOTIF FATIGUE line. Zero new LLM calls (rides the per-turn Scribe), deterministi
 counting. Wait for live play with the 2026-08-03 layer first — the RAG never-transplant
 rule + FOE FATIGUE + RECENT VICTORY may already be enough.
 
+### The world keeps living while you're away: absence drift + traveling rumor — status: `idea` (2026-08-05)
+Today a return visit relies on RAG recalling what a place *was* — nothing makes the place
+have **moved** in the meantime, and nothing makes the hero's deeds travel ahead of them.
+Two halves of one system, both triggered by the same event: SET_LOCATION arriving at a
+registry record whose `lastVisitedAt` is ≥ N conversational messages ago (the registry
+already stamps visits; `conversationalDistance` in replayLedger.js already measures gaps).
+
+**Half 1 — absence drift ("what happened here since you left").** On a qualifying return,
+a background call (the `frontAftermath.js` pattern: fire-and-forget off a session marker,
+one-shot install, validated complete-or-nothing) proposes 1–2 bounded off-screen
+developments for THAT location: `npc_updates` (agenda / lastNotes — the innkeeper finally
+married, the guard captain got promoted, the rival finished her scheme), ONE world fact,
+and — only if the location is a front's theater — one front symptom consistent with that
+front's current clock/stage, so the fronts that already tick off-screen become *visible*
+exactly where they live. Engine bounds: replay-guarded per (locationId, returnMessage era);
+drift may never touch mechanics, kill or relocate a bond-bearing NPC (stance/keepsakes are
+sacred — those beats belong to live play), or contradict `stanceToPlayer`; a weak proposal
+installs nothing. Injected once as a `## WHILE YOU WERE AWAY` block on the arrival turn,
+then it's just canon like anything else.
+
+**Half 2 — traveling rumor ("what they've heard about you").** The hero's *witnessed*
+deeds propagate as hearsay with distortion that grows over distance and time. Sources
+already exist structurally: resolved fronts (title + epitaph — the payoff canon), the
+encounter ledger, and high-salience story-memory cards; the Scribe could add a cheap
+`witnessed` flag at extraction (a battle in a market square travels; a deal in a crypt
+does not). The engine *selects and schedules* — pick ≤2 deeds old/public enough to have
+plausibly reached this place, stamp a distortion grade from distance + age (`fresh &
+local: accurate` → `far & old: names wrong, scale doubled, allegiance inverted`) — and the
+DM prompt renders one REGIONAL HEARSAY line telling the LLM to *play* the distortion in
+NPC dialogue, never as narration fact. Division of labor stays clean: engine owns truth
+and scheduling, LLM owns the garbled retelling. A tavern-keeper greeting the hero with a
+wrong-in-one-detail version of a real triumph is the "persisting world" feel in one beat —
+and it gives resolved fronts a second life as folklore instead of a 40-message echo that
+just expires.
+
+Why: this is the cheapest path to "the world exists without me" — the single strongest
+persistent-world signal a solo campaign can send. Absence becomes content instead of a
+gap; deeds compound into legend; and it reuses four shipped systems (location registry,
+conversational distance, front clocks/theaters, story-memory salience) with one new
+background call and two prompt lines. Anti-abuse is the usual pattern: one-shot ledgers,
+caps, mechanics-inert, complete-or-nothing installs. Start with Half 2 if scoping down —
+it's engine-side selection + one prompt line, no new LLM call at all.
+
 ### Location-transition recall ledger — status: `shipped` (2026-06-23)
 Journal entries now store `location`; the DM prompt receives a deterministic
 `## LOCATION TRANSITION HISTORY` block for chronological "what happened right before I arrived?"
