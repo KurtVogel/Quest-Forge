@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     dedupeLocationRecords,
     findLocationRecord,
@@ -76,6 +76,39 @@ describe('upsertLocation', () => {
         }
         expect(locations).toHaveLength(MAX_LOCATIONS);
         expect(upsertLocation(locations, '   ')).toBe(locations);
+    });
+
+    it('never evicts a theater record while non-theaters exist (2026-08-02 queue P2)', () => {
+        // The old FIFO slice dropped the founding town — the likeliest theater —
+        // first, silently disabling that front's intensity clamp everywhere.
+        let locations = [normalizeLocationRecord({
+            name: 'Founding Town', theaterFrontIds: ['front-1'], lastVisitedAt: 1,
+        })];
+        for (let i = 0; i < MAX_LOCATIONS + 5; i++) {
+            locations = upsertLocation(locations, `Distinct Hamlet Number${i}`);
+        }
+        expect(locations).toHaveLength(MAX_LOCATIONS);
+        expect(locations.some(r => r.name === 'Founding Town')).toBe(true);
+    });
+
+    it('evicts the least-recently-visited record, not the first-seen one', () => {
+        // Monotonic clock: real Date.now ties at ms resolution inside a loop.
+        let tick = 1000;
+        vi.spyOn(Date, 'now').mockImplementation(() => ++tick);
+        let locations = [];
+        for (let i = 0; i < MAX_LOCATIONS; i++) {
+            locations = upsertLocation(locations, `Distinct Hamlet Number${i}`);
+        }
+        // Revisit the oldest record so it becomes the freshest.
+        locations = upsertLocation(locations, 'Distinct Hamlet Number0');
+        locations = upsertLocation(locations, 'Brand New Village');
+        expect(locations.some(r => r.name === 'Distinct Hamlet Number0')).toBe(true);
+        expect(locations.some(r => r.name === 'Distinct Hamlet Number1')).toBe(false); // now the stalest
+        expect(locations.some(r => r.name === 'Brand New Village')).toBe(true);
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
     });
 });
 

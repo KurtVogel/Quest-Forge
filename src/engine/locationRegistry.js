@@ -128,7 +128,17 @@ export function upsertLocation(locations = [], name, profile = null) {
         // Scene descriptions never mint records — wait for a nameable name.
         if (!isRegistrableLocationName(target)) return list;
         const record = normalizeLocationRecord({ name: target, ...(profile || {}) });
-        return [...list, record].slice(-MAX_LOCATIONS);
+        if (list.length < MAX_LOCATIONS) return [...list, record];
+        // Evict the least-recently-visited NON-THEATER record. The old FIFO
+        // slice evicted by first-seen order, so the founding town — the
+        // likeliest theater — went first, and that front's intensity clamp
+        // silently stopped applying everywhere (2026-08-02 audit). Theaters
+        // are only evictable if every record is one.
+        const evictable = list.filter(r => !(r.theaterFrontIds || []).length);
+        const pool = evictable.length ? evictable : list;
+        const lastTouch = r => r.lastVisitedAt || r.firstSeenAt || 0;
+        const victim = pool.reduce((oldest, r) => (lastTouch(r) < lastTouch(oldest) ? r : oldest));
+        return [...list.filter(r => r !== victim), record];
     }
 
     const existing = list[idx];
