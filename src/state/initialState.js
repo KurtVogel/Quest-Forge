@@ -30,6 +30,7 @@ export const initialGameState = {
     recentChecks: [], // Compact out-of-combat check-proposal ledger — heat input for diceless-but-tense arcs (chases, heists)
     recentSpellCasts: [], // "sourceId|spellKey" replay guard so a re-parsed spell_cast never double-spends a slot
     recentRests: [], // "sourceId|restType|messageIndex" replay guard — a DM re-emitting rest_taken must not re-run the rest
+    recentHearsay: [], // "deedKey|locationKey|messageIndex" — a hero deed is offered as traveling rumor at a given place only once
     combat: {
         active: false,
         enemies: [],

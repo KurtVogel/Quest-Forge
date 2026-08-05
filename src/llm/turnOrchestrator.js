@@ -110,6 +110,8 @@ export function createTurnRunner({
             storyMemory,
             retrievedMemories,
             premise: s.session?.premise,
+            regionalHearsay: s.session?.regionalHearsay || null,
+            absenceDrift: s.session?.absenceDrift || null,
             recentRulings: pruneRecentRulings(s.recentRulings, {
                 messageCount: (s.messages || []).length,
                 location: s.currentLocation,

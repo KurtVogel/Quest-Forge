@@ -6,7 +6,28 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-05 (strengthening queue cleared to 1 open item: P1 batch + full P2 sweep; 1,359 tests green)._
+_Last updated: 2026-08-05 evening (living-world system shipped: absence drift + traveling rumor; 1,391 tests green)._
+
+## The world keeps living while you're away 2026-08-05 (absence drift + traveling rumor)
+
+Shipped both halves of the same-day IDEAS.md entry (DECISIONS.md 2026-08-05) — the
+strongest persistent-world signal a solo campaign can send. One trigger: SET_LOCATION
+arriving at a different canonical record, with new `lastVisitedMessage` departure/arrival
+stamps. **Traveling rumor** (`engine/regionalHearsay.js`): ≤2 hero deeds (resolved fronts,
+encounter-ledger fights; hostile-site fights never travel) selected deterministically on
+arrival, distortion-graded firsthand/secondhand/legend by age + locality, offered once per
+(deed, place) via the `recentHearsay` ledger, rendered as `## REGIONAL HEARSAY — PRIVATE`
+(NPC dialogue only, never narrator fact). **Absence drift** (`llm/absenceDrift.js`):
+return after ≥30 conversational messages away raises a one-shot marker; a background
+DM-model call proposes 0–2 off-screen developments (existing NPCs' agenda/lastNotes only —
+structurally nobody dies or moves away, bonds untouchable), one world fact, and a
+band-clamped symptom only where a front holds theater; `INSTALL_ABSENCE_DRIFT` validates
+complete-or-nothing and `## WHILE YOU WERE AWAY — PRIVATE` cues the DM for ~12
+conversational messages. No new DM event channels. 32 new tests (1,391 green), lint clean.
+**Watch item: next long campaign, leave a town for 15+ scenes and return — check the
+console for `[LivingWorld] Absence drift …` and that the return scene surfaces the
+developments as discovery, not exposition dump; then arrive somewhere new after a big
+victory and check hearsay lands in NPC dialogue with the distortion played straight.**
 
 ## Strengthening-queue P1 batch #2 2026-08-05 (3 P1s + 9 sibling P2s fixed)
 

@@ -16,6 +16,8 @@ import { normalizeCampaignPremise } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 import { TABLE_TALK_STANDING_RULE } from './tableTalk.js';
 import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js';
+import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
+import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
 import { isCompanionActive } from '../engine/combatExchange.js';
 import { namesMatch } from '../engine/npcRoster.js';
@@ -35,7 +37,7 @@ export const PROMPT_CHAR_BUDGET = 160000;
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift }) {
     /** Named [{name, text}] parts — joined in push order; names feed the DEV size log only. */
     const namedParts = [];
     const parts = {
@@ -119,6 +121,27 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     });
     if (tempoBlock) {
         parts.push(tempoBlock, 'worldTempo');
+    }
+
+    // Living world (DECISIONS.md 2026-08-05): a long-absence return surfaces
+    // installed off-screen developments, and the hero's traveled deeds surface
+    // as distorted NPC hearsay. Both are private, windowed, and gated on the
+    // hero still being at the arrival place.
+    const awayBlock = buildWhileYouWereAwayBlock(absenceDrift, {
+        currentLocation,
+        messages: messages || null,
+        messageCount: messageCount || 0,
+    });
+    if (awayBlock) {
+        parts.push(awayBlock, 'absenceDrift');
+    }
+    const hearsayBlock = buildRegionalHearsayBlock(regionalHearsay, {
+        currentLocation,
+        messages: messages || null,
+        messageCount: messageCount || 0,
+    });
+    if (hearsayBlock) {
+        parts.push(hearsayBlock, 'regionalHearsay');
     }
 
     // Character info

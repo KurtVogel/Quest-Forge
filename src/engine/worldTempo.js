@@ -43,6 +43,15 @@ export const MAX_ACTIVE_FRONTS = 4;
 export const FOE_FATIGUE_THRESHOLD = 3;
 /** How long (in conversational messages) a resolved front's absence keeps being echoed to the DM. */
 export const RESOLVED_ECHO_WINDOW_MESSAGES = 40;
+/**
+ * Living-world absence drift (DECISIONS.md 2026-08-05): a return to a known
+ * place after this many conversational messages away (~15 scenes) qualifies
+ * for a private "what happened here since you left" pass. Constants live here
+ * so reducer handlers never import from llm/.
+ */
+export const ABSENCE_DRIFT_MIN_AWAY = 30;
+export const ABSENCE_DRIFT_WINDOW_MESSAGES = 12;
+export const MAX_DRIFT_DEVELOPMENTS = 2;
 
 /**
  * Conversational distance since an anchor stamped as "message count at the
@@ -50,7 +59,7 @@ export const RESOLVED_ECHO_WINDOW_MESSAGES = 40;
  * message appended after the stamp sits at index `anchorIndex`, so counting
  * starts there. Without a messages array, degrades to the raw difference.
  */
-function distanceSince(messages, anchorIndex, messageCount) {
+export function distanceSince(messages, anchorIndex, messageCount) {
     if (!Array.isArray(messages)) return Math.max(0, messageCount - anchorIndex);
     return conversationalDistance(messages, anchorIndex - 1, messageCount);
 }

@@ -261,7 +261,17 @@ MOTIF FATIGUE line. Zero new LLM calls (rides the per-turn Scribe), deterministi
 counting. Wait for live play with the 2026-08-03 layer first — the RAG never-transplant
 rule + FOE FATIGUE + RECENT VICTORY may already be enough.
 
-### The world keeps living while you're away: absence drift + traveling rumor — status: `idea` (2026-08-05)
+### The world keeps living while you're away: absence drift + traveling rumor — status: `shipped` (2026-08-05, same day as proposed)
+**Shipped both halves same-day** (DECISIONS.md 2026-08-05): `engine/regionalHearsay.js`
+(deterministic deed selection from resolved fronts + encounter ledger, distortion grades
+firsthand/secondhand/legend, once-per-(deed, place) `recentHearsay` ledger, `## REGIONAL
+HEARSAY — PRIVATE` block), `llm/absenceDrift.js` (background DM-model director off the
+one-shot `session.pendingAbsenceDrift` marker, `INSTALL_ABSENCE_DRIFT` complete-or-nothing
+install, `## WHILE YOU WERE AWAY — PRIVATE` block), and `lastVisitedMessage`
+departure/arrival stamps on location records. **Still open from the original design:** the
+Scribe `witnessed` flag so high-salience story-memory cards become a third hearsay source
+(public deeds beyond fights — a wedding vow, a public accusation), and a memory-inspector
+readout for the living-world state. Original notes below.
 Today a return visit relies on RAG recalling what a place *was* — nothing makes the place
 have **moved** in the meantime, and nothing makes the hero's deeds travel ahead of them.
 Two halves of one system, both triggered by the same event: SET_LOCATION arriving at a

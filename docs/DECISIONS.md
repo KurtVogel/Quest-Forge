@@ -8,6 +8,39 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-05 · The world keeps living while you're away: absence drift + traveling rumor (engine owns truth and scheduling, LLM owns the retelling).**
+Shipped both halves of the same-day IDEAS.md entry as one system triggered by one event —
+SET_LOCATION arriving at a DIFFERENT canonical location record (alias re-statements of the
+current place are not arrivals). Location records now carry a `lastVisitedMessage` stamp:
+arrival stamps the new record, departure stamps the record being left, so absence is
+measured hero-presence-to-return in conversational messages (a 60-message stay can't read
+as a 60-message absence — the departure stamp is the anchor). **Half 1, absence drift:** a
+return after ≥30 conversational messages raises a one-shot `session.pendingAbsenceDrift`;
+a background DM-model call (`llm/absenceDrift.js`, the frontAftermath pattern) proposes
+0–2 off-screen developments for THAT place — existing NPCs' `agenda`/`lastNotes` moving on,
+ONE world fact, and a front symptom only where a front holds theater.
+`INSTALL_ABSENCE_DRIFT` re-validates complete-or-nothing: roster names only (structurally
+nobody can be killed, relocated, or have bond history rewritten — only agenda/lastNotes
+are writable), the fact rides deduping ADD_WORLD_FACTS, the symptom survives only under a
+still-active theater front and is clamped to that front's LIVE intensity band, and a quiet
+"nothing much changed" installs nothing — a first-class answer. The `## WHILE YOU WERE
+AWAY — PRIVATE` block renders for ~12 conversational messages while the hero is still at
+the place; the installed canon persists regardless. **Half 2, traveling rumor:**
+`engine/regionalHearsay.js` deterministically selects ≤2 deeds that plausibly reached the
+arrival place — resolved fronts (region-wide news; folklore instead of an echo that just
+expires) and encounter-ledger fights (victories AND defeats; hostile-site fights never
+travel — no witnesses in a crypt) — and stamps each with a distortion grade from age +
+locality (firsthand → secondhand-one-detail-wrong → legend-scale-doubled). Selection runs
+ONCE per arrival in the reducer; a `recentHearsay` pipe ledger ("deedKey|locKey|msgIdx",
+cap 30) makes each deed offerable at each place once. The `## REGIONAL HEARSAY — PRIVATE`
+block instructs the DM to voice the distortion ONLY in NPC dialogue, never narrator fact —
+the true events remain exactly what the table played. No new DM event channels (nothing
+for the one-shot-mechanics ledger rule to guard); all state persists by construction.
+Why this shape: it is the cheapest "the world exists without me" signal — absence becomes
+content, deeds compound into legend — and it reuses four shipped systems (location
+registry, conversational distance, front clocks/theaters, encounter ledger) with exactly
+one new background LLM call.
+
 **2026-08-05 · Hero gear stats are clamped at every trust boundary (the companion-AC-21 decision, applied to the hero).**
 The hero was the only combatant with no stat ceiling: companions clamp at AC 21, enemies
 are band-validated, but a DM-hallucinated or hand-imported non-catalog item

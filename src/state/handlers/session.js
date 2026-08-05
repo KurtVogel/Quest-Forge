@@ -7,6 +7,7 @@ import { migrateLoadedSave } from '../migrations.js';
 import { createInitialFronts, normalizeFront } from '../../engine/fronts.js';
 import { normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { dedupeLocationRecords, normalizeLocationRecord } from '../../engine/locationRegistry.js';
+import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
 import { MAX_RECENT_ENCOUNTERS } from '../../engine/worldTempo.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
@@ -149,6 +150,7 @@ function validateSaveState(payload) {
         recentRests: Array.isArray(payload.recentRests)
             ? payload.recentRests.filter(entry => typeof entry === 'string').slice(-RECENT_REST_LIMIT)
             : [],
+        recentHearsay: sanitizeRecentHearsay(payload.recentHearsay),
         combat: (() => {
             const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)
                 ? payload.combat

@@ -4,7 +4,10 @@
  */
 import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
-import { upsertLocation } from '../../engine/locationRegistry.js';
+import { findLocationRecord, upsertLocation } from '../../engine/locationRegistry.js';
+import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
+import { ABSENCE_DRIFT_MIN_AWAY, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand } from '../../engine/worldTempo.js';
+import { gameReducer } from '../gameReducer.js';
 import { upsertNpc } from './shared.js';
 
 /**
@@ -126,11 +129,142 @@ export const handlers = {
         const name = typeof rawPayload === 'string' ? rawPayload : rawPayload?.name;
         if (!name || typeof name !== 'string') return state;
         const profile = rawPayload && typeof rawPayload === 'object' ? rawPayload.profile : null;
-        return {
-            ...state,
-            currentLocation: name,
-            locations: upsertLocation(state.locations || [], name, profile || null),
+
+        // Living-world arrival detection (DECISIONS.md 2026-08-05): only a move
+        // to a DIFFERENT canonical record is an arrival — the Scribe re-stating
+        // the current place (alias drift) must not re-trigger anything.
+        const messageIndex = (state.messages || []).length;
+        const priorLocations = state.locations || [];
+        const prevIdx = findLocationRecord(priorLocations, state.currentLocation);
+        const prevRecord = prevIdx === -1 ? null : priorLocations[prevIdx];
+        const targetIdx = findLocationRecord(priorLocations, name);
+        const targetRecord = targetIdx === -1 ? null : priorLocations[targetIdx];
+        const arrived = !prevRecord || !targetRecord || targetRecord.id !== prevRecord.id;
+
+        // Absence runs from the moment the hero LEFT the place (its departure
+        // stamp) to this return, in conversational messages. Legacy records
+        // without a stamp read null and simply start accruing from now.
+        const awayDistance = arrived && targetRecord && Number.isFinite(targetRecord.lastVisitedMessage)
+            ? distanceSince(state.messages, targetRecord.lastVisitedMessage, messageIndex)
+            : null;
+
+        // Departure stamp on the place being left, arrival stamp on the new one.
+        const departed = arrived && prevRecord
+            ? priorLocations.map(record => (record.id === prevRecord.id
+                ? { ...record, lastVisitedMessage: messageIndex }
+                : record))
+            : priorLocations;
+        const locations = upsertLocation(departed, name, { ...(profile || {}), lastVisitedMessage: messageIndex });
+
+        const next = { ...state, currentLocation: name, locations };
+        if (!arrived) return next;
+
+        // Traveling rumor: deterministically pick which of the hero's deeds
+        // could plausibly be talk of THIS place, once per (deed, place).
+        const selection = selectRegionalHearsay({
+            fronts: state.fronts,
+            recentEncounters: state.recentEncounters,
+            recentHearsay: state.recentHearsay,
+            locations,
+            locationName: name,
+            messages: state.messages,
+            messageIndex,
+        });
+        if (selection.items.length > 0) {
+            next.recentHearsay = appendHearsayLedger(state.recentHearsay, selection.ledgerEntries);
+        }
+        next.session = {
+            ...next.session,
+            regionalHearsay: selection.items.length > 0
+                ? { locationName: name, arrivedAtMessage: messageIndex, items: selection.items }
+                : null,
         };
+
+        // Absence drift: a long-enough return raises the one-shot marker the
+        // background director (llm/absenceDrift.js) fires from.
+        if (awayDistance !== null && awayDistance >= ABSENCE_DRIFT_MIN_AWAY && !state.session?.pendingAbsenceDrift) {
+            next.session = {
+                ...next.session,
+                pendingAbsenceDrift: {
+                    key: `${targetRecord.id}|${messageIndex}`,
+                    locationName: targetRecord.name,
+                    awayDistance,
+                    returnMessage: messageIndex,
+                },
+            };
+        }
+        return next;
+    },
+
+    /**
+     * One-shot install of the background absence-drift proposal. Everything is
+     * re-validated here: NPC developments touch agenda/lastNotes only and only
+     * for names already in the roster (structurally nobody can be killed,
+     * relocated, or have bond history rewritten), the world fact rides the
+     * deduping ADD_WORLD_FACTS path, and a front symptom survives only where
+     * an active front still holds theater — clamped to its live intensity
+     * band. A weak proposal installs nothing; a quiet return is first-class.
+     */
+    INSTALL_ABSENCE_DRIFT(state, action) {
+        const payload = action.payload || {};
+        const pending = state.session?.pendingAbsenceDrift;
+        if (!pending || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
+        const session = { ...state.session, pendingAbsenceDrift: null };
+        const drift = payload.drift && typeof payload.drift === 'object' ? payload.drift : {};
+
+        const developments = (Array.isArray(drift.developments) ? drift.developments : [])
+            .map(dev => ({
+                name: String(dev?.name || '').trim().slice(0, 100),
+                agenda: String(dev?.agenda || '').trim().slice(0, 300),
+                lastNotes: String(dev?.lastNotes || '').trim().slice(0, 400),
+                visible: String(dev?.visible || '').trim().slice(0, 240),
+            }))
+            .filter(dev => dev.name && (dev.agenda || dev.lastNotes)
+                && (state.npcs || []).some(npc => npc?.name && namesMatch(npc.name, dev.name)))
+            .slice(0, MAX_DRIFT_DEVELOPMENTS);
+
+        let npcs = state.npcs || [];
+        for (const dev of developments) {
+            npcs = upsertNpc(npcs, {
+                name: dev.name,
+                ...(dev.agenda && { agenda: dev.agenda }),
+                ...(dev.lastNotes && { lastNotes: dev.lastNotes }),
+            });
+        }
+
+        const locations = state.locations || [];
+        const idx = findLocationRecord(locations, pending.locationName);
+        const record = idx === -1 ? null : locations[idx];
+        const theaterFront = record
+            ? (state.fronts || []).find(front => (front.status || 'active') === 'active'
+                && (record.theaterFrontIds || []).includes(front.id))
+            : null;
+        const symptomText = String(drift.frontSymptom || '').trim().slice(0, 240);
+        const frontSymptom = theaterFront && symptomText
+            ? { frontId: theaterFront.id, maxIntensity: getFrontIntensityBand(theaterFront), text: symptomText }
+            : null;
+
+        const fact = String(drift.worldFact || '').trim().slice(0, 300);
+        const installed = developments.length > 0 || fact || frontSymptom;
+        const next = {
+            ...state,
+            npcs,
+            session: {
+                ...session,
+                absenceDrift: installed
+                    ? {
+                        locationName: pending.locationName,
+                        arrivedAtMessage: pending.returnMessage,
+                        awayDistance: pending.awayDistance,
+                        developments,
+                        fact,
+                        frontSymptom,
+                    }
+                    : state.session?.absenceDrift || null,
+            },
+        };
+        if (!fact) return next;
+        return gameReducer(next, { type: 'ADD_WORLD_FACTS', payload: [{ fact, category: 'event' }] });
     },
 
     // Scribe-classified profile for an already-known place (type/danger/theater).

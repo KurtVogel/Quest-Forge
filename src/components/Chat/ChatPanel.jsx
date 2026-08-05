@@ -10,6 +10,7 @@ import { addMemory, seedMemories } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/frontAftermath.js';
+import { generateAbsenceDrift, shouldGenerateAbsenceDrift } from '../../llm/absenceDrift.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
@@ -50,6 +51,7 @@ export default function ChatPanel() {
     const narratedCombatExchangeIdsRef = useRef(new Set()); // Prevent duplicate narration calls for one mechanics commit
     const frontGenerationSessionRef = useRef(null); // One private generation request per fresh campaign at a time
     const aftermathFrontRef = useRef(null); // One aftermath request per resolved front at a time
+    const absenceDriftRef = useRef(null); // One absence-drift request per qualifying return at a time
 
     // Use a ref to always read the latest state inside async callbacks
     const stateRef = useRef(state);
@@ -229,6 +231,32 @@ export default function ChatPanel() {
                 if (aftermathFrontRef.current === frontId) aftermathFrontRef.current = null;
             });
     }, [state.session?.pendingFrontAftermath?.frontId, state.settings.apiKey, state.combat?.active, dispatch]);
+
+    /**
+     * Absence drift (DECISIONS.md 2026-08-05): returning to a known place after
+     * a long absence raises a one-shot session marker; a private DM-model call
+     * proposes what happened THERE while the hero was away. Fire-and-forget like
+     * front aftermath — INSTALL_ABSENCE_DRIFT re-validates everything, a stale
+     * or duplicate result is dropped, and a failed call retries on the next
+     * dependency change.
+     */
+    useEffect(() => {
+        const s = stateRef.current;
+        const pending = s.session?.pendingAbsenceDrift;
+        if (!pending || !shouldGenerateAbsenceDrift(s) || absenceDriftRef.current === pending.key) return;
+        const sessionId = s.session.id;
+        const key = pending.key;
+        absenceDriftRef.current = key;
+        generateAbsenceDrift(s)
+            .then(drift => {
+                dispatch({ type: 'INSTALL_ABSENCE_DRIFT', payload: { sessionId, key, drift } });
+                console.info(`[LivingWorld] Absence drift for ${pending.locationName}: ${drift.developments.length} development(s)${drift.worldFact ? ' + fact' : ''}${drift.frontSymptom ? ' + symptom' : ''}.`);
+            })
+            .catch(error => {
+                console.warn('[LivingWorld] Absence-drift generation failed; will retry:', error.message || error);
+                if (absenceDriftRef.current === key) absenceDriftRef.current = null;
+            });
+    }, [state.session?.pendingAbsenceDrift?.key, state.settings.apiKey, state.combat?.active, dispatch]);
 
     /**
      * RAG seeding: embed all existing world facts and journal summaries once on mount.

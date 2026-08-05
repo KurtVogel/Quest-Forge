@@ -88,6 +88,13 @@ export function normalizeLocationRecord(record = {}, existing = null) {
         theaterFrontIds: [...new Set([...(existing?.theaterFrontIds || []), ...((record.theaterFrontIds || []).map(id => cleanText(id, 60)))].filter(Boolean))].slice(0, 6),
         firstSeenAt: existing?.firstSeenAt || record.firstSeenAt || Date.now(),
         lastVisitedAt: record.lastVisitedAt || Date.now(),
+        // Message-index visit stamp (living-world system, DECISIONS.md 2026-08-05):
+        // only SET_LOCATION passes this — profile/theater upserts keep the old
+        // stamp, so "how long was the hero away" measures real presence, not
+        // bookkeeping touches. Legacy records read null until first re-visit.
+        lastVisitedMessage: Number.isFinite(record.lastVisitedMessage)
+            ? record.lastVisitedMessage
+            : (Number.isFinite(existing?.lastVisitedMessage) ? existing.lastVisitedMessage : null),
     };
 }
 
