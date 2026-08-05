@@ -102,8 +102,32 @@ export function extractBalancedJson(text, keyword) {
  * @returns {string} Repaired string (may still be invalid)
  */
 export function repairJson(str) {
-    // Remove trailing commas before } or ]
-    let repaired = str.replace(/,\s*([}\]])/g, '$1');
+    // Remove trailing commas before } or ] — string-aware: a comma inside a
+    // string VALUE ("…wait, }") is content, not syntax. The closing logic below
+    // was made string-aware 2026-07-14; the old regex comma pass was not, and
+    // mutated dialogue during repair (2026-08-05 audit).
+    let repaired = '';
+    {
+        let inString = false;
+        let escape = false;
+        for (let i = 0; i < str.length; i++) {
+            const ch = str[i];
+            if (inString) {
+                repaired += ch;
+                if (escape) escape = false;
+                else if (ch === '\\') escape = true;
+                else if (ch === '"') inString = false;
+                continue;
+            }
+            if (ch === '"') { inString = true; repaired += ch; continue; }
+            if (ch === ',') {
+                let j = i + 1;
+                while (j < str.length && /\s/.test(str[j])) j++;
+                if (j < str.length && (str[j] === '}' || str[j] === ']')) continue; // trailing comma — drop
+            }
+            repaired += ch;
+        }
+    }
     // A truncated response often ends mid-list, right after a comma
     repaired = repaired.replace(/,\s*$/, '');
 

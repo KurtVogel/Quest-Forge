@@ -95,6 +95,14 @@ describe('stripMarkdownFences / repairJson', () => {
         expect(JSON.parse(repairJson('{"a":1,}'))).toEqual({ a: 1 });
     });
 
+    it('never mutates a comma-before-brace inside a string value during repair', () => {
+        // 2026-08-05 audit: the old regex comma pass was not string-aware and
+        // corrupted dialogue like this during an otherwise-unrelated repair.
+        const raw = '{"quest_updates":[{"id":"q1","description":"He said: \\"wait, }\\" and left, ]",}],}';
+        const parsed = JSON.parse(repairJson(raw));
+        expect(parsed.quest_updates[0].description).toBe('He said: "wait, }" and left, ]');
+    });
+
     it('closes interleaved truncation in nesting order and terminates open strings', () => {
         // Object-in-array truncation needs `}]` — the old all-brackets-then-braces
         // append produced `]}` and stayed invalid.

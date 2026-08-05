@@ -15,9 +15,28 @@
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
-import { normalizeEvents } from './eventChannels.js';
+import { normalizeEvents, EVENT_CHANNELS } from './eventChannels.js';
+import { isMemoryInspectorEnabled } from '../debug/memoryInspectorStore.js';
 
 export { normalizeEvents };
+
+// Per-turn diagnostics are debug-only: four unconditional logs per ordinary
+// turn (including a 200-char response tail) were permanent console churn on
+// the phone target. ?debugMemory=1 (or the Settings inspector toggle's URL
+// twin) turns them back on.
+const debugLog = (...args) => {
+    if (isMemoryInspectorEnabled()) console.log(...args);
+};
+
+// Anchor keys for rescuing UNFENCED event JSON, derived from the channel
+// registry so the list can never drift from the contract. Anchoring only on
+// requested_rolls dropped every other unfenced channel silently and leaked the
+// raw JSON into the displayed narrative → journal → RAG (2026-08-05 audit P1).
+// Plain-word wires (location, healing, purchase…) are excluded: they occur in
+// ordinary prose, snake_case keys only ever appear as JSON.
+const UNFENCED_EVENT_ANCHORS = EVENT_CHANNELS
+    .flatMap(c => [c.wire, ...(c.aliases || [])])
+    .filter(key => key.includes('_'));
 
 // All recognized skill and ability names for text roll detection
 const KNOWN_SKILLS = [
@@ -103,37 +122,34 @@ export function parseResponse(response) {
     // Try to find a fenced JSON block in the response
     const jsonMatch = response.match(/```json\s*\n?([\s\S]*?)\n?\s*```/);
 
-    console.log('[ResponseParser] Raw response length:', response.length);
-    console.log('[ResponseParser] JSON block found:', !!jsonMatch);
+    debugLog('[ResponseParser] Raw response length:', response.length);
+    debugLog('[ResponseParser] JSON block found:', !!jsonMatch);
 
     if (!jsonMatch) {
-        // Fallback 1: unfenced JSON containing requested_rolls — use balanced-brace extraction
-        const looseJson = extractBalancedJson(response, 'requested_rolls');
-        if (looseJson) {
-            console.warn('[ResponseParser] Found unfenced JSON with requested_rolls — attempting parse.');
+        // Fallback 1: unfenced event JSON — balanced-brace extraction anchored on
+        // each registry wire key in turn. The anchors usually point into the same
+        // object, so the first parseable extraction wins.
+        for (const anchor of UNFENCED_EVENT_ANCHORS) {
+            const looseJson = extractBalancedJson(response, anchor);
+            if (!looseJson) continue;
+            let parsed = null;
             try {
-                const parsed = JSON.parse(looseJson.json);
-                const narrative = response.slice(0, looseJson.startIndex).trim();
-                const events = normalizeEvents(parsed);
-                console.log('[ResponseParser] Parsed unfenced JSON.');
-                return { narrative, events };
+                parsed = JSON.parse(looseJson.json);
             } catch {
-                // Try repair before giving up
                 try {
-                    const parsed = JSON.parse(repairJson(looseJson.json));
-                    const narrative = response.slice(0, looseJson.startIndex).trim();
-                    const events = normalizeEvents(parsed);
-                    console.log('[ResponseParser] Parsed unfenced JSON after repair.');
-                    return { narrative, events };
-                } catch (e2) {
-                    console.warn('[ResponseParser] Failed to parse unfenced JSON:', e2.message);
+                    parsed = JSON.parse(repairJson(looseJson.json));
+                } catch {
+                    continue; // try the next anchor
                 }
             }
+            console.warn(`[ResponseParser] Parsed unfenced JSON (anchor: ${anchor}).`);
+            const narrative = response.slice(0, looseJson.startIndex).trim();
+            return { narrative, events: normalizeEvents(parsed) };
         }
 
         // Fallback 2: text roll detector — DM put roll request in narrative prose
-        console.log('[ResponseParser] No JSON block — scanning for text-based roll requests.');
-        console.log('[ResponseParser] Response tail (last 200 chars):', response.slice(-200));
+        debugLog('[ResponseParser] No JSON block — scanning for text-based roll requests.');
+        debugLog('[ResponseParser] Response tail (last 200 chars):', response.slice(-200));
 
         const detectedRolls = detectTextRollRequests(response);
         if (detectedRolls.length > 0) {
@@ -169,7 +185,7 @@ export function parseResponse(response) {
             console.warn('[ResponseParser] JSON repaired successfully.');
         } catch (e2) {
             console.warn('[ResponseParser] JSON repair failed too:', e2.message);
-            console.warn('[ResponseParser] Raw JSON string:', jsonMatch[1]);
+            debugLog('[ResponseParser] Raw JSON string:', jsonMatch[1]);
             // Unrepairable events are DROPPED — flag it so the caller can surface
             // a visible notice instead of the events vanishing in silence.
             return { narrative: response.trim(), events: null, eventsDropped: true };
@@ -179,7 +195,7 @@ export function parseResponse(response) {
     events = normalizeEvents(events);
 
     if (events.requestedRolls.length > 0) {
-        console.log(`[ResponseParser] ${events.requestedRolls.length} roll(s) requested:`,
+        debugLog(`[ResponseParser] ${events.requestedRolls.length} roll(s) requested:`,
             events.requestedRolls.map(r => `${r.type}: ${r.description} (DC ${r.dc})`).join(', ')
         );
     }
@@ -191,12 +207,21 @@ export async function detectSemanticTextRolls(narrative, settings) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !narrative) return null;
 
-    // Cheap gate: prose that requests a roll essentially always names one of these.
-    // Without it, EVERY ordinary no-roll narration pays a blocking LLM round-trip
-    // for a detector that almost always returns empty. (DECISIONS.md 2026-06-22
-    // rejected regex *extraction* — this only decides whether to make the semantic
-    // call at all; false positives merely cost one call.)
-    if (!/\b(roll|check|saving throw|save|dc\s*\d|d20)\b/i.test(narrative)) return null;
+    // Cheap gate: prose that requests a roll essentially always looks request-
+    // shaped. Without it, EVERY ordinary no-roll narration pays a blocking LLM
+    // round-trip for a detector that almost always returns empty. (DECISIONS.md
+    // 2026-06-22 rejected regex *extraction* — this only decides whether to make
+    // the semantic call at all; false positives merely cost one call.) Bare
+    // \bcheck\b/\bsave\b matched ordinary prose ("a quick check of the room")
+    // — require a request verb NEAR the check/save noun, an explicit DC, or a
+    // die name (2026-08-05 audit).
+    const requestShaped =
+        /\b(?:rolls?|makes?|attempts?|give me|need)\b[\s\S]{0,40}?\b(?:check|save|saving\s+throw)\b/i.test(narrative)
+        || /\b(?:check|save|saving\s+throw)\b[\s\S]{0,40}?\b(?:roll|to resist)\b/i.test(narrative)
+        || /\bdc\s*\d/i.test(narrative)
+        || /\bd20\b/i.test(narrative);
+    if (!requestShaped) return null;
+    debugLog('[ResponseParser] Semantic roll gate opened — narrative looks request-shaped.');
 
     const systemPrompt = `You are a parser assistant for a tabletop RPG. Analyze the Dungeon Master's (DM) narrative text to determine if they requested the player to make a non-combat check or saving throw in the text (which violates the system's structured event schema).
 

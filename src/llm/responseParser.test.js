@@ -232,6 +232,27 @@ describe('defenses against LLM misbehavior', () => {
         expect(narrative).not.toContain('requested_rolls');
     });
 
+    it('parses unfenced JSON for non-roll channels instead of leaking it into narrative', () => {
+        // 2026-08-05 audit P1: the fallback anchored ONLY on requested_rolls —
+        // an unfenced response on any other channel dropped all events silently
+        // AND the raw JSON flowed into the displayed narrative → journal → RAG.
+        const raw = 'Steel rings out as the bandits charge!\n{ "combat_start": { "enemies": [ { "name": "Bandit", "hp": 11 } ] } }';
+        const { narrative, events } = parseResponse(raw);
+        expect(events?.combatStart?.enemies?.[0]?.name).toBe('Bandit');
+        expect(narrative).toBe('Steel rings out as the bandits charge!');
+        expect(narrative).not.toContain('combat_start');
+    });
+
+    it('parses unfenced quest_updates and spell_cast JSON', () => {
+        const quests = parseResponse('She nods.\n{ "quest_updates": [ { "id": "q1", "name": "Find the ledger", "status": "new", "description": "Recover it." } ] }');
+        expect(quests.events?.questUpdates).toHaveLength(1);
+        expect(quests.narrative).toBe('She nods.');
+
+        const spell = parseResponse('Light blooms.\n{ "spell_cast": { "spell": "cureWounds", "level": 1 } }');
+        expect(spell.events?.spellCasts?.length).toBe(1);
+        expect(spell.narrative).toBe('Light blooms.');
+    });
+
     it('P0 regression: unfenced JSON where requested_rolls follows an npc_updates object keeps the roll', () => {
         // The old extractor anchored on the nearest '{' — the closed Guard object —
         // parsed it "successfully", and silently dropped the roll request.
@@ -963,26 +984,47 @@ describe('detectSemanticTextRolls', () => {
 
     it('returns null when no JSON is extractable', async () => {
         sendMessage.mockResolvedValue('no json here');
-        const rolls = await detectSemanticTextRolls('Some narration.', { apiKey: 'k', llmProvider: 'gemini' });
+        const rolls = await detectSemanticTextRolls('Make an Insight check to read her.', { apiKey: 'k', llmProvider: 'gemini' });
         expect(rolls).toBeNull();
     });
 
     it('returns null when the extracted JSON fails to parse', async () => {
         sendMessage.mockResolvedValue('{ requested_rolls: [broken] }');
-        const rolls = await detectSemanticTextRolls('Some narration.', { apiKey: 'k', llmProvider: 'gemini' });
+        const rolls = await detectSemanticTextRolls('Make an Insight check to read her.', { apiKey: 'k', llmProvider: 'gemini' });
         expect(rolls).toBeNull();
     });
 
     it('returns null when requested_rolls is missing or not an array', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({ requested_rolls: 'nope' }));
-        const rolls = await detectSemanticTextRolls('Some narration.', { apiKey: 'k', llmProvider: 'gemini' });
+        const rolls = await detectSemanticTextRolls('Make an Insight check to read her.', { apiKey: 'k', llmProvider: 'gemini' });
         expect(rolls).toBeNull();
     });
 
     it('returns null when the provider call throws', async () => {
         sendMessage.mockRejectedValue(new Error('network down'));
-        const rolls = await detectSemanticTextRolls('Some narration.', { apiKey: 'k', llmProvider: 'gemini' });
+        const rolls = await detectSemanticTextRolls('Make an Insight check to read her.', { apiKey: 'k', llmProvider: 'gemini' });
         expect(rolls).toBeNull();
+    });
+
+    it('skips the LLM call for prose that merely mentions a check or save', async () => {
+        // 2026-08-05 audit: bare \bcheck\b/\bsave\b gated open on ordinary prose,
+        // so most no-roll narrations paid a blocking Flash-Lite round trip.
+        const prose = 'A quick check of the room turns up nothing. You save your strength and press on.';
+        expect(await detectSemanticTextRolls(prose, { apiKey: 'k', llmProvider: 'gemini' })).toBeNull();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('gates open on request-shaped prose, an explicit DC, or a die name', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({ requested_rolls: [] }));
+        for (const prose of [
+            'Roll a Wisdom saving throw.',
+            'The fumes sting — make a Constitution save to resist.',
+            'Spotting it needs a sharp eye (DC 14).',
+            'Give me a d20.',
+        ]) {
+            await detectSemanticTextRolls(prose, { apiKey: 'k', llmProvider: 'gemini' });
+        }
+        expect(sendMessage).toHaveBeenCalledTimes(4);
     });
 });
 
