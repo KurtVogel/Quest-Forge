@@ -8,6 +8,25 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-07 · Declared spells are honored out loud; the revealed hero is the hero.**
+Live playtest #4 (dwarf cleric, real Gemini) found the combat-intent translation adapting
+player-declared magic *silently*: "I cast Guiding Bolt" (not in the 29-spell catalog)
+resolved as an unnamed Sacred Flame — the result line literally read "attacks … Hit for 2" —
+and a declared Healing Word (level 2 here, uncastable at cleric 1) vanished without
+comment. Ruling: **adaptation is fine, silence is not, and a legal named spell is the
+player's call.** `engine/declaredSpells.js` reconciles the intent before planning: an
+unambiguously named, castable, action-time catalog spell REPLACES the DM's different pick
+(player narrative authority over their own action; the engine still validates and rolls
+everything); a named catalog spell out of reach gets a visible note with the class level
+that unlocks it; named magic outside the catalog gets a note saying what it resolved as.
+Ambiguous declarations (two castable action spells named) stay the DM's choice, non-cast
+turns are never nagged, and the stored intent message is never mutated. Spell-attack
+result lines now name the spell, closing the cantrip-invisibility gap (cantrips spend no
+slot, so they previously left no trace at all). Also from #4: the hero-reveal step now
+caches the built character by identity inputs and `handleCreate` starts the campaign with
+exactly that character — starting gold is crypto-rolled inside `createCharacter`, and the
+old second call quietly re-rolled what the reveal had promised (25 gp shown → 12 started).
+
 **2026-08-06 ×4 · Region misattribution: backstory blocklist + one-slot reserve (prompt-only enforcement is dead).**
 Live playtest #3 proved the ×2 prompt rule insufficient: the Scribe tagged Blackwater Weirs
 with "the Sorrow Fen" — a proper, well-formed name that exists only in the hero's

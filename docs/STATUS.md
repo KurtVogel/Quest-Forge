@@ -6,7 +6,32 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-06 (vector-memory P1 pair fixed + THIRD live playtest: fixes verified live, region misattribution recurred — prompt-only fix insufficient; 1,423 tests green)._
+_Last updated: 2026-08-07 (F+D region guards shipped + FOURTH live playtest validating them; declared-spell reconciliation + reveal-gold fix; 1,434 tests green; deployed to hosting)._
+
+## Region guards + fourth live playtest 2026-08-07 (F+D validated, spell silence fixed)
+
+Vesa picked **F+D** from the five candidate guards (DECISIONS.md 2026-08-06 ×4):
+`isBackstoryRegion` strips a Scribe region named in `character.background` but not the
+premise before it enters the registry, and regional installs top the front web only to
+`MAX_ACTIVE_FRONTS − 1` (one slot always free; trigger gated the same). **Playtest #4**
+(dwarf cleric Brunhild, the Harrowlands premise, backstory land "the Ember Steppe" as
+bait): the bait never appeared anywhere, the REAL new region seeded —
+`[LivingWorld] Native pressures for the Pale Downs: 2 proposed`, exactly 1 installed
+(3 of 4 slots, reserve held). Also verified live: purchase event, challenge-ruling flow
+(DM revised to advantage, FINAL RULING, challenge spent), surprise suppressing the
+opening-initiative slot, Channel Divinity correctly rejected at cleric 1 with no free
+enemy action, situational-ruling kill, out-of-combat `spell_cast` Cure Wounds (slot spent,
+engine-rolled heal), OOC table talk, reload/Continue with the campaign-keyed embedding
+cache. **New finding, fixed same-night (DECISIONS.md 2026-08-07):** silent spell
+adaptation — off-catalog "Guiding Bolt" became an unnamed Sacred Flame and an uncastable
+Healing Word vanished wordlessly; now `engine/declaredSpells.js` honors castable
+player-named spells, posts visible notes for adapted/dropped magic, and spell-attack
+result lines name the spell. Plus the reveal-gold re-roll fix (reveal 25 gp → started 12;
+the previewed character now IS the campaign hero). **Still open (queue):** same-value
+coin-loss suppression P2, location-registry noise P2 ("frosted grass"-class records;
+"the Downs" mis-tagged Harrowlands), story-memory/vector-memory P2 batch, `publicHints`
+design question. Watch item: next combats, confirm the DM now emits player-named catalog
+spells directly (the reconcile note "Cast adjusted to your declared X" should be RARE).
 
 ## Third live playtest 2026-08-06 (interactive browser session, ~12 turns, real Gemini)
 

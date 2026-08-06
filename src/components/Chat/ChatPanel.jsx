@@ -4,6 +4,7 @@ import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { createTurnRunner } from '../../llm/turnOrchestrator.js';
 import { playerAuthorityRollCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
+import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildKnownAppearances, buildKnownStances, runScribe } from '../../llm/scribe.js';
 import { isTableTalkMessage } from '../../llm/tableTalk.js';
 import { addMemory, seedMemories } from '../../engine/vectorMemory.js';
@@ -544,7 +545,15 @@ export default function ChatPanel() {
                 || routed.route === TURN_ROUTES.IN_COMBAT_ROLLS_REJECTED) {
                 dispatch({ type: 'REJECT_COMBAT_EXCHANGE', payload: { reason: routed.reason } });
             } else if (routed.route === TURN_ROUTES.COMBAT_EXCHANGE) {
-                commitCombatPlan(planCombatExchange(stateRef.current, events.combatExchange));
+                // Declared-spell reconciliation (playtest #4): honor a castable
+                // spell the player named, and say so out loud when the DM's
+                // translation adapted or dropped named magic. Returns a NEW
+                // exchange — the stored intent message is never mutated.
+                const reconciled = reconcileDeclaredSpells(trimmed, events.combatExchange, stateRef.current.character);
+                for (const note of reconciled.notes) {
+                    dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: note } });
+                }
+                commitCombatPlan(planCombatExchange(stateRef.current, reconciled.exchange));
             } else if (routed.route === TURN_ROUTES.ROLL_PROPOSAL) {
                 // A hidden setup rides the proposal so its fiction survives: re-woven into
                 // the post-roll outcome, or revealed if the player changes approach.

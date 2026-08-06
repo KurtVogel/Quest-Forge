@@ -184,7 +184,7 @@ export function createTurnRunner({
         let systemPrompt = baseSystemPrompt;
         if (opts.combatIntentOnly) {
             systemPrompt = `${baseSystemPrompt}\n\n## CURRENT RESPONSE MODE — COMBAT INTENT ONLY
-Translate the player's committed action into the single bounded combat_exchange required by the live combat rules. Return ONLY the trailing fenced JSON event block: no narrative, setup, outcome, commentary, or prose outside the JSON. Keep descriptions brief. The engine will resolve mechanics and make a separate narration-only request from the authoritative result.`;
+Translate the player's committed action into the single bounded combat_exchange required by the live combat rules. Return ONLY the trailing fenced JSON event block: no narrative, setup, outcome, commentary, or prose outside the JSON. Keep descriptions brief. If the player names a spell from their available spell list, the cast slot MUST use exactly that spell — never substitute another. If they name magic outside their list, adapt it to the closest available option. The engine will resolve mechanics and make a separate narration-only request from the authoritative result.`;
         } else if (opts.tableTalk) {
             // Deterministic OOC contract: some DM providers (Grok in live play) never
             // break character on their own and steamroll "DM, ..." into scene prose.

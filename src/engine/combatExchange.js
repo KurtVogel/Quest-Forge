@@ -353,7 +353,8 @@ function eventMessage(event) {
     const roll = event.rolled != null ? ` Rolled **${event.rolled}** vs AC ${event.dc}${mode}` : '';
     if (event.type === 'attack') {
         const intercept = event.intercepted ? ` (guard — ${event.target} intercepts the blow meant for the hero)` : '';
-        if (!event.hit) return `**${event.actor} attacks ${event.target}**${intercept} —${roll}; **Miss.**`;
+        const verb = event.spellName ? `casts ${event.spellName} at` : 'attacks';
+        if (!event.hit) return `**${event.actor} ${verb} ${event.target}**${intercept} —${roll}; **Miss.**`;
         const crit = event.critical ? ' Critical hit.' : '';
         const sa = event.sneakAttackDetail
             ? ` Includes **${event.sneakAttackDetail.total}** Sneak Attack damage (${event.sneakAttackDetail.diceCount}d6: ${event.sneakAttackDetail.rolls.join(', ')}).`
@@ -362,7 +363,7 @@ function eventMessage(event) {
         const survival = event.remainingHp <= 0
             ? ` ${event.target} is down.`
             : ` ${event.target} remains alive at ${event.remainingHp}/${event.maxHp} HP.`;
-        return `**${event.actor} attacks ${event.target}**${intercept} —${roll}; **Hit for ${event.damage} damage.**${crit}${sa}${ud}${survival}`;
+        return `**${event.actor} ${verb} ${event.target}**${intercept} —${roll}; **Hit for ${event.damage} damage.**${crit}${sa}${ud}${survival}`;
     }
     if (event.type === 'check' || event.type === 'save') {
         const checkMode = event.mode ? ` (${event.mode})` : '';
@@ -672,6 +673,11 @@ function resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events,
             }
             events.push({
                 type: 'attack', actor: character.name || 'Player', target: enemy.name,
+                // Cantrips spend no slot and get no "casts X" note — without the
+                // spell name here the result line reads as a weapon attack and
+                // the cast is invisible (playtest #4: Sacred Flame showed as
+                // "attacks ... Hit for 2" with nothing naming the spell).
+                spellName: spell.name,
                 rolled: attack.roll.total, natural: attack.natural, dc: enemy.ac,
                 mode: rollModeLabel(attack, modifiers, slot.situationalRuling),
                 hit, critical, damage, remainingHp: enemy.hp, maxHp: enemy.maxHp,

@@ -132,17 +132,30 @@ export default function CharacterCreation() {
 
     // Engine-computed preview of the finished hero for the reveal step: the same
     // createCharacter/createStartingInventory calls handleCreate makes, so every
-    // number the player sees is the real engine math, not a UI estimate.
+    // number the player sees is the real engine math, not a UI estimate. Kept
+    // alive through the adventure (premise) step and REUSED by handleCreate —
+    // starting gold is crypto-rolled inside createCharacter, so a second call at
+    // confirm time would re-roll it and break the reveal's promise (playtest #4:
+    // the reveal showed 25 gp, the campaign began with a freshly rolled 12).
     const currentStepName = STEPS[step];
     const revealReady = !!(name.trim() && race && charClass && allStatsAssigned && allSkillsChosen);
+    const previewCacheRef = useRef({ key: null, value: null });
     const preview = useMemo(() => {
-        if (!revealReady || currentStepName !== 'confirm') return null;
+        if (!revealReady || (currentStepName !== 'confirm' && currentStepName !== 'adventure')) return null;
         const abilityScores = {};
         for (const ability of ABILITY_NAMES) {
             abilityScores[ability] = statAssignment[ability];
         }
-        const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle, expertiseSkills, gender, appearance, background });
-        return { character, inventory: createStartingInventory(charClass) };
+        // Identity-keyed cache, NOT a bare memo: the step advance from confirm to
+        // adventure changes a dep, and a recompute would re-run the crypto gold
+        // roll. Same identity inputs → the SAME built character all the way to
+        // handleCreate; an identity edit mints a fresh one (and its fresh roll).
+        const key = JSON.stringify([name, race, charClass, abilityScores, chosenSkills, fightingStyle, expertiseSkills, gender, appearance, background]);
+        if (previewCacheRef.current.key !== key) {
+            const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle, expertiseSkills, gender, appearance, background });
+            previewCacheRef.current = { key, value: { character, inventory: createStartingInventory(charClass) } };
+        }
+        return previewCacheRef.current.value;
     }, [revealReady, currentStepName, name, race, charClass, statAssignment, chosenSkills, fightingStyle, expertiseSkills, gender, appearance, background]);
 
     const imageKeyAvailable = !!(state.settings?.imageApiKey || getMachineryGeminiKey(state.settings));
@@ -202,6 +215,18 @@ export default function CharacterCreation() {
     };
 
     const handleCreate = () => {
+        // The revealed hero IS the hero: reuse the preview so the stat chips and
+        // gold the player just confirmed are what the campaign starts with.
+        if (preview) {
+            const character = { ...preview.character };
+            if (portraitUrl) {
+                character.portraitUrl = portraitUrl;
+                character.portraitPrompt = portraitPromptUsed;
+                character.portraitUpdatedAt = Date.now();
+            }
+            beginAdventure(character, preview.inventory);
+            return;
+        }
         const abilityScores = {};
         for (const ability of ABILITY_NAMES) {
             abilityScores[ability] = statAssignment[ability];
