@@ -53,8 +53,8 @@ it under Process notes.
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-08-02 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-08-02 |
 | memory-journal | `engine/worldJournal.js` | 2026-07-30 |
-| story-memory | `engine/storyMemory.js` | 2026-07-28 |
-| vector-memory-rag | `engine/vectorMemory.js` | 2026-07-28 |
+| story-memory | `engine/storyMemory.js` | 2026-08-06 |
+| vector-memory-rag | `engine/vectorMemory.js` | 2026-08-06 |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-04 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-08-04 |
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-08-04 |
@@ -253,6 +253,13 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P1** (response-parsing, 2026-08-05): unfenced-JSON fallback anchors only `'requested_rolls'` — an unfenced response carrying any other channel (incl. the no-backstop `combat_start`/`spell_cast`/`combat_exchange`) drops ALL events silently and leaks raw JSON into displayed narrative → journal/RAG; widen to an anchor list via `parseJsonObjectLoose` — `llm/responseParser.js:111`. *Fixed 2026-08-05: anchors derived from the EVENT_CHANNELS registry (snake_case wires + aliases, no drift possible); plain-word wires (`location`, `healing`, `purchase`…) deliberately excluded — they occur in prose.*
 - [x] **P2** (response-parsing, 2026-08-05): `detectSemanticTextRolls`' gate matches bare `\bcheck\b`/`\bsave\b` in ordinary prose, so many no-roll narrations pay a blocking Flash-Lite round trip before the turn commits; require request-shape proximity (roll/make/attempt near check/save, or a DC digit) + log hit rate — `llm/responseParser.js:199`, `llm/turnOrchestrator.js:246`. *Fixed 2026-08-05: request verb within 40 chars of check/save (either order, incl. "to resist"), or DC digit / d20; gate hit debug-logged.*
 - [x] **P2** (response-parsing, 2026-08-05): `repairJson`'s trailing-comma strip (`/,\s*([}\]])/g`) is not string-aware — mutates string values containing `", }"`/`", ]"` during repair; the same function's closing logic was made string-aware 2026-07-14, the comma pass was missed — `llm/utils/jsonExtractor.js:106`. *Fixed 2026-08-05: single string-aware walk drops trailing commas outside strings only.*
+- [ ] **P1** (vector-memory-rag, 2026-08-06): combat-intent calls pay a blocking RAG embed round-trip + inject ~4-6 KB of memory blocks into the JSON-only translation prompt, and clobber the Memory Inspector capture — skip retrieval/curation/captureInjection when `opts.combatIntentOnly` — `llm/turnOrchestrator.js:144-176`, `ChatPanel.jsx:532`.
+- [ ] **P1** (vector-memory-rag, 2026-08-06): embedding cache has no lifecycle — unbounded per-campaign row growth (2+/turn), stale rows for reworded NPC-note/story-card texts stay retrievable forever beside their replacements, and `clearMemories()` has zero production call sites so deleted campaigns orphan their rows permanently; add per-campaign cap + delete-campaign hook + replace-not-append re-seed for mutable categories — `engine/vectorMemory.js:53-59,131-162,247-252`.
+- [ ] **P2** (vector-memory-rag, 2026-08-06): category boost applied before the `minScore` gate can pass sub-threshold hits and drop above-threshold `narrative` ones — document+pin or reorder — `engine/vectorMemory.js:229-234`.
+- [ ] **P2** (vector-memory-rag, 2026-08-06): machinery key entered after mount leaves the session unseeded and its embeds unpersisted (`activeSessionId` stays null) — re-run seeding when the key appears — `ChatPanel.jsx:293-326`, `engine/vectorMemory.js:149,161`.
+- [ ] **P2** (story-memory, 2026-08-06): unbounded card pool — implement the IDEAS.md 2026-07-14 dormancy/age-out pass (inspector prerequisite has existed since 2026-07); full-pool re-tokenization per turn measured ~15 ms @ 400 cards — `state/handlers/worldMemory.js:72-107`, `engine/storyMemory.js:249-256`.
+- [ ] **P2** (story-memory, 2026-08-06): RAG mount-seed embeds resolved/dormant cards with no status marker — skip non-active or prefix `[resolved]` — `ChatPanel.jsx:310-314`.
+- [ ] **P2** (story-memory, 2026-08-06): `UPDATE_STORY_MEMORY` subject fallback match lacks the type guard `findStoryMemoryMatch` has — wrong same-subject cross-type card can be marked used/rewritten — `state/handlers/worldMemory.js:112-116`.
 - [x] **P2** (progression, 2026-07-28): hostile-input paths untested — negative/NaN/string XP amounts, `awardExperience(null)`, `getExperienceThreshold(0/-1/NaN/25)`, unknown class (hitDie 8 default), `estimateCombatExperience` with object-valued stats (NaN sum → silent 0-award, safe but unpinned) — `engine/progression.test.js`. *Fixed 2026-07-28: full suite added; `estimateCombatExperience` also hardened directly (coerces stats, skips non-object entries and non-array input) rather than leaning on awardExperience's downstream NaN→0.*
 
 ## Entry template
@@ -277,6 +284,31 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-06 — vector-memory-rag + story-memory (Lap 3: performance & token budget)
+
+`npm test`: 1412 passing / 82 files
+
+### vector-memory-rag
+- **Scope examined:** `engine/vectorMemory.js` (whole file), `llm/providers/gemini.js:141-178` (embedText), `llm/turnOrchestrator.js:135-176,320-332`, `ChatPanel.jsx:293-326,443-455,515-525,600-625`, `debug/memoryInspectorStore.js:40-60`, `vectorMemory.test.js` (472 lines); benchmarked cosine scan (0.4 ms @ 500 memories, 3.4 ms @ 5000 — retrieval CPU is a non-issue).
+- **Findings:**
+  - **P1** The combat-intent call pays full RAG it cannot use: `ChatPanel.jsx:532` passes the player's text as `originalPlayerMessage` with `combatIntentOnly: true`, so `turnOrchestrator.js:144-176` runs a BLOCKING `embedText` round-trip + `curateStoryMemory` and injects both memory blocks (~4-6 KB) into a prompt whose entire contract is "return ONLY the JSON exchange" — extra TTFT on the hottest interactive path (the CLAUDE.md combat-pacing concern), wasted tokens every combat turn, and `captureInjection` clobbers the Memory Inspector's last-injection view with intent-call data. The narration-only follow-up passes `null`, so memories reach the call that can't use them and skip the one that could.
+  - **P1** No eviction anywhere in the embedding lifecycle: (a) a live campaign accretes 2+ rows/turn (player + narrative + facts/journal) with no cap — ~1000+ rows ≈ several MB IndexedDB *and* the same again in page RAM (`memoryStore`) on a 500-turn campaign; (b) rows are keyed `[sessionId, text]`, so every reworded NPC `lastNotes` / merged story-card text mints a NEW row at next mount-seed while the stale rows stay loaded and retrievable forever — a superseded "Marta: swore to kill the hero" snapshot retrieves beside the reconciled current stance with no staleness marker; (c) `clearMemories()` has ZERO production call sites since v4 removed the mount wipe (grep-confirmed), so deleting/abandoning a campaign orphans its rows permanently — `vectorMemory.js:53-59,131-162,247-252`.
+  - **P2** Category boost is added BEFORE the `minScore` filter (`vectorMemory.js:229-234`) — a 0.48-similarity `npc_character` hit (+0.08) passes the 0.55 gate while a 0.58 `narrative` (−0.04) is dropped; plausibly intended, but undocumented and unpinned.
+  - **P2** Key-after-mount seeding gap: the seeding effect runs once with `[]` deps (`ChatPanel.jsx:293-326`); a machinery key entered in Settings after mount leaves the session unseeded AND `activeSessionId` null, so that session's narrative/player embeds stay in-memory only and are permanently unpersisted (`vectorMemory.js:149,161`).
+- **Suggested improvements:** (1) skip retrieval/curation/captureInjection when `opts.combatIntentOnly`; (2) give the embed cache a lifecycle — per-campaign row cap with oldest-first eviction, a delete-campaign hook, and replace-not-append re-seeding for mutable-text categories (`npc`, `story_*`); (3) pin the boost-before-gate behavior with a comment + test or move the boost after the filter; (4) re-run seeding when the machinery key first appears.
+
+### story-memory
+- **Scope examined:** `engine/storyMemory.js` (whole file), `state/handlers/worldMemory.js:72-124`, `handlers/npcs.js:61-76`, `handlers/session.js:121-122`, `textMatch.js`, `scribe.js` extraction/reflection dispatch sites, `promptBuilder.js:200-206`, tests (storyMemory 297 + epistemics 92 + reducer 145 lines); benchmarked `curateStoryMemory` (0.9 ms @ 50 cards, 14.6 ms @ 400 cards/40 NPCs per turn).
+- **Findings:**
+  - **P2** Unbounded card pool: `state.storyMemory` only appends or merges — no cap, no archival; resolved/dormant cards persist forever, `curateStoryMemory` re-tokenizes the full pool every turn (~15 ms @ 400 cards on desktop node — meaningful on the phone target), `findStoryMemoryMatch` scans + tokenizes the whole pool per added card, and all cards ride every autosave. IDEAS.md already holds the design sketch ("Story-memory pool dormancy/pruning", 2026-07-14) — the inspector it wanted to wait for has existed since 2026-07; time to act on it.
+  - **P2** The mount-seed embeds resolved/dormant cards with no status marker in the embedded text (`ChatPanel.jsx:310-314`) — a paid-off promise retrieves identically to a live one, inviting the DM to revive a resolved beat; curation excludes non-active cards (`storyMemory.js:206`) but RAG retrieval has no status filter.
+  - **P2** `UPDATE_STORY_MEMORY`'s subject fallback match has no type guard (`worldMemory.js:112-116`), unlike `findStoryMemoryMatch`'s `m.type === card.type` (`storyMemory.js:199`) — a bare-subject `memory_updates` ("Oren") can mark used or rewrite the wrong same-subject card of a different type.
+  - Prompt cost is well-bounded: 5-card cap × ~350 chars ≈ 1.8 KB — no token finding.
+- **Suggested improvements:** (1) implement the IDEAS.md dormancy pass (journal-cadence age-out of salience-1/2 cards, wounds auto-dormant when healed); (2) skip non-active cards in the RAG seed or prefix `[resolved]`; (3) add the type guard to UPDATE_STORY_MEMORY's subject match.
+
+### Process notes
+- The registry's story-memory row should eventually mention `state/handlers/worldMemory.js` (card reducer paths live there since the 2026-07-31 handlers split); left as-is this run since the scope column says "primary files".
 
 ## 2026-08-05 — enemy-stats-conditions + inventory-economy (Lap 3: performance & token budget) — second run
 

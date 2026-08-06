@@ -1091,6 +1091,21 @@ use raw message indexes with the same 4-message window — no observed failure y
 same inflation applies to any post-roll turn. Apply the established pattern if a replay
 slips through either ledger in play.
 
+### [strengthening] RAG embedding-cache lifecycle: eviction, campaign-delete hook, replace-on-reseed — status: `idea` (2026-08-06)
+The v4 campaign-keyed embedding cache (`rpg-vector-memory` IndexedDB) fixed the reload
+re-embedding storm but removed the only deletion path from production: `clearMemories()`
+now has zero call sites, rows accrete 2+/turn per live campaign with no cap, and deleting
+a save orphans that campaign's rows forever. Worse, rows are keyed `[sessionId, text]`,
+so every reworded NPC `lastNotes` or merged story-card text mints a NEW row at the next
+mount-seed while the stale version stays loaded and retrievable — a superseded "swore to
+kill the hero" snapshot can be retrieved beside the reconciled current stance with no
+staleness marker. Why: the phone target + "infinite campaigns" north star means several
+MB of IndexedDB and page RAM per mature campaign, growing without bound. Idea: (a) a
+per-campaign row cap with oldest-first eviction (timestamp already stored); (b) call a
+campaign-scoped delete when a save slot is deleted; (c) for mutable-text categories
+(`npc`, `story_*`), replace that subject's prior rows on re-seed instead of appending.
+From the 2026-08-06 strengthening audit (vector-memory-rag, Lap 3).
+
 ### [strengthening] Spend `publicHints` as a "don't repeat this symptom" tempo line — status: `idea` (2026-08-02)
 Each cadence appends the symptom it permitted to the front's `publicHints` (cap 6 × 240
 chars, `engine/fronts.js:235-237`), and the DM's own `front_updates` can add more — but
