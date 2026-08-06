@@ -145,6 +145,28 @@ export function sanitizeRegionName(value, placeName = '') {
     return region;
 }
 
+/**
+ * Backstory-region guard (DECISIONS.md 2026-08-06, live playtest #3): a region
+ * named in the hero's player-authored background is where the hero CAME FROM —
+ * the Scribe kept tagging the current place with it ("the Sorrow Fen", named
+ * only in a backstory confession, passed every form check, became a registry
+ * region, and its native fronts starved the genuinely new region). Properness
+ * validation cannot catch this: the name IS proper; only its provenance is
+ * wrong. A region the campaign premise also names is real world geography and
+ * is never rejected (players routinely set their background in the campaign's
+ * actual home region — stripping that would poison home-region detection
+ * instead). Known limitation, accepted in the design call: a backstory land
+ * the campaign later genuinely visits cannot become a registry region, so it
+ * never seeds native fronts — its pressures are the hero's story anyway.
+ */
+export function isBackstoryRegion(region, { background = '', premise = '' } = {}) {
+    const core = cleanText(region, 60).replace(/^the\s+/i, '').toLowerCase();
+    if (core.length < 3) return false;
+    const normalize = (text) => String(text || '').toLowerCase().replace(/\s+/g, ' ');
+    if (!normalize(background).includes(core)) return false;
+    return !normalize(premise).includes(core);
+}
+
 /** "the Icebound Coast" and "Icebound Coast, the frozen north" are one region. */
 export function isSameRegion(a, b) {
     if (!a || !b) return false;

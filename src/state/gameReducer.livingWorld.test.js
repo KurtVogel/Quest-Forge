@@ -295,6 +295,59 @@ describe('region name validation (2026-08-05 live playtest findings)', () => {
     });
 });
 
+describe('backstory-region guard (2026-08-06 live playtest #3)', () => {
+    it('isBackstoryRegion: background-only lands are backstory, premise geography is not', async () => {
+        const { isBackstoryRegion } = await import('../engine/locationRegistry.js');
+        const background = 'Grew up a ferry-keeper\'s daughter on the Sorrow Fen crossings.';
+        const premise = 'Saltmere lies in the Vale of Reeds; north is the Rimefell Marches.';
+
+        expect(isBackstoryRegion('the Sorrow Fen', { background, premise })).toBe(true);
+        expect(isBackstoryRegion('THE SORROW FEN', { background, premise })).toBe(true);
+        // Premise names it too → real campaign geography, never rejected —
+        // even when the background is also set there (home-region detection
+        // must survive a background written in the campaign's home region).
+        expect(isBackstoryRegion('the Vale of Reeds', {
+            background: background + ' Now hauls freight across the Vale of Reeds.',
+            premise,
+        })).toBe(false);
+        // Not in the background at all → not backstory.
+        expect(isBackstoryRegion('the Rimefell Marches', { background, premise })).toBe(false);
+        expect(isBackstoryRegion('the Sorrow Fen', {})).toBe(false);
+        expect(isBackstoryRegion('', { background, premise })).toBe(false);
+    });
+
+    it('strips a backstory region before it can enter the registry or trigger seeding', () => {
+        let state = {
+            ...initialGameState,
+            session: { ...initialGameState.session, id: 'campaign-1', premise: 'A tale set in the Vale of Reeds.' },
+            character: { ...initialGameState.character, background: 'Born on the Sorrow Fen, fled after the fire.' },
+            messages: Array.from({ length: 20 }, (_, i) => ({ role: 'user', content: `m${i}` })),
+        };
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Saltmere' });
+        state = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Saltmere', profile: { type: 'settlement', region: 'the Vale of Reeds' } },
+        });
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Blackwater Weirs' });
+
+        const poisoned = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Blackwater Weirs', profile: { type: 'frontier', region: 'the Sorrow Fen' } },
+        });
+        const weirs = poisoned.locations.find(r => r.name === 'Blackwater Weirs');
+        expect(weirs.region ?? null).toBeNull();
+        expect(weirs.type).toBe('frontier'); // rest of the profile still lands
+        expect(poisoned.session.pendingRegionalFronts).toBeUndefined();
+
+        // The same arrival with a genuinely new, non-backstory region still seeds.
+        const real = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Blackwater Weirs', profile: { region: 'the Rimefell Marches' } },
+        });
+        expect(real.session.pendingRegionalFronts).toMatchObject({ region: 'the Rimefell Marches' });
+    });
+});
+
 describe('absence-drift cooldown (2026-08-05 live playtest finding)', () => {
     it('one drift per homecoming: a recent install suppresses re-triggers on nearby stale records', () => {
         let state = gameReducer(atMessages(initialGameState, 0), { type: 'SET_LOCATION', payload: 'Gilded Eel' });
@@ -377,6 +430,42 @@ describe('regional front seeding', () => {
             payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },
         });
         expect(capped.session.pendingRegionalFronts).toBeUndefined();
+
+        // One-slot reserve (2026-08-06): at MAX_ACTIVE_FRONTS - 1 the installer
+        // has no room either, so the marker isn't raised — the region stays
+        // unseeded and may trigger later when a slot frees.
+        const nearlyFull = {
+            ...state,
+            fronts: Array.from({ length: 3 }, (_, i) => ({ id: `f${i}`, title: `F${i}`, status: 'active' })),
+        };
+        const reserved = gameReducer(nearlyFull, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },
+        });
+        expect(reserved.session.pendingRegionalFronts).toBeUndefined();
+    });
+
+    it('regional installs never fill the last front slot (2026-08-06 one-slot reserve)', () => {
+        let state = traveled();
+        state = { ...state, fronts: [{ id: 'f0', title: 'F0', status: 'active' }, { id: 'f1', title: 'F1', status: 'active' }] };
+        state = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },
+        });
+        const installed = gameReducer(state, {
+            type: 'INSTALL_REGIONAL_FRONTS',
+            payload: {
+                sessionId: 'campaign-1',
+                key: state.session.pendingRegionalFronts.key,
+                fronts: [proposal('The Sled Toll', 'Kettu Syndicate'), proposal('The Ice Tithe', 'Frostbound Compact')],
+            },
+        });
+        // Two valid proposals, but only one slot below the reserve line: 2 + 1 = 3 of 4.
+        const active = installed.fronts.filter(f => (f.status || 'active') === 'active');
+        expect(active).toHaveLength(3);
+        expect(installed.fronts.some(f => f.title === 'The Sled Toll')).toBe(true);
+        expect(installed.fronts.some(f => f.title === 'The Ice Tithe')).toBe(false);
+        expect(installed.session.seededRegions).toContain('the Icebound Coast');
     });
 
     it('INSTALL_REGIONAL_FRONTS installs validated natives with the arrival theater, one-shot', () => {

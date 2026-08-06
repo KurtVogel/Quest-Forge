@@ -4,7 +4,7 @@
  */
 import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
-import { collectKnownRegions, findLocationRecord, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
+import { collectKnownRegions, findLocationRecord, isBackstoryRegion, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
@@ -281,8 +281,21 @@ export const handlers = {
     // regional-front marker (DECISIONS.md 2026-08-05 ×2, world-tempo
     // component 9): a genuinely new land gets its own native pressures.
     UPDATE_LOCATION_PROFILE(state, action) {
-        const { name, profile } = action.payload || {};
-        if (!name || !profile || typeof profile !== 'object') return state;
+        const { name, profile: rawProfile } = action.payload || {};
+        if (!name || !rawProfile || typeof rawProfile !== 'object') return state;
+        // Backstory-region guard (DECISIONS.md 2026-08-06, live playtest #3):
+        // a region named only in the hero's player-authored background is where
+        // the hero CAME FROM, not where this place lies — the Scribe kept
+        // misattributing it despite the prompt rule, and a phantom region can
+        // become "home" or seed native fronts. Stripped BEFORE the registry
+        // write so it never becomes canon. A region the premise also names is
+        // real campaign geography and stays accepted.
+        const profile = isBackstoryRegion(rawProfile.region, {
+            background: state.character?.background,
+            premise: state.session?.premise,
+        })
+            ? { ...rawProfile, region: null }
+            : rawProfile;
         const priorRegions = collectKnownRegions(state.locations || []);
         const locations = upsertLocation(state.locations || [], name, profile);
         const next = { ...state, locations };
@@ -300,7 +313,11 @@ export const handlers = {
         if ((state.session?.seededRegions || []).some(known => isSameRegion(known, region))) return next;
         if (state.session?.pendingRegionalFronts) return next;
         const activeFronts = (state.fronts || []).filter(f => (f.status || 'active') === 'active').length;
-        if (activeFronts >= MAX_ACTIVE_FRONTS) return next;
+        // The installer only tops the web to MAX_ACTIVE_FRONTS - 1 (one slot
+        // always stays free), so with no room below that line the marker would
+        // only buy a wasted DM call. The region stays unseeded and can trigger
+        // later when a slot frees up.
+        if (activeFronts >= MAX_ACTIVE_FRONTS - 1) return next;
 
         next.session = {
             ...next.session,

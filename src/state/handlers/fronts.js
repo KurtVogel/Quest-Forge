@@ -266,9 +266,10 @@ export const handlers = {
      * One-shot install of a new region's native pressures (world-tempo
      * component 9, DECISIONS.md 2026-08-05 ×2). The region is marked seeded
      * even when every proposal fails validation — one shot per region, no
-     * retry loops. Additions are capped by MAX_ACTIVE_FRONTS and born with
-     * the arrival place as their theater, so existing gating keeps them
-     * local from day one.
+     * retry loops. Additions top the web only to MAX_ACTIVE_FRONTS - 1
+     * (one slot always stays free — DECISIONS.md 2026-08-06) and are born
+     * with the arrival place as their theater, so existing gating keeps
+     * them local from day one.
      */
     INSTALL_REGIONAL_FRONTS(state, action) {
         const payload = action.payload || {};
@@ -278,7 +279,12 @@ export const handlers = {
         const session = { ...state.session, pendingRegionalFronts: null, seededRegions };
         const fronts = state.fronts || [];
         const activeCount = fronts.filter(f => (f.status || 'active') === 'active').length;
-        const room = Math.min(2, Math.max(0, MAX_ACTIVE_FRONTS - activeCount));
+        // Like the aftermath installer, regional natives top the web up to
+        // MAX_ACTIVE_FRONTS - 1, never to the cap: a misattributed region
+        // (2026-08-06 live playtest #3 — a backstory land seeded 2 natives and
+        // filled the web) must never be able to lock the last slot away from
+        // the region the hero actually travels to next.
+        const room = Math.min(2, Math.max(0, (MAX_ACTIVE_FRONTS - 1) - activeCount));
         const additions = [];
         for (const proposal of (Array.isArray(payload.fronts) ? payload.fronts : []).slice(0, 2)) {
             if (additions.length >= room) break;

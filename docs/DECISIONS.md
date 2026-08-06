@@ -8,6 +8,28 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-06 ×4 · Region misattribution: backstory blocklist + one-slot reserve (prompt-only enforcement is dead).**
+Live playtest #3 proved the ×2 prompt rule insufficient: the Scribe tagged Blackwater Weirs
+with "the Sorrow Fen" — a proper, well-formed name that exists only in the hero's
+player-authored background — and the phantom region seeded 2 native fronts that filled the
+4-front cap, starving the real new region. Of five candidate designs (DM-narration
+attestation, two-classification agreement, arrival-bound capture, backstory blocklist,
+Scribe provenance quote), Vesa picked the two cheap structural ones: **(D)
+`isBackstoryRegion` in `locationRegistry.js`** — a region candidate named in
+`character.background` but NOT in the campaign premise is stripped in
+`UPDATE_LOCATION_PROFILE` before the registry write (premise lands are real geography;
+backgrounds routinely live in the campaign's home region, so premise-named regions are
+never rejected — stripping those would poison home-region detection). Accepted limitation:
+a backstory land the campaign genuinely visits never becomes a registry region and never
+seeds natives — its pressures are the hero's story anyway. **(F) one-slot reserve** —
+`INSTALL_REGIONAL_FRONTS` tops the web only to MAX_ACTIVE_FRONTS − 1 (matching the
+aftermath installer) and the trigger requires room below that line (no marker → no wasted
+DM call; the region stays unseeded and can trigger later). Blast-radius principle: even a
+misattributed region that slips every guard can cost at most background tokens, never the
+front web's last slot. The general fix (Scribe `regionEvidence` quote, engine-verified
+against DM narration) stays deferred until a run shows premise-side mentioned-land
+confusion.
+
 **2026-08-06 ×3 · Embedding cache gets a lifecycle; combat-intent turns skip RAG entirely.**
 The two P1s from the morning's vector-memory-rag audit, fixed together. **(1) Combat-intent
 RAG skip** (`turnOrchestrator.js`): the JSON-only intent-translation call now performs no
