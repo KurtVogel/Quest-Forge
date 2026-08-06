@@ -137,11 +137,18 @@ export function createTurnRunner({
 
         // RAG: retrieve memories relevant to the current scene (machinery key —
         // embeddings are Gemini-only regardless of the DM provider).
-        // Include location and combat context for better retrieval relevance
+        // Include location and combat context for better retrieval relevance.
+        // Combat-intent translation skips ALL of this (2026-08-06 P1): the call is
+        // JSON-only — the DM translates a committed action into a bounded
+        // combat_exchange and never narrates, so retrieved memories and dramatic
+        // callbacks are dead weight in its prompt, the blocking query-embed
+        // round-trip delays every combat turn, and the captureInjection would
+        // clobber the Memory Inspector's last real (narrative-turn) capture.
         const machineryKey = getMachineryGeminiKey(s.settings);
+        const wantsMemories = !!originalPlayerMessage && !opts.combatIntentOnly;
         let retrievedMemories = [];
         let dramaticMemories = [];
-        if (originalPlayerMessage && machineryKey) {
+        if (wantsMemories && machineryKey) {
             const sceneContext = [
                 originalPlayerMessage,
                 s.currentLocation && `Location: ${s.currentLocation}`,
@@ -154,7 +161,7 @@ export function createTurnRunner({
                 location: s.currentLocation || '',
                 npcs: s.npcs || [],
             });
-        } else if (originalPlayerMessage) {
+        } else if (wantsMemories) {
             dramaticMemories = curateStoryMemory({
                 memories: s.storyMemory || [],
                 query: originalPlayerMessage,
@@ -162,7 +169,7 @@ export function createTurnRunner({
                 npcs: s.npcs || [],
             });
         }
-        if (originalPlayerMessage) {
+        if (wantsMemories) {
             // Scores/similarities are dropped once the prompt string is built —
             // keep the latest copy for the read-only Memory Inspector panel.
             captureInjection({

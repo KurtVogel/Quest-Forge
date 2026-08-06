@@ -3,7 +3,8 @@ import { useGame } from '../../state/GameContext.jsx';
 import { initialGameState } from '../../state/gameReducer.js';
 import { PROVIDERS, PROVIDER_LIST } from '../../llm/adapter.js';
 import { PRESETS, PRESET_LIST } from '../../data/presets.js';
-import { saveGame, loadGame, listSaves, deleteSave } from '../../state/persistence.js';
+import { saveGame, loadGame, listSaves, deleteSave, getSaveSessionId } from '../../state/persistence.js';
+import { deleteCampaignMemories, shouldPurgeCampaignEmbeddings } from '../../engine/vectorMemory.js';
 import { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud } from '../../state/cloudSync.js';
 import { getFirebaseConfigError, initializeFirebase } from '../../config/firebase.js';
 import { signInWithGoogle, logOut } from '../../state/auth.js';
@@ -148,8 +149,30 @@ export default function SettingsModal() {
     };
 
     const handleDelete = async (slotId) => {
+        // Campaign identity of the doomed slot, read BEFORE deletion. When the
+        // last local slot holding a campaign goes (autosave included — it's not
+        // in the list, so it gets its own metadata read), the campaign's
+        // embedding cache rows are orphans; purge them (2026-08-06 P1). A cloud
+        // copy may still exist — that's fine, embeddings are derived data and
+        // re-embed transparently on the campaign's next load.
+        const deletedSessionId = saves.find(s => s.slotId === slotId)?.sessionId
+            || await getSaveSessionId(slotId).catch(() => null);
         await deleteSave(slotId);
         await loadSavesList();
+        try {
+            const autosaveSessionId = await getSaveSessionId('__autosave__').catch(() => null);
+            const remaining = await listSaves();
+            if (shouldPurgeCampaignEmbeddings({
+                deletedSessionId,
+                liveSessionId: state.session?.id || null,
+                remainingSessionIds: [...remaining.map(s => s.sessionId), autosaveSessionId].filter(Boolean),
+            })) {
+                await deleteCampaignMemories(deletedSessionId);
+                console.info('[VectorMemory] Purged the deleted campaign\'s embedding cache.');
+            }
+        } catch (e) {
+            console.warn('[VectorMemory] Embedding purge check failed (cache left in place):', e);
+        }
     };
 
     const handleDeleteCloud = async (slotId, name) => {

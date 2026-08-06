@@ -58,6 +58,19 @@ function persistEmbedding(entry) {
     }).catch(() => {}); // Non-critical — in-memory still works
 }
 
+/** Fire-and-forget removal of specific persisted rows (eviction / stale-prune). */
+function deletePersistedEmbeddings(entries) {
+    const keyed = (entries || []).filter(e => e && e.sessionId != null);
+    if (keyed.length === 0) return;
+    openEmbedDB().then(db => {
+        const tx = db.transaction(EMBED_STORE, 'readwrite');
+        const store = tx.objectStore(EMBED_STORE);
+        for (const e of keyed) store.delete([e.sessionId, e.text]);
+        tx.oncomplete = () => db.close();
+        tx.onabort = () => db.close();
+    }).catch(() => {}); // Non-critical — in-memory already dropped them
+}
+
 function clearPersistedEmbeddings() {
     // Resolves only after the IndexedDB clear COMMITS, so a caller can order a
     // subsequent load/seed behind it. Never rejects — the cache is non-critical.
@@ -107,6 +120,47 @@ async function loadPersistedEmbeddings(sessionId) {
 let memoryStore = [];
 /** Campaign whose memories are currently loaded; stamped onto every new entry. */
 let activeSessionId = null;
+
+// --- Lifecycle (2026-08-06 P1: the cache previously grew without bound) ---
+
+/**
+ * Hard per-campaign row ceiling. Growth is ~2 rows per turn (player + narrative),
+ * so 1500 covers several hundred turns of transient color on top of the durable
+ * corpus (facts, journal, NPCs, story cards) before anything is evicted.
+ */
+export const MAX_CAMPAIGN_MEMORIES = 1500;
+
+/**
+ * Per-turn color evicts before durable canon: a 300-turn-old "player" or
+ * "narrative" row is scene flavor long since journaled/summarized elsewhere,
+ * while world facts, journal entries, NPC records, and story cards remain the
+ * campaign's actual memory.
+ */
+const EVICT_FIRST_CATEGORIES = new Set(['player', 'narrative']);
+
+/**
+ * Mount-time seed items for these categories are snapshots of CURRENT state
+ * (NPC notes, story-card texts) that get reworded/merged as play continues. A
+ * cached row whose text no longer appears in the seed is a stale predecessor —
+ * without pruning, every rewording stays retrievable forever beside its
+ * replacement (the audit's stale-rows finding).
+ */
+const isMutableSeedCategory = (category) =>
+    category === 'npc' || String(category || '').startsWith('story_');
+
+/** Enforce the campaign cap on the in-memory store, mirroring evictions to disk. */
+function enforceCampaignCap() {
+    const overflow = memoryStore.length - MAX_CAMPAIGN_MEMORIES;
+    if (overflow <= 0) return;
+    const ranked = [...memoryStore].sort((a, b) => {
+        const classA = EVICT_FIRST_CATEGORIES.has(a.category) ? 0 : 1;
+        const classB = EVICT_FIRST_CATEGORIES.has(b.category) ? 0 : 1;
+        return (classA - classB) || ((a.timestamp || 0) - (b.timestamp || 0));
+    });
+    const toEvict = new Set(ranked.slice(0, overflow));
+    memoryStore = memoryStore.filter(m => !toEvict.has(m));
+    deletePersistedEmbeddings([...toEvict]);
+}
 
 /** Simple cosine similarity between two numeric arrays. */
 function cosineSimilarity(a, b) {
@@ -159,6 +213,7 @@ export async function addMemory(apiKey, text, category = 'general', location = n
     };
     memoryStore.push(entry);
     if (activeSessionId != null) persistEmbedding(entry); // fire-and-forget to IndexedDB
+    enforceCampaignCap();
 }
 
 /**
@@ -176,8 +231,22 @@ export async function seedMemories(apiKey, items, sessionId = null) {
     memoryStore = [];
     if (!items?.length && sessionId == null) return;
 
-    // This campaign's cached embeddings first
-    const persisted = sessionId != null ? await loadPersistedEmbeddings(sessionId) : [];
+    // This campaign's cached embeddings first. Mutable-category rows (NPC notes,
+    // story cards — state snapshots that get reworded) are kept only while their
+    // exact text is still in the current seed: anything else is a stale
+    // predecessor wording, dropped here and from disk (replace, not append).
+    const persistedRaw = sessionId != null ? await loadPersistedEmbeddings(sessionId) : [];
+    const currentSeedTexts = new Set((items || []).map(item => item.text));
+    const persisted = [];
+    const stale = [];
+    for (const entry of persistedRaw) {
+        (!isMutableSeedCategory(entry.category) || currentSeedTexts.has(entry.text)
+            ? persisted : stale).push(entry);
+    }
+    if (stale.length > 0) {
+        deletePersistedEmbeddings(stale);
+        console.log(`[VectorMemory] Pruned ${stale.length} stale reworded rows from the campaign cache`);
+    }
     if (persisted.length > 0) {
         memoryStore = persisted;
         console.log(`[VectorMemory] Loaded ${persisted.length} cached embeddings for this campaign`);
@@ -197,6 +266,9 @@ export async function seedMemories(apiKey, items, sessionId = null) {
     if (persisted.length === 0) {
         console.log(`[VectorMemory] Seeded ${memoryStore.length} memories (fresh embeddings)`);
     }
+    // A long campaign's cache can arrive over the cap (rows persisted before the
+    // cap existed) — addMemory enforces per-add, this covers the bulk load.
+    enforceCampaignCap();
 }
 
 /**
@@ -249,6 +321,42 @@ export function clearMemories() {
     activeSessionId = null;
     // Awaitable: resolves once the persisted clear actually commits.
     return clearPersistedEmbeddings();
+}
+
+/**
+ * Delete every persisted embedding row belonging to ONE campaign (2026-08-06 P1:
+ * before this, deleting a campaign's saves orphaned its rows permanently).
+ * Composite [sessionId, text] keys make this a single ranged delete — in
+ * IndexedDB key order, arrays sort after every string, so [sessionId, []] is an
+ * upper bound past any text. Never rejects; the cache is derivable, so a failed
+ * purge only costs disk until the next successful one.
+ */
+export function deleteCampaignMemories(sessionId) {
+    if (sessionId == null) return Promise.resolve();
+    if (activeSessionId === sessionId) {
+        memoryStore = [];
+    }
+    return openEmbedDB().then(db => new Promise(resolve => {
+        const tx = db.transaction(EMBED_STORE, 'readwrite');
+        tx.objectStore(EMBED_STORE).delete(IDBKeyRange.bound([sessionId, ''], [sessionId, []]));
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onabort = () => { db.close(); resolve(); };
+    })).catch(() => {});
+}
+
+/**
+ * Should deleting a save slot purge its campaign's embedding cache?
+ * Only when the campaign is verifiably gone from this device: the deleted slot
+ * carried a sessionId stamp, it isn't the live session, and no remaining slot
+ * (manual or autosave) claims it. Legacy saves without the stamp contribute
+ * nothing to remainingSessionIds — the worst case of purging a campaign a
+ * legacy slot still holds is a transparent re-embed on its next load, never
+ * data loss (embeddings are derived from the save itself).
+ */
+export function shouldPurgeCampaignEmbeddings({ deletedSessionId, liveSessionId = null, remainingSessionIds = [] }) {
+    if (!deletedSessionId) return false;
+    if (deletedSessionId === liveSessionId) return false;
+    return !remainingSessionIds.includes(deletedSessionId);
 }
 
 /**

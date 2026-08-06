@@ -137,6 +137,9 @@ export function serializeGameState(gameState) {
 /** Shared slot-list metadata for a save (local and cloud add their own savedAt/slot fields). */
 export function buildSaveMetadata(gameState) {
     return {
+        // Campaign identity stamp: lets deletion decide whether any slot still
+        // holds a campaign before purging its embedding cache (vectorMemory.js).
+        sessionId: gameState.session?.id || null,
         name: gameState.session?.name || 'Unnamed Save',
         characterName: gameState.character?.name || 'Unknown',
         characterLevel: gameState.character?.level || 1,
@@ -238,6 +241,7 @@ export async function listSaves() {
                 .sort((a, b) => b.savedAt - a.savedAt)
                 .map(s => ({
                     slotId: s.slotId,
+                    sessionId: s.sessionId || null, // absent on legacy saves
                     name: s.name,
                     characterName: s.characterName,
                     characterLevel: s.characterLevel,
@@ -257,6 +261,24 @@ export async function listSaves() {
                 }));
             resolve(saves);
         };
+        request.onerror = () => reject(request.error);
+        tx.oncomplete = () => db.close();
+        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+    });
+}
+
+/**
+ * Read one slot's campaign identity from its metadata record alone — never
+ * materializes the payload. Returns null for legacy saves (no stamp) or a
+ * missing slot. Used by the delete flow to check whether the AUTOSAVE slot
+ * (excluded from listSaves) still holds a campaign being deleted.
+ */
+export async function getSaveSessionId(slotId) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const request = tx.objectStore(STORE_NAME).get(slotId);
+        request.onsuccess = () => resolve(request.result?.sessionId || null);
         request.onerror = () => reject(request.error);
         tx.oncomplete = () => db.close();
         tx.onabort = () => { db.close(); reject(tx.error || request.error); };

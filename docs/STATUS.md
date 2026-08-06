@@ -6,7 +6,21 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-06 (SECOND live playtest: 8/10 stricter verdicts, 3 deeper calibrations fixed; 1,412 tests green)._
+_Last updated: 2026-08-06 (vector-memory P1 pair fixed: combat-intent RAG skip + embedding-cache lifecycle; 1,423 tests green)._
+
+## Vector-memory P1 pair 2026-08-06 (both audit P1s fixed same-day, DECISIONS.md 2026-08-06 ×3)
+
+The morning strengthening audit (vector-memory-rag + story-memory) opened 2 P1 + 5 P2;
+both P1s are fixed: **(1)** combat-intent calls skip retrieval/curation/inspector-capture
+(`wantsMemories` gate in `turnOrchestrator.js`) — no more blocking embed round-trip or
+4-6 KB of dead memory blocks in the JSON-only prompt; **(2)** the embedding cache has a
+lifecycle: 1500-row per-campaign cap (transient `player`/`narrative` evict first, mirrored
+to disk), mount re-seed prunes stale reworded `npc`/`story_*` rows (replace-not-append),
+and deleting a campaign's last save purges its rows (`sessionId` stamped in save metadata,
+`shouldPurgeCampaignEmbeddings` biased toward keeping — legacy unstamped saves never
+purge). **Queue after this: 5 P2s (vector-memory ×2, story-memory ×3) + the `publicHints`
+design question.** Watch item: on a mature campaign's first mount after this, expect a
+one-time `[VectorMemory] Pruned N stale reworded rows` console line.
 
 ## Second live playtest 2026-08-06 (28 turns, stricter verdicts — DECISIONS.md 2026-08-06 ×2)
 

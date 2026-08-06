@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 
 const { embedTextMock, SCHEMA } = vi.hoisted(() => ({
     embedTextMock: vi.fn(),
@@ -16,9 +16,12 @@ import {
     addMemory,
     buildRetrievedMemoriesBlock,
     clearMemories,
+    deleteCampaignMemories,
     getMemoryCount,
+    MAX_CAMPAIGN_MEMORIES,
     retrieveRelevant,
     seedMemories,
+    shouldPurgeCampaignEmbeddings,
 } from './vectorMemory.js';
 
 function unitVector(index) {
@@ -364,6 +367,167 @@ describe('hostile-input guards (2026-07-28 audit)', () => {
         expect(getMemoryCount()).toBe(1);
         const matches = await retrieveRelevant('key', 'query', 3, 0.1);
         expect(Number.isFinite(matches[0]?.score ?? 0)).toBe(true);
+    });
+});
+
+describe('cache lifecycle (2026-08-06 P1)', () => {
+    beforeEach(() => {
+        clearMemories();
+        globalThis.indexedDB = new IDBFactory();
+        globalThis.IDBKeyRange = IDBKeyRange; // deleteCampaignMemories' ranged delete
+        embedTextMock.mockReset();
+    });
+
+    /** All entries in ONE transaction — the per-entry helper is too slow for cap-sized fixtures. */
+    function putEmbeddings(entries) {
+        return new Promise((resolve, reject) => {
+            const request = globalThis.indexedDB.open('rpg-vector-memory', 4);
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains('embeddings')) {
+                    db.createObjectStore('embeddings', { keyPath: ['sessionId', 'text'] });
+                }
+            };
+            request.onsuccess = () => {
+                const db = request.result;
+                const tx = db.transaction('embeddings', 'readwrite');
+                const store = tx.objectStore('embeddings');
+                for (const e of entries) store.put(e);
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onerror = () => reject(tx.error);
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    /** Let fire-and-forget IndexedDB work (evictions, prunes) settle. */
+    async function flushAsync(rounds = 25) {
+        for (let i = 0; i < rounds; i++) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    function row(text, category, timestamp, sessionId = 's1') {
+        return { sessionId, text, category, timestamp, vector: unitVector(0), schema: SCHEMA };
+    }
+
+    it('re-seeding prunes stale reworded mutable-category rows but keeps immutable history', async () => {
+        await putEmbeddings([
+            row('Marn (friendly): guards the old gate.', 'npc', 1),
+            row('Marn: promised the hero a map.', 'story_promise', 2),
+            row('The old gate fell in the goblin raid.', 'world_fact', 3),
+            row('The party reached the coast.', 'journal', 4),
+        ]);
+        embedTextMock.mockResolvedValue(unitVector(1));
+
+        // Current state reworded both mutable texts; facts/journal are NOT in the
+        // seed at all (immutable categories must survive regardless).
+        await seedMemories('key', [
+            { text: 'Marn (wary): guards the new gate, resents the hero.', category: 'npc' },
+            { text: 'Marn: promised the hero a map of the Underway.', category: 'story_promise' },
+        ], 's1');
+        await flushAsync();
+
+        expect(getMemoryCount()).toBe(4);
+        // The stale wordings are gone from DISK too: a re-seed can't resurrect them.
+        await seedMemories('key', [
+            { text: 'Marn (wary): guards the new gate, resents the hero.', category: 'npc' },
+            { text: 'Marn: promised the hero a map of the Underway.', category: 'story_promise' },
+        ], 's1');
+        expect(getMemoryCount()).toBe(4);
+        embedTextMock.mockResolvedValue(unitVector(0));
+        const matches = await retrieveRelevant('key', 'What about Marn and the gate?', 10, 0.1);
+        const texts = matches.map(m => m.text);
+        expect(texts).not.toContain('Marn (friendly): guards the old gate.');
+        expect(texts).not.toContain('Marn: promised the hero a map.');
+        expect(texts).toContain('The old gate fell in the goblin raid.');
+    });
+
+    it('seeding over the cap evicts oldest transient rows first and mirrors eviction to disk', async () => {
+        const rows = [
+            row('player action one', 'player', 1),
+            row('player action two', 'player', 2),
+            row('narrative beat three', 'narrative', 3),
+        ];
+        for (let i = 0; i < MAX_CAMPAIGN_MEMORIES - 1; i++) {
+            rows.push(row(`Durable fact #${i}`, 'world_fact', 10 + i));
+        }
+        expect(rows.length).toBe(MAX_CAMPAIGN_MEMORIES + 2);
+        await putEmbeddings(rows);
+
+        await seedMemories('key', [], 's1');
+        await flushAsync();
+
+        expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
+        // The two OLDEST transient rows went; the newest transient survived.
+        embedTextMock.mockResolvedValue(unitVector(0));
+        const matches = await retrieveRelevant('key', 'query', MAX_CAMPAIGN_MEMORIES, 0.1);
+        const texts = new Set(matches.map(m => m.text));
+        expect(texts.has('player action one')).toBe(false);
+        expect(texts.has('player action two')).toBe(false);
+        expect(texts.has('narrative beat three')).toBe(true);
+
+        // Disk agrees: a fresh seed of the same campaign loads exactly the cap.
+        await seedMemories('key', [], 's1');
+        expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
+    });
+
+    it('addMemory at the cap evicts the oldest transient row instead of growing', async () => {
+        const rows = [row('old player chatter', 'player', 1)];
+        for (let i = 0; i < MAX_CAMPAIGN_MEMORIES - 1; i++) {
+            rows.push(row(`Durable fact #${i}`, 'world_fact', 10 + i));
+        }
+        await putEmbeddings(rows);
+        await seedMemories('key', [], 's1');
+        expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
+
+        embedTextMock.mockResolvedValue(unitVector(0));
+        await addMemory('key', 'A brand new fact.', 'world_fact');
+
+        expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
+        const matches = await retrieveRelevant('key', 'query', MAX_CAMPAIGN_MEMORIES, 0.1);
+        const texts = new Set(matches.map(m => m.text));
+        expect(texts.has('old player chatter')).toBe(false);
+        expect(texts.has('A brand new fact.')).toBe(true);
+    });
+
+    it('deleteCampaignMemories removes exactly one campaign\'s persisted rows', async () => {
+        await putEmbeddings([
+            row('Campaign A fact.', 'world_fact', 1, 'campaign-a'),
+            row('Another campaign A fact.', 'journal', 2, 'campaign-a'),
+            row('Campaign B fact.', 'world_fact', 3, 'campaign-b'),
+        ]);
+
+        await deleteCampaignMemories('campaign-a');
+
+        await seedMemories('key', [], 'campaign-a');
+        expect(getMemoryCount()).toBe(0);
+        await seedMemories('key', [], 'campaign-b');
+        expect(getMemoryCount()).toBe(1);
+    });
+
+    it('deleteCampaignMemories tolerates a null id and resolves without touching anything', async () => {
+        await putEmbeddings([row('Campaign A fact.', 'world_fact', 1, 'campaign-a')]);
+        await expect(deleteCampaignMemories(null)).resolves.toBeUndefined();
+        await seedMemories('key', [], 'campaign-a');
+        expect(getMemoryCount()).toBe(1);
+    });
+
+    it('shouldPurgeCampaignEmbeddings: only when the campaign is verifiably gone', () => {
+        // Gone from every slot and not live → purge.
+        expect(shouldPurgeCampaignEmbeddings({
+            deletedSessionId: 's1', liveSessionId: 's2', remainingSessionIds: ['s2', 's3'],
+        })).toBe(true);
+        // Another slot still holds it → keep.
+        expect(shouldPurgeCampaignEmbeddings({
+            deletedSessionId: 's1', liveSessionId: 's2', remainingSessionIds: ['s1'],
+        })).toBe(false);
+        // It IS the live campaign → keep.
+        expect(shouldPurgeCampaignEmbeddings({
+            deletedSessionId: 's1', liveSessionId: 's1', remainingSessionIds: [],
+        })).toBe(false);
+        // Legacy save without a stamp → keep (unknown ≠ gone).
+        expect(shouldPurgeCampaignEmbeddings({
+            deletedSessionId: null, liveSessionId: 's2', remainingSessionIds: [],
+        })).toBe(false);
     });
 });
 

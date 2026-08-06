@@ -8,6 +8,29 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-06 ×3 · Embedding cache gets a lifecycle; combat-intent turns skip RAG entirely.**
+The two P1s from the morning's vector-memory-rag audit, fixed together. **(1) Combat-intent
+RAG skip** (`turnOrchestrator.js`): the JSON-only intent-translation call now performs no
+retrieval embed, no story-memory curation, and no Memory Inspector capture — the prompt
+never narrates, so memory blocks were dead weight, the blocking query-embed round-trip
+delayed every combat turn, and the capture clobbered the inspector's last real turn.
+**(2) Cache lifecycle** (`vectorMemory.js`): (a) hard per-campaign cap
+`MAX_CAMPAIGN_MEMORIES` = 1500 rows (~2 rows/turn growth), evicting transient categories
+(`player`, `narrative`) oldest-first before any durable canon (facts/journal/NPC/story),
+enforced per-add and after bulk seed, evictions mirrored to IndexedDB; (b) mount seeding is
+**replace-not-append for mutable categories** — `npc` and `story_*` seed items are
+snapshots of current state, so a cached row whose exact text is no longer in the seed is a
+stale predecessor wording and is pruned from memory + disk (the "every rewording stays
+retrievable forever" finding); immutable categories (world facts, journal) are never
+pruned by absence; (c) **deleting a campaign's last save purges its rows**:
+`buildSaveMetadata` now stamps `sessionId`, `listSaves` projects it,
+`getSaveSessionId(slotId)` reads the autosave slot's stamp metadata-only, and
+SettingsModal's delete calls `deleteCampaignMemories` (single ranged delete over the
+composite key) only when `shouldPurgeCampaignEmbeddings` proves no remaining slot, the
+autosave, or the live session holds the campaign. Legacy saves without the stamp never
+trigger a purge (unknown ≠ gone), and a wrong-side error only costs a transparent re-embed —
+embeddings are derived data, so the decision is deliberately biased toward keeping.
+
 **2026-08-06 ×2 · Second live playtest: properness includes capitalization, regions are where you ARE, and secrecy beats witnessed.**
 The second 28-turn live run (same harness, stricter verdicts: `realRegionSeeded` +
 `noJunkRegions`) re-passed the whole first-run slate — secret probe PASS again, absence

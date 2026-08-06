@@ -29,6 +29,7 @@ const {
     loadGame,
     listSaves,
     deleteSave,
+    getSaveSessionId,
     saveRosterCharacter,
     listRosterCharacters,
     deleteRosterCharacter,
@@ -188,6 +189,27 @@ describe('listSaves', () => {
 
     it('returns an empty list when there are no saves', async () => {
         expect(await listSaves()).toEqual([]);
+    });
+
+    it('projects the campaign sessionId stamp (null on legacy saves)', async () => {
+        await saveGame('slot-a', makeGameState({ session: { id: 'campaign-1', name: 'Stamped' } }));
+        await saveGame('slot-b', makeGameState()); // makeGameState session has no id
+        const saves = await listSaves();
+        expect(saves.find(s => s.slotId === 'slot-a').sessionId).toBe('campaign-1');
+        expect(saves.find(s => s.slotId === 'slot-b').sessionId).toBeNull();
+    });
+});
+
+describe('getSaveSessionId (embedding-purge support, 2026-08-06)', () => {
+    it('reads a slot\'s campaign stamp from metadata alone — autosave slot included', async () => {
+        await autoSave(makeGameState({ session: { id: 'campaign-live', name: 'Live' } }));
+        expect(await getSaveSessionId('__autosave__')).toBe('campaign-live');
+    });
+
+    it('returns null for a missing slot and for legacy saves without the stamp', async () => {
+        expect(await getSaveSessionId('never-saved')).toBeNull();
+        await saveGame('slot-legacy', makeGameState());
+        expect(await getSaveSessionId('slot-legacy')).toBeNull();
     });
 });
 
