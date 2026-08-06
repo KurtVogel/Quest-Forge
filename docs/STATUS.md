@@ -6,7 +6,28 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-06 (vector-memory P1 pair fixed: combat-intent RAG skip + embedding-cache lifecycle; 1,423 tests green)._
+_Last updated: 2026-08-06 (vector-memory P1 pair fixed + THIRD live playtest: fixes verified live, region misattribution recurred — prompt-only fix insufficient; 1,423 tests green)._
+
+## Third live playtest 2026-08-06 (interactive browser session, ~12 turns, real Gemini)
+
+Full interactive run on the production build (creation wizard → premise opening → checks →
+combat → loot → travel → new region → reload/Continue). **Both same-day P1 fixes verified
+live**: `[LLM timing] combat-intent: TTFT ~6.4s` with no retrieval embed preceding it, and
+Continue loaded 19 cached embeddings re-embedding only new texts. **Working as designed:**
+roll proposals (DC 10/12, advantage from fiction, nat-20 advantage pair displayed),
+opening-initiative slot, situational-ruling advantage + Sneak Attack, engine XP + quest
+open/complete in the same arcs, narrated long rest applied once, coin ledger caught a
+40-silver-recapped-as-4-gold duplicate AND a loot-audit shortfall recovery + stand-down
+pair, hearsay of the weir kill voiced as distorted NPC gossip in the next region, the
+knownBy secret (confession to Tarn) never leaked, and a seeded front's symptom surfaced as
+whispers. **Four new queue findings** (SCHEDULED_STRENGTHENING open queue): **(P1) the
+region watch item FAILED** — the Scribe tagged Blackwater Weirs with backstory-only
+"the Sorrow Fen" (proper name, passes sanitizeRegionName), which seeded 2 native fronts
+for a never-visited land, filled the 4-front cap, and blocked the real Rimefell Marches
+from seeding; prompt-only enforcement is now proven insufficient, engine-side guard needs
+a design call. Plus P2s: same-value coin-loss double-charge suppression (1 sp stew after
+1 sp passage), hero-reveal starting gold re-rolled on confirm (18 gp shown → 11 gp
+started), region names leaking into the location registry as location records.
 
 ## Vector-memory P1 pair 2026-08-06 (both audit P1s fixed same-day, DECISIONS.md 2026-08-06 ×3)
 
