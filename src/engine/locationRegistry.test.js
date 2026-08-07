@@ -3,12 +3,37 @@ import {
     dedupeLocationRecords,
     findLocationRecord,
     getCurrentLocationRecord,
+    isRegionNameOnly,
     isRegistrableLocationName,
     isSameLocation,
     normalizeLocationRecord,
     upsertLocation,
     MAX_LOCATIONS,
 } from './locationRegistry.js';
+
+describe('isRegionNameOnly (2026-08-06 registry-noise guard)', () => {
+    const locations = [
+        { name: 'Aldermill', region: 'the Rimefell Marches' },
+        { name: 'Saltmere', region: 'Vale of Reeds' },
+    ];
+
+    it('matches the bare region name, with or without the article', () => {
+        expect(isRegionNameOnly(locations, 'the Rimefell Marches')).toBe(true);
+        expect(isRegionNameOnly(locations, 'Rimefell Marches')).toBe(true);
+        expect(isRegionNameOnly(locations, 'the Vale of Reeds')).toBe(true);
+    });
+
+    it('does NOT match a place merely inside a region (token equality, not containment)', () => {
+        expect(isRegionNameOnly(locations, 'Ghyll, Rimefell Marches')).toBe(false);
+        expect(isRegionNameOnly(locations, 'the Rimefell Marches borderlands')).toBe(false);
+    });
+
+    it('tolerates unknown names and empty registries', () => {
+        expect(isRegionNameOnly(locations, 'Candlemire')).toBe(false);
+        expect(isRegionNameOnly([], 'the Rimefell Marches')).toBe(false);
+        expect(isRegionNameOnly(locations, '')).toBe(false);
+    });
+});
 
 describe('location identity folding', () => {
     it('folds sub-location phrasings into the same place', () => {

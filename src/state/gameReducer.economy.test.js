@@ -593,6 +593,39 @@ describe('APPLY_COIN_LOSS', () => {
         expect(second.character.silver).toBe(6);
     });
 
+    it('allows a same-value loss when the player message itself makes a purchase (live 2026-08-06)', () => {
+        // 1 sp caravan passage, then "I buy a bowl of mutton stew" (also 1 sp)
+        // two messages later — the second charge was suppressed even though the
+        // player explicitly initiated a new purchase with no coin word in it.
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 1, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I pay for passage with the caravan.' } },
+        });
+        const later = addMessages(paid, 2);
+        const second = gameReducer(later, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 1, _meta: { sourceId: 'msg-pay-2', playerMessage: 'I buy a bowl of mutton stew.' } },
+        });
+        expect(second.character.silver).toBe(8); // both charges land
+        expect(second.recentCoinLosses.at(-1).status).toBe('applied');
+    });
+
+    it('still suppresses a same-value recap when the message has no purchase phrasing', () => {
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 1, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I pay for passage.' } },
+        });
+        const later = addMessages(paid, 2);
+        const replayed = gameReducer(later, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 1, _meta: { sourceId: 'msg-pay-2', playerMessage: 'I climb aboard the wagon.' } },
+        });
+        expect(replayed.character.silver).toBe(9); // recap eaten
+        expect(replayed.recentCoinLosses.at(-1).status).toBe('ignored');
+    });
+
     it('always suppresses an exact same-source replay, even with payment phrasing', () => {
         const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
         const paid = gameReducer(state, {

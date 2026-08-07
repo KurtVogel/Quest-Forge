@@ -348,6 +348,45 @@ describe('backstory-region guard (2026-08-06 live playtest #3)', () => {
     });
 });
 
+describe('region names never become location records (2026-08-06 live playtest #3 registry noise)', () => {
+    const settled = () => {
+        let state = { ...initialGameState, session: { ...initialGameState.session, id: 'campaign-1' }, messages: msgs(20) };
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
+        state = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Aldermill', profile: { type: 'settlement', region: 'the Rimefell Marches' } },
+        });
+        return state;
+    };
+
+    it('SET_LOCATION to a bare known-region name updates currentLocation without minting a record', () => {
+        const state = gameReducer(settled(), { type: 'SET_LOCATION', payload: 'the Rimefell Marches' });
+        expect(state.currentLocation).toBe('the Rimefell Marches');
+        expect(state.locations.map(r => r.name)).toEqual(['Aldermill']);
+    });
+
+    it('a compound place name inside a known region still mints its own record', () => {
+        const state = gameReducer(settled(), { type: 'SET_LOCATION', payload: 'Ghyll, Rimefell Marches' });
+        expect(state.locations.some(r => r.name === 'Ghyll, Rimefell Marches')).toBe(true);
+    });
+
+    it('a bare region re-statement never renames a compound place record (the Ghyll failure)', () => {
+        let state = gameReducer(settled(), { type: 'SET_LOCATION', payload: 'Ghyll, Rimefell Marches' });
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'the Rimefell Marches' });
+        const town = state.locations.find(r => r.name === 'Ghyll, Rimefell Marches');
+        expect(town).toBeTruthy();
+        expect(state.locations.some(r => r.name.toLowerCase() === 'the rimefell marches')).toBe(false);
+    });
+
+    it('UPDATE_LOCATION_PROFILE is update-only: a profile for an unknown place mints nothing', () => {
+        const state = gameReducer(settled(), {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Vale of Reeds', profile: { type: 'wilderness', danger: 'moderate' } },
+        });
+        expect(state.locations.map(r => r.name)).toEqual(['Aldermill']);
+    });
+});
+
 describe('absence-drift cooldown (2026-08-05 live playtest finding)', () => {
     it('one drift per homecoming: a recent install suppresses re-triggers on nearby stale records', () => {
         let state = gameReducer(atMessages(initialGameState, 0), { type: 'SET_LOCATION', payload: 'Gilded Eel' });

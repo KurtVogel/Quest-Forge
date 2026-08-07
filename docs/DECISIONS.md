@@ -8,6 +8,37 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-07 ×2 · Open-queue P2 batch: regions are whereabouts not places, dormant cards sleep, ledgers honor purchases.**
+Eight queue items closed in one hardening pass. The load-bearing calls: **(1) Region names
+never become location records** — `SET_LOCATION` to a bare known-region name ("the Rimefell
+Marches") updates `currentLocation` and still runs hearsay but mints no registry record,
+and a region variant can fold into a compound place record only as an alias, never as a
+rename (token-set EQUALITY via `isRegionNameOnly`, deliberately stricter than
+`isSameRegion`'s containment — "Ghyll, Rimefell Marches" is a place and mints normally;
+playtest #3 showed the shorter-wins rename letting the region steal the town's record).
+`UPDATE_LOCATION_PROFILE` is now update-only: the Scribe dispatches SET_LOCATION first so
+the current place always has its record, and profiles for anywhere else were exactly the
+null-stamp noise records ("Vale of Reeds", "the fen"); theater growth keeps its own
+minting path in handlers/fronts.js. **(2) Coin losses get a commerce-verb bypass** — "I
+buy a bowl of mutton stew" is a NEW spend even at a price identical to a recent charge;
+the verb set is deliberately narrower than the purchase ledger's (no take/grab/get, which
+appear in movement prose where a same-value recap really is a replay). **(3) Story-memory
+dormancy** (the IDEAS.md 2026-07-14 sketch, finally shipped): on each journal cadence,
+active salience-1/2 cards untouched across the last 3 cadences decay to `dormant` — still
+saved, skipped by curation AND the RAG seed (non-active cards no longer embed, and the
+mutable-category prune drops their stale rows from disk), auto-revived when a Scribe
+re-report merges into them; `promise`/`playerCanon` never decay. **(4)**
+`UPDATE_STORY_MEMORY` resolves identity id → *unique* subject → exact text: a bare subject
+shared by cards of different types now matches nothing instead of the wrong card. **(5)**
+`retrieveRelevant` gates on RAW cosine similarity and applies the category boost only to
+rank survivors (boost-before-gate passed sub-threshold boosted hits while dropping
+above-threshold narrative ones). **(6)** RAG seeding re-runs when the machinery key first
+appears after mount (a key entered in Settings mid-session previously left the campaign
+unseeded and its embeds unpersisted all session). **(7)** `publicHints` is finally spent:
+an open tempo window lists the front's last 3 surfaced symptoms as anti-repeat guidance
+("never re-run these beats"), which was the cheaper half of the 2026-08-02 shrink-or-spend
+question.
+
 **2026-08-07 · Declared spells are honored out loud; the revealed hero is the hero.**
 Live playtest #4 (dwarf cleric, real Gemini) found the combat-intent translation adapting
 player-declared magic *silently*: "I cast Guiding Bolt" (not in the 29-spell catalog)

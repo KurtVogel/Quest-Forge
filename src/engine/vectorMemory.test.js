@@ -130,6 +130,30 @@ describe('VectorMemory embedding roles', () => {
         expect(buildRetrievedMemoriesBlock(null)).toBe('');
         expect(buildRetrievedMemoriesBlock(undefined)).toBe('');
     });
+
+    it('gates on RAW similarity before applying the category boost (2026-08-06 P2)', async () => {
+        // Unit vectors: query = e0; a memory [c, √(1-c²), 0…] has cosine c.
+        const withCosine = (c) => {
+            const v = Array(768).fill(0);
+            v[0] = c;
+            v[1] = Math.sqrt(1 - c * c);
+            return v;
+        };
+        const query = Array(768).fill(0);
+        query[0] = 1;
+
+        // npc_character (+0.08 boost) at raw 0.50: boosted 0.58 used to pass the
+        // 0.55 gate; narrative (−0.04) at raw 0.58: boosted 0.54 used to drop.
+        embedTextMock
+            .mockResolvedValueOnce(withCosine(0.50))
+            .mockResolvedValueOnce(withCosine(0.58))
+            .mockResolvedValueOnce(query);
+        await addMemory('test-key', 'Marta once swore an oath.', 'npc_character');
+        await addMemory('test-key', 'The storm broke over the quay.', 'narrative');
+
+        const matches = await retrieveRelevant('test-key', 'What does Marta remember?', 8, 0.55);
+        expect(matches.map(m => m.text)).toEqual(['The storm broke over the quay.']);
+    });
 });
 
 describe('addMemory guards and dedup', () => {

@@ -142,4 +142,91 @@ describe('UPDATE_STORY_MEMORY', () => {
         const next = gameReducer(state, { type: 'UPDATE_STORY_MEMORY', payload: {} });
         expect(next).toBe(state);
     });
+
+    it('refuses an ambiguous bare-subject match across card types (2026-08-06 audit)', () => {
+        let state = gameReducer(initialGameState, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { text: 'Oren guards the sluice-gate ledger jealously.', subject: 'Oren', type: 'npcAgenda' },
+        });
+        state = gameReducer(state, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { text: 'The hero owes Oren an unpaid ferry debt.', subject: 'Oren', type: 'promise' },
+        });
+        expect(state.storyMemory).toHaveLength(2);
+        // A bare "Oren" could hit either card — must touch neither.
+        const ambiguous = gameReducer(state, {
+            type: 'UPDATE_STORY_MEMORY',
+            payload: { subject: 'Oren', status: 'resolved' },
+        });
+        expect(ambiguous).toBe(state);
+        // Referencing the card by id still works.
+        const byId = gameReducer(state, {
+            type: 'UPDATE_STORY_MEMORY',
+            payload: { id: state.storyMemory[1].id, status: 'resolved' },
+        });
+        expect(byId.storyMemory[1].status).toBe('resolved');
+        expect(byId.storyMemory[0].status).toBe('active');
+    });
+});
+
+describe('story-memory dormancy on the journal cadence (2026-08-06 audit)', () => {
+    const OLD = Date.now() - 1000 * 60 * 60;
+    const card = (over = {}) => ({
+        id: over.id || `card-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'callback', text: 'A one-off scene beat.', subject: 'beat',
+        salience: 1, emotionalCharge: 1, status: 'active',
+        firstSeenAt: OLD, lastSeenAt: OLD, lastUsedAt: null,
+        tags: [], linkedNpcNames: [], location: '', source: 'scribe',
+        ...over,
+    });
+    const journalEntry = (i, timestamp) => ({ id: `j-${i}`, timestamp, summary: `entry ${i}` });
+
+    function cadence(state) {
+        return gameReducer(state, {
+            type: 'ADD_JOURNAL_ENTRY',
+            payload: journalEntry(Math.random().toString(36).slice(2, 6), Date.now()),
+        });
+    }
+
+    it('ages low-salience silent cards to dormant after three cadences; exempts promises and player canon', () => {
+        let state = {
+            ...initialGameState,
+            journal: [journalEntry(1, OLD + 1000), journalEntry(2, OLD + 2000)],
+            storyMemory: [
+                card({ id: 'stale' }),
+                card({ id: 'fresh', lastSeenAt: Date.now() }),
+                card({ id: 'important', salience: 4 }),
+                card({ id: 'vow', type: 'promise' }),
+                card({ id: 'canon', type: 'playerCanon' }),
+            ],
+        };
+        state = cadence(state); // third entry — cutoff = first entry's timestamp
+        const byId = Object.fromEntries(state.storyMemory.map(c => [c.id, c.status]));
+        expect(byId).toEqual({
+            stale: 'dormant',
+            fresh: 'active',
+            important: 'active',
+            vow: 'active',
+            canon: 'active',
+        });
+    });
+
+    it('does nothing before three journal entries exist', () => {
+        let state = { ...initialGameState, journal: [journalEntry(1, OLD)], storyMemory: [card({ id: 'stale' })] };
+        state = cadence(state);
+        expect(state.storyMemory[0].status).toBe('active');
+    });
+
+    it('a Scribe re-report revives a dormant card', () => {
+        const state = {
+            ...initialGameState,
+            storyMemory: [card({ id: 'stale', status: 'dormant', text: 'The miller still owes the hero a favor.' })],
+        };
+        const revived = gameReducer(state, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { type: 'callback', subject: 'beat', text: 'The miller still owes the hero a favor.' },
+        });
+        expect(revived.storyMemory).toHaveLength(1);
+        expect(revived.storyMemory[0].status).toBe('active');
+    });
 });

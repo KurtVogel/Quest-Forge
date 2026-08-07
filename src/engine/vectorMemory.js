@@ -298,12 +298,16 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55)
         npc: 0.02,
     };
 
+    // The relevance threshold gates on RAW similarity; the category boost only
+    // orders the survivors. Boost-before-gate let a sub-threshold boosted hit
+    // pass while dropping an above-threshold narrative one (2026-08-06 audit).
     const scored = memoryStore
-        .map(m => ({
-            ...m,
-            score: cosineSimilarity(queryVector, m.vector) + (categoryBoost[m.category] || 0),
+        .map(m => ({ entry: m, similarity: cosineSimilarity(queryVector, m.vector) }))
+        .filter(({ similarity }) => similarity >= minScore)
+        .map(({ entry, similarity }) => ({
+            ...entry,
+            score: similarity + (categoryBoost[entry.category] || 0),
         }))
-        .filter(m => m.score >= minScore)
         .sort((a, b) => b.score - a.score)
         .slice(0, topN);
 

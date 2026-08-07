@@ -6,7 +6,25 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-07 (F+D region guards shipped + FOURTH live playtest validating them; declared-spell reconciliation + reveal-gold fix; 1,434 tests green; deployed to hosting)._
+_Last updated: 2026-08-07 (open-queue P2 batch closed — 8 items; 1,449 tests green; playtest #5 pending)._
+
+## Open-queue P2 batch 2026-08-07 (DECISIONS.md 2026-08-07 ×2 — every open queue item closed)
+
+All 8 open items from the strengthening queue fixed in one pass: **(1) region names never
+become location records** — bare known-region SET_LOCATION mints nothing (token-equality
+`isRegionNameOnly`; compound "Ghyll, Rimefell Marches" still mints), a region variant can
+alias but never RENAME a place record (the Ghyll-lost-its-record mechanism), and
+`UPDATE_LOCATION_PROFILE` is update-only (the null-stamp "Vale of Reeds"/"the fen" mints);
+**(2)** coin losses honor an explicit purchase message (COMMERCE_VERB_RE bypass — the 1 sp
+stew after 1 sp passage case); **(3)** story-memory dormancy shipped (IDEAS 2026-07-14
+design): journal-cadence age-out of salience-1/2 cards silent 3 cadences,
+promise/playerCanon exempt, Scribe re-report revives, non-active cards also skipped by the
+RAG seed; **(4)** `UPDATE_STORY_MEMORY` ambiguous bare-subject guard; **(5)**
+`retrieveRelevant` gates on raw similarity (boost ranks only); **(6)** RAG seeding re-runs
+when the machinery key first appears; **(7)** `publicHints` spent as the tempo block's
+anti-repeat line (last 3 surfaced symptoms, "never re-run these beats"). The queue's only
+open line is now the "frosted grass"-class registry noise sub-case (descriptive location
+records — distinct from the region leak, no guard designed yet). 1,449 tests, lint clean.
 
 ## Region guards + fourth live playtest 2026-08-07 (F+D validated, spell silence fixed)
 

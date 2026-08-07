@@ -246,6 +246,40 @@ export function scoreStoryMemory(card, { query = '', location = '', npcs = [], n
     return score;
 }
 
+/** How many journal cadences of silence age a low-salience card out. */
+export const DORMANCY_JOURNAL_CYCLES = 3;
+/** Long-payoff card types that never decay — their moment may be far away. */
+const DORMANCY_EXEMPT_TYPES = new Set(['promise', 'playerCanon']);
+
+/**
+ * Journal-cadence age-out (IDEAS.md 2026-07-14; 2026-08-06 audit — the pool
+ * only ever grew): active salience-1/2 cards untouched across the last
+ * DORMANCY_JOURNAL_CYCLES journal entries decay to `dormant` — still in saves,
+ * skipped by curation and the RAG seed, and revived automatically if the
+ * Scribe re-reports the beat (the ADD_STORY_MEMORY_CARD merge restores
+ * `active`). "Untouched" compares the card's last merge/use stamp against the
+ * timestamp of the journal entry N cycles back, so the measure is
+ * conversational (a cadence ≈ 10 messages) while using existing stamps.
+ */
+export function applyStoryMemoryDormancy(cards = [], journal = []) {
+    const list = Array.isArray(cards) ? cards : [];
+    const entries = Array.isArray(journal) ? journal : [];
+    if (entries.length < DORMANCY_JOURNAL_CYCLES) return list;
+    const cutoff = entries[entries.length - DORMANCY_JOURNAL_CYCLES]?.timestamp;
+    if (!Number.isFinite(cutoff)) return list;
+
+    let changed = false;
+    const next = list.map(card => {
+        if (!card || (card.status || 'active') !== 'active') return card;
+        if ((card.salience || 0) > 2 || DORMANCY_EXEMPT_TYPES.has(card.type)) return card;
+        const lastTouch = Math.max(card.lastSeenAt || 0, card.lastUsedAt || 0, card.firstSeenAt || 0);
+        if (lastTouch >= cutoff) return card;
+        changed = true;
+        return { ...card, status: 'dormant' };
+    });
+    return changed ? next : list;
+}
+
 export function curateStoryMemory({ memories = [], query = '', location = '', npcs = [], now = Date.now(), limit = DEFAULT_CARD_LIMIT } = {}) {
     return (memories || [])
         .map(card => ({ card, score: scoreStoryMemory(card, { query, location, npcs, now }) }))

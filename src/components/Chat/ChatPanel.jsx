@@ -308,7 +308,11 @@ export default function ChatPanel() {
                 category: 'npc',
                 location: n.basedIn || n.lastLocation,
             })),
-            ...(s.storyMemory || []).map(m => ({
+            // Non-active cards stay out of retrieval: a resolved promise or a
+            // dormant scene beat retrieving beside live ones invites the DM to
+            // revive a paid-off arc (2026-08-06 audit). Their cached rows are
+            // mutable-category, so the seed prune also drops them from disk.
+            ...(s.storyMemory || []).filter(m => (m.status || 'active') === 'active').map(m => ({
                 text: `${formatSecrecyTag(m.knownBy)}${m.subject ? `${m.subject}: ` : ''}${m.text}`,
                 category: `story_${m.type || 'callback'}`,
                 location: m.location,
@@ -324,7 +328,11 @@ export default function ChatPanel() {
                 console.error('[RAG] Memory seeding failed — will retry next mount:', e);
                 memorySeededRef.current = false; // Allow retry on next mount
             });
-    }, []); // Only on mount
+        // Re-runs when the machinery key first appears (a key entered in
+        // Settings after mount previously left the session unseeded AND its
+        // live embeds unpersisted for the whole session — 2026-08-06 audit);
+        // memorySeededRef keeps this one-shot once a seed succeeds.
+    }, [!!getMachineryGeminiKey(state.settings)]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         const s = stateRef.current;

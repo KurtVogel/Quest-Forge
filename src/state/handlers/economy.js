@@ -147,6 +147,12 @@ const RECENT_COIN_LOSS_MESSAGE_WINDOW = 4;
 const STRONG_PAYMENT_VERB_RE = /\b(pay|pays|paying|paid|repay|repays|repaying|repaid|tip|tips|tipping|tipped|bribe|bribes|bribing|bribed|donate|donates|donating|donated)\b/i;
 // Broader transfer verbs count only when the message also names coin.
 const COIN_TRANSFER_VERB_RE = /\b(give|gives|giving|gave|hand|hands|handing|handed|toss|tosses|tossing|tossed|drop|drops|dropping|dropped|leave|leaves|leaving|left|slip|slips|slipping|slipped|slide|slides|sliding|slid|spend|spends|spending|spent|count|counts|counting|counted|settle|settles|settling|settled|offer|offers|offering|offered)\b/i;
+// A message that itself initiates a purchase is a NEW spend even at a
+// coincidentally identical price — live 2026-08-06: a 1 sp stew right after a
+// 1 sp passage was suppressed despite "I buy a bowl of mutton stew". Narrower
+// than PURCHASE_VERB_RE on purpose: take/grab/get appear in ordinary movement
+// and loot prose, where a same-value DM recap really is a replay.
+const COMMERCE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|order|orders|ordering|ordered)\b/i;
 
 function buildCoinLossTransaction(gold, silver, copper) {
     const totalCp = gold * 100 + silver * 10 + copper;
@@ -163,6 +169,7 @@ function playerMessageSupportsRepeatCoinLoss(playerMessage) {
     const text = String(playerMessage || '');
     if (!text.trim()) return false;
     if (STRONG_PAYMENT_VERB_RE.test(text)) return true;
+    if (COMMERCE_VERB_RE.test(text)) return true;
     if (REPEAT_TRANSACTION_RE.test(text) && COIN_WORD_RE.test(text)) return true;
     return COIN_TRANSFER_VERB_RE.test(text) && COIN_WORD_RE.test(text);
 }

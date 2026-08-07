@@ -89,7 +89,12 @@ flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NP
 - Remaining ideas: real-provider eval for "natural old detail recall without exposition",
   salience tuning after real play, and the memory debug inspector (below).
 
-### Story-memory pool dormancy/pruning for high-churn campaigns — status: `idea` (2026-07-14)
+### Story-memory pool dormancy/pruning for high-churn campaigns — status: `shipped` (2026-08-07)
+Shipped as sketched below (minus healed-wound auto-dormancy, folded into the general
+age-out): `applyStoryMemoryDormancy` runs on every journal cadence — active salience-1/2
+cards untouched for 3 cadences decay to `dormant`, promise/playerCanon exempt, and a Scribe
+re-report revives the card through the normal merge. Dormant cards also stay out of the RAG
+seed, and the mutable-category cache prune removes their stale embedding rows.
 The first keyed `eval:memory` pass (30 turns, violent arc) ended with ~68 active cards even
 after the new near-duplicate containment merge shipped (DECISIONS.md 2026-07-14 collapsed
 reworded restatements — one promise had been recorded 4×). Most survivors are legitimate but

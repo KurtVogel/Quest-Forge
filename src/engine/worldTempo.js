@@ -435,6 +435,13 @@ export function buildWorldTempoBlock({
             : permittedFront.goal;
         lines.push(`THIS SCENE'S PERMISSION: you may surface ONE symptom of ${permittedFront.id} (${faction}).`);
         lines.push(`Maximum intensity: ${directive.maxIntensity} — ${describeIntensity(directive.maxIntensity)}.${directive.where ? ` Natural place: ${directive.where}.` : ''}${directive.suggestedSymptom ? ` Suggested expression: ${directive.suggestedSymptom}.` : ''} Weave it in only where the fiction allows; never exceed this intensity, and one symptom is the cap.`);
+        // Spend the accrued symptom ledger as anti-repeat guidance (2026-08-02
+        // audit: publicHints rode every save but nothing re-injected it since
+        // the tempo redesign).
+        const surfaced = (permittedFront.publicHints || []).slice(-3).filter(Boolean);
+        if (surfaced.length > 0) {
+            lines.push(`Symptoms of this pressure ALREADY shown: ${surfaced.map(hint => `"${hint}"`).join('; ')}. Never re-run these beats — a new symptom must bring new information, escalation, or a different face of the same pressure.`);
+        }
     } else {
         const hook = directive?.quietHook ? ` If a small beat is wanted: ${directive.quietHook}.` : '';
         lines.push(`The world is QUIET this scene: introduce no unprovoked new threats or pressure symptoms. Daily life, local color, small personal hooks, travel, and character beats are complete scenes on their own.${hook}`);

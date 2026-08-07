@@ -357,6 +357,28 @@ describe('world tempo prompt block', () => {
         expect(active).toContain('A skiff goes missing.');
     });
 
+    it('lists already-surfaced symptoms as anti-repeat guidance on an open window (2026-08-02 audit)', () => {
+        const hinted = fronts.map(front => (front.id === 'front-v2-1'
+            ? { ...front, publicHints: ['an old hint', 'a toll doubles overnight', 'dockhands vanish', 'a skiff is found stripped'] }
+            : front));
+        const directive = {
+            frontId: 'front-v2-1', maxIntensity: 'indirect',
+            grantedAtMessage: 10, activatesAtMessage: 10, expiresAtMessage: 34,
+        };
+        const block = buildWorldTempoBlock({
+            fronts: hinted, worldTempo: { directive }, heat: { level: 'calm', reasons: [] }, messageCount: 12,
+        });
+        expect(block).toContain('ALREADY shown: "a toll doubles overnight"; "dockhands vanish"; "a skiff is found stripped"');
+        expect(block).not.toContain('an old hint'); // last 3 only
+        expect(block).toContain('Never re-run these beats');
+
+        // No surfaced symptoms → no anti-repeat line.
+        const clean = buildWorldTempoBlock({
+            fronts, worldTempo: { directive }, heat: { level: 'calm', reasons: [] }, messageCount: 12,
+        });
+        expect(clean).not.toContain('ALREADY shown');
+    });
+
     it('suppresses the permission during active combat and lists recent fights', () => {
         const directive = {
             frontId: 'front-v2-1', maxIntensity: 'indirect',

@@ -173,6 +173,24 @@ export function isSameRegion(a, b) {
     return containment(locationTokens(a), locationTokens(b)) >= 0.99;
 }
 
+/**
+ * Is this location string exactly a known REGION's name — not a place merely
+ * inside one? Token-set EQUALITY, deliberately stricter than isSameRegion's
+ * containment: "Ghyll, Rimefell Marches" contains the region's tokens but IS a
+ * place and must mint a record; "the Rimefell Marches" IS the region and must
+ * not (live playtest #3: region names minted location records that distorted
+ * canonical folding and could swallow real places via containment).
+ */
+export function isRegionNameOnly(locations, name) {
+    const nameTokens = locationTokens(name);
+    if (nameTokens.size === 0) return false;
+    return collectKnownRegions(locations).some(region => {
+        const regionTokens = locationTokens(region);
+        return regionTokens.size === nameTokens.size
+            && containment(nameTokens, regionTokens) >= 0.99;
+    });
+}
+
 /** Distinct region names known to the registry (first occurrence wins). */
 export function collectKnownRegions(locations = []) {
     const regions = [];
@@ -242,7 +260,13 @@ export function upsertLocation(locations = [], name, profile = null) {
     // rename the tavern record out from under itself.
     const nameLevelMatch = existing.name.toLowerCase() === target.toLowerCase()
         || isSameLocation(existing.name, target);
-    const keepExistingName = !nameLevelMatch || existing.name.length <= target.length;
+    // A bare region name may fold INTO a place record as an alias but never
+    // rename it: "Rimefell Marches" is shorter than "Ghyll, Rimefell Marches",
+    // and the shorter-wins rule let the region steal the town's canonical name
+    // (live playtest #3 — the arrival town lost its record to its region).
+    const keepExistingName = !nameLevelMatch
+        || existing.name.length <= target.length
+        || isRegionNameOnly(list, target);
     const merged = normalizeLocationRecord({
         ...(profile || {}),
         name: keepExistingName ? existing.name : target,

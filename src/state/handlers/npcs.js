@@ -4,7 +4,7 @@
  */
 import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
-import { collectKnownRegions, findLocationRecord, isBackstoryRegion, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
+import { collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionNameOnly, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
@@ -154,7 +154,16 @@ export const handlers = {
                 ? { ...record, lastVisitedMessage: messageIndex }
                 : record))
             : priorLocations;
-        const locations = upsertLocation(departed, name, { ...(profile || {}), lastVisitedMessage: messageIndex });
+        // A bare region name ("the Rimefell Marches") is a whereabouts, not a
+        // place — minting it as a location record distorts canonical folding
+        // and eviction (live playtest #3 registry noise). currentLocation still
+        // updates and hearsay still runs; the record waits for a real place
+        // name ("Ghyll, Rimefell Marches" mints normally — token EQUALITY, not
+        // containment, decides).
+        const regionOnly = targetIdx === -1 && isRegionNameOnly(priorLocations, name);
+        const locations = regionOnly
+            ? departed
+            : upsertLocation(departed, name, { ...(profile || {}), lastVisitedMessage: messageIndex });
 
         const next = { ...state, currentLocation: name, locations };
         if (!arrived) return next;
@@ -283,6 +292,13 @@ export const handlers = {
     UPDATE_LOCATION_PROFILE(state, action) {
         const { name, profile: rawProfile } = action.payload || {};
         if (!name || !rawProfile || typeof rawProfile !== 'object') return state;
+        // Update-only: a profile classifies a place the registry already knows.
+        // The Scribe dispatches SET_LOCATION before this, so the current place
+        // always has its record; a profile for anything else (a mentioned
+        // region, a place the hero never stood in) minted null-stamp noise
+        // records ("Vale of Reeds", "the fen" — live playtest #3). Theater
+        // growth keeps its own minting path in handlers/fronts.js.
+        if (findLocationRecord(state.locations || [], name) === -1) return state;
         // Backstory-region guard (DECISIONS.md 2026-08-06, live playtest #3):
         // a region named only in the hero's player-authored background is where
         // the hero CAME FROM, not where this place lies — the Scribe kept

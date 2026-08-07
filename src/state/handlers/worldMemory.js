@@ -4,6 +4,7 @@
  */
 import { containment, tokenSet } from '../../engine/textMatch.js';
 import {
+    applyStoryMemoryDormancy,
     findStoryMemoryMatch,
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
@@ -109,11 +110,23 @@ export const handlers = {
     UPDATE_STORY_MEMORY(state, action) {
         const update = normalizeStoryMemoryUpdate(action.payload);
         if (!update) return state;
-        const idx = (state.storyMemory || []).findIndex(memory =>
-            (update.id && memory.id === update.id) ||
-            (update.subject && memory.subject?.toLowerCase() === update.subject.toLowerCase()) ||
-            (update.text && memory.text?.toLowerCase() === update.text.toLowerCase())
-        );
+        const cards = state.storyMemory || [];
+        // Identity resolution, strictest first: id, then subject — but a bare
+        // subject shared by cards of different types is ambiguous ("Oren" could
+        // mark the wrong card used/rewritten — 2026-08-06 audit), so subject
+        // acts only when it names exactly ONE card. Exact text is the last
+        // resort (the DM referencing a card by its wording).
+        let idx = update.id ? cards.findIndex(memory => memory.id === update.id) : -1;
+        if (idx === -1 && update.subject) {
+            const matches = cards.reduce((acc, memory, i) => {
+                if (memory.subject?.toLowerCase() === update.subject.toLowerCase()) acc.push(i);
+                return acc;
+            }, []);
+            if (matches.length === 1) idx = matches[0];
+        }
+        if (idx === -1 && update.text) {
+            idx = cards.findIndex(memory => memory.text?.toLowerCase() === update.text.toLowerCase());
+        }
         if (idx === -1) return state;
         return {
             ...state,
@@ -137,13 +150,18 @@ export const handlers = {
     },
 
     ADD_JOURNAL_ENTRY(state, action) {
+        const journal = [...state.journal, {
+            id: action.payload.id || `journal-${Date.now()}`,
+            timestamp: action.payload.timestamp || Date.now(),
+            ...action.payload,
+        }];
         return {
             ...state,
-            journal: [...state.journal, {
-                id: action.payload.id || `journal-${Date.now()}`,
-                timestamp: action.payload.timestamp || Date.now(),
-                ...action.payload,
-            }],
+            journal,
+            // The journal cadence doubles as the story-memory age-out pass:
+            // low-salience cards silent for DORMANCY_JOURNAL_CYCLES cadences
+            // go dormant (a Scribe re-report revives them).
+            storyMemory: applyStoryMemoryDormancy(state.storyMemory, journal),
         };
     },
 
