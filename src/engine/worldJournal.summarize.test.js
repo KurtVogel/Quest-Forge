@@ -85,7 +85,9 @@ describe('maybeAutoSummarize', () => {
         expect(result.journalEntry.summary).toContain('reached Brackwater');
         expect(result.journalEntry.location).toBe('Brackwater');
         expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_JOURNAL_ENTRY' }));
-        expect(dispatch).toHaveBeenCalledWith({ type: 'SET_LOCATION', payload: 'Brackwater' });
+        // fillOnly: a batch summary may fill/re-affirm a location but never
+        // relocate the hero past a fresher same-turn Scribe arrival.
+        expect(dispatch).toHaveBeenCalledWith({ type: 'SET_LOCATION', payload: { name: 'Brackwater', fillOnly: true } });
         expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 12 });
         // World facts are capped per batch so one summary cannot flood the store.
         const factsCall = dispatch.mock.calls.find(([action]) => action.type === 'ADD_WORLD_FACTS');

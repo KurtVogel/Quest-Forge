@@ -3,6 +3,7 @@ import {
     dedupeLocationRecords,
     findLocationRecord,
     getCurrentLocationRecord,
+    isMintableLocationName,
     isRegionNameOnly,
     isRegistrableLocationName,
     isSameLocation,
@@ -85,13 +86,22 @@ describe('upsertLocation', () => {
         const description = 'a miserable but solid patch of raised earth beneath the sprawling, dead limbs of a drowned willow tree';
         expect(isRegistrableLocationName(description)).toBe(false);
         expect(isRegistrableLocationName('Candlemire')).toBe(true);
-        expect(isRegistrableLocationName('the old salthouse by the north locks')).toBe(true);
         expect(upsertLocation([], description)).toEqual([]);
+        // All-lowercase short names are descriptions too (live playtest #5:
+        // "the freezing muck" and "frosted grass" minted records) — a MINT
+        // needs a proper capital-initial token; the registrable-shape check
+        // stays lenient so legacy lowercase records survive the dedupe heal.
+        expect(isMintableLocationName('the freezing muck')).toBe(false);
+        expect(isMintableLocationName('frosted grass')).toBe(false);
+        expect(isMintableLocationName('the old salthouse by the north locks')).toBe(false);
+        expect(isMintableLocationName('The Weirs')).toBe(true);
+        expect(isMintableLocationName('the docks of Karst')).toBe(true);
+        expect(upsertLocation([], 'the freezing muck')).toEqual([]);
         // But descriptions still MATCH an existing record instead of vanishing.
-        let locations = upsertLocation([], 'drowned willow tree');
+        let locations = upsertLocation([], 'Drowned Willow tree');
         locations = upsertLocation(locations, description, { type: 'wilderness' });
         expect(locations).toHaveLength(1);
-        expect(locations[0]).toMatchObject({ name: 'drowned willow tree', type: 'wilderness' });
+        expect(locations[0]).toMatchObject({ name: 'Drowned Willow tree', type: 'wilderness' });
     });
 
     it('caps the registry and ignores empty names', () => {

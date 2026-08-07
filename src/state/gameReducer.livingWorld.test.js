@@ -289,7 +289,7 @@ describe('region name validation (2026-08-05 live playtest findings)', () => {
     it('strips junk regions at the reducer boundary', () => {
         const state = gameReducer(initialGameState, {
             type: 'SET_LOCATION',
-            payload: { name: 'The docks', profile: { type: 'settlement', region: 'the docks' } },
+            payload: { name: 'The Docks', profile: { type: 'settlement', region: 'the docks' } },
         });
         expect(state.locations[0].region).toBeNull();
     });
@@ -384,6 +384,28 @@ describe('region names never become location records (2026-08-06 live playtest #
             payload: { name: 'Vale of Reeds', profile: { type: 'wilderness', danger: 'moderate' } },
         });
         expect(state.locations.map(r => r.name)).toEqual(['Aldermill']);
+    });
+});
+
+describe('fillOnly SET_LOCATION (playtest #5: journal cadence must never relocate the hero)', () => {
+    const base = () => ({ ...initialGameState, session: { ...initialGameState.session, id: 'campaign-1' }, messages: msgs(20) });
+
+    it('a stale batch summary cannot clobber a fresher location', () => {
+        let state = gameReducer(base(), { type: 'SET_LOCATION', payload: 'Weatherby' });
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'The Weirs' });
+        const clobbered = gameReducer(state, { type: 'SET_LOCATION', payload: { name: 'Weatherby', fillOnly: true } });
+        expect(clobbered).toBe(state); // no relocation, no phantom departure stamps
+        expect(clobbered.currentLocation).toBe('The Weirs');
+    });
+
+    it('fills an empty location and re-affirms the current one normally', () => {
+        const filled = gameReducer(base(), { type: 'SET_LOCATION', payload: { name: 'Weatherby', fillOnly: true } });
+        expect(filled.currentLocation).toBe('Weatherby');
+
+        let state = gameReducer(base(), { type: 'SET_LOCATION', payload: 'Clockwork Tower' });
+        const affirmed = gameReducer(state, { type: 'SET_LOCATION', payload: { name: 'Library landing, Clockwork Tower', fillOnly: true } });
+        expect(affirmed.locations).toHaveLength(1); // alias fold onto the same record
+        expect(affirmed.locations[0].aliases).toContain('Library landing, Clockwork Tower');
     });
 });
 

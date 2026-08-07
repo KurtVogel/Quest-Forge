@@ -6,7 +6,29 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-07 (open-queue P2 batch closed — 8 items; 1,449 tests green; playtest #5 pending)._
+_Last updated: 2026-08-07 (open-queue P2 batch closed + FIFTH live playtest validating it; journal-relocation P1 + descriptive-mint gate fixed same-night; 1,451 tests green; deployed)._
+
+## Fifth live playtest 2026-08-07 (elf wizard, fresh campaign, emphasis on the just-fixed seams)
+
+Validated live: **reveal-gold contract** (15 gp shown = 15 gp started), **bare-region guard**
+(`currentLocation` became "Sallow Fen" with NO registry record minted, while The Weirs
+carried `region: "the Sallow Fen"` from its profile), **story-memory dormancy** (two
+salience-2 cards silent for 3 cadences went dormant mid-run; promises/wounds stayed
+active), **declared spells** (zero "Cast adjusted" notes — the DM emitted player-named
+Magic Missile exactly, slot spent, and the Fire Bolt kill line read "casts Fire Bolt at
+Silt-Walker"; the watch item is answered: the prompt line holds, the backstop idles),
+opening-initiative slot (Silt-Walker won init, hit for 2, then `awaiting_player`), engine
+XP, Scribe audit stand-down on the porter's silver, advantage pair display, Continue with
+23 cached embeddings. **Two new findings, fixed same-night (DECISIONS.md 2026-08-07 ×3):**
+(P1) the journal cadence's async `SET_LOCATION` relocated the hero backwards ("Weatherby"
+clobbered the same-turn fen arrival, forging phantom departure/arrival stamps) — journal
+location is now `fillOnly`, the per-turn Scribe owns live position; (P2) "the freezing
+muck" minted a record — new `isMintableLocationName` properness gate (mint-only; legacy
+lowercase records survive the heal). The strengthening queue is now **fully clear**. Minor
+observed non-bugs: the DM prices purchases its own way (no same-value collision occurred;
+the commerce-verb bypass stays unit-pinned), and same-place name drift ("Aunt's shop,
+Tallow Lane" vs the shop's sign name "E. Duskwell — Tallow & Tapers") mints two records —
+no token overlap for containment to fold; accepted drift.
 
 ## Open-queue P2 batch 2026-08-07 (DECISIONS.md 2026-08-07 ×2 — every open queue item closed)
 
@@ -22,9 +44,9 @@ promise/playerCanon exempt, Scribe re-report revives, non-active cards also skip
 RAG seed; **(4)** `UPDATE_STORY_MEMORY` ambiguous bare-subject guard; **(5)**
 `retrieveRelevant` gates on raw similarity (boost ranks only); **(6)** RAG seeding re-runs
 when the machinery key first appears; **(7)** `publicHints` spent as the tempo block's
-anti-repeat line (last 3 surfaced symptoms, "never re-run these beats"). The queue's only
-open line is now the "frosted grass"-class registry noise sub-case (descriptive location
-records — distinct from the region leak, no guard designed yet). 1,449 tests, lint clean.
+anti-repeat line (last 3 surfaced symptoms, "never re-run these beats"). The remaining
+"frosted grass"-class descriptive-noise sub-case was then closed the same night after
+playtest #5 reproduced it (see the entry above). 1,449 tests at this commit, lint clean.
 
 ## Region guards + fourth live playtest 2026-08-07 (F+D validated, spell silence fixed)
 

@@ -8,6 +8,26 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-07 ×3 · The journal never relocates the hero; only proper names mint places.**
+Live playtest #5 (elf wizard, real Gemini) caught the journal cadence's `SET_LOCATION`
+clobbering live position: the async batch summary answered "Weatherby" while the same
+turn's Scribe had already placed the hero at the fen weirs — regressing `currentLocation`
+and forging phantom departure/arrival stamps the living-world machinery keys on. Ruling:
+**the per-turn Scribe owns live position; a batch summary is as stale as its batch.** The
+journal's dispatch now carries `fillOnly: true` — it may fill an empty location or
+re-affirm the current record (alias fold included), never relocate; the reducer guard is a
+strict no-op on relocation so no stamps are touched. Same run: "the freezing muck" minted
+a registry record — the "frosted grass"-class descriptive noise. New `isMintableLocationName`
+gate: minting a NEW record requires a capital-initial non-filler token (the properness rule
+regions adopted 2026-08-06 — the Scribe copies proper nouns verbatim, so all-lowercase
+names are scene descriptions), while `isRegistrableLocationName` stays lenient on purpose:
+the dedupe heal and alias filtering keep legacy lowercase records (possibly theaters) as
+canon, and descriptions still match existing records via containment. Everything else in
+the run validated the morning batch live: bare-region "Sallow Fen" as currentLocation with
+NO registry record minted, dormancy retiring two salience-2 cards after three quiet
+cadences, and zero "Cast adjusted" notes across two declared casts (Magic Missile named
+and honored, Fire Bolt named in its result line).
+
 **2026-08-07 ×2 · Open-queue P2 batch: regions are whereabouts not places, dormant cards sleep, ledgers honor purchases.**
 Eight queue items closed in one hardening pass. The load-bearing calls: **(1) Region names
 never become location records** — `SET_LOCATION` to a bare known-region name ("the Rimefell

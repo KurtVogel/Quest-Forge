@@ -61,6 +61,22 @@ export function isRegistrableLocationName(name) {
     return cleaned.length <= MAX_NAME_CHARS && locationTokens(cleaned).size <= MAX_NAME_TOKENS;
 }
 
+/**
+ * May this name MINT a brand-new record? Registrable shape PLUS a properness
+ * gate (live playtest #5: "the freezing muck", "frosted grass" minted records):
+ * a canonical place name carries at least one capital-initial non-filler word —
+ * the Scribe copies proper nouns verbatim, so an all-lowercase name is a scene
+ * description. Same rule the region boundary adopted 2026-08-06. Deliberately
+ * NOT applied to the dedupe heal or alias filtering: legacy lowercase records
+ * (possibly theaters) stay canon; descriptions still MATCH existing records via
+ * containment — they just never mint one.
+ */
+export function isMintableLocationName(name) {
+    if (!isRegistrableLocationName(name)) return false;
+    return cleanText(name, 200).split(/\s+/)
+        .some(word => !REGION_FILLER_WORDS.has(word.toLowerCase()) && /^\p{Lu}/u.test(word));
+}
+
 /** "Library landing, Clockwork Tower" names the same place as "Clockwork Tower". */
 export function isSameLocation(a, b) {
     return containment(locationTokens(a), locationTokens(b)) >= 0.99;
@@ -236,7 +252,7 @@ export function upsertLocation(locations = [], name, profile = null) {
 
     if (idx === -1) {
         // Scene descriptions never mint records — wait for a nameable name.
-        if (!isRegistrableLocationName(target)) return list;
+        if (!isMintableLocationName(target)) return list;
         const record = normalizeLocationRecord({ name: target, ...(profile || {}) });
         if (list.length < MAX_LOCATIONS) return [...list, record];
         // Evict the least-recently-visited NON-THEATER record. The old FIFO

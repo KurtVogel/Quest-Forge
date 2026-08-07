@@ -4,7 +4,7 @@
  */
 import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
-import { collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionNameOnly, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
+import { collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionNameOnly, isSameLocation, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
@@ -139,6 +139,19 @@ export const handlers = {
         const prevRecord = prevIdx === -1 ? null : priorLocations[prevIdx];
         const targetIdx = findLocationRecord(priorLocations, name);
         const targetRecord = targetIdx === -1 ? null : priorLocations[targetIdx];
+
+        // fillOnly (journal cadence): a batch summary may fill an EMPTY location
+        // or re-affirm the current one, but never relocate the hero — by the
+        // time the async summarize lands, the per-turn Scribe may already have
+        // moved the hero somewhere newer (live playtest #5: the summary's stale
+        // town clobbered a same-turn arrival and forged departure stamps).
+        const fillOnly = rawPayload && typeof rawPayload === 'object' && rawPayload.fillOnly === true;
+        if (fillOnly && state.currentLocation) {
+            const samePlace = (prevRecord && targetRecord && targetRecord.id === prevRecord.id)
+                || isSameLocation(state.currentLocation, name);
+            if (!samePlace) return state;
+        }
+
         const arrived = !prevRecord || !targetRecord || targetRecord.id !== prevRecord.id;
 
         // Absence runs from the moment the hero LEFT the place (its departure

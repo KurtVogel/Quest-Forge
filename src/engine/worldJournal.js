@@ -220,8 +220,14 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
 
         // Update location — the journal prompt itself invites a literal "null" for
         // "unchanged", so the shared filler drop-list is load-bearing here.
+        // fillOnly: a batch summary is as stale as its batch — while this call was
+        // in flight the hero may have traveled (live playtest #5: the summary's
+        // "Weatherby" clobbered the same-turn Scribe's fen arrival, minting
+        // phantom departure/arrival stamps for the living-world machinery). The
+        // journal may fill an empty location or re-affirm the current one, never
+        // relocate; the per-turn Scribe owns live position.
         if (normalized.location) {
-            dispatch({ type: 'SET_LOCATION', payload: normalized.location });
+            dispatch({ type: 'SET_LOCATION', payload: { name: normalized.location, fillOnly: true } });
         }
 
         // Mark these messages as summarized — they will be excluded from future LLM history
