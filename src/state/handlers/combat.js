@@ -152,9 +152,22 @@ export const handlers = {
             ),
         };
         // Combat's end releases the caster's sustained spell (v1 concentration).
+        // Announce it: the fade was silent, so the DM's next narration kept
+        // asserting the ward still held ("you are already protected") while the
+        // real AC had dropped — live playtest #7. The system line reaches the
+        // player AND the DM's message window.
         if (newState.character?.sustainedSpell) {
+            const endedName = newState.character.sustainedSpell.name || 'The sustained spell';
             const released = clearSustainedSpellState(newState.character, newState.party, newState.inventory);
-            newState = { ...newState, character: released.character, party: released.party };
+            newState = {
+                ...newState,
+                character: released.character,
+                party: released.party,
+                messages: [
+                    ...newState.messages,
+                    systemMessage(`**${endedName}** fades as the fight ends.`),
+                ],
+            };
         }
         // A companion down at combat's end is stable — no bleed-out mechanic by
         // design (death stays behind the deliberate remove_companions channel).

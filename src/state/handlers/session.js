@@ -141,6 +141,7 @@ function validateSaveState(payload) {
         recentSales: normalizeRecentTransactions(payload.recentSales),
         recentCoinGrants: normalizeRecentTransactions(payload.recentCoinGrants),
         recentCoinLosses: normalizeRecentTransactions(payload.recentCoinLosses),
+        recentItemGrants: normalizeRecentTransactions(payload.recentItemGrants),
         recentRulings: (Array.isArray(payload.recentRulings) ? payload.recentRulings : [])
             .map(normalizeRollRuling).filter(Boolean).slice(-RECENT_RULING_LIMIT),
         recentChecks: sanitizeRecentChecks(payload.recentChecks),

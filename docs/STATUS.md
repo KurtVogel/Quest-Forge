@@ -6,7 +6,33 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-08 (SIXTH live playtest → stale-Scribe root cause found and fixed: post-turn consumers now read the runner's committed-turn record, never React state; 1,458 tests green; deployed)._
+_Last updated: 2026-08-08 (SEVENTH live playtest, adversarial → items_found replay ledger + multi-entry coin-bundle strip + announced sustained-spell fade + nested-place drift guard; 1,474 tests green; deployed)._
+
+## Seventh live playtest 2026-08-08 (same-day adversarial run — deliberately hunting the unexercised paths)
+
+Continued Maren Duskwell into combat/spellcasting and hostile-recap territory. **Two new
+P1s, both fixed with tests (DECISIONS.md 2026-08-08 ×2):** (1) `items_found` had NO
+cross-message replay ledger — the DM granted the aunt's one healing potion on three
+separate messages (find → counting recap → deal-scene recap) and every grant applied; new
+`recentItemGrants` ledger in ADD_ITEM (event-path dispatches only, player re-acquire
+bypass, visible suppression line). (2) `stripBundledReplay` stripped only ONE ledger entry,
+so a split grant (2 gp + 28 gp) recapped as one 30 gp bundle leaked the 2 gp complement —
+watched live ("granted 2 gp" on a zero-coin turn); it now strips every matching entry and
+fully suppresses a bundle assembled entirely from prior grants. **Also fixed:** sustained-
+spell clear at combat end/rest was silent → DM narrated "you are already protected" over a
+dropped AC (now announced: "**Mage Armor** fades as the fight ends."); absence drift
+false-fired for "Tallow Lane" while the hero spent the whole absence inside the shop ON it
+(nested places fragment into separate records) → `areRelatedPlaces` nearby-guard skips
+drift when a token-related record was visited within the threshold; pure-noise legacy
+registry records ("the freezing muck") now dropped by the load heal (theaters/profiled
+records still kept); Scribe audit rule: identifying an owned item is not an acquisition.
+**Validated live this run:** combat spellcasting end-to-end (Fire Bolt/Magic Missile slots,
+crypto dice, invalid target blocked with no free enemy action, bogus advantage claim
+ignored, OOC-in-combat paused with no hidden-state leak), challenge-ruling withdrawal →
+diceless success + `recentRulings` entry, Chronicle "Close chapter" (13.8k-char chapter),
+scene-art fallback (no xAI key → labeled Gemini render), quest opened on deal acceptance,
+front clock advanced on the Dunstan kill, reload/Continue byte-identical. **Still
+unexercised:** tempo-window publicHints anti-repeat, level-up/ASI flow.
 
 ## Sixth live playtest 2026-08-08 (continued Maren Duskwell campaign — the location mess's real root cause)
 

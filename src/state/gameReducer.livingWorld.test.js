@@ -67,6 +67,27 @@ describe('absence-drift pending marker', () => {
         const kept = gameReducer(atMessages(withPending, 60), { type: 'SET_LOCATION', payload: 'Aldermill' });
         expect(kept.session.pendingAbsenceDrift.key).toBe('other|1');
     });
+
+    it('nested-place guard: no drift for a street whose child shop was just visited (live playtest #7)', () => {
+        // The street, the shop ON it, and the guild quarter fragment into three
+        // records. The hero "returns" to the street after 30+ messages by ITS
+        // stale stamp — but spent most of that time inside the shop. A related
+        // record (shared "tallow" token) with a fresh stamp means no real absence.
+        let state = gameReducer(atMessages(initialGameState, 5), { type: 'SET_LOCATION', payload: 'Tallow Lane' });
+        state = gameReducer(atMessages(state, 8), { type: 'SET_LOCATION', payload: 'E. Duskwell, Tallow & Tapers' });
+        state = gameReducer(atMessages(state, 20), { type: 'SET_LOCATION', payload: 'Weatherby Guild Quarter' });
+        const returned = gameReducer(atMessages(state, 45), { type: 'SET_LOCATION', payload: 'Tallow Lane' });
+        expect(returned.locations.map(r => r.name)).toContain('E. Duskwell, Tallow & Tapers');
+        expect(returned.session.pendingAbsenceDrift).toBeUndefined();
+    });
+
+    it('nested-place guard: a genuine return past unrelated places still drifts', () => {
+        let state = gameReducer(atMessages(initialGameState, 5), { type: 'SET_LOCATION', payload: 'Tallow Lane' });
+        state = gameReducer(atMessages(state, 8), { type: 'SET_LOCATION', payload: 'Fen Causeway' });
+        state = gameReducer(atMessages(state, 20), { type: 'SET_LOCATION', payload: 'Black Weirs' });
+        const returned = gameReducer(atMessages(state, 45), { type: 'SET_LOCATION', payload: 'Tallow Lane' });
+        expect(returned.session.pendingAbsenceDrift).toMatchObject({ locationName: 'Tallow Lane' });
+    });
 });
 
 describe('traveling rumor on arrival', () => {

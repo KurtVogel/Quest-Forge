@@ -311,6 +311,32 @@ export function upsertLocation(locations = [], name, profile = null) {
     return list.map((record, i) => (i === idx ? merged : record));
 }
 
+/**
+ * Do two registry records plausibly name the same PLACE CLUSTER — a shop on a
+ * street, a district of a town, a landing in a tower? Nested places fragment
+ * into separate records whenever containment folding can't see the kinship
+ * ("Tallow Lane" vs "E. Duskwell, Tallow & Tapers"), so any shared meaningful
+ * token across their name+alias pools counts as related. Used to stop absence
+ * drift from firing for a street the hero spent all morning ON because only its
+ * child-shop record was being stamped (live playtest #7). Deliberately loose:
+ * a false "related" merely skips one flavor beat, a false "unrelated" narrates
+ * weeks of off-screen change for a place the hero never left.
+ */
+export function areRelatedPlaces(a, b) {
+    const pool = (record) => {
+        const tokens = new Set();
+        for (const text of [record?.name, ...(record?.aliases || [])]) {
+            for (const token of locationTokens(text)) tokens.add(token);
+        }
+        return tokens;
+    };
+    const poolA = pool(a);
+    for (const token of pool(b)) {
+        if (poolA.has(token)) return true;
+    }
+    return false;
+}
+
 /** The record for the hero's current location, if the registry knows it. */
 export function getCurrentLocationRecord(locations = [], currentLocation) {
     const idx = findLocationRecord(locations, currentLocation);
@@ -360,6 +386,15 @@ export function dedupeLocationRecords(locations = []) {
             continue;
         }
         if (!isRegistrableLocationName(record.name)) continue;
+        // Pure-noise legacy heal (live playtest #7): pre-mint-gate saves carry
+        // lowercase scene-fragment records ("the causeway", "the freezing muck")
+        // whose stale visit stamps feed false absence drift and registry churn.
+        // The 2026-08-07 "legacy lowercase records stay canon" call protected
+        // possible THEATERS — so only records carrying nothing at all (no
+        // theater, no profile, no region) are dropped.
+        if (!isMintableLocationName(record.name)
+            && !(record.theaterFrontIds || []).length
+            && !record.type && !record.danger && !record.region) continue;
         kept.push(record);
     }
 

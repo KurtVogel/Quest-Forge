@@ -887,6 +887,57 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
         expect(bundled.character.silver).toBe(5);
         expect(bundled.messages.at(-1).content).toMatch(/Adjusted a bundled coin grant/);
     });
+
+    it('suppresses a recap bundle assembled ENTIRELY from split prior grants (live playtest #7: 2 gp leak)', () => {
+        // Live repro: a 2 gp grant, then the purse turn's 28 gp adjusted grant,
+        // then a pure recap re-emitting the whole 30 gp purse. The single-entry
+        // strip matched only the 28 gp piece and paid the 2 gp complement out
+        // of thin air — every later recap of a split grant leaks its remainder.
+        const state = makeState();
+        const first = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 2, _meta: { sourceId: 'msg-vial-turn' } },
+        });
+        // The purse turn emits the full 30 gp bundle; the guard strips the 2 gp
+        // already granted and pays 28 — exactly the live "granted 28 gp" line.
+        const second = gameReducer(addMessages(first, 1), {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 25, silver: 50, _meta: { sourceId: 'msg-purse-turn' } },
+        });
+        expect(second.messages.at(-1).content).toMatch(/granted 28 gp/);
+        const goldAfterBoth = second.character.gold;
+        const silverAfterBoth = second.character.silver;
+        const recap = gameReducer(addMessages(second, 1), {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 25, silver: 50, _meta: { sourceId: 'msg-recap-turn', playerMessage: 'I look Jagger in the eye and make the deal.' } },
+        });
+        expect(recap.character.gold).toBe(goldAfterBoth); // nothing new granted
+        expect(recap.character.silver).toBe(silverAfterBoth);
+        expect(recap.messages.at(-1).content).toMatch(/Duplicate coin grant ignored/);
+        // The recap is remembered as ignored, not as a fresh applied grant.
+        expect(recap.recentCoinGrants.at(-1).status).toBe('ignored');
+    });
+
+    it('strips MULTIPLE prior payments from one recap charge and charges only the true remainder', () => {
+        const state = makeState({ character: { gold: 10, silver: 10, copper: 10 } });
+        const first = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 1, _meta: { sourceId: 'msg-room', playerMessage: 'I pay for the room.' } },
+        });
+        const second = gameReducer(addMessages(first, 1), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-meal', playerMessage: 'I pay for the meal.' } },
+        });
+        // Recap bundles BOTH prior payments plus 5 new coppers.
+        const recap = gameReducer(addMessages(second, 1), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 1, silver: 2, copper: 5, _meta: { sourceId: 'msg-recap', playerMessage: 'I head upstairs for the night.' } },
+        });
+        expect(recap.character.gold).toBe(9);   // charged once, not twice
+        expect(recap.character.silver).toBe(8); // charged once, not twice
+        expect(recap.character.copper).toBe(5); // only the genuinely new part
+        expect(recap.messages.at(-1).content).toMatch(/Adjusted a bundled coin charge/);
+    });
 });
 
 describe('coin replay guards: denomination drift + conversational window (2026-07-22 live finding)', () => {

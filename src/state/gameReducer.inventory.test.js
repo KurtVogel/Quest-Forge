@@ -536,3 +536,85 @@ describe('ADD_ITEM trust boundary (2026-07-28 audit)', () => {
         expect(next.inventory.find(i => i.itemKey === 'leatherArmor').equipped).toBe(true);
     });
 });
+
+describe('items_found replay ledger (live playtest #7: one healing potion granted on three messages)', () => {
+    function addMessages(state, count, prefix = 'item-msg') {
+        let next = state;
+        for (let i = 0; i < count; i++) {
+            next = gameReducer(next, {
+                type: 'ADD_MESSAGE',
+                payload: { id: `${prefix}-${i}`, role: 'assistant', content: `Filler line ${i}.` },
+            });
+        }
+        return next;
+    }
+    const potionPayload = (sourceId, playerMessage) => ({
+        name: 'Potion of Healing',
+        itemKey: 'potionHealing',
+        _meta: { sourceId, ...(playerMessage && { playerMessage }) },
+    });
+
+    it('suppresses the same item re-granted on a later message inside the window', () => {
+        const state = { ...makeState(), inventory: [] };
+        const first = gameReducer(state, { type: 'ADD_ITEM', payload: potionPayload('msg-find') });
+        expect(first.inventory).toHaveLength(1);
+        const recap = gameReducer(addMessages(first, 2), {
+            type: 'ADD_ITEM',
+            payload: potionPayload('msg-recap', 'I make the deal with Jagger.'),
+        });
+        expect(recap.inventory).toHaveLength(1); // still one potion
+        expect(recap.messages.at(-1).content).toMatch(/Duplicate item grant ignored — Potion of Healing/);
+        expect(recap.recentItemGrants.at(-1).status).toBe('ignored');
+    });
+
+    it('honors the player explicitly taking another copy', () => {
+        const state = { ...makeState(), inventory: [] };
+        const first = gameReducer(state, { type: 'ADD_ITEM', payload: potionPayload('msg-find') });
+        const second = gameReducer(addMessages(first, 2), {
+            type: 'ADD_ITEM',
+            payload: potionPayload('msg-second', 'I take another potion of healing from the shelf.'),
+        });
+        expect(second.inventory).toHaveLength(2);
+    });
+
+    it('applies freely outside the conversational window', () => {
+        const state = { ...makeState(), inventory: [] };
+        const first = gameReducer(state, { type: 'ADD_ITEM', payload: potionPayload('msg-find') });
+        const second = gameReducer(addMessages(first, 6), {
+            type: 'ADD_ITEM',
+            payload: potionPayload('msg-later', 'I open the second chest.'),
+        });
+        expect(second.inventory).toHaveLength(2);
+    });
+
+    it('never guards manual adds without a sourceId (UI + internal paths)', () => {
+        const state = { ...makeState(), inventory: [] };
+        const first = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'Torch' } });
+        const second = gameReducer(first, { type: 'ADD_ITEM', payload: { name: 'Torch' } });
+        expect(second.inventory).toHaveLength(2);
+        expect(second.recentItemGrants).toHaveLength(0);
+    });
+
+    it('different items in the window both apply', () => {
+        const state = { ...makeState(), inventory: [] };
+        const first = gameReducer(state, { type: 'ADD_ITEM', payload: potionPayload('msg-find') });
+        const second = gameReducer(addMessages(first, 1), {
+            type: 'ADD_ITEM',
+            payload: { name: 'Rusted iron keys', _meta: { sourceId: 'msg-keys' } },
+        });
+        expect(second.inventory).toHaveLength(2);
+    });
+
+    it('same-message identical grants are suppressed by exact sourceId regardless of phrasing', () => {
+        const state = { ...makeState(), inventory: [] };
+        const first = gameReducer(state, {
+            type: 'ADD_ITEM',
+            payload: potionPayload('msg-find', 'I take another potion of healing.'),
+        });
+        const replay = gameReducer(first, {
+            type: 'ADD_ITEM',
+            payload: potionPayload('msg-find', 'I take another potion of healing.'),
+        });
+        expect(replay.inventory).toHaveLength(1);
+    });
+});

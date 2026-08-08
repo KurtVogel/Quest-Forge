@@ -10,14 +10,32 @@ import {
     companionStatus,
     consumeItem,
     appendRollHistory,
+    currentMessageIndex,
+    findRecentTransactionDuplicate,
     isPlayerCombatTurn,
     mintOwnedItem,
     normalizeCompanion,
     normalizeRefToken,
+    playerMessageSupportsRepeatTransaction,
+    rememberTransaction,
     reviveCharacter,
     systemMessage,
     withInventoryAndAC,
 } from './shared.js';
+
+// Cross-message replay ledger for DM items_found (the one-shot mechanics
+// invariant, DECISIONS.md 2026-07-21 — this channel was its missing sibling):
+// live playtest #7 watched the DM grant the same healing potion on three
+// separate messages (the find, the counting recap, and a later scene recap) and
+// every one applied, because only same-message CLAIM_LOOT_SOURCE idempotency
+// existed. Same tight window as coin grants — the failure mode is the recap on
+// the very next turns, and two identical legitimate finds further apart stay
+// untouched.
+const RECENT_ITEM_GRANT_MESSAGE_WINDOW = 4;
+// Verbs that show the player's own message re-acquiring an item this turn —
+// broader than the coin-loss commerce set on purpose: "I take/grab/pick up
+// another torch" is a genuine second acquisition.
+const ITEM_ACQUIRE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|take|takes|taking|took|grab|grabs|grabbing|grabbed|pick|picks|picking|picked|pocket|pockets|pocketing|pocketed|loot|loots|looting|looted|collect|collects|collecting|collected|claim|claims|claiming|claimed)\b/i;
 
 function isBonusActionConsumable(item) {
     return item?.actionType === 'bonus' || item?.consumableType === 'healing';
@@ -79,8 +97,47 @@ export const handlers = {
         // bypassing the deliberate empty-slot-only auto-equip (2026-07-28 audit).
         // Premise starting items are the one sanctioned equip-on-add channel and
         // declare it via `equipOnAdd`.
-        const equipOnAdd = !Array.isArray(action.payload) && action.payload?.equipOnAdd === true;
-        const newItem = mintOwnedItem(normalizeItem(action.payload), { equipOnAdd });
+        const rawPayload = action.payload;
+        const meta = (rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload) && rawPayload._meta) || {};
+        const payload = rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)
+            ? (({ _meta: _dropped, ...rest }) => rest)(rawPayload)
+            : rawPayload;
+        const equipOnAdd = !Array.isArray(payload) && payload?.equipOnAdd === true;
+        const item = normalizeItem(payload);
+
+        // Only DM-event dispatches carry a sourceId — manual UI adds and internal
+        // grants stay unguarded (a user click is always deliberate).
+        const sourceId = String(meta.sourceId || '').slice(0, 160);
+        let recentItemGrants = state.recentItemGrants;
+        if (sourceId) {
+            const identity = normalizeItemKey(item.itemKey || item.name) || normalizeRefToken(item.name);
+            const quantity = Math.max(1, Math.trunc(item.quantity || 1));
+            const transaction = {
+                item: { itemKey: item.itemKey, name: item.name },
+                quantity,
+                priceCp: 0,
+                signature: `item|${identity}|${quantity}`,
+            };
+            const messageIndex = currentMessageIndex(state);
+            const duplicate = findRecentTransactionDuplicate(
+                state.recentItemGrants, transaction, sourceId, messageIndex,
+                RECENT_ITEM_GRANT_MESSAGE_WINDOW, state.messages
+            );
+            const exactSourceReplay = !!duplicate && duplicate.sourceId === sourceId;
+            if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatTransaction(item, meta.playerMessage, ITEM_ACQUIRE_VERB_RE))) {
+                return {
+                    ...state,
+                    recentItemGrants: rememberTransaction(state.recentItemGrants, transaction, sourceId, messageIndex, 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`Duplicate item grant ignored — ${item.name} was already added moments ago.`),
+                    ],
+                };
+            }
+            recentItemGrants = rememberTransaction(state.recentItemGrants, transaction, sourceId, messageIndex);
+        }
+
+        const newItem = mintOwnedItem(item, { equipOnAdd });
         // Auto-equip armor/shields if no other of that type is currently equipped
         if (!newItem.equipped) {
             const isArmor = newItem.type === 'armor' && !newItem.isShield;
@@ -93,7 +150,8 @@ export const handlers = {
                 newItem.equipped = true;
             }
         }
-        return withInventoryAndAC(state, normalizeEquippedSlots([...state.inventory, newItem], newItem.equipped ? newItem.id : null));
+        const guarded = recentItemGrants === state.recentItemGrants ? state : { ...state, recentItemGrants };
+        return withInventoryAndAC(guarded, normalizeEquippedSlots([...state.inventory, newItem], newItem.equipped ? newItem.id : null));
     },
 
     USE_ITEM(state, action) {

@@ -8,6 +8,55 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-08 · items_found gets its replay ledger (`recentItemGrants`), and bundle-strip subtracts EVERY prior piece.**
+Live playtest #7 (same-day adversarial run) proved the one-shot invariant's missing
+sibling twice on one campaign: the DM emitted the aunt's single healing potion as
+`items_found` on three separate messages — the wall-cavity find, the counting recap, and
+a later deal-scene recap — and all three applied, because item grants had only
+same-message `CLAIM_LOOT_SOURCE` idempotency, no cross-message ledger. Ruling: `ADD_ITEM`
+now runs the standard pipe-ledger guard (`recentItemGrants`, conversational window 4,
+same as coins) for dispatches carrying `_meta.sourceId` — i.e. the DM event path, which
+now attaches the same transaction meta purchases carry. Manual UI adds and internal
+grants stay unguarded (a user click is deliberate), and the Scribe loot audit keeps its
+own reconciliation (its ADD_ITEMs stay meta-less by choice: its summary line must not lie
+about what applied — revisit if a live audit replay ever appears). Player re-acquire
+bypass uses acquisition verbs (take/grab/pick/loot/…) naming the item; suppression posts
+a visible "Duplicate item grant ignored" line. In the same commit, the coin
+`stripBundledReplay` was upgraded from strip-ONE-entry to strip-ALL-matching-entries:
+the live save held a split grant (2 gp, then a 28 gp adjusted remainder), and every DM
+recap of the whole 30 gp purse matched only the 28 gp piece and paid the 2 gp complement
+out of thin air — watched happen on a zero-coin turn. A bundle assembled entirely from
+already-applied pieces now suppresses outright ("Duplicate coin grant ignored — … repeats
+rewards already received moments ago"), and an entry equal to the WHOLE incoming amount
+is only strippable after something else already was (the untouched exact-total case stays
+with the signature-duplicate check and its player-phrasing bypass). Related same-session
+prompt fix: the Scribe audit now states that identifying/appraising an item the hero
+already carries is not an acquisition (the counting turn's "the vial is a healing
+draught" is what triggered re-grants #2 and #3).
+
+**2026-08-08 · Mechanical state changes the DM cannot see must be announced as system lines (sustained-spell fade), and absence drift respects nested-place clusters.**
+Two live playtest #7 findings about silent state. (1) Combat's end and rests clear the
+sustained spell (v1 concentration) — but the clear was invisible: no system line, nothing
+in the DM's 20-message window. The very next narration asserted "the ward you wove before
+entering the cellar still clings to your skin — you are already protected" while the real
+AC had dropped 15→12. Ruling: END_COMBAT posts "**Mage Armor** fades as the fight ends."
+and the rest banner appends "Mage Armor fades." — the player sees the truth and the line
+rides the message window so the DM stops narrating a ward that is gone. General principle
+worth keeping: any engine-owned state change that alters what the DM should narrate needs
+a message-window carrier. (2) Nested places fragment into separate registry records
+("Tallow Lane" the street vs "E. Duskwell, Tallow & Tapers" the shop ON it — no token
+containment folds them), so each record's visit stamps age independently and a "return"
+to the street's stale record fired absence drift while the hero had spent the entire
+so-called absence inside the shop. Ruling: `areRelatedPlaces` (any shared meaningful
+token across name+alias pools) + a nearby-guard in SET_LOCATION — if any related record
+was visited more recently than the drift threshold, the hero never left the place's
+orbit and no drift fires. Deliberately loose relation test: a false "related" skips one
+flavor beat, a false "unrelated" narrates weeks of off-screen change for a place the
+hero never left. Also: the load-time registry heal now drops pre-mint-gate records that
+carry nothing at all (no theater, no type/danger, no region — "the freezing muck");
+the 2026-08-07 "legacy lowercase stays canon" call protected possible theaters, and
+those still survive (profiled "the causeway" kept, verified live).
+
 **2026-08-08 · Post-turn consumers read the committed turn from the runner, never from React state.**
 Live playtest #6 found the real root cause under the whole #5/#6 location mess: after
 `await sendToLLM(...)` resolves, the ADD_MESSAGE render has not flushed yet (React 18

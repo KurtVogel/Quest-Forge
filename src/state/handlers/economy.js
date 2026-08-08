@@ -9,12 +9,13 @@ import { conversationalDistance } from '../../engine/replayLedger.js';
 import {
     consumeItem,
     currentMessageIndex,
+    findRecentTransactionDuplicate,
     mintOwnedItem,
     normalizeRecentTransactions,
     normalizeRefToken,
-    RECENT_TRANSACTION_LIMIT,
+    playerMessageSupportsRepeatTransaction,
+    rememberTransaction,
     REPEAT_TRANSACTION_RE,
-    sanitizeRecentTransaction,
     systemMessage,
     withInventoryAndAC,
 } from './shared.js';
@@ -64,49 +65,6 @@ function buildPurchaseTransaction(payload = {}) {
     };
 }
 
-/** Base narration-message id of a compound sourceId ("msg-1:scribe-loot:payment" → "msg-1"). */
-function sourceBaseOf(sourceId) {
-    return String(sourceId || '').split(':')[0];
-}
-
-function findRecentTransactionDuplicate(entries, transaction, sourceId, currentIndex, window = RECENT_TRANSACTION_MESSAGE_WINDOW, messages = null, { excludeSameBase = false } = {}) {
-    const base = sourceBaseOf(sourceId);
-    return normalizeRecentTransactions(entries)
-        .slice()
-        .reverse()
-        .find(entry => {
-            if (entry.signature !== transaction.signature) return false;
-            if (sourceId && entry.sourceId === sourceId) return true;
-            // Audit dispatches arrive already reconciled against their own narration
-            // message's applied events (scribe.js does the subtraction in code), so a
-            // same-base entry is the portion the engine already accounted for — not a
-            // duplicate of this dispatch. Without this, a genuine engine-computed
-            // shortfall that happens to equal the event-path amount would be eaten.
-            if (excludeSameBase && base && sourceBaseOf(entry.sourceId) === base) return false;
-            const distance = messages
-                ? conversationalDistance(messages, entry.messageIndex, currentIndex)
-                : currentIndex - entry.messageIndex;
-            return distance >= 0 && distance <= window;
-        }) || null;
-}
-
-function rememberTransaction(entries, transaction, sourceId, messageIndex, status = 'applied') {
-    const record = sanitizeRecentTransaction({
-        signature: transaction.signature,
-        itemKey: transaction.item.itemKey,
-        name: transaction.item.name,
-        quantity: transaction.quantity,
-        priceCp: transaction.priceCp,
-        sourceId,
-        messageIndex,
-        timestamp: Date.now(),
-        status,
-    });
-    if (!record) return normalizeRecentTransactions(entries);
-    const previous = normalizeRecentTransactions(entries)
-        .filter(entry => !(entry.signature === record.signature && entry.sourceId === record.sourceId));
-    return [...previous, record].slice(-RECENT_TRANSACTION_LIMIT);
-}
 
 // Coin grants replay in a tighter window than purchases: the observed failure is the DM
 // re-emitting a reward on the very next turn while narrating the pouch being counted or
@@ -174,24 +132,6 @@ function playerMessageSupportsRepeatCoinLoss(playerMessage) {
     return COIN_TRANSFER_VERB_RE.test(text) && COIN_WORD_RE.test(text);
 }
 
-function playerMessageSupportsRepeatTransaction(item, playerMessage, verbRe) {
-    const text = String(playerMessage || '');
-    if (!text.trim()) return false;
-    if (!verbRe.test(text) && !REPEAT_TRANSACTION_RE.test(text)) return false;
-
-    const compactText = normalizeRefToken(text);
-    const tokens = [item.itemKey, item.name]
-        .filter(Boolean)
-        .map(normalizeRefToken)
-        .filter(Boolean);
-    if (tokens.some(token => compactText.includes(token))) return true;
-
-    const nameWords = String(item.name || '').toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
-    if (nameWords.length > 0 && nameWords.every(word => text.toLowerCase().includes(word))) return true;
-
-    return REPEAT_TRANSACTION_RE.test(text) && /\b(one|it|that|those|these|them|same)\b/i.test(text);
-}
-
 const DENOMINATION_WORD_RE = {
     gold: /\b(gold|gp)\b/i,
     silver: /\b(silver|sp)\b/i,
@@ -223,31 +163,41 @@ function decomposeWithin(targetCp, { gold, silver, copper }) {
  * the old behavior silently double-charged.
  */
 function stripBundledReplay(entries, amounts, playerMessage, currentIndex, window, messages) {
-    const totalCp = amounts.gold * 100 + amounts.silver * 10 + amounts.copper;
     const text = String(playerMessage || '');
+    let remainder = { ...amounts };
+    let strippedCp = 0;
+    // Strip EVERY recent applied entry the bundle swallows, each at most once —
+    // a split grant (2 gp then 28 gp) recapped as one 30 gp bundle used to match
+    // only the largest piece and leak the complement on every re-emission (live
+    // playtest #7: the ledger held 2 gp + 28 gp, a recap emitted 30 gp, and the
+    // hero pocketed 2 gp from nothing). An entry equal to the WHOLE incoming
+    // amount is only strippable after something else already was: the untouched
+    // exact-total case belongs to the signature duplicate check, whose player-
+    // phrasing bypass must not be silently overridden here.
     for (const entry of normalizeRecentTransactions(entries).slice().reverse()) {
+        const remainderCp = remainder.gold * 100 + remainder.silver * 10 + remainder.copper;
+        if (remainderCp <= 0) break;
         if (entry.status !== 'applied') continue;
-        if (!(entry.priceCp > 0 && entry.priceCp < totalCp)) continue;
+        if (!(entry.priceCp > 0)) continue;
+        if (strippedCp === 0 ? entry.priceCp >= remainderCp : entry.priceCp > remainderCp) continue;
         const distance = messages
             ? conversationalDistance(messages, entry.messageIndex, currentIndex)
             : currentIndex - entry.messageIndex;
         if (!(distance >= 0 && distance <= window)) continue;
-        const component = decomposeWithin(entry.priceCp, amounts);
+        const component = decomposeWithin(entry.priceCp, remainder);
         if (!component) continue;
         const namesStrippedCoin = ['gold', 'silver', 'copper'].some(
             denom => component[denom] > 0 && DENOMINATION_WORD_RE[denom].test(text)
         );
         if (namesStrippedCoin) continue;
-        return {
-            strippedCp: entry.priceCp,
-            remainder: {
-                gold: amounts.gold - component.gold,
-                silver: amounts.silver - component.silver,
-                copper: amounts.copper - component.copper,
-            },
+        remainder = {
+            gold: remainder.gold - component.gold,
+            silver: remainder.silver - component.silver,
+            copper: remainder.copper - component.copper,
         };
+        strippedCp += entry.priceCp;
     }
-    return null;
+    return strippedCp > 0 ? { strippedCp, remainder } : null;
 }
 
 export const handlers = {
@@ -295,6 +245,18 @@ export const handlers = {
             messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW, state.messages
         );
         const grant = bundled ? bundled.remainder : { gold, silver, copper };
+        // The whole bundle can be an assembly of already-paid pieces (split
+        // grants recapped as one total) — then there is nothing left to grant.
+        if (bundled && grant.gold <= 0 && grant.silver <= 0 && grant.copper <= 0) {
+            return {
+                ...state,
+                recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
+                messages: [
+                    ...state.messages,
+                    systemMessage(`Duplicate coin grant ignored — ${transaction.item.name} repeats rewards already received moments ago.`),
+                ],
+            };
+        }
         const grantTransaction = bundled
             ? buildCoinGrantTransaction(grant.gold, grant.silver, grant.copper)
             : transaction;
@@ -349,6 +311,18 @@ export const handlers = {
             messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW, state.messages
         );
         const charge = bundled ? bundled.remainder : { gold, silver, copper };
+        // Spend-side twin of the grant path: a recap bundle assembled entirely
+        // from already-taken payments must charge nothing at all.
+        if (bundled && charge.gold <= 0 && charge.silver <= 0 && charge.copper <= 0) {
+            return {
+                ...state,
+                recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
+                messages: [
+                    ...state.messages,
+                    systemMessage(`Duplicate coin charge ignored — ${transaction.item.name} repeats payments already taken moments ago.`),
+                ],
+            };
+        }
         const chargeTransaction = bundled
             ? buildCoinLossTransaction(charge.gold, charge.silver, charge.copper)
             : transaction;

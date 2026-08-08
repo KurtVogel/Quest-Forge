@@ -166,6 +166,17 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         }
     }
 
+    const transactionMeta = {
+        ...(lootSourceId && { sourceId: lootSourceId }),
+        ...(opts?.playerMessage && { playerMessage: opts.playerMessage }),
+    };
+    const withTransactionMeta = (entry) => {
+        if (Object.keys(transactionMeta).length === 0) return entry;
+        return entry && typeof entry === 'object' && !Array.isArray(entry)
+            ? { ...entry, _meta: transactionMeta }
+            : { name: String(entry || ''), _meta: transactionMeta };
+    };
+
     for (const item of itemsFound) {
         if (lootAlreadyClaimed) break;
         const itemData = typeof item === 'string'
@@ -208,19 +219,10 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                 ...(item.healing && { healing: item.healing }),
                 ...(item.quantity && { quantity: item.quantity }),
             };
-        dispatch({ type: 'ADD_ITEM', payload: itemData });
+        // The cross-message replay ledger (recentItemGrants) needs the source
+        // message id + player phrasing — the same meta purchases already carry.
+        dispatch({ type: 'ADD_ITEM', payload: withTransactionMeta(itemData) });
     }
-
-    const transactionMeta = {
-        ...(lootSourceId && { sourceId: lootSourceId }),
-        ...(opts?.playerMessage && { playerMessage: opts.playerMessage }),
-    };
-    const withTransactionMeta = (entry) => {
-        if (Object.keys(transactionMeta).length === 0) return entry;
-        return entry && typeof entry === 'object' && !Array.isArray(entry)
-            ? { ...entry, _meta: transactionMeta }
-            : { name: String(entry || ''), _meta: transactionMeta };
-    };
 
     for (const purchase of events.purchases) {
         dispatch({ type: 'PURCHASE_ITEM', payload: withTransactionMeta(purchase) });

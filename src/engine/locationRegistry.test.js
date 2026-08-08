@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+    areRelatedPlaces,
     dedupeLocationRecords,
     findLocationRecord,
     getCurrentLocationRecord,
@@ -264,5 +265,46 @@ describe('dedupeLocationRecords', () => {
         expect(healed[0].aliases).toEqual(['the old salthouse']);
         expect(healed[0].theaterFrontIds).toEqual(['front-v2-1']);
         expect(findLocationRecord(healed, 'Harrowmere')).toBe(1);
+    });
+});
+
+describe('areRelatedPlaces (live playtest #7 nested-place kinship)', () => {
+    it('relates a street to a shop on it through a shared name token', () => {
+        const street = normalizeLocationRecord({ name: 'Tallow Lane' });
+        const shop = normalizeLocationRecord({ name: 'E. Duskwell, Tallow & Tapers' });
+        expect(areRelatedPlaces(street, shop)).toBe(true);
+    });
+
+    it('relates through aliases, not just canonical names', () => {
+        const town = normalizeLocationRecord({
+            name: 'Weatherby',
+            aliases: ['E. Duskwell — Tallow & Tapers, Tallow Lane, Weatherby'],
+        });
+        const street = normalizeLocationRecord({ name: 'Tallow Lane' });
+        expect(areRelatedPlaces(town, street)).toBe(true);
+    });
+
+    it('keeps genuinely distinct places unrelated', () => {
+        const street = normalizeLocationRecord({ name: 'Tallow Lane' });
+        const fen = normalizeLocationRecord({ name: 'The Weirs', aliases: ['The Weirs, Sallow Fen'] });
+        expect(areRelatedPlaces(street, fen)).toBe(false);
+        expect(areRelatedPlaces(street, null)).toBe(false);
+    });
+});
+
+describe('dedupeLocationRecords pure-noise legacy heal (live playtest #7)', () => {
+    it('drops pre-mint-gate scene fragments carrying nothing', () => {
+        const junk1 = normalizeLocationRecord({ name: 'the freezing muck', lastVisitedMessage: 39 });
+        const junk2 = normalizeLocationRecord({ name: 'the causeway', lastVisitedMessage: 28 });
+        const real = normalizeLocationRecord({ name: 'Tallow Lane' });
+        const healed = dedupeLocationRecords([junk1, junk2, real]);
+        expect(healed.map(r => r.name)).toEqual(['Tallow Lane']);
+    });
+
+    it('keeps lowercase legacy records that are theaters or carry a profile', () => {
+        const theater = normalizeLocationRecord({ name: 'the drowned barrow', theaterFrontIds: ['front-v2-2'] });
+        const profiled = normalizeLocationRecord({ name: 'the eel-weirs', type: 'wilderness' });
+        const healed = dedupeLocationRecords([theater, profiled]);
+        expect(healed.map(r => r.name)).toEqual(['the drowned barrow', 'the eel-weirs']);
     });
 });

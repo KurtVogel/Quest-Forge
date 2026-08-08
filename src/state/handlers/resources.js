@@ -337,9 +337,12 @@ export const handlers = {
             id: `msg-${Date.now()}-rest`,
             timestamp: Date.now(),
             role: 'system',
-            content: isLong
+            content: (isLong
                 ? `**Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${newSpellSlots ? ' Spell slots restored.' : ''}${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}${companionNote}`
-                : `**Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.${recoveryNote}${companionNote}`,
+                : `**Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.${recoveryNote}${companionNote}`)
+                // Announce the sustained-spell fade — a silent clear leaves the DM
+                // (and player) believing the ward still holds (live playtest #7).
+                + (endedSustained ? ` ${endedSustained.name} fades.` : ''),
             ...(action.meta?.narrate && {
                 narrationCue: {
                     type: 'player_mechanic',

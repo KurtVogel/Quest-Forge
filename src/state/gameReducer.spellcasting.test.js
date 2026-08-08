@@ -230,6 +230,20 @@ describe('rest slot recovery and sustained lifecycle', () => {
         const next = gameReducer(state, { type: 'END_COMBAT', payload: { llmAwardedXp: true } });
         expect(next.character.sustainedSpell).toBeNull();
         expect(next.party[0].spellAcBonus).toBeUndefined();
+        // The fade is ANNOUNCED (live playtest #7): a silent clear left the DM
+        // narrating "you are already protected" over a dropped AC.
+        expect(next.messages.some(m => m.role === 'system' && /Shield of Faith\*\* fades as the fight ends/.test(m.content))).toBe(true);
+    });
+
+    it('announces the sustained-spell fade in the rest message too', () => {
+        const state = clericState({
+            character: {
+                sustainedSpell: { key: 'mageArmor', name: 'Mage Armor', acBonus: 3, targetType: 'self' },
+            },
+        });
+        const next = gameReducer(state, { type: 'TAKE_REST', payload: 'long' });
+        expect(next.character.sustainedSpell).toBeNull();
+        expect(next.messages.at(-1).content).toMatch(/Mage Armor fades\./);
     });
 });
 

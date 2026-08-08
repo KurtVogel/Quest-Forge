@@ -3,6 +3,7 @@
  * (migrations.js). Single-domain helpers live in their domain module instead.
  */
 import { computeACFromInventory } from '../../engine/rules.js';
+import { conversationalDistance } from '../../engine/replayLedger.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
@@ -159,6 +160,68 @@ export function normalizeRecentTransactions(entries) {
 
 export function currentMessageIndex(state) {
     return Math.max(0, (state.messages || []).length - 1);
+}
+
+/** Base narration-message id of a compound sourceId ("msg-1:scribe-loot:payment" → "msg-1"). */
+export function sourceBaseOf(sourceId) {
+    return String(sourceId || '').split(':')[0];
+}
+
+export function findRecentTransactionDuplicate(entries, transaction, sourceId, currentIndex, window, messages = null, { excludeSameBase = false } = {}) {
+    const base = sourceBaseOf(sourceId);
+    return normalizeRecentTransactions(entries)
+        .slice()
+        .reverse()
+        .find(entry => {
+            if (entry.signature !== transaction.signature) return false;
+            if (sourceId && entry.sourceId === sourceId) return true;
+            // Audit dispatches arrive already reconciled against their own narration
+            // message's applied events (scribe.js does the subtraction in code), so a
+            // same-base entry is the portion the engine already accounted for — not a
+            // duplicate of this dispatch. Without this, a genuine engine-computed
+            // shortfall that happens to equal the event-path amount would be eaten.
+            if (excludeSameBase && base && sourceBaseOf(entry.sourceId) === base) return false;
+            const distance = messages
+                ? conversationalDistance(messages, entry.messageIndex, currentIndex)
+                : currentIndex - entry.messageIndex;
+            return distance >= 0 && distance <= window;
+        }) || null;
+}
+
+export function rememberTransaction(entries, transaction, sourceId, messageIndex, status = 'applied') {
+    const record = sanitizeRecentTransaction({
+        signature: transaction.signature,
+        itemKey: transaction.item.itemKey,
+        name: transaction.item.name,
+        quantity: transaction.quantity,
+        priceCp: transaction.priceCp,
+        sourceId,
+        messageIndex,
+        timestamp: Date.now(),
+        status,
+    });
+    if (!record) return normalizeRecentTransactions(entries);
+    const previous = normalizeRecentTransactions(entries)
+        .filter(entry => !(entry.signature === record.signature && entry.sourceId === record.sourceId));
+    return [...previous, record].slice(-RECENT_TRANSACTION_LIMIT);
+}
+
+export function playerMessageSupportsRepeatTransaction(item, playerMessage, verbRe) {
+    const text = String(playerMessage || '');
+    if (!text.trim()) return false;
+    if (!verbRe.test(text) && !REPEAT_TRANSACTION_RE.test(text)) return false;
+
+    const compactText = normalizeRefToken(text);
+    const tokens = [item.itemKey, item.name]
+        .filter(Boolean)
+        .map(normalizeRefToken)
+        .filter(Boolean);
+    if (tokens.some(token => compactText.includes(token))) return true;
+
+    const nameWords = String(item.name || '').toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
+    if (nameWords.length > 0 && nameWords.every(word => text.toLowerCase().includes(word))) return true;
+
+    return REPEAT_TRANSACTION_RE.test(text) && /\b(one|it|that|those|these|them|same)\b/i.test(text);
 }
 
 /**

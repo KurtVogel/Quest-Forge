@@ -4,7 +4,7 @@
  */
 import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
-import { collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionNameOnly, isSameLocation, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
+import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionNameOnly, isSameLocation, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
@@ -212,8 +212,19 @@ export const handlers = {
         const lastDriftAt = state.session?.absenceDrift?.arrivedAtMessage;
         const driftCoolingDown = Number.isFinite(lastDriftAt)
             && distanceSince(state.messages, lastDriftAt, messageIndex) < ABSENCE_DRIFT_COOLDOWN_MESSAGES;
+        // Nested-place guard (live playtest #7): the shop, its street, and the
+        // town fragment into separate records, so a "return" to the street's
+        // stale record fired drift while the hero had spent the whole absence
+        // inside the shop ON that street. If any RELATED record (shared
+        // name/alias token) was visited more recently than the drift threshold,
+        // the hero never really left this place's orbit — no drift.
+        const lingeredNearby = (departed || []).some(record =>
+            record.id !== targetRecord?.id
+            && Number.isFinite(record.lastVisitedMessage)
+            && distanceSince(state.messages, record.lastVisitedMessage, messageIndex) < ABSENCE_DRIFT_MIN_AWAY
+            && areRelatedPlaces(record, targetRecord));
         if (awayDistance !== null && awayDistance >= ABSENCE_DRIFT_MIN_AWAY
-            && !state.session?.pendingAbsenceDrift && !driftCoolingDown) {
+            && !state.session?.pendingAbsenceDrift && !driftCoolingDown && !lingeredNearby) {
             next.session = {
                 ...next.session,
                 pendingAbsenceDrift: {
