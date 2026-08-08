@@ -1063,6 +1063,24 @@ synonyms: "repair" vs needle "mend"; all four landmarks named vs needle "landmar
 console errors AND zero warnings (prior runs had warnings), extraction budgets held
 (44 facts / 48 cards / 12 NPCs / 6 journal entries over 78 messages), fronts paced correctly.
 
+### Explicit thinking budget for the machinery calls — status: `idea` `[strengthening]` (2026-08-08 audit)
+Grep-confirmed: the repo sets **no** `thinkingConfig` anywhere, so every Gemini call runs at the
+model's default thinking level under `maxOutputTokens: 32768` — and on thinking-capable models
+reasoning tokens count against that cap and are billed as output. The machinery model
+(`gemini-3.1-flash-lite`) fires 2-4× per turn on pure JSON-extraction work — Scribe extraction,
+journal summaries, roll-policy audits, semantic roll detection, the missing-events nudge —
+whose entire output is a small object; two of those calls block the turn before it commits. So
+the machinery pays for reasoning it does not need, twice over: token cost on the cheapest model
+(the same lever the 2026-07-18 machinery-model swap pulled) and TTFT on the hottest interactive
+path. **Why it's an idea and not just a fix:** the natural shape is a thinking policy in
+`llm/machinery.js` / `getBackgroundConfig` — a low/zero budget for extraction, the DM's default
+untouched (narration genuinely benefits from thinking) — plus a smaller `maxOutputTokens` for
+the extraction path, threaded through `formatMessages` as a per-call option rather than the
+current single module constant. Extraction quality is the gate exactly as it was for the model
+swap: Scribe appearance/stance merges and roll audits are the sensitive consumers, so pair it
+with the golden fixtures + a keyed `eval:memory` pass before shipping. Non-Gemini providers are
+unaffected (the machinery is Gemini-only by design).
+
 ### Hosted-tier key proxy (server-side) — status: `idea`, blocks hosted monetization only
 BYOK launch needs none of this. A hosted paid tier requires a thin server-side proxy so
 provider keys never reach the browser: per-user auth + metering, rate limits, fair-use
