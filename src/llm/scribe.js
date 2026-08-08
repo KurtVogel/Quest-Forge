@@ -16,6 +16,7 @@ import { isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { captureReflection, captureScribePass } from '../debug/memoryInspectorStore.js';
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
+import { conversationalDistance } from '../engine/replayLedger.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX, MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
 
@@ -66,7 +67,7 @@ Output ONLY valid JSON:
   ],
   "player_appearance": "concrete physical/visual description of the PLAYER's character, only if newly described this turn — otherwise omit",
   "location": "The place the hero PHYSICALLY STANDS at the END of this narrative, only if it changed — NEVER a place that is merely mentioned, discussed, remembered, watched from afar, or being left behind; null if unchanged",
-  "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly", "region": "the broad NAMED land or realm containing many settlements that THIS PLACE ITSELF lies in, as the fiction states (e.g. 'the Rimefell Marches', 'the Vale of Reeds') — a capitalized proper name, NEVER a town, district, quarter, dock, street, building, or generic feature like 'the coast', and NEVER a distant land that is merely mentioned, discussed, or named as a destination in the scene; omit unless the fiction places THIS location inside a named land, never invent" }
+  "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly", "region": "the broad NAMED land or realm containing many settlements that THIS PLACE ITSELF lies in, ONLY as the fiction has explicitly stated it — a capitalized proper name, NEVER a town, district, quarter, dock, street, building, or generic feature like 'the coast', and NEVER a distant land that is merely mentioned, discussed, or named as a destination in the scene. Omit unless the narrative has actually NAMED the land this place lies in — never invent one, never guess one, and never reuse a name from these instructions" }
 }
 
 Rules:
@@ -363,12 +364,32 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     }
 
     const knownTokens = appliedItemTokens(appliedEvents);
+    // Cross-message ledger check (live playtest #8): the same-message stand-down
+    // above cannot see a RE-narration — "you tuck the pages away" one turn after
+    // the pages were evented re-granted them because audit ADD_ITEMs deliberately
+    // carry no _meta (the announcement line must never claim more than it did).
+    // So the dedupe happens HERE: an item identity the recentItemGrants ledger
+    // shows applied within its window is a recount, not a missing grant. Window
+    // mirrors RECENT_ITEM_GRANT_MESSAGE_WINDOW in state/handlers/inventory.js.
+    const ITEM_GRANT_LEDGER_WINDOW = 4;
+    const state = getState?.();
+    const recentGrantTokens = new Set();
+    const currentIndex = (state?.messages || []).length;
+    for (const entry of state?.recentItemGrants || []) {
+        if (entry?.status !== 'applied') continue;
+        const distance = conversationalDistance(state.messages, entry.messageIndex, currentIndex);
+        if (!(distance >= 0 && distance <= ITEM_GRANT_LEDGER_WINDOW)) continue;
+        for (const token of [auditItemToken(entry.name), auditItemToken(entry.itemKey)]) {
+            if (token) recentGrantTokens.add(token);
+        }
+    }
     const missingItems = items.filter(item => {
-        const alreadyApplied = [item.name, item.itemKey]
-            .map(auditItemToken)
-            .some(token => token && knownTokens.has(token));
+        const tokens = [item.name, item.itemKey].map(auditItemToken);
+        const alreadyApplied = tokens.some(token => token && knownTokens.has(token));
+        const recentlyGranted = tokens.some(token => token && recentGrantTokens.has(token));
         if (alreadyApplied) console.warn(`[Scribe] Narrated item "${item.name}" already granted by the event path; skipping.`);
-        return !alreadyApplied;
+        else if (recentlyGranted) console.warn(`[Scribe] Narrated item "${item.name}" was already granted moments ago (ledger); skipping.`);
+        return !alreadyApplied && !recentlyGranted;
     });
 
     // Coins route through the replay-guarded grant so a reward the DM re-narrates on a

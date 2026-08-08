@@ -23,7 +23,7 @@
  * the same place twice.
  */
 
-import { findLocationRecord, isSameLocation } from './locationRegistry.js';
+import { areRelatedPlaces, findLocationRecord, isSameLocation } from './locationRegistry.js';
 import { distanceSince } from './worldTempo.js';
 
 export const HEARSAY_MAX_ITEMS = 2;
@@ -64,9 +64,31 @@ function gradeFor({ local, age }) {
     return age >= HEARSAY_LEGEND_DISTANCE ? 'legend' : 'secondhand';
 }
 
-function ledgerHas(recentHearsay, deedKey, locKey) {
-    return (Array.isArray(recentHearsay) ? recentHearsay : []).some(entry =>
-        typeof entry === 'string' && entry.startsWith(`${deedKey}|${locKey}|`));
+/** Resolve a ledger place key (record id or raw string) back to its record. */
+function keyToRecord(locations, key) {
+    if (!key) return null;
+    const byId = (locations || []).find(record => record?.id === key);
+    if (byId) return byId;
+    const idx = findLocationRecord(locations || [], key);
+    return idx === -1 ? null : locations[idx];
+}
+
+function ledgerHas(recentHearsay, deedKey, locKey, locations) {
+    const hereRecord = keyToRecord(locations, locKey);
+    return (Array.isArray(recentHearsay) ? recentHearsay : []).some(entry => {
+        if (typeof entry !== 'string' || !entry.startsWith(`${deedKey}|`)) return false;
+        const rest = entry.slice(deedKey.length + 1);
+        const cut = rest.lastIndexOf('|');
+        const entryKey = cut === -1 ? rest : rest.slice(0, cut);
+        if (entryKey === locKey) return true;
+        // Cluster rule (live playtest #8): the shop, its street, and the town it
+        // stands in are one gossiping audience — a deed already offered at a
+        // RELATED place must not be re-offered under every nested spelling (one
+        // fight was cued at nine "places" inside the same few streets).
+        const entryRecord = keyToRecord(locations, entryKey);
+        if (entryRecord && hereRecord) return areRelatedPlaces(entryRecord, hereRecord);
+        return isSameLocation(entryRecord ? entryRecord.name : entryKey, hereRecord ? hereRecord.name : locKey);
+    });
 }
 
 /**
@@ -94,7 +116,7 @@ export function selectRegionalHearsay({
     const ledgerEntries = [];
 
     const consider = (deedKey, item) => {
-        if (items.length >= HEARSAY_MAX_ITEMS || ledgerHas(recentHearsay, deedKey, locKey)) return;
+        if (items.length >= HEARSAY_MAX_ITEMS || ledgerHas(recentHearsay, deedKey, locKey, locations)) return;
         items.push(item);
         ledgerEntries.push(`${deedKey}|${locKey}|${messageIndex}`);
     };

@@ -6,7 +6,42 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-08 (SEVENTH live playtest, adversarial → items_found replay ledger + multi-entry coin-bundle strip + announced sustained-spell fade + nested-place drift guard; 1,474 tests green; deployed)._
+_Last updated: 2026-08-09 (EIGHTH live playtest, adversarial → Scribe-audit cross-message re-grant closed on both coin and item sides, post-defeat 1-HP stabilization, same-response item aggregation, hearsay cluster dedupe, region locality gate; 1,494 tests green; deployed)._
+
+## Eighth live playtest 2026-08-08/09 (adversarial follow-up — hunting the #7 fixes' own blind spots)
+
+Continued Maren into the lockbox, the wharf sale, a watchman fight (won), a guild-guard
+fight (LOST — deliberately), and the capture arc. **P1 found live, fixed with tests
+(DECISIONS.md 2026-08-09):** the Scribe audit re-grants already-applied loot when the NEXT
+message re-narrates it — coins slipped the value ledger by drift (evented 7 gp, narrated
+"5 gold and 12 silver" = 620 cp; watched +6g2s from nothing), items slipped because audit
+ADD_ITEMs are meta-less by #7 design ("Missing ledger pages" ×2 in inventory). Fixes: audit
+coin grants/payments get a cover rule (any recent larger applied non-same-base entry
+suppresses) + the bundle strip (same-base excluded); scribe.js drops audit items the
+`recentItemGrants` ledger shows applied within window. **Also fixed:** two identical
+`items_found` entries in ONE response were eaten by the #7 ledger's exact-source guard →
+applyEvents now aggregates them into one quantity-summed grant; item signatures went
+identity-only (quantity drift = the coin denomination-drift twin); **post-defeat 0-HP
+limbo** — the whole capture arc ran at 0 HP + Unconscious while the DM narrated her awake
+and rolling checks (a stale lowLevelDefeat also means instant defeat in any new fight) →
+the player's next out-of-combat action revives to 1 HP, clears the flag/Unconscious, keeps
+Restrained (verified live on the real save); **hearsay spam** — one fight was offered at
+NINE nested/raw spellings ("the shop", "guild quarter", loc-ids…) → pseudo-places (no
+canonical record) get no rumor pass and the ledger is cluster-aware via `areRelatedPlaces`;
+**region junk** — "the Chandlers' quarter"/"the Guild Quarter" passed the properness gate
+(and "the Rimefell Marches" turned out to be the Scribe echoing the prompt's own example —
+examples removed, echo forbidden) → regions can never end in an urban-locality head noun.
+**Validated live this run:** prompt injection via player-embedded JSON block (no XP/item/
+gold applied, DM answered in fiction), zero-slot cast rejected with no free enemy action,
+"Cast adjusted to your declared Fire Bolt" guardrail, situational ruling granted off
+established fiction (embers → advantage → nat-20 crit), surprise suppressing Opening
+Initiative, potion bonus-action mid-combat (max-HP clamp), exact-DC success (12 vs DC 12),
+proposal survives reload, defeat safety net + zero XP on a lost fight + encounter ledger
+"defeat" entry, DM-emitted rest_taken with full restore + ledger, robbery via items_lost/
+coin events (one turn late but complete; stale twin records left ghost copies), OOC recap
+mid-captivity refusing hidden state — the DM itself flagged the sheet/story divergence.
+**Still unexercised:** level-up/ASI live flow, tempo publicHints anti-repeat. Playtest
+save left as-is (phantom 6g2s + duplicate pages are period artifacts of the bug).
 
 ## Seventh live playtest 2026-08-08 (same-day adversarial run — deliberately hunting the unexercised paths)
 

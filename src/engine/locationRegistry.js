@@ -157,6 +157,21 @@ const GENERIC_PLACE_TOKENS = new Set([
 const REGION_FILLER_WORDS = new Set(['the', 'a', 'an', 'of', 'and']);
 
 /**
+ * Urban-locality head nouns a REGION name can never END in (live playtest #8):
+ * "the Chandlers' quarter" and "the Guild Quarter" carry a proper token, so the
+ * all-generic test waves them through — but a region is a LAND, and no land is
+ * named after a street-level subdivision. Geographic heads (hills, marches,
+ * fen, vale) stay legal: "the Whispering Hills" is a perfectly good region.
+ */
+const URBAN_LOCALITY_HEAD_TOKENS = new Set([
+    'quarter', 'quarters', 'district', 'districts', 'ward', 'wards', 'street',
+    'streets', 'lane', 'lanes', 'alley', 'alleys', 'square', 'squares', 'market',
+    'markets', 'dock', 'docks', 'docklands', 'wharf', 'wharves', 'harbor',
+    'harbour', 'harbors', 'harbours', 'port', 'ports', 'waterfront', 'gate',
+    'gates', 'bridge', 'bridges', 'row', 'plaza', 'bazaar',
+]);
+
+/**
  * Boundary for a model-reported region: must be a short NAME (≤4 meaningful
  * tokens), must not be the classified place itself, must carry at least one
  * non-generic token, AND must read as a proper name — at least one non-filler
@@ -172,6 +187,10 @@ export function sanitizeRegionName(value, placeName = '') {
     if (tokens.size === 0 || tokens.size > 4) return null;
     if (placeName && isSameLocation(region, placeName)) return null;
     if ([...tokens].every(token => GENERIC_PLACE_TOKENS.has(token))) return null;
+    // A region never ends in a street-level subdivision noun — "the Chandlers'
+    // quarter" is a locality inside a town, whatever its capitalization.
+    const words = region.toLowerCase().split(/[^a-z0-9']+/).filter(Boolean);
+    if (words.length > 0 && URBAN_LOCALITY_HEAD_TOKENS.has(words[words.length - 1])) return null;
     const hasProperToken = region.split(/\s+/)
         .some(word => !REGION_FILLER_WORDS.has(word.toLowerCase()) && /^\p{Lu}/u.test(word));
     if (!hasProperToken) return null;

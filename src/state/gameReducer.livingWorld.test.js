@@ -110,6 +110,28 @@ describe('traveling rumor on arrival', () => {
         expect(state.session.regionalHearsay).toBeNull();
         expect(state.recentHearsay).toHaveLength(2); // Deep Fen arrival earned its own offer
     });
+
+    it('runs no rumor pass for a destination that neither resolves nor mints (playtest #8)', () => {
+        // "The threshold of the hidden staircase" is scene furniture, not a place
+        // with a gossiping audience — every such string used to count as a fresh
+        // arrival and re-offer the same deeds under raw-text ledger keys.
+        let state = gameReducer(withDeeds(), { type: 'SET_LOCATION', payload: 'Saltmarsh' });
+        const hearsayBefore = state.session.regionalHearsay;
+        const ledgerBefore = state.recentHearsay;
+        const next = gameReducer(atMessages(state, 34), { type: 'SET_LOCATION', payload: 'the threshold of the hidden staircase' });
+        expect(next.currentLocation).toBe('the threshold of the hidden staircase');
+        expect(next.locations.map(r => r.name)).not.toContain('the threshold of the hidden staircase');
+        expect(next.recentHearsay).toBe(ledgerBefore);
+        expect(next.session.regionalHearsay).toBe(hearsayBefore);
+    });
+
+    it('does not re-offer a deed at a nested sibling of the place it was offered at (playtest #8)', () => {
+        let state = gameReducer(withDeeds(), { type: 'SET_LOCATION', payload: 'Tallow Lane' });
+        expect(state.recentHearsay).toHaveLength(1);
+        const next = gameReducer(atMessages(state, 34), { type: 'SET_LOCATION', payload: 'E. Duskwell, Tallow & Tapers' });
+        expect(next.recentHearsay).toHaveLength(1); // same audience, no second offer
+        expect(next.session.regionalHearsay).toBeNull();
+    });
 });
 
 describe('INSTALL_ABSENCE_DRIFT', () => {

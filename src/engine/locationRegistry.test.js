@@ -9,6 +9,7 @@ import {
     isRegionNameOnly,
     isRegistrableLocationName,
     isSameLocation,
+    sanitizeRegionName,
     normalizeLocationRecord,
     upsertLocation,
     MAX_LOCATIONS,
@@ -306,5 +307,22 @@ describe('dedupeLocationRecords pure-noise legacy heal (live playtest #7)', () =
         const profiled = normalizeLocationRecord({ name: 'the eel-weirs', type: 'wilderness' });
         const healed = dedupeLocationRecords([theater, profiled]);
         expect(healed.map(r => r.name)).toEqual(['the drowned barrow', 'the eel-weirs']);
+    });
+});
+
+describe('sanitizeRegionName urban-locality heads (playtest #8: "the Chandlers\' quarter" became a region)', () => {
+    it('rejects proper-cased names whose head noun is a street-level subdivision', () => {
+        expect(sanitizeRegionName("the Chandlers' quarter")).toBeNull();
+        expect(sanitizeRegionName('the Guild Quarter')).toBeNull();
+        expect(sanitizeRegionName('River Wharves')).toBeNull();
+        expect(sanitizeRegionName('the Lantern District')).toBeNull();
+        expect(sanitizeRegionName('Weatherby Market Square')).toBeNull();
+    });
+
+    it('keeps real region names with geographic heads', () => {
+        expect(sanitizeRegionName('the Whispering Hills')).toBe('the Whispering Hills');
+        expect(sanitizeRegionName('the Harchwold')).toBe('the Harchwold');
+        expect(sanitizeRegionName('the Sallow Fen')).toBe('the Sallow Fen');
+        expect(sanitizeRegionName('Vale of Reeds')).toBe('Vale of Reeds');
     });
 });

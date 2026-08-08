@@ -112,11 +112,16 @@ export const handlers = {
         if (sourceId) {
             const identity = normalizeItemKey(item.itemKey || item.name) || normalizeRefToken(item.name);
             const quantity = Math.max(1, Math.trunc(item.quantity || 1));
+            // Identity-only signature (playtest #8): quantity drift is the item
+            // twin of coin denomination drift — a "3 arrows" grant recapped as
+            // "arrows" (x1) is the same find, and a quantity-bearing signature
+            // let it through. A genuine second find of the same item type inside
+            // the window still applies via the player-phrasing bypass, visibly.
             const transaction = {
                 item: { itemKey: item.itemKey, name: item.name },
                 quantity,
                 priceCp: 0,
-                signature: `item|${identity}|${quantity}`,
+                signature: `item|${identity}`,
             };
             const messageIndex = currentMessageIndex(state);
             const duplicate = findRecentTransactionDuplicate(

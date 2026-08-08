@@ -183,6 +183,17 @@ export const handlers = {
         const next = { ...state, currentLocation: name, locations };
         if (!arrived) return next;
 
+        // Pseudo-place guard (live playtest #8): a destination that neither
+        // resolves to nor mints a canonical record ("the threshold of the hidden
+        // staircase") is scene furniture, not a place with a gossiping audience.
+        // Every such string used to count as an arrival at a brand-new "place",
+        // re-offering the same deeds under raw-text ledger keys — one fight was
+        // cued at nine spellings inside the same few streets. Keep the live
+        // hearsay window untouched (the render guard hides it if the hero truly
+        // moved on) and skip selection entirely.
+        const destinationIdx = findLocationRecord(locations, name);
+        if (destinationIdx === -1) return next;
+
         // Traveling rumor: deterministically pick which of the hero's deeds
         // could plausibly be talk of THIS place, once per (deed, place).
         const selection = selectRegionalHearsay({

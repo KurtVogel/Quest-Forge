@@ -618,3 +618,45 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
         expect(replay.inventory).toHaveLength(1);
     });
 });
+
+describe('items_found quantity drift (playtest #8: the item twin of coin denomination drift)', () => {
+    function addMessages(state, count, prefix = 'qty-msg') {
+        let next = state;
+        for (let i = 0; i < count; i++) {
+            next = gameReducer(next, {
+                type: 'ADD_MESSAGE',
+                payload: { id: `${prefix}-${i}`, role: 'assistant', content: `Filler line ${i}.` },
+            });
+        }
+        return next;
+    }
+
+    it('suppresses a recap that re-grants the same item at a different quantity', () => {
+        const state = { ...makeState(), inventory: [] };
+        const first = gameReducer(state, {
+            type: 'ADD_ITEM',
+            payload: { name: 'Arrow', quantity: 3, _meta: { sourceId: 'msg-find' } },
+        });
+        expect(first.inventory).toHaveLength(1);
+        const recap = gameReducer(addMessages(first, 2), {
+            type: 'ADD_ITEM',
+            payload: { name: 'Arrow', quantity: 1, _meta: { sourceId: 'msg-recap', playerMessage: 'I check my quiver and move on.' } },
+        });
+        expect(recap.inventory).toHaveLength(1);
+        expect(recap.inventory[0].quantity).toBe(3);
+        expect(recap.messages.at(-1).content).toMatch(/Duplicate item grant ignored — Arrow/);
+    });
+
+    it('still honors explicit player re-acquisition at a new quantity', () => {
+        const state = { ...makeState(), inventory: [] };
+        const first = gameReducer(state, {
+            type: 'ADD_ITEM',
+            payload: { name: 'Arrow', quantity: 3, _meta: { sourceId: 'msg-find' } },
+        });
+        const second = gameReducer(addMessages(first, 2), {
+            type: 'ADD_ITEM',
+            payload: { name: 'Arrow', quantity: 5, _meta: { sourceId: 'msg-buy', playerMessage: 'I take the rest of the arrows too.' } },
+        });
+        expect(second.inventory).toHaveLength(2);
+    });
+});

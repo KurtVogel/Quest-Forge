@@ -231,3 +231,20 @@ describe('turn runner — roleplay-check accept path failures', () => {
         expect(getState().messages.some(m => /The dice landed/.test(m.content || ''))).toBe(false);
     });
 });
+
+describe('turn runner — same-response duplicate items_found entries (playtest #8)', () => {
+    it('aggregates two identical entries into one grant of quantity 2 instead of eating the second', async () => {
+        const response = 'Each guard carried a blade.\n```json\n{"items_found": [{"name": "Dagger"}, {"name": "Dagger"}]}\n```';
+        const { runner, getState } = createHarness({
+            streamMessage: scriptedStream([response]),
+            sendMessage: vi.fn(async () => ''),
+        });
+
+        await runner.sendToLLM('I search both guards.', 'I search both guards.');
+
+        const daggers = getState().inventory.filter(i => /dagger/i.test(i.name));
+        expect(daggers).toHaveLength(1);
+        expect(daggers[0].quantity).toBe(2);
+        expect(getState().messages.some(m => m.role === 'system' && /Duplicate item grant ignored/.test(m.content || ''))).toBe(false);
+    });
+});

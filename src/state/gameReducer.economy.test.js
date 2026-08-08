@@ -1004,3 +1004,106 @@ describe('coin replay guards: denomination drift + conversational window (2026-0
         expect(second.character.gold).toBe(granted.character.gold + 20); // a genuinely new, later 20 gp job
     });
 });
+
+describe('playtest #8: audit value drift — a re-narrated reward/payment must not move coin again', () => {
+    function addMessages(state, count, prefix = 'drift-msg') {
+        let next = state;
+        for (let i = 0; i < count; i++) {
+            next = gameReducer(next, {
+                type: 'ADD_MESSAGE',
+                payload: { id: `${prefix}-${i}`, role: 'assistant', content: `Filler line ${i}.` },
+            });
+        }
+        return next;
+    }
+
+    it('suppresses an audit grant covered by a larger recent grant (the live 620-after-700 case)', () => {
+        // Event path granted 7 gp for the lockbox; the next turn re-narrated the
+        // same purse as "five gold and twelve silver" (620 cp) with no events,
+        // and the audit re-granted it — value drift defeated the signature.
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 7, _meta: { sourceId: 'msg-lockbox' } },
+        });
+        const later = addMessages(granted, 1);
+        const audited = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 6, silver: 2, _meta: { sourceId: 'msg-recap:scribe-loot', announce: 'audit', audit: true } },
+        });
+        expect(audited.character.gold).toBe(state.character.gold + 7); // the 7 gp, once
+        expect(audited.character.silver).toBe(0);
+        expect(audited.recentCoinGrants.at(-1).status).toBe('ignored');
+        expect(audited.messages.at(-1).content).toMatch(/repeats rewards already received/);
+    });
+
+    it('keeps DM event grants uncovered — a genuine smaller follow-up reward still pays', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 7, _meta: { sourceId: 'msg-reward-1' } },
+        });
+        const later = addMessages(granted, 1);
+        const second = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 5, _meta: { sourceId: 'msg-reward-2', playerMessage: 'I thank her and pocket the tip.' } },
+        });
+        expect(second.character.gold).toBe(state.character.gold + 12);
+    });
+
+    it('suppresses an audit payment covered by a larger recent charge', () => {
+        const state = makeState({ character: { gold: 10, silver: 0, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 7, _meta: { sourceId: 'msg-toll' } },
+        });
+        const later = addMessages(paid, 1);
+        const audited = gameReducer(later, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { gold: 6, silver: 2, _meta: { sourceId: 'msg-recap:scribe-loot:payment', audit: true } },
+        });
+        expect(audited.character.gold).toBe(3); // 10 - 7, once
+        expect(audited.messages.at(-1).content).toMatch(/repeats payments already taken/);
+    });
+
+    it('strips bundled already-taken pieces from an audit payment and charges only the remainder', () => {
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        let next = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-pay-a' } },
+        });
+        next = addMessages(next, 1, 'strip-a');
+        next = gameReducer(next, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 3, _meta: { sourceId: 'msg-pay-b' } },
+        });
+        next = addMessages(next, 1, 'strip-b');
+        const audited = gameReducer(next, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { silver: 6, _meta: { sourceId: 'msg-recap:scribe-loot:payment', audit: true } },
+        });
+        // 2s + 3s were already taken; only the novel 1s of the recapped 6s is owed.
+        expect(audited.character.silver).toBe(10 - 2 - 3 - 1);
+        expect(audited.messages.some(m => m.content.includes('Adjusted an audited payment'))).toBe(true);
+    });
+
+    it('never strips same-base pieces from a reconciled audit shortfall', () => {
+        // scribe.js already subtracted this narration's own applied losses; the
+        // dispatched amount IS the genuine shortfall and must charge in full.
+        const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
+        let next = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 2, _meta: { sourceId: 'msg-A' } },
+        });
+        next = gameReducer(next, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 1, _meta: { sourceId: 'msg-A', playerMessage: 'I pay the porter and the gate fee.' } },
+        });
+        const audited = gameReducer(next, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { silver: 5, _meta: { sourceId: 'msg-A:scribe-loot:payment', audit: true } },
+        });
+        expect(audited.character.silver).toBe(10 - 2 - 1 - 5);
+        expect(audited.messages.at(-1).content).toMatch(/Payment settled from narration/);
+    });
+});

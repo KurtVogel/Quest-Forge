@@ -16,6 +16,7 @@ import {
     playerMessageSupportsRepeatTransaction,
     rememberTransaction,
     REPEAT_TRANSACTION_RE,
+    sourceBaseOf,
     systemMessage,
     withInventoryAndAC,
 } from './shared.js';
@@ -236,12 +237,46 @@ export const handlers = {
                 ],
             };
         }
+        // Audit cover rule (live playtest #8): scribe.js only stands down against
+        // the SAME narration's applied events, so a next-turn re-narration with a
+        // drifted value (event granted 7 gp, recap says "5 gold and 12 silver" =
+        // 620 cp) reaches here as a novel signature and used to re-grant. An audit
+        // is a recap by nature: when any recent applied grant from ANOTHER message
+        // is at least this large, the narration is recounting that reward — suppress
+        // outright. DM event grants keep #7 semantics (a genuine smaller follow-up
+        // reward must not be eaten; the player-phrasing bypass covers repeats).
+        if (isAudit) {
+            const base = sourceBaseOf(sourceId);
+            const covered = normalizeRecentTransactions(state.recentCoinGrants).some(entry =>
+                entry.status === 'applied'
+                && entry.priceCp >= transaction.priceCp
+                && (!base || sourceBaseOf(entry.sourceId) !== base)
+                && conversationalDistance(state.messages, entry.messageIndex, messageIndex) <= RECENT_COIN_GRANT_MESSAGE_WINDOW);
+            if (covered) {
+                return {
+                    ...state,
+                    recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`Duplicate coin grant ignored — ${transaction.item.name} repeats rewards already received moments ago.`),
+                    ],
+                };
+            }
+        }
         // Recap-bundle guard, gain side: a new grant that swallows a recent reward
         // whole ("the 10 gold reward plus 5 silver you find now") must only pay the
-        // new part. Audit grants skip this — they already stood down in scribe.js
-        // unless the event path granted nothing at all.
-        const bundled = isAudit ? null : stripBundledReplay(
-            state.recentCoinGrants, { gold, silver, copper }, meta.playerMessage,
+        // new part. Audit grants run it too (playtest #8) — a recap can bundle
+        // several smaller already-paid pieces; audits carry no playerMessage, so
+        // the denomination-naming bypass never blocks their strip. Same-base
+        // entries stay OUT of an audit's strip pool: scribe.js already subtracted
+        // that narration's applied events, and stripping them again would eat a
+        // legitimately reconciled shortfall.
+        const grantStripPool = isAudit
+            ? normalizeRecentTransactions(state.recentCoinGrants)
+                .filter(entry => !sourceBaseOf(sourceId) || sourceBaseOf(entry.sourceId) !== sourceBaseOf(sourceId))
+            : state.recentCoinGrants;
+        const bundled = stripBundledReplay(
+            grantStripPool, { gold, silver, copper }, meta.playerMessage,
             messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW, state.messages
         );
         const grant = bundled ? bundled.remainder : { gold, silver, copper };
@@ -379,8 +414,57 @@ export const handlers = {
                 ],
             };
         }
-        const recentCoinLosses = rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex);
-        const result = spendCurrency(state.character, { gold, silver, copper });
+        // Cover rule, spend side (playtest #8 twin of the audit grant cover): a
+        // re-narrated payment with a drifted value must not charge again when a
+        // recent applied loss from another message already covers it. The audit
+        // is a backstop for pure omissions, never a second payer of record.
+        const base = sourceBaseOf(sourceId);
+        const covered = normalizeRecentTransactions(state.recentCoinLosses).some(entry =>
+            entry.status === 'applied'
+            && entry.priceCp >= costCp
+            && (!base || sourceBaseOf(entry.sourceId) !== base)
+            && conversationalDistance(state.messages, entry.messageIndex, messageIndex) <= RECENT_COIN_LOSS_MESSAGE_WINDOW);
+        if (covered) {
+            return {
+                ...state,
+                recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
+                messages: [
+                    ...state.messages,
+                    systemMessage(`**Duplicate payment ignored:** ${formatCurrency(costCp)} repeats payments already taken moments ago.`),
+                ],
+            };
+        }
+        // Bundle strip for audited payments: a recap can assemble several smaller
+        // already-taken charges into one novel total. No playerMessage rides an
+        // audit, so the denomination-naming bypass never blocks the strip. Same-
+        // base entries stay out of the pool — scribe.js already reconciled this
+        // narration's own applied losses.
+        const lossStripPool = normalizeRecentTransactions(state.recentCoinLosses)
+            .filter(entry => !base || sourceBaseOf(entry.sourceId) !== base);
+        const bundled = stripBundledReplay(
+            lossStripPool, { gold, silver, copper }, meta.playerMessage,
+            messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW, state.messages
+        );
+        const charge = bundled ? bundled.remainder : { gold, silver, copper };
+        if (bundled && charge.gold <= 0 && charge.silver <= 0 && charge.copper <= 0) {
+            return {
+                ...state,
+                recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
+                messages: [
+                    ...state.messages,
+                    systemMessage(`**Duplicate payment ignored:** ${formatCurrency(costCp)} repeats payments already taken moments ago.`),
+                ],
+            };
+        }
+        const chargeTransaction = bundled
+            ? buildCoinLossTransaction(charge.gold, charge.silver, charge.copper)
+            : transaction;
+        const chargeCp = chargeTransaction.priceCp;
+        const recentCoinLosses = rememberTransaction(state.recentCoinLosses, chargeTransaction, sourceId, messageIndex);
+        const result = spendCurrency(state.character, charge);
+        const strippedNote = bundled
+            ? [systemMessage(`Adjusted an audited payment — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago.`)]
+            : [];
         if (result.paid) {
             return {
                 ...state,
@@ -388,18 +472,20 @@ export const handlers = {
                 recentCoinLosses,
                 messages: [
                     ...state.messages,
-                    systemMessage(`**Payment settled from narration:** ${formatCurrency(costCp)} deducted from your purse.`),
+                    ...strippedNote,
+                    systemMessage(`**Payment settled from narration:** ${formatCurrency(chargeCp)} deducted from your purse.`),
                 ],
             };
         }
-        const availableCp = costCp - result.missingCp;
+        const availableCp = chargeCp - result.missingCp;
         if (availableCp <= 0) {
             return {
                 ...state,
                 recentCoinLosses,
                 messages: [
                     ...state.messages,
-                    systemMessage(`**Payment noted from narration:** ${formatCurrency(costCp)} was owed, but your purse is empty — nothing deducted.`),
+                    ...strippedNote,
+                    systemMessage(`**Payment noted from narration:** ${formatCurrency(chargeCp)} was owed, but your purse is empty — nothing deducted.`),
                 ],
             };
         }
@@ -410,7 +496,8 @@ export const handlers = {
             recentCoinLosses,
             messages: [
                 ...state.messages,
-                systemMessage(`**Payment settled from narration:** ${formatCurrency(availableCp)} deducted (purse emptied; ${formatCurrency(result.missingCp)} short of the narrated ${formatCurrency(costCp)}).`),
+                ...strippedNote,
+                systemMessage(`**Payment settled from narration:** ${formatCurrency(availableCp)} deducted (purse emptied; ${formatCurrency(result.missingCp)} short of the narrated ${formatCurrency(chargeCp)}).`),
             ],
         };
     },

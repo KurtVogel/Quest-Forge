@@ -232,3 +232,46 @@ describe('buildRegionalHearsayBlock', () => {
         expect(block.length).toBeLessThan(1500);
     });
 });
+
+describe('cluster-aware ledger (playtest #8: one fight cued at nine nested spellings)', () => {
+    const at = HEARSAY_MIN_TRAVEL_DISTANCE + 8;
+    const street = { id: 'loc-street', name: 'Tallow Lane', aliases: ['Outside the shop, Tallow Lane'] };
+    const shop = { id: 'loc-shop', name: 'E. Duskwell, Tallow & Tapers', aliases: ['Tallow Lane chandlery'] };
+    const farTown = { id: 'loc-far', name: 'The Weirs', aliases: [] };
+
+    it('does not re-offer a deed at a place related to one it was already offered at', () => {
+        const { items } = selectRegionalHearsay({
+            fronts: [resolvedFront()],
+            recentHearsay: [`front:front-brood|loc-street|${at - 4}`],
+            locations: [street, shop, farTown],
+            locationName: 'E. Duskwell, Tallow & Tapers',
+            messages: msgs(at),
+            messageIndex: at,
+        });
+        expect(items).toHaveLength(0);
+    });
+
+    it('matches raw-string ledger keys against the arrival record by containment', () => {
+        const { items } = selectRegionalHearsay({
+            fronts: [resolvedFront()],
+            recentHearsay: [`front:front-brood|outside the shop, tallow lane|${at - 4}`],
+            locations: [street, shop],
+            locationName: 'Tallow Lane',
+            messages: msgs(at),
+            messageIndex: at,
+        });
+        expect(items).toHaveLength(0);
+    });
+
+    it('still offers the deed at a genuinely unrelated place', () => {
+        const { items } = selectRegionalHearsay({
+            fronts: [resolvedFront()],
+            recentHearsay: [`front:front-brood|loc-street|${at - 4}`],
+            locations: [street, shop, farTown],
+            locationName: 'The Weirs',
+            messages: msgs(at),
+            messageIndex: at,
+        });
+        expect(items).toHaveLength(1);
+    });
+});

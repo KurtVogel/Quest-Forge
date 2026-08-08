@@ -148,8 +148,29 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     };
     const purchasedTokens = tradedTokenSet(events.purchases, (p) => p.itemKey || p.item?.itemKey || p.key, (p) => p.name || p.item?.name);
     const soldTokens = tradedTokenSet(events.sells, (s) => s.itemKey || s.key, (s) => s.name);
-    const itemsFound = dropMatching(events.itemsFound, purchasedTokens, 'purchase');
+    const itemsFoundRaw = dropMatching(events.itemsFound, purchasedTokens, 'purchase');
     const itemsLost = dropMatching(events.itemsLost, soldTokens, 'sale');
+
+    // Aggregate same-identity items_found entries into one dispatch (playtest #8):
+    // a DM listing "Dagger" twice for two guards produces two identical dispatches
+    // under ONE sourceId, and the recentItemGrants ledger's exact-source replay
+    // guard would eat the second dagger. Summing quantities up front keeps both
+    // daggers AND keeps the ledger's same-source protection for true replays.
+    const itemsFound = [];
+    const foundByToken = new Map();
+    for (const entry of itemsFoundRaw) {
+        const token = normToken(itemKeyOf(entry) || itemNameOf(entry));
+        const prior = token ? foundByToken.get(token) : null;
+        if (!prior) {
+            const normalized = typeof entry === 'string' ? { name: entry } : { ...entry };
+            itemsFound.push(normalized);
+            if (token) foundByToken.set(token, normalized);
+            continue;
+        }
+        const priorQty = Math.max(1, Math.trunc(prior.quantity || 1));
+        const entryQty = typeof entry === 'string' ? 1 : Math.max(1, Math.trunc(entry.quantity || 1));
+        prior.quantity = priorQty + entryQty;
+    }
 
     // Loot deduplication guard — prevent the same message from granting gold/items twice
     // (e.g. from a re-render, state restore, or DM re-narrating already-applied loot).

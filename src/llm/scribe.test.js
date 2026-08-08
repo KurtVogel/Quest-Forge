@@ -616,6 +616,47 @@ describe('Scribe loot persistence audit', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'CLAIM_LOOT_SOURCE' }));
     });
 
+    it('skips a narrated item the recentItemGrants ledger shows granted moments ago (playtest #8)', async () => {
+        // The live re-narration: "you tuck the pages away" one turn after the
+        // pages were evented. Audit ADD_ITEMs stay meta-less by design, so the
+        // cross-message dedupe lives in scribe.js against the item-grant ledger.
+        sendMessage.mockResolvedValue(scribeResponse({
+            items: [{ name: 'Missing ledger pages', quantity: 1 }, { name: 'Velvet purse', quantity: 1 }],
+        }));
+        const dispatch = vi.fn();
+        const messages = Array.from({ length: 120 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `m${i}` }));
+
+        await runScribe({
+            playerMessage: 'I pocket the purse and the pages.',
+            dmNarrative: 'You tuck the missing ledger pages away with the velvet purse.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                getState: () => ({
+                    appliedLootSourceIds: [],
+                    messages,
+                    recentItemGrants: [{
+                        signature: 'item|missingledgerpages',
+                        itemKey: '',
+                        name: 'Missing ledger pages',
+                        quantity: 1,
+                        priceCp: 0,
+                        sourceId: 'msg-earlier',
+                        messageIndex: 118,
+                        status: 'applied',
+                    }],
+                }),
+            }),
+        });
+
+        const addItemCalls = dispatch.mock.calls.filter(([action]) => action.type === 'ADD_ITEM');
+        expect(addItemCalls).toHaveLength(1);
+        expect(addItemCalls[0][0].payload.name).toBe('Velvet purse');
+        const announce = dispatch.mock.calls.find(([action]) =>
+            action.type === 'ADD_MESSAGE' && /Loot recovered from narration/.test(action.payload?.content || ''));
+        expect(announce[0].payload.content).not.toContain('Missing ledger pages');
+    });
+
     it('does nothing when the Scribe reports no missing loot', async () => {
         sendMessage.mockResolvedValue(scribeResponse({ gold: 0, silver: 0, copper: 0, items: [] }));
         const dispatch = vi.fn();

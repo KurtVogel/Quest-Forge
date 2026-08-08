@@ -9,11 +9,11 @@ import {
     RECENT_RULING_LIMIT,
     sanitizePendingRoleplayCheck,
 } from '../../engine/roleplayCheck.js';
-import { appendRollHistory } from './shared.js';
+import { appendRollHistory, reviveCharacter, systemMessage } from './shared.js';
 
 export const handlers = {
     ADD_MESSAGE(state, action) {
-        return {
+        const next = {
             ...state,
             messages: [...state.messages, {
                 id: action.payload.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -21,6 +21,25 @@ export const handlers = {
                 ...action.payload,
             }],
         };
+        // Post-defeat stabilization (live playtest #8): a non-lethal low-level
+        // defeat left the hero at 0 HP + Unconscious through a whole capture arc —
+        // the DM narrated her awake, talking, and rolling checks while the sheet
+        // said unconscious, and a stale lowLevelDefeat flag makes any NEW fight an
+        // instant defeat in combatExchange. The player's next in-fiction action
+        // after the lost fight IS the story moving past the knockout: come to at
+        // 1 HP (the 5e stable-wake analog), keep every other condition (rope is
+        // rope), and clear the defeat flag. Healing/rests still clear it too.
+        if (action.payload?.role === 'user'
+            && next.character?.lowLevelDefeat
+            && (next.character.currentHP ?? 0) <= 0
+            && !next.combat?.active) {
+            next.character = { ...reviveCharacter(next.character), currentHP: 1 };
+            next.messages = [
+                ...next.messages,
+                systemMessage(`**You come to** — battered and barely standing at 1/${next.character.maxHP} HP.`),
+            ];
+        }
+        return next;
     },
 
     CLAIM_LOOT_SOURCE(state, action) {

@@ -272,3 +272,61 @@ describe('PLAYER_DEFEAT', () => {
         expect(next.messages.some(m => m.content.includes('story setback'))).toBe(true);
     });
 });
+
+describe('post-defeat stabilization (playtest #8: the capture arc ran at 0 HP)', () => {
+    const defeated = (overrides = {}) => levelOneSolo({
+        currentHP: 0,
+        lowLevelDefeat: true,
+        dying: false,
+        conditions: ['Unconscious', 'Restrained'],
+        ...overrides,
+    });
+
+    it("revives to 1 HP on the player's next out-of-combat action and keeps other conditions", () => {
+        const next = gameReducer(defeated(), {
+            type: 'ADD_MESSAGE',
+            payload: { role: 'user', content: 'I come to slowly, listening first.' },
+        });
+        expect(next.character.currentHP).toBe(1);
+        expect(next.character.lowLevelDefeat).toBe(false);
+        expect(next.character.conditions).not.toContain('Unconscious');
+        expect(next.character.conditions).toContain('Restrained');
+        expect(next.messages.some(m => m.role === 'system' && m.content.includes('You come to'))).toBe(true);
+    });
+
+    it('does not revive on assistant or system messages', () => {
+        let next = gameReducer(defeated(), {
+            type: 'ADD_MESSAGE',
+            payload: { role: 'assistant', content: 'You collapse at their mercy.' },
+        });
+        next = gameReducer(next, {
+            type: 'ADD_MESSAGE',
+            payload: { role: 'system', content: '**Mage Armor** fades as the fight ends.' },
+        });
+        expect(next.character.currentHP).toBe(0);
+        expect(next.character.lowLevelDefeat).toBe(true);
+        expect(next.character.conditions).toContain('Unconscious');
+    });
+
+    it('does not revive while a fight is somehow still active', () => {
+        const state = {
+            ...defeated(),
+            combat: { ...initialGameState.combat, active: true, phase: 'awaiting_player' },
+        };
+        const next = gameReducer(state, {
+            type: 'ADD_MESSAGE',
+            payload: { role: 'user', content: 'I crawl for the door.' },
+        });
+        expect(next.character.currentHP).toBe(0);
+        expect(next.character.lowLevelDefeat).toBe(true);
+    });
+
+    it('leaves an ordinary conscious character untouched', () => {
+        const next = gameReducer(makeState(), {
+            type: 'ADD_MESSAGE',
+            payload: { role: 'user', content: 'I walk on.' },
+        });
+        expect(next.character.currentHP).toBe(12);
+        expect(next.messages.filter(m => m.role === 'system')).toHaveLength(0);
+    });
+});

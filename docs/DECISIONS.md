@@ -8,6 +8,51 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-09 · The Scribe audit is a recap by nature: audit coin movements get a cross-message cover rule + bundle strip, and audit items dedupe against the grant ledger in scribe.js.**
+The #7 entry's "revisit if a live audit replay ever appears" clause fired the very next
+session: playtest #8 watched one turn re-narrate the lockbox loot ("you tuck the pages
+away… five gold and twelve silver") and the audit re-grant BOTH sides — coins slipped the
+value-signature ledger by narration drift (evented 7 gp ≠ narrated 620 cp, and a larger
+prior entry can never bundle-strip a smaller recap), items slipped because audit ADD_ITEMs
+carry no `_meta` by design. Rulings: (1) audit coin grants and payments (`_meta.audit`)
+are suppressed outright when any recent APPLIED entry from another message is at least as
+large (a genuine narrated-without-events payment that exceeds everything recent still
+recovers — the audit stays a backstop for pure omissions, never a second payer/payer of
+record); they also run `stripBundledReplay` with same-base entries excluded from the pool
+(scribe.js already reconciled that narration's own applied events — stripping them again
+would eat a legitimate shortfall). DM event grants keep #7 semantics: no cover rule, a
+genuine smaller follow-up reward must not be eaten. (2) Audit items stay meta-less (the
+announcement line must not lie), so the cross-message dedupe lives in scribe.js itself:
+an item identity the `recentItemGrants` ledger shows applied within its window is dropped
+before dispatch and before the announcement. (3) Item signatures are identity-only —
+quantity drift ("3 arrows" recapped as "arrows") is the item twin of coin denomination
+drift; the player-phrasing bypass keeps genuine re-acquisitions working. (4) applyEvents
+aggregates same-identity `items_found` entries in ONE response into a single
+quantity-summed dispatch — without this, the #7 ledger's exact-source guard silently ate
+the second of two daggers looted off two guards in the same reply.
+
+**2026-08-09 · A non-lethal defeat stabilizes at 1 HP on the player's next action; hearsay dedupes per place-cluster; regions never end in urban-locality nouns — and extraction prompts must not contain echoable example names.**
+Playtest #8 lost a fight on purpose. The capture arc then ran FOUR turns at 0 HP +
+Unconscious while the DM narrated the hero awake, bargaining, and rolling checks — and a
+stale `lowLevelDefeat` flag makes any new fight an instant defeat in combatExchange.
+Ruling: the player's next out-of-combat message after a low-level defeat revives to 1 HP
+(the 5e stable-wake analog), clears the flag and Unconscious, keeps every other condition,
+and posts "**You come to** — battered…"; healing and rests still clear it as before, and
+the DEFEATED prompt framing survives long enough for the exchange's own aftermath
+narration (which runs before any player message). Living-world rulings from the same run:
+a destination that neither resolves to nor mints a canonical record gets NO rumor pass
+(scene furniture like "the threshold of the hidden staircase" is not a place with an
+audience), and the hearsay ledger is cluster-aware via `areRelatedPlaces` — the shop, its
+street, and the town are one gossiping audience (one fight had been offered at nine
+nested/raw spellings). `sanitizeRegionName` rejects any name whose HEAD noun is a
+street-level subdivision (quarter/district/square/wharves/…) — "the Chandlers' quarter"
+carried a proper token and sailed past the all-generic test — while geographic heads
+("the Whispering Hills") stay legal. And a generalizable lesson: the registry's phantom
+region "the Rimefell Marches" was not invented by the Scribe — it was the region rule's
+own in-prompt EXAMPLE echoed back as data. Extraction prompts must never contain
+real-sounding example values; the rule now forbids reusing any name from the
+instructions, and the examples are gone.
+
 **2026-08-08 · items_found gets its replay ledger (`recentItemGrants`), and bundle-strip subtracts EVERY prior piece.**
 Live playtest #7 (same-day adversarial run) proved the one-shot invariant's missing
 sibling twice on one campaign: the DM emitted the aunt's single healing potion as
