@@ -140,11 +140,13 @@ export const handlers = {
         const targetIdx = findLocationRecord(priorLocations, name);
         const targetRecord = targetIdx === -1 ? null : priorLocations[targetIdx];
 
-        // fillOnly (journal cadence): a batch summary may fill an EMPTY location
-        // or re-affirm the current one, but never relocate the hero — by the
-        // time the async summarize lands, the per-turn Scribe may already have
-        // moved the hero somewhere newer (live playtest #5: the summary's stale
-        // town clobbered a same-turn arrival and forged departure stamps).
+        // fillOnly (journal cadence + same-turn Scribe under a DM location event):
+        // the caller may fill an EMPTY location or re-affirm the current one, but
+        // never relocate the hero — a less authoritative async pass must not
+        // override live position (live playtest #5: the summary's stale town
+        // clobbered a same-turn arrival and forged departure stamps; playtest #6:
+        // the Scribe dragged the hero back to a merely-mentioned fen place the
+        // DM's own location event had just walked her out of).
         const fillOnly = rawPayload && typeof rawPayload === 'object' && rawPayload.fillOnly === true;
         if (fillOnly && state.currentLocation) {
             const samePlace = (prevRecord && targetRecord && targetRecord.id === prevRecord.id)

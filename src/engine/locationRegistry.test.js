@@ -3,6 +3,7 @@ import {
     dedupeLocationRecords,
     findLocationRecord,
     getCurrentLocationRecord,
+    isLocationEvidencedInText,
     isMintableLocationName,
     isRegionNameOnly,
     isRegistrableLocationName,
@@ -102,6 +103,20 @@ describe('upsertLocation', () => {
         locations = upsertLocation(locations, description, { type: 'wilderness' });
         expect(locations).toHaveLength(1);
         expect(locations[0]).toMatchObject({ name: 'Drowned Willow tree', type: 'wilderness' });
+    });
+
+    it('evidence-gates a relocation on the turn text actually naming the place (live playtest #6)', () => {
+        const shopTurn = 'I walk down Tallow Lane to my aunt\'s chandlery.\nThe bell above the shop door chimes as you step inside the chandlery.';
+        // "market square" came from stale model context — neither word is in the turn.
+        expect(isLocationEvidencedInText('market square', shopTurn)).toBe(false);
+        expect(isLocationEvidencedInText('Tallow Lane', shopTurn)).toBe(true);
+        // Majority vote: a compound name partially present passes...
+        expect(isLocationEvidencedInText('The Gilded Eel taproom', 'The Gilded Eel is warm and loud.')).toBe(true);
+        // ...but a bare half does not ("the Kettle" alone cannot place "The Copper Kettle").
+        expect(isLocationEvidencedInText('Copper Kettle', 'You warm your hands at the Kettle.')).toBe(false);
+        expect(isLocationEvidencedInText('Weatherby', 'You walk through Weatherby\'s gates.')).toBe(true);
+        expect(isLocationEvidencedInText('', 'any text')).toBe(false);
+        expect(isLocationEvidencedInText('Weatherby', '')).toBe(false);
     });
 
     it('caps the registry and ignores empty names', () => {

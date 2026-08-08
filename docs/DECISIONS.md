@@ -8,7 +8,31 @@ Format: date · decision · why. Newest first.
 
 ---
 
-**2026-08-07 ×3 · The journal never relocates the hero; only proper names mint places.**
+**2026-08-08 · Post-turn consumers read the committed turn from the runner, never from React state.**
+Live playtest #6 found the real root cause under the whole #5/#6 location mess: after
+`await sendToLLM(...)` resolves, the ADD_MESSAGE render has not flushed yet (React 18
+schedules it on a later macrotask), so `findLast(assistant)` in the awaited continuation
+deterministically returns the PREVIOUS turn's message. **The per-turn Scribe had been
+extracting facts, cards, NPC updates, locations, and loot audits from one narrative behind
+the table** — proven four independent ways in the live save (turn-2's "The Weirs" and
+recovered lodestone both live only in turn-1's text; the shop turn's "market square" lives
+only in the provisions text; turn-1's recovered bog-wax/keys live only in the victory
+narration). It looked *almost* right for weeks because message, events, and audit sourceId
+were consistently from the same (previous) message. Ruling: the orchestrator records
+`lastCommittedTurn = { id, content, events, hidden }` at dispatch time, resets it per call
+(a call that commits nothing exposes nothing), and exposes `getLastCommittedTurn()`;
+ChatPanel's post-turn scribe block and `finalizeRoleplayTurn` consume it instead of any
+state read. Two defense-in-depth guards shipped in the same session, both live-validated:
+**(a) the DM's own `location` event outranks the same-turn async Scribe** — when the DM
+explicitly relocated, the Scribe's location dispatch downgrades to the reducer's
+`fillOnly` confirm-or-fill (the #5 guard, now shared by two callers); **(b) a Scribe
+relocation must be evidenced in the turn's own text** — `isLocationEvidencedInText`
+requires >half of the name's meaningful tokens in playerMessage+narrative, killing
+stale-context hallucinations ("market square" while the narration entered the chandlery)
+while a dropped update simply self-heals on the next turn that names the place. The Scribe
+prompt's location field now reads "the place the hero PHYSICALLY STANDS at the END of this
+narrative — never a place merely mentioned, remembered, watched, or being left." Same-task
+`stateRef` reads elsewhere in handleSend (castResults slice) are a known sibling — queued.
 Live playtest #5 (elf wizard, real Gemini) caught the journal cadence's `SET_LOCATION`
 clobbering live position: the async batch summary answered "Weatherby" while the same
 turn's Scribe had already placed the hero at the fen weirs — regressing `currentLocation`

@@ -15,7 +15,7 @@
  * high-clock story event, never texture.
  */
 
-import { containment, tokenSet } from './textMatch.js';
+import { containment, coverage, tokenSet } from './textMatch.js';
 
 export const LOCATION_TYPES = ['haven', 'settlement', 'wilderness', 'frontier', 'hostile_site'];
 export const DANGER_LEVELS = ['none', 'low', 'moderate', 'high', 'deadly'];
@@ -53,6 +53,23 @@ const JUNK_LOCATION_RE = /^(null|none|undefined|unknown|unchanged|same|same plac
 export function sanitizeExtractedLocation(value) {
     const text = typeof value === 'string' ? value.trim() : '';
     return text && !JUNK_LOCATION_RE.test(text) ? text : null;
+}
+
+/**
+ * Evidence gate for a Scribe relocation (live playtest #6): the extraction runs
+ * on ONE turn of text, so any place it claims the hero now stands in must
+ * actually be named there — "market square" arrived from stale model context
+ * while the narration walked the hero into her aunt's chandlery, relocating
+ * her and forging living-world departure stamps. More than half of the name's
+ * meaningful tokens must appear in the turn's text. A colloquial partial
+ * mention ("the Kettle" for "The Copper Kettle") may lose the vote — dropping
+ * an update self-heals on the next turn that names the place, while a wrong
+ * relocation corrupts visit stamps permanently.
+ */
+export function isLocationEvidencedInText(name, turnText) {
+    const tokens = locationTokens(name);
+    if (tokens.size === 0) return false;
+    return coverage(tokens, tokenSet(turnText, { minLength: 3 })) > 0.5;
 }
 
 export function isRegistrableLocationName(name) {

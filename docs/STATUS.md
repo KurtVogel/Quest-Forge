@@ -6,7 +6,35 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-07 (open-queue P2 batch closed + FIFTH live playtest validating it; journal-relocation P1 + descriptive-mint gate fixed same-night; 1,451 tests green; deployed)._
+_Last updated: 2026-08-08 (SIXTH live playtest → stale-Scribe root cause found and fixed: post-turn consumers now read the runner's committed-turn record, never React state; 1,458 tests green; deployed)._
+
+## Sixth live playtest 2026-08-08 (continued Maren Duskwell campaign — the location mess's real root cause)
+
+Continued the playtest-#5 elf-wizard save through ~10 turns (fen → Weatherby → shop →
+market → nat-20 wall cache → Jagger's arrival). **Found and fixed the P1 under everything
+(DECISIONS.md 2026-08-08):** after `await sendToLLM`, the ADD_MESSAGE render hasn't
+flushed, so ChatPanel's `findLast(assistant)` returned the PREVIOUS turn's message — the
+Scribe had been extracting facts/locations/loot from one narrative behind (proven 4× from
+save text: "The Weirs", "market square", the lodestone, bog-wax/keys). Fix: orchestrator
+records `lastCommittedTurn` at dispatch, ChatPanel + `finalizeRoleplayTurn` consume it;
+plus two guards — DM location event outranks same-turn Scribe (fillOnly downgrade) and
+`isLocationEvidencedInText` (Scribe can only relocate to a place the turn's text names).
+All three validated live post-fix (facts/cards/loot from the correct turn; post-roll path
+too). **Validated live this run:** same-value coin-loss purchase bypass (2 sp inn payment
+then 2 sp provisions purchase, both `applied` — the never-reproduced #5 target), dormancy
+revival by merge (the dormant "Aunt's ledger" mystery flipped active, no duplicate),
+regional hearsay end-to-end (fight:43 offered once per place, secondhand grade, ledger
+correct), **absence drift full cycle** (shop arrival at awayDistance 31 → background call →
+`INSTALL_ABSENCE_DRIFT`: 0 NPC developments + dues-notice fact + whispers-clamped
+Fen-Tallow symptom; the DM voiced the notice as in-scene discovery under the door),
+mint gate (lowercase "market square"/"the back room of the chandlery" minted nothing),
+mount re-seed prune lines, Continue with 64→96 cached embeddings, engine-exact coin grants
+(2+28 gp = the narrated 25 gp + 50 s), zero app console errors. **Queued (P2):**
+colloquial sub-place strings miss canonical records (arrivals/stamps/drift skipped until a
+proper name lands), castResults' same-task stateRef read (sibling of the fixed bug),
+silent send-swallow while post-stream machinery runs. **Not exercised:** combat spell
+declarations (no combat this run), tempo-window publicHints anti-repeat (no window opened;
+the drift symptom was a genuinely new beat).
 
 ## Fifth live playtest 2026-08-07 (elf wizard, fresh campaign, emphasis on the just-fixed seams)
 

@@ -608,8 +608,15 @@ export default function ChatPanel() {
                 || !!events?.requestedRolls?.length;
             // An OOC exchange is meta conversation, not fiction: extracting facts,
             // NPC updates, or memories from it would canonize table talk.
-            const finalNarration = (waitsForResolution || tableTalkTurn) ? null : latest.messages
-                .findLast(m => m.role === 'assistant' && !m.hidden && m.content?.trim());
+            // The narration comes from the runner's committed-turn record, never a
+            // state read: the ADD_MESSAGE render has not flushed yet in this task,
+            // so findLast(assistant) here returned the PREVIOUS turn's message —
+            // the Scribe was extracting from one narrative behind (live playtest #6).
+            const committed = runner.getLastCommittedTurn();
+            const finalNarration = (waitsForResolution || tableTalkTurn
+                || !committed || committed.hidden || !committed.content?.trim())
+                ? null
+                : committed;
             if (finalNarration) {
                 runScribe({
                     playerMessage: trimmed,
@@ -618,6 +625,10 @@ export default function ChatPanel() {
                     dispatch,
                     knownAppearances: buildKnownAppearances(latest, trimmed, finalNarration.content),
                     knownStances: buildKnownStances(latest, trimmed, finalNarration.content),
+                    // The DM's own location event (already applied) outranks the async
+                    // Scribe for this turn: the Scribe's location downgrades to
+                    // confirm-or-fill so it can never relocate the hero backwards.
+                    dmLocationEvent: finalNarration.events?.location || null,
                     // Loot persistence audit: recover coins/items the narrative granted
                     // but the DM's structured events missed. Out-of-combat only; keyed
                     // to the narration message so retries/reloads cannot double-grant.

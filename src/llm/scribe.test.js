@@ -954,6 +954,47 @@ describe('Scribe location + inspector-flag hygiene (2026-07-23 audit)', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'SET_LOCATION', payload: 'The Gilded Eel taproom' });
     });
 
+    it('drops a location the turn text never names (live playtest #6 "market square")', async () => {
+        sendMessage.mockResolvedValue(extraction({ location: 'market square' }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I walk down Tallow Lane to my aunt\'s chandlery and let myself in.',
+            dmNarrative: 'The bell above the shop door chimes as you step into the quiet chill of the chandlery. You set the satchel down beside your aunt\'s ledger.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+        });
+        expect(dispatch.mock.calls.some(([action]) => action.type === 'SET_LOCATION')).toBe(false);
+    });
+
+    it('downgrades to fillOnly when the DM already relocated the hero this turn (live playtest #6)', async () => {
+        sendMessage.mockResolvedValue(extraction({ location: 'The Weirs' }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I walk out of the fen toward Weatherby.',
+            dmNarrative: 'You leave the fen behind; if the eel-trappers in The Weirs watch you go, they do so in silence. The chalk hills of the Harchwold rise ahead.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+            dmLocationEvent: 'Weatherby',
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'SET_LOCATION',
+            payload: { name: 'The Weirs', fillOnly: true },
+        });
+    });
+
+    it('keeps authoritative scribe relocation when the DM emitted no location event', async () => {
+        sendMessage.mockResolvedValue(extraction({ location: 'The Weirs' }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I wade back to the weirs.',
+            dmNarrative: 'You reach The Weirs as dusk falls.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+            dmLocationEvent: null,
+        });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'SET_LOCATION', payload: 'The Weirs' });
+    });
+
     it('reports object-shaped loot/payment audits to the inspector', async () => {
         const { getInspectorSnapshot } = await import('../debug/memoryInspectorStore.js');
         sendMessage.mockResolvedValue(extraction({

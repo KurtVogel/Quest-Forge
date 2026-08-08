@@ -12,7 +12,7 @@
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { classifyNpcCandidate, curateNpcsForPrompt } from '../engine/npcRoster.js';
-import { sanitizeExtractedLocation } from '../engine/locationRegistry.js';
+import { isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { captureReflection, captureScribePass } from '../debug/memoryInspectorStore.js';
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
@@ -65,7 +65,7 @@ Output ONLY valid JSON:
     }
   ],
   "player_appearance": "concrete physical/visual description of the PLAYER's character, only if newly described this turn — otherwise omit",
-  "location": "Current location if changed, or null",
+  "location": "The place the hero PHYSICALLY STANDS at the END of this narrative, only if it changed — NEVER a place that is merely mentioned, discussed, remembered, watched from afar, or being left behind; null if unchanged",
   "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly", "region": "the broad NAMED land or realm containing many settlements that THIS PLACE ITSELF lies in, as the fiction states (e.g. 'the Rimefell Marches', 'the Vale of Reeds') — a capitalized proper name, NEVER a town, district, quarter, dock, street, building, or generic feature like 'the coast', and NEVER a distant land that is merely mentioned, discussed, or named as a destination in the scene; omit unless the fiction places THIS location inside a named land, never invent" }
 }
 
@@ -526,7 +526,7 @@ function contradictsAuthoritativeCombat(value, authoritativeContext) {
     });
 }
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, dmLocationEvent = null }) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
 
@@ -626,9 +626,21 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
 
         // A model answering "where are we now?" with filler must not mint a canonical
         // place — "null"/"unchanged" as the current location was a real 2026-07-23 find.
+        // Evidence gate (live playtest #6): the hero can only be relocated to a
+        // place this turn's text actually names — "market square" arrived from
+        // stale model context while the narration entered the chandlery.
         const location = sanitizeExtractedLocation(extracted.location);
-        if (location) {
-            dispatch({ type: 'SET_LOCATION', payload: location });
+        if (location && isLocationEvidencedInText(location, `${playerMessage}\n${dmNarrative}`)) {
+            // When the DM's OWN events already relocated the hero this turn, that
+            // explicit call is the narrator's authoritative statement — the async
+            // Scribe may confirm or refine it but never relocate away from it
+            // (live playtest #6: the Scribe latched onto a merely-mentioned "The
+            // Weirs" and dragged the hero back into the fen the narration had
+            // just walked her out of, forging phantom living-world stamps).
+            dispatch({
+                type: 'SET_LOCATION',
+                payload: dmLocationEvent ? { name: location, fillOnly: true } : location,
+            });
         }
 
         const locationProfile = extracted.location_profile;

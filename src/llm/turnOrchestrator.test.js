@@ -110,6 +110,53 @@ describe('turn runner — unmount safety', () => {
     });
 });
 
+describe('turn runner — committed-turn record (live playtest #6 stale-Scribe root cause)', () => {
+    it('records the committed assistant message so consumers never re-read React state', async () => {
+        const response = 'You cross the bridge into Weatherby.\n```json\n{"location": "Weatherby"}\n```';
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream([response]) });
+
+        const events = await runner.sendToLLM('I walk to Weatherby.', 'I walk to Weatherby.');
+
+        const committed = runner.getLastCommittedTurn();
+        expect(committed).toBeTruthy();
+        expect(committed.content).toBe('You cross the bridge into Weatherby.');
+        expect(committed.hidden).toBe(false);
+        // Identity: the SAME events object the store carries — the Scribe's
+        // dmLocationEvent and loot appliedEvents come from this turn, not the last.
+        expect(committed.events).toBe(events);
+        expect(committed.events.location).toBe('Weatherby');
+        const stored = getState().messages.findLast(m => m.role === 'assistant');
+        expect(stored.id).toBe(committed.id);
+    });
+
+    it('still records a no-events narration (Scribe loot audit needs the id)', async () => {
+        const { runner } = createHarness({
+            streamMessage: scriptedStream(['You pocket the strange coin without a word.']),
+        });
+        await runner.sendToLLM('I take the coin.', 'I take the coin.');
+        const committed = runner.getLastCommittedTurn();
+        expect(committed).toBeTruthy();
+        expect(committed.events).toBeNull();
+        expect(committed.id).toMatch(/^msg-/);
+    });
+
+    it('resets per call: a turn that commits nothing exposes no earlier message', async () => {
+        let mounted = true;
+        const { runner } = createHarness({
+            streamMessage: scriptedStream([
+                'First narration.\n```json\n{"gold_found": 2}\n```',
+                'Second narration that must never commit.',
+            ]),
+            isMounted: () => mounted,
+        });
+        await runner.sendToLLM('First.', 'First.');
+        expect(runner.getLastCommittedTurn()).toBeTruthy();
+        mounted = false;
+        await runner.sendToLLM('Second.', 'Second.');
+        expect(runner.getLastCommittedTurn()).toBeNull();
+    });
+});
+
 describe('turn runner — missing-events nudge', () => {
     it('fires the JSON-only follow-up at a contract moment and holds the whitelist', async () => {
         const opening = 'Dawn breaks over the caravan camp as Marla hands you your father\'s hunting knife.';

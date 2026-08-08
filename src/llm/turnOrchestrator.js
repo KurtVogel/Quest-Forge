@@ -127,12 +127,31 @@ export function createTurnRunner({
     const buildMessageHistory = () => buildMessageWindow(getState().messages, MESSAGE_WINDOW);
 
     /**
+     * The assistant message the most recent sendToLLM call committed to the
+     * store — id, narrative, events, hidden — recorded at dispatch time.
+     *
+     * This exists because reading the committed message back out of React
+     * state right after sendToLLM resolves is a proven trap (live playtest
+     * #6): the ADD_MESSAGE render flushes in a later macrotask, so a
+     * `findLast(assistant)` in the awaited continuation deterministically
+     * returns the PREVIOUS turn's message — the Scribe spent weeks extracting
+     * facts, locations, and loot audits from one narrative behind the table.
+     * The orchestrator already owns the authoritative values; consumers must
+     * take them from here, never from a state read in the same task.
+     */
+    let lastCommittedTurn = null;
+    const getLastCommittedTurn = () => lastCommittedTurn;
+
+    /**
      * Send a message to the LLM and process the response.
      * Returns the parsed events (or null).
      * @param {string} userMessage
      * @param {string} [originalPlayerMessage] - The player's actual input (for Scribe)
      */
     const sendToLLM = async (userMessage, originalPlayerMessage, opts = {}) => {
+        // Per-call semantics: a call that commits nothing (combat intent,
+        // failure) must never leave an older turn's message readable here.
+        lastCommittedTurn = null;
         const s = getState();
 
         // RAG: retrieve memories relevant to the current scene (machinery key —
@@ -309,6 +328,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             type: 'ADD_MESSAGE',
             payload: { id: msgId, role: 'assistant', content: narrative, events, hidden: hideSetup },
         });
+        lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup };
 
         // Apply game events (damage, items, etc.)
         if (events) {
@@ -398,8 +418,13 @@ Translate the player's committed action into the single bounded combat_exchange 
 
     const finalizeRoleplayTurn = (playerAction) => {
         const latest = getState();
-        const finalNarration = (latest.messages || [])
-            .findLast(message => message.role === 'assistant' && !message.hidden && message.content?.trim());
+        // The committed-turn record, never a state read: the outcome message's
+        // render has not flushed yet, so findLast here returns the PREVIOUS
+        // assistant message (live playtest #6 — the stale-Scribe root cause).
+        const committed = getLastCommittedTurn();
+        const finalNarration = committed && !committed.hidden && committed.content?.trim()
+            ? committed
+            : null;
         if (finalNarration) {
             runScribe({
                 playerMessage: playerAction,
@@ -408,6 +433,8 @@ Translate the player's committed action into the single bounded combat_exchange 
                 dispatch,
                 knownAppearances: buildKnownAppearances(latest, playerAction, finalNarration.content),
                 knownStances: buildKnownStances(latest, playerAction, finalNarration.content),
+                // The DM's own location event outranks the async Scribe this turn.
+                dmLocationEvent: finalNarration.events?.location || null,
                 // Post-roll outcomes are where narrated loot most often loses its
                 // events (the withheld setup already dropped them by design).
                 lootAudit: (!latest.combat?.active && finalNarration.id) ? {
@@ -565,6 +592,7 @@ Translate the player's committed action into the single bounded combat_exchange 
 
     return {
         sendToLLM,
+        getLastCommittedTurn,
         recoverMissingEvents,
         runAutoSummarize,
         stageRoleplayCheck,
