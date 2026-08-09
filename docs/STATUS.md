@@ -6,7 +6,23 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-09 (EIGHTH live playtest, adversarial → Scribe-audit cross-message re-grant closed on both coin and item sides, post-defeat 1-HP stabilization, same-response item aggregation, hearsay cluster dedupe, region locality gate; 1,494 tests green; deployed)._
+_Last updated: 2026-08-09 (EIGHTH live playtest + the parallel Codex playtest's P0 fixed: opening-scene priming is retry-safe — marker consumed only on commit, bounded retries, late-API-key trigger; 1,494 tests green; deployed)._
+
+## Codex parallel playtest P0 fixed 2026-08-09 (opening-scene priming stall)
+
+Vesa accidentally ran a Codex playtest in parallel with playtest #8; its report
+(`PLAYTEST_REPORT.md`, repo root, untracked — Vesa reviews/deletes) found a real P0:
+fresh premise campaigns under `npm run dev` lose their DM opening permanently (StrictMode
+double-mount cleanup aborts the priming call AFTER `openingScenePending` was consumed; no
+retry, reload can't recover). Reproduced deterministically in isolation, fixed
+(DECISIONS.md 2026-08-09: consume-on-commit via `getLastCommittedTurn`, bounded retries,
+API-key-change trigger), verified live: abort → silent retry → exactly one opening. The
+concurrent run itself was assessed clean otherwise — separate browser profiles/origins,
+so no cross-contamination of saves; only the shared Gemini key and port 4173 overlapped.
+Codex's remaining findings (Second Wind declared in chat not applied in the exchange,
+attack staged as roleplay check until challenged, combat HUD missing hero HP, stale
+journal entry, mobile drawer UX, ability-button aria) are transcribed into the Open
+Findings Queue with attribution.
 
 ## Eighth live playtest 2026-08-08/09 (adversarial follow-up — hunting the #7 fixes' own blind spots)
 

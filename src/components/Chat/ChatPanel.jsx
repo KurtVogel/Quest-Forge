@@ -26,6 +26,9 @@ import './Chat.css';
  * click away and still lives in saves/journal/RAG regardless.
  */
 const RENDERED_MESSAGE_WINDOW = 150;
+// Opening-scene priming attempts per API key: enough to absorb the StrictMode
+// dev double-mount abort and one transient failure, without looping a bad key.
+const MAX_PRIMING_ATTEMPTS = 3;
 const DECORATIVE_SYMBOL_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?/gu;
 
 function cleanDisplayText(text) {
@@ -47,7 +50,10 @@ export default function ChatPanel() {
     const [showJumpToLatest, setShowJumpToLatest] = useState(false);
     const abortControllerRef = useRef(null);
     const inputRef = useRef(null);
-    const hasPrimedRef = useRef(false); // Ensure session priming only fires once per mount
+    const hasPrimedRef = useRef(false); // True while an opening-scene attempt is in flight (reset on failure so it can retry)
+    const [primingRetryToken, setPrimingRetryToken] = useState(0); // Bumped after a failed attempt to re-arm the priming effect
+    const primingAttemptsRef = useRef(0); // Bounded so a persistently failing key can't loop the opening call
+    const primingKeyRef = useRef(undefined); // Last apiKey seen by the priming effect; a change resets the attempt budget
     const memorySeededRef = useRef(false); // Ensure RAG seeding only fires once per mount
     const pendingStreamTextRef = useRef(''); // Latest fence-frozen display text from the turn runner
     const narratedCueIdsRef = useRef(new Set()); // Mechanic system messages already given an LLM flavor beat
@@ -172,27 +178,64 @@ export default function ChatPanel() {
      * Fresh-campaign priming: auto-trigger the DM to set the opening scene only when
      * character creation explicitly marked it pending. Continue/Load must never create
      * an unsolicited DM turn merely because older assistant messages were summarized.
+     *
+     * Retry-safe since the Codex playtest P0 (2026-08-09): the old version consumed
+     * `openingScenePending` BEFORE the call and never retried, so React StrictMode's
+     * dev double-mount (whose cleanup aborts the in-flight turn) permanently stalled
+     * every fresh premise campaign — AbortError, no opening, reload can't recover.
+     * Now the marker is consumed only after the opening actually commits, a failed
+     * attempt re-arms itself (bounded), and a late-arriving API key (begin without a
+     * key, set it in Settings) triggers the opening it used to silently skip.
+     * shouldPrimeCampaignOpening goes false once any visible assistant message
+     * exists, so a player who starts manually can never receive a stray opening.
      */
     useEffect(() => {
         const s = stateRef.current;
-        if (shouldPrimeCampaignOpening(s) && !hasPrimedRef.current) {
-            hasPrimedRef.current = true;
-            dispatch({ type: 'UPDATE_SESSION', payload: { openingScenePending: false } });
-            setIsLoading(true);
-
-            // The authored premise and live starting inventory are already in the system
-            // prompt. The one-time opening also reconciles explicit premise possessions.
-            runner.sendToLLM(buildCampaignOpeningPrompt(), null, { openingScene: true })
-                .catch(e => {
-                    console.warn('[Priming] Session start priming failed:', e);
-                })
-                .finally(() => {
-                    setIsLoading(false);
-                    clearStreamingDisplay();
-                });
+        if (primingKeyRef.current !== s.settings?.apiKey) {
+            primingKeyRef.current = s.settings?.apiKey;
+            primingAttemptsRef.current = 0; // a new key is a fresh chance
         }
+        if (!shouldPrimeCampaignOpening(s) || hasPrimedRef.current) return;
+        if (primingAttemptsRef.current >= MAX_PRIMING_ATTEMPTS) return;
+        hasPrimedRef.current = true;
+        primingAttemptsRef.current += 1;
+        setIsLoading(true);
+
+        // The authored premise and live starting inventory are already in the system
+        // prompt. The one-time opening also reconciles explicit premise possessions.
+        runner.sendToLLM(buildCampaignOpeningPrompt(), null, { openingScene: true })
+            .then(() => {
+                // The committed-turn record, never a state read: stateRef has not
+                // re-rendered yet in this task (live playtest #6's stale-Scribe root
+                // cause — the first draft of this check re-made that exact bug).
+                const committed = runner.getLastCommittedTurn();
+                if (!committed || committed.hidden || !committed.content?.trim()) {
+                    throw new Error('opening scene did not commit');
+                }
+                dispatch({ type: 'UPDATE_SESSION', payload: { openingScenePending: false } });
+            })
+            .catch(e => {
+                console.warn('[Priming] Session start priming failed:', e);
+                hasPrimedRef.current = false;
+                if (!mountedRef.current) return; // real unmount: the next mount retries
+                if (primingAttemptsRef.current < MAX_PRIMING_ATTEMPTS) {
+                    setPrimingRetryToken(t => t + 1);
+                } else {
+                    dispatch({
+                        type: 'ADD_MESSAGE',
+                        payload: {
+                            role: 'system',
+                            content: '**The opening scene could not be generated.** Check your AI provider settings, then reload to retry — or simply describe your first action to begin.',
+                        },
+                    });
+                }
+            })
+            .finally(() => {
+                setIsLoading(false);
+                clearStreamingDisplay();
+            });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // Only on mount
+    }, [primingRetryToken, state.settings?.apiKey]);
 
     /** Privately replace the generic safety-net front with a grounded 2–3-front web. */
     useEffect(() => {

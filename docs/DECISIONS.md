@@ -8,6 +8,26 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-09 · Opening-scene priming is retry-safe: the pending marker is consumed only after the opening COMMITS, and commit detection reads the orchestrator's committed-turn record.**
+The parallel Codex playtest's P0, reproduced deterministically in one try on the dev
+server: React StrictMode's double-mount cleanup aborts the in-flight priming call
+(AbortError), and the old effect had already consumed `openingScenePending` before the
+call with no retry path — every fresh premise campaign started under `npm run dev`
+permanently lost its DM opening (reload could never recover; the marker was gone). The
+same shape silently ate the opening in production when a player began without an API key
+and set it later. Rulings: (1) the marker is consumed ONLY when the opening actually
+commits; (2) a failed attempt re-arms the effect (bounded at 3 attempts per API key, with
+a visible system line when exhausted); (3) the effect re-runs when the API key changes,
+so a late key triggers the opening it used to skip; (4) `shouldPrimeCampaignOpening`'s
+zero-visible-assistant-messages guard means a player who starts manually can never
+receive a stray opening from the still-pending marker. Lesson re-learned mid-fix: the
+first draft detected the commit by reading `stateRef` in the resolution task and re-made
+playtest #6's stale-state bug exactly (the dispatch hadn't re-rendered yet, so success
+read as failure) — post-turn consumers use `runner.getLastCommittedTurn()`, never a state
+read in the same task. Verified live: pre-fix stall on attempt one; post-fix AbortError →
+silent retry → exactly one opening, marker consumed. Codex's "input stays disabled"
+observation did not reproduce (input gates only on keys/loading); likely environmental.
+
 **2026-08-09 · The Scribe audit is a recap by nature: audit coin movements get a cross-message cover rule + bundle strip, and audit items dedupe against the grant ledger in scribe.js.**
 The #7 entry's "revisit if a live audit replay ever appears" clause fired the very next
 session: playtest #8 watched one turn re-narrate the lockbox loot ("you tuck the pages
