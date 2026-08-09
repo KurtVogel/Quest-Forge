@@ -154,7 +154,9 @@ describe('hostile intent envelopes (2026-07-25 audit)', () => {
             enemy_intents: Array.from({ length: 200 }, (_, i) => ({ enemy_id: `goblin-${i}`, action: 'attack', target: 'player' })),
             companion_intents: Array.from({ length: 40 }, (_, i) => ({ companion_id: `ally-${i}`, action: 'defend' })),
         });
-        expect(flooded.playerSlots).toHaveLength(2);
+        // 3 = two action slots (Surge/Cunning/bonus-cast lanes) + one second_wind;
+        // validatePlayerSlots enforces the real per-lane rules on top.
+        expect(flooded.playerSlots).toHaveLength(3);
         expect(flooded.enemyIntents).toHaveLength(30);
         expect(flooded.companionIntents).toHaveLength(4);
     });
@@ -1419,5 +1421,101 @@ describe('critical hit dice doubling (live exchange path)', () => {
         expect(attack.sneakAttackDetail).toEqual({ diceCount: 4, rolls: [6, 5, 4, 3], total: 18 });
         expect(exchangeSummary(plan.payload.result)).toContain('Includes **18** Sneak Attack damage (4d6: 6, 5, 4, 3)');
         expect(plan.payload.enemies[0].hp).toBe(4);
+    });
+});
+
+describe('Second Wind bonus-action lane (Codex 2026-08-09)', () => {
+    const fighterState = (charOverrides = {}, combatOverrides = {}) => state({
+        character: {
+            currentHP: 8,
+            classResources: { secondWind: { used: 0, max: 1 } },
+            ...charOverrides,
+        },
+        combat: combatOverrides,
+    });
+
+    it('normalizes "Second Wind"/"secondWind" spellings into the documented key', () => {
+        const spaced = normalizeCombatExchange({ player_slots: [{ action: 'Second Wind' }] });
+        expect(spaced.playerSlots[0].action).toBe('second_wind');
+        const camel = normalizeCombatExchange({ player_slots: [{ action: 'secondWind' }] });
+        expect(camel.playerSlots[0].action).toBe('second_wind');
+    });
+
+    it('rides beside the normal action: heals, spends the resource, keeps the attack', () => {
+        rollQueue.push(7, 15, 6, 1); // heal d10=7 (+2 level), attack 15 hits AC 12, 1d8=6 (+3 STR), goblin nat 1 miss
+        const plan = planCombatExchange(fighterState(), normalizeCombatExchange({
+            player_slots: [{ action: 'second_wind' }, { action: 'attack', strikes: [{ target: 'Goblin' }] }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        }));
+
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.playerHealing).toBe(9);
+        expect(plan.payload.characterUpdates.classResources.secondWind).toEqual({ used: 1, max: 1 });
+        const note = plan.payload.result.events.find(e => e.type === 'note' && /Second Wind/.test(e.text));
+        expect(note.text).toContain('**9 HP**');
+        expect(note.text).toContain('bonus action');
+        expect(plan.payload.enemies[0].hp).toBe(1);
+    });
+
+    it('stands alone as a complete turn — the fighter catches their breath, foes still act', () => {
+        rollQueue.push(5, 1); // heal d10=5 (+2), goblin nat 1 miss
+        const plan = planCombatExchange(fighterState(), normalizeCombatExchange({
+            player_slots: [{ action: 'second_wind' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        }));
+
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.playerHealing).toBe(7);
+        expect(plan.payload.result.terminal).toBeNull();
+    });
+
+    it('rides alongside both Action Surge slots (three-slot envelope)', () => {
+        rollQueue.push(4, 15, 5, 14, 4); // heal, hit+damage (8), hit+damage (7) — goblin down before its slot
+        const plan = planCombatExchange(fighterState({ pendingActionSurge: true }), normalizeCombatExchange({
+            player_slots: [
+                { action: 'second_wind' },
+                { action: 'attack', strikes: [{ target: 'Goblin' }] },
+                { action: 'attack', strikes: [{ target: 'Goblin' }] },
+            ],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        }));
+
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.playerHealing).toBe(6);
+        expect(plan.payload.consumeActionSurge).toBe(true);
+        expect(plan.payload.result.terminal).toBe('victory');
+    });
+
+    it('rejects a spent Second Wind before any dice exist', () => {
+        const plan = planCombatExchange(
+            fighterState({ classResources: { secondWind: { used: 1, max: 1 } } }),
+            normalizeCombatExchange({ player_slots: [{ action: 'second_wind' }] })
+        );
+        expect(plan).toMatchObject({ ok: false, error: expect.stringContaining('already spent') });
+        expect(rollQueue).toHaveLength(0);
+    });
+
+    it('rejects Second Wind for a character without the resource', () => {
+        const plan = planCombatExchange(
+            state({ character: { class: 'wizard', classResources: {} } }),
+            normalizeCombatExchange({ player_slots: [{ action: 'second_wind' }] })
+        );
+        expect(plan).toMatchObject({ ok: false, error: expect.stringContaining('does not have') });
+    });
+
+    it('rejects Second Wind when the bonus action is already used this turn', () => {
+        const plan = planCombatExchange(
+            fighterState({}, { bonusActionUsed: true }),
+            normalizeCombatExchange({ player_slots: [{ action: 'second_wind' }] })
+        );
+        expect(plan).toMatchObject({ ok: false, error: expect.stringContaining('bonus action is already used') });
+    });
+
+    it('a dying fighter cannot slip Second Wind beside the death save', () => {
+        const plan = planCombatExchange(
+            fighterState({ dying: true, currentHP: 0 }),
+            normalizeCombatExchange({ player_slots: [{ action: 'second_wind' }, { action: 'death_save' }] })
+        );
+        expect(plan).toMatchObject({ ok: false, error: expect.stringContaining('death saving throw') });
     });
 });

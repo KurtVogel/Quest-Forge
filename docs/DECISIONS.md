@@ -8,6 +8,24 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-09 ×3 · Second Wind declared in the combat message is HONORED as an engine-owned `second_wind` exchange slot — the "UI-only resources" rule now has exactly one combat exception.**
+Codex's parallel playtest P1: "I use Second Wind, then slash…" resolved only the slash; the
+resource part was silently ignored and the DM told the player OOC to press the sheet button
+— which was the PROMPT'S OWN instruction ("gently note they can trigger it from their
+character sheet"), a legacy of pre-exchange design. Ruling: the player's explicit in-message
+invocation is player activation, exactly like the button — the DM only translates intent and
+the ENGINE still owns everything (availability, the bonus-action limit, dying lockout, the
+1d10+level roll, atomic spend inside the exchange commit). Implementation: `second_wind` is
+a player slot in its own bonus-action lane (the fighter parallel of the Cleric bonus-cast
+lane): it rides beside the normal action, beside BOTH Action Surge slots (slot cap 3), or
+alone as a complete catch-your-breath turn; a spent resource, used bonus action, or dying
+character rejects at validation before any dice exist; the prompt permits declaring it ONLY
+on the player's explicit invocation, never as DM initiative. Potions and Action Surge remain
+UI-only (a potion consumes inventory mid-exchange and Action Surge restructures the whole
+declaration — different problems, revisit separately). The combat panel also gained the hero
+status card (HP bar, AC, slots, bonus action, conditions) + a collapsed-summary HP chip —
+the fight HUD showed every combatant's numbers except the player's own.
+
 **2026-08-09 ×2 · Passive class resources are never hand-activatable, and a pre-fight cast rides the fight-starting response as `spell_cast` + `combat_start` (the engine applies casts before initiative).**
 Codex's retest of 6c8be23 found both. (1) Arcane Recovery's generic "Use" button hit
 ACTIVATE_RESOURCE's narrative fallthrough — marked spent, zero effect — and the short-rest

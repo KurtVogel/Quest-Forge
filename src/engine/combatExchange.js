@@ -44,7 +44,7 @@ export const COMBAT_PHASES = Object.freeze({
     AWAITING_NARRATION: 'awaiting_narration',
 });
 
-const PLAYER_ACTIONS = new Set(['attack', 'cast', 'channel', 'check', 'save', 'dodge', 'dash', 'disengage', 'flee', 'interact', 'pass', 'death_save']);
+const PLAYER_ACTIONS = new Set(['attack', 'cast', 'channel', 'check', 'save', 'dodge', 'dash', 'disengage', 'flee', 'interact', 'pass', 'death_save', 'second_wind']);
 const ENEMY_ACTIONS = new Set(['attack', 'defend', 'flee', 'surrender']);
 const COMPANION_ACTIONS = new Set(['attack', 'defend', 'guard', 'pass']);
 const ABILITIES = new Set(['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']);
@@ -111,9 +111,13 @@ export function normalizeCombatExchange(raw) {
     const rawEnemyIntents = raw.enemy_intents || raw.enemyIntents;
     const rawCompanionIntents = raw.companion_intents || raw.companionIntents;
     const rawEnemyConditionUpdates = raw.enemy_condition_updates || raw.enemyConditionUpdates;
+    // Cap 3: up to two action slots (Action Surge / Cunning Action / bonus-cast
+    // lane) plus one bonus-action second_wind slot. validatePlayerSlots owns the
+    // real per-lane rules.
     const playerSlots = Array.isArray(rawPlayerSlots)
-        ? rawPlayerSlots.slice(0, 2).map((slot, index) => {
-            const action = text(slot?.action, 30).toLowerCase();
+        ? rawPlayerSlots.slice(0, 3).map((slot, index) => {
+            // "Second Wind"/"secondWind" spellings fold into the documented key.
+            const action = text(slot?.action, 30).toLowerCase().replace(/[\s-]+/g, '_').replace(/^secondwind$/, 'second_wind');
             if (!PLAYER_ACTIONS.has(action)) return null;
             const situationalRuling = normalizeSituationalRuling(slot);
             return {
@@ -484,7 +488,27 @@ function castTargetRefs(slot, fallback = []) {
 }
 
 function validatePlayerSlots(exchange, state) {
-    const slots = exchange.playerSlots || [];
+    const allSlots = exchange.playerSlots || [];
+    // Fighter bonus-action lane (Codex 2026-08-09): a player-invoked Second Wind
+    // rides beside the normal action without consuming an action slot — the
+    // fighter parallel of the Cleric bonus-cast lane below.
+    const secondWindSlots = allSlots.filter(slot => slot.action === 'second_wind');
+    const slots = allSlots.filter(slot => slot.action !== 'second_wind');
+    if (secondWindSlots.length > 1) {
+        return { ok: false, error: 'Second Wind can be declared at most once per turn.' };
+    }
+    if (secondWindSlots.length === 1) {
+        const res = state.character?.classResources?.secondWind;
+        if (!res) {
+            return { ok: false, error: 'Second Wind is a Fighter ability this character does not have.' };
+        }
+        if (res.used >= res.max) {
+            return { ok: false, error: 'Second Wind is already spent; it recharges on a rest.' };
+        }
+        if (state.combat?.bonusActionUsed) {
+            return { ok: false, error: 'The bonus action is already used this turn; Second Wind must wait for a later turn.' };
+        }
+    }
     const surge = !!state.character?.pendingActionSurge;
     const isRogue = state.character?.class === 'rogue';
     const hasCunningActionFeature = isRogue && (state.character?.level >= 2);
@@ -496,7 +520,9 @@ function validatePlayerSlots(exchange, state) {
 
     const maxSlots = hasCunningActionFeature || surge || casterBonusTurn ? 2 : 1;
 
-    if (slots.length > maxSlots || slots.length === 0) {
+    // A lone second_wind slot is a complete turn (the fighter just catches their
+    // breath), so only the fully empty envelope is rejected here.
+    if (slots.length > maxSlots || allSlots.length === 0) {
         return {
             ok: false,
             error: hasCunningActionFeature
@@ -536,7 +562,7 @@ function validatePlayerSlots(exchange, state) {
         }
     }
 
-    if (surge && slots.length === 1) {
+    if (surge && slots.length !== 2) {
         return {
             ok: false,
             error: 'Action Surge is active: declare exactly two action slots in this turn.',
@@ -545,10 +571,12 @@ function validatePlayerSlots(exchange, state) {
     if (state.character?.isDead || state.character?.lowLevelDefeat) {
         return { ok: false, error: 'The player cannot commit a combat action while defeated or dead.' };
     }
-    if (state.character?.dying && slots.some(slot => slot.action !== 'death_save')) {
+    // Dying checks run over EVERY slot: a dying fighter cannot slip a Second
+    // Wind in beside their death save.
+    if (state.character?.dying && allSlots.some(slot => slot.action !== 'death_save')) {
         return { ok: false, error: 'A dying character can only make a death saving throw.' };
     }
-    if (!state.character?.dying && slots.some(slot => slot.action === 'death_save')) {
+    if (!state.character?.dying && allSlots.some(slot => slot.action === 'death_save')) {
         return { ok: false, error: 'A death saving throw is only valid while dying.' };
     }
     const fleeIndex = slots.findIndex(slot => slot.action === 'flee');
@@ -894,6 +922,23 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
             rolls.push(save);
             deathSaveNatural = save.rolls[0];
             events.push({ type: 'death_save', natural: deathSaveNatural });
+            continue;
+        }
+        if (slot.action === 'second_wind') {
+            // Player-invoked bonus action, validated upstream; the soft guard here
+            // keeps a stale envelope from double-spending (the channel pattern).
+            const resources = support.characterUpdates.classResources || character.classResources || {};
+            const res = resources.secondWind;
+            if (!res || res.used >= res.max) {
+                events.push({ type: 'note', text: 'Second Wind is already spent; nothing happens.' });
+                continue;
+            }
+            const heal = rollWithModifier(1, 10, character.level || 1, 'Second Wind (bonus action)');
+            rolls.push(heal);
+            support.playerHealing += heal.total;
+            support.characterUpdates.classResources = { ...resources, secondWind: { ...res, used: res.used + 1 } };
+            const preview = Math.min(character.maxHP, (character.currentHP || 0) + support.playerHealing);
+            events.push({ type: 'note', text: `**${character.name || 'The player'} catches a Second Wind** *(bonus action)* — recovering **${heal.total} HP** (now ${preview}/${character.maxHP}). Their main action is unaffected.` });
             continue;
         }
         if (slot.action === 'cast') {

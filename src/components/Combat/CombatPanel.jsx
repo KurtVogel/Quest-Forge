@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getCombatStatus } from '../../engine/combatStatus.js';
 import { COMBAT_PHASES, isEnemyActive } from '../../engine/combatExchange.js';
+import { summarizeSpellSlots } from '../../engine/spellcasting.js';
 import './Combat.css';
 
 export default function CombatPanel() {
@@ -25,6 +26,15 @@ export default function CombatPanel() {
     const enemySummary = aliveEnemies.length > 0
         ? aliveEnemies.map(enemy => `${enemy.name} ${enemy.hp}/${enemy.maxHp} HP`).join(' · ')
         : 'No foes standing';
+
+    // The hero's own numbers live HERE, not only in the collapsed Character
+    // Profile — at 1/12 HP the fight panel was the one place not showing it
+    // (Codex 2026-08-09).
+    const heroHp = Math.max(0, state.character?.currentHP ?? 0);
+    const heroMaxHp = Math.max(1, state.character?.maxHP ?? 1);
+    const heroHpPercent = Math.max(0, Math.min(100, (heroHp / heroMaxHp) * 100));
+    const heroHpColor = heroHpPercent > 50 ? '#4caf50' : heroHpPercent > 25 ? '#e6a23c' : '#f44336';
+    const heroSlots = state.character?.spellSlots ? summarizeSpellSlots(state.character.spellSlots) : '';
 
     return (
         <div className="combat-overlay">
@@ -56,6 +66,7 @@ export default function CombatPanel() {
                 {isCollapsed ? (
                     <div className={`combat-collapsed-summary ${combatStatus.variant}`}>
                         <span>{combatStatus.title}</span>
+                        <span className="combat-collapsed-hero">You {heroHp}/{heroMaxHp}</span>
                         <span>{enemySummary}</span>
                     </div>
                 ) : (
@@ -84,6 +95,30 @@ export default function CombatPanel() {
                                     </div>
                                 );
                             })}
+                        </div>
+
+                        {/* Hero status */}
+                        <div className="combat-hero-card">
+                            <div className="combat-hero-info">
+                                <span className="combat-hero-name">{state.character?.name || 'You'}</span>
+                                <span className="combat-hero-meta">
+                                    AC {state.character?.armorClass ?? '—'}
+                                    {heroSlots ? ` · slots ${heroSlots}` : ''}
+                                    {` · bonus action ${combat.bonusActionUsed ? 'used' : 'free'}`}
+                                </span>
+                            </div>
+                            <div className="enemy-hp-bar-container">
+                                <div
+                                    className="enemy-hp-bar"
+                                    style={{ width: `${heroHpPercent}%`, backgroundColor: heroHpColor }}
+                                />
+                            </div>
+                            <div className="enemy-stats">
+                                <span className="enemy-hp-text">{heroHp}/{heroMaxHp} HP</span>
+                                {(state.character?.conditions || []).length > 0 && (
+                                    <span>{state.character.conditions.join(', ')}</span>
+                                )}
+                            </div>
                         </div>
 
                         {/* Enemy Cards */}

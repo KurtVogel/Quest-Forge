@@ -126,6 +126,12 @@
     white-space: nowrap;
 }
 
+.combat-collapsed-summary .combat-collapsed-hero {
+    flex-shrink: 0;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
 .combat-collapsed-summary.danger span:first-child,
 .combat-collapsed-summary.dead span:first-child,
 .combat-collapsed-summary.enemy span:first-child {
@@ -194,6 +200,35 @@
 .initiative-roll {
     color: var(--text-muted);
     font-size: 0.65rem;
+}
+
+/* Hero status card — the fight panel must carry the hero's own numbers */
+.combat-hero-card {
+    background: rgba(76, 175, 80, 0.06);
+    border: 1px solid rgba(76, 175, 80, 0.35);
+    border-radius: 8px;
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.5rem;
+}
+
+.combat-hero-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.25rem;
+}
+
+.combat-hero-name {
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+.combat-hero-meta {
+    font-size: 0.7rem;
+    color: var(--text-muted);
 }
 
 /* Enemy cards */
