@@ -35,7 +35,10 @@ export function deriveSetupVisibility(events) {
         && events?.requestedRolls?.length > 0;
     const setupPhase = events?.requestedRolls?.length > 0
         || !!events?.combatExchange
-        || !!events?._playerAuthorityRollRejected;
+        || !!events?._playerAuthorityRollRejected
+        // An attack staged as a check: the invalid setup narration is superseded
+        // by the combat_start correction response, exactly like the no-dice case.
+        || !!events?._attackAsCheckRejected;
     return { proposalFromProse, setupPhase, hideSetup: setupPhase && !proposalFromProse };
 }
 

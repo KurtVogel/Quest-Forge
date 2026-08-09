@@ -63,8 +63,8 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
         return err;
     }
 
-    /** Send a non-streaming message. */
-    async function send({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature }) {
+    /** Send a non-streaming message. (thinkingBudget is Gemini-only; ignored here.) */
+    async function send({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, maxOutputTokens, signal }) {
         const response = await fetch(baseUrl, {
             method: 'POST',
             headers: {
@@ -75,8 +75,9 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
                 model,
                 messages: formatMessages(systemPrompt, messageHistory, userMessage),
                 temperature: temperature ?? 0.9,
-                max_tokens: MAX_TOKENS,
+                max_tokens: Number.isFinite(maxOutputTokens) ? maxOutputTokens : MAX_TOKENS,
             }),
+            signal,
         });
 
         if (!response.ok) {

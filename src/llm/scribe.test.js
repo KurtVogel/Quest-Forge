@@ -1172,3 +1172,119 @@ describe('runNpcFrontReflection guard paths (queue 2026-07-07)', () => {
         expect(updates[0][0].payload.name).toBe('Mother Sorsa');
     });
 });
+
+describe('Scribe narrated-cast audit (queue P1, Codex 2026-08-09)', () => {
+    beforeEach(() => {
+        sendMessage.mockReset();
+    });
+
+    const settings = { apiKey: 'test-key', llmProvider: 'gemini' };
+    const wizard = {
+        name: 'Neris', class: 'wizard', level: 2,
+        abilityScores: { intelligence: 16 },
+        spellSlots: { 1: { used: 0, max: 3 } },
+    };
+
+    function castState(overrides = {}) {
+        return {
+            appliedLootSourceIds: [],
+            character: wizard,
+            combat: { active: false },
+            messages: [],
+            ...overrides,
+        };
+    }
+
+    function castResponse(narratedCasts) {
+        return JSON.stringify({
+            world_facts: [],
+            npc_updates: [],
+            story_memory: [],
+            location: null,
+            ...(narratedCasts !== undefined && { narrated_casts: narratedCasts }),
+        });
+    }
+
+    function castAudit(overrides = {}) {
+        return {
+            sourceId: 'msg-9:scribe-loot',
+            appliedEvents: null,
+            getState: () => castState(),
+            auditCasts: true,
+            ...overrides,
+        };
+    }
+
+    it('adds the cast-audit task and known-spells list for an out-of-combat caster', async () => {
+        sendMessage.mockResolvedValue(castResponse());
+        await runScribe({
+            playerMessage: 'I cast Mage Armor and step inside.',
+            dmNarrative: 'A shimmering ward settles over you.',
+            settings,
+            dispatch: vi.fn(),
+            lootAudit: castAudit(),
+        });
+        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+            systemPrompt: expect.stringContaining('NARRATED SPELLCAST AUDIT'),
+            userMessage: expect.stringContaining("HERO'S KNOWN SPELLS"),
+        }));
+        expect(sendMessage.mock.calls[0][0].userMessage).toContain('Mage Armor');
+    });
+
+    it('never adds the cast audit for a non-caster or without the auditCasts flag', async () => {
+        sendMessage.mockResolvedValue(castResponse());
+        await runScribe({
+            playerMessage: 'x', dmNarrative: 'y', settings, dispatch: vi.fn(),
+            lootAudit: castAudit({ getState: () => castState({ character: { class: 'fighter' } }) }),
+        });
+        expect(sendMessage.mock.calls[0][0].systemPrompt).not.toContain('NARRATED SPELLCAST AUDIT');
+
+        sendMessage.mockClear();
+        sendMessage.mockResolvedValue(castResponse());
+        await runScribe({
+            playerMessage: 'x', dmNarrative: 'y', settings, dispatch: vi.fn(),
+            lootAudit: castAudit({ auditCasts: undefined }),
+        });
+        expect(sendMessage.mock.calls[0][0].systemPrompt).not.toContain('NARRATED SPELLCAST AUDIT');
+    });
+
+    it('dispatches the missed CAST_SPELL with an audit sourceId', async () => {
+        sendMessage.mockResolvedValue(castResponse([{ spell: 'Mage Armor', target: 'self' }]));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I cast Mage Armor.',
+            dmNarrative: 'The ward settles over you, humming faintly.',
+            settings, dispatch,
+            lootAudit: castAudit(),
+        });
+        const cast = dispatch.mock.calls.map(c => c[0]).find(a => a.type === 'CAST_SPELL');
+        expect(cast).toBeTruthy();
+        expect(cast.payload.spell).toBe('Mage Armor');
+        expect(cast.payload._meta.sourceId).toBe('msg-9:scribe-loot:cast');
+        expect(cast.payload._meta.playerMessage).toBeUndefined();
+    });
+
+    it('skips a cast the event path already applied for this narrative', async () => {
+        sendMessage.mockResolvedValue(castResponse([{ spell: 'Mage Armor', target: 'self' }]));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I cast Mage Armor.',
+            dmNarrative: 'The ward settles over you.',
+            settings, dispatch,
+            lootAudit: castAudit({ appliedEvents: { spellCasts: [{ spell: 'mage armor', slotLevel: null, target: 'self' }] } }),
+        });
+        expect(dispatch.mock.calls.map(c => c[0]).find(a => a.type === 'CAST_SPELL')).toBeUndefined();
+    });
+
+    it('ignores spells the hero cannot mechanically know', async () => {
+        sendMessage.mockResolvedValue(castResponse([{ spell: 'Wish' }, 'Fireball']));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I bend reality.',
+            dmNarrative: 'Reality bends.',
+            settings, dispatch,
+            lootAudit: castAudit(),
+        });
+        expect(dispatch.mock.calls.map(c => c[0]).find(a => a.type === 'CAST_SPELL')).toBeUndefined();
+    });
+});

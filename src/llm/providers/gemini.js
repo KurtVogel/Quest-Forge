@@ -71,7 +71,7 @@ function extractCandidateText(candidate) {
 /**
  * Convert our message format to Gemini's content format.
  */
-function formatMessages(systemPrompt, messageHistory, userMessage, temperature) {
+function formatMessages(systemPrompt, messageHistory, userMessage, temperature, { thinkingBudget, maxOutputTokens } = {}) {
     const contents = [];
 
     // Convert history
@@ -98,7 +98,11 @@ function formatMessages(systemPrompt, messageHistory, userMessage, temperature) 
             // roll policy) pass a low temperature for reliable JSON.
             temperature: temperature ?? 0.9,
             topP: 0.95,
-            maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+            maxOutputTokens: Number.isFinite(maxOutputTokens) ? maxOutputTokens : GEMINI_MAX_OUTPUT_TOKENS,
+            // Machinery calls (pure-JSON extraction, 2-4 per turn) pass 0 so
+            // default-on thinking cannot burn reasoning tokens against the cap;
+            // DM narration omits it and keeps the model's own default.
+            ...(Number.isFinite(thinkingBudget) && { thinkingConfig: { thinkingBudget } }),
         },
     };
 }
@@ -106,14 +110,15 @@ function formatMessages(systemPrompt, messageHistory, userMessage, temperature) 
 /**
  * Send a non-streaming message to Gemini.
  */
-export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature }) {
+export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, signal }) {
     const url = `${GEMINI_API_BASE}/${model}:generateContent`;
-    const body = formatMessages(systemPrompt, messageHistory, userMessage, temperature);
+    const body = formatMessages(systemPrompt, messageHistory, userMessage, temperature, { thinkingBudget, maxOutputTokens });
 
     const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body: JSON.stringify(body),
+        signal,
     });
 
     if (!response.ok) {
@@ -152,6 +157,9 @@ export async function embedText(apiKey, text, { inputType = 'document' } = {}) {
                 content: { parts: [{ text: formattedText }] },
                 output_dimensionality: GEMINI_EMBED_DIMENSIONS,
             }),
+            // RAG retrieval is awaited BEFORE the DM prompt is built — a stalled
+            // embed call must fail into the null path, never hang the turn.
+            signal: AbortSignal.timeout(30_000),
         });
         if (!response.ok) {
             const body = await response.text().catch(() => '');

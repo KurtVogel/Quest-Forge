@@ -159,6 +159,44 @@ describe('sendGeminiMessage', () => {
         expect(error.message).toContain('Gemini API error (503)');
         expect(error.message).toContain('The model is overloaded.');
     });
+
+    it('applies thinkingBudget and maxOutputTokens to generationConfig (machinery economics)', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+            candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{}' }] } }],
+        }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await sendGeminiMessage({ ...SEND_ARGS, thinkingBudget: 0, maxOutputTokens: 8192 });
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+        expect(body.generationConfig.maxOutputTokens).toBe(8192);
+    });
+
+    it('omits thinkingConfig and keeps the default output cap when not requested (DM path)', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+            candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'ok' }] } }],
+        }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await sendGeminiMessage(SEND_ARGS);
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.generationConfig).not.toHaveProperty('thinkingConfig');
+        expect(body.generationConfig.maxOutputTokens).toBe(32768);
+    });
+
+    it('threads the abort signal into fetch so the adapter stall guard can cancel it', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+            candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'ok' }] } }],
+        }));
+        vi.stubGlobal('fetch', fetchMock);
+        const controller = new AbortController();
+
+        await sendGeminiMessage({ ...SEND_ARGS, signal: controller.signal });
+
+        expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal);
+    });
 });
 
 describe('streamGeminiMessage', () => {

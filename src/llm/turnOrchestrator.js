@@ -290,8 +290,15 @@ Translate the player's committed action into the single bounded combat_exchange 
             const review = await reviewOutsideCombatRolls(events.requestedRolls, originalPlayerMessage, narrative, s.settings);
             events.requestedRolls = review.acceptedRolls;
             if (review.rejectedRolls.length > 0) {
-                events._playerAuthorityRollRejected = true;
-                console.warn('[ChatPanel] Rejected a check that overrides player-authored portrayal; requesting a no-roll roleplay response.');
+                // An attack staged as a check takes the combat-correction path —
+                // but only when no legitimate check survived to stage instead.
+                if (review.attackAsCheck && review.acceptedRolls.length === 0) {
+                    events._attackAsCheckRejected = true;
+                    console.warn('[ChatPanel] Rejected a check that staged the player\'s declared attack; requesting a combat_start response.');
+                } else {
+                    events._playerAuthorityRollRejected = true;
+                    console.warn('[ChatPanel] Rejected a check that overrides player-authored portrayal; requesting a no-roll roleplay response.');
+                }
             }
             const preNarrated = review.preNarrated !== undefined ? review.preNarrated : detectPreNarratedOutcome(narrative);
             if (preNarrated) {

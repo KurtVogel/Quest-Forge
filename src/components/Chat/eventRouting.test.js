@@ -154,3 +154,26 @@ describe('needsSpellCastNarration', () => {
         })).toBe(false);
     });
 });
+
+describe('attack-as-check route (Codex 2026-08-09)', () => {
+    it('routes _attackAsCheckRejected to the combat correction', () => {
+        const routed = routeTurnEvents({ requestedRolls: [], _attackAsCheckRejected: true }, { combatWasActive: false });
+        expect(routed.route).toBe(TURN_ROUTES.ATTACK_AS_CHECK);
+    });
+
+    it('outranks the no-dice authority correction when both flags are set', () => {
+        const routed = routeTurnEvents(
+            { requestedRolls: [], _attackAsCheckRejected: true, _playerAuthorityRollRejected: true },
+            { combatWasActive: false }
+        );
+        expect(routed.route).toBe(TURN_ROUTES.ATTACK_AS_CHECK);
+    });
+
+    it('surviving accepted rolls still stage a proposal instead of the correction', () => {
+        const routed = routeTurnEvents(
+            { requestedRolls: [{ type: 'skill_check', skill: 'stealth' }], _attackAsCheckRejected: true },
+            { combatWasActive: false }
+        );
+        expect(routed.route).toBe(TURN_ROUTES.ROLL_PROPOSAL);
+    });
+});

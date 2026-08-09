@@ -6,7 +6,7 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-09 ×4 (Codex combat pair closed: Second Wind declared in the combat message is now an engine-owned `second_wind` exchange slot in its own bonus-action lane — live-verified, Gemini emitted it on first declaration, heal rolled + resource spent atomically; the combat panel gained a hero status card (HP/AC/slots/bonus action) + collapsed-summary HP chip; earlier today: level-up resource-refill P1, Arcane Recovery Use-button trap, pre-fight spell_cast pairing; 1,509 tests green; deployed)._
+_Last updated: 2026-08-09 ×5 (three-P1 hardening batch, DECISIONS ×4: every non-streaming provider call now has an abort/retry stall guard (90s, machinery 60s, embedText 30s→null) and machinery extraction runs thinking-free with an 8k output cap; a declared weapon attack staged as a check is policy-rejected with a combat_start correction re-response; eventless narrated casts get the Scribe-audit backstop (`narrated_casts` → validated CAST_SPELL, ordinary out-of-combat turns only). Earlier today: Second Wind exchange lane + combat hero HUD, level-up resource refill, Arcane Recovery trap, pre-fight cast pairing. 1,530 tests green; deployed)._
 
 ## Codex retest of 6c8be23 processed 2026-08-09 (all priority targets PASS; 2 new P1s fixed)
 

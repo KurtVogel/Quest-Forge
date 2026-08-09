@@ -33,11 +33,19 @@ export function isMachineryReady(settings) {
 /**
  * Provider config for background LLM tasks (Scribe, journal, roll policy,
  * NPC enrichment/review, semantic roll detection). Always Gemini Flash.
+ *
+ * Extraction calls are pure JSON: thinkingBudget 0 stops default-on thinking
+ * from burning reasoning tokens against the output cap (2-4 such calls run
+ * per turn, two of them blocking), and 8192 output tokens is generous for
+ * every consumer's bounded JSON. Both ride the sendMessage options spread.
  */
 export function getBackgroundConfig(settings) {
     return {
         provider: 'gemini',
         apiKey: getMachineryGeminiKey(settings),
         model: MACHINERY_MODEL,
+        thinkingBudget: 0,
+        maxOutputTokens: 8192,
+        timeoutMs: 60_000,
     };
 }

@@ -28,6 +28,14 @@ function isRetryableError(error) {
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
+ * Browser fetch never times out on its own: a stalled connection (no response,
+ * no error) used to hang the awaiting turn forever — three call sites block the
+ * turn pre-commit (2026-08-08 audit P1). Every non-streaming call now aborts
+ * after this long and retries like any other transient failure.
+ */
+const DEFAULT_SEND_TIMEOUT_MS = 90_000;
+
+/**
  * Send a message to the configured LLM provider.
  *
  * Non-streaming calls (Scribe, journal, roll policy, front generation) retry
@@ -44,22 +52,44 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
  * @param {string} options.userMessage - New user message
  * @param {number} [options.temperature] - Sampling temperature; use low values
  *   (~0.2) for JSON extraction tasks, omit for creative DM narration (0.9).
+ * @param {number} [options.thinkingBudget] - Explicit reasoning-token budget
+ *   (Gemini only; pass 0 for pure-JSON extraction tasks). Omit for DM defaults.
+ * @param {number} [options.maxOutputTokens] - Per-call output cap override.
+ * @param {number} [options.timeoutMs] - Stall guard; a call this old is aborted
+ *   and retried (default 90s).
+ * @param {AbortSignal} [options.signal] - External cancel; never retried.
  * @returns {Promise<string>} LLM response text
  */
-export async function sendMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, temperature }) {
+export async function sendMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, signal }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
 
     const MAX_RETRIES = 2;
     for (let attempt = 0; ; attempt++) {
+        if (signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
+        // Per-attempt controller: the stall timer must not leak an abort into a
+        // later retry, and an external caller signal cancels every attempt.
+        const controller = new AbortController();
+        const onExternalAbort = () => controller.abort();
+        signal?.addEventListener('abort', onExternalAbort, { once: true });
+        const stallTimer = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            return await p.send({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature });
+            return await p.send({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, signal: controller.signal });
         } catch (error) {
-            if (attempt >= MAX_RETRIES || !isRetryableError(error)) throw error;
+            const stalled = error?.name === 'AbortError' && !signal?.aborted;
+            if (signal?.aborted) throw error; // caller cancelled — never retry
+            if (!stalled && (attempt >= MAX_RETRIES || !isRetryableError(error))) throw error;
+            if (stalled && attempt >= MAX_RETRIES) {
+                throw new Error(`${provider} request stalled — no response after ${Math.round(timeoutMs / 1000)}s (${MAX_RETRIES + 1} attempts).`);
+            }
+            const reason = stalled ? `stalled after ${Math.round(timeoutMs / 1000)}s` : error.message;
             const delay = 1000 * 2 ** attempt + Math.random() * 250;
-            console.warn(`[LLM Adapter] Transient ${provider} failure (${error.message}); retry ${attempt + 1}/${MAX_RETRIES} in ~${Math.round(delay)}ms.`);
+            console.warn(`[LLM Adapter] Transient ${provider} failure (${reason}); retry ${attempt + 1}/${MAX_RETRIES} in ~${Math.round(delay)}ms.`);
             await sleep(delay);
+        } finally {
+            clearTimeout(stallTimer);
+            signal?.removeEventListener('abort', onExternalAbort);
         }
     }
 }

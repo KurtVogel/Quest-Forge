@@ -37,7 +37,16 @@ describe('isMachineryReady', () => {
 describe('getBackgroundConfig', () => {
     it('always targets Gemini Flash, never the DM provider or model', () => {
         const config = getBackgroundConfig({ llmProvider: 'xai', apiKey: 'xai-key', geminiApiKey: 'gem-key', model: 'grok-4.3' });
-        expect(config).toEqual({ provider: 'gemini', apiKey: 'gem-key', model: MACHINERY_MODEL });
+        expect(config).toEqual({
+            provider: 'gemini',
+            apiKey: 'gem-key',
+            model: MACHINERY_MODEL,
+            // Extraction economics (2026-08-09): no reasoning tokens, bounded
+            // JSON output, and a 60s stall guard on every machinery call.
+            thinkingBudget: 0,
+            maxOutputTokens: 8192,
+            timeoutMs: 60_000,
+        });
     });
 
     it('returns an empty key (callers skip) when no Gemini key exists', () => {

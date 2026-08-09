@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, memo } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { createTurnRunner } from '../../llm/turnOrchestrator.js';
-import { playerAuthorityRollCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
+import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildKnownAppearances, buildKnownStances, runScribe } from '../../llm/scribe.js';
@@ -615,6 +615,11 @@ export default function ChatPanel() {
                     setupNarrative: events._setupHidden ? dmNarrative : '',
                     setupMessageId: events._setupHidden ? events._setupMessageId : null,
                 });
+            } else if (routed.route === TURN_ROUTES.ATTACK_AS_CHECK) {
+                // Unlike the no-dice correction, this re-response must carry EVENTS
+                // (combat_start + the player's attack as a queued exchange), so it is
+                // a normal turn — playerActionContext keeps the replay guards honest.
+                await runner.sendToLLM(attackAsCheckCorrectionPrompt(trimmed), null, { playerActionContext: trimmed });
             } else if (routed.route === TURN_ROUTES.AUTHORITY_CORRECTION) {
                 await runner.sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
             }
@@ -679,6 +684,9 @@ export default function ChatPanel() {
                         sourceId: `${finalNarration.id}:scribe-loot`,
                         appliedEvents: finalNarration.events || null,
                         getState: () => stateRef.current,
+                        // Narrated-cast backstop rides ordinary turns only — the
+                        // victory-narration audit below recaps in-fight casts.
+                        auditCasts: true,
                     } : null,
                 }).catch(() => {});
                 const machineryKey = getMachineryGeminiKey(latest.settings);

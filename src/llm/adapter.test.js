@@ -160,6 +160,57 @@ describe('sendMessage retry/backoff', () => {
         await sendMessage({ ...baseOptions, provider: 'gemini', temperature: 0.2 });
         expect(sendGeminiMessage).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.2 }));
     });
+
+    it('forwards thinkingBudget/maxOutputTokens and always supplies an abort signal', async () => {
+        sendGeminiMessage.mockResolvedValue('ok');
+        await sendMessage({ ...baseOptions, provider: 'gemini', thinkingBudget: 0, maxOutputTokens: 8192 });
+        expect(sendGeminiMessage).toHaveBeenCalledWith(expect.objectContaining({
+            thinkingBudget: 0,
+            maxOutputTokens: 8192,
+            signal: expect.any(AbortSignal),
+        }));
+    });
+});
+
+describe('sendMessage stall guard (2026-08-08 audit P1)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    // A provider that never resolves until its abort signal fires — the exact
+    // stalled-connection shape browser fetch produces.
+    const hangUntilAborted = ({ signal }) => new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')), { once: true });
+    });
+
+    it('aborts a stalled call, retries, and succeeds on a live attempt', async () => {
+        vi.useFakeTimers();
+        sendGeminiMessage.mockImplementationOnce(hangUntilAborted).mockResolvedValueOnce('recovered');
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini', timeoutMs: 5000 });
+        await vi.advanceTimersByTimeAsync(5000 + 3000); // stall guard + backoff
+        await expect(promise).resolves.toBe('recovered');
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('surfaces a stall error after exhausting retries instead of hanging forever', async () => {
+        vi.useFakeTimers();
+        sendGeminiMessage.mockImplementation(hangUntilAborted);
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini', timeoutMs: 5000 });
+        const outcome = expect(promise).rejects.toThrow('stalled — no response after 5s');
+        await vi.advanceTimersByTimeAsync(60000);
+        await outcome;
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(3);
+    });
+
+    it('an external caller abort cancels immediately and is never retried', async () => {
+        sendGeminiMessage.mockImplementation(hangUntilAborted);
+        const controller = new AbortController();
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini', signal: controller.signal });
+        const outcome = expect(promise).rejects.toThrow();
+        controller.abort();
+        await outcome;
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
+    });
 });
 
 describe('PROVIDERS / PROVIDER_LIST', () => {

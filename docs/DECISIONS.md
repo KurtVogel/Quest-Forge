@@ -8,6 +8,30 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-09 ×4 · Three-P1 hardening batch: non-streaming calls get a stall guard, machinery runs thinking-free, a declared attack is combat (correction path, not just prompt), and narrated casts get the Scribe-audit backstop.**
+(1) Browser fetch never times out, so a stalled connection hung the awaiting turn forever
+(three pre-commit call sites). Ruling: the adapter owns the guard — a per-attempt
+AbortController (90s default, 60s for machinery via `getBackgroundConfig`, `timeoutMs`
+override) aborts a stalled attempt and retries it like any transient failure; an external
+caller `signal` cancels immediately and is never retried; `embedText` fails into its null
+path after 30s. (2) Machinery extraction calls (2-4 pure-JSON per turn) now carry
+`thinkingBudget: 0` + `maxOutputTokens: 8192` through the config spread; gemini.js applies
+`thinkingConfig` only when a finite budget is passed, so DM narration keeps model defaults.
+(3) Attack-staged-as-check (Codex P1): the roll-policy arbiter gained Rule 3 with a
+per-roll `violation: "attack"` tag (+ conservative sync-regex fallback), and a flagged
+rejection takes a NEW correction route — unlike the no-dice authority correction, the
+re-response is a normal EVENTS turn that must emit `combat_start` + the queued exchange
+carrying the player's attack; approach checks (Stealth/Deception before violence) stay
+legal, and the invalid check-staging narration is hidden like any superseded setup.
+(4) Eventless narrated casts (Codex P1): `narrated_casts` is the loot audit's spellcast
+sibling — observation-only, ordinary out-of-combat turns only (`auditCasts` flag; victory
+narration recaps in-fight casts and never reaches it), prompt fed HERO'S KNOWN SPELLS +
+ENGINE CASTS ALREADY APPLIED, engine-side `reconcileNarratedCasts` pre-validates the spell
+and dispatches CAST_SPELL with an audit sourceId. The queue's double-spend caveat
+dissolved by construction: audits carry no playerMessage, so `playerMessageRecastsSpell`'s
+bypass never opens for them. Known boundary: a cast narrated only in the fight-starting
+response still rides the prompt pairing rule — mid-combat CAST_SPELL stays exchange-only.
+
 **2026-08-09 ×3 · Second Wind declared in the combat message is HONORED as an engine-owned `second_wind` exchange slot — the "UI-only resources" rule now has exactly one combat exception.**
 Codex's parallel playtest P1: "I use Second Wind, then slash…" resolved only the slash; the
 resource part was silently ignored and the DM told the player OOC to press the sheet button

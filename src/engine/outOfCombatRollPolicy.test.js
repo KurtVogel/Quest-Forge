@@ -196,3 +196,58 @@ describe('reviewOutsideCombatRolls LLM-arbiter path', () => {
         expect(Object.keys(parsed[0]).sort()).toEqual(['dc', 'description', 'index', 'skill', 'type'].sort());
     });
 });
+
+describe('attack staged as a check (Codex 2026-08-09)', () => {
+    it('sync: rejects a check that resolves a declared weapon attack and flags attackAsCheck', () => {
+        const roll = { type: 'skill_check', skill: 'strength', dc: 12, description: 'Attack the lookout with your longsword' };
+        const review = reviewOutsideCombatRollsSync([roll], 'I attack the lookout with my longsword.');
+        expect(review.rejectedRolls).toEqual([roll]);
+        expect(review.attackAsCheck).toBe(true);
+    });
+
+    it('sync: an approach check (Stealth) before the attack stays valid', () => {
+        const roll = { type: 'skill_check', skill: 'stealth', dc: 12, description: 'Sneak close enough to strike the lookout' };
+        const review = reviewOutsideCombatRollsSync([roll], 'I sneak up and attack the lookout.');
+        expect(review.acceptedRolls).toEqual([roll]);
+        expect(review.attackAsCheck).toBeFalsy();
+    });
+
+    it('sync: a non-attack message never trips the attack detector', () => {
+        const roll = { type: 'skill_check', skill: 'persuasion', dc: 10, description: 'Convince the lookout to let you pass' };
+        const review = reviewOutsideCombatRollsSync([roll], 'I try to talk my way past the lookout.');
+        expect(review.acceptedRolls).toEqual([roll]);
+        expect(review.attackAsCheck).toBeFalsy();
+    });
+
+    it('LLM path: violation "attack" on a rejected roll sets attackAsCheck', async () => {
+        sendMessage.mockReset();
+        sendMessage.mockResolvedValue(JSON.stringify({
+            rolls_evaluation: [{ index: 0, approved: false, violation: 'attack', reason: 'Overt attack staged as a check.' }],
+            pre_narrated_outcome_detected: false,
+        }));
+        const roll = { type: 'skill_check', skill: 'athletics', dc: 12, description: 'Strike down the lookout' };
+        const review = await reviewOutsideCombatRolls([roll], 'I attack the lookout.', 'narrative', SETTINGS);
+        expect(review.rejectedRolls).toEqual([roll]);
+        expect(review.attackAsCheck).toBe(true);
+    });
+
+    it('LLM path: an agency rejection does not set attackAsCheck', async () => {
+        sendMessage.mockReset();
+        sendMessage.mockResolvedValue(JSON.stringify({
+            rolls_evaluation: [{ index: 0, approved: false, violation: 'agency', reason: 'Demeanor check.' }],
+            pre_narrated_outcome_detected: false,
+        }));
+        const roll = { type: 'skill_check', skill: 'wisdom', dc: 12, description: 'Stay composed' };
+        const review = await reviewOutsideCombatRolls([roll], 'I remain calm.', 'narrative', SETTINGS);
+        expect(review.rejectedRolls).toEqual([roll]);
+        expect(review.attackAsCheck).toBeFalsy();
+    });
+
+    it('attackAsCheckCorrectionPrompt demands combat_start and echoes the player action', async () => {
+        const { attackAsCheckCorrectionPrompt } = await import('./outOfCombatRollPolicy.js');
+        const prompt = attackAsCheckCorrectionPrompt('I attack the lookout with my longsword.');
+        expect(prompt).toContain('combat_start');
+        expect(prompt).toContain('combat_exchange');
+        expect(prompt).toContain('I attack the lookout');
+    });
+});

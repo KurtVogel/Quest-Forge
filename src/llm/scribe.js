@@ -17,6 +17,7 @@ import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { captureReflection, captureScribePass } from '../debug/memoryInspectorStore.js';
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
 import { conversationalDistance } from '../engine/replayLedger.js';
+import { getKnownSpells, isSpellcaster, resolveSpellForCharacter } from '../engine/spellcasting.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX, MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
 
@@ -138,6 +139,19 @@ Gear handoff rules:
 - Anything under EVENTS ALREADY APPLIED (companion gear or keepsake updates, items lost by the hero) is NOT missing.
 - Copy the companion's and the item's names exactly as the narrative writes them.
 - When in doubt, omit — an invented handoff is worse than a missed one. Omit "missing_gear_handoffs" entirely when nothing is missing.`;
+
+const CAST_AUDIT_RULES = `
+
+ADDITIONAL TASK — NARRATED SPELLCAST AUDIT:
+The engine spends spell slots and applies spell effects ONLY from structured events; a cast the DM narrates without its event mechanically never happened — no slot spent, no ward, no healing (a hero once fought a whole battle at base AC under a lovingly narrated Mage Armor). Pure OBSERVATION again: report the spells THIS DM narrative shows the HERO successfully completing, as one extra top-level field:
+"narrated_casts": [{ "spell": "exact spell name from HERO'S KNOWN SPELLS", "target": "self, or the exact companion name the spell lands on" }]
+
+Cast rules:
+- Report ONLY casts the DM NARRATIVE completes for the HERO in this scene: the ward settles, the wounds knit, the light blooms. Attempts, intentions, preparations, interrupted or failed magic, and spells cast by ANY other character report nothing.
+- HERO'S KNOWN SPELLS lists every spell that mechanically exists for the hero — report a cast only under its exact listed name. Magic that matches no listed spell reports nothing.
+- ENGINE CASTS ALREADY APPLIED lists casts the engine already handled for this narrative — never re-report those.
+- An effect merely CONTINUING from an earlier cast (an active ward glinting, an ongoing magical light) is not a new cast; only magic completed for the first time in THIS narrative counts.
+- When in doubt, omit. Omit "narrated_casts" entirely when the hero completes no cast.`;
 
 /** Compact owned-inventory summary so the audit can tell "using" from "acquiring".
  * Live Grok finding 2026-07-09: "takes out her flint and steel" read as a completed
@@ -423,6 +437,49 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
 }
 
 /**
+ * Spellcast sibling of reconcileNarratedLoot (queue P1, Codex 2026-08-09): a
+ * cast the DM narrates with no spell_cast event is mechanically nonexistent.
+ * The audit dispatches the missed CAST_SPELL and the reducer stays the single
+ * authority — it validates the spell, spends the slot, rolls healing, posts its
+ * own "casts X" line, and its ledger keeps this idempotent (exact sourceId for
+ * retries; the nearby-replay window suppresses later re-narrations because
+ * audits deliberately carry no playerMessage, so the player-recast bypass never
+ * opens for them). Out-of-combat only by design: in-fight casting is exchange
+ * territory, and victory narration recaps in-fight casts (no `auditCasts` flag
+ * on that path).
+ */
+function reconcileNarratedCasts(narrated, lootAudit, dispatch) {
+    if (!Array.isArray(narrated) || narrated.length === 0) return;
+    const { sourceId, getState, appliedEvents } = lootAudit;
+    if (!sourceId) return;
+    const state = getState?.();
+    const character = state?.character;
+    if (state?.combat?.active || !isSpellcaster(character?.class)) return;
+    const appliedKeys = new Set((appliedEvents?.spellCasts || [])
+        .map(cast => resolveSpellForCharacter(character, cast?.spell)?.key)
+        .filter(Boolean));
+    for (const entry of narrated.slice(0, 2)) {
+        const name = String((typeof entry === 'string' ? entry : entry?.spell) || '').trim();
+        const spell = resolveSpellForCharacter(character, name);
+        if (!spell || !spell.outOfCombatAvailable) continue;
+        if (appliedKeys.has(spell.key)) {
+            console.warn(`[Scribe] Narrated cast "${spell.name}" already applied by the event path; skipping.`);
+            continue;
+        }
+        const target = typeof entry === 'object' && entry?.target ? String(entry.target).slice(0, 60) : '';
+        dispatch({
+            type: 'CAST_SPELL',
+            payload: {
+                spell: spell.name,
+                ...(target && { target }),
+                _meta: { sourceId: `${sourceId}:cast` },
+            },
+        });
+        console.log(`[Scribe] Cast audit: recovered narrated ${spell.name} the event path missed.`);
+    }
+}
+
+/**
  * Payment twin of reconcileNarratedLoot: the Scribe reports the TOTAL coins the
  * narrative shows the hero paying out; the engine deducts them ONLY when the
  * event path applied no coin loss at all for this same narration (pure omission
@@ -552,17 +609,27 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
 
-    const ownedInventory = (lootAudit && typeof lootAudit.getState === 'function')
-        ? describeOwnedInventory(lootAudit.getState())
+    const auditState = (lootAudit && typeof lootAudit.getState === 'function') ? lootAudit.getState() : null;
+    const ownedInventory = auditState ? describeOwnedInventory(auditState) : null;
+    const partyGear = auditState ? describePartyGear(auditState) : null;
+    // Narrated-cast audit rides the ordinary-turn loot audit only (auditCasts flag):
+    // victory narration recaps in-fight casts and mid-combat casting is exchange
+    // territory, so neither may reach CAST_SPELL through this path.
+    const castAudit = !!(lootAudit?.auditCasts && auditState
+        && isSpellcaster(auditState.character?.class) && !auditState.combat?.active);
+    const knownSpells = castAudit
+        ? getKnownSpells(auditState.character).map(spell => spell.name).join('; ')
         : null;
-    const partyGear = (lootAudit && typeof lootAudit.getState === 'function')
-        ? describePartyGear(lootAudit.getState())
+    const appliedCasts = castAudit
+        ? ((lootAudit.appliedEvents?.spellCasts || []).map(cast => cast?.spell).filter(Boolean).join('; ') || 'None.')
         : null;
 
     try {
         const response = await sendMessage({
             ...background,
-            systemPrompt: lootAudit ? SCRIBE_SYSTEM_PROMPT + LOOT_AUDIT_RULES : SCRIBE_SYSTEM_PROMPT,
+            systemPrompt: SCRIBE_SYSTEM_PROMPT
+                + (lootAudit ? LOOT_AUDIT_RULES : '')
+                + (castAudit ? CAST_AUDIT_RULES : ''),
             temperature: 0.2, // faithful extraction — facts and loot amounts must not drift
             messageHistory: [],
             userMessage: [
@@ -585,6 +652,12 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     : null,
                 partyGear
                     ? `PARTY COMPANIONS' CURRENT GEAR (already carried — referencing these is NOT a new handoff): ${partyGear}`
+                    : null,
+                knownSpells
+                    ? `HERO'S KNOWN SPELLS (the only spells that mechanically exist for the hero): ${knownSpells}`
+                    : null,
+                appliedCasts
+                    ? `ENGINE CASTS ALREADY APPLIED for this narrative (never re-report these): ${appliedCasts}`
                     : null,
             ].filter(Boolean).join('\n\n'),
         });
@@ -680,6 +753,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             reconcileNarratedLoot(extracted.narrated_loot, lootAudit, dispatch);
             reconcileNarratedPayment(extracted.narrated_payment, lootAudit, dispatch);
             applyMissingGearHandoffs(extracted.missing_gear_handoffs, lootAudit, dispatch);
+            if (castAudit) reconcileNarratedCasts(extracted.narrated_casts, lootAudit, dispatch);
         }
 
         captureScribePass({
@@ -693,6 +767,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             lootAudited: !!(lootAudit && hasAuditPayload(extracted.narrated_loot)),
             paymentAudited: !!(lootAudit && hasAuditPayload(extracted.narrated_payment)),
             gearAudited: !!(lootAudit && Array.isArray(extracted.missing_gear_handoffs) && extracted.missing_gear_handoffs.length > 0),
+            castsAudited: !!(castAudit && Array.isArray(extracted.narrated_casts) && extracted.narrated_casts.length > 0),
         });
     } catch (e) {
         // Scribe failures must never block the main game loop, but log clearly
