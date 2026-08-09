@@ -6,7 +6,7 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-09 ×2 (Codex retest of 6c8be23 came back: priming fix, late-key path, wizard level-up, post-defeat stabilization, item aggregation, and both recap guards all PASS; its two new P1s fixed — Arcane Recovery Use-button trap + pre-fight spell_cast pairing; 1,497 tests green; deployed)._
+_Last updated: 2026-08-09 ×3 (queue P1 closed: level-up no longer silently refills spent class resources — `buildClassResources` gained the `buildSpellSlots` carry-forward pattern, level-up passes `previous`, creation/import/migrations stay rested-fresh by design; string-level coercion P2 closed alongside; 1,501 tests green; deployed)._
 
 ## Codex retest of 6c8be23 processed 2026-08-09 (all priority targets PASS; 2 new P1s fixed)
 

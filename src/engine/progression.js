@@ -55,7 +55,7 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
     const conMod = getModifier(character.abilityScores?.constitution || 10);
     const averageHp = Math.floor(hitDie / 2) + 1;
     const hpGain = Math.max(1, averageHp + conMod);
-    const newLevel = character.level + 1;
+    const newLevel = (Number(character.level) || 1) + 1;
     const newMaxHP = character.maxHP + hpGain;
 
     const newFeatures = getFeaturesForLevel(character.class, newLevel);
@@ -77,7 +77,9 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
         maxHP: newMaxHP,
         currentHP: newMaxHP,
         features: updatedFeatures,
-        classResources: buildClassResources(character.class, newLevel),
+        // Spent uses carry over — newly unlocked resources start fresh, but a
+        // level-up mid-day never hands back the day's spent abilities.
+        classResources: buildClassResources(character.class, newLevel, character.classResources),
         // Spent slots carry over — a level-up mid-day grows the slot table but
         // never silently refills the day's magic.
         ...(isSpellcaster(character.class) && { spellSlots: buildSpellSlots(newLevel, character.spellSlots) }),

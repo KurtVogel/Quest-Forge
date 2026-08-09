@@ -194,6 +194,57 @@ describe('estimateCombatExperience (End-Combat XP fallback)', () => {
     });
 });
 
+describe('class resources across level-ups (2026-08-08 audit P1)', () => {
+    it('carries spent resources forward and unlocks new ones fresh', () => {
+        // Fighter 1→2 with Second Wind already spent: XP lands at END_COMBAT, so
+        // a mid-day level-up must not hand the day's abilities back for free.
+        const result = awardExperience({
+            ...character,
+            level: 1,
+            exp: 0,
+            maxHP: 12,
+            currentHP: 12,
+            classResources: { secondWind: { used: 1, max: 1 } },
+            hitDice: { total: 1, remaining: 1, die: 10 },
+        }, 300);
+
+        expect(result.character.level).toBe(2);
+        expect(result.character.classResources.secondWind).toEqual({ used: 1, max: 1 });
+        // Action Surge unlocks at 2 and starts fresh.
+        expect(result.character.classResources.actionSurge).toEqual({ used: 0, max: 1 });
+    });
+
+    it('keeps resources spent across a multi-level jump', () => {
+        const result = awardExperience({
+            ...character,
+            level: 1,
+            exp: 0,
+            maxHP: 12,
+            currentHP: 12,
+            classResources: { secondWind: { used: 1, max: 1 } },
+            hitDice: { total: 1, remaining: 1, die: 10 },
+        }, 900); // 300 → L2, 600 more → L3
+
+        expect(result.character.level).toBe(3);
+        expect(result.character.classResources.secondWind.used).toBe(1);
+        expect(result.character.classResources.actionSurge).toEqual({ used: 0, max: 1 });
+    });
+
+    it('clamps junk carried used-counts to the resource max', () => {
+        const result = awardExperience({
+            ...character,
+            level: 1,
+            exp: 0,
+            maxHP: 12,
+            currentHP: 12,
+            classResources: { secondWind: { used: 7, max: 1 } },
+            hitDice: { total: 1, remaining: 1, die: 10 },
+        }, 300);
+
+        expect(result.character.classResources.secondWind).toEqual({ used: 1, max: 1 });
+    });
+});
+
 describe('hostile-input robustness (2026-07-28 audit)', () => {
     it('getExperienceThreshold clamps junk levels to the table bounds', () => {
         expect(getExperienceThreshold(0)).toBe(300);
@@ -218,6 +269,18 @@ describe('hostile-input robustness (2026-07-28 audit)', () => {
     it('awardExperience coerces a numeric string amount (corrupted-save shape)', () => {
         const result = awardExperience({ ...character, level: 1 }, '50');
         expect(result.character.exp).toBe(50);
+    });
+
+    it('level-up coerces a string level from a corrupted save instead of concatenating', () => {
+        const result = awardExperience({
+            ...character,
+            level: '1',
+            exp: 0,
+            maxHP: 12,
+            currentHP: 12,
+            hitDice: { total: 1, remaining: 1, die: 10 },
+        }, 300);
+        expect(result.character.level).toBe(2); // was "11" with raw `character.level + 1`
     });
 
     it('level-up falls back to the d8 hit die for an unknown class', () => {

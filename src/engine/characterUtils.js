@@ -81,17 +81,24 @@ export function applyRacialBonuses(abilityScores, raceName) {
 }
 
 /**
- * Build the initial classResources object for a character.
- * Each resource tracks `used` count vs `max` uses.
+ * Build the classResources object for a character.
+ * Each resource tracks `used` count vs `max` uses. Pass `previous` (the
+ * buildSpellSlots pattern) to carry spent uses forward — a level-up mid-day
+ * unlocks new resources at 0 used but never silently refills the day's
+ * spent Second Wind / Action Surge / Channel Divinity / Arcane Recovery.
  */
-export function buildClassResources(className, level) {
+export function buildClassResources(className, level, previous = null) {
     const charClass = CLASSES[className];
     if (!charClass?.resources) return {};
 
     const resources = {};
     for (const [key, def] of Object.entries(charClass.resources)) {
         if (level >= (def.minLevel || 1)) {
-            resources[key] = { used: 0, max: def.max };
+            const prevUsed = previous?.[key]?.used;
+            resources[key] = {
+                used: Number.isFinite(prevUsed) ? Math.max(0, Math.min(def.max, Math.trunc(prevUsed))) : 0,
+                max: def.max,
+            };
         }
     }
     return resources;
