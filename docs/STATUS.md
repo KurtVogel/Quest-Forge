@@ -6,7 +6,28 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-09 (EIGHTH live playtest + the parallel Codex playtest's P0 fixed: opening-scene priming is retry-safe — marker consumed only on commit, bounded retries, late-API-key trigger; 1,494 tests green; deployed)._
+_Last updated: 2026-08-09 ×2 (Codex retest of 6c8be23 came back: priming fix, late-key path, wizard level-up, post-defeat stabilization, item aggregation, and both recap guards all PASS; its two new P1s fixed — Arcane Recovery Use-button trap + pre-fight spell_cast pairing; 1,497 tests green; deployed)._
+
+## Codex retest of 6c8be23 processed 2026-08-09 (all priority targets PASS; 2 new P1s fixed)
+
+The directed Codex playtest re-verified everything this week shipped: opening-scene
+priming retry under StrictMode (exactly one AbortError → one silent retry → ONE opening,
+reload-safe), the late-API-key trigger, wizard level 1→2 with spent slots preserved
+(8→14 HP exactly once, slot table 2→3 without refill), Arcane Recovery via short rest,
+post-defeat 1-HP stabilization + working rematch, same-scene identical-loot aggregation
+(one x2 stack), and both coin/item recap guards (state unchanged across re-narration
+turns). **Its two new P1s are fixed with tests:** (1) Arcane Recovery's generic "Use"
+button consumed the once-per-long-rest charge with NO effect and locked out the real
+short-rest recovery → passive resources (`passive` flag on the class def) now render
+an "auto" tag instead of a button and ACTIVATE_RESOURCE refuses to spend them; (2)
+"I cast Mage Armor" in the message that started the fight was narrated but never
+evented, so the whole fight ran at AC 12 → the SPELLCASTING prompt now requires
+`spell_cast` ALONGSIDE `combat_start` for pre-fight casts (the engine already applies
+casts before initiative — ordering now pinned by an orchestrator test). Its two P2s
+(Magic Missile dart splitting, NPC gender flip mid-scene — KNOWN NPCs header now marks
+gender/pronouns never-changing) plus the eventless-narrated-cast backstop are in the
+Open Findings Queue with attribution. Report file deleted after transcription, per the
+standing dated-and-temporary convention.
 
 ## Codex parallel playtest P0 fixed 2026-08-09 (opening-scene priming stall)
 

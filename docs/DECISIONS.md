@@ -8,6 +8,25 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-09 ×2 · Passive class resources are never hand-activatable, and a pre-fight cast rides the fight-starting response as `spell_cast` + `combat_start` (the engine applies casts before initiative).**
+Codex's retest of 6c8be23 found both. (1) Arcane Recovery's generic "Use" button hit
+ACTIVATE_RESOURCE's narrative fallthrough — marked spent, zero effect — and the short-rest
+path then saw it consumed and skipped the real recovery, silently destroying the
+once-per-long-rest benefit on an intuitive click. Ruling: automatic-on-rest features carry
+`passive: '<trigger>'` on the class resource def; the sheet renders an "auto" tag instead
+of a Use button, and ACTIVATE_RESOURCE refuses to spend a passive resource (visible
+"happens automatically, charge still available" line) so stale UIs and DM `resources_used`
+echoes can't burn it either. TAKE_REST remains the single owner of the effect. (2) "I cast
+Mage Armor" in the same message that released the enemies got full ward narration but no
+event — the DM read "Never use spell_cast during a fight" as covering the response that
+STARTS the fight, so the hero fought at AC 12 under a narrated ward. Ruling: applyEvents'
+existing order (spell_cast dispatches before combat_start) is the contract, now pinned by
+an orchestrator test, and the SPELLCASTING prompt names the one exception explicitly: an
+out-of-combat cast in the fight-starting message must be emitted alongside combat_start.
+No engine backstop yet for a cast the DM narrates with no event at all — queued P1 with
+the double-spend caveat (`playerMessageRecastsSpell` would let a same-turn DM echo of any
+future engine pre-cast spend a second slot).
+
 **2026-08-09 · Opening-scene priming is retry-safe: the pending marker is consumed only after the opening COMMITS, and commit detection reads the orchestrator's committed-turn record.**
 The parallel Codex playtest's P0, reproduced deterministically in one try on the dev
 server: React StrictMode's double-mount cleanup aborts the in-flight priming call

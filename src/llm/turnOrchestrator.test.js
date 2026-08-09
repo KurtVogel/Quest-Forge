@@ -26,10 +26,10 @@ function scriptedStream(responses) {
     });
 }
 
-function createHarness({ streamMessage, sendMessage, isMounted, interceptDispatch } = {}) {
+function createHarness({ streamMessage, sendMessage, isMounted, interceptDispatch, character } = {}) {
     let state = {
         ...initialGameState,
-        character: createCharacter('Testa', 'human', 'fighter', ABILITY_SCORES, ['athletics']),
+        character: character || createCharacter('Testa', 'human', 'fighter', ABILITY_SCORES, ['athletics']),
         settings: { ...initialGameState.settings, llmProvider: 'openai', apiKey: 'test-key', model: 'test-model' },
         session: { ...initialGameState.session, id: 'session-test' },
     };
@@ -246,5 +246,33 @@ describe('turn runner — same-response duplicate items_found entries (playtest 
         expect(daggers).toHaveLength(1);
         expect(daggers[0].quantity).toBe(2);
         expect(getState().messages.some(m => m.role === 'system' && /Duplicate item grant ignored/.test(m.content || ''))).toBe(false);
+    });
+});
+
+describe('turn runner — pre-fight spell_cast alongside combat_start (Codex 2026-08-09)', () => {
+    it('applies the cast before initiative so the ward is real when the first blow lands', async () => {
+        const wizard = createCharacter('Neris', 'human', 'wizard', {
+            strength: 8, dexterity: 12, constitution: 14,
+            intelligence: 16, wisdom: 10, charisma: 10,
+        }, ['arcana']);
+        const response = 'A shimmering ward settles over you as the wisps shriek and dive.\n'
+            + '```json\n{"spell_cast": {"spell": "Mage Armor", "target": "self"},'
+            + ' "combat_start": {"enemies": [{"id": "wisp-1", "name": "Spark Wisp", "hp": 5, "ac": 12, "attack_bonus": 3, "damage": "1d4"}]}}\n```';
+        const { runner, getState } = createHarness({
+            streamMessage: scriptedStream([response]),
+            sendMessage: vi.fn(async () => ''),
+            character: wizard,
+        });
+        const acBefore = getState().character.armorClass;
+
+        await runner.sendToLLM('I cast Mage Armor and brace as the wisps attack.', 'I cast Mage Armor and brace as the wisps attack.');
+
+        const after = getState();
+        expect(after.character.sustainedSpell?.key).toBe('mageArmor');
+        expect(after.character.spellSlots['1'].used).toBe(1);
+        expect(after.character.armorClass).toBe(acBefore + 3);
+        expect(after.combat.active).toBe(true);
+        expect(after.combat.enemies).toHaveLength(1);
+        expect(after.messages.some(m => m.role === 'system' && /casts Mage Armor/.test(m.content || ''))).toBe(true);
     });
 });

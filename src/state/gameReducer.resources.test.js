@@ -124,6 +124,46 @@ describe('class resource activation', () => {
     });
 });
 
+describe('passive resources (Arcane Recovery — Codex 2026-08-09)', () => {
+    function makeWizard() {
+        return {
+            ...initialGameState,
+            character: {
+                name: 'Neris',
+                race: 'human',
+                class: 'wizard',
+                level: 2,
+                currentHP: 14,
+                maxHP: 14,
+                abilityScores: { strength: 8, dexterity: 12, constitution: 14, intelligence: 16, wisdom: 10, charisma: 10 },
+                classResources: { arcaneRecovery: { used: 0, max: 1 } },
+                spellSlots: { 1: { used: 2, max: 3 } },
+                hitDice: { total: 2, remaining: 2, die: 6 },
+                conditions: [],
+            },
+            messages: [],
+        };
+    }
+
+    it('ACTIVATE_RESOURCE never consumes a passive resource', () => {
+        const next = gameReducer(makeWizard(), { type: 'ACTIVATE_RESOURCE', payload: 'arcaneRecovery' });
+
+        expect(next.character.classResources.arcaneRecovery.used).toBe(0);
+        expect(next.character.spellSlots[1].used).toBe(2);
+        expect(next.messages.at(-1).content).toContain('automatically');
+    });
+
+    it('a short rest still triggers Arcane Recovery after a stray activation attempt', () => {
+        // The exact Codex trap: player clicks the button, then takes the short rest.
+        const clicked = gameReducer(makeWizard(), { type: 'ACTIVATE_RESOURCE', payload: 'arcaneRecovery' });
+        const rested = gameReducer(clicked, { type: 'TAKE_REST', payload: 'short' });
+
+        expect(rested.character.spellSlots[1].used).toBe(1);
+        expect(rested.character.classResources.arcaneRecovery.used).toBe(1);
+        expect(rested.messages.at(-1).content).toContain('Arcane Recovery restores');
+    });
+});
+
 describe('DM rest replay guard', () => {
     const filler = (n) => Array.from({ length: n }, (_, i) => ({
         id: `filler-${i}`,

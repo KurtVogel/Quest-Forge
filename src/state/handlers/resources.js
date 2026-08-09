@@ -89,6 +89,16 @@ export const handlers = {
         const res = resources[resKey];
         if (!def || !res) return state;
 
+        // Passive resources (Arcane Recovery) trigger automatically — TAKE_REST owns
+        // the effect. Activating one by hand used to mark it spent with NO effect,
+        // silently destroying the once-per-long-rest benefit (Codex 2026-08-09).
+        if (def.passive) {
+            return {
+                ...state,
+                messages: [...state.messages, systemMessage(`**${def.label}** happens automatically on your first ${def.passive} after a long rest — there is nothing to activate manually, and the charge is still available.`)],
+            };
+        }
+
         if (resKey === 'actionSurge') {
             const unableToAct = state.character.isDead
                 || state.character.dying

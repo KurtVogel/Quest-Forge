@@ -144,6 +144,10 @@ export const CLASSES = {
                 max: 1,
                 resetOn: 'long',
                 minLevel: 1,
+                // Fires automatically on the first short rest per long-rest cycle
+                // (TAKE_REST owns it) — never activatable by hand. A generic Use
+                // button was consuming the charge with no effect (Codex 2026-08-09).
+                passive: 'short rest',
             },
         },
         startingEquipment: [

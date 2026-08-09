@@ -363,7 +363,7 @@ export function buildJournalContext(journal, npcs, currentLocation) {
             ? `\n*(${hiddenCount} other NPCs available via RETRIEVED MEMORIES when relevant)*`
             : '';
 
-        parts.push(`\n## KNOWN NPCs (keep names and established looks EXACTLY consistent — never re-invent or launder hair, eyes, build, body proportions, scars, intimate details, or clothing that "looks:" already records. Each NPC's "secret:" and "agenda:" entries are that character's PRIVATE interior — other characters do not know them unless the fiction has shown the reveal, per rule 9)\n${npcList}${overflow}`);
+        parts.push(`\n## KNOWN NPCs (keep names, registered gender, and established looks EXACTLY consistent — a character's gender and pronouns NEVER change from the registered value or the fiction that introduced them, and never re-invent or launder hair, eyes, build, body proportions, scars, intimate details, or clothing that "looks:" already records. Each NPC's "secret:" and "agenda:" entries are that character's PRIVATE interior — other characters do not know them unless the fiction has shown the reveal, per rule 9)\n${npcList}${overflow}`);
     }
 
     return parts.join('\n');

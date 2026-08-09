@@ -390,14 +390,22 @@ export default function CharacterSheet() {
                                                 ))}
                                             </span>
                                             <span className="cs-resource-reset">{def.resetOn} rest</span>
-                                            <button
-                                                className="cs-resource-use"
-                                                onClick={() => dispatch({ type: 'ACTIVATE_RESOURCE', payload: key })}
-                                                disabled={available <= 0 || bonusActionBlocked}
-                                                title={disabledReason}
-                                            >
-                                                Use
-                                            </button>
+                                            {def.passive ? (
+                                                /* Automatic feature (Arcane Recovery): TAKE_REST applies it. A
+                                                   generic Use button here consumed the charge with no effect. */
+                                                <span className="cs-resource-reset" title={`${def.label} triggers automatically on your first ${def.passive} after a long rest`}>
+                                                    auto
+                                                </span>
+                                            ) : (
+                                                <button
+                                                    className="cs-resource-use"
+                                                    onClick={() => dispatch({ type: 'ACTIVATE_RESOURCE', payload: key })}
+                                                    disabled={available <= 0 || bonusActionBlocked}
+                                                    title={disabledReason}
+                                                >
+                                                    Use
+                                                </button>
+                                            )}
                                         </div>
                                     );
                                 })}
