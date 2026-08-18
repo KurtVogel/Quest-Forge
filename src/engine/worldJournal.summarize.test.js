@@ -16,7 +16,7 @@ vi.mock('../llm/adapter.js', () => ({ sendMessage: sendMessageMock }));
 vi.mock('../llm/machinery.js', () => ({ getBackgroundConfig: backgroundConfigMock }));
 vi.mock('../llm/scribe.js', () => ({ runNpcFrontReflection: reflectionMock }));
 
-const { maybeAutoSummarize } = await import('./worldJournal.js');
+const { maybeAutoSummarize, resetSummarizeFailureTracker } = await import('./worldJournal.js');
 
 function makeMessages(count, { hidden = false } = {}) {
     return Array.from({ length: count }, (_, i) => ({
@@ -51,6 +51,7 @@ beforeEach(() => {
     reflectionMock.mockClear();
     backgroundConfigMock.mockReset();
     backgroundConfigMock.mockReturnValue({ apiKey: 'k', provider: 'gemini', model: 'flash' });
+    resetSummarizeFailureTracker(); // module-level failure streak must not leak between tests
 });
 
 describe('maybeAutoSummarize', () => {
@@ -173,6 +174,87 @@ describe('maybeAutoSummarize', () => {
         expect(result).toEqual({ index: 0, journalEntry: null });
         expect(sendMessageMock).not.toHaveBeenCalled();
         expect(dispatch).not.toHaveBeenCalled();
+    });
+});
+
+describe('poison-batch escape hatch + batch bounds (2026-08-18 audit P1)', () => {
+    it('archives a persistently failing batch behind a fallback entry on the third consecutive failure', async () => {
+        sendMessageMock.mockResolvedValue('I cannot help with that request.'); // e.g. a safety block, every time
+        const state = makeState(makeMessages(12));
+
+        for (const attempt of [1, 2]) {
+            const dispatch = vi.fn();
+            const result = await maybeAutoSummarize(state, dispatch, 0);
+            expect(result, `attempt ${attempt} retries silently`).toEqual({ index: 0, journalEntry: null });
+            expect(dispatch).not.toHaveBeenCalled();
+        }
+
+        const dispatch = vi.fn();
+        const result = await maybeAutoSummarize(state, dispatch, 0);
+
+        expect(result.index).toBe(12); // the cadence finally advances
+        expect(result.journalEntry.fallback).toBe(true);
+        expect(result.journalEntry.summary).toContain('archived without a summary');
+        expect(result.journalEntry.messageRange).toEqual([0, 12]);
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_JOURNAL_ENTRY' }));
+        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 12 });
+        // No facts, NPCs, location, or reflection ride a fallback archive.
+        expect(dispatch.mock.calls.every(([action]) => ['ADD_JOURNAL_ENTRY', 'MARK_MESSAGES_SUMMARIZED'].includes(action.type))).toBe(true);
+        expect(reflectionMock).not.toHaveBeenCalled();
+    });
+
+    it('a success resets the failure streak — non-consecutive failures never trigger the hatch', async () => {
+        const state = makeState(makeMessages(12));
+        sendMessageMock.mockResolvedValue('no json here');
+        await maybeAutoSummarize(state, vi.fn(), 0);
+        await maybeAutoSummarize(state, vi.fn(), 0); // streak: 2
+
+        sendMessageMock.mockResolvedValue(validSummary());
+        const success = await maybeAutoSummarize(state, vi.fn(), 0);
+        expect(success.index).toBe(12);
+
+        sendMessageMock.mockResolvedValue('no json here');
+        const dispatch = vi.fn();
+        const result = await maybeAutoSummarize(state, dispatch, 0); // streak restarted: 1, not 3
+        expect(result).toEqual({ index: 0, journalEntry: null });
+        expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('caps a stalled backlog to 40 messages per call and clamps each message to 2000 chars', async () => {
+        sendMessageMock.mockResolvedValue(validSummary());
+        const messages = makeMessages(60).map(m => ({ ...m, content: `${m.content} ${'y'.repeat(5000)}` }));
+        const state = makeState(messages);
+        const dispatch = vi.fn();
+
+        const result = await maybeAutoSummarize(state, dispatch, 0);
+
+        // Only the oldest 40 are summarized; the backlog drains next cadence.
+        expect(result.index).toBe(40);
+        expect(result.journalEntry.messageRange).toEqual([0, 40]);
+        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 40 });
+
+        const payload = sendMessageMock.mock.calls[0][0].userMessage;
+        const transcriptLines = payload.split('\n\n').filter(line => line.startsWith('['));
+        expect(transcriptLines).toHaveLength(40);
+        for (const line of transcriptLines) {
+            expect(line.length).toBeLessThanOrEqual(2000 + 20); // clamp + role prefix
+        }
+    });
+
+    it('advances past an all-hidden stretch when more messages wait beyond the cap', async () => {
+        const messages = [
+            ...makeMessages(41, { hidden: true }),
+            { id: 'm-visible', role: 'assistant', content: 'A visible message beyond the cap.' },
+        ];
+        const state = makeState(messages);
+        const dispatch = vi.fn();
+
+        const result = await maybeAutoSummarize(state, dispatch, 0);
+
+        expect(result).toEqual({ index: 40, journalEntry: null });
+        expect(sendMessageMock).not.toHaveBeenCalled();
+        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 40 });
+        expect(dispatch.mock.calls).toHaveLength(1);
     });
 });
 

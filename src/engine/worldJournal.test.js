@@ -140,10 +140,13 @@ describe('worldJournal context builder', () => {
         const context = buildJournalContext(journal, [], 'Blackroot Cave');
 
         expect(context).toContain('## LOCATION TRANSITION HISTORY');
-        // The entry right before entering should be Entry 2 (Forest)
+        // The entry right before entering should be Entry 2 (Forest) — outside the
+        // SESSION HISTORY last-3 window, so its summary is printed in full.
         expect(context).toContain('- **Right before entering:** [Entry 2 at Forest] Traveled along the dark forest path.');
-        // The entry arriving should be Entry 3 (Blackroot Cave)
-        expect(context).toContain('- **Arrival at Blackroot Cave:** [Entry 3] Reached the mouth of Blackroot Cave.');
+        // The arrival entry (Entry 3) already renders in SESSION HISTORY above —
+        // referenced, never re-printed (2026-08-18 audit dedupe).
+        expect(context).toContain('- **Arrival at Blackroot Cave:** Entry 3 in SESSION HISTORY above.');
+        expect(context).not.toContain('- **Arrival at Blackroot Cave:** [Entry 3]');
     });
 
     it('handles transition detection with case-insensitive matching, trimming, punctuation, and leading article removal', () => {
@@ -156,8 +159,10 @@ describe('worldJournal context builder', () => {
         const context = buildJournalContext(journal, [], 'dark caverns');
 
         expect(context).toContain('## LOCATION TRANSITION HISTORY');
-        expect(context).toContain('- **Right before entering:** [Entry 1 at Garrison] Fled the guard tower.');
-        expect(context).toContain('- **Arrival at dark caverns:** [Entry 2] Entered the dark caverns.');
+        // A 3-entry journal sits entirely inside SESSION HISTORY's window, so
+        // both transition lines are references, not re-prints.
+        expect(context).toContain('- **Right before entering:** Entry 1 (at Garrison) in SESSION HISTORY above.');
+        expect(context).toContain('- **Arrival at dark caverns:** Entry 2 in SESSION HISTORY above.');
     });
 
     it('normalizeLocationName normalizes inputs correctly', () => {
@@ -176,7 +181,41 @@ describe('worldJournal context builder', () => {
 
         expect(context).toContain('## LOCATION TRANSITION HISTORY');
         expect(context).not.toContain('Right before entering');
-        expect(context).toContain('- **Arrival at Cell:** [Entry 1] Woke up in the jail cell.');
+        expect(context).toContain('- **Arrival at Cell:** Entry 1 in SESSION HISTORY above.');
+    });
+
+    it('clamps re-printed transition summaries to 300 chars (2026-08-18 audit)', () => {
+        const longSummary = `The caravan wound through the pass. ${'x'.repeat(1000)}`;
+        const journal = [
+            { summary: longSummary, location: 'Mountain Pass' }, // Entry 1 — becomes "right before"
+            { summary: longSummary, location: 'Deephold' }, // Entry 2 — arrival
+            { summary: 'Explored the underhalls.', location: 'Deephold' }, // Entry 3
+            { summary: 'Met the stone-priests.', location: 'Deephold' }, // Entry 4
+            { summary: 'Bargained for the vault key.', location: 'Deephold' }, // Entry 5
+        ];
+
+        const context = buildJournalContext(journal, [], 'Deephold');
+        const block = context.split('## LOCATION TRANSITION HISTORY')[1].split('\n## ')[0];
+
+        // Entries 1 and 2 sit outside the last-3 window, so both re-print — clamped.
+        expect(block).toContain('- **Right before entering:** [Entry 1 at Mountain Pass]');
+        expect(block).toContain('- **Arrival at Deephold:** [Entry 2]');
+        for (const line of block.split('\n').filter(l => l.startsWith('- **'))) {
+            expect(line.length).toBeLessThan(400); // 300-char summary + label overhead
+        }
+    });
+
+    it('bounds the transition scan to the recent journal instead of walking an infinite campaign', () => {
+        // The only entry matching the current location sits 40 entries back —
+        // outside the 30-entry scan window, so no transition block renders.
+        const journal = [
+            { summary: 'Long ago, visited the swamp.', location: 'Swamp' },
+            ...Array.from({ length: 40 }, (_, i) => ({ summary: `Road event ${i}.`, location: 'Road' })),
+        ];
+
+        const context = buildJournalContext(journal, [], 'Swamp');
+
+        expect(context).not.toContain('## LOCATION TRANSITION HISTORY');
     });
 
     it('handles situations where current location is not found in the journal yet', () => {

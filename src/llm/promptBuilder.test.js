@@ -572,6 +572,38 @@ describe(`spellcasting prompt contract`, () => {
     });
 });
 
+describe('DM REMINDERS threat re-injection (2026-08-18 audit)', () => {
+    const reminderBlock = text => (text.split('## DM REMINDERS — MAINTAIN THESE PRESSURES')[1] ?? '').split('\n## ')[0];
+
+    it('renders only the 6 newest threat facts, each line clamped to 200 chars', () => {
+        const worldFacts = Array.from({ length: 10 }, (_, i) => ({
+            id: `t-${i}`,
+            timestamp: i,
+            category: 'event',
+            fact: `Threat ${i}: a bounty stands on the hero. ${'x'.repeat(400)}`,
+        }));
+        const block = reminderBlock(prompt({ worldFacts }));
+        const lines = block.split('\n').filter(line => line.startsWith('- Threat'));
+        // Newest first, capped at 6 — facts 9 down to 4; 0-3 aged out of the reminders.
+        expect(lines.map(line => line.slice(0, 10).trim())).toEqual(
+            ['- Threat 9', '- Threat 8', '- Threat 7', '- Threat 6', '- Threat 5', '- Threat 4']
+        );
+        for (const line of lines) {
+            expect(line.length).toBeLessThanOrEqual('- '.length + 200);
+        }
+    });
+
+    it("no longer bills ordinary 'before the' prose facts as standing threats", () => {
+        const worldFacts = [{
+            id: 'vow',
+            timestamp: 1,
+            category: 'lore',
+            fact: 'The hero swore the lantern vow before the shrine of the drowned god.',
+        }];
+        expect(prompt({ worldFacts })).not.toContain('Active threats/pressures');
+    });
+});
+
 describe('prompt size budget (tripwire against unbounded growth)', () => {
     /** Deterministic filler that reaches exactly `len` characters. */
     function longText(seed, len) {
@@ -671,7 +703,10 @@ describe('prompt size budget (tripwire against unbounded growth)', () => {
             description: longText(`Recover the weir-deed ${i} from the tithe-barge before the spring flood, without the guild learning who paid for the job. `, 300),
         }));
 
-        const worldFacts = Array.from({ length: 18 }, (_, i) => ({
+        // 60 facts, every one threat-shaped ("hunting"/"bounty"/"deadline"), so this
+        // fixture also sweeps the DM REMINDERS threat re-injection cap: production
+        // growth in worldFacts must never re-bloat the reminders block (2026-08-18).
+        const worldFacts = Array.from({ length: 60 }, (_, i) => ({
             id: `fact-${i}`,
             timestamp: i,
             category: ['event', 'location', 'faction', 'lore'][i % 4],
@@ -807,6 +842,10 @@ describe('prompt size budget (tripwire against unbounded growth)', () => {
         expect(text).toContain('## ACTIVE COMBAT');
         expect(text).toContain('## WORLD TEMPO — PRIVATE PACING STATE');
         expect(text).toContain('## RECENT TABLE RULINGS — BINDING');
+
+        // The threat re-injection cap held: 15 fact lines render in WORLD FACTS
+        // and at most 6 (newest, clamped) in DM REMINDERS — never all 60.
+        expect((text.match(/^- Canonical truth /gm) || []).length).toBe(15 + 6);
 
         // Measured 139,035 chars on 2026-07-30. If this trips, the prompt genuinely
         // grew — investigate the new weight before even thinking about the budget.

@@ -6,7 +6,30 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-09 ×5 (three-P1 hardening batch, DECISIONS ×4: every non-streaming provider call now has an abort/retry stall guard (90s, machinery 60s, embedText 30s→null) and machinery extraction runs thinking-free with an 8k output cap; a declared weapon attack staged as a check is policy-rejected with a combat_start correction re-response; eventless narrated casts get the Scribe-audit backstop (`narrated_casts` → validated CAST_SPELL, ordinary out-of-combat turns only). Earlier today: Second Wind exchange lane + combat hero HUD, level-up resource refill, Arcane Recovery trap, pre-fight cast pairing. 1,530 tests green; deployed)._
+_Last updated: 2026-08-18 (2026-08-18 audit batch cleared same-day: journal summarize
+retry escape hatch + batch/message bounds, DM REMINDERS threat cap, transition-history
+dedupe/scan bound, first test suites for frontAftermath/regionalFronts. 1,562 tests
+green, lint clean)._
+
+## 2026-08-18 audit batch cleared same-day (1 P1 + 3 P2s, all four queue items ticked)
+
+The morning strengthening audit (prompt-building + memory-journal, closed Lap 3) found
+one P1 and three P2s; all fixed with tests the same day. **(P1) journal summarize retry
+loop** — a persistently failing batch (realistic case: Gemini safety block on re-sent
+raw narration) retried every turn forever with an unboundedly growing payload while
+unsummarized messages aged out of the DM window: now the batch is capped at 40 messages
+with a 2k per-message clamp, and 3 consecutive failures on the same batch start archive
+it behind an honest local fallback entry so the cadence always advances (raw messages
+untouched — only excluded from LLM history like any summarized stretch). **(P2s)** DM
+REMINDERS threat re-injection is bounded (newest 6, 200-char lines, `'before the'`
+keyword dropped, dead `quests` param removed) with the budget fixture swept to 60
+all-threat facts pinning 15+6 rendered lines; LOCATION TRANSITION HISTORY references
+entries already shown in SESSION HISTORY instead of re-printing them (~2-4k chars/turn
+saved right after travel), clamps re-prints to 300 chars, and bounds the scan to the
+last 30 entries; `frontAftermath.js` + `regionalFronts.js` got their first suites
+(24 tests — gating, context projection, sanitation, malformed-response paths; found
+truncated JSON degrades to an install-nothing empty list via the shared repair path,
+pinned as such). Next audit opens Lap 4 (simplification & design) on living-world.
 
 ## Codex retest of 6c8be23 processed 2026-08-09 (all priority targets PASS; 2 new P1s fixed)
 
@@ -402,9 +425,9 @@ generation + victory echo land.**
 
 ## Strengthening queue & watch items
 
-Open in SCHEDULED_STRENGTHENING.md after the 2026-08-04 fix batch: 1 P1 (scene-art
-image cache that can never hit) + 15 P2s (scene-art ×3, dice-engine ×3, hidden-fronts ×2,
-roll-resolution ×3, quests ×2, character-vault ×2). Carried watch items (need live play / Vesa's eyes):
+Open in SCHEDULED_STRENGTHENING.md after the 2026-08-18 batch: **0 P1s, 14 P2s** (oldest:
+embedText batching, model-list drift; plus the playtest-sourced location-registry /
+scribe-audit / UX items). Carried watch items (need live play / Vesa's eyes):
 stance-stutter self-clean on the Saima save (other browser profile), Scribe gender
 backfill on pre-gender campaigns, Grok art respecting the gender tag, Aune
 appearance-thinning LOOKS baseline snapshot next playtest, L1-death balance observation.

@@ -191,8 +191,8 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         parts.push(journalContext, 'journalAndNpcs');
     }
 
-    // Active constraints — synthesized DM reminders from quests, world state, threats
-    const constraints = buildActiveConstraints(quests, worldFacts, character, party);
+    // Active constraints — synthesized DM reminders from world state and threats
+    const constraints = buildActiveConstraints(worldFacts, character, party);
     if (constraints) {
         parts.push(constraints, 'dmReminders');
     }
@@ -918,19 +918,27 @@ function buildWorldFactsBlock(worldFacts) {
  * Highlights active threats, deadlines, and relationship pressures
  * so the DM can't forget them even in a long session.
  */
-function buildActiveConstraints(quests, worldFacts, character, party) {
+function buildActiveConstraints(worldFacts, character, party) {
     const reminders = [];
     // (Active quests are NOT re-listed here — the ACTIVE QUESTS block a few
     // hundred lines up already carries them; the duplicate name list was pure
     // token spend — 2026-08-04 audit.)
 
-    // Scan world facts for active threats (simple keyword detection)
-    const threatKeywords = ['hunting', 'pursuing', 'wants the player dead', 'deadline', 'before the', 'bounty', 'wanted'];
-    const threatFacts = (worldFacts || []).filter(f =>
-        threatKeywords.some(kw => String(f?.fact ?? '').toLowerCase().includes(kw))
-    );
+    // Scan world facts for active threats (simple keyword detection). The scan
+    // deliberately covers ALL facts — a threat aged out of the WORLD FACTS
+    // top-15 must stay remembered — but the rendering is bounded: newest few
+    // only, each line clamped. This was the last uncapped prompt accretion
+    // block (2026-08-18 audit; 'before the' also matched ordinary prose facts
+    // and permanently re-billed them as threats, so it was dropped).
+    const MAX_THREAT_REMINDERS = 6;
+    const THREAT_REMINDER_CHARS = 200;
+    const threatKeywords = ['hunting', 'pursuing', 'wants the player dead', 'deadline', 'bounty', 'wanted'];
+    const threatFacts = (worldFacts || [])
+        .filter(f => threatKeywords.some(kw => String(f?.fact ?? '').toLowerCase().includes(kw)))
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .slice(0, MAX_THREAT_REMINDERS);
     if (threatFacts.length > 0) {
-        reminders.push(`Active threats/pressures:\n${threatFacts.map(f => `- ${f.fact}`).join('\n')}`);
+        reminders.push(`Active threats/pressures:\n${threatFacts.map(f => `- ${String(f.fact).slice(0, THREAT_REMINDER_CHARS)}`).join('\n')}`);
     }
 
     // Character death reminder

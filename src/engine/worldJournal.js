@@ -30,6 +30,28 @@ export function normalizeLocationName(loc) {
 
 const SUMMARIZE_EVERY = 10; // Summarize every N new messages
 
+// A stalled cadence must not grow its payload without bound: one summarize call
+// covers at most MAX_BATCH_MESSAGES (a backlog drains cap-by-cap across turns),
+// and one bloated message cannot dominate the payload (MAX_MESSAGE_CHARS).
+const MAX_BATCH_MESSAGES = 40;
+const MAX_MESSAGE_CHARS = 2000;
+// Escape hatch for a poison batch (realistic case: a provider safety block on
+// re-sent raw narration). Without it the same failing batch retries on EVERY
+// turn forever — recurring per-turn cost — while messages past the DM's window
+// age out unsummarized: permanent memory rot (2026-08-18 audit P1). After this
+// many consecutive failures on the same batch start, the batch is archived
+// behind a local fallback entry so the cadence always eventually advances.
+const MAX_BATCH_FAILURES = 3;
+
+let failedBatchKey = '';
+let failedBatchFailures = 0;
+
+/** Test hook: module-level failure state must not leak between tests. */
+export function resetSummarizeFailureTracker() {
+    failedBatchKey = '';
+    failedBatchFailures = 0;
+}
+
 const clampText = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
 const toStringList = (value, maxItems, maxLen) => (Array.isArray(value) ? value : [])
@@ -116,18 +138,59 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
     const background = getBackgroundConfig(state.settings);
     if (!background.apiKey) return { index: lastSummarizedIndex, journalEntry: null };
 
+    const batchEnd = Math.min(messageCount, lastSummarizedIndex + MAX_BATCH_MESSAGES);
+    const batchKey = `${state.session?.id || 'campaign'}:${lastSummarizedIndex}`;
+
+    // A parse failure, an unusable summary, or a rejected call all land here.
+    // Below the threshold the batch simply retries next cadence (transient
+    // failures stay cheap); at the threshold the batch is archived behind an
+    // honest local fallback entry so the cadence advances and the per-turn
+    // retry cost stops. The raw messages are never deleted — only excluded
+    // from future LLM history like any summarized stretch.
+    const recordFailure = () => {
+        if (failedBatchKey !== batchKey) {
+            failedBatchKey = batchKey;
+            failedBatchFailures = 0;
+        }
+        failedBatchFailures += 1;
+        if (failedBatchFailures < MAX_BATCH_FAILURES) {
+            return { index: lastSummarizedIndex, journalEntry: null }; // retry next cadence
+        }
+        resetSummarizeFailureTracker();
+        const journalEntry = {
+            id: `journal-${Date.now()}`,
+            timestamp: Date.now(),
+            summary: `(Auto-summary was unavailable for a stretch of ${batchEnd - lastSummarizedIndex} messages${state.currentLocation ? ` around ${state.currentLocation}` : ''}; the events of that stretch are archived without a summary.)`,
+            keyDecisions: [],
+            consequences: [],
+            messageRange: [lastSummarizedIndex, batchEnd],
+            location: state.currentLocation || null,
+            fallback: true,
+        };
+        dispatch({ type: 'ADD_JOURNAL_ENTRY', payload: journalEntry });
+        dispatch({ type: 'MARK_MESSAGES_SUMMARIZED', payload: batchEnd });
+        console.warn(`[Journal] Gave up on messages ${lastSummarizedIndex}–${batchEnd} after ${MAX_BATCH_FAILURES} failed summarize attempts — archived behind a fallback entry`);
+        return { index: batchEnd, journalEntry };
+    };
+
     try {
-        // Get the unsummarized messages
-        const messagesToSummarize = state.messages.slice(lastSummarizedIndex, messageCount);
+        // Get the unsummarized messages (bounded batch, per-message clamp)
+        const messagesToSummarize = state.messages.slice(lastSummarizedIndex, batchEnd);
         const recentMessages = messagesToSummarize
             .filter(m => !m.hidden)
-            .map(m => `[${m.role.toUpperCase()}]: ${m.content}`)
+            .map(m => `[${m.role.toUpperCase()}]: ${clampText(m.content, MAX_MESSAGE_CHARS)}`)
             .join('\n\n');
 
         // An all-hidden batch (e.g. withheld roll-setup narration) would send the LLM
         // an empty transcript and risk a hallucinated summary being written into the
         // journal permanently. Wait for visible messages; the batch retries next turn.
+        // With more messages waiting past the cap, advance instead: there is nothing
+        // visible in this stretch to record, and deferring would stall the backlog.
         if (!recentMessages.trim()) {
+            if (batchEnd < messageCount) {
+                dispatch({ type: 'MARK_MESSAGES_SUMMARIZED', payload: batchEnd });
+                return { index: batchEnd, journalEntry: null };
+            }
             console.warn('[Journal] Batch contains no visible messages — deferring summarization');
             return { index: lastSummarizedIndex, journalEntry: null };
         }
@@ -147,15 +210,17 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         // conversational prose ("Here is the summary:") and would misanchor.
         const summary = parseJsonObjectLoose(response, ['"summary"', '"npcs_encountered"']);
         if (!summary) {
-            console.warn('[Journal] Could not parse summary response — messages NOT marked as summarized');
-            return { index: lastSummarizedIndex, journalEntry: null }; // Don't advance — retry next time
+            console.warn('[Journal] Could not parse summary response');
+            return recordFailure();
         }
 
         const normalized = normalizeJournalSummary(summary);
         if (!normalized) {
-            console.warn('[Journal] Summary carried no usable text — messages NOT marked as summarized');
-            return { index: lastSummarizedIndex, journalEntry: null }; // Don't advance — retry next time
+            console.warn('[Journal] Summary carried no usable text');
+            return recordFailure();
         }
+
+        resetSummarizeFailureTracker();
 
         const journalId = `journal-${Date.now()}`;
         const journalTimestamp = Date.now();
@@ -165,7 +230,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             summary: normalized.summary,
             keyDecisions: normalized.keyDecisions,
             consequences: normalized.consequences,
-            messageRange: [lastSummarizedIndex, messageCount],
+            messageRange: [lastSummarizedIndex, batchEnd],
             location: normalized.location || state.currentLocation || null,
         };
 
@@ -231,7 +296,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         }
 
         // Mark these messages as summarized — they will be excluded from future LLM history
-        dispatch({ type: 'MARK_MESSAGES_SUMMARIZED', payload: messageCount });
+        dispatch({ type: 'MARK_MESSAGES_SUMMARIZED', payload: batchEnd });
 
         // Cadenced private reflection: keep NPC intent, relationship pressure, hidden
         // front symptoms, and future callback hooks alive without adding per-turn cost.
@@ -239,19 +304,19 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             state,
             dispatch,
             cadence: {
-                id: `journal-${state.session?.id || 'campaign'}-${messageCount}`,
-                journalEnd: messageCount,
+                id: `journal-${state.session?.id || 'campaign'}-${batchEnd}`,
+                journalEnd: batchEnd,
                 summary: normalized.summary,
                 keyDecisions: normalized.keyDecisions,
                 consequences: normalized.consequences,
             },
         }).catch(() => {});
 
-        console.log(`[Journal] Summarized messages ${lastSummarizedIndex}–${messageCount}, extracted ${summary.world_facts?.length || 0} world facts`);
-        return { index: messageCount, journalEntry };
+        console.log(`[Journal] Summarized messages ${lastSummarizedIndex}–${batchEnd}, extracted ${summary.world_facts?.length || 0} world facts`);
+        return { index: batchEnd, journalEntry };
     } catch (e) {
         console.warn('[Journal] Auto-summarize failed:', e);
-        return { index: lastSummarizedIndex, journalEntry: null };
+        return recordFailure();
     }
 }
 
@@ -281,12 +346,21 @@ export function buildJournalContext(journal, npcs, currentLocation) {
         parts.push(`\n## SESSION HISTORY (what has happened so far)\n${entrySummaries}`);
     }
 
-    // Location transition history ledger
+    // Location transition history ledger. Bounded (2026-08-18 audit): the
+    // backward scan covers only the recent journal — an infinite campaign must
+    // not pay O(whole journal) regex work per prompt build when the current
+    // location matches nothing — and an entry already visible in the SESSION
+    // HISTORY last-3 window above is referenced, not re-printed (right after
+    // travel the arrival entry IS one of the last 3, so re-printing duplicated
+    // ~2-4k chars every turn). Re-printed summaries are clamped.
+    const TRANSITION_SCAN_ENTRIES = 30;
+    const TRANSITION_SUMMARY_CHARS = 300;
     const normCurrentLoc = normalizeLocationName(currentLocation);
     if (normCurrentLoc && journal.length > 0) {
+        const scanFloor = Math.max(0, journal.length - TRANSITION_SCAN_ENTRIES);
         let transitionIdx = -1;
         let i = journal.length - 1;
-        while (i >= 0) {
+        while (i >= scanFloor) {
             const entryLoc = normalizeLocationName(journal[i].location);
             if (entryLoc === normCurrentLoc) {
                 transitionIdx = i;
@@ -299,17 +373,20 @@ export function buildJournalContext(journal, npcs, currentLocation) {
         }
 
         if (transitionIdx !== -1) {
+            const shownFloor = journal.length - Math.min(journal.length, 3); // SESSION HISTORY's window
             const arrivalEntry = journal[transitionIdx];
             const prevEntry = transitionIdx > 0 ? journal[transitionIdx - 1] : null;
             const lines = [];
             if (prevEntry) {
-                let prevText = `[Entry ${transitionIdx}] ${prevEntry.summary}`;
-                if (prevEntry.location) {
-                    prevText = `[Entry ${transitionIdx} at ${prevEntry.location}] ${prevEntry.summary}`;
-                }
-                lines.push(`- **Right before entering:** ${prevText}`);
+                const prevIdx = transitionIdx - 1;
+                const at = prevEntry.location ? ` at ${prevEntry.location}` : '';
+                lines.push(prevIdx >= shownFloor
+                    ? `- **Right before entering:** Entry ${prevIdx + 1}${at ? ` (${at.trim()})` : ''} in SESSION HISTORY above.`
+                    : `- **Right before entering:** [Entry ${prevIdx + 1}${at}] ${clampText(prevEntry.summary, TRANSITION_SUMMARY_CHARS)}`);
             }
-            lines.push(`- **Arrival at ${currentLocation}:** [Entry ${transitionIdx + 1}] ${arrivalEntry.summary}`);
+            lines.push(transitionIdx >= shownFloor
+                ? `- **Arrival at ${currentLocation}:** Entry ${transitionIdx + 1} in SESSION HISTORY above.`
+                : `- **Arrival at ${currentLocation}:** [Entry ${transitionIdx + 1}] ${clampText(arrivalEntry.summary, TRANSITION_SUMMARY_CHARS)}`);
             parts.push(`\n## LOCATION TRANSITION HISTORY\n${lines.join('\n')}`);
         }
     }
