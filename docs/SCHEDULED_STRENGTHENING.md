@@ -46,13 +46,14 @@ it under Process notes.
 | rules-math | `engine/rules.js` | 2026-08-05 |
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-08-08 |
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-08-05 |
-| prompt-building | `llm/promptBuilder.js` | 2026-07-29 |
+| prompt-building | `llm/promptBuilder.js` | 2026-08-18 |
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-08-03 |
 | combat-exchange | `engine/combatExchange.js`, `engine/combatMath.js`, `state/handlers/combat.js`, opening initiative | 2026-08-03 |
 | enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-08-05 |
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-08-02 |
+| living-world | `engine/regionalHearsay.js`, `llm/absenceDrift.js`, `llm/frontAftermath.js`, `llm/regionalFronts.js` | never |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-08-02 |
-| memory-journal | `engine/worldJournal.js` | 2026-07-30 |
+| memory-journal | `engine/worldJournal.js` | 2026-08-18 |
 | story-memory | `engine/storyMemory.js` | 2026-08-06 |
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-08-06 |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-04 |
@@ -70,31 +71,32 @@ Refreshed by the audit **at most weekly** (when older than 7 days), via:
 `npm.cmd install --no-save @vitest/coverage-v8 && npx.cmd vitest run --coverage --coverage.all --coverage.include='src/**/*.{js,jsx,ts}'`
 Used only to bias feature picking toward weak spots; per-file statement % for registry files.
 
-**2026-08-04** (1300 tests / 76 files passing). % Statements per registry file:
+**2026-08-18** (1530 tests / 84 files passing). % Statements per registry file:
 
 | Feature ID | File | % Stmts |
 |---|---|---|
-| dice-engine | `engine/dice.ts` | absent from this v8 report (tooling quirk — same class as currency.js; its own `dice.test.ts` suite passes) |
-| rules-math | `engine/rules.js` | 92.41 |
+| dice-engine | `engine/dice.ts` | 100 (present again in this v8 report) |
+| rules-math | `engine/rules.js` | 93.83 |
 | progression | `engine/progression.js` | 100 |
-| response-parsing | `responseParser.js` / `jsonExtractor.js` | 94.68 / 95.06 |
-| prompt-building | `promptBuilder.js` | 97.43 |
-| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 81.35 / 100 |
-| combat-exchange | `combatExchange.js` / `combatMath.js` | 84.35 / 91.22 |
-| enemy-stats-conditions | `enemyStats.js` | 97.40 |
-| hidden-fronts | `fronts.js` / `frontDirector.js` / `frontUpgrade.js` / `worldTempo.js` | 90.75 / 90.69 / 87.93 / 97.88 |
-| scribe | `scribe.js` | 83.85 |
+| response-parsing | `responseParser.js` / `jsonExtractor.js` | 97.97 / absent from this v8 report (tooling quirk — same class as currency.js; its own suite passes) |
+| prompt-building | `promptBuilder.js` | 97.64 |
+| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 81.30 / 100 |
+| combat-exchange | `combatExchange.js` / `combatMath.js` | 84.63 / 90.56 |
+| enemy-stats-conditions | `enemyStats.js` | 97.36 |
+| hidden-fronts | `fronts.js` / `frontDirector.js` / `frontUpgrade.js` / `worldTempo.js` | 90.75 / 90.69 / 87.93 / 98.10 |
+| living-world | `regionalHearsay.js` / `absenceDrift.js` / `frontAftermath.js` / `regionalFronts.js` | 94.28 / 79.41 / **0** / **0** (the two 0% llm modules have no test file at all) |
+| scribe | `scribe.js` | 84.75 |
 | memory-journal | `worldJournal.js` | 100 |
-| story-memory | `storyMemory.js` | 97.70 |
-| vector-memory-rag | `vectorMemory.js` | 96.69 |
-| persistence | `persistence.js` | 86.58 (`GameContext.jsx` 0 — the whole autosave orchestration is untested) |
-| cloud-sync | `cloudSync.js` / `auth.js` | 96.26 / 0 (auth.js untested — thin Firebase wrapper) |
-| character-vault | `characterVault.js` / `characterUtils.js` | 88.75 / 96.20 |
-| inventory-economy | `items.js` / `equipment.js` / `handlers/inventory.js` | 98.36 / 100 / 74.21 (currency.js absent from v8 report — tooling quirk, has its own passing test file) |
-| quests | `state/handlers/quests.js` (direct file since the 2026-07-31 handlers split) | 92.30 |
-| scene-art | `imageGen.js` | 88.28 |
-| providers-adapter | `adapter.js` / `gemini.js` / `openaiCompatible.js` | 100 / 91.26 / 98.33 (openai.js / xai.js absent from v8 report — same quirk; both have passing test files) |
-| chat-orchestration | `ChatPanel.jsx` / `turnOrchestrator.js` | 0 / 59.24 (turnOrchestrator extracted 2026-07-31; the DOM-free pipeline is only part-covered) |
+| story-memory | `storyMemory.js` | 96.95 |
+| vector-memory-rag | `vectorMemory.js` | 95.00 |
+| persistence | `persistence.js` | 86.06 (`GameContext.jsx` 0; `autosavePolicy.js` absent from this v8 report — quirk, has its own passing suite) |
+| cloud-sync | `cloudSync.js` / `auth.js` | 96.22 / 0 (auth.js untested — thin Firebase wrapper) |
+| character-vault | `characterVault.js` / `characterUtils.js` | 88.75 / 96.25 |
+| inventory-economy | `items.js` / `equipment.js` / `handlers/inventory.js` | 98.63 / 100 / 92.56 (currency.js absent from v8 report — tooling quirk, has its own passing test file) |
+| quests | `state/handlers/quests.js` | 100 |
+| scene-art | `imageGen.js` | 88.88 |
+| providers-adapter | `adapter.js` / `gemini.js` / `openaiCompatible.js` | 98.18 / 91.26 / 98.33 (openai.js / xai.js absent from v8 report — same quirk; both have passing test files) |
+| chat-orchestration | `ChatPanel.jsx` / `turnOrchestrator.js` | 0 / 62.27 |
 
 ## Open Findings Queue
 
@@ -292,6 +294,10 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P1** (spellcasting/scribe-audit, 2026-08-09, Codex retest of 6c8be23): a narrated out-of-combat cast with NO `spell_cast` event is mechanically nonexistent — "I cast Mage Armor" + trial release got full ward narration but no slot spend and AC stayed 12 through the whole fight. Prompt-side pairing rule shipped 2026-08-09 (spell_cast alongside combat_start is now explicitly required for pre-fight casts, and the applyEvents ordering that applies the cast before initiative is pinned by test), but there is still no engine backstop when the DM narrates a cast eventlessly. Design sketch: a Scribe-audit sibling (`narrated_casts`, observation-only like the loot audit) or an engine pre-cast on explicit player "I cast <known spell>" declarations (tableTalk-style deterministic detection). CAUTION for the pre-cast route: `CAST_SPELL`'s nearby-replay guard deliberately lets a cast through when the player's own message names the spell (`playerMessageRecastsSpell`), so a same-turn DM echo of a pre-applied cast would double-spend the slot — the guard needs a same-turn exemption first — `llm/scribe.js`, `state/handlers/spellcasting.js:81`. (Codex `PLAYTEST_REPORT.md` 2026-08-09.) *Fixed 2026-08-09 via the Scribe-audit route (the pre-cast caveat never arises: audits carry no playerMessage, so the recast bypass stays closed): `narrated_casts` rides the ordinary-turn loot audit for out-of-combat casters only (`auditCasts` flag — victory narration and mid-combat prose never reach it), the Scribe sees HERO'S KNOWN SPELLS + ENGINE CASTS ALREADY APPLIED, and `reconcileNarratedCasts` pre-validates via `resolveSpellForCharacter` before dispatching CAST_SPELL with an audit sourceId — the reducer stays the single authority (slot spend, healing roll, its own "casts X" line, exact + nearby replay ledgers). Boundary: a cast narrated ONLY in the fight-starting response still relies on the prompt pairing rule, since mid-combat CAST_SPELL is exchange territory by design. 5 tests.*
 - [ ] **P2** (combat-exchange/spellcasting, 2026-08-09, Codex retest of 6c8be23): Magic Missile ignores a declared legal dart split — "splitting the darts between the two remaining Spark Wisps" spent the slot, dumped all 9 damage into one wisp, and the narration invented a magnetic pull to justify overriding the player's targeting. The exchange cast contract has one target per cast slot; Magic Missile (and upcast variants) needs per-dart targets or a deterministic split when the player declares one — `engine/combatExchange.js`, `data/spells.js` (magicMissile `targeting.mode`), combat prompt. (Codex `PLAYTEST_REPORT.md` 2026-08-09.)
 - [ ] **P2** (npc-consistency, 2026-08-09, Codex retest of 6c8be23): an NPC introduced as "a tall, gaunt woman" flipped to he/his in the first post-defeat response and stayed masculine, with the she/her introduction still inside the visible message window — pure DM attention slip, no disguise/ambiguity. KNOWN NPCs header now names gender/pronouns as never-changing (2026-08-09); watch whether the flip recurs, and if it does, consider a Scribe-audit pronoun check against the registered roster gender — `engine/worldJournal.js` KNOWN NPCs header, `llm/scribe.js`. (Codex `PLAYTEST_REPORT.md` 2026-08-09.)
+- [ ] **P1** (memory-journal, 2026-08-18): the summarization retry loop has no escape hatch — a persistently failing batch (realistic case: Gemini safety block on explicit narration; the journal re-sends raw messages) retries EVERY turn with the same poison content in a batch that grows without bound (no per-message clamp, no batch cap, no failure backoff), while messages past the DM's 20-message window age out unsummarized — per-turn machinery cost plus permanent memory rot. Add a consecutive-failure counter that chunks or advances past the oldest sub-batch, cap the batch, clamp per-message content, and pin with a payload test — `engine/worldJournal.js:110-157,252-255`.
+- [ ] **P2** (prompt-building, 2026-08-18): `buildActiveConstraints` threat re-injection is the last uncapped prompt accretion block — scans ALL worldFacts (bypassing MAX_PROMPT_WORLD_FACTS), re-injects every keyword-matching fact verbatim (400 chars each, duplicating the WORLD FACTS block) with no count cap, and `'before the'` matches ordinary prose facts; cap ~6, clamp rendered lines, tighten the keyword, drop the dead `quests` param — `llm/promptBuilder.js:921,927-934`.
+- [ ] **P2** (memory-journal, 2026-08-18): LOCATION TRANSITION HISTORY re-injects up to two full 2000-char entry summaries that usually already sit in the last-3 SESSION HISTORY window (arrival is recent right after travel), and the transition scan walks the entire journal with 4 regex ops per entry when the current location matches nothing; skip already-shown entries, clamp to ~300 chars, bound the scan — `engine/worldJournal.js:286-313`.
+- [ ] **P2** (living-world, 2026-08-18): `llm/frontAftermath.js` and `llm/regionalFronts.js` have zero test coverage and no test file at all — the only living-world llm modules without one (absenceDrift/regionalHearsay both have suites); their malformed-response, validation-failure, and one-shot-marker paths are unpinned. Surfaced while adding the living-world registry row; first candidate for the Lap 4 opener — `llm/frontAftermath.js`, `llm/regionalFronts.js`.
 
 ## Entry template
 
@@ -315,6 +321,31 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-18 — prompt-building + memory-journal (Lap 3: performance & token budget — closes Lap 3)
+
+`npm test`: 1530 passing / 84 files
+
+### prompt-building
+- **Scope examined:** `llm/promptBuilder.js` (857 lines, end to end), `promptBuilder.test.js` stable-prefix + budget-tripwire suites, coverage report (97.64% stmts; only the dev size-log lines 227-232 uncovered).
+- **Findings:** This feature is in strong Lap-3 shape — the byte-stable cache prefix is pinned by test (`:56-72`), the PROMPT_CHAR_BUDGET tripwire models a genuinely maxed campaign, and the 08-04/08-05 caps (quests 12, carried items 25, facts 15, NPCs 8) all held under re-reading. Two residues:
+  - **P2**: `buildActiveConstraints` threat re-injection is now the LAST uncapped accretion block — it scans **ALL** `worldFacts` (bypassing `MAX_PROMPT_WORLD_FACTS`), re-injects every keyword-matching fact verbatim (up to 400 chars each) into DM REMINDERS with **no count cap**, duplicating facts already rendered in the WORLD FACTS block above it; and the keyword `'before the'` is broad enough to match ordinary prose facts ("swore the vow before the shrine"), so mundane facts get permanently re-billed every turn as "Active threats/pressures" — `llm/promptBuilder.js:927-934`. The budget fixture models only 18 facts (all threat-matching, so the weight is partially counted), but production growth is unbounded.
+  - **P2**: `buildActiveConstraints(quests, …)` — the `quests` parameter is dead since the 08-04 duplicate-reminder removal; the body never reads it — `llm/promptBuilder.js:921`.
+- **Suggested improvements:** (1) cap threat reminders (~6 newest), clamp each rendered line (~200 chars), and either scope the scan to the shown top-15 facts or keep the resurrection-of-aged-out-facts behavior deliberately but bounded; (2) tighten `'before the'` to deadline-shaped phrases or drop it; (3) remove the dead param; (4) after capping, extend the budget test with a 60-fact all-threat sweep so the cap is pinned.
+
+### memory-journal
+- **Scope examined:** `engine/worldJournal.js` (335 lines, end to end), `worldJournal.test.js` + `worldJournal.summarize.test.js`, flow into `buildSystemPrompt` and the cadence reflection. Coverage 100% stmts.
+- **Findings:**
+  - **P1**: the summarization retry loop has **no escape hatch and an unbounded batch**. A batch that persistently fails — the realistic case is a Gemini safety block on explicit narration (the exact failure class DECISIONS.md 2026-07-15 documents for machinery calls; the journal re-sends RAW player/DM messages, which the clinical-register fix deliberately does not launder) — is retried on EVERY turn once past the 10-message threshold: the same poison content re-sent forever plus ~2 new messages per turn (no per-message clamp, no batch cap, no failure counter/backoff), a full Flash call per turn, `sendMessage`'s adapter retries ×2 inside each. Meanwhile messages beyond the DM's 20-message window age out unsummarized — permanent memory rot with recurring per-turn cost, the quiet-campaign-rot failure the mandatory-machinery-key rule exists to prevent — `engine/worldJournal.js:110-157,252-255`.
+  - **P2**: `LOCATION TRANSITION HISTORY` re-injects up to two FULL entry summaries (2000-char clamp each) that usually already sit verbatim in the last-3 SESSION HISTORY window — right after travel (the common case) the arrival entry IS one of the last 3, so ~2-4k chars are duplicated every turn while the hero stays there — `engine/worldJournal.js:301-313`.
+  - **P2**: the transition scan walks the ENTIRE journal backwards with 4 regex ops per entry (`normalizeLocationName`) whenever the current location matches no entry — O(n) per prompt build on an infinite campaign; bound it (~last 30 entries) — `engine/worldJournal.js:286-299`.
+  - **P2**: no payload/size test on the summarize call (the 08-02 reflection payload-test pattern) — the batch-growth mode above is unpinned; nothing asserts what a stalled 100-message batch sends.
+- **Suggested improvements:** (1) consecutive-failure counter: after K failures on the same batch start, summarize a bounded oldest chunk (or advance past it with a fallback local entry) so the cadence always eventually advances; (2) cap the batch (~40 messages) and clamp per-message content (~2k) at the join; (3) skip transition-history entries already shown in SESSION HISTORY, clamp the rest to ~300 chars, bound the scan; (4) add the payload test.
+
+### Process notes
+- **Lap 3 is complete** — every registry feature has now had the performance/token-budget pass. Next run opens **Lap 4: simplification & design**.
+- Registry amended: added **living-world** (`regionalHearsay.js`, `absenceDrift.js`, `frontAftermath.js`, `regionalFronts.js`) — shipped 2026-08-03..08-06, never audited as a feature, and `frontAftermath.js` + `regionalFronts.js` sit at **0% coverage with no test file at all** (every sibling llm living-world module has one). Never-audited features get first pick under the rotation rule, so Lap 4 starts there.
+- Spot-verified oldest open queue items (2026-08-08 batch): embedText batching and model-list drift both still open (`gpt-4o-mini` still recommended, no `batchEmbedContents`); nothing checked off this run.
 
 ## 2026-08-08 — progression + providers-adapter (Lap 3: performance & token budget)
 
