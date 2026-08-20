@@ -15,6 +15,7 @@
 
 import {
     embedText,
+    embedTexts,
     GEMINI_EMBED_DIMENSIONS,
     GEMINI_EMBED_SCHEMA,
 } from '../llm/providers/gemini.js';
@@ -196,6 +197,13 @@ export async function addMemory(apiKey, text, category = 'general', location = n
         return;
     }
 
+    storeMemoryEntry({ text, vector, category, location });
+    enforceCampaignCap();
+}
+
+/** Store one already-embedded entry (dedupe + persist) — shared by addMemory and the batch seed. */
+function storeMemoryEntry({ text, vector, category = 'general', location = null }) {
+    if (memoryStore.some(m => m.text === text)) return;
     const entry = {
         // Campaign key — rows are persisted per campaign so a switch loads its own
         // cache instead of wiping everything. An entry added before any seed set a
@@ -213,7 +221,6 @@ export async function addMemory(apiKey, text, category = 'general', location = n
     };
     memoryStore.push(entry);
     if (activeSessionId != null) persistEmbedding(entry); // fire-and-forget to IndexedDB
-    enforceCampaignCap();
 }
 
 /**
@@ -252,16 +259,25 @@ export async function seedMemories(apiKey, items, sessionId = null) {
         console.log(`[VectorMemory] Loaded ${persisted.length} cached embeddings for this campaign`);
     }
 
-    // Embed only items not already cached
+    // Embed only items not already cached. One batchEmbedContents round trip
+    // per 100 items (2026-08-08 audit: the old 5-wide per-item fan-out cost a
+    // cold device ~300 sequential trips before RAG was warm); a failed vector
+    // skips its item exactly like the per-item path, and the next mount's seed
+    // retries whatever the cache is still missing.
     const existingTexts = new Set(persisted.map(m => m.text));
-    const newItems = (items || []).filter(item => !existingTexts.has(item.text));
+    const newItems = (items || [])
+        .filter(item => typeof item?.text === 'string' && item.text.trim())
+        .filter(item => !existingTexts.has(item.text));
     if (newItems.length > 0) {
         if (persisted.length > 0) console.log(`[VectorMemory] Embedding ${newItems.length} new items not in cache`);
-        const BATCH = 5;
-        for (let i = 0; i < newItems.length; i += BATCH) {
-            const batch = newItems.slice(i, i + BATCH);
-            await Promise.all(batch.map(item => addMemory(apiKey, item.text, item.category, item.location)));
-        }
+        const vectors = await embedTexts(apiKey, newItems.map(item => item.text), { inputType: 'document' });
+        newItems.forEach((item, i) => {
+            if (vectors?.[i]) {
+                storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location });
+            } else {
+                console.error('[VectorMemory] Embedding failed for:', item.text.slice(0, 80));
+            }
+        });
     }
     if (persisted.length === 0) {
         console.log(`[VectorMemory] Seeded ${memoryStore.length} memories (fresh embeddings)`);

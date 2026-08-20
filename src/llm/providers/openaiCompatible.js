@@ -50,9 +50,13 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
  * @param {string} options.baseUrl - Full chat-completions endpoint URL.
  * @param {function} [options.mapApiKey] - Optional key normalizer applied before the
  *   Authorization header (e.g. xAI's mandatory `xai-` prefix repair).
+ * @param {string} [options.maxTokensParam] - Wire name of the output-cap field.
+ *   OpenAI deprecated `max_tokens` in favor of `max_completion_tokens` (post-4o
+ *   models 400 on the old name), while xAI still speaks `max_tokens` — the one
+ *   request-shape divergence between the two (2026-08-08 audit).
  * @returns {{ send: function, stream: function }}
  */
-export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key }) {
+export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens' }) {
     async function httpError(response) {
         const error = await response.json().catch(() => ({}));
         // The string fallback covers xAI's occasional string-shaped error bodies
@@ -75,7 +79,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
                 model,
                 messages: formatMessages(systemPrompt, messageHistory, userMessage),
                 temperature: temperature ?? 0.9,
-                max_tokens: Number.isFinite(maxOutputTokens) ? maxOutputTokens : MAX_TOKENS,
+                [maxTokensParam]: Number.isFinite(maxOutputTokens) ? maxOutputTokens : MAX_TOKENS,
             }),
             signal,
         });
@@ -105,7 +109,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
                 model,
                 messages: formatMessages(systemPrompt, messageHistory, userMessage),
                 temperature: temperature ?? 0.9,
-                max_tokens: MAX_TOKENS,
+                [maxTokensParam]: MAX_TOKENS,
                 stream: true,
             }),
             signal,

@@ -48,6 +48,11 @@ describe('sendXaiMessage', () => {
         const [url, options] = fetchMock.mock.calls[0];
         expect(url).toBe('https://api.x.ai/v1/chat/completions');
         expect(options.headers.Authorization).toBe('Bearer xai-test');
+        // xAI still speaks legacy max_tokens — the one request-shape divergence
+        // from OpenAI's max_completion_tokens (see openai.test.js).
+        const body = JSON.parse(options.body);
+        expect(body.max_tokens).toBe(16384);
+        expect(body.max_completion_tokens).toBeUndefined();
     });
 
     it('normalizes a pasted bare key with the required xai- prefix', async () => {

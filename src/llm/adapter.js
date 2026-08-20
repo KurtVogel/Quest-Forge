@@ -126,15 +126,18 @@ export const PROVIDERS = {
         models: [
             { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Latest!)', description: 'Most capable model, released Feb 2026' },
             { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', description: 'Fast frontier-class, great value' },
-            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Fast, smart, very affordable' },
+            { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', description: 'Cheapest current-gen — the same model the background machinery runs on' },
+            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Previous gen, fast and affordable' },
             { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Previous gen pro model' },
         ],
     },
     openai: {
         name: 'OpenAI',
         models: [
-            { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Recommended)', description: 'Fast and affordable' },
-            { id: 'gpt-4o', name: 'GPT-4o', description: 'Highest quality' },
+            { id: 'gpt-5-mini', name: 'GPT-5 Mini (Recommended)', description: 'Fast, affordable current-gen' },
+            { id: 'gpt-5', name: 'GPT-5', description: 'Highest quality' },
+            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Previous gen, budget legacy option' },
+            { id: 'gpt-4o', name: 'GPT-4o', description: 'Previous gen' },
         ],
     },
     // DM narration only — the memory machinery (RAG, Scribe & co.) always runs

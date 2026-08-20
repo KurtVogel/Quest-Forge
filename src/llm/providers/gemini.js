@@ -186,6 +186,66 @@ export async function embedText(apiKey, text, { inputType = 'document' } = {}) {
 }
 
 /**
+ * Batch variant of embedText: batchEmbedContents embeds up to 100 texts per
+ * round trip (2026-08-08 audit: the per-item seed path cost a cold device
+ * ~300 sequential trips before RAG was warm). Chunks internally, so callers
+ * may pass any length. Returns an array aligned with `texts` — number[] per
+ * success, null per empty/failed slot; a wholesale HTTP failure nulls that
+ * chunk so callers skip those items exactly like the per-item path (the next
+ * mount's seed retries whatever the cache is still missing).
+ */
+export async function embedTexts(apiKey, texts, { inputType = 'document' } = {}) {
+    const list = Array.isArray(texts) ? texts : [];
+    const results = new Array(list.length).fill(null);
+    if (!apiKey || list.length === 0) return results;
+    const sendable = [];
+    list.forEach((text, index) => {
+        if (String(text || '').trim()) sendable.push({ index, text });
+    });
+
+    const url = `${GEMINI_EMBED_BASE}/${GEMINI_EMBED_MODEL}:batchEmbedContents`;
+    const BATCH_LIMIT = 100; // the API's per-call request ceiling
+    for (let start = 0; start < sendable.length; start += BATCH_LIMIT) {
+        const chunk = sendable.slice(start, start + BATCH_LIMIT);
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+                body: JSON.stringify({
+                    requests: chunk.map(({ text }) => ({
+                        model: `models/${GEMINI_EMBED_MODEL}`,
+                        content: { parts: [{ text: formatEmbeddingInput(text, inputType) }] },
+                        output_dimensionality: GEMINI_EMBED_DIMENSIONS,
+                    })),
+                }),
+                // Seeding runs in the background at mount — a stalled batch must
+                // fail into nulls (skip + retry next mount), never hang the seed.
+                signal: AbortSignal.timeout(60_000),
+            });
+            if (!response.ok) {
+                const body = await response.text().catch(() => '');
+                console.error(
+                    `[Gemini embed] Batch HTTP ${response.status} ${response.statusText} from ${GEMINI_EMBED_MODEL}:`,
+                    body.slice(0, 500),
+                );
+                continue;
+            }
+            const data = await response.json();
+            const embeddings = Array.isArray(data.embeddings) ? data.embeddings : [];
+            chunk.forEach(({ index }, j) => {
+                const values = embeddings[j]?.values;
+                if (Array.isArray(values) && values.length === GEMINI_EMBED_DIMENSIONS) {
+                    results[index] = values;
+                }
+            });
+        } catch (err) {
+            console.error('[Gemini embed] Batch request failed:', err);
+        }
+    }
+    return results;
+}
+
+/**
  * Stream a message from Gemini.
  */
 export async function streamGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature }) {

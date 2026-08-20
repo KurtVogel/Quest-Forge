@@ -8,6 +8,8 @@ import { makeOpenAICompatProvider } from './openaiCompatible.js';
 const { send, stream } = makeOpenAICompatProvider({
     label: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1/chat/completions',
+    // OpenAI's current field name; post-4o models reject legacy max_tokens.
+    maxTokensParam: 'max_completion_tokens',
 });
 
 /** Send a non-streaming message to OpenAI. */

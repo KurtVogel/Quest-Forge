@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { embedText, GEMINI_EMBED_DIMENSIONS, sendGeminiMessage, streamGeminiMessage } from './gemini.js';
+import { embedText, embedTexts, GEMINI_EMBED_DIMENSIONS, sendGeminiMessage, streamGeminiMessage } from './gemini.js';
 
 function jsonResponse(payload, { ok = true, status = 200, statusText = 'OK' } = {}) {
     return { ok, status, statusText, json: async () => payload };
@@ -82,6 +82,69 @@ describe('Gemini embedding provider', () => {
             expect.stringContaining('Expected 768 values from gemini-embedding-2'),
             expect.any(Object),
         );
+    });
+});
+
+describe('embedTexts — batchEmbedContents (2026-08-08 audit)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    const batchResponse = (count) => ({
+        ok: true,
+        json: async () => ({
+            embeddings: Array.from({ length: count }, () => ({
+                values: Array.from({ length: GEMINI_EMBED_DIMENSIONS }, (_, i) => i / GEMINI_EMBED_DIMENSIONS),
+            })),
+        }),
+    });
+
+    it('embeds many texts through one batch call with per-request document formatting', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(batchResponse(2));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const vectors = await embedTexts('test-key', ['Kraul fell.', 'The gate is barred.']);
+
+        expect(vectors).toHaveLength(2);
+        expect(vectors[0]).toHaveLength(768);
+        expect(fetchMock).toHaveBeenCalledOnce();
+        const [url, options] = fetchMock.mock.calls[0];
+        expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:batchEmbedContents');
+        const body = JSON.parse(options.body);
+        expect(body.requests).toHaveLength(2);
+        expect(body.requests[0]).toEqual({
+            model: 'models/gemini-embedding-2',
+            content: { parts: [{ text: 'title: none | text: Kraul fell.' }] },
+            output_dimensionality: 768,
+        });
+    });
+
+    it('chunks past the 100-request ceiling and nulls empty slots without sending them', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(batchResponse(100))
+            .mockResolvedValueOnce(batchResponse(19));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const texts = Array.from({ length: 120 }, (_, i) => (i === 5 ? '   ' : `Fact ${i}.`));
+        const vectors = await embedTexts('test-key', texts);
+
+        expect(fetchMock).toHaveBeenCalledTimes(2); // 119 sendable = 100 + 19
+        expect(vectors).toHaveLength(120);
+        expect(vectors[5]).toBeNull(); // the empty slot never reached the wire
+        expect(vectors.filter(Boolean)).toHaveLength(119);
+    });
+
+    it('a failed batch nulls its chunk instead of throwing', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: 'boom', text: async () => 'err' }));
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const vectors = await embedTexts('test-key', ['One.', 'Two.']);
+
+        expect(vectors).toEqual([null, null]);
+        expect(errorSpy).toHaveBeenCalled();
+        expect(await embedTexts('', ['One.'])).toEqual([null]);
+        expect(await embedTexts('test-key', [])).toEqual([]);
     });
 });
 

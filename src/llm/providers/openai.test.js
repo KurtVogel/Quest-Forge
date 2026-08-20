@@ -56,6 +56,11 @@ describe('sendOpenAIMessage', () => {
             { role: 'assistant', content: 'Well met.' },
             { role: 'user', content: 'I open the door.' },
         ]);
+        // OpenAI's current output-cap field name; post-4o models 400 on the
+        // legacy max_tokens (2026-08-08 audit). xAI keeps max_tokens — pinned
+        // in xai.test.js.
+        expect(body.max_completion_tokens).toBe(16384);
+        expect(body.max_tokens).toBeUndefined();
     });
 
     it('throws a retryable truncation error on finish_reason "length"', async () => {

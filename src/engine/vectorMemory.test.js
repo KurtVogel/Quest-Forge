@@ -1,16 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 
-const { embedTextMock, SCHEMA } = vi.hoisted(() => ({
+const { embedTextMock, embedTextsMock, SCHEMA } = vi.hoisted(() => ({
     embedTextMock: vi.fn(),
+    embedTextsMock: vi.fn(),
     SCHEMA: 'gemini-embedding-2:search-retrieval-v1:768',
 }));
 
 vi.mock('../llm/providers/gemini.js', () => ({
     embedText: embedTextMock,
+    embedTexts: embedTextsMock,
     GEMINI_EMBED_DIMENSIONS: 768,
     GEMINI_EMBED_SCHEMA: SCHEMA,
 }));
+
+// The batch embed delegates to the per-text mock by default, so every existing
+// assertion about which TEXTS were embedded (call counts, args) keeps holding
+// across the seed path's batching. Tests about batching itself use
+// embedTextsMock directly.
+beforeEach(() => {
+    embedTextsMock.mockReset();
+    embedTextsMock.mockImplementation(async (apiKey, texts, options) =>
+        Promise.all((texts || []).map(text => embedTextMock(apiKey, text, options))));
+});
 
 import {
     addMemory,
@@ -335,6 +347,30 @@ describe('seedMemories', () => {
         embedTextMock.mockResolvedValue(unitVector(0)); // query aligned with campaign A's cached vector
         const back = await retrieveRelevant('key', 'Is the Duke alive?', 3, 0.1);
         expect(back.map(m => m.text)).toEqual(['Old campaign: the Duke is dead.']);
+    });
+
+    it('seeds through ONE batch call for the whole missing set (2026-08-08 audit)', async () => {
+        embedTextMock.mockResolvedValue(unitVector(0));
+        const items = Array.from({ length: 12 }, (_, i) => ({ text: `Fact number ${i}.`, category: 'world_fact' }));
+
+        await seedMemories('key', items);
+
+        expect(embedTextsMock).toHaveBeenCalledTimes(1);
+        expect(embedTextsMock.mock.calls[0][1]).toHaveLength(12);
+        expect(embedTextsMock.mock.calls[0][2]).toEqual({ inputType: 'document' });
+        expect(getMemoryCount()).toBe(12);
+    });
+
+    it('a failed slot in the batch skips only that item', async () => {
+        embedTextsMock.mockResolvedValue([unitVector(0), null, unitVector(1)]);
+
+        await seedMemories('key', [
+            { text: 'Kept one.', category: 'world_fact' },
+            { text: 'Failed slot.', category: 'world_fact' },
+            { text: 'Kept two.', category: 'world_fact' },
+        ]);
+
+        expect(getMemoryCount()).toBe(2);
     });
 
     it('ignores cached embeddings with an incompatible schema and re-embeds from scratch', async () => {
