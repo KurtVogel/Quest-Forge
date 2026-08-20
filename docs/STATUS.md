@@ -6,10 +6,41 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-19 (2026-08-19 audit batch cleared same-day: post-roll
-narrated-cast audit P1 via the shared runPostTurnExtraction, absence-drift local-NPC
-boundary, shared director JSON/cleanText helper, table-driven ChatPanel directors,
-turnOrchestrator surface tests. 1,589 tests green, lint clean)._
+_Last updated: 2026-08-20 (queue sweep: narrated-losses audit + inventory heal, the
+four-item chat/journal sweep, the location-registry design pass (settlement no-fold +
+region evidence gate + cluster inheritance, DECISIONS.md), batched embedding seeds +
+model-list refresh. Queue is down to 3 P2s. 1,614 tests green, lint clean.
+PLAYTEST_BRIEF.md added for the next directed playtest)._
+
+## 2026-08-20 queue sweep (11 P2s cleared in four commits; queue down to 0 P1s / 3 P2s)
+
+Four clusters, one session, each committed separately. **(1) Audit family completed:**
+`narrated_losses` joins the Scribe audit (observation-only; engine removes an item only on
+pure omission while the hero still owns it, whole-stack REMOVE_ITEM_BY_NAME parity, claimed
+`:losses` sourceId, visible line; involuntary coin seizures route through narrated_payment —
+one coin lane, one ledger), and `healDuplicateInventoryRows` merges the stale-twin ghost
+rows on load (exact-name, all-unequipped-qty-1 only) so confiscations take the whole merged
+stack. **(2) Small sweep:** empty combat-intent assistant messages are no longer stored
+(events still flow to routing/applyEvents); the spell-cast narration cue derives from
+`events.spellCasts` instead of the stale same-task state slice; a Send during post-stream
+machinery surfaces "Still resolving the previous turn" instead of vanishing; the journal
+cadence defers while combat is active + a [SYSTEM]-lines-are-authoritative rule (no more
+mid-fight "Mara at 1/12 HP" as durable history). **(3) Location-registry design pass
+(DECISIONS.md 2026-08-20):** settlements never absorb their own districts (sub-places mint
+records; areRelatedPlaces keeps the cluster one orbit; every other type keeps the fold —
+rooms are not places); a first-seen region needs evidence (turn text via the Scribe's new
+transient `evidenceText`, premise, or a world fact) and sub-places inherit their cluster's
+canon region — the well-formed-phantom class ("the Rimefell Marches" echo) is structurally
+dead; the per-turn Scribe now sees KNOWN PLACES so colloquial re-phrasings report canonical
+names. **(4) Providers:** `embedTexts` batches the seed path via batchEmbedContents (~15
+calls instead of ~300 for a cold capped campaign), the model lists gain
+`gemini-3.1-flash-lite` / `gpt-5-mini` (4o family kept as legacy), and the openai provider
+sends `max_completion_tokens` (xAI keeps `max_tokens`) — both pinned. **Remaining open
+queue:** mobile drawer/a11y UX, Magic Missile dart split, and the NPC pronoun-flip watch
+item. `PLAYTEST_BRIEF.md` (repo root, tracked) carries copy-pasteable instructions + report
+template for the next directed playtest; delete it after the playtest report is transcribed.
+
+## 2026-08-19 audit batch cleared same-day (1 P1 + 5 P2s, all six queue items ticked)
 
 ## 2026-08-19 audit batch cleared same-day (1 P1 + 5 P2s, all six queue items ticked)
 
@@ -450,9 +481,9 @@ generation + victory echo land.**
 
 ## Strengthening queue & watch items
 
-Open in SCHEDULED_STRENGTHENING.md after the 2026-08-19 batch: **0 P1s, 14 P2s** (oldest:
-embedText batching, model-list drift; plus the playtest-sourced location-registry /
-scribe-audit / UX items). Carried watch items (need live play / Vesa's eyes):
+Open in SCHEDULED_STRENGTHENING.md after the 2026-08-20 sweep: **0 P1s, 3 P2s** (mobile
+drawer/a11y UX, Magic Missile dart split, NPC pronoun-flip watch item). Carried watch
+items (need live play / Vesa's eyes):
 stance-stutter self-clean on the Saima save (other browser profile), Scribe gender
 backfill on pre-gender campaigns, Grok art respecting the gender tag, Aune
 appearance-thinning LOOKS baseline snapshot next playtest, L1-death balance observation.
