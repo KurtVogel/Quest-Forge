@@ -49,6 +49,7 @@ import { normalizeEquippedSlots } from '../engine/equipment.js';
 import { createInitialFronts } from '../engine/fronts.js';
 import { isSpellcaster, sanitizeSpellSlots } from '../engine/spellcasting.js';
 import { initialGameState } from './initialState.js';
+import { coverage, tokenSet } from '../engine/textMatch.js';
 import { applyEarlyDefeat, isLowLevelSolo, systemMessage } from './handlers/shared.js';
 
 /**
@@ -110,6 +111,51 @@ function healDuplicateInventoryRows(save) {
         healed.push({ ...item, quantity: rowsByName.get(name).length });
     }
     console.log(`[Migrations] Merged ${inventory.length - healed.length} duplicate inventory row(s) into stacks.`);
+    return { ...save, inventory: healed };
+}
+
+const shadowRowTokens = name => tokenSet(String(name || ''), { minLength: 2 });
+
+/**
+ * Merge narrated SHADOW rows into their CATALOG twins (live playtest
+ * 2026-08-20): the fixed Scribe loot-audit matcher minted lowercase raw-named
+ * duplicates of same-turn catalog grants ("hempen rope" beside "Hempen Rope
+ * (50 ft)") that the exact-name heal above can never fold. Deliberately
+ * narrow: the shadow row must be unequipped, quantity 1, carry NO itemKey,
+ * its name tokens must be a subset of EXACTLY ONE catalog-KEYED row's name
+ * tokens — two candidate twins means two genuinely distinct stacks. Keyless
+ * near-name variants ("brick of bog-wax" vs "Brick of raw bog-wax") stay
+ * separate rows, preserving healDuplicateInventoryRows' documented design.
+ */
+function healShadowInventoryRows(save) {
+    const inventory = save.inventory || [];
+    if (inventory.length < 2) return save;
+    const absorbed = new Map(); // shadow row id → twin row id
+    const gained = new Map();   // twin row id → extra quantity
+    for (const row of inventory) {
+        if (!row?.id || row?.itemKey || row?.equipped || (row?.quantity ?? 1) !== 1) continue;
+        const name = String(row?.name || '').trim();
+        if (!name) continue;
+        const tokens = shadowRowTokens(name);
+        if (tokens.size === 0) continue;
+        const twins = inventory.filter(other => {
+            // Catalog-keyed twins only: the key is the proof both rows mean one
+            // canonical item, and its asymmetry (shadows are keyless) makes
+            // mutual absorption structurally impossible.
+            if (other === row || !other?.id || !other?.itemKey || !other?.name) return false;
+            return coverage(tokens, shadowRowTokens(other.name)) >= 0.99;
+        });
+        if (twins.length !== 1) continue;
+        absorbed.set(row.id, twins[0].id);
+        gained.set(twins[0].id, (gained.get(twins[0].id) || 0) + (row.quantity ?? 1));
+    }
+    if (absorbed.size === 0) return save;
+    const healed = inventory
+        .filter(row => !absorbed.has(row?.id))
+        .map(row => (gained.has(row?.id)
+            ? { ...row, quantity: (row.quantity ?? 1) + gained.get(row.id) }
+            : row));
+    console.log(`[Migrations] Merged ${absorbed.size} narrated shadow inventory row(s) into their catalog twins.`);
     return { ...save, inventory: healed };
 }
 
@@ -295,6 +341,7 @@ function reseedMissingFronts(save) {
 
 const UNCONDITIONAL_HEALS = [
     healDuplicateInventoryRows,
+    healShadowInventoryRows,
     healEquippedSlots,
     backfillCharacterShape,
     healCharacterCoreFields,

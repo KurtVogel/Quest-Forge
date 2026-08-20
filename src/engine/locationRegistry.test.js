@@ -3,6 +3,7 @@ import {
     areRelatedPlaces,
     dedupeLocationRecords,
     findLocationRecord,
+    findPlaceRecordByName,
     getCurrentLocationRecord,
     isLocationEvidencedInText,
     isMintableLocationName,
@@ -10,11 +11,82 @@ import {
     isRegionNameOnly,
     isRegistrableLocationName,
     isSameLocation,
+    resolvePlaceNamedRegion,
     sanitizeRegionName,
     normalizeLocationRecord,
     upsertLocation,
     MAX_LOCATIONS,
 } from './locationRegistry.js';
+
+describe('place-named regions (2026-08-20 playtest §5c: districts tagged region "Ashford" / "The Coast Road")', () => {
+    it('sanitizeRegionName rejects travel-way heads — a road is a route through lands, never a land', () => {
+        expect(sanitizeRegionName('The Coast Road')).toBeNull();
+        expect(sanitizeRegionName("the King's Highway")).toBeNull();
+        expect(sanitizeRegionName('the Karok Pass')).toBeNull();
+        expect(sanitizeRegionName('the Old Ford')).toBeNull();
+        // Geographic heads stay legal regions.
+        expect(sanitizeRegionName('the Sundered Coast')).toBe('the Sundered Coast');
+        expect(sanitizeRegionName('the Whispering Hills')).toBe('the Whispering Hills');
+    });
+
+    it('findPlaceRecordByName matches by token equality, never containment', () => {
+        const town = normalizeLocationRecord({ name: 'Ashford', type: 'haven', region: 'Veyrmoor' });
+        const fen = normalizeLocationRecord({ name: 'the Veyrmoor Fen', type: 'wilderness' });
+        expect(findPlaceRecordByName([town, fen], 'ashford')).toBe(town);
+        // "Veyrmoor" is contained in the fen's name but is not the fen.
+        expect(findPlaceRecordByName([town, fen], 'Veyrmoor')).toBeNull();
+    });
+
+    it('resolvePlaceNamedRegion substitutes the named place\'s own region (district → town → land)', () => {
+        const town = normalizeLocationRecord({ name: 'Ashford', type: 'haven', region: 'Veyrmoor' });
+        expect(resolvePlaceNamedRegion([town], 'Ashford')).toBe('Veyrmoor');
+    });
+
+    it('resolvePlaceNamedRegion nulls a region naming a region-less place-scale record', () => {
+        const town = normalizeLocationRecord({ name: 'Cold Harbor', type: 'settlement' });
+        expect(resolvePlaceNamedRegion([town], 'Cold Harbor')).toBeNull();
+    });
+
+    it('an UNCLASSIFIED record named after a genuine region does not eat the proposal', () => {
+        // Early campaigns can mint "The Veyrmoor" as a location record before any
+        // region is known; the real land must survive that stale record.
+        const stale = normalizeLocationRecord({ name: 'The Veyrmoor' });
+        expect(resolvePlaceNamedRegion([stale], 'Veyrmoor')).toBe('Veyrmoor');
+    });
+
+    it('keeps a proposal naming no known place, and excludes the profiled record itself', () => {
+        const town = normalizeLocationRecord({ name: 'Ashford', type: 'haven', region: 'Veyrmoor' });
+        expect(resolvePlaceNamedRegion([town], 'the Harchwold')).toBe('the Harchwold');
+        expect(resolvePlaceNamedRegion([town], 'Ashford', { excludeId: town.id })).toBe('Ashford');
+    });
+
+    it('dedupeLocationRecords heals place-named regions from pre-fix saves', () => {
+        const town = normalizeLocationRecord({ name: 'Ashford', type: 'haven', region: 'Veyrmoor' });
+        const district = { ...normalizeLocationRecord({ name: 'The Guildhall archives', type: 'haven' }), region: 'Ashford' };
+        const healed = dedupeLocationRecords([town, district]);
+        expect(healed.find(r => r.name === 'The Guildhall archives').region).toBe('Veyrmoor');
+        expect(healed.find(r => r.name === 'Ashford').region).toBe('Veyrmoor');
+    });
+});
+
+describe('settlementScale (2026-08-20 playtest: type flip settlement → haven must not re-fold districts)', () => {
+    it('a settlement re-profiled as haven keeps its scale and its districts keep their own records', () => {
+        let locations = upsertLocation([], 'Cold Harbor', { type: 'settlement' });
+        locations = upsertLocation(locations, 'Cold Harbor', { type: 'haven' });
+        expect(locations[0].type).toBe('haven'); // fiction may change a place's nature
+        expect(locations[0].settlementScale).toBe(true); // but a town never becomes a room
+        expect(findLocationRecord(locations, 'the docks of Cold Harbor')).toBe(-1);
+        locations = upsertLocation(locations, 'The docks of Cold Harbor');
+        expect(locations).toHaveLength(2);
+    });
+
+    it('site-scale places never gain the flag and keep the original fold', () => {
+        let locations = upsertLocation([], 'Clockwork Tower', { type: 'haven' });
+        expect(locations[0].settlementScale).toBe(false);
+        locations = upsertLocation(locations, 'Library landing, Clockwork Tower');
+        expect(locations).toHaveLength(1); // rooms and landings are still not places
+    });
+});
 
 describe('isRegionEvidenced (queue P2, playtest #8 phantom regions)', () => {
     it('accepts a region named in the turn text, the premise, or a world fact', () => {

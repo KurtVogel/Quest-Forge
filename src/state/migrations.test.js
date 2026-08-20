@@ -96,6 +96,48 @@ describe('healDuplicateInventoryRows (queue P2, live playtests #7-#8 stale-twin 
     });
 });
 
+describe('healShadowInventoryRows (2026-08-20 playtest: lowercase narrated twins of catalog rows)', () => {
+    it('merges a keyless narrated shadow into its catalog-keyed twin', () => {
+        const save = migrateLoadedSave(fighterSave({
+            inventory: [
+                { id: 'r-1', itemKey: 'ropeHempen', name: 'Hempen Rope (50 ft)', quantity: 1 },
+                { id: 'r-2', name: 'hempen rope', quantity: 1 },
+            ],
+        }));
+        const ropes = save.inventory.filter(i => /rope/i.test(i.name));
+        expect(ropes).toHaveLength(1);
+        expect(ropes[0].itemKey).toBe('ropeHempen');
+        expect(ropes[0].quantity).toBe(2);
+    });
+
+    it('leaves a shadow alone when two keyed twins could claim it', () => {
+        const save = migrateLoadedSave(fighterSave({
+            inventory: [
+                { id: 'r-1', itemKey: 'ropeHempen', name: 'Hempen Rope (50 ft)', quantity: 1 },
+                { id: 'r-2', itemKey: 'ropeSilk', name: 'Silk Rope (50 ft)', quantity: 1 },
+                { id: 'r-3', name: 'rope', quantity: 1 },
+            ],
+        }));
+        expect(save.inventory).toHaveLength(3);
+    });
+
+    it('never absorbs equipped or stacked shadows, and never merges keyless near-name pairs', () => {
+        const save = migrateLoadedSave(fighterSave({
+            inventory: [
+                { id: 'a-1', itemKey: 'leatherArmor', name: 'Leather Armor', type: 'armor', baseAC: 11, quantity: 1 },
+                { id: 'a-2', name: 'leather armor', type: 'armor', baseAC: 11, equipped: true, quantity: 1 },
+                { id: 'c-1', itemKey: 'candlesWax', name: 'Wax Candles (x5)', quantity: 1 },
+                { id: 'c-2', name: 'wax candles', quantity: 5 },
+                { id: 'b-1', name: 'Brick of raw bog-wax', quantity: 1 },
+                { id: 'b-2', name: 'brick of bog-wax', quantity: 1 },
+            ],
+        }));
+        expect(save.inventory.filter(i => /leather armor/i.test(i.name)).length).toBeGreaterThanOrEqual(2);
+        expect(save.inventory.filter(i => /candles/i.test(i.name))).toHaveLength(2);
+        expect(save.inventory.filter(i => /bog-wax/i.test(i.name))).toHaveLength(2);
+    });
+});
+
 describe('version gating', () => {
     it('runs versioned migrations for pre-boundary saves (unstamped and v2)', () => {
         const unstamped = migrateLoadedSave(fighterSave());

@@ -8,6 +8,48 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-20 ×2 · Directed-playtest fix batch: coin audits act only on coin-silent narrations (direction confusion killed a reward), item audits match fuzzily, regions can't be places, and town-scale is permanent.**
+Four rulings from the 2026-08-20 directed playtest (PLAYTEST_REPORT.md). (1) **Coin-audit
+direction invariant (the P1 reward negation):** "Twenty, like I promised" — Branock counting a
+REWARD into the hero's palm was reported by the Scribe as `narrated_payment` (the prompt's own
+verb lists made "hands over" valid evidence in BOTH directions), and the payment audit deducted
+the exact coins the DM's own grant had just added: net zero reward, silently. Ruling, three
+layers: the prompt now leads the audit block with "DIRECTION DECIDES THE LANE — the final
+holder decides, never the verb" and the ambiguous verbs are direction-qualified; engine-side,
+BOTH coin audits stand down whenever the event path moved ANY coin in EITHER direction for that
+narration (the payment audit already stood down on losses — now a same-narration gain means a
+reward-shaped turn and the payment report is the same handover read backwards; the loot audit's
+coin lane mirrors it against losses). Cross-message, `AUDIT_COIN_PAYMENT` is covered by a
+recent APPLIED grant of EXACTLY equal value and audit `ADD_COIN_GRANT` by a recent applied loss
+of exactly equal value — exact-value only, so a genuine smaller unevented payment right after a
+windfall still settles; DM event-path grants keep working as refunds. The memorable invariant:
+**the coin audit only acts when the event lane was completely silent on coins for that
+narration; any evented coin movement means the DM owned the coin accounting.** Audits
+under-correct by design — every suppression posts a visible system line. (2) **Fuzzy item
+identity in the audit family (the P1 duplicate rows):** exact compact-token matching couldn't
+see that narrated "hempen rope" IS the purchase path's "Hempen Rope (50 ft)", so the loot audit
+minted lowercase duplicate rows. All item-identity checks in scribe.js (applied grants, the
+item-grant ledger, applied losses, owned-loss lookup) now use exact-compact OR symmetric
+token-containment via the shared textMatch tokenizer; the loss lookup honors a fuzzy match only
+when it is UNAMBIGUOUS (whole-stack removal must never guess between two stacks). A new
+load-time heal (`healShadowInventoryRows`) merges existing keyless qty-1 unequipped shadows
+into their catalog-KEYED twin — keyed twins only, preserving the earlier ruling that keyless
+near-name variants ("brick of bog-wax" vs "Brick of raw bog-wax") are distinct rows. (3)
+**Regions can't be places (the §5c P2):** "Ashford" (the town) and "The Coast Road" (a road)
+became `region` values — proper, premise-evidenced names every existing gate waves through.
+Travel-way head nouns (road/route/trail/pass/ford/…) join the region-name rejection list (a
+road is a route THROUGH lands; geographic heads like "the Sundered Coast" stay legal), and a
+proposed region that token-set-EQUALS a known place record's name translates to that place's
+own region — the Scribe's "it's in Ashford" intuition is correct, we just resolve place → land,
+chains included (district → town → land). A region-less but clearly place-scale match resolves
+to null; an UNCLASSIFIED match keeps the proposal (a genuine region minted early as a location
+record must not eat the real land). The load-time dedupe runs the same translation over
+polluted saves. (4) **Town-scale is permanent (the type-flip P2):** Cold Harbor re-profiled
+settlement → haven, which silently switched the settlement no-fold rule off — its districts
+would have folded back into the town. `type` keeps evolving with the fiction (a town can fall),
+but a sticky `settlementScale` flag records that a record was EVER a settlement and the fold
+guard reads the flag, not live type. A town never becomes a room.
+
 **2026-08-20 · Towns don't absorb their districts, and a first-seen region needs evidence: the location registry's settlement no-fold + region evidence gate + cluster region inheritance.**
 Three linked rulings closing the 2026-08-08/09 location-registry queue cluster. (1) **Settlement
 no-fold:** the containment fold's founding assumption — "Library landing, Clockwork Tower" IS

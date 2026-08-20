@@ -812,6 +812,96 @@ describe('audit ledger policy: no player-phrasing bypass, same-base reconciliati
     });
 });
 
+describe('direction covers (2026-08-20 playtest: reward misread as payment netted the coin to zero)', () => {
+    const totalCp = character => (character.gold || 0) * 100 + (character.silver || 0) * 10 + (character.copper || 0);
+
+    function addMessages(state, count, prefix = 'dir-msg') {
+        let next = state;
+        for (let i = 0; i < count; i++) {
+            next = gameReducer(next, {
+                type: 'ADD_MESSAGE',
+                payload: { id: `${prefix}-${i}`, role: 'assistant', content: `Filler line ${i}.` },
+            });
+        }
+        return next;
+    }
+
+    it('ignores an audit payment exactly matching a recent applied coin grant (the same handover read backwards)', () => {
+        const state = makeState({ character: { gold: 0, silver: 30, copper: 0 } });
+        const rewarded = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { silver: 20, _meta: { sourceId: 'msg-reward' } },
+        });
+        const later = addMessages(rewarded, 1);
+        const audited = gameReducer(later, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { silver: 20, _meta: { sourceId: 'msg-recap:scribe-loot:payment', audit: true } },
+        });
+        expect(totalCp(audited.character)).toBe(500); // reward kept, nothing deducted
+        expect(audited.messages.at(-1).content).toMatch(/Payment report ignored/);
+        expect(audited.recentCoinLosses.at(-1).status).toBe('ignored');
+    });
+
+    it('still settles a genuine smaller unevented payment right after a windfall (exact-value match only)', () => {
+        const state = makeState({ character: { gold: 0, silver: 30, copper: 0 } });
+        const rewarded = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { silver: 20, _meta: { sourceId: 'msg-reward' } },
+        });
+        const later = addMessages(rewarded, 1);
+        const audited = gameReducer(later, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { silver: 5, _meta: { sourceId: 'msg-room:scribe-loot:payment', audit: true } },
+        });
+        expect(totalCp(audited.character)).toBe(450); // +20 reward, −5 room
+        expect(audited.messages.at(-1).content).toMatch(/Payment settled from narration/);
+    });
+
+    it('charges normally once the grant has aged out of the replay window', () => {
+        const state = makeState({ character: { gold: 0, silver: 30, copper: 0 } });
+        const rewarded = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { silver: 20, _meta: { sourceId: 'msg-reward' } },
+        });
+        const later = addMessages(rewarded, 6);
+        const audited = gameReducer(later, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { silver: 20, _meta: { sourceId: 'msg-late:scribe-loot:payment', audit: true } },
+        });
+        expect(totalCp(audited.character)).toBe(300); // +20 then −20, both real by then
+    });
+
+    it('ignores an audit coin grant exactly matching a recent applied loss (a payment retold as a find)', () => {
+        const state = makeState({ character: { gold: 10, silver: 0, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 5, _meta: { sourceId: 'msg-toll' } },
+        });
+        const later = addMessages(paid, 1);
+        const audited = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 5, _meta: { sourceId: 'msg-recap:scribe-loot', announce: 'audit', audit: true } },
+        });
+        expect(audited.character.gold).toBe(5); // the toll stays paid
+        expect(audited.messages.at(-1).content).toMatch(/Coin recovery ignored/);
+        expect(audited.recentCoinGrants.at(-1).status).toBe('ignored');
+    });
+
+    it('never blocks a DM event-path grant equal to a recent loss — an explicit refund is authoritative', () => {
+        const state = makeState({ character: { gold: 10, silver: 0, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 5, _meta: { sourceId: 'msg-toll' } },
+        });
+        const later = addMessages(paid, 1);
+        const refunded = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 5, _meta: { sourceId: 'msg-refund', playerMessage: 'I demand my money back.' } },
+        });
+        expect(refunded.character.gold).toBe(10); // paid 5, refunded 5
+    });
+});
+
 describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beggar\'s gold again)', () => {
     function addMessages(state, count, prefix = 'bundle-msg') {
         let next = state;

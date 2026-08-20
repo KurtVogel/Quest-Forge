@@ -809,6 +809,98 @@ describe('Scribe loot persistence audit', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
     });
 
+    it('treats a payment report on a reward-shaped turn as direction confusion (live playtest 2026-08-20 reward negation)', async () => {
+        // Branock counts the promised 20 silver INTO the hero's hand; the DM's own
+        // event granted it, and the Scribe misread the same handover as the hero
+        // paying out — the audit deducted the reward back to zero net coin.
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            narrated_payment: { silver: 20 },
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I collect my reward from Branock.',
+            dmNarrative: '"Twenty, like I promised." He counts the silver into your palm.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                appliedEvents: { silverFound: 20, purchases: [], sells: [] },
+            }),
+        });
+
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'AUDIT_COIN_PAYMENT' }));
+    });
+
+    it('stands down on reported loot coins when the event path applied a coin loss (payment-shaped turn, direction mirror)', async () => {
+        sendMessage.mockResolvedValue(scribeResponse({ gold: 1 }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I hand the beggar a gold piece.',
+            dmNarrative: 'You press the gold piece into her palm; she clutches it, stunned.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                appliedEvents: { goldLost: 1, purchases: [], sells: [] },
+            }),
+        });
+
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
+    });
+
+    it('matches narrated raw names against catalog-cased applied grants (live playtest 2026-08-20 duplicate rows)', async () => {
+        // "hempen rope" must be recognized as the purchase path's "Hempen Rope
+        // (50 ft)" — exact compact-token equality minted lowercase duplicates.
+        sendMessage.mockResolvedValue(scribeResponse({
+            items: [{ name: 'hempen rope', quantity: 1 }, { name: 'wax candles', quantity: 5 }],
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I buy rope and candles.',
+            dmNarrative: 'You pay and pack away a coil of hempen rope and five wax candles.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                appliedEvents: {
+                    purchases: [
+                        { itemKey: 'ropeHempen', item: { name: 'Hempen Rope (50 ft)' } },
+                        { item: { name: 'Wax Candles (x5)' } },
+                    ],
+                },
+            }),
+        });
+
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ITEM' }));
+    });
+
+    it('matches a raw-named recount against the item-grant ledger fuzzily across messages', async () => {
+        sendMessage.mockResolvedValue(scribeResponse({
+            items: [{ name: 'brass token', quantity: 1 }],
+        }));
+        const dispatch = vi.fn();
+
+        await runScribe({
+            playerMessage: 'I check my pockets.',
+            dmNarrative: 'The brass token is safely tucked away where you left it.',
+            settings,
+            dispatch,
+            lootAudit: makeLootAudit({
+                getState: () => ({
+                    appliedLootSourceIds: [],
+                    messages: [{ role: 'user' }, { role: 'assistant' }],
+                    recentItemGrants: [{
+                        signature: 'item|brasstransittoken', name: 'Brass transit token', itemKey: '',
+                        status: 'applied', messageIndex: 1, priceCp: 0, quantity: 1, sourceId: 'msg-0', timestamp: 1,
+                    }],
+                }),
+            }),
+        });
+
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ITEM' }));
+    });
+
     it('never re-grants coins or items the event path already applied for the same narration', async () => {
         sendMessage.mockResolvedValue(scribeResponse({
             gold: 23,
@@ -1269,6 +1361,60 @@ describe('Scribe narrated-loss audit (queue P2, live playtest #8)', () => {
         const actions = dispatch.mock.calls.map(c => c[0]);
         expect(actions.find(a => a.type === 'REMOVE_ITEM_BY_NAME')).toBeUndefined();
         expect(actions.find(a => a.type === 'ADD_MESSAGE')).toBeUndefined();
+    });
+
+    it('matches a narrated loss to its catalog-cased stack (live playtest 2026-08-20)', async () => {
+        sendMessage.mockResolvedValue(lossResponse({ items: [{ name: 'wax candles' }] }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I let the candle burn overnight.',
+            dmNarrative: 'By dawn the wax candles are spent, melted to a hardened puddle.',
+            settings, dispatch,
+            lootAudit: lossAudit({
+                getState: () => lossState({ inventory: [{ id: 'c-1', name: 'Wax Candles (x5)', quantity: 1 }] }),
+            }),
+        });
+        const removal = dispatch.mock.calls.map(c => c[0]).find(a => a.type === 'REMOVE_ITEM_BY_NAME');
+        expect(removal?.payload).toBe('Wax Candles (x5)');
+    });
+
+    it('prefers an exact-name stack over a fuzzy twin when both exist', async () => {
+        sendMessage.mockResolvedValue(lossResponse({ items: [{ name: 'wax candles' }] }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'The candle burns down.',
+            dmNarrative: 'The wax candles are spent.',
+            settings, dispatch,
+            lootAudit: lossAudit({
+                getState: () => lossState({
+                    inventory: [
+                        { id: 'c-1', name: 'wax candles', quantity: 5 },
+                        { id: 'c-2', name: 'Wax Candles (x5)', quantity: 1 },
+                    ],
+                }),
+            }),
+        });
+        const removal = dispatch.mock.calls.map(c => c[0]).find(a => a.type === 'REMOVE_ITEM_BY_NAME');
+        expect(removal?.payload).toBe('wax candles');
+    });
+
+    it('skips a fuzzy loss matching multiple stacks — whole-stack removal must never guess', async () => {
+        sendMessage.mockResolvedValue(lossResponse({ items: [{ name: 'candles' }] }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'The candles are gone.',
+            dmNarrative: 'Your candles are all spent.',
+            settings, dispatch,
+            lootAudit: lossAudit({
+                getState: () => lossState({
+                    inventory: [
+                        { id: 'c-1', name: 'Wax Candles (x5)', quantity: 1 },
+                        { id: 'c-2', name: 'Tallow Candles', quantity: 2 },
+                    ],
+                }),
+            }),
+        });
+        expect(dispatch.mock.calls.map(c => c[0]).find(a => a.type === 'REMOVE_ITEM_BY_NAME')).toBeUndefined();
     });
 
     it('applies at most once per narration via the claimed sourceId', async () => {

@@ -4,7 +4,7 @@
  */
 import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
-import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
+import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
@@ -345,15 +345,20 @@ export const handlers = {
         const targetRecord = locationsBefore[targetIdx];
         const priorRegions = collectKnownRegions(locationsBefore);
 
-        // Region acceptance runs three gates before the registry write:
+        // Region acceptance runs four gates before the registry write:
         // 1. Backstory guard (DECISIONS.md 2026-08-06, live playtest #3): a land
         //    named only in the hero's player-authored background is where the
         //    hero CAME FROM, not where this place lies.
-        // 2. Cluster inheritance (queue P2, live playtest #8): the shop, its
+        // 2. Place-name translation (live playtest 2026-08-20): the Scribe
+        //    reports the containing TOWN ("Ashford") as a district's region —
+        //    a proper, premise-evidenced name every other gate waves through.
+        //    A "region" exactly naming a known place record is not a land:
+        //    substitute that place's own canon region, or nothing.
+        // 3. Cluster inheritance (queue P2, live playtest #8): the shop, its
         //    lane, and their town are one land — a related record's canon
         //    region outranks a novel proposal for a sub-place ("the Chandlers'
         //    quarter" cannot sit in a different land than Weatherby itself).
-        // 3. Evidence gate (same queue entry): a FIRST-SEEN region name must
+        // 4. Evidence gate (same queue entry): a FIRST-SEEN region name must
         //    appear in the turn's own text, the premise, or a world fact — a
         //    well-formed invention (the live "Rimefell Marches" prompt-example
         //    echo) dies here. Already-known regions re-tag without evidence.
@@ -363,6 +368,9 @@ export const handlers = {
             premise: state.session?.premise,
         })) {
             region = null;
+        }
+        if (region) {
+            region = resolvePlaceNamedRegion(locationsBefore, region, { excludeId: targetRecord.id });
         }
         if (region && !targetRecord.region) {
             const clusterRegion = locationsBefore.find(record => record !== targetRecord

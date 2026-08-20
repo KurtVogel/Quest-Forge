@@ -262,6 +262,26 @@ export const handlers = {
                     ],
                 };
             }
+            // Direction cover, gain side (2026-08-20 twin of AUDIT_COIN_PAYMENT's
+            // grant echo): a recap of the hero HANDING coins over can be misread
+            // as the hero receiving them — the audit would silently refund a
+            // payment the DM's own event already took. A recent APPLIED coin
+            // LOSS of exactly this value is that payment retold, not a find.
+            // DM event grants are untouched: an explicit refund is authoritative.
+            const lossEcho = normalizeRecentTransactions(state.recentCoinLosses).some(entry =>
+                entry.status === 'applied'
+                && entry.priceCp === transaction.priceCp
+                && conversationalDistance(state.messages, entry.messageIndex, messageIndex) <= RECENT_COIN_GRANT_MESSAGE_WINDOW);
+            if (lossEcho) {
+                return {
+                    ...state,
+                    recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`Coin recovery ignored — ${transaction.item.name} matches a payment you just made; treated as the same handover retold.`),
+                    ],
+                };
+            }
         }
         // Recap-bundle guard, gain side: a new grant that swallows a recent reward
         // whole ("the 10 gold reward plus 5 silver you find now") must only pay the
@@ -431,6 +451,29 @@ export const handlers = {
                 messages: [
                     ...state.messages,
                     systemMessage(`**Duplicate payment ignored:** ${formatCurrency(costCp)} repeats payments already taken moments ago.`),
+                ],
+            };
+        }
+        // Direction cover (live playtest 2026-08-20): the Scribe read Branock
+        // counting the hero's REWARD into her palm as the hero paying out, and
+        // the loss ledger knew nothing about the grant — the audit deducted the
+        // exact coins the DM's own event had just added, netting the reward to
+        // zero. A recent APPLIED coin GRANT of exactly this value is that same
+        // handover seen backwards, never a payment. Exact value match by
+        // design: a genuine unevented smaller payment right after a windfall
+        // must still settle. scribe.js stands down same-narration gains; this
+        // is the cross-message belt for next-turn re-narrations.
+        const grantEcho = normalizeRecentTransactions(state.recentCoinGrants).some(entry =>
+            entry.status === 'applied'
+            && entry.priceCp === costCp
+            && conversationalDistance(state.messages, entry.messageIndex, messageIndex) <= RECENT_COIN_LOSS_MESSAGE_WINDOW);
+        if (grantEcho) {
+            return {
+                ...state,
+                recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
+                messages: [
+                    ...state.messages,
+                    systemMessage(`**Payment report ignored:** ${formatCurrency(costCp)} matches coins you just received — treated as the same handover, not a new charge.`),
                 ],
             };
         }

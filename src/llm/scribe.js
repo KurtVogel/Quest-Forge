@@ -17,6 +17,7 @@ import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { captureReflection, captureScribePass } from '../debug/memoryInspectorStore.js';
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
 import { conversationalDistance } from '../engine/replayLedger.js';
+import { containment, tokenSet } from '../engine/textMatch.js';
 import { getKnownSpells, isSpellcaster, resolveSpellForCharacter } from '../engine/spellcasting.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX, MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
@@ -109,8 +110,13 @@ Report the coins and items the narrative shows the hero ACQUIRING, as one extra 
 Also report the coins the narrative shows the hero PAYING OUT, as another top-level field:
 "narrated_payment": { "gold": 0, "silver": 0, "copper": 0 }
 
+DIRECTION DECIDES THE LANE — check who holds the coins at the END before anything else:
+- narrated_loot is ONLY what flows TO the hero: coins or items the HERO ends up holding.
+- narrated_payment is ONLY coins flowing AWAY FROM the hero to someone or something else.
+- The final holder decides, never the verb. "He counts out twenty silver and presses them into your hand" is the HERO receiving — that is narrated_loot. A reward, wage, bounty, refund, or purse an NPC hands, counts, tosses, or pays TO the hero goes in narrated_loot and must NEVER appear in narrated_payment, no matter that words like "pays", "counts out", or "hands over" describe it. One coin movement goes in exactly one lane.
+
 Loot rules:
-- Report ONLY acquisitions the DM NARRATIVE explicitly completes for the hero: taken, pocketed, looted, claimed, received, handed over. The player's own message is never sufficient evidence — the DM narrative must confirm the acquisition happened.
+- Report ONLY acquisitions the DM NARRATIVE explicitly completes for the hero: taken, pocketed, looted, claimed, received, or handed over TO the hero. The player's own message is never sufficient evidence — the DM narrative must confirm the acquisition happened.
 - Never report offers, prices, rewards merely promised, goods only seen or described, another character's possessions, or attempts/intentions.
 - Never report coins or items the narrative merely recalls, recounts, splits, or admires from an EARLIER scene — only acquisitions completed for the first time in THIS narrative. A reward being counted, divided, or mentioned again was already granted when it was first handed over.
 - Hospitality consumed on the spot is not an acquisition: a poured drink, a served meal, food and ale enjoyed at the table never become inventory. Report provisions only when the narrative has the hero pack, pocket, or carry them away.
@@ -122,7 +128,7 @@ Loot rules:
 - Identifying, appraising, examining, or recognizing an item the hero ALREADY carries is NOT an acquisition — realizing the corked vial in her pack is a healing potion, or that the old ring is silver, changes what the item IS, never what the hero HAS. Report nothing for it, under either name.
 
 Payment rules:
-- Report a payment ONLY when the DM narrative explicitly completes it: the hero counts out, hands over, or drops the coins and the other party takes them. Intentions, promises, IOUs, haggling, and prices merely quoted are never payments.
+- Report a payment ONLY when the DM narrative explicitly completes it: the HERO counts out, hands over, or drops THEIR OWN coins and the other party takes them. Coins moving in the opposite direction — into the hero's hands — are never a payment (see DIRECTION above). Intentions, promises, IOUs, haggling, and prices merely quoted are never payments.
 - Involuntary coin losses count as paying out: coins the narrative shows being confiscated, seized, stolen, extorted, or robbed from the hero report here at the exact narrated amount. Threats and demands not yet carried out report nothing.
 - Copy narrated amounts digit-exactly; spelled-out numbers convert exactly ("six silver" is "silver": 6, "a dozen coppers" is "copper": 12). Never round, estimate, or infer an amount the narrative does not state.
 - Change-making: when the hero pays with a larger coin and receives change (hands over a gold piece for a 2-silver fare and gets 8 silver back), report the NET price actually paid — "silver": 2 — never the gross coin handed over, and never add the fare on top of the coin.
@@ -323,24 +329,48 @@ function appliedCoinCp(events) {
 }
 
 const auditItemToken = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const itemTokenSet = value => tokenSet(String(value || ''), { minLength: 2 });
 
-/** Identity tokens for every item the event path already granted this narration. */
-function appliedItemTokens(events) {
-    const tokens = new Set();
+/**
+ * Item identity match for the whole audit family: exact compact-token equality
+ * OR symmetric meaningful-token containment, so the narrative's "hempen rope"
+ * matches the catalog's "Hempen Rope (50 ft)" and "wax candles" matches "Wax
+ * Candles (x5)". Live playtest 2026-08-20: exact-only matching let a purchase
+ * turn's Scribe re-report mint lowercase duplicate inventory rows the load-time
+ * heal could not merge back. Under-matching mints phantom duplicates; over-
+ * matching merely skips a grant — the documented safe direction for audits.
+ */
+function itemIdentityMatches(a, b) {
+    const compactA = auditItemToken(a);
+    const compactB = auditItemToken(b);
+    if (compactA && compactA === compactB) return true;
+    const setA = itemTokenSet(a);
+    const setB = itemTokenSet(b);
+    return setA.size > 0 && setB.size > 0 && containment(setA, setB) >= 0.99;
+}
+
+/** True when any identity string in the pool matches the narrated item. */
+function matchesAnyItemIdentity(item, identities) {
+    return identities.some(value =>
+        itemIdentityMatches(item.name, value) || (item.itemKey && itemIdentityMatches(item.itemKey, value)));
+}
+
+/** Identity strings for every item the event path already granted this narration. */
+function appliedItemIdentities(events) {
+    const identities = [];
     const add = entry => {
         if (!entry) return;
         const values = typeof entry === 'string'
             ? [entry]
             : [entry.name, entry.itemKey, entry.key, entry.item?.name, entry.item?.itemKey];
         for (const value of values) {
-            const token = auditItemToken(value);
-            if (token) tokens.add(token);
+            if (value && String(value).trim()) identities.push(String(value));
         }
     };
     for (const list of [events?.itemsFound, events?.startingItems, events?.purchases]) {
         (list || []).forEach(add);
     }
-    return tokens;
+    return identities;
 }
 
 /**
@@ -381,15 +411,22 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: sourceId });
 
     const narratedCp = gold * 100 + silver * 10 + copper;
-    // Stand-down rule: any applied coin gain means the DM evented this grant —
-    // recover coins only on PURE omission, in the narrated denominations.
-    const { gainCp } = appliedCoinCp(appliedEvents);
-    const coinShortfallCp = gainCp > 0 ? 0 : narratedCp;
+    // Stand-down rule: the coin audit acts ONLY on coin-silent narrations. Any
+    // applied coin GAIN means the DM evented this grant and owns its amount —
+    // recover coins only on PURE omission, in the narrated denominations. Any
+    // applied coin LOSS stands the gain-side down too (live playtest 2026-08-20
+    // direction bug, mirrored): on a payment-shaped turn a Scribe-reported coin
+    // GAIN is change-making or the hero's own outgoing coins read backwards —
+    // minting it would silently refund the payment.
+    const { gainCp, lossCp } = appliedCoinCp(appliedEvents);
+    const coinShortfallCp = (gainCp > 0 || lossCp > 0) ? 0 : narratedCp;
     if (narratedCp > 0 && gainCp > 0) {
         console.log(`[Scribe] Loot audit: event path already applied a ${gainCp} cp gain for this narration — standing down on coins.`);
+    } else if (narratedCp > 0 && lossCp > 0) {
+        console.log(`[Scribe] Loot audit: event path applied a ${lossCp} cp loss for this narration — payment-shaped turn, treating the reported coin gain as direction confusion and standing down on coins.`);
     }
 
-    const knownTokens = appliedItemTokens(appliedEvents);
+    const knownIdentities = appliedItemIdentities(appliedEvents);
     // Cross-message ledger check (live playtest #8): the same-message stand-down
     // above cannot see a RE-narration — "you tuck the pages away" one turn after
     // the pages were evented re-granted them because audit ADD_ITEMs deliberately
@@ -399,20 +436,19 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     // mirrors RECENT_ITEM_GRANT_MESSAGE_WINDOW in state/handlers/inventory.js.
     const ITEM_GRANT_LEDGER_WINDOW = 4;
     const state = getState?.();
-    const recentGrantTokens = new Set();
+    const recentGrantIdentities = [];
     const currentIndex = (state?.messages || []).length;
     for (const entry of state?.recentItemGrants || []) {
         if (entry?.status !== 'applied') continue;
         const distance = conversationalDistance(state.messages, entry.messageIndex, currentIndex);
         if (!(distance >= 0 && distance <= ITEM_GRANT_LEDGER_WINDOW)) continue;
-        for (const token of [auditItemToken(entry.name), auditItemToken(entry.itemKey)]) {
-            if (token) recentGrantTokens.add(token);
+        for (const value of [entry.name, entry.itemKey]) {
+            if (value && String(value).trim()) recentGrantIdentities.push(String(value));
         }
     }
     const missingItems = items.filter(item => {
-        const tokens = [item.name, item.itemKey].map(auditItemToken);
-        const alreadyApplied = tokens.some(token => token && knownTokens.has(token));
-        const recentlyGranted = tokens.some(token => token && recentGrantTokens.has(token));
+        const alreadyApplied = matchesAnyItemIdentity(item, knownIdentities);
+        const recentlyGranted = matchesAnyItemIdentity(item, recentGrantIdentities);
         if (alreadyApplied) console.warn(`[Scribe] Narrated item "${item.name}" already granted by the event path; skipping.`);
         else if (recentlyGranted) console.warn(`[Scribe] Narrated item "${item.name}" was already granted moments ago (ledger); skipping.`);
         return !alreadyApplied && !recentlyGranted;
@@ -521,9 +557,20 @@ function reconcileNarratedPayment(narrated, lootAudit, dispatch) {
     dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: paymentSourceId });
 
     const narratedCp = gold * 100 + silver * 10 + copper;
-    const { lossCp } = appliedCoinCp(appliedEvents);
+    const { gainCp, lossCp } = appliedCoinCp(appliedEvents);
     if (lossCp > 0) {
         console.log(`[Scribe] Payment audit: event path already applied a ${lossCp} cp loss for this narration — standing down.`);
+        return;
+    }
+    // Direction backstop (live playtest 2026-08-20): "Twenty, like I promised" —
+    // Branock counting a REWARD into the hero's hand was reported as the hero
+    // paying out, and the engine deducted the coins the DM's own grant had just
+    // added, netting the reward to zero. A narration whose event path applied a
+    // coin GAIN is reward-shaped; a simultaneous payment report is the same
+    // handover read backwards (or a change-making gross amount) — never a
+    // genuine unevented charge. Coin audits act only on coin-silent narrations.
+    if (gainCp > 0) {
+        console.log(`[Scribe] Payment audit: event path applied a ${gainCp} cp gain for this narration — reward-shaped turn, treating the reported payment as direction confusion and standing down.`);
         return;
     }
     // The reducer checks the shared recentCoinLosses ledger for OTHER messages'
@@ -572,20 +619,33 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
 
     // Stand-down per item: a loss identity the event path already removed for
     // this narration is the DM's own accounting, not a missing removal.
-    const appliedLossTokens = new Set((appliedEvents?.itemsLost || [])
-        .map(entry => auditItemToken(typeof entry === 'string' ? entry : entry?.name))
-        .filter(Boolean));
+    const appliedLossIdentities = (appliedEvents?.itemsLost || [])
+        .map(entry => (typeof entry === 'string' ? entry : entry?.name))
+        .filter(value => value && String(value).trim())
+        .map(String);
 
     const removed = [];
     for (const name of items) {
-        const token = auditItemToken(name);
-        if (token && appliedLossTokens.has(token)) {
+        if (appliedLossIdentities.some(value => itemIdentityMatches(name, value))) {
             console.warn(`[Scribe] Narrated loss "${name}" already removed by the event path; skipping.`);
             continue;
         }
-        const owned = (state?.inventory || []).find(
+        // Exact name first; otherwise a fuzzy match is honored only when it is
+        // UNAMBIGUOUS — REMOVE_ITEM_BY_NAME takes whole stacks, so "wax candles"
+        // matching both a lowercase shadow row and "Wax Candles (x5)" must skip
+        // rather than guess which stack the fiction destroyed.
+        const inventory = state?.inventory || [];
+        let owned = inventory.find(
             item => String(item?.name || '').trim().toLowerCase() === name.toLowerCase(),
         );
+        if (!owned) {
+            const fuzzy = inventory.filter(item => itemIdentityMatches(name, item?.name));
+            if (fuzzy.length === 1) owned = fuzzy[0];
+            else if (fuzzy.length > 1) {
+                console.warn(`[Scribe] Narrated loss "${name}" matches ${fuzzy.length} owned stacks — ambiguous; skipping.`);
+                continue;
+            }
+        }
         if (!owned) {
             console.warn(`[Scribe] Narrated loss "${name}" matches nothing the hero owns; skipping.`);
             continue;

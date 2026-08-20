@@ -498,6 +498,78 @@ describe('first-seen region evidence gate + cluster inheritance (queue P2, playt
     });
 });
 
+describe('place-named region translation in UPDATE_LOCATION_PROFILE (2026-08-20 playtest §5c)', () => {
+    const townInVeyrmoor = () => {
+        let state = {
+            ...initialGameState,
+            session: { ...initialGameState.session, id: 'campaign-1', premise: 'Wool debts across the Veyrmoor; Ashford holds its edge.' },
+            messages: msgs(20),
+        };
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Ashford' });
+        state = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: {
+                name: 'Ashford',
+                profile: { type: 'haven', region: 'Veyrmoor' },
+                evidenceText: 'Ashford sits at the western edge of the Veyrmoor.',
+            },
+        });
+        return state;
+    };
+
+    it('a district profiled with the TOWN as its region inherits the town\'s land instead', () => {
+        // The live find: "The Guildhall archives" got region "Ashford" — a proper,
+        // premise-evidenced name every other gate waves through, but a town.
+        let state = townInVeyrmoor();
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'The Guildhall archives' });
+        const next = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: {
+                name: 'The Guildhall archives',
+                profile: { type: 'haven', region: 'Ashford' },
+                evidenceText: 'Penrose shelves ledgers in the Guildhall archives of Ashford.',
+            },
+        });
+        const archives = next.locations.find(r => r.name === 'The Guildhall archives');
+        expect(archives.region).toBe('Veyrmoor');
+        expect(next.session.pendingRegionalFronts).toBeUndefined(); // known region, no phantom seeding
+    });
+
+    it('a region naming a region-less settlement resolves to nothing rather than a phantom land', () => {
+        let state = townInVeyrmoor();
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Cold Harbor' });
+        state = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Cold Harbor', profile: { type: 'settlement' } },
+        });
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'The Keel & Cod' });
+        const next = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: {
+                name: 'The Keel & Cod',
+                profile: { type: 'haven', region: 'Cold Harbor' },
+                evidenceText: 'The Keel & Cod hums with dockhands from Cold Harbor.',
+            },
+        });
+        const tavern = next.locations.find(r => r.name === 'The Keel & Cod');
+        expect(tavern.region ?? null).toBeNull();
+    });
+
+    it('roads die at the sanitize boundary before translation is even needed', () => {
+        let state = townInVeyrmoor();
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Cold Harbor' });
+        const next = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: {
+                name: 'Cold Harbor',
+                profile: { type: 'settlement', region: 'The Coast Road' },
+                evidenceText: 'The Coast Road drops down to Cold Harbor\'s quays.',
+            },
+        });
+        expect(next.locations.find(r => r.name === 'Cold Harbor').region ?? null).toBeNull();
+    });
+});
+
 describe('region names never become location records (2026-08-06 live playtest #3 registry noise)', () => {
     const settled = () => {
         // The premise names the region so the first-seen evidence gate accepts it.

@@ -115,7 +115,7 @@ export function isSameLocation(a, b) {
  * its first location_profile lands.
  */
 function namesPlaceWithinSettlement(record, target) {
-    if (record?.type !== 'settlement') return false;
+    if (record?.type !== 'settlement' && record?.settlementScale !== true) return false;
     const recordTokens = locationTokens(record.name);
     const targetTokens = locationTokens(target);
     if (targetTokens.size <= recordTokens.size) return false;
@@ -140,6 +140,15 @@ export function normalizeLocationRecord(record = {}, existing = null) {
         name,
         aliases: [...new Set([...(existing?.aliases || []), ...((record.aliases || []).map(a => cleanText(a, 120)))].filter(Boolean))].slice(-MAX_ALIASES),
         type: normalizeLocationType(record.type) || existing?.type || null,
+        // Town-scale is PERMANENT once established (live playtest 2026-08-20:
+        // Cold Harbor re-profiled settlement → haven, which silently switched
+        // the settlement no-fold rule off and would have folded "the docks of
+        // Cold Harbor" back into the town). `type` keeps evolving with the
+        // fiction — a town can fall, a warren can be cleared — but a town never
+        // becomes a room, so the fold guard reads this flag, not live type.
+        settlementScale: existing?.settlementScale === true
+            || existing?.type === 'settlement'
+            || normalizeLocationType(record.type) === 'settlement',
         danger: normalizeDangerLevel(record.danger) || existing?.danger || null,
         theaterFrontIds: [...new Set([...(existing?.theaterFrontIds || []), ...((record.theaterFrontIds || []).map(id => cleanText(id, 60)))].filter(Boolean))].slice(0, 6),
         firstSeenAt: existing?.firstSeenAt || record.firstSeenAt || Date.now(),
@@ -192,6 +201,14 @@ const URBAN_LOCALITY_HEAD_TOKENS = new Set([
     'markets', 'dock', 'docks', 'docklands', 'wharf', 'wharves', 'harbor',
     'harbour', 'harbors', 'harbours', 'port', 'ports', 'waterfront', 'gate',
     'gates', 'bridge', 'bridges', 'row', 'plaza', 'bazaar',
+    // Travel-way heads (live playtest 2026-08-20): "The Coast Road" — a literal
+    // road the hero walked — became a region value. A road, trail, or crossing
+    // is a route THROUGH lands, never a land. Geographic heads (coast, hills,
+    // marches) stay legal: "the Sundered Coast" is a perfectly good region.
+    'road', 'roads', 'route', 'routes', 'highway', 'highways', 'causeway',
+    'causeways', 'trail', 'trails', 'path', 'paths', 'track', 'tracks',
+    'crossing', 'crossings', 'crossroads', 'ford', 'fords', 'pass', 'passes',
+    'ferry', 'ferries',
 ]);
 
 /**
@@ -261,6 +278,64 @@ export function isRegionEvidenced(region, { turnText = '', premise = '', worldFa
 export function isSameRegion(a, b) {
     if (!a || !b) return false;
     return containment(locationTokens(a), locationTokens(b)) >= 0.99;
+}
+
+/**
+ * The registry record whose canonical name (or a stored alias) IS this string —
+ * token-set EQUALITY, never containment: "Veyrmoor" must not claim a record
+ * named "the Veyrmoor Fen". Used to recognize a place name posing as something
+ * else (a region value naming a town).
+ */
+export function findPlaceRecordByName(locations = [], name) {
+    const target = cleanText(name, 120);
+    if (!target) return null;
+    const lower = target.toLowerCase();
+    const targetTokens = locationTokens(target);
+    for (const record of locations || []) {
+        if (!record?.name) continue;
+        if (record.name.toLowerCase() === lower) return record;
+        if ((record.aliases || []).some(alias => alias.toLowerCase() === lower)) return record;
+        const recordTokens = locationTokens(record.name);
+        if (targetTokens.size > 0 && recordTokens.size === targetTokens.size
+            && containment(targetTokens, recordTokens) >= 0.99) return record;
+    }
+    return null;
+}
+
+/** Record types that are confidently PLACES, never candidate region names. */
+const PLACE_SCALE_TYPES = new Set(['settlement', 'haven', 'hostile_site']);
+
+/**
+ * Region-as-place translation (live playtest 2026-08-20): the Scribe reported
+ * the containing TOWN as a district's region ("The Guildhall archives" got
+ * region "Ashford"), and the town name passed every properness/evidence gate —
+ * a town IS a proper noun the premise names. A proposed region that exactly
+ * names a known place record is not a land: substitute that place's own canon
+ * region (true cluster inheritance riding the Scribe's correct "it's in
+ * Ashford" intuition), or nothing when the place is region-less but clearly
+ * place-scale. An UNCLASSIFIED matching record keeps the proposal — early
+ * campaigns can mint a genuine region name as a location record ("you cross
+ * into the Veyrmoor") and that stale record must not eat the real land.
+ * Chains resolve (district → town → land); cycles die to null.
+ */
+export function resolvePlaceNamedRegion(locations = [], region, { excludeId = null } = {}) {
+    let current = sanitizeRegionName(region) ? cleanText(region, 60) : null;
+    const visited = new Set();
+    for (let hop = 0; hop < 3 && current; hop += 1) {
+        const key = current.toLowerCase();
+        if (visited.has(key)) return null;
+        visited.add(key);
+        const record = findPlaceRecordByName(locations, current);
+        if (!record || (excludeId && record.id === excludeId)) return current;
+        const ownRegion = sanitizeRegionName(record.region, record.name);
+        if (ownRegion) {
+            if (isSameRegion(ownRegion, current)) return ownRegion;
+            current = ownRegion;
+            continue;
+        }
+        return (PLACE_SCALE_TYPES.has(record.type) || record.settlementScale === true) ? null : current;
+    }
+    return current;
 }
 
 /**
@@ -461,7 +536,7 @@ export function dedupeLocationRecords(locations = []) {
     }
 
     const names = new Set(kept.map(record => record.name.toLowerCase()));
-    return kept.map(record => {
+    const cleanedRecords = kept.map(record => {
         const cleaned = (record.aliases || []).filter(alias => {
             const lower = alias.toLowerCase();
             return lower === record.name.toLowerCase() || !names.has(lower);
@@ -469,5 +544,17 @@ export function dedupeLocationRecords(locations = []) {
         return cleaned.length === (record.aliases || []).length
             ? record
             : { ...record, aliases: cleaned };
+    });
+
+    // Pass 3 — region heal (live playtest 2026-08-20): pre-fix saves carry
+    // region values that name PLACES ("The Guildhall archives" in region
+    // "Ashford"; road-named regions already die in sanitizeRegionName during
+    // load normalization). Translate each through the registry exactly like
+    // live profiling now does — a chain (district → town → land) resolves to
+    // the land, a region-less place-scale match resolves to null.
+    return cleanedRecords.map(record => {
+        if (!record.region) return record;
+        const resolved = resolvePlaceNamedRegion(cleanedRecords, record.region, { excludeId: record.id });
+        return resolved === record.region ? record : { ...record, region: resolved };
     });
 }

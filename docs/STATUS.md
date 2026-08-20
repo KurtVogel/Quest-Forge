@@ -6,11 +6,33 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-20 (queue sweep: narrated-losses audit + inventory heal, the
-four-item chat/journal sweep, the location-registry design pass (settlement no-fold +
-region evidence gate + cluster inheritance, DECISIONS.md), batched embedding seeds +
-model-list refresh. Queue is down to 3 P2s. 1,614 tests green, lint clean.
-PLAYTEST_BRIEF.md added for the next directed playtest)._
+_Last updated: 2026-08-20 ×2 (directed playtest #9 ran against the sweep build — 7/10
+scenario passes, 2 P1s + 2 P2s found and ALL fixed same-day: coin-audit direction
+invariant, fuzzy item-identity matching + shadow-row heal, region-as-place translation,
+sticky settlementScale. DECISIONS.md 2026-08-20 ×2. 1,641 tests green, lint clean)._
+
+## 2026-08-20 ×2 — directed playtest #9 (Tamsin Rooke / Veyrmoor) + same-day fix batch
+
+The PLAYTEST_BRIEF.md run came back (report in repo root): ~80 turns, 2 combats, 0 console
+errors. **Validated live:** post-roll cast audit (Mage Armor recovered, no double-spend),
+narrated-losses backstop both paths + recap no-ops, settlement no-fold (districts minted own
+records), no mid-fight journal + accurate fight-outcome entries, phantom-region kill test
+clean (Sundered Coast bait never seeded), transcript hygiene + send-swallow via disabled
+input, known-places canonicalization ("Brida's place" → Keel & Cod), cold-start batched
+embedding seed (174 memories, near-instant), L1 death contract honored in fiction. **Found
+and fixed same-day (DECISIONS.md 2026-08-20 ×2):** (P1) a reward the DM correctly evented
+was negated to zero by the Scribe payment audit misreading the handover's direction — coin
+audits now act ONLY on coin-silent narrations (prompt direction rule + engine stand-downs
+both ways) plus exact-value cross-ledger covers in the reducer; (P1) the loot audit minted
+lowercase duplicate inventory rows for catalog purchases — all audit item matching is now
+fuzzy token-containment (shared textMatch), loss lookup honors only unambiguous matches,
+and `healShadowInventoryRows` merges existing keyless shadows into their catalog-keyed
+twins on load; (P2) `region` values naming places ("Ashford", "The Coast Road") — travel-way
+head nouns join the region rejection list, and a region that token-equals a known place
+record translates to that place's own region (live + load-time heal); (P2) Cold Harbor's
+settlement→haven type flip would have silently disabled district no-fold — new sticky
+`settlementScale` flag; `type` still evolves with the fiction. 27 new tests (1,641 green).
+OpenAI provider row NOT-EXERCISED (no key in .env) — still an open gap for a future run.
 
 ## 2026-08-20 queue sweep (11 P2s cleared in four commits; queue down to 0 P1s / 3 P2s)
 
@@ -482,8 +504,13 @@ generation + victory echo land.**
 ## Strengthening queue & watch items
 
 Open in SCHEDULED_STRENGTHENING.md after the 2026-08-20 sweep: **0 P1s, 3 P2s** (mobile
-drawer/a11y UX, Magic Missile dart split, NPC pronoun-flip watch item). Carried watch
-items (need live play / Vesa's eyes):
-stance-stutter self-clean on the Saima save (other browser profile), Scribe gender
-backfill on pre-gender campaigns, Grok art respecting the gender tag, Aune
-appearance-thinning LOOKS baseline snapshot next playtest, L1-death balance observation.
+drawer/a11y UX, Magic Missile dart split, NPC pronoun-flip watch item — playtest #9 saw
+zero flips across six NPCs, but no generated art exercised the visual half). Carried
+watch items (need live play / Vesa's eyes): stance-stutter self-clean on the Saima save
+(other browser profile), Scribe gender backfill on pre-gender campaigns, Grok art
+respecting the gender tag, Aune appearance-thinning LOOKS baseline snapshot next playtest.
+L1-death balance is CONFIRMED working (playtest #9 §10: non-lethal defeat honored in
+fiction, no hand-wave) — watch item retired. New watch items from the #9 fixes: a reward
+turn should log `[Scribe] Payment audit: ... reward-shaped turn ... standing down` instead
+of deducting, and a narrated purchase turn should log `already granted by the event path`
+instead of `items 2`.
