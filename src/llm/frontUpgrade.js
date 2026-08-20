@@ -1,5 +1,5 @@
 import { sendMessage } from './adapter.js';
-import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { cleanText, parseDirectorJson } from './directorUtils.js';
 import { buildFrontMigrationContext } from './frontMigration.js';
 import { sanitizeGeneratedFronts } from './frontDirector.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
@@ -44,10 +44,6 @@ Rules:
 - Do not alter HP, XP, level, class, inventory, quests, party, combat, conditions, abilities, or any other mechanics. Never expose hidden titles, clocks, stages, or notes to the player.
 - Prefer a small, specific web over generic fantasy threats. Keep every field compact.`;
 
-function cleanText(value, maxLength) {
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
-}
-
 function sanitizeFaction(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const name = cleanText(value.name, 100);
@@ -64,19 +60,12 @@ function sanitizeFaction(value) {
     };
 }
 
+// Both error surfaces reach the Settings upgrade dialog — keep them verbatim.
 function parseUpgradeResponse(response) {
-    const extracted = extractBalancedJson(String(response || ''), 'front_enrichments')
-        || extractBalancedJson(String(response || ''), 'new_fronts');
-    if (!extracted) throw new Error('The living-world upgrade did not contain a valid front web.');
-    try {
-        return JSON.parse(extracted.json);
-    } catch {
-        try {
-            return JSON.parse(repairJson(extracted.json));
-        } catch {
-            throw new Error('The living-world upgrade was malformed. No campaign state was changed.');
-        }
-    }
+    return parseDirectorJson(response, ['front_enrichments', 'new_fronts'], 'living-world upgrade', {
+        missingMessage: 'The living-world upgrade did not contain a valid front web.',
+        malformedMessage: 'The living-world upgrade was malformed. No campaign state was changed.',
+    });
 }
 
 export function sanitizeFrontUpgrade(raw, existingFronts = []) {

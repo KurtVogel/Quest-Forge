@@ -6,10 +6,35 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-18 (2026-08-18 audit batch cleared same-day: journal summarize
-retry escape hatch + batch/message bounds, DM REMINDERS threat cap, transition-history
-dedupe/scan bound, first test suites for frontAftermath/regionalFronts. 1,562 tests
-green, lint clean)._
+_Last updated: 2026-08-19 (2026-08-19 audit batch cleared same-day: post-roll
+narrated-cast audit P1 via the shared runPostTurnExtraction, absence-drift local-NPC
+boundary, shared director JSON/cleanText helper, table-driven ChatPanel directors,
+turnOrchestrator surface tests. 1,589 tests green, lint clean)._
+
+## 2026-08-19 audit batch cleared same-day (1 P1 + 5 P2s, all six queue items ticked)
+
+The morning strengthening audit (living-world + chat-orchestration, opened Lap 4:
+simplification & design) found one P1 and five P2s; all fixed with tests the same day.
+**(P1) post-roll narrated-cast audit** — `finalizeRoleplayTurn`'s Scribe lootAudit had
+silently lost `auditCasts: true` (handleSend's near-duplicate block carried it), so an
+eventless cast the DM narrated in a post-roll outcome escaped the 2026-08-09 backstop.
+Root cause was the duplication itself, so the fix IS the extraction: one orchestrator-owned
+`runPostTurnExtraction(playerMessage, {auditCasts})` now serves both handleSend and the
+post-roll path (the runner owns the hidden/empty-commit checks, Scribe args, loot/cast
+audit, and narrative embed; ChatPanel keeps only the waitsForResolution/tableTalk gating),
+with the post-roll auditCasts pin in `turnOrchestrator.postTurn.test.js`. **(P2s)**
+absence-drift validation now accepts developments only for NPCs OF the return place —
+`isAbsenceDriftLocalNpc` in `engine/worldTempo.js` threaded into both validators
+(sanitize + INSTALL_ABSENCE_DRIFT), distant-NPC rejection pinned on both; the six director
+modules' copy-pasted extract→parse→repair→throw dance and eight `cleanText` copies
+collapsed into `llm/directorUtils.js` (`parseDirectorJson` + shared `cleanText`,
+error surfaces byte-identical, 9-test surface); ChatPanel's four structurally identical
+background-director effects became one table-driven effect over `BACKGROUND_DIRECTORS`
+(a new living-world director is now a table row); and turnOrchestrator's untested surfaces
+got 13 pins — tableTalk event suppression first (OOC can never mutate state), challenge
+ruling both branches, change-approach reveal/ruling, the semantic-roll merge, and
+suppressHpEvents — with `recoverMissingEvents` dropped from the public return
+(internal-only, zero external callers).
 
 ## 2026-08-18 audit batch cleared same-day (1 P1 + 3 P2s, all four queue items ticked)
 
@@ -425,7 +450,7 @@ generation + victory echo land.**
 
 ## Strengthening queue & watch items
 
-Open in SCHEDULED_STRENGTHENING.md after the 2026-08-18 batch: **0 P1s, 14 P2s** (oldest:
+Open in SCHEDULED_STRENGTHENING.md after the 2026-08-19 batch: **0 P1s, 14 P2s** (oldest:
 embedText batching, model-list drift; plus the playtest-sourced location-registry /
 scribe-audit / UX items). Carried watch items (need live play / Vesa's eyes):
 stance-stutter self-clean on the Saima save (other browser profile), Scribe gender

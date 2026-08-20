@@ -423,42 +423,68 @@ Translate the player's committed action into the single bounded combat_exchange 
         return true;
     };
 
-    const finalizeRoleplayTurn = (playerAction) => {
+    /**
+     * Post-turn extraction over the FINAL narrated outcome — the shared
+     * Scribe + narrative-embed + loot/cast-audit pass that ordinary sends
+     * (ChatPanel.handleSend) and post-roll outcomes (finalizeRoleplayTurn)
+     * previously hand-maintained as near-duplicate blocks. The copies drifted:
+     * the post-roll one silently lost the narrated-cast audit (2026-08-19 P1),
+     * so an eventless cast narrated after dice escaped the 2026-08-09 backstop.
+     *
+     * Reads the committed-turn record, never React state: the outcome
+     * message's render has not flushed yet, so a findLast(assistant) here
+     * returns the PREVIOUS assistant message (live playtest #6 — the
+     * stale-Scribe root cause). A hidden or empty commit (a withheld roll
+     * setup) extracts nothing; callers own the turn-shape gating (pending
+     * resolution, table talk).
+     *
+     * @returns {boolean} true when a final narration existed and was extracted.
+     */
+    const runPostTurnExtraction = (playerMessage, { auditCasts = true } = {}) => {
         const latest = getState();
-        // The committed-turn record, never a state read: the outcome message's
-        // render has not flushed yet, so findLast here returns the PREVIOUS
-        // assistant message (live playtest #6 — the stale-Scribe root cause).
         const committed = getLastCommittedTurn();
         const finalNarration = committed && !committed.hidden && committed.content?.trim()
             ? committed
             : null;
-        if (finalNarration) {
-            runScribe({
-                playerMessage: playerAction,
-                dmNarrative: finalNarration.content,
-                settings: latest.settings,
-                dispatch,
-                knownAppearances: buildKnownAppearances(latest, playerAction, finalNarration.content),
-                knownStances: buildKnownStances(latest, playerAction, finalNarration.content),
-                // The DM's own location event outranks the async Scribe this turn.
-                dmLocationEvent: finalNarration.events?.location || null,
-                // Post-roll outcomes are where narrated loot most often loses its
-                // events (the withheld setup already dropped them by design).
-                lootAudit: (!latest.combat?.active && finalNarration.id) ? {
-                    sourceId: `${finalNarration.id}:scribe-loot`,
-                    appliedEvents: finalNarration.events || null,
-                    getState,
-                } : null,
-            }).catch(() => {});
-            const machineryKey = getMachineryGeminiKey(latest.settings);
-            if (machineryKey) {
-                const loc = latest.currentLocation;
-                const narrativeText = loc
-                    ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
-                    : finalNarration.content.slice(0, 500);
-                addMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
-            }
+        if (!finalNarration) return false;
+        runScribe({
+            playerMessage,
+            dmNarrative: finalNarration.content,
+            settings: latest.settings,
+            dispatch,
+            knownAppearances: buildKnownAppearances(latest, playerMessage, finalNarration.content),
+            knownStances: buildKnownStances(latest, playerMessage, finalNarration.content),
+            // The DM's own location event (already applied) outranks the async
+            // Scribe for this turn: the Scribe's location downgrades to
+            // confirm-or-fill so it can never relocate the hero backwards.
+            dmLocationEvent: finalNarration.events?.location || null,
+            // Loot persistence audit: recover coins/items the narrative granted
+            // but the DM's structured events missed — post-roll outcomes lose
+            // them most often (the withheld setup already dropped its events by
+            // design). Out-of-combat only; keyed to the narration message so
+            // retries/reloads cannot double-grant. The narrated-cast backstop
+            // rides these ordinary turns only — the victory-narration audit
+            // (ChatPanel) recaps in-fight casts without the flag.
+            lootAudit: (!latest.combat?.active && finalNarration.id) ? {
+                sourceId: `${finalNarration.id}:scribe-loot`,
+                appliedEvents: finalNarration.events || null,
+                getState,
+                auditCasts,
+            } : null,
+        }).catch(() => {});
+        const machineryKey = getMachineryGeminiKey(latest.settings);
+        if (machineryKey) {
+            const loc = latest.currentLocation;
+            const narrativeText = loc
+                ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
+                : finalNarration.content.slice(0, 500);
+            addMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
         }
+        return true;
+    };
+
+    const finalizeRoleplayTurn = (playerAction) => {
+        runPostTurnExtraction(playerAction, { auditCasts: true });
         runAutoSummarize();
     };
 
@@ -597,11 +623,13 @@ Translate the player's committed action into the single bounded combat_exchange 
         resetRoleplayChallengeUi();
     };
 
+    // recoverMissingEvents stays internal (sendToLLM's nudge path is its only
+    // caller); it was exposed here for a while with zero external callers.
     return {
         sendToLLM,
         getLastCommittedTurn,
-        recoverMissingEvents,
         runAutoSummarize,
+        runPostTurnExtraction,
         stageRoleplayCheck,
         finalizeRoleplayTurn,
         acceptRoleplayCheck,

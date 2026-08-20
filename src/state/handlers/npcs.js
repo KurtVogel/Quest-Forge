@@ -6,7 +6,7 @@ import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRe
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionNameOnly, isSameLocation, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
-import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand } from '../../engine/worldTempo.js';
+import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { upsertNpc } from './shared.js';
 
@@ -252,7 +252,7 @@ export const handlers = {
     /**
      * One-shot install of the background absence-drift proposal. Everything is
      * re-validated here: NPC developments touch agenda/lastNotes only and only
-     * for names already in the roster (structurally nobody can be killed,
+     * for roster NPCs OF the return place (structurally nobody can be killed,
      * relocated, or have bond history rewritten), the world fact rides the
      * deduping ADD_WORLD_FACTS path, and a front symptom survives only where
      * an active front still holds theater — clamped to its live intensity
@@ -272,8 +272,12 @@ export const handlers = {
                 lastNotes: String(dev?.lastNotes || '').trim().slice(0, 400),
                 visible: String(dev?.visible || '').trim().slice(0, 240),
             }))
+            // Local NPCs only (2026-08-19 audit): the director's context holds
+            // just the NPCs of the return place, so a development naming a
+            // distant roster NPC is a hallucination, never a valid install.
             .filter(dev => dev.name && (dev.agenda || dev.lastNotes)
-                && (state.npcs || []).some(npc => npc?.name && namesMatch(npc.name, dev.name)))
+                && (state.npcs || []).some(npc => isAbsenceDriftLocalNpc(npc, pending.locationName)
+                    && namesMatch(npc.name, dev.name)))
             .slice(0, MAX_DRIFT_DEVELOPMENTS);
 
         let npcs = state.npcs || [];

@@ -1,5 +1,5 @@
 import { sendMessage } from './adapter.js';
-import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { cleanText, parseDirectorJson } from './directorUtils.js';
 import { normalizeFront } from '../engine/fronts.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH, CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
@@ -37,10 +37,6 @@ Rules:
 - If the hero travels alone, make at least one front naturally intersect a plausible potential companion through need, competence, rivalry, witness, rescue, shared enemies, debt, or aligned motives. Never force recruitment and never add a companion mechanically.
 - Do not alter HP, XP, inventory, quests, combat, conditions, character abilities, or any other mechanics.
 - Keep every field compact and specific. Hidden front titles, clocks, and notes are private and must never be exposed to the player.`;
-
-function cleanText(value, maxLength) {
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
-}
 
 function compactMessage(message) {
     if (!message || message.hidden || !['user', 'assistant'].includes(message.role)) return null;
@@ -185,19 +181,11 @@ export async function generateContextualFronts(state) {
         userMessage: JSON.stringify(context),
         temperature: 0.7, // creative front invention, but inside a strict JSON schema
     });
-    const extracted = extractBalancedJson(String(response || ''), 'fronts');
-    if (!extracted) throw new Error('The migration response did not contain campaign fronts. Try again.');
-
-    let parsed;
-    try {
-        parsed = JSON.parse(extracted.json);
-    } catch {
-        try {
-            parsed = JSON.parse(repairJson(extracted.json));
-        } catch {
-            throw new Error('The migration response was malformed. No campaign state was changed.');
-        }
-    }
+    // Both error surfaces reach the Settings migration dialog — keep them verbatim.
+    const parsed = parseDirectorJson(response, 'fronts', 'migration', {
+        missingMessage: 'The migration response did not contain campaign fronts. Try again.',
+        malformedMessage: 'The migration response was malformed. No campaign state was changed.',
+    });
 
     const existingTitles = new Set((state.fronts || []).map(front => front.title?.toLowerCase()).filter(Boolean));
     const availableSlots = Math.max(0, 3 - (state.fronts || []).length);

@@ -184,6 +184,29 @@ describe('INSTALL_ABSENCE_DRIFT', () => {
         expect(gameReducer(state, { type: 'INSTALL_ABSENCE_DRIFT', payload: { sessionId: 'campaign-1', key: 'loc-aldermill|1', drift } })).toBe(state);
     });
 
+    it('rejects a development for a roster NPC who lives elsewhere (2026-08-19 audit)', () => {
+        // The director's context holds only the NPCs of the return place, so a
+        // proposal naming a distant roster NPC is a hallucination — installing
+        // it would rewrite that NPC's agenda/lastNotes as if they lived here.
+        const state = pendingState();
+        state.npcs = [...state.npcs, { id: 'npc-renn', name: 'Renn', rosterTier: 'character', lastLocation: 'Deep Fen', lastNotes: 'Runs the fen ferry' }];
+        const next = gameReducer(state, {
+            type: 'INSTALL_ABSENCE_DRIFT',
+            payload: {
+                sessionId: 'campaign-1',
+                key: 'loc-aldermill|50',
+                drift: {
+                    developments: [{ name: 'Renn', agenda: 'Secretly rule Aldermill', lastNotes: 'Moved to Aldermill and took over' }],
+                    worldFact: '',
+                    frontSymptom: '',
+                },
+            },
+        });
+        expect(next.npcs).toBe(state.npcs); // untouched — the development never installs
+        expect(next.session.absenceDrift).toBeNull(); // nothing survived → install-nothing
+        expect(next.session.pendingAbsenceDrift).toBeNull(); // the one-shot marker is still spent
+    });
+
     it('treats a quiet proposal as a clean, install-nothing answer', () => {
         const state = pendingState();
         const next = gameReducer(state, {

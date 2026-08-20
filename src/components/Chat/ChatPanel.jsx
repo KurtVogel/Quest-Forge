@@ -35,6 +35,60 @@ function cleanDisplayText(text) {
     return String(text || '').replace(DECORATIVE_SYMBOL_RE, '').replace(/[ \t]{2,}/g, ' ').trimStart();
 }
 
+/**
+ * The living-world background directors share one fire-and-forget contract
+ * (DECISIONS.md 2026-08-03/05): a one-shot trigger in session state, a private
+ * DM-model call while play continues, and an INSTALL_* reducer action that
+ * re-validates everything — so a late, duplicate, or hostile result is
+ * harmless, and a failed call retries on the next dependency change. The four
+ * effects that carried this contract were structurally identical (~90 lines;
+ * 2026-08-19 audit), so one table + one effect serves them all — a new
+ * director is a row here, not a fifth copy.
+ *
+ * `getKey(state)` returns the identity of the currently requested generation
+ * (null when nothing is pending): one key fires at most one call; success
+ * parks the key so the result installs at most once per mount, failure clears
+ * the slot so the next dependency change retries.
+ */
+const BACKGROUND_DIRECTORS = [
+    {
+        // Privately replace the generic safety-net front with a grounded 2–3-front web.
+        name: 'campaignFronts',
+        getKey: (s) => (shouldGenerateCampaignFronts(s) ? s.session.id : null),
+        generate: generateCampaignFronts,
+        install: (s, key, fronts) => ({ type: 'INSTALL_GENERATED_FRONTS', payload: { sessionId: s.session.id, fronts } }),
+        logSuccess: (s, key, fronts) => `[Fronts] Generated ${fronts.length} private campaign pressures.`,
+        failureNote: '[Fronts] Initial private generation failed; deterministic front remains active:',
+    },
+    {
+        // A resolved front's aftermath: 0–2 successor pressures, often none.
+        name: 'frontAftermath',
+        getKey: (s) => (shouldGenerateFrontAftermath(s) ? s.session.pendingFrontAftermath.frontId : null),
+        generate: generateFrontAftermath,
+        install: (s, key, fronts) => ({ type: 'INSTALL_AFTERMATH_FRONTS', payload: { sessionId: s.session.id, frontId: key, fronts } }),
+        logSuccess: (s, key, fronts) => `[Fronts] Aftermath of ${key}: ${fronts.length} successor pressure(s) proposed.`,
+        failureNote: '[Fronts] Aftermath generation failed; will retry:',
+    },
+    {
+        // What happened HERE while the hero was away (DECISIONS.md 2026-08-05).
+        name: 'absenceDrift',
+        getKey: (s) => (shouldGenerateAbsenceDrift(s) ? s.session.pendingAbsenceDrift.key : null),
+        generate: generateAbsenceDrift,
+        install: (s, key, drift) => ({ type: 'INSTALL_ABSENCE_DRIFT', payload: { sessionId: s.session.id, key, drift } }),
+        logSuccess: (s, key, drift) => `[LivingWorld] Absence drift for ${s.session.pendingAbsenceDrift?.locationName}: ${drift.developments.length} development(s)${drift.worldFact ? ' + fact' : ''}${drift.frontSymptom ? ' + symptom' : ''}.`,
+        failureNote: '[LivingWorld] Absence-drift generation failed; will retry:',
+    },
+    {
+        // Native pressures for a genuinely new region (world-tempo component 9).
+        name: 'regionalFronts',
+        getKey: (s) => (shouldGenerateRegionalFronts(s) ? s.session.pendingRegionalFronts.key : null),
+        generate: generateRegionalFronts,
+        install: (s, key, fronts) => ({ type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId: s.session.id, key, fronts } }),
+        logSuccess: (s, key, fronts) => `[LivingWorld] Native pressures for ${s.session.pendingRegionalFronts?.region}: ${fronts.length} proposed.`,
+        failureNote: '[LivingWorld] Regional front seeding failed; will retry:',
+    },
+];
+
 export default function ChatPanel() {
     const { state, dispatch } = useGame();
     const [input, setInput] = useState('');
@@ -58,10 +112,7 @@ export default function ChatPanel() {
     const pendingStreamTextRef = useRef(''); // Latest fence-frozen display text from the turn runner
     const narratedCueIdsRef = useRef(new Set()); // Mechanic system messages already given an LLM flavor beat
     const narratedCombatExchangeIdsRef = useRef(new Set()); // Prevent duplicate narration calls for one mechanics commit
-    const frontGenerationSessionRef = useRef(null); // One private generation request per fresh campaign at a time
-    const aftermathFrontRef = useRef(null); // One aftermath request per resolved front at a time
-    const absenceDriftRef = useRef(null); // One absence-drift request per qualifying return at a time
-    const regionalFrontsRef = useRef(null); // One native-pressure generation per newly entered region at a time
+    const directorKeysRef = useRef({}); // One in-flight/served key per background director (see BACKGROUND_DIRECTORS)
 
     // Use a ref to always read the latest state inside async callbacks
     const stateRef = useRef(state);
@@ -237,98 +288,42 @@ export default function ChatPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [primingRetryToken, state.settings?.apiKey]);
 
-    /** Privately replace the generic safety-net front with a grounded 2–3-front web. */
-    useEffect(() => {
-        const s = stateRef.current;
-        if (!shouldGenerateCampaignFronts(s) || frontGenerationSessionRef.current === s.session.id) return;
-        const sessionId = s.session.id;
-        frontGenerationSessionRef.current = sessionId;
-        generateCampaignFronts(s)
-            .then(fronts => {
-                dispatch({ type: 'INSTALL_GENERATED_FRONTS', payload: { sessionId, fronts } });
-                console.info(`[Fronts] Generated ${fronts.length} private campaign pressures.`);
-            })
-            .catch(error => {
-                console.warn('[Fronts] Initial private generation failed; deterministic front remains active:', error.message || error);
-                if (frontGenerationSessionRef.current === sessionId) frontGenerationSessionRef.current = null;
-            });
-    }, [state.session?.id, state.session?.frontDirector?.version, state.settings.apiKey, state.messages.length, state.combat?.active, dispatch]);
-
     /**
-     * Front aftermath: a resolved front leaves a pending flag; a private DM-model
-     * call decides what the victory leaves behind (0–2 successor pressures, often
-     * none). Fire-and-forget like initial front generation — the reducer's
-     * one-shot pending guard makes a late or duplicate result harmless, and a
-     * failed call retries on the next dependency change.
+     * All living-world background directors, one table-driven effect (see
+     * BACKGROUND_DIRECTORS at module scope). The dependency list is the union
+     * of every director's triggers; each row's getKey gate makes the extra
+     * evaluations no-ops, and success/failure key parking preserves the exact
+     * per-director one-shot/retry semantics the four separate effects had.
      */
     useEffect(() => {
         const s = stateRef.current;
-        const pending = s.session?.pendingFrontAftermath;
-        if (!pending || !shouldGenerateFrontAftermath(s) || aftermathFrontRef.current === pending.frontId) return;
-        const sessionId = s.session.id;
-        const frontId = pending.frontId;
-        aftermathFrontRef.current = frontId;
-        generateFrontAftermath(s)
-            .then(fronts => {
-                dispatch({ type: 'INSTALL_AFTERMATH_FRONTS', payload: { sessionId, frontId, fronts } });
-                console.info(`[Fronts] Aftermath of ${frontId}: ${fronts.length} successor pressure(s) proposed.`);
-            })
-            .catch(error => {
-                console.warn('[Fronts] Aftermath generation failed; will retry:', error.message || error);
-                if (aftermathFrontRef.current === frontId) aftermathFrontRef.current = null;
-            });
-    }, [state.session?.pendingFrontAftermath?.frontId, state.settings.apiKey, state.combat?.active, dispatch]);
-
-    /**
-     * Absence drift (DECISIONS.md 2026-08-05): returning to a known place after
-     * a long absence raises a one-shot session marker; a private DM-model call
-     * proposes what happened THERE while the hero was away. Fire-and-forget like
-     * front aftermath — INSTALL_ABSENCE_DRIFT re-validates everything, a stale
-     * or duplicate result is dropped, and a failed call retries on the next
-     * dependency change.
-     */
-    useEffect(() => {
-        const s = stateRef.current;
-        const pending = s.session?.pendingAbsenceDrift;
-        if (!pending || !shouldGenerateAbsenceDrift(s) || absenceDriftRef.current === pending.key) return;
-        const sessionId = s.session.id;
-        const key = pending.key;
-        absenceDriftRef.current = key;
-        generateAbsenceDrift(s)
-            .then(drift => {
-                dispatch({ type: 'INSTALL_ABSENCE_DRIFT', payload: { sessionId, key, drift } });
-                console.info(`[LivingWorld] Absence drift for ${pending.locationName}: ${drift.developments.length} development(s)${drift.worldFact ? ' + fact' : ''}${drift.frontSymptom ? ' + symptom' : ''}.`);
-            })
-            .catch(error => {
-                console.warn('[LivingWorld] Absence-drift generation failed; will retry:', error.message || error);
-                if (absenceDriftRef.current === key) absenceDriftRef.current = null;
-            });
-    }, [state.session?.pendingAbsenceDrift?.key, state.settings.apiKey, state.combat?.active, dispatch]);
-
-    /**
-     * Regional front seeding (world-tempo component 9, DECISIONS.md 2026-08-05):
-     * entering a genuinely new named region raises a one-shot marker; a private
-     * DM-model call proposes 1–2 pressures NATIVE to that land, installed with
-     * the arrival place as their theater. Same fire-and-forget contract as the
-     * other living-world directors.
-     */
-    useEffect(() => {
-        const s = stateRef.current;
-        const pending = s.session?.pendingRegionalFronts;
-        if (!pending || !shouldGenerateRegionalFronts(s) || regionalFrontsRef.current === pending.key) return;
-        const sessionId = s.session.id;
-        const key = pending.key;
-        regionalFrontsRef.current = key;
-        generateRegionalFronts(s)
-            .then(fronts => {
-                dispatch({ type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId, key, fronts } });
-                console.info(`[LivingWorld] Native pressures for ${pending.region}: ${fronts.length} proposed.`);
-            })
-            .catch(error => {
-                console.warn('[LivingWorld] Regional front seeding failed; will retry:', error.message || error);
-                if (regionalFrontsRef.current === key) regionalFrontsRef.current = null;
-            });
-    }, [state.session?.pendingRegionalFronts?.key, state.settings.apiKey, state.combat?.active, dispatch]);
+        for (const director of BACKGROUND_DIRECTORS) {
+            const key = director.getKey(s);
+            if (!key || directorKeysRef.current[director.name] === key) continue;
+            directorKeysRef.current[director.name] = key;
+            director.generate(s)
+                .then(result => {
+                    dispatch(director.install(s, key, result));
+                    console.info(director.logSuccess(s, key, result));
+                })
+                .catch(error => {
+                    console.warn(director.failureNote, error.message || error);
+                    if (directorKeysRef.current[director.name] === key) {
+                        directorKeysRef.current[director.name] = null;
+                    }
+                });
+        }
+    }, [
+        state.session?.id,
+        state.session?.frontDirector?.version,
+        state.session?.pendingFrontAftermath?.frontId,
+        state.session?.pendingAbsenceDrift?.key,
+        state.session?.pendingRegionalFronts?.key,
+        state.settings.apiKey,
+        state.messages.length,
+        state.combat?.active,
+        dispatch,
+    ]);
 
     /**
      * RAG seeding: embed all existing world facts and journal summaries once on mount.
@@ -648,55 +643,15 @@ export default function ChatPanel() {
             }
 
             // Extract world-state from the FINAL narrated outcome (where the real facts
-            // live), now that any roll chain has resolved. Covers no-roll turns too, and
-            // skips the withheld pre-roll setup (flagged hidden).
-            const latest = stateRef.current;
+            // live), now that any roll chain has resolved. Covers no-roll turns too;
+            // the runner skips withheld pre-roll setups (flagged hidden) itself. An OOC
+            // exchange is meta conversation, not fiction: extracting facts, NPC
+            // updates, or memories from it would canonize table talk.
             const waitsForResolution = !!events?.combatExchange
                 || combatStartedNow
                 || !!events?.requestedRolls?.length;
-            // An OOC exchange is meta conversation, not fiction: extracting facts,
-            // NPC updates, or memories from it would canonize table talk.
-            // The narration comes from the runner's committed-turn record, never a
-            // state read: the ADD_MESSAGE render has not flushed yet in this task,
-            // so findLast(assistant) here returned the PREVIOUS turn's message —
-            // the Scribe was extracting from one narrative behind (live playtest #6).
-            const committed = runner.getLastCommittedTurn();
-            const finalNarration = (waitsForResolution || tableTalkTurn
-                || !committed || committed.hidden || !committed.content?.trim())
-                ? null
-                : committed;
-            if (finalNarration) {
-                runScribe({
-                    playerMessage: trimmed,
-                    dmNarrative: finalNarration.content,
-                    settings: latest.settings,
-                    dispatch,
-                    knownAppearances: buildKnownAppearances(latest, trimmed, finalNarration.content),
-                    knownStances: buildKnownStances(latest, trimmed, finalNarration.content),
-                    // The DM's own location event (already applied) outranks the async
-                    // Scribe for this turn: the Scribe's location downgrades to
-                    // confirm-or-fill so it can never relocate the hero backwards.
-                    dmLocationEvent: finalNarration.events?.location || null,
-                    // Loot persistence audit: recover coins/items the narrative granted
-                    // but the DM's structured events missed. Out-of-combat only; keyed
-                    // to the narration message so retries/reloads cannot double-grant.
-                    lootAudit: (!latest.combat?.active && finalNarration.id) ? {
-                        sourceId: `${finalNarration.id}:scribe-loot`,
-                        appliedEvents: finalNarration.events || null,
-                        getState: () => stateRef.current,
-                        // Narrated-cast backstop rides ordinary turns only — the
-                        // victory-narration audit below recaps in-fight casts.
-                        auditCasts: true,
-                    } : null,
-                }).catch(() => {});
-                const machineryKey = getMachineryGeminiKey(latest.settings);
-                if (machineryKey) {
-                    const loc = latest.currentLocation;
-                    const narrativeText = loc
-                        ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
-                        : finalNarration.content.slice(0, 500);
-                    addMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
-                }
+            if (!waitsForResolution && !tableTalkTurn) {
+                runner.runPostTurnExtraction(trimmed, { auditCasts: true });
             }
 
             // A turn awaiting dice resolution summarizes after the outcome lands, not mid-split.

@@ -21,7 +21,7 @@
  * instructing). Player-sought danger is never gated by any of this.
  */
 
-import { findLocationRecord, getCurrentLocationRecord } from './locationRegistry.js';
+import { findLocationRecord, getCurrentLocationRecord, isSameLocation } from './locationRegistry.js';
 import { conversationalDistance } from './replayLedger.js';
 import { DEFAULT_MAX_CLOCK } from './fronts.js';
 
@@ -58,6 +58,19 @@ export const MAX_DRIFT_DEVELOPMENTS = 2;
  * turns in the 2026-08-05 live playtest). One drift per return, not per door.
  */
 export const ABSENCE_DRIFT_COOLDOWN_MESSAGES = 20;
+
+/**
+ * Absence-drift developments may touch only the NPCs OF the return place —
+ * the same eligibility buildAbsenceDriftContext uses to project the prompt's
+ * NPC list. Shared by BOTH validators (sanitizeAbsenceDrift and
+ * INSTALL_ABSENCE_DRIFT, 2026-08-19 audit) so a hallucinated development for
+ * a distant roster NPC can never rewrite their agenda/lastNotes; it lives
+ * here beside the drift constants so reducer handlers never import from llm/.
+ */
+export function isAbsenceDriftLocalNpc(npc, locationName) {
+    return !!(npc?.name && npc.rosterTier !== 'archived_creature'
+        && npc.lastLocation && isSameLocation(npc.lastLocation, String(locationName || '')));
+}
 
 /**
  * Conversational distance since an anchor stamped as "message count at the

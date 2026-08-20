@@ -1,5 +1,5 @@
 import { sendMessage } from './adapter.js';
-import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { cleanText, parseDirectorJson } from './directorUtils.js';
 import { FRONTS_VERSION, normalizeFront } from '../engine/fronts.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
@@ -37,24 +37,6 @@ Rules:
 - When the hero is alone, let one pressure plausibly intersect a potential ally through competence, shared danger, rivalry, debt, rescue, or aligned motives. Never add a companion mechanically.
 - Do not alter HP, XP, inventory, quests, combat, conditions, abilities, or any other mechanics.
 - Prefer two specific fronts over three weak or generic ones. Keep every field compact.`;
-
-function cleanText(value, maxLength) {
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
-}
-
-function parseJsonResponse(response) {
-    const extracted = extractBalancedJson(String(response || ''), 'fronts');
-    if (!extracted) throw new Error('The living-world response did not contain fronts.');
-    try {
-        return JSON.parse(extracted.json);
-    } catch {
-        try {
-            return JSON.parse(repairJson(extracted.json));
-        } catch {
-            throw new Error('The living-world response was malformed.');
-        }
-    }
-}
 
 export function shouldGenerateCampaignFronts(state) {
     if (!state?.character || !state?.session?.id || !state?.settings?.apiKey) return false;
@@ -130,7 +112,7 @@ export async function generateCampaignFronts(state) {
         userMessage: JSON.stringify(context),
         temperature: 0.7, // creative front invention, but inside a strict JSON schema
     });
-    const fronts = sanitizeGeneratedFronts(parseJsonResponse(response).fronts);
+    const fronts = sanitizeGeneratedFronts(parseDirectorJson(response, 'fronts', 'living-world').fronts);
     if (fronts.length < 2) throw new Error('The living-world director did not produce two safe, specific fronts.');
     return fronts;
 }

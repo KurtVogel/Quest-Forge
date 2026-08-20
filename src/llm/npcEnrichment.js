@@ -15,10 +15,7 @@ import { NPC_GENDER_MAX } from '../config/contentLimits.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
-
-function cleanText(value) {
-    return String(value || '').replace(/\s+/g, ' ').trim();
-}
+import { cleanText } from './directorUtils.js';
 
 function mentionsName(text, name) {
     const hay = cleanText(text).toLowerCase();

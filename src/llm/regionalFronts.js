@@ -15,7 +15,7 @@
  * off a one-shot session marker, complete-or-nothing validated install.
  */
 import { sendMessage } from './adapter.js';
-import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { cleanText, parseDirectorJson } from './directorUtils.js';
 import { sanitizeAftermathProposals } from './frontAftermath.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 import { findLocationRecord } from '../engine/locationRegistry.js';
@@ -52,10 +52,6 @@ Rules:
 - Do not alter HP, XP, inventory, quests, combat, conditions, abilities, or any other mechanics.
 - Return an EMPTY list only if the supplied region genuinely offers nothing — a settled, peaceful land can still have a native pressure (a trade war, a failing harvest, a succession dispute).
 - Keep every field compact and specific. All of this is private and never shown to the player.`;
-
-function cleanText(value, maxLength) {
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
-}
 
 function compactMessage(message) {
     if (!message || message.hidden || !['user', 'assistant'].includes(message.role)) return null;
@@ -126,17 +122,5 @@ export async function generateRegionalFronts(state) {
         userMessage: JSON.stringify(buildRegionalFrontsContext(state)),
         temperature: 0.7, // creative front invention, inside a strict JSON schema
     });
-    const extracted = extractBalancedJson(String(response || ''), 'aftermath_fronts');
-    if (!extracted) throw new Error('The regional-front response did not contain aftermath_fronts.');
-    let parsed;
-    try {
-        parsed = JSON.parse(extracted.json);
-    } catch {
-        try {
-            parsed = JSON.parse(repairJson(extracted.json));
-        } catch {
-            throw new Error('The regional-front response was malformed.');
-        }
-    }
-    return sanitizeAftermathProposals(parsed.aftermath_fronts);
+    return sanitizeAftermathProposals(parseDirectorJson(response, 'aftermath_fronts', 'regional-front').aftermath_fronts);
 }

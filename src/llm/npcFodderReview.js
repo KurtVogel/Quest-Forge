@@ -6,12 +6,9 @@
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { parseJsonObjectLoose } from './utils/jsonExtractor.js';
+import { cleanText } from './directorUtils.js';
 
 const BATCH_SIZE = 28;
-
-function cleanText(value) {
-    return String(value || '').replace(/\s+/g, ' ').trim();
-}
 
 export function buildFodderReviewBatch(npcs = []) {
     return (npcs || [])

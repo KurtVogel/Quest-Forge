@@ -17,7 +17,7 @@
  * installs nothing, and a quiet "nothing much changed" is a first-class answer.
  */
 import { sendMessage } from './adapter.js';
-import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { cleanText, parseDirectorJson } from './directorUtils.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 import { findLocationRecord, isSameLocation } from '../engine/locationRegistry.js';
 import {
@@ -27,6 +27,7 @@ import {
     describeIntensity,
     distanceSince,
     getFrontIntensityBand,
+    isAbsenceDriftLocalNpc,
 } from '../engine/worldTempo.js';
 import { namesMatch } from '../engine/npcRoster.js';
 
@@ -57,10 +58,6 @@ Rules:
 - An empty developments list with a null fact is a valid and common answer when the supplied canon suggests stability.
 - Keep every field compact and specific. All of this is private and never shown to the player.`;
 
-function cleanText(value, maxLength) {
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
-}
-
 export function shouldGenerateAbsenceDrift(state) {
     return !!(state?.session?.pendingAbsenceDrift
         && state.session?.id
@@ -85,8 +82,7 @@ export function buildAbsenceDriftContext(state) {
     const character = state.character || {};
 
     const localNpcs = (state.npcs || [])
-        .filter(npc => npc?.name && npc.rosterTier !== 'archived_creature'
-            && npc.lastLocation && isSameLocation(npc.lastLocation, pending.locationName || ''))
+        .filter(npc => isAbsenceDriftLocalNpc(npc, pending.locationName))
         .slice(-8)
         .map(npc => ({
             name: cleanText(npc.name, 100),
@@ -137,8 +133,13 @@ export function buildAbsenceDriftContext(state) {
     };
 }
 
-/** Light shaping only: INSTALL_ABSENCE_DRIFT re-validates everything. */
-export function sanitizeAbsenceDrift(raw, { npcs = [] } = {}) {
+/**
+ * Light shaping only: INSTALL_ABSENCE_DRIFT re-validates everything. The NPC
+ * boundary is LOCAL, not roster-wide (2026-08-19 audit): the prompt context
+ * deliberately supplies only the NPCs of the return place, so a hallucinated
+ * development for a distant NPC must never rewrite that record.
+ */
+export function sanitizeAbsenceDrift(raw, { npcs = [], locationName = '' } = {}) {
     if (!raw || typeof raw !== 'object') return { developments: [], worldFact: '', frontSymptom: '' };
     const developments = (Array.isArray(raw.developments) ? raw.developments : [])
         .map(dev => ({
@@ -148,7 +149,7 @@ export function sanitizeAbsenceDrift(raw, { npcs = [] } = {}) {
             visible: cleanText(dev?.visible, 240),
         }))
         .filter(dev => dev.name && (dev.agenda || dev.lastNotes)
-            && npcs.some(npc => npc?.name && namesMatch(npc.name, dev.name)))
+            && npcs.some(npc => isAbsenceDriftLocalNpc(npc, locationName) && namesMatch(npc.name, dev.name)))
         .slice(0, MAX_DRIFT_DEVELOPMENTS);
     return {
         developments,
@@ -170,19 +171,10 @@ export async function generateAbsenceDrift(state) {
         userMessage: JSON.stringify(buildAbsenceDriftContext(state)),
         temperature: 0.7, // creative off-screen life, inside a strict JSON schema
     });
-    const extracted = extractBalancedJson(String(response || ''), 'developments');
-    if (!extracted) throw new Error('The absence-drift response did not contain developments.');
-    let parsed;
-    try {
-        parsed = JSON.parse(extracted.json);
-    } catch {
-        try {
-            parsed = JSON.parse(repairJson(extracted.json));
-        } catch {
-            throw new Error('The absence-drift response was malformed.');
-        }
-    }
-    return sanitizeAbsenceDrift(parsed, { npcs: state.npcs || [] });
+    return sanitizeAbsenceDrift(parseDirectorJson(response, 'developments', 'absence-drift'), {
+        npcs: state.npcs || [],
+        locationName: state.session?.pendingAbsenceDrift?.locationName || '',
+    });
 }
 
 /**

@@ -12,7 +12,7 @@
  * normalizeEmergentFront and owns the one-shot pending flag.
  */
 import { sendMessage } from './adapter.js';
-import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { cleanText, parseDirectorJson } from './directorUtils.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 
@@ -49,10 +49,6 @@ Rules:
 - Grim portents are possible FUTURE escalations, not events that already happened. New pressures start invisible: no on-screen presence yet.
 - Do not alter HP, XP, inventory, quests, combat, conditions, abilities, or any other mechanics.
 - Keep every field compact and specific. All of this is private and never shown to the player.`;
-
-function cleanText(value, maxLength) {
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
-}
 
 function compactFront(front) {
     return {
@@ -173,17 +169,5 @@ export async function generateFrontAftermath(state) {
         userMessage: JSON.stringify(buildFrontAftermathContext(state)),
         temperature: 0.7, // creative front invention, but inside a strict JSON schema
     });
-    const extracted = extractBalancedJson(String(response || ''), 'aftermath_fronts');
-    if (!extracted) throw new Error('The aftermath response did not contain aftermath_fronts.');
-    let parsed;
-    try {
-        parsed = JSON.parse(extracted.json);
-    } catch {
-        try {
-            parsed = JSON.parse(repairJson(extracted.json));
-        } catch {
-            throw new Error('The aftermath response was malformed.');
-        }
-    }
-    return sanitizeAftermathProposals(parsed.aftermath_fronts);
+    return sanitizeAftermathProposals(parseDirectorJson(response, 'aftermath_fronts', 'aftermath').aftermath_fronts);
 }

@@ -88,7 +88,13 @@ describe('buildAbsenceDriftContext', () => {
 });
 
 describe('sanitizeAbsenceDrift', () => {
-    const npcs = [{ name: 'Marta' }, { name: 'Ox' }];
+    const npcs = [
+        { name: 'Marta', lastLocation: 'Aldermill' },
+        { name: 'Ox', lastLocation: 'Aldermill' },
+        { name: 'Renn', lastLocation: 'Deep Fen' },
+        { name: 'Old rat', rosterTier: 'archived_creature', lastLocation: 'Aldermill' },
+    ];
+    const opts = { npcs, locationName: 'Aldermill' };
 
     it('keeps only known NPCs, clamps fields, and caps developments', () => {
         const drift = sanitizeAbsenceDrift({
@@ -100,7 +106,7 @@ describe('sanitizeAbsenceDrift', () => {
             ],
             world_fact: 'The ferry runs again',
             front_symptom: 'Grey Ledger men now sit at the toll bridge',
-        }, { npcs });
+        }, opts);
         expect(drift.developments).toHaveLength(2);
         expect(drift.developments.map(dev => dev.name)).toEqual(['Marta', 'Ox']);
         expect(drift.developments[0].agenda).toHaveLength(300);
@@ -108,9 +114,22 @@ describe('sanitizeAbsenceDrift', () => {
         expect(drift.frontSymptom).toContain('toll bridge');
     });
 
+    it('rejects developments for roster NPCs of a DIFFERENT place, and for archived creatures (2026-08-19 audit)', () => {
+        // The prompt context supplies only the NPCs OF the return place, so a
+        // development naming anyone else is a hallucination — even a real
+        // roster name must not have their record rewritten from here.
+        const drift = sanitizeAbsenceDrift({
+            developments: [
+                { npc: 'Renn', lastNotes: 'Suddenly runs this town now' },
+                { npc: 'Old rat', lastNotes: 'Grew ambitious' },
+            ],
+        }, opts);
+        expect(drift.developments).toEqual([]);
+    });
+
     it('degrades junk to an empty, install-nothing proposal', () => {
-        expect(sanitizeAbsenceDrift(null, { npcs })).toEqual({ developments: [], worldFact: '', frontSymptom: '' });
-        expect(sanitizeAbsenceDrift({ developments: 'no' }, { npcs }).developments).toEqual([]);
+        expect(sanitizeAbsenceDrift(null, opts)).toEqual({ developments: [], worldFact: '', frontSymptom: '' });
+        expect(sanitizeAbsenceDrift({ developments: 'no' }, opts).developments).toEqual([]);
     });
 });
 
