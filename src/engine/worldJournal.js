@@ -111,6 +111,7 @@ Your output MUST be valid JSON with this exact structure:
 
 Rules:
 - Be concise but capture ALL important narrative beats
+- [SYSTEM] lines are the game engine's authoritative mechanical results and always outrank narrative prose about HP, injuries, deaths, and fight outcomes. Record a fight only by its FINAL resolved outcome (who won; who died, fled, or surrendered; the hero's state after any healing) — never mid-fight snapshots: "she is down to 1 HP" or "the lookout remains conscious" from the middle of a fight is superseded by the fight's end and must not appear in the summary
 - Track NPCs by their EXACT name as written (never rename or paraphrase it — their record forks if the name drifts) and how they feel about the player
 - Only include npcs_encountered entries worth tracking across sessions: named characters with dialogue, rivalry, debt, secrets, or recurring story weight. Use kind "creature" or "ephemeral" and rosterEligible false for nameless combat fodder (generic goblins, numbered guards, one-line minions). Combat fodder does not belong in the durable roster.
 - Preserve proper nouns and numbers verbatim — never approximate or invent them
@@ -132,6 +133,15 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
     const newMessages = messageCount - lastSummarizedIndex;
 
     if (newMessages < SUMMARIZE_EVERY) {
+        return { index: lastSummarizedIndex, journalEntry: null };
+    }
+
+    // Never journal mid-fight (Codex 2026-08-09): a batch cut inside an active
+    // combat records pre-resolution state ("Mara at 1/12 HP", "the lookout
+    // remains conscious") as durable history that the committed mechanics
+    // contradict minutes later. The cadence simply waits — the capped batch
+    // drains normally once the fight resolves.
+    if (state.combat?.active) {
         return { index: lastSummarizedIndex, journalEntry: null };
     }
 

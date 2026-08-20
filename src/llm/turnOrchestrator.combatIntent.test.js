@@ -104,3 +104,35 @@ describe('turn runner — combat-intent RAG skip', () => {
         expect(captureInjectionMock).toHaveBeenCalledTimes(1);
     });
 });
+
+describe('turn runner — empty combat-intent messages (queue 2026-08-09, playtest #8)', () => {
+    it('stores no assistant message when the intent translation is pure JSON', async () => {
+        const streamMessage = vi.fn(async ({ onChunk }) => {
+            const text = '```json\n{}\n```';
+            onChunk?.(text);
+            return text;
+        });
+        const { runner, getState } = createHarness({ streamMessage, combatActive: true });
+
+        const events = await runner.sendToLLM('I attack the goblin.', 'I attack the goblin.', { combatIntentOnly: true });
+
+        expect(events).toBeTruthy(); // events still flow to the caller for routing
+        expect(getState().messages.filter(m => m.role === 'assistant')).toHaveLength(0);
+        expect(runner.getLastCommittedTurn()).toBeNull();
+    });
+
+    it('still stores the message when the intent call leaked prose', async () => {
+        const streamMessage = vi.fn(async ({ onChunk }) => {
+            const text = 'The goblin snarls as you press in.\n```json\n{}\n```';
+            onChunk?.(text);
+            return text;
+        });
+        const { runner, getState } = createHarness({ streamMessage, combatActive: true });
+
+        await runner.sendToLLM('I attack the goblin.', 'I attack the goblin.', { combatIntentOnly: true });
+
+        const assistants = getState().messages.filter(m => m.role === 'assistant');
+        expect(assistants).toHaveLength(1);
+        expect(assistants[0].content).toContain('goblin snarls');
+    });
+});

@@ -331,11 +331,19 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
         }
         if (!isMounted()) return null; // Never commit a turn into a different campaign's store
-        dispatch({
-            type: 'ADD_MESSAGE',
-            payload: { id: msgId, role: 'assistant', content: narrative, events, hidden: hideSetup },
-        });
-        lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup };
+        // A combat-intent translation is JSON-only by contract: with no prose
+        // there is nothing to show or remember, and storing the empty assistant
+        // message padded saves AND the DM's 20-message window with blank turns
+        // (queue 2026-08-09, live playtest #8). Events still flow to the caller
+        // and through applyEvents below (condition syncs ride intent turns);
+        // the committed-turn record stays null, matching "nothing narrated".
+        if (!(opts.combatIntentOnly && !narrative.trim())) {
+            dispatch({
+                type: 'ADD_MESSAGE',
+                payload: { id: msgId, role: 'assistant', content: narrative, events, hidden: hideSetup },
+            });
+            lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup };
+        }
 
         // Apply game events (damage, items, etc.)
         if (events) {

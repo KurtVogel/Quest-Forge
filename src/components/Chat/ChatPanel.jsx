@@ -540,7 +540,14 @@ export default function ChatPanel() {
      */
     const handleSend = async () => {
         const trimmed = input.trim();
-        if (!trimmed || isLoading) return;
+        if (!trimmed) return;
+        if (isLoading) {
+            // A send while the previous turn's post-stream machinery is still
+            // resolving used to vanish silently (queue 2026-08-08, playtest #6):
+            // the input survives in the box — now the wait indicator says so.
+            setLoadingStatus('Still resolving the previous turn — your message stays in the box.');
+            return;
+        }
 
         // Explicit OOC table talk ("OOC: ...", "DM, ...") is a question to the DM,
         // never a character action: it must not enter the combat-intent machine,
@@ -628,9 +635,13 @@ export default function ChatPanel() {
                 combatIntentHandled,
                 combatActive: stateRef.current.combat?.active,
             })) {
-                const castResults = [...stateRef.current.messages].slice(-1 - events.spellCasts.length)
-                    .filter(m => m.role === 'system' && /casts /i.test(m.content || ''))
-                    .map(m => m.content)
+                // Derived from the turn's own events, never a same-task state
+                // read: the reducer's "casts X" system lines have not rendered
+                // into stateRef yet in this task (queue 2026-08-08 — the fixed
+                // stale-Scribe bug's sibling), and the narration prompt forbids
+                // repeating numbers anyway, so spell + target is the whole cue.
+                const castResults = events.spellCasts
+                    .map(cast => `The hero casts ${cast.spell}${cast.target && !/^self$/i.test(cast.target) ? ` on ${cast.target}` : ''}.`)
                     .join(' ');
                 const castNarrationRequest = [
                     '[SYSTEM: Your previous response declared a spell casting but contained no prose — the player saw nothing.',

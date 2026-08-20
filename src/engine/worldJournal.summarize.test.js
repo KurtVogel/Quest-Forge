@@ -64,6 +64,21 @@ describe('maybeAutoSummarize', () => {
         expect(dispatch).not.toHaveBeenCalled();
     });
 
+    it('defers the whole cadence while combat is active (Codex 2026-08-09: no mid-fight journal)', async () => {
+        const state = { ...makeState(makeMessages(14)), combat: { active: true } };
+        const dispatch = vi.fn();
+        const result = await maybeAutoSummarize(state, dispatch, 0);
+        expect(result).toEqual({ index: 0, journalEntry: null });
+        expect(sendMessageMock).not.toHaveBeenCalled();
+        expect(dispatch).not.toHaveBeenCalled();
+
+        // The same backlog summarizes normally once the fight resolves.
+        sendMessageMock.mockResolvedValue(validSummary());
+        const after = await maybeAutoSummarize({ ...state, combat: { active: false } }, dispatch, 0);
+        expect(after.index).toBe(14);
+        expect(after.journalEntry).toBeTruthy();
+    });
+
     it('skips silently without a machinery key', async () => {
         backgroundConfigMock.mockReturnValue({ apiKey: null });
         const state = makeState(makeMessages(12));
