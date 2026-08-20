@@ -46,6 +46,56 @@ describe('save-version machinery', () => {
     });
 });
 
+describe('healDuplicateInventoryRows (queue P2, live playtests #7-#8 stale-twin ghosts)', () => {
+    it('merges exact case-insensitive duplicate qty-1 unequipped rows into one stack', () => {
+        const save = migrateLoadedSave(fighterSave({
+            inventory: [
+                { id: 'i-1', name: 'Rusted iron keys', quantity: 1 },
+                { id: 'i-2', name: 'rusted iron keys', quantity: 1 },
+                { id: 'i-3', name: 'Lodestone' },
+                { id: 'i-4', name: 'Lodestone', quantity: 1 },
+                { id: 'i-5', name: 'Rope', quantity: 1 },
+            ],
+        }));
+        const keys = save.inventory.filter(i => /rusted iron keys/i.test(i.name));
+        expect(keys).toHaveLength(1);
+        expect(keys[0].quantity).toBe(2);
+        const lodestones = save.inventory.filter(i => i.name === 'Lodestone');
+        expect(lodestones).toHaveLength(1);
+        expect(lodestones[0].quantity).toBe(2);
+        expect(save.inventory.find(i => i.name === 'Rope').quantity).toBe(1);
+    });
+
+    it('never touches equipped copies, stacked quantities, or near-name variants', () => {
+        const save = migrateLoadedSave(fighterSave({
+            inventory: [
+                // One copy equipped: both rows stay (a worn blade is not a ghost).
+                { id: 'w-1', name: 'Shortsword', type: 'weapon', damage: '1d6', equipped: true, quantity: 1 },
+                { id: 'w-2', name: 'Shortsword', type: 'weapon', damage: '1d6', quantity: 1 },
+                // A real stack beside a single: quantities differ, leave alone.
+                { id: 'p-1', name: 'Healing Potion', type: 'consumable', quantity: 3 },
+                { id: 'p-2', name: 'Healing Potion', type: 'consumable', quantity: 1 },
+                // Near-name variants are different rows by design.
+                { id: 'b-1', name: 'Brick of raw bog-wax', quantity: 1 },
+                { id: 'b-2', name: 'brick of bog-wax', quantity: 1 },
+            ],
+        }));
+        expect(save.inventory.filter(i => i.name === 'Shortsword')).toHaveLength(2);
+        expect(save.inventory.filter(i => i.name === 'Healing Potion')).toHaveLength(2);
+        expect(save.inventory.filter(i => /bog-wax/i.test(i.name))).toHaveLength(2);
+    });
+
+    it('is a no-op reference-wise on a clean inventory', () => {
+        const save = migrateLoadedSave(fighterSave({
+            inventory: [
+                { id: 'i-1', name: 'Rope', quantity: 1 },
+                { id: 'i-2', name: 'Lantern', quantity: 1 },
+            ],
+        }));
+        expect(save.inventory.map(i => i.name)).toEqual(['Rope', 'Lantern']);
+    });
+});
+
 describe('version gating', () => {
     it('runs versioned migrations for pre-boundary saves (unstamped and v2)', () => {
         const unstamped = migrateLoadedSave(fighterSave());

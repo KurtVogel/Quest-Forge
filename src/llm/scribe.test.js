@@ -1173,6 +1173,137 @@ describe('runNpcFrontReflection guard paths (queue 2026-07-07)', () => {
     });
 });
 
+describe('Scribe narrated-loss audit (queue P2, live playtest #8)', () => {
+    beforeEach(() => {
+        sendMessage.mockReset();
+    });
+
+    const settings = { apiKey: 'test-key', llmProvider: 'gemini' };
+
+    function lossState(overrides = {}) {
+        return {
+            appliedLootSourceIds: [],
+            character: { name: 'Maren', class: 'rogue' },
+            combat: { active: false },
+            messages: [],
+            inventory: [
+                { id: 'item-1', name: 'Rusted iron keys', quantity: 1 },
+                { id: 'item-2', name: 'Aunt\'s ledger', quantity: 1 },
+            ],
+            ...overrides,
+        };
+    }
+
+    function lossResponse(narratedLosses) {
+        return JSON.stringify({
+            world_facts: [],
+            npc_updates: [],
+            story_memory: [],
+            location: null,
+            ...(narratedLosses !== undefined && { narrated_losses: narratedLosses }),
+        });
+    }
+
+    function lossAudit(overrides = {}) {
+        return {
+            sourceId: 'msg-12:scribe-loot',
+            appliedEvents: null,
+            getState: () => lossState(),
+            ...overrides,
+        };
+    }
+
+    it('ships the loss-audit task in the prompt whenever the loot audit runs', async () => {
+        sendMessage.mockResolvedValue(lossResponse());
+        await runScribe({
+            playerMessage: 'I surrender the pack.',
+            dmNarrative: 'The sergeant empties your pack onto the table.',
+            settings, dispatch: vi.fn(),
+            lootAudit: lossAudit(),
+        });
+        expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('narrated_losses');
+        expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('Loss rules:');
+    });
+
+    it('removes a narrated loss the event path missed, announced and idempotency-claimed', async () => {
+        sendMessage.mockResolvedValue(lossResponse({ items: [{ name: 'Rusted iron keys' }] }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I hand everything over.',
+            dmNarrative: 'The guards seize your keys and wave you through.',
+            settings, dispatch,
+            lootAudit: lossAudit(),
+        });
+        const actions = dispatch.mock.calls.map(c => c[0]);
+        expect(actions.find(a => a.type === 'CLAIM_LOOT_SOURCE')?.payload).toBe('msg-12:scribe-loot:losses');
+        const removal = actions.find(a => a.type === 'REMOVE_ITEM_BY_NAME');
+        expect(removal?.payload).toBe('Rusted iron keys');
+        const notice = actions.find(a => a.type === 'ADD_MESSAGE');
+        expect(notice?.payload.content).toContain('Losses recorded from narration');
+        expect(notice?.payload.content).toContain('Rusted iron keys');
+    });
+
+    it('stands down on a loss the event path already removed for this narration', async () => {
+        sendMessage.mockResolvedValue(lossResponse({ items: ['Rusted iron keys'] }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I hand everything over.',
+            dmNarrative: 'The guards seize your keys.',
+            settings, dispatch,
+            lootAudit: lossAudit({ appliedEvents: { itemsLost: ['rusted iron keys'] } }),
+        });
+        const actions = dispatch.mock.calls.map(c => c[0]);
+        expect(actions.find(a => a.type === 'REMOVE_ITEM_BY_NAME')).toBeUndefined();
+        expect(actions.find(a => a.type === 'ADD_MESSAGE')).toBeUndefined();
+    });
+
+    it('skips items the hero does not own (a recap of an old loss removes nothing)', async () => {
+        sendMessage.mockResolvedValue(lossResponse({ items: [{ name: 'Long-lost sword' }] }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I think back on the seizure.',
+            dmNarrative: 'Your sword is still gone, kept in the guild vault.',
+            settings, dispatch,
+            lootAudit: lossAudit(),
+        });
+        const actions = dispatch.mock.calls.map(c => c[0]);
+        expect(actions.find(a => a.type === 'REMOVE_ITEM_BY_NAME')).toBeUndefined();
+        expect(actions.find(a => a.type === 'ADD_MESSAGE')).toBeUndefined();
+    });
+
+    it('applies at most once per narration via the claimed sourceId', async () => {
+        sendMessage.mockResolvedValue(lossResponse({ items: ['Rusted iron keys'] }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I hand everything over.',
+            dmNarrative: 'The guards seize your keys.',
+            settings, dispatch,
+            lootAudit: lossAudit({
+                getState: () => lossState({ appliedLootSourceIds: ['msg-12:scribe-loot:losses'] }),
+            }),
+        });
+        const actions = dispatch.mock.calls.map(c => c[0]);
+        expect(actions.find(a => a.type === 'CLAIM_LOOT_SOURCE')).toBeUndefined();
+        expect(actions.find(a => a.type === 'REMOVE_ITEM_BY_NAME')).toBeUndefined();
+    });
+
+    it('caps a flood at 4 removals', async () => {
+        const inventory = Array.from({ length: 6 }, (_, i) => ({ id: `flood-${i}`, name: `Trinket ${i}`, quantity: 1 }));
+        sendMessage.mockResolvedValue(lossResponse({
+            items: inventory.map(item => ({ name: item.name })),
+        }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'They take everything.',
+            dmNarrative: 'Every trinket is swept into the strongbox.',
+            settings, dispatch,
+            lootAudit: lossAudit({ getState: () => lossState({ inventory }) }),
+        });
+        const removals = dispatch.mock.calls.map(c => c[0]).filter(a => a.type === 'REMOVE_ITEM_BY_NAME');
+        expect(removals).toHaveLength(4);
+    });
+});
+
 describe('Scribe narrated-cast audit (queue P1, Codex 2026-08-09)', () => {
     beforeEach(() => {
         sendMessage.mockReset();

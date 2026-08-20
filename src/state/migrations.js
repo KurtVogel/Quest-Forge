@@ -70,6 +70,50 @@ export function getSaveVersion(save) {
 // --- Unconditional heals (hostile-input defense; self-guarded era backfills) ---
 
 /**
+ * Merge duplicate inventory ROWS left by the fixed stale-Scribe re-grant bug
+ * (live playtests #7-#8: "Rusted iron keys"×2 case-identical rows, lodestone×2
+ * — and the Guild robbery's items_lost then removed only ONE of each twin, so
+ * "confiscated" ghosts survived the whole capture arc). Deliberately narrow:
+ * only rows whose names match exactly (case-insensitive), every copy
+ * unequipped and quantity 1, merge into the first row with quantity = row
+ * count. Distinct quantities, equipped copies, and near-name variants
+ * ("brick of bog-wax" vs "Brick of raw bog-wax") are left alone — a second
+ * rope can be legitimate, and REMOVE_ITEM_BY_NAME's whole-stack semantics
+ * mean a merged stack is confiscated in one events pass, which is the point.
+ */
+function healDuplicateInventoryRows(save) {
+    const inventory = save.inventory || [];
+    const rowsByName = new Map();
+    for (const item of inventory) {
+        const name = String(item?.name || '').trim().toLowerCase();
+        if (!name) continue;
+        if (!rowsByName.has(name)) rowsByName.set(name, []);
+        rowsByName.get(name).push(item);
+    }
+    const mergeNames = new Set();
+    for (const [name, rows] of rowsByName) {
+        if (rows.length > 1 && rows.every(row => !row.equipped && (row.quantity ?? 1) === 1)) {
+            mergeNames.add(name);
+        }
+    }
+    if (mergeNames.size === 0) return save;
+    const seen = new Set();
+    const healed = [];
+    for (const item of inventory) {
+        const name = String(item?.name || '').trim().toLowerCase();
+        if (!mergeNames.has(name)) {
+            healed.push(item);
+            continue;
+        }
+        if (seen.has(name)) continue;
+        seen.add(name);
+        healed.push({ ...item, quantity: rowsByName.get(name).length });
+    }
+    console.log(`[Migrations] Merged ${inventory.length - healed.length} duplicate inventory row(s) into stacks.`);
+    return { ...save, inventory: healed };
+}
+
+/**
  * Auto-equip armor/shield when nothing of that type is equipped (fixes old
  * saves and hand-stripped ones), then collapse invalid equipped combinations:
  * one active weapon, one armor, one shield, and no shield while a two-handed
@@ -250,6 +294,7 @@ function reseedMissingFronts(save) {
 }
 
 const UNCONDITIONAL_HEALS = [
+    healDuplicateInventoryRows,
     healEquippedSlots,
     backfillCharacterShape,
     healCharacterCoreFields,

@@ -123,6 +123,7 @@ Loot rules:
 
 Payment rules:
 - Report a payment ONLY when the DM narrative explicitly completes it: the hero counts out, hands over, or drops the coins and the other party takes them. Intentions, promises, IOUs, haggling, and prices merely quoted are never payments.
+- Involuntary coin losses count as paying out: coins the narrative shows being confiscated, seized, stolen, extorted, or robbed from the hero report here at the exact narrated amount. Threats and demands not yet carried out report nothing.
 - Copy narrated amounts digit-exactly; spelled-out numbers convert exactly ("six silver" is "silver": 6, "a dozen coppers" is "copper": 12). Never round, estimate, or infer an amount the narrative does not state.
 - Change-making: when the hero pays with a larger coin and receives change (hands over a gold piece for a 2-silver fare and gets 8 silver back), report the NET price actually paid — "silver": 2 — never the gross coin handed over, and never add the fare on top of the coin.
 - Never re-report a payment the narrative merely recalls, confirms, defends, or references from an EARLIER scene — only payments completed for the first time in THIS narrative. "You already paid the six silver" is a recollection, not a new payment.
@@ -138,7 +139,18 @@ Gear handoff rules:
 - PARTY COMPANIONS' CURRENT GEAR lists what each companion already carries — an item already listed there is NOT a new handoff, and narration merely referencing or admiring their existing gear reports nothing.
 - Anything under EVENTS ALREADY APPLIED (companion gear or keepsake updates, items lost by the hero) is NOT missing.
 - Copy the companion's and the item's names exactly as the narrative writes them.
-- When in doubt, omit — an invented handoff is worse than a missed one. Omit "missing_gear_handoffs" entirely when nothing is missing.`;
+- When in doubt, omit — an invented handoff is worse than a missed one. Omit "missing_gear_handoffs" entirely when nothing is missing.
+
+Also report the ITEMS the narrative shows LEAVING the hero's possession, as another top-level field:
+"narrated_losses": { "items": [{ "name": "exact item name as the hero's inventory would know it" }] }
+
+Loss rules:
+- Report ONLY losses the DM NARRATIVE completes in this scene: confiscated, seized, stolen, taken, dropped and left behind, destroyed, handed over and kept by the other party. Threats, demands, attempts, and items merely set down within reach report nothing.
+- The HERO'S CURRENT INVENTORY line lists what the hero owns — report a loss only for an item on that list, under its listed name (the narrative's "your blade" is the inventory's actual weapon name).
+- A pack, purse, or bag "emptied" or "taken" loses its narrated CONTENTS: report each named item individually; coins seized with it report under narrated_payment, never here.
+- Gear handed to a party COMPANION is a handoff (missing_gear_handoffs), never a loss. An item merely used, shown, worn, or lent for a moment and returned reports nothing.
+- Never re-report a loss the narrative merely recalls, confirms, or laments from an EARLIER scene — only losses completed for the first time in THIS narrative. "Your sword is still gone" reports nothing.
+- When in doubt, omit — a wrongly removed item is worse than a missed loss. Omit "narrated_losses" entirely when the hero loses nothing.`;
 
 const CAST_AUDIT_RULES = `
 
@@ -528,6 +540,73 @@ function reconcileNarratedPayment(narrated, lootAudit, dispatch) {
 }
 
 /**
+ * Loss twin of reconcileNarratedLoot (queue P2, live playtest #8): the seizure
+ * decree narrated the pack "emptied onto the table" with zero items_lost events
+ * and the sheet kept everything the story locked away. Observation-only like
+ * the whole family: the Scribe reports the items the narrative shows LEAVING
+ * the hero's possession; the engine removes each one ONLY when the event path
+ * removed nothing matching for this narration AND the hero still owns it —
+ * routed through REMOVE_ITEM_BY_NAME, the exact action the items_lost event
+ * path uses (whole-stack semantics, AC recompute, so the audit is never more
+ * powerful than the DM's own channel). Self-limiting on recaps: an item
+ * already removed matches nothing and reports no shortfall. Coins seized
+ * alongside ride narrated_payment (one coin-loss lane, one ledger). Idempotent
+ * per narration via a claimed `:losses` sourceId; announced visibly.
+ */
+function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
+    const items = (Array.isArray(narrated?.items) ? narrated.items : [])
+        .map(entry => String((typeof entry === 'string' ? entry : entry?.name) || '').trim().slice(0, 80))
+        .filter(Boolean)
+        .slice(0, 4);
+    if (items.length === 0) return;
+
+    const { sourceId, getState, appliedEvents } = lootAudit;
+    if (!sourceId) return;
+    const lossSourceId = `${sourceId}:losses`;
+    const state = getState?.();
+    if ((state?.appliedLootSourceIds || []).includes(lossSourceId)) {
+        console.warn(`[Scribe] Loss audit for ${lossSourceId} already applied; skipping.`);
+        return;
+    }
+    dispatch({ type: 'CLAIM_LOOT_SOURCE', payload: lossSourceId });
+
+    // Stand-down per item: a loss identity the event path already removed for
+    // this narration is the DM's own accounting, not a missing removal.
+    const appliedLossTokens = new Set((appliedEvents?.itemsLost || [])
+        .map(entry => auditItemToken(typeof entry === 'string' ? entry : entry?.name))
+        .filter(Boolean));
+
+    const removed = [];
+    for (const name of items) {
+        const token = auditItemToken(name);
+        if (token && appliedLossTokens.has(token)) {
+            console.warn(`[Scribe] Narrated loss "${name}" already removed by the event path; skipping.`);
+            continue;
+        }
+        const owned = (state?.inventory || []).find(
+            item => String(item?.name || '').trim().toLowerCase() === name.toLowerCase(),
+        );
+        if (!owned) {
+            console.warn(`[Scribe] Narrated loss "${name}" matches nothing the hero owns; skipping.`);
+            continue;
+        }
+        dispatch({ type: 'REMOVE_ITEM_BY_NAME', payload: owned.name });
+        removed.push(owned.name);
+    }
+
+    if (removed.length > 0) {
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+                role: 'system',
+                content: `**Losses recorded from narration:** ${removed.join(', ')} removed from your possessions.`,
+            },
+        });
+        console.log(`[Scribe] Loss audit removed ${removed.length} narrated loss(es) the event path missed.`);
+    }
+}
+
+/**
  * Current canonical looks for the characters likely in this exchange: the player,
  * plus every tracked NPC whose name appears in the turn's text. Fed to the Scribe
  * so appearance updates MERGE with the established look instead of replacing it
@@ -752,6 +831,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         if (lootAudit) {
             reconcileNarratedLoot(extracted.narrated_loot, lootAudit, dispatch);
             reconcileNarratedPayment(extracted.narrated_payment, lootAudit, dispatch);
+            reconcileNarratedLosses(extracted.narrated_losses, lootAudit, dispatch);
             applyMissingGearHandoffs(extracted.missing_gear_handoffs, lootAudit, dispatch);
             if (castAudit) reconcileNarratedCasts(extracted.narrated_casts, lootAudit, dispatch);
         }
@@ -766,6 +846,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             // kept both inspector flags permanently false (2026-07-23 audit).
             lootAudited: !!(lootAudit && hasAuditPayload(extracted.narrated_loot)),
             paymentAudited: !!(lootAudit && hasAuditPayload(extracted.narrated_payment)),
+            lossesAudited: !!(lootAudit && Array.isArray(extracted.narrated_losses?.items) && extracted.narrated_losses.items.length > 0),
             gearAudited: !!(lootAudit && Array.isArray(extracted.missing_gear_handoffs) && extracted.missing_gear_handoffs.length > 0),
             castsAudited: !!(castAudit && Array.isArray(extracted.narrated_casts) && extracted.narrated_casts.length > 0),
         });
