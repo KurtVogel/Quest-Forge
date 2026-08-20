@@ -630,6 +630,23 @@ export function buildKnownAppearances({ character, npcs = [] } = {}, ...texts) {
 }
 
 /**
+ * Canonical place names the registry already tracks, for the Scribe's location
+ * extraction (queue P2, live playtest #6): colloquial strings ("the back room
+ * of the chandlery") share no tokens with the canonical record ("E. Duskwell —
+ * Tallow & Tapers"), so genuine arrivals minted nothing, updated no visit
+ * stamps, and skipped absence-drift/hearsay until a turn happened to name the
+ * place properly. Most recently visited names first; compact by design.
+ */
+export function buildKnownLocations({ locations = [] } = {}) {
+    const names = [...(locations || [])]
+        .filter(record => record?.name)
+        .sort((a, b) => (b.lastVisitedAt || b.firstSeenAt || 0) - (a.lastVisitedAt || a.firstSeenAt || 0))
+        .slice(0, 12)
+        .map(record => record.name);
+    return names.length > 0 ? names.join('; ') : null;
+}
+
+/**
  * Established personal stances toward the hero for the NPCs in this exchange.
  * Same merge contract as appearances: the Scribe must emit the complete updated
  * stance, so one turn's cold reply can't erase months of recorded warmth. The
@@ -684,7 +701,7 @@ function contradictsAuthoritativeCombat(value, authoritativeContext) {
     });
 }
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, dmLocationEvent = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownLocations = null, dmLocationEvent = null }) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
 
@@ -722,6 +739,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     : null,
                 knownStances
                     ? `KNOWN PLAYER-RELATIONSHIP STANCES (each NPC's established personal stance toward the hero — stanceToPlayer updates must merge with these, never shrink them to this turn's fragment):\n${knownStances}`
+                    : null,
+                knownLocations
+                    ? `KNOWN PLACES (canonical place names the game already tracks): ${knownLocations}\nWhen this turn's location is one of these places under ANY phrasing — "the back room of the chandlery" IS the chandlery — report "location" as the canonical name verbatim. A distinct named place not on this list (a particular shop, street, or site, even inside a known town) keeps its own proper name.`
                     : null,
                 lootAudit
                     ? `EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN (the engine reconciles narrated_loot/narrated_payment against these itself — for the gear-handoff audit, anything listed here is NOT missing): ${describeAppliedLoot(lootAudit.appliedEvents)}`
@@ -824,6 +844,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                 payload: {
                     name: locationProfile.name,
                     profile: { type: locationProfile.type, danger: locationProfile.danger, region: locationProfile.region },
+                    // The turn's own text, inspected by the reducer's first-seen
+                    // region evidence gate at dispatch time — never stored.
+                    evidenceText: `${playerMessage || ''}\n${dmNarrative || ''}`.slice(0, 6000),
                 },
             });
         }

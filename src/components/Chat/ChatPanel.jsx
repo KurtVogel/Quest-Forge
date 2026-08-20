@@ -5,7 +5,7 @@ import { createTurnRunner } from '../../llm/turnOrchestrator.js';
 import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
-import { buildKnownAppearances, buildKnownStances, runScribe } from '../../llm/scribe.js';
+import { buildKnownAppearances, buildKnownLocations, buildKnownStances, runScribe } from '../../llm/scribe.js';
 import { isTableTalkMessage } from '../../llm/tableTalk.js';
 import { addMemory, seedMemories } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
@@ -470,6 +470,7 @@ export default function ChatPanel() {
                         dispatch,
                         knownAppearances: buildKnownAppearances(latest, narrative),
                         knownStances: buildKnownStances(latest, narrative),
+                        knownLocations: buildKnownLocations(latest),
                         authoritativeContext: {
                             terminal: result.terminal || 'ongoing',
                             postState: result.postState,

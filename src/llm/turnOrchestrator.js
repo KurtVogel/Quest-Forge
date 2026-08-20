@@ -30,7 +30,7 @@ import { applyEvents } from '../state/applyEvents.js';
 import { handleRequestedRolls } from '../engine/rollResolver.js';
 import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../engine/outOfCombatRollPolicy.js';
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
-import { buildKnownAppearances, buildKnownStances, runScribe } from './scribe.js';
+import { buildKnownAppearances, buildKnownLocations, buildKnownStances, runScribe } from './scribe.js';
 import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { addMemory, retrieveRelevant } from '../engine/vectorMemory.js';
 import { getMachineryGeminiKey } from './machinery.js';
@@ -462,6 +462,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             dispatch,
             knownAppearances: buildKnownAppearances(latest, playerMessage, finalNarration.content),
             knownStances: buildKnownStances(latest, playerMessage, finalNarration.content),
+            knownLocations: buildKnownLocations(latest),
             // The DM's own location event (already applied) outranks the async
             // Scribe for this turn: the Scribe's location downgrades to
             // confirm-or-fill so it can never relocate the hero backwards.

@@ -99,6 +99,29 @@ export function isSameLocation(a, b) {
     return containment(locationTokens(a), locationTokens(b)) >= 0.99;
 }
 
+/**
+ * A town must not absorb its own districts (queue P2, live playtest #7): the
+ * containment fold's design assumption — "Library landing, Clockwork Tower"
+ * IS the tower — breaks when the container is a whole SETTLEMENT. Every
+ * "X, Weatherby" string (the guild quarter, the market, the shop's sign name)
+ * folded into the bare town record, so districts never got records and the
+ * town's visit stamps stayed eternally fresh. A candidate that names a
+ * classified settlement PLUS additional meaningful tokens is a place WITHIN
+ * the town, not the town: it gets its own record, and areRelatedPlaces
+ * kinship keeps drift/hearsay treating the cluster as one orbit. Site-scale
+ * records (towers, taverns, ruins — every non-settlement type) keep the
+ * original fold: rooms and landings are still not places. Type is the
+ * Scribe-classified size hint, so an unclassified town folds as before until
+ * its first location_profile lands.
+ */
+function namesPlaceWithinSettlement(record, target) {
+    if (record?.type !== 'settlement') return false;
+    const recordTokens = locationTokens(record.name);
+    const targetTokens = locationTokens(target);
+    if (targetTokens.size <= recordTokens.size) return false;
+    return coverage(recordTokens, targetTokens) >= 0.99;
+}
+
 export function normalizeLocationType(value) {
     const raw = cleanText(value, 30).toLowerCase().replace(/[\s-]+/g, '_');
     return LOCATION_TYPES.includes(raw) ? raw : null;
@@ -219,6 +242,21 @@ export function isBackstoryRegion(region, { background = '', premise = '' } = {}
     return !normalize(premise).includes(core);
 }
 
+/**
+ * Evidence gate for a first-seen region (queue P2, live playtest #8): "the
+ * Rimefell Marches" entered the registry as a WELL-FORMED phantom — the Scribe
+ * echoing a prompt example — because nothing demanded the land's name exist
+ * anywhere in the fiction. A brand-new region name must appear in the turn's
+ * own text, the campaign premise, or a world fact. Re-tagging an already-known
+ * region needs no evidence (its canon established it), and cluster inheritance
+ * runs before this gate — both are the caller's checks.
+ */
+export function isRegionEvidenced(region, { turnText = '', premise = '', worldFacts = [] } = {}) {
+    const check = text => !!text && isLocationEvidencedInText(region, text);
+    return check(turnText) || check(premise)
+        || (worldFacts || []).some(fact => check(typeof fact === 'string' ? fact : fact?.fact));
+}
+
 /** "the Icebound Coast" and "Icebound Coast, the frozen north" are one region. */
 export function isSameRegion(a, b) {
     if (!a || !b) return false;
@@ -272,7 +310,8 @@ export function findLocationRecord(locations = [], name) {
         && (record.name?.toLowerCase() === lower
             || (record.aliases || []).some(alias => alias.toLowerCase() === lower)));
     if (exact !== -1) return exact;
-    return list.findIndex(record => record && isSameLocation(record.name, target));
+    return list.findIndex(record => record && isSameLocation(record.name, target)
+        && !namesPlaceWithinSettlement(record, target));
 }
 
 /**
@@ -392,10 +431,14 @@ export function dedupeLocationRecords(locations = []) {
     // Pass 2: fold name-level containment fragments ("the plague-shrine at a
     // ring of drowned alders" is "the shrine" — 2026-07-15 playtest husks left
     // behind by renames), then drop scene-description records that match
-    // nothing: they were junk the moment they were minted.
+    // nothing: they were junk the moment they were minted. Settlement records
+    // never re-absorb their own districts here either — the load heal must not
+    // undo the live no-fold rule.
     const kept = [];
     for (const record of byName.values()) {
-        const matchIdx = kept.findIndex(other => isSameLocation(other.name, record.name));
+        const matchIdx = kept.findIndex(other => isSameLocation(other.name, record.name)
+            && !namesPlaceWithinSettlement(other, record.name)
+            && !namesPlaceWithinSettlement(record, other.name));
         if (matchIdx !== -1) {
             // Keep the shorter (better canonical) name of the pair.
             const other = kept[matchIdx];

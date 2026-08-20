@@ -8,6 +8,33 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-20 · Towns don't absorb their districts, and a first-seen region needs evidence: the location registry's settlement no-fold + region evidence gate + cluster region inheritance.**
+Three linked rulings closing the 2026-08-08/09 location-registry queue cluster. (1) **Settlement
+no-fold:** the containment fold's founding assumption — "Library landing, Clockwork Tower" IS
+the tower — breaks when the container is a whole town: every "X, Weatherby" string (guild
+quarter, market, shop sign) folded into the bare town record, districts never got records, and
+the town's visit stamps stayed eternally fresh (playtest #7). Ruling: a record Scribe-classified
+`type: "settlement"` never absorbs a candidate that names it PLUS extra meaningful tokens — the
+sub-place mints its own record; `areRelatedPlaces` kinship keeps the cluster one orbit for
+absence-drift/hearsay (those guards already existed), and the load-time dedupe honors the same
+rule so old saves can't re-fold. Site-scale records (towers, taverns, ruins — every other type)
+keep the fold: rooms are still not places. The type IS the size-class hint the queue sketch
+asked for; an unclassified town folds as before until its first profile lands. (2) **Region
+evidence gate:** a well-formed phantom region ("the Rimefell Marches", a prompt-example echo)
+could enter the registry because nothing demanded the name exist anywhere in the fiction.
+Ruling: a FIRST-SEEN region must be named in the turn's own text (the Scribe dispatch now
+carries `evidenceText`, inspected at dispatch time and never stored), the campaign premise, or
+a world fact; re-tagging an already-known region needs no evidence. (3) **Cluster inheritance:**
+a sub-place record related to one that already has a region takes THAT region — a novel region
+proposed for "the Chandlers' quarter" while Weatherby sits in the Harchwold is the phantom
+class even when evidenced (the quarter cannot lie in a different land than its town), and an
+inherited region is already known, so it never seeds native fronts. Companion change: the
+per-turn Scribe now receives a KNOWN PLACES line (canonical registry names) so colloquial
+re-phrasings ("the back room of the chandlery") report the canonical record name instead of
+minting nothing — with the honest boundary that a zero-token-overlap colloquial report can
+still be dropped by the relocation evidence gate (which deliberately stays strict: a dropped
+update self-heals next turn, a wrong relocation corrupts stamps permanently).
+
 **2026-08-09 ×4 · Three-P1 hardening batch: non-streaming calls get a stall guard, machinery runs thinking-free, a declared attack is combat (correction path, not just prompt), and narrated casts get the Scribe-audit backstop.**
 (1) Browser fetch never times out, so a stalled connection hung the awaiting turn forever
 (three pre-commit call sites). Ruling: the adapter owns the guard — a per-attempt

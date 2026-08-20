@@ -4,7 +4,7 @@
  */
 import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
-import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionNameOnly, isSameLocation, isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
+import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
@@ -339,25 +339,49 @@ export const handlers = {
         // region, a place the hero never stood in) minted null-stamp noise
         // records ("Vale of Reeds", "the fen" — live playtest #3). Theater
         // growth keeps its own minting path in handlers/fronts.js.
-        if (findLocationRecord(state.locations || [], name) === -1) return state;
-        // Backstory-region guard (DECISIONS.md 2026-08-06, live playtest #3):
-        // a region named only in the hero's player-authored background is where
-        // the hero CAME FROM, not where this place lies — the Scribe kept
-        // misattributing it despite the prompt rule, and a phantom region can
-        // become "home" or seed native fronts. Stripped BEFORE the registry
-        // write so it never becomes canon. A region the premise also names is
-        // real campaign geography and stays accepted.
-        const profile = isBackstoryRegion(rawProfile.region, {
+        const locationsBefore = state.locations || [];
+        const targetIdx = findLocationRecord(locationsBefore, name);
+        if (targetIdx === -1) return state;
+        const targetRecord = locationsBefore[targetIdx];
+        const priorRegions = collectKnownRegions(locationsBefore);
+
+        // Region acceptance runs three gates before the registry write:
+        // 1. Backstory guard (DECISIONS.md 2026-08-06, live playtest #3): a land
+        //    named only in the hero's player-authored background is where the
+        //    hero CAME FROM, not where this place lies.
+        // 2. Cluster inheritance (queue P2, live playtest #8): the shop, its
+        //    lane, and their town are one land — a related record's canon
+        //    region outranks a novel proposal for a sub-place ("the Chandlers'
+        //    quarter" cannot sit in a different land than Weatherby itself).
+        // 3. Evidence gate (same queue entry): a FIRST-SEEN region name must
+        //    appear in the turn's own text, the premise, or a world fact — a
+        //    well-formed invention (the live "Rimefell Marches" prompt-example
+        //    echo) dies here. Already-known regions re-tag without evidence.
+        let region = sanitizeRegionName(rawProfile.region, name);
+        if (region && isBackstoryRegion(region, {
             background: state.character?.background,
             premise: state.session?.premise,
-        })
-            ? { ...rawProfile, region: null }
-            : rawProfile;
-        const priorRegions = collectKnownRegions(state.locations || []);
-        const locations = upsertLocation(state.locations || [], name, profile);
+        })) {
+            region = null;
+        }
+        if (region && !targetRecord.region) {
+            const clusterRegion = locationsBefore.find(record => record !== targetRecord
+                && record?.region && areRelatedPlaces(record, targetRecord))?.region || null;
+            if (clusterRegion) {
+                region = isSameRegion(clusterRegion, region) ? region : clusterRegion;
+            } else if (!priorRegions.some(known => isSameRegion(known, region))
+                && !isRegionEvidenced(region, {
+                    turnText: action.payload?.evidenceText,
+                    premise: state.session?.premise,
+                    worldFacts: state.worldFacts,
+                })) {
+                region = null;
+            }
+        }
+        const profile = { ...rawProfile, region };
+        const locations = upsertLocation(locationsBefore, name, profile);
         const next = { ...state, locations };
 
-        const region = String(profile.region || '').replace(/\s+/g, ' ').trim().slice(0, 60);
         if (!region) return next;
         const hereIdx = findLocationRecord(locations, state.currentLocation);
         const classifiedIdx = findLocationRecord(locations, name);

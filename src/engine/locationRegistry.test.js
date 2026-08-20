@@ -6,6 +6,7 @@ import {
     getCurrentLocationRecord,
     isLocationEvidencedInText,
     isMintableLocationName,
+    isRegionEvidenced,
     isRegionNameOnly,
     isRegistrableLocationName,
     isSameLocation,
@@ -14,6 +15,29 @@ import {
     upsertLocation,
     MAX_LOCATIONS,
 } from './locationRegistry.js';
+
+describe('isRegionEvidenced (queue P2, playtest #8 phantom regions)', () => {
+    it('accepts a region named in the turn text, the premise, or a world fact', () => {
+        expect(isRegionEvidenced('the Rimefell Marches', {
+            turnText: 'You cross the last weir into the Rimefell Marches.',
+        })).toBe(true);
+        expect(isRegionEvidenced('the Harchwold', {
+            premise: 'A low-fantasy tale set across the Harchwold.',
+        })).toBe(true);
+        expect(isRegionEvidenced('the Icebound Coast', {
+            worldFacts: [{ fact: 'The Icebound Coast trade routes froze early this year.' }],
+        })).toBe(true);
+    });
+
+    it('rejects a well-formed region name that appears nowhere in the fiction', () => {
+        expect(isRegionEvidenced('the Rimefell Marches', {
+            turnText: 'You enter the chandlery on Tallow Lane.',
+            premise: 'A river town with debts.',
+            worldFacts: [{ fact: 'The ferry sank in spring.' }],
+        })).toBe(false);
+        expect(isRegionEvidenced('the Rimefell Marches', {})).toBe(false);
+    });
+});
 
 describe('isRegionNameOnly (2026-08-06 registry-noise guard)', () => {
     const locations = [
@@ -166,13 +190,41 @@ describe('upsertLocation', () => {
 
 describe('lookup', () => {
     it('finds records by name, alias, or containment and returns the current record', () => {
-        let locations = upsertLocation([], 'Clockwork Tower', { type: 'settlement' });
+        // A site-scale record (tower, tavern, ruin): rooms and landings fold in.
+        let locations = upsertLocation([], 'Clockwork Tower', { type: 'frontier' });
         locations = upsertLocation(locations, 'Library landing, Clockwork Tower');
         expect(findLocationRecord(locations, 'clockwork tower')).toBe(0);
         expect(findLocationRecord(locations, 'the Clockwork Tower stairwell')).toBe(0);
         expect(findLocationRecord(locations, 'Sunlit Orchard')).toBe(-1);
-        expect(getCurrentLocationRecord(locations, 'Clockwork Tower')?.type).toBe('settlement');
+        expect(getCurrentLocationRecord(locations, 'Clockwork Tower')?.type).toBe('frontier');
         expect(getCurrentLocationRecord(locations, null)).toBeNull();
+    });
+
+    it('a classified settlement never absorbs its own districts (queue P2, playtest #7)', () => {
+        let locations = upsertLocation([], 'Weatherby', { type: 'settlement' });
+        // Sub-places of a TOWN mint their own records instead of folding in.
+        locations = upsertLocation(locations, 'Guild Quarter, Weatherby');
+        expect(locations).toHaveLength(2);
+        expect(locations.some(r => r.name === 'Guild Quarter, Weatherby')).toBe(true);
+        // The bare town name still resolves to the town record.
+        expect(locations[findLocationRecord(locations, 'Weatherby')].name).toBe('Weatherby');
+        // The cluster stays kin for drift/hearsay purposes.
+        expect(areRelatedPlaces(locations[0], locations[1])).toBe(true);
+        // An UNCLASSIFIED town (type null) keeps the legacy fold until its
+        // first location_profile lands.
+        let untyped = upsertLocation([], 'Millhaven');
+        untyped = upsertLocation(untyped, 'Market Square, Millhaven');
+        expect(untyped).toHaveLength(1);
+        expect(untyped[0].aliases).toContain('Market Square, Millhaven');
+    });
+
+    it('the load-time dedupe never re-folds a district into its settlement', () => {
+        const deduped = dedupeLocationRecords([
+            { id: 'town', name: 'Weatherby', type: 'settlement', aliases: [] },
+            { id: 'lane', name: 'Tallow Lane, Weatherby', type: null, aliases: [] },
+        ]);
+        expect(deduped).toHaveLength(2);
+        expect(deduped.some(r => r.name === 'Tallow Lane, Weatherby')).toBe(true);
     });
 
     it('normalizeLocationRecord rejects nameless records', () => {

@@ -405,18 +405,107 @@ describe('backstory-region guard (2026-08-06 live playtest #3)', () => {
         expect(weirs.type).toBe('frontier'); // rest of the profile still lands
         expect(poisoned.session.pendingRegionalFronts).toBeUndefined();
 
-        // The same arrival with a genuinely new, non-backstory region still seeds.
+        // The same arrival with a genuinely new, non-backstory region still
+        // seeds — here evidenced by the turn's own text (the Scribe dispatch
+        // always carries it in production).
         const real = gameReducer(state, {
             type: 'UPDATE_LOCATION_PROFILE',
-            payload: { name: 'Blackwater Weirs', profile: { region: 'the Rimefell Marches' } },
+            payload: {
+                name: 'Blackwater Weirs',
+                profile: { region: 'the Rimefell Marches' },
+                evidenceText: 'You cross the last weir into the Rimefell Marches.',
+            },
         });
         expect(real.session.pendingRegionalFronts).toMatchObject({ region: 'the Rimefell Marches' });
     });
 });
 
+describe('first-seen region evidence gate + cluster inheritance (queue P2, playtest #8)', () => {
+    const based = () => {
+        let state = {
+            ...initialGameState,
+            session: { ...initialGameState.session, id: 'campaign-1', premise: 'Debts and river trade in the Harchwold.' },
+            messages: msgs(20),
+        };
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Weatherby' });
+        state = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Weatherby', profile: { type: 'settlement', region: 'the Harchwold' } },
+        });
+        return state;
+    };
+
+    it('rejects a well-formed phantom region with no evidence anywhere (the Rimefell Marches echo)', () => {
+        let state = based();
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Fort Halla' });
+        const next = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: {
+                name: 'Fort Halla',
+                profile: { type: 'frontier', region: 'the Rimefell Marches' },
+                evidenceText: 'The fort gate creaks open onto a muddy yard.',
+            },
+        });
+        const fort = next.locations.find(r => r.name === 'Fort Halla');
+        expect(fort.region ?? null).toBeNull();
+        expect(fort.type).toBe('frontier'); // the rest of the profile still lands
+        expect(next.session.pendingRegionalFronts).toBeUndefined();
+    });
+
+    it('accepts the same region when the turn text names it', () => {
+        let state = based();
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Fort Halla' });
+        const next = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: {
+                name: 'Fort Halla',
+                profile: { region: 'the Rimefell Marches' },
+                evidenceText: 'Beyond the gate the Rimefell Marches stretch north.',
+            },
+        });
+        expect(next.locations.find(r => r.name === 'Fort Halla').region).toBe('the Rimefell Marches');
+        expect(next.session.pendingRegionalFronts).toMatchObject({ region: 'the Rimefell Marches' });
+    });
+
+    it('re-tags an already-known region without needing evidence', () => {
+        let state = based();
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
+        const next = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Aldermill', profile: { type: 'settlement', region: 'the Harchwold' } },
+        });
+        expect(next.locations.find(r => r.name === 'Aldermill').region).toBe('the Harchwold');
+    });
+
+    it('a sub-place inherits its cluster region over a novel proposal', () => {
+        let state = based();
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Guild Quarter, Weatherby' });
+        // Settlement no-fold: the quarter has its own record now.
+        const quarter = state.locations.find(r => r.name === 'Guild Quarter, Weatherby');
+        expect(quarter).toBeTruthy();
+        const next = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: {
+                name: 'Guild Quarter, Weatherby',
+                profile: { type: 'settlement', region: 'the Rimefell Marches' },
+                evidenceText: 'Talk in the Guild Quarter runs to the Rimefell Marches and its wars.',
+            },
+        });
+        // The quarter sits in Weatherby, and Weatherby sits in the Harchwold —
+        // a novel (even evidenced) region for a related record is the phantom class.
+        expect(next.locations.find(r => r.name === 'Guild Quarter, Weatherby').region).toBe('the Harchwold');
+        expect(next.session.pendingRegionalFronts).toBeUndefined();
+    });
+});
+
 describe('region names never become location records (2026-08-06 live playtest #3 registry noise)', () => {
     const settled = () => {
-        let state = { ...initialGameState, session: { ...initialGameState.session, id: 'campaign-1' }, messages: msgs(20) };
+        // The premise names the region so the first-seen evidence gate accepts it.
+        let state = {
+            ...initialGameState,
+            session: { ...initialGameState.session, id: 'campaign-1', premise: 'A tale of the Rimefell Marches.' },
+            messages: msgs(20),
+        };
         state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
         state = gameReducer(state, {
             type: 'UPDATE_LOCATION_PROFILE',
@@ -507,7 +596,16 @@ describe('regional front seeding', () => {
     });
 
     const traveled = () => {
-        let state = { ...initialGameState, session: { ...initialGameState.session, id: 'campaign-1' }, messages: msgs(20) };
+        // The premise names both regions so the first-seen evidence gate accepts them.
+        let state = {
+            ...initialGameState,
+            session: {
+                ...initialGameState.session,
+                id: 'campaign-1',
+                premise: 'Trade wars run from the Riverlands to the Icebound Coast.',
+            },
+            messages: msgs(20),
+        };
         state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
         state = gameReducer(state, {
             type: 'UPDATE_LOCATION_PROFILE',
