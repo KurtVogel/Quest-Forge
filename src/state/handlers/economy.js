@@ -15,7 +15,7 @@ import {
     normalizeRefToken,
     playerMessageSupportsRepeatTransaction,
     rememberTransaction,
-    REPEAT_TRANSACTION_RE,
+    repeatIntentNearNoun,
     sourceBaseOf,
     systemMessage,
     withInventoryAndAC,
@@ -89,11 +89,19 @@ function buildCoinGrantTransaction(gold, silver, copper) {
     };
 }
 
+// Bare alternation for proximity tests (COIN_WORD_RE keeps its own \b anchors).
+const COIN_NOUN_SRC = /(?:gold|silver|copper|coins?|gp|sp|cp|payment|reward|wages?|bounty|purse|money)/;
+// "the rest of my payment", "pay me again/more/the rest" — repeat-grant intent
+// phrased without a quantifier-noun pair.
+const OWED_REMAINDER_RE = /\b(?:the\s+)?rest of (?:my|the|our) (?:payment|reward|wages?|bounty|coin|money|pay|share)\b|\bpay (?:me|us) (?:again|more|the rest)\b/i;
+
 function playerMessageSupportsRepeatCoinGrant(playerMessage) {
     const text = String(playerMessage || '');
     if (!text.trim()) return false;
-    // "another 20 gold", "the rest of my payment" — explicit repeat intent naming coin.
-    return REPEAT_TRANSACTION_RE.test(text) && COIN_WORD_RE.test(text);
+    // "another 20 gold", "the rest of my payment" — the repeat intent must attach
+    // to the coin words. Mere co-occurrence ("Another time, Odo… three silver out
+    // of my purse") authorized a live replayed reward on 2026-08-22.
+    return repeatIntentNearNoun(text, COIN_NOUN_SRC) || OWED_REMAINDER_RE.test(text);
 }
 
 // Coin losses replay in the same tight window as grants: the observed failure
@@ -129,7 +137,7 @@ function playerMessageSupportsRepeatCoinLoss(playerMessage) {
     if (!text.trim()) return false;
     if (STRONG_PAYMENT_VERB_RE.test(text)) return true;
     if (COMMERCE_VERB_RE.test(text)) return true;
-    if (REPEAT_TRANSACTION_RE.test(text) && COIN_WORD_RE.test(text)) return true;
+    if (repeatIntentNearNoun(text, COIN_NOUN_SRC)) return true;
     return COIN_TRANSFER_VERB_RE.test(text) && COIN_WORD_RE.test(text);
 }
 
@@ -361,6 +369,13 @@ export const handlers = {
         }
         // No exact duplicate — but the charge may be a recap BUNDLE that swallows a
         // recent payment whole (novel total, so the signature check can't see it).
+        // Known accepted false positive (live 2026-08-22): a genuine fresh charge
+        // that HAPPENS to swallow an unrelated recent payment gets that payment
+        // carved out (a 3 sp ferry debt stripped from a 3 gp 6 sp shopping bill).
+        // Deliberately kept: the same playtest's next turn had the DM bundle a
+        // full 360 cp recap INTO a genuine 71 cp meal charge on a message that
+        // also initiated commerce — no player-intent guard can tell the two
+        // apart, and a visible under-charge beats a silent double-charge.
         const bundled = stripBundledReplay(
             state.recentCoinLosses, { gold, silver, copper }, meta.playerMessage,
             messageIndex, RECENT_COIN_LOSS_MESSAGE_WINDOW, state.messages

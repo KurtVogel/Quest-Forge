@@ -363,6 +363,30 @@ describe('transaction replay phrasing', () => {
         expect(second.character.gold).toBe(1); // both purchases charged
         expect(second.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(2);
     });
+
+    it('a stray repeat word plus a distant pronoun is NOT repeat purchase intent (2026-08-22)', () => {
+        const state = makeState();
+        const bought = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-buy-1', playerMessage: 'I buy a dagger.' } },
+        });
+        const nextAssistant = gameReducer(bought, {
+            type: 'ADD_MESSAGE',
+            payload: { id: 'msg-buy-2', role: 'assistant', content: 'The smith nods.' },
+        });
+        const replayed = gameReducer(nextAssistant, {
+            type: 'PURCHASE_ITEM',
+            payload: {
+                itemKey: 'dagger',
+                // "another" (an idiom) and "them" live in different sentences —
+                // the old fallback read this as "buy another one".
+                _meta: { sourceId: 'msg-buy-2', playerMessage: 'Another time, maybe. I nod to the guards and walk past them.' },
+            },
+        });
+
+        expect(replayed.character.gold).toBe(3); // only the first purchase charged
+        expect(replayed.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(1);
+    });
 });
 
 describe('CLAIM_LOOT_SOURCE', () => {
@@ -489,6 +513,46 @@ describe('ADD_COIN_GRANT', () => {
         const repeat = gameReducer(later, {
             type: 'ADD_COIN_GRANT',
             payload: { gold: 20, _meta: { sourceId: 'msg-reward-2', playerMessage: 'I demand another 20 gold for the second wagon.' } },
+        });
+        expect(repeat.character.gold).toBe(45);
+    });
+
+    it('does NOT treat unrelated "another"+coin co-occurrence as repeat intent (live playtest #10)', () => {
+        // 2026-08-22: "Another time, Odo… I count three silver out of my purse"
+        // — "another" is an idiom for NOT NOW and the coins flow AWAY from the
+        // hero, yet the old co-occurrence test authorized the DM's replayed
+        // 200 cp reward. Repeat intent must attach the quantifier to the coin.
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { silver: 20, _meta: { sourceId: 'msg-reward-1', playerMessage: 'Odo. Job\'s done. Twenty silver, as agreed.' } },
+        });
+        const later = addMessages(granted, 2);
+        const replayed = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: {
+                silver: 20,
+                _meta: {
+                    sourceId: 'msg-pay-ferry',
+                    playerMessage: 'Another time, Odo. Got a debt of my own to square first. I count three silver out of my purse and press them into his hand.',
+                },
+            },
+        });
+        const totalCp = c => (c.gold || 0) * 100 + (c.silver || 0) * 10 + (c.copper || 0);
+        expect(totalCp(replayed.character)).toBe(totalCp(granted.character));
+        expect(replayed.messages.at(-1).content).toMatch(/Duplicate coin grant ignored/);
+    });
+
+    it('still allows a repeat when the quantifier attaches to the coins ("pay me the rest")', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-reward-1' } },
+        });
+        const later = addMessages(granted, 2);
+        const repeat = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-reward-2', playerMessage: 'That was half. Now pay me the rest.' } },
         });
         expect(repeat.character.gold).toBe(45);
     });

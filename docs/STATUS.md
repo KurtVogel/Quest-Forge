@@ -6,10 +6,36 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-20 ×2 (directed playtest #9 ran against the sweep build — 7/10
-scenario passes, 2 P1s + 2 P2s found and ALL fixed same-day: coin-audit direction
-invariant, fuzzy item-identity matching + shadow-row heal, region-as-place translation,
-sticky settlementScale. DECISIONS.md 2026-08-20 ×2. 1,641 tests green, lint clean)._
+_Last updated: 2026-08-22 (directed playtest #10 ran live against the freshly deployed #9
+batch — every #9 fix held under fire, 1 new P1 + several P2/P3s found and ALL fixed
+same-day: repeat-intent proximity, count-in-name items, sub-place settlement evidence,
+premise equip empty-slots-only, RAG seed/live text alignment. DECISIONS.md 2026-08-22.
+1,654 tests green, lint clean, deployed)._
+
+## 2026-08-22 — directed playtest #10 (Brakka Ironmouth / Marrowdal) + same-day fix batch
+
+Agent-driven live run on the dev server immediately after deploying 89a065c (report in repo
+root, PLAYTEST_REPORT.md). **The #9 fixes all held under live fire:** the exact reward-killer
+sentence reconciled correctly both directions (loot + payment stand-down lines observed), a
+turn where the DM re-emitted an ENTIRE prior turn's events was fully absorbed by the ledgers
+(2 item replays + coin-grant replay ignored, bundle-strip carved the 360 cp recap and charged
+exactly the 71 cp meal), Harrowmere folded/profiled with region + sticky town-scale, and
+checks/challenge-ruling/combat (opening initiative, situational ruling, Second Wind slot,
+XP)/short-rest/OOC/Continue all behaved to spec. **Found and fixed same-day (DECISIONS.md
+2026-08-22):** (P1) "Another time, Odo… three silver out of my purse" authorized a replayed
+2 gp reward — all repeat-intent bypasses now require quantifier-noun PROXIMITY
+(`repeatIntentNearNoun`); (P2) "3 Torches"/"7 days of Trail Rations" minted literal rows —
+`parseCountedItemName` + plural catalog resolution in normalizeItem; (P2) the Scribe tagged
+the inn `region="Stonebridge"` with no town record to translate through, inverting the home
+region — sub-place records now PROVE settlements (`settlementEvidencedRegion`, live + load
+heal, polluted campaign healed on reload); (P2) reload re-embedded 40 RAG items — live embeds
+now build the seed's exact text and journal joined the mutable categories (verified: prune 3,
+re-embed 0); (P3) premise equip no longer displaces the class kit's weapon; (P3) patron-less
+pursuits now open quests; priming AbortError quieted. Bundle-strip small under-charge
+analyzed and ACCEPTED as designed (guard tried, reverted — see DECISIONS). **Watch items for
+the next live run:** narrated shopping should now produce clean stacked rows; a reward turn
+after an idiom like "another time" must log `Duplicate coin grant ignored`; first-profile
+region of a new campaign should be the LAND, not the town.
 
 ## 2026-08-20 ×2 — directed playtest #9 (Tamsin Rooke / Veyrmoor) + same-day fix batch
 

@@ -8,6 +8,52 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-22 · Playtest #10 fix batch: repeat-intent needs PROXIMITY (co-occurrence double-granted a reward), counts come out of item names, sub-places prove settlements, premise equip fills empty slots only, and live RAG embeds must match the seed's text byte-for-byte.**
+Six rulings from directed playtest #10 (PLAYTEST_REPORT.md), run live against the freshly
+deployed #9 batch — whose fixes all held under fire (the exact killer sentence "counts out
+twenty silver … into your waiting hand" reconciled perfectly, and a turn where the DM re-emitted
+an ENTIRE prior turn's events was fully absorbed by the ledgers). (1) **Repeat-intent proximity
+(the P1):** "**Another** time, Odo… I count three **silver** out of my purse" authorized the
+DM's replayed 200 cp reward — the bypass was `REPEAT_RE && COIN_WORD_RE`, two stray words
+sentences apart, with the coin flowing OUT. All repeat-intent bypasses (coin grant, coin loss,
+purchase/sale pronoun fallback, spell recast) now require the repeat quantifier to ATTACH to
+its noun via `repeatIntentNearNoun` in shared.js ("another twenty silver", "more of those",
+"cast it again"), plus grant-side "pay me the rest / rest of my payment" phrasings. False
+negatives are cheap (visible line + 4-message window); false positives silently double-charge.
+(2) **Counts embedded in item names:** `items_found` "3 Torches" / "7 days of Trail Rations"
+minted literal rows that could never stack or decrement. `parseCountedItemName` (data/items.js)
+parses leading counts, "N days of X", and "x3" suffixes into quantity inside `normalizeItem`
+(explicit quantity field still wins; parenthesized catalog bundles "(x5)"/"(50 ft)" and
+measurements "10 foot pole" untouched), and `normalizeItemKey` resolves bare plurals
+("Torches" → torch). (3) **Sub-places prove settlements:** the Scribe tagged the Stonebridge
+inn `region="Stonebridge"` and the 08-20 place-translation had nothing to match — the town
+never got its own record (the DM only SET_LOCATIONs sub-places), so the TOWN became the home
+region and the real land (Marrowdal) looked foreign. `settlementEvidencedRegion`: a record
+whose name is the target plus ONLY urban-locality tokens ("The Stonebridge market square")
+proves the target is a settlement — the region proposal resolves to that sub-place's own land
+when known, else null. Strictly urban tokens on purpose: "Marrowdal valley" proves a LAND and
+must not eat a genuine region. Applies live (UPDATE_LOCATION_PROFILE) and at load (dedupe pass
+3) — the polluted live campaign healed on reload. (4) **Premise equip fills empty slots only**
+(refines 2026-07-28's equipOnAdd): "a small hunting knife at her belt" arrived `equipped: true`
+and silently displaced the class kit's Longsword the hero-reveal had promised — a L1 fighter
+nearly fought wolves with 1d4. The class kit the player confirmed wins; premise items equip
+only into an empty weapon/armor/shield slot. (5) **Live RAG embeds must build the SAME text as
+the mount seed:** journal rows were live-embedded as "[Location: X] summary" but seeded bare,
+and secret world facts live-embedded untagged — every reload re-embedded most of the corpus
+(40 re-embeds observed) and stacked near-duplicate retrieval rows. Live embeds now use the
+seed's exact builders, and 'journal' joined the mutable seed categories (journal entries are
+append-only in state, so the always-complete seed makes the prune a pure heal that clears the
+legacy prefixed rows — verified live: next reload pruned 3, re-embedded 0). (6) **Quests
+without patrons:** a full self-initiated investigation arc produced zero quest records; QUEST
+TRACKING now opens a quest when the hero takes up a multi-scene pursuit on their own
+initiative. Also noted-and-accepted: the coin bundle-strip can under-charge when a genuine
+fresh charge happens to swallow an unrelated recent payment (3 sp ferry debt inside a 3 gp 6 sp
+shopping bill) — a player-intent guard was tried and REVERTED, because the very next live turn
+had the DM bundle a real 360 cp recap into a real 71 cp meal charge on a message that also
+initiated commerce: indistinguishable, and a visible under-charge beats a silent double-charge.
+
+---
+
 **2026-08-20 ×2 · Directed-playtest fix batch: coin audits act only on coin-silent narrations (direction confusion killed a reward), item audits match fuzzily, regions can't be places, and town-scale is permanent.**
 Four rulings from the 2026-08-20 directed playtest (PLAYTEST_REPORT.md). (1) **Coin-audit
 direction invariant (the P1 reward negation):** "Twenty, like I promised" — Branock counting a

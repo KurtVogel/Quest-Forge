@@ -130,7 +130,59 @@ export function normalizeItemKey(value = '') {
     // ("massive warhammer", "weathered leather armor"). Match only a complete
     // catalog-name suffix so unrelated story objects do not become mechanical gear.
     const descriptorMatch = CATALOG_NAMES_BY_LENGTH.find(([, name]) => withoutBonus.endsWith(` ${name}`));
-    return descriptorMatch?.[0] || null;
+    if (descriptorMatch) return descriptorMatch[0];
+
+    // Plural grants ("Torches", "Healing Potions") resolve to their singular
+    // catalog entry — counts parsed out of names arrive pluralized (2026-08-22).
+    if (/[a-z]s$/.test(withoutBonus)) {
+        for (const singular of new Set([withoutBonus.replace(/es$/, ''), withoutBonus.replace(/s$/, '')])) {
+            if (singular && singular !== withoutBonus) {
+                const key = normalizeItemKey(singular);
+                if (key) return key;
+            }
+        }
+    }
+    return null;
+}
+
+// Remainders that are measurements, not item counts: "10 foot pole" is one pole.
+const COUNT_UNIT_HEAD_RE = /^(?:foot|feet|ft|inch|inches|in|pound|pounds|lb|lbs|yard|yards|meter|meters|metre|metres|gallon|gallons|pint|pints|sided)\b/i;
+
+/**
+ * Parse a count the LLM embedded in an item NAME ("3 Torches", "7 days of
+ * Trail Rations", "2x Healing Potion", "Torch x3") into { name, quantity } —
+ * live 2026-08-22: such grants minted literal rows like `3 Torches ×1` that
+ * never stack and cannot decrement. Parenthesized suffixes ("Wax Candles (x5)",
+ * "Hempen Rope (50 ft)") are catalog bundle names and are deliberately left
+ * alone, as is any raw name the catalog already recognizes.
+ * Returns null when there is no embedded count.
+ */
+export function parseCountedItemName(name = '') {
+    const raw = String(name).trim();
+    if (!raw) return null;
+    // Exact catalog identities pass through untouched. Deliberately NOT the full
+    // normalizeItemKey resolution: its plural/suffix fallbacks can resolve
+    // "3 Torches" (via "3 torch") and would swallow the count we are here for.
+    if (ITEM_CATALOG[raw] || NAME_TO_KEY[raw.toLowerCase()]) return null;
+    let count;
+    let rest;
+    let match = raw.match(/^(\d{1,3})\s*[x×]\s*(.+)$/i)
+        || raw.match(/^(\d{1,3})\s+(?:days?|nights?)\s+(?:worth\s+)?of\s+(.+)$/i)
+        || raw.match(/^(\d{1,3})\s+(.+)$/);
+    if (match) {
+        count = Number(match[1]);
+        rest = match[2].trim();
+    } else {
+        match = raw.match(/^(.+?)\s*[x×]\s*(\d{1,3})$/i);
+        if (!match) return null;
+        rest = match[1].trim();
+        count = Number(match[2]);
+    }
+    if (!rest || COUNT_UNIT_HEAD_RE.test(rest)) return null;
+    return {
+        name: rest,
+        quantity: Math.max(1, Math.min(MAX_ITEM_QUANTITY, Math.trunc(count) || 1)),
+    };
 }
 
 function applyMagicName(item) {
@@ -155,6 +207,15 @@ const ARMOR_TYPES = ['light', 'medium', 'heavy'];
 
 export function normalizeItem(raw = {}) {
     const source = typeof raw === 'string' ? { name: raw } : { ...raw };
+    // A count embedded in the name becomes quantity ("3 Torches" → Torch ×3);
+    // an explicit quantity field from the payload still wins when present.
+    const counted = parseCountedItemName(source.name);
+    if (counted) {
+        source.name = counted.name;
+        if (!(Number.isFinite(source.quantity) && source.quantity > 1)) {
+            source.quantity = counted.quantity;
+        }
+    }
     const itemKey = normalizeItemKey(source.itemKey || source.key || source.name);
     const base = itemKey ? ITEM_CATALOG[itemKey] : {};
     const parsedBonus = parseMagicBonusFromName(source.name || base.name);

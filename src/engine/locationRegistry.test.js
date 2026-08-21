@@ -60,6 +60,24 @@ describe('place-named regions (2026-08-20 playtest §5c: districts tagged region
         expect(resolvePlaceNamedRegion([town], 'Ashford', { excludeId: town.id })).toBe('Ashford');
     });
 
+    it('sub-place records prove a name is a settlement even with no record of its own (playtest #10)', () => {
+        // Live 2026-08-22: the Scribe tagged an inn with region "Stonebridge"
+        // while the town had no record — only "The Stonebridge market square"
+        // existed. The sub-place is the evidence: the region proposal dies.
+        const square = normalizeLocationRecord({ name: 'The Stonebridge market square' });
+        expect(resolvePlaceNamedRegion([square], 'Stonebridge')).toBeNull();
+    });
+
+    it('a sub-place with its own region hands the settlement its land (district → town → land)', () => {
+        const square = { ...normalizeLocationRecord({ name: 'The Stonebridge market square' }), region: 'Marrowdal' };
+        expect(resolvePlaceNamedRegion([square], 'Stonebridge')).toBe('Marrowdal');
+    });
+
+    it('geographic remainders are NOT settlement evidence — "Marrowdal valley" proves a land', () => {
+        const valley = normalizeLocationRecord({ name: 'Marrowdal valley', type: 'wilderness' });
+        expect(resolvePlaceNamedRegion([valley], 'Marrowdal')).toBe('Marrowdal');
+    });
+
     it('dedupeLocationRecords heals place-named regions from pre-fix saves', () => {
         const town = normalizeLocationRecord({ name: 'Ashford', type: 'haven', region: 'Veyrmoor' });
         const district = { ...normalizeLocationRecord({ name: 'The Guildhall archives', type: 'haven' }), region: 'Ashford' };

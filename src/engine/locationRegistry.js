@@ -305,6 +305,44 @@ export function findPlaceRecordByName(locations = [], name) {
 /** Record types that are confidently PLACES, never candidate region names. */
 const PLACE_SCALE_TYPES = new Set(['settlement', 'haven', 'hostile_site']);
 
+// Urban tokens that, as the ONLY extra words around a name inside a record
+// ("The Stonebridge market square"), prove the name is a settlement. Strictly
+// urban on purpose: "Marrowdal valley" proves Marrowdal is a LAND, not a town,
+// so geographic heads (valley, hills, river) must never count as evidence.
+const SETTLEMENT_EVIDENCE_TOKENS = new Set([...URBAN_LOCALITY_HEAD_TOKENS, 'town', 'city', 'village']);
+
+/**
+ * Sub-place settlement evidence (live playtest #10, 2026-08-22): the Scribe
+ * profiled a Stonebridge inn with region "Stonebridge" — and no record named
+ * "Stonebridge" existed for the place-translation to match, because the DM only
+ * ever SET_LOCATIONed sub-places ("Odo Fell's stall", "The Stonebridge market
+ * square"). The town then became the campaign's HOME region and the real land
+ * looked foreign. But those sub-place records themselves prove the name is a
+ * town: a record whose name is the target plus only urban-locality words is a
+ * district OF it. Returns { evidenced, region } — region is the first sanitized
+ * region such a sub-place record carries (a district's land is the town's land).
+ */
+export function settlementEvidencedRegion(locations = [], name, { excludeId = null } = {}) {
+    const targetTokens = locationTokens(name);
+    if (targetTokens.size === 0) return { evidenced: false, region: null };
+    let evidenced = false;
+    let region = null;
+    for (const record of locations || []) {
+        if (!record?.name || (excludeId && record.id === excludeId)) continue;
+        const recordTokens = locationTokens(record.name);
+        if (recordTokens.size <= targetTokens.size) continue;
+        if (containment(targetTokens, recordTokens) < 0.99) continue;
+        const remainder = [...recordTokens].filter(token => !targetTokens.has(token));
+        if (remainder.length === 0 || !remainder.every(token => SETTLEMENT_EVIDENCE_TOKENS.has(token))) continue;
+        evidenced = true;
+        if (!region) {
+            const own = sanitizeRegionName(record.region, record.name);
+            if (own) region = own;
+        }
+    }
+    return { evidenced, region };
+}
+
 /**
  * Region-as-place translation (live playtest 2026-08-20): the Scribe reported
  * the containing TOWN as a district's region ("The Guildhall archives" got
@@ -326,7 +364,18 @@ export function resolvePlaceNamedRegion(locations = [], region, { excludeId = nu
         if (visited.has(key)) return null;
         visited.add(key);
         const record = findPlaceRecordByName(locations, current);
-        if (!record || (excludeId && record.id === excludeId)) return current;
+        if (!record || (excludeId && record.id === excludeId)) {
+            // No record IS this name — but sub-place records may still prove it
+            // is a settlement (2026-08-22): inherit a district's own land when
+            // one is known, otherwise drop the proposal entirely.
+            const evidence = settlementEvidencedRegion(locations, current, { excludeId });
+            if (!evidence.evidenced) return current;
+            if (evidence.region && !isSameRegion(evidence.region, current)) {
+                current = evidence.region;
+                continue;
+            }
+            return null;
+        }
         const ownRegion = sanitizeRegionName(record.region, record.name);
         if (ownRegion) {
             if (isSameRegion(ownRegion, current)) return ownRegion;

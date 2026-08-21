@@ -34,7 +34,7 @@ import { buildKnownAppearances, buildKnownLocations, buildKnownStances, runScrib
 import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { addMemory, retrieveRelevant } from '../engine/vectorMemory.js';
 import { getMachineryGeminiKey } from './machinery.js';
-import { curateStoryMemory } from '../engine/storyMemory.js';
+import { curateStoryMemory, formatSecrecyTag } from '../engine/storyMemory.js';
 import { captureInjection } from '../debug/memoryInspectorStore.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from '../components/Chat/turnVisibility.js';
 import { buildNudgePrompt, detectMissingEventsCue, extractNudgeEventFields } from '../components/Chat/missingEventsNudge.js';
@@ -69,10 +69,12 @@ export function createTurnRunner({
             lastSummarizedIndex = result.index;
             const machineryKey = getMachineryGeminiKey(getState().settings);
             if (result.journalEntry && machineryKey) {
-                const journalText = result.journalEntry.location
-                    ? `[Location: ${result.journalEntry.location}] ${result.journalEntry.summary}`
-                    : result.journalEntry.summary;
-                await addMemory(machineryKey, journalText, 'journal', result.journalEntry.location).catch(() => {});
+                // Bare summary, location as metadata — the EXACT text the mount
+                // seed builds. The old "[Location: X] summary" prefix never
+                // matched the seed's bare text, so every journal entry was
+                // re-embedded (and duplicated in retrieval) on each reload
+                // (live playtest #10, 2026-08-22: 40 re-embeds on Continue).
+                await addMemory(machineryKey, result.journalEntry.summary, 'journal', result.journalEntry.location).catch(() => {});
             }
         } catch (e) {
             console.error('[Journal RAG Seeding] Failed:', e);
@@ -369,7 +371,10 @@ Translate the player's committed action into the single bounded combat_exchange 
         // Skip on a setup turn (pending rolls) — those facts ride on the outcome narration.
         if (!setupPhase && !s.combat?.active && events?.worldFacts?.length > 0 && machineryKey) {
             for (const f of events.worldFacts) {
-                addMemory(machineryKey, f.fact, f.category || 'world_fact', events?.location || s.currentLocation).catch(() => {});
+                // Same secrecy-tagged text the mount seed builds — an untagged
+                // live embed of a secret fact was a mismatched duplicate row
+                // (and leaked the canon without its knower boundary) on reload.
+                addMemory(machineryKey, `${formatSecrecyTag(f.knownBy)}${f.fact}`, f.category || 'world_fact', events?.location || s.currentLocation).catch(() => {});
             }
         }
 

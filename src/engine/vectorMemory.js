@@ -147,7 +147,11 @@ const EVICT_FIRST_CATEGORIES = new Set(['player', 'narrative']);
  * replacement (the audit's stale-rows finding).
  */
 const isMutableSeedCategory = (category) =>
-    category === 'npc' || String(category || '').startsWith('story_');
+    category === 'npc' || category === 'journal' || String(category || '').startsWith('story_');
+// 'journal' joined 2026-08-22: journal entries are append-only in state, so the
+// seed always carries every summary — marking them mutable is a pure heal that
+// prunes the legacy "[Location: X]"-prefixed live rows which never matched the
+// seed's bare text and were duplicated + re-embedded on every reload.
 
 /** Enforce the campaign cap on the in-memory store, mirroring evictions to disk. */
 function enforceCampaignCap() {

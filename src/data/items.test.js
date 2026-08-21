@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeItem, normalizeItemKey } from './items.js';
+import { normalizeItem, normalizeItemKey, parseCountedItemName } from './items.js';
 
 describe('item catalog normalization', () => {
     it('recognizes a catalog item with a descriptive prefix', () => {
         expect(normalizeItemKey('massive warhammer')).toBe('warhammer');
         expect(normalizeItemKey('weathered leather armor +1')).toBe('leatherArmor');
+    });
+
+    it('resolves plural grants to their singular catalog entry (2026-08-22)', () => {
+        expect(normalizeItemKey('Torches')).toBe('torch');
+        expect(normalizeItemKey('Daggers')).toBe('dagger');
+        expect(normalizeItemKey('shortswords')).toBe('shortsword');
     });
 
     it('keeps catalog mechanics authoritative over LLM-supplied fields', () => {
@@ -29,6 +35,41 @@ describe('item catalog normalization', () => {
             weight: 2,
             valueCp: 1500,
         });
+    });
+
+    it('parses counts embedded in grant names into quantity (live playtest #10)', () => {
+        // "3 Torches" and "7 days of Trail Rations" arrived as literal row names.
+        expect(parseCountedItemName('3 Torches')).toEqual({ name: 'Torches', quantity: 3 });
+        expect(parseCountedItemName('7 days of Trail Rations')).toEqual({ name: 'Trail Rations', quantity: 7 });
+        expect(parseCountedItemName('2x Healing Potion')).toEqual({ name: 'Healing Potion', quantity: 2 });
+        expect(parseCountedItemName('Torch x3')).toEqual({ name: 'Torch', quantity: 3 });
+    });
+
+    it('leaves measurements, catalog bundle names, and plain names un-parsed', () => {
+        expect(parseCountedItemName('10 foot pole')).toBeNull();
+        expect(parseCountedItemName('Wax Candles (x5)')).toBeNull();
+        expect(parseCountedItemName('Hempen Rope (50 ft)')).toBeNull();
+        expect(parseCountedItemName('Lodestone')).toBeNull();
+    });
+
+    it('normalizeItem turns "3 Torches" into a catalog Torch stack of three', () => {
+        const item = normalizeItem({ name: '3 Torches' });
+        expect(item.itemKey).toBe('torch');
+        expect(item.name).toBe('Torch');
+        expect(item.quantity).toBe(3);
+    });
+
+    it('normalizeItem keeps an explicit quantity field over the name count', () => {
+        const item = normalizeItem({ name: '3 Torches', quantity: 5 });
+        expect(item.itemKey).toBe('torch');
+        expect(item.quantity).toBe(5);
+    });
+
+    it('normalizeItem gives non-catalog counted names a clean custom row', () => {
+        const item = normalizeItem({ name: '7 days of Trail Rations' });
+        expect(item.itemKey).toBeNull();
+        expect(item.name).toBe('Trail Rations');
+        expect(item.quantity).toBe(7);
     });
 
     it('clamps hostile quantity and valueCp at the normalize boundary', () => {

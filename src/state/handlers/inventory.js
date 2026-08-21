@@ -142,7 +142,19 @@ export const handlers = {
             recentItemGrants = rememberTransaction(state.recentItemGrants, transaction, sourceId, messageIndex);
         }
 
-        const newItem = mintOwnedItem(item, { equipOnAdd });
+        // Premise equip fills EMPTY slots only (live playtest #10, 2026-08-22):
+        // a "hunting knife at her belt" arriving `equipped: true` displaced the
+        // class kit's Longsword as active weapon — the hero-reveal screen had
+        // promised otherwise. The class kit the player confirmed wins; the
+        // premise item still joins inventory and one click makes it active.
+        const slotHolder = item.type === 'weapon'
+            ? state.inventory.some(i => i.equipped && i.type === 'weapon')
+            : item.type === 'armor' && !item.isShield
+                ? state.inventory.some(i => i.equipped && i.type === 'armor' && !i.isShield)
+                : (item.type === 'shield' || item.isShield)
+                    ? state.inventory.some(i => i.equipped && (i.type === 'shield' || i.isShield))
+                    : false;
+        const newItem = mintOwnedItem(item, { equipOnAdd: equipOnAdd && !slotHolder });
         // Auto-equip armor/shields if no other of that type is currently equipped
         if (!newItem.equipped) {
             const isArmor = newItem.type === 'armor' && !newItem.isShield;

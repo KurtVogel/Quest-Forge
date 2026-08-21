@@ -513,8 +513,9 @@ describe('ADD_ITEM trust boundary (2026-07-28 audit)', () => {
         expect(dagger.id).not.toBe('weapon-1');
     });
 
-    it('honors the premise starting-item equipOnAdd channel, which takes the active slot', () => {
+    it('honors the premise starting-item equipOnAdd channel into an EMPTY weapon slot', () => {
         const state = makeState();
+        state.inventory = state.inventory.map(i => (i.id === 'weapon-1' ? { ...i, equipped: false } : i));
         const next = gameReducer(state, {
             type: 'ADD_ITEM',
             payload: { name: 'Warhammer', itemKey: 'warhammer', equipOnAdd: true },
@@ -523,7 +524,20 @@ describe('ADD_ITEM trust boundary (2026-07-28 audit)', () => {
         const warhammer = next.inventory.find(i => i.itemKey === 'warhammer');
         expect(warhammer.equipped).toBe(true);
         expect(warhammer.equipOnAdd).toBeUndefined();
-        expect(next.inventory.find(i => i.id === 'weapon-1').equipped).toBe(false);
+    });
+
+    it('premise equipOnAdd never displaces the class kit\'s already-equipped weapon (playtest #10)', () => {
+        // Live 2026-08-22: "a small hunting knife at her belt" arrived equipped:true
+        // and displaced the wizard-confirmed Longsword as active weapon.
+        const state = makeState();
+        const next = gameReducer(state, {
+            type: 'ADD_ITEM',
+            payload: { name: 'Small hunting knife', itemKey: 'dagger', equipOnAdd: true },
+        });
+
+        const dagger = next.inventory.find(i => i.itemKey === 'dagger');
+        expect(dagger.equipped).toBe(false);
+        expect(next.inventory.find(i => i.id === 'weapon-1').equipped).toBe(true);
     });
 
     it('still auto-equips armor into an empty slot without any flag', () => {

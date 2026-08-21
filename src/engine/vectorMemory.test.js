@@ -474,30 +474,35 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
             row('Marn (friendly): guards the old gate.', 'npc', 1),
             row('Marn: promised the hero a map.', 'story_promise', 2),
             row('The old gate fell in the goblin raid.', 'world_fact', 3),
+            // Journal joined the mutable set 2026-08-22: the legacy live-embed
+            // format prefixed "[Location: X] " and never matched the seed's bare
+            // text — those rows must prune, the seed-matching one must survive.
             row('The party reached the coast.', 'journal', 4),
+            row('[Location: The coast] The party reached the coast.', 'journal', 5),
         ]);
         embedTextMock.mockResolvedValue(unitVector(1));
 
-        // Current state reworded both mutable texts; facts/journal are NOT in the
-        // seed at all (immutable categories must survive regardless).
-        await seedMemories('key', [
+        // Current state reworded both mutable NPC/story texts; the world fact is
+        // NOT in the seed at all (immutable categories must survive regardless).
+        const seed = [
             { text: 'Marn (wary): guards the new gate, resents the hero.', category: 'npc' },
             { text: 'Marn: promised the hero a map of the Underway.', category: 'story_promise' },
-        ], 's1');
+            { text: 'The party reached the coast.', category: 'journal' },
+        ];
+        await seedMemories('key', seed, 's1');
         await flushAsync();
 
         expect(getMemoryCount()).toBe(4);
         // The stale wordings are gone from DISK too: a re-seed can't resurrect them.
-        await seedMemories('key', [
-            { text: 'Marn (wary): guards the new gate, resents the hero.', category: 'npc' },
-            { text: 'Marn: promised the hero a map of the Underway.', category: 'story_promise' },
-        ], 's1');
+        await seedMemories('key', seed, 's1');
         expect(getMemoryCount()).toBe(4);
         embedTextMock.mockResolvedValue(unitVector(0));
         const matches = await retrieveRelevant('key', 'What about Marn and the gate?', 10, 0.1);
         const texts = matches.map(m => m.text);
         expect(texts).not.toContain('Marn (friendly): guards the old gate.');
         expect(texts).not.toContain('Marn: promised the hero a map.');
+        expect(texts).not.toContain('[Location: The coast] The party reached the coast.');
+        expect(texts).toContain('The party reached the coast.');
         expect(texts).toContain('The old gate fell in the goblin raid.');
     });
 

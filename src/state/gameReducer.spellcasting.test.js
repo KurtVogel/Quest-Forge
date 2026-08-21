@@ -81,6 +81,14 @@ describe('CAST_SPELL (out of combat)', () => {
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'I cast Cure Wounds again' } },
         });
         expect(recast.character.spellSlots[1].used).toBe(2);
+
+        // A stray repeat word plus a distant pronoun is NOT recast intent
+        // (2026-08-22 proximity rule — the coin-grant bypass's spell twin).
+        const strayWords = gameReducer(withChatter, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'Another time, maybe. I let the priest examine it.' } },
+        });
+        expect(strayWords).toBe(withChatter);
     });
 
     it('measures the spell replay window in conversational distance — a dice turn cannot age out the guard (2026-07-30)', () => {

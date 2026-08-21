@@ -134,6 +134,26 @@ export const RECENT_TRANSACTION_LIMIT = 20;
 // Explicit repeat-intent phrasing: "another", "one/two/a few more", "more of those", etc.
 export const REPEAT_TRANSACTION_RE = /\b(another|second|same|again|(?:one|two|three|four|five|six|a couple(?: of)?|a few|several|some)\s+more|more of (?:those|these|them))\b/i;
 
+// Proximity beats co-occurrence (live 2026-08-22 double-grant: "Another time,
+// Odo… I count three silver out of my purse" read as repeat-grant intent because
+// "another" and "silver" merely co-occurred sentences apart — and the coin was
+// flowing OUT). A repeat quantifier only shows repeat intent when it attaches to
+// the noun it repeats: "another twenty silver", "a few more of those", "the same
+// stew again". `nounRe` is a bare alternation group (no anchors of its own).
+const REPEAT_QUANTIFIER_SRC = String.raw`(?:another|a second|the same|(?:one|two|three|four|five|six|a couple(?: of)?|a few|several|some) more|more of)`;
+
+export function repeatIntentNearNoun(playerMessage, nounRe) {
+    const text = String(playerMessage || '');
+    if (!text.trim()) return false;
+    const noun = nounRe.source;
+    const near = new RegExp(String.raw`\b${REPEAT_QUANTIFIER_SRC}\s+(?:[\w'-]+\s+){0,2}?(?:${noun})\b`, 'i');
+    if (near.test(text)) return true;
+    // Inverted form: the noun with a trailing "again" in the same clause
+    // ("buy it again", "cast that again", "the stew again, please").
+    const trailing = new RegExp(String.raw`\b(?:${noun})\b[^.!?;]{0,24}\bagain\b`, 'i');
+    return trailing.test(text);
+}
+
 export function sanitizeRecentTransaction(entry) {
     if (!entry || typeof entry !== 'object') return null;
     const signature = String(entry.signature || '').slice(0, 200);
@@ -221,7 +241,10 @@ export function playerMessageSupportsRepeatTransaction(item, playerMessage, verb
     const nameWords = String(item.name || '').toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
     if (nameWords.length > 0 && nameWords.every(word => text.toLowerCase().includes(word))) return true;
 
-    return REPEAT_TRANSACTION_RE.test(text) && /\b(one|it|that|those|these|them|same)\b/i.test(text);
+    // Last resort: a repeat quantifier attached to a pronoun ("another one",
+    // "more of those", "buy it again") — bare co-occurrence of a repeat word and
+    // a stray pronoun anywhere in the message is NOT repeat intent (2026-08-22).
+    return repeatIntentNearNoun(text, /(?:one|round|it|that|those|these|them)/);
 }
 
 /**

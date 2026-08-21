@@ -19,7 +19,7 @@ import {
     normalizeCompanion,
     normalizeRefToken,
     RECENT_SPELL_CAST_LIMIT,
-    REPEAT_TRANSACTION_RE,
+    repeatIntentNearNoun,
     reviveCharacter,
     systemMessage,
     withCondition,
@@ -37,8 +37,10 @@ function playerMessageRecastsSpell(spell, playerMessage) {
     if (tokens.some(token => compact.includes(token))) return true;
     const nameWords = String(spell.name || '').toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
     if (nameWords.length > 0 && nameWords.every(word => text.includes(word))) return true;
-    // "I cast it again" — explicit repeat intent without naming the spell.
-    return REPEAT_TRANSACTION_RE.test(text) && /\b(cast|spell|it|that)\b/i.test(text);
+    // "I cast it again", "another casting" — explicit repeat intent without
+    // naming the spell. Proximity required: a stray repeat word plus a stray
+    // pronoun anywhere in the message is not recast intent (2026-08-22).
+    return repeatIntentNearNoun(text, /(?:cast|casting|spell|it|that)/);
 }
 
 export const handlers = {

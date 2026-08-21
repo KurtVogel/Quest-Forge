@@ -266,7 +266,13 @@ export default function ChatPanel() {
                 dispatch({ type: 'UPDATE_SESSION', payload: { openingScenePending: false } });
             })
             .catch(e => {
-                console.warn('[Priming] Session start priming failed:', e);
+                // An aborted call (dev StrictMode remount, navigation away) is not a
+                // provider failure — the retry path below already covers it quietly.
+                if (e?.name === 'AbortError' || e?.code === 20) {
+                    console.info('[Priming] Opening-scene call aborted (remount/navigation) — retrying.');
+                } else {
+                    console.warn('[Priming] Session start priming failed:', e);
+                }
                 hasPrimedRef.current = false;
                 if (!mountedRef.current) return; // real unmount: the next mount retries
                 if (primingAttemptsRef.current < MAX_PRIMING_ATTEMPTS) {
