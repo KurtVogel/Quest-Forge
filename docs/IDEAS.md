@@ -403,6 +403,30 @@ fatigue idea (2026-08-03), and the cross-faction-contradiction guard idea (2026-
 
 ## Gameplay & Mechanics
 
+### Engine-owned quest-completion XP + boss-enemy XP — status: `designed` (2026-08-22, rpg-balance-master ruling), awaiting Vesa's go
+Vesa (during the Terra playtest evening): quests finishing should reward XP, and notable
+NPCs/bosses should pay more than mooks. Today's controlled provider comparison proved the
+gap: for the SAME scripted quest, Terra awarded +75 XP via `exp_awarded` while Gemini Pro
+awarded ZERO — quest XP is currently provider-mood-dependent, which undercuts non-combat
+play as a first-class path. Full ruling in
+`.claude/agent-memory/rpg-balance-master/quest_and_boss_xp_ruling.md`; the shape:
+**(1) Quest XP** — engine-owned on `completed` (never `failed`): 12.5% of the current level
+threshold (exactly 1/4 of the shipped front-resolution milestone → the quotable invariant
+"4 quests = 1 front = half a level; 8 quests = 1 level" at any level); a quest opened and
+closed in the same response, or the never-tracked fallback branch, pays flat 25 XP
+(anti-farming: trivial same-scene quests can't ladder; the known duplicate-quest-row bug
+degrades to a 25 XP leak, not a double-pay). One-shot via the quest's own prior status — no
+new ledger. `exp_awarded` demoted in the prompt to freeform bonuses only, never for a
+tracked quest's own completion. **(2) Boss XP** — boolean `boss: true` on `combat_start`
+enemies (the `is_undead` pattern), honored ONLY when the statline already maxes the
+ordinary cap (`hp*2+ac*3 >= 300` — a flagged mook is silently ignored), ceiling =
+quest-completion XP at current level (never front scale), max 2 qualifying bosses per
+fight, and only kill/surrender pay boss XP — a fled boss pays ordinary flee-XP so a
+recurring named villain can't farm the elevated tier across reappearances. Below ~L4 the
+ceiling degenerates to the flat 300 (documented, not a bug — 300 is already the whole L1→2
+threshold). Follow-up hardening noted separately: fuzzy `textMatch` containment on quest
+completion matching (the duplicate-row playtest finding).
+
 ### [strengthening] Incapacitating conditions don't stop an enemy's own turn — status: `shipped` (2026-07-14, confirmed 2026-07-26)
 Found during the 2026-07-13 scheduled strengthening audit; this entry was left at `idea` after
 the fix shipped the very next day (commit `39446ae`, STATUS.md "Strengthening-queue batch 2") —
