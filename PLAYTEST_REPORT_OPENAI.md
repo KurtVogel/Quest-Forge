@@ -5,7 +5,38 @@
 
 ## Verdict in one line
 
-**gpt-5 is contract-competent and narratively strong, but its JSON-fencing discipline is weak (the unfenced-JSON rescue carried 4+ turns) and its latency is disqualifying for ordinary play (median TTFT ~30s, worst 72.9s, totals 28–79s/turn).**
+**On `gpt-5` (stale list): contract-competent but unfenced-JSON-prone and disqualifyingly slow (median TTFT ~30s, worst 72.9s). On `gpt-5.6-terra` (current gen, retested same session): fast (TTFT 6.5s/3.1s, totals 11.4s/7.0s), properly fenced, contract flawless — OpenAI is a genuinely viable narrator on the current tier.**
+
+## ADDENDUM — gpt-5.6 retest (same session)
+
+Vesa flagged that the app's OpenAI list was two generations stale (`gpt-5`/`gpt-5-mini` from
+the 2026-08-20 refresh). Live models API confirms the family now tops out at **GPT-5.6**,
+shipped as three durable capability tiers: **Sol** (flagship, $5/$30 per 1M), **Terra**
+(balanced, $2.50/$15, ~5.5-flagship performance at half price), **Luna** (light, $1/$6).
+All three reject non-default temperature (probed live), so the `/^(gpt-5|o\d)/` omit-regex
+already covers them. The adapter list now carries the 5.6 trio (Terra recommended) + gpt-5 +
+gpt-4o legacy; devSettingsSeed's openai default is `gpt-5.6-terra`.
+
+**Terra retest** (2 turns continuing the same campaign — lamp relit, bonus collected):
+- TTFT **6.5s / 3.1s**, totals **11.4s / 7.0s** — an order of magnitude better than gpt-5 and
+  competitive with Gemini's live baseline. The latency P2 below is a gpt-5 artifact; on 5.6
+  it is RESOLVED.
+- Both turns properly ` ```json `-fenced (gpt-5's unfenced habit not observed on 5.6, small
+  sample; the P2 below stays open as a watch item).
+- Contract: torch re-purchase evented (1 cp loss, Scribe stood down on item AND payment), the
+  1 gp bonus evented (100 cp gain, audit stand-down), lamp world fact minted, quest completed
+  in the resolving response, and Terra even marked a DRAMATIC CALLBACK card used via
+  `memory_updates` — the WOW-layer channel exercised unprompted. Purse arithmetic exact
+  through the ledgers (19g 9s 5c).
+- New P3: the completion turn minted a SECOND quest row under a fresh name ("The Silent
+  Lighthouse", completed) beside the original — name-drift beat the normalized-name upsert.
+  Cosmetic (both rows finished), but quest-name drift is a known LLM habit worth a dedupe
+  glance.
+
+**Revised bottom line:** on `gpt-5.6-terra` the OpenAI row is a real narrator option —
+latency competitive, contract discipline excellent in the retest window. Gemini-first
+production posture unchanged (machinery is Gemini-only regardless), but "OpenAI = experimental"
+now means "viable fallback," not "unusable."
 
 ## P1 found and FIXED this session
 

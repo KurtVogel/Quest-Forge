@@ -26,8 +26,14 @@ tests, and devSettingsSeed learned `'openai'`. **Verdict:** gpt-5 honors the con
 open, evented loot/coins with audit stand-downs BOTH directions incl. the 500 cp reward
 cover, DC-ladder proposals with fiction-granted advantage, declared-attack combat entry, full
 exchange cycle + engine XP, clean OOC) but rode the unfenced-JSON rescue on 4+ of ~10 turns
-and ran median TTFT ~30s / worst 72.9s — **stays experimental; Gemini-first posture
-unchanged.** 1,656 tests green, lint clean. New P2/P3s queued in the report.
+and ran median TTFT ~30s / worst 72.9s. **Same-session addendum (Vesa: "5.6 is the
+latest"):** the list was two generations stale — refreshed to the GPT-5.6 tier trio
+(Terra recommended; Sol flagship; Luna light; all reject non-default temperature, regex
+already covers), and a 2-turn `gpt-5.6-terra` retest ran TTFT 6.5s/3.1s with proper fencing
+and flawless contract behavior (audit stand-downs both directions, quest completed, a
+callback card marked used). **Verdict revised: on 5.6-terra OpenAI is a viable narrator
+fallback; Gemini-first posture unchanged.** 1,656 tests green, lint clean. P2/P3s queued
+in the report (incl. new P3: quest-name drift minted a duplicate completed row).
 
 ## Current focus (adopted 2026-08-22): post-hardening focus plan
 

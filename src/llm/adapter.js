@@ -134,10 +134,11 @@ export const PROVIDERS = {
     openai: {
         name: 'OpenAI',
         models: [
-            { id: 'gpt-5-mini', name: 'GPT-5 Mini (Recommended)', description: 'Fast, affordable current-gen' },
-            { id: 'gpt-5', name: 'GPT-5', description: 'Highest quality' },
-            { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Previous gen, budget legacy option' },
-            { id: 'gpt-4o', name: 'GPT-4o', description: 'Previous gen' },
+            { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra (Recommended)', description: 'Balanced current-gen tier' },
+            { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: 'Highest quality, priciest' },
+            { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: 'Fast, low-cost current-gen' },
+            { id: 'gpt-5', name: 'GPT-5', description: 'Previous gen' },
+            { id: 'gpt-4o', name: 'GPT-4o', description: 'Legacy' },
         ],
     },
     // DM narration only — the memory machinery (RAG, Scribe & co.) always runs

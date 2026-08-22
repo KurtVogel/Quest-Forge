@@ -25,10 +25,19 @@ open, evented items/coins with Scribe audits standing down both directions, roll
 the solo DC ladder with fiction-granted advantage, declared-attack combat entry, full exchange
 cycle, clean OOC — but it leaned on the unfenced-JSON rescue for 4+ of ~10 turns, and median
 TTFT ~30s (worst 72.9s, one turn nearly tripping the 90s stall guard) is disqualifying for
-ordinary play. Verdict: the experiment row works and stays experimental; Gemini-first
-production posture unchanged. P2/P3 follow-ups queued in the report (fence discipline via
-response_format if OpenAI ever graduates, stacked priming-failure banners, third-person camera
-drift, one-shot frontDirector lost to a provider outage at campaign start).
+ordinary play. **Same-session addendum:** Vesa flagged the list was two generations stale —
+the live API tops out at **GPT-5.6**, shipped as capability tiers Sol ($5/$30) / Terra
+($2.50/$15) / Luna ($1/$6), all rejecting non-default temperature (probed; the omit-regex
+already covers them). Model list refreshed to the 5.6 trio (Terra recommended) + gpt-5 +
+gpt-4o legacy; devSettingsSeed's openai default is `gpt-5.6-terra`. A 2-turn Terra retest on
+the same campaign: TTFT 6.5s/3.1s, totals 11.4s/7.0s, both turns properly fenced, coin/item
+audits standing down both directions, quest completed on resolution, and a callback card
+marked used via memory_updates — **on 5.6-terra OpenAI is a viable narrator fallback**, not
+just an experiment. Gemini-first posture unchanged (machinery is Gemini-only regardless).
+Remaining P2/P3s in the report: fence-discipline watch item (gpt-5 artifact, unobserved on
+5.6's small sample), stacked priming-failure banners, third-person camera drift, one-shot
+frontDirector lost to a provider outage at campaign start, and a new P3 — quest-name drift
+minted a duplicate completed quest row on the resolving turn.
 
 **2026-08-22 · Production provider posture: Gemini-first with a hosted key — OpenAI experimental, Grok shelved for narration.**
 Vesa's call after the same-day architecture assessment: production Quest Forge runs ON
