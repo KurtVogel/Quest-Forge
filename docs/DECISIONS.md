@@ -8,6 +8,29 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-22 · Controlled narrator comparison: gemini-3.1-pro-preview vs gpt-5.6-terra — both contract-clean; Gemini the dramatist, Terra the fast plotter; Gemini-first posture holds with Terra as a near-peer alternate.**
+New reusable harness `scripts/playtest_provider_compare.cjs`: two fully scripted 13-action runs
+(identical premise/hero/player messages/machinery, isolated profiles, production preview build)
+differing only in narrator. Full report: PLAYTEST_COMPARISON_TERRA_VS_GEMINI.md; raw logs +
+transcripts in test-results/provider_compare/. **Objective:** engine cooperation was a tie —
+both runs contract-perfect (quest open→complete, exact purchase, spell_cast + slot, reward
+paid once, audits standing down, 0 parser rescues, 0 errors). Latency was NOT a tie: Terra
+TTFT median 2.0s / max 5.3s vs Gemini 12.3s / 25.7s; words-per-turn 146 vs 224 (the north
+star's brevity rule favors Terra). **Subjective:** Gemini escalated to creature horror and
+ran the full combat + non-lethal-defeat pipeline flawlessly (hero downed at 1/8, quest still
+completed via the logbook, negotiated 10 silver paid exactly); Terra kept the monster
+off-screen (Osmo rescued alive), wove the hero's personal hook (mother's tide-compass /
+forbidden chart) into NPC dialogue unprompted — the best callback craft seen in any run —
+and writes tighter, more distinct NPC voices, but narrates in third person (consistent
+OpenAI-family habit; one POV prompt line would fix) and defaults gentler on danger.
+**Caveats:** one run per model (directional); Terra has never yet been observed inside the
+combat exchange machine (open gap); XP-channel generosity differs (Terra +75 on completion,
+Gemini 0). **Ruling:** Gemini-first production unchanged (machinery coupling, proven combat,
+POV, eval baselines); Terra graduates from "fallback" to near-peer alternate. Harness bug
+worth remembering: raw `el.value` writes are invisible to React's value tracker — the first
+run pair silently played zero turns; the committed harness uses native-setter fills plus
+per-step screen assertions that fail loudly.
+
 **2026-08-22 · Machinery model → `gemini-3.7-flash` (Vesa's order), OpenAI reasoning models get a temperature omit, and the first live OpenAI-narrator playtest returns its verdict.**
 Three outcomes from the same session. (1) **Machinery swap:** `MACHINERY_MODEL` moves
 `gemini-3.1-flash-lite` → `gemini-3.7-flash` on Vesa's direct instruction (his framing "from

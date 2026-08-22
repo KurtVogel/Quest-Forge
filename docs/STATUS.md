@@ -12,6 +12,22 @@ same-day: repeat-intent proximity, count-in-name items, sub-place settlement evi
 premise equip empty-slots-only, RAG seed/live text alignment. DECISIONS.md 2026-08-22.
 1,654 tests green, lint clean, deployed)._
 
+## 2026-08-22 — controlled narrator comparison: Gemini Pro vs GPT-5.6 Terra
+
+Same-day follow-up to the OpenAI playtest (DECISIONS.md 2026-08-22 ×4): new reusable harness
+`scripts/playtest_provider_compare.cjs` ran two scripted 13-action campaigns identical in
+everything but the narrator (report: PLAYTEST_COMPARISON_TERRA_VS_GEMINI.md, delete after
+review). **Engine cooperation: tie, both contract-perfect** (0 parser rescues, 0 errors,
+audits stood down both directions in both runs). **Latency: Terra 6× faster** (TTFT median
+2.0s vs 12.3s) and ~35% briefer per turn. **Craft:** Gemini = dramatist (creature-horror
+escalation, full combat + non-lethal-defeat pipeline exercised flawlessly, second person);
+Terra = plotter (Osmo rescued alive, hero's personal tide-compass hook woven into NPC
+dialogue unprompted — best callback craft seen in any run — but third-person camera and a
+gentler danger default). **Ruling: Gemini-first production holds; Terra is now a near-peer
+alternate, not a fallback.** Open gaps: Terra never yet observed in the combat exchange
+machine; XP-channel generosity differs across providers. Next probes queued in the report
+(Terra combat run, OpenAI-gated second-person POV prompt line, dual eval:memory).
+
 ## 2026-08-22 — machinery → gemini-3.7-flash + first live OpenAI-narrator playtest (D3 done)
 
 Same-day pair on Vesa's order (DECISIONS.md 2026-08-22 ×3): **machinery model swapped** to
