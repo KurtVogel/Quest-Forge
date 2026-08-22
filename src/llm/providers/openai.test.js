@@ -61,6 +61,26 @@ describe('sendOpenAIMessage', () => {
         // in xai.test.js.
         expect(body.max_completion_tokens).toBe(16384);
         expect(body.max_tokens).toBeUndefined();
+        // Non-reasoning models keep the tuned temperature.
+        expect(body.temperature).toBe(0.9);
+    });
+
+    it('omits temperature entirely for reasoning models that 400 on non-default values', async () => {
+        // gpt-5 rejected temperature 0.7 live (2026-08-22 OpenAI playtest):
+        // "Unsupported value: 'temperature' does not support 0.7 with this model."
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+            choices: [{ finish_reason: 'stop', message: { content: 'ok' } }],
+        }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await sendOpenAIMessage({ ...SEND_ARGS, model: 'gpt-5', temperature: 0.7 });
+        await sendOpenAIMessage({ ...SEND_ARGS, model: 'o3-mini', temperature: 0.7 });
+        await sendOpenAIMessage({ ...SEND_ARGS, model: 'gpt-4o', temperature: 0.7 });
+
+        const bodies = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body));
+        expect(bodies[0].temperature).toBeUndefined();
+        expect(bodies[1].temperature).toBeUndefined();
+        expect(bodies[2].temperature).toBe(0.7);
     });
 
     it('throws a retryable truncation error on finish_reason "length"', async () => {
@@ -123,6 +143,17 @@ describe('streamOpenAIMessage', () => {
 
         expect(fullText).toBe('You step into the hall.');
         expect(onChunk.mock.calls.map(([chunk]) => chunk)).toEqual(['You step ', 'into the hall.']);
+    });
+
+    it('omits temperature for reasoning models on the streaming path too', async () => {
+        const chunks = [sseEvent({ choices: [{ finish_reason: 'stop', delta: { content: 'ok' } }] })];
+        const fetchMock = vi.fn().mockResolvedValue(streamResponse(chunks));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await streamOpenAIMessage({ ...SEND_ARGS, model: 'gpt-5', onChunk: vi.fn() });
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.temperature).toBeUndefined();
     });
 
     it('throws after the stream ends when finish_reason marks truncation', async () => {

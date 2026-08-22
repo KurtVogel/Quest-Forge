@@ -54,9 +54,14 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
  *   OpenAI deprecated `max_tokens` in favor of `max_completion_tokens` (post-4o
  *   models 400 on the old name), while xAI still speaks `max_tokens` — the one
  *   request-shape divergence between the two (2026-08-08 audit).
+ * @param {function} [options.temperatureUnsupported] - Predicate on the model id;
+ *   when true the `temperature` field is omitted entirely. OpenAI's reasoning
+ *   models (gpt-5 family, o-series) 400 on any non-default temperature, while
+ *   xAI's grok models accept it — the second request-shape divergence
+ *   (2026-08-22 OpenAI playtest).
  * @returns {{ send: function, stream: function }}
  */
-export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens' }) {
+export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens', temperatureUnsupported = () => false }) {
     async function httpError(response) {
         const error = await response.json().catch(() => ({}));
         // The string fallback covers xAI's occasional string-shaped error bodies
@@ -78,7 +83,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             body: JSON.stringify({
                 model,
                 messages: formatMessages(systemPrompt, messageHistory, userMessage),
-                temperature: temperature ?? 0.9,
+                ...(temperatureUnsupported(model) ? {} : { temperature: temperature ?? 0.9 }),
                 [maxTokensParam]: Number.isFinite(maxOutputTokens) ? maxOutputTokens : MAX_TOKENS,
             }),
             signal,
@@ -108,7 +113,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             body: JSON.stringify({
                 model,
                 messages: formatMessages(systemPrompt, messageHistory, userMessage),
-                temperature: temperature ?? 0.9,
+                ...(temperatureUnsupported(model) ? {} : { temperature: temperature ?? 0.9 }),
                 [maxTokensParam]: MAX_TOKENS,
                 stream: true,
             }),

@@ -6,7 +6,7 @@
  * React mounts, so a playtest session never has to paste keys into the UI.
  *
  * The DM provider can be flipped without touching keys by setting
- * localStorage['qf-dev-dm-provider'] to 'gemini' or 'xai' and reloading.
+ * localStorage['qf-dev-dm-provider'] to 'gemini', 'xai', or 'openai' and reloading.
  *
  * No-op outside `npm run dev` (import.meta.env.DEV) or when no VITE_ keys exist.
  */
@@ -17,7 +17,8 @@ export function seedDevSettings() {
     if (!import.meta.env.DEV) return;
     const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
     const xaiKey = import.meta.env.VITE_XAI_API_KEY;
-    if (!geminiKey && !xaiKey) return;
+    const openaiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    if (!geminiKey && !xaiKey && !openaiKey) return;
 
     let settings = {};
     try {
@@ -34,6 +35,10 @@ export function seedDevSettings() {
         settings.llmProvider = 'xai';
         settings.apiKey = xaiKey;
         settings.model = 'grok-4.3';
+    } else if (dm === 'openai' && openaiKey) {
+        settings.llmProvider = 'openai';
+        settings.apiKey = openaiKey;
+        settings.model = 'gpt-5';
     } else if (geminiKey) {
         settings.llmProvider = 'gemini';
         settings.apiKey = geminiKey;

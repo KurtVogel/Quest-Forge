@@ -8,6 +8,28 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-22 · Machinery model → `gemini-3.7-flash` (Vesa's order), OpenAI reasoning models get a temperature omit, and the first live OpenAI-narrator playtest returns its verdict.**
+Three outcomes from the same session. (1) **Machinery swap:** `MACHINERY_MODEL` moves
+`gemini-3.1-flash-lite` → `gemini-3.7-flash` on Vesa's direct instruction (his framing "from
+2.5 flash" was stale — Lite had been current since 2026-07-18). Id verified against the live
+models API (no 3.7-flash-lite variant exists); `thinkingBudget: 0` accepted; full suite green
+and a live session ran the Scribe/journal/audits cleanly on it. Full Flash bills above Lite, so
+machinery $/turn rises — an `eval:memory` keyed A/B for the quality upside is the open watch
+item. (2) **OpenAI request shape:** `gpt-5` 400s on any non-default temperature ("does not
+support 0.7… Only the default (1)"), which bricked every DM call — the shared factory gained a
+`temperatureUnsupported` predicate (the `maxTokensParam` pattern): openai.js omits temperature
+for `/^(gpt-5|o\d)/`, xAI/grok keeps it. Pinned send+stream in openai.test.js.
+`devSettingsSeed.js` also learned `'openai'` (VITE_OPENAI_API_KEY) — it silently forced Gemini
+before. (3) **OpenAI-as-DM verdict (PLAYTEST_REPORT_OPENAI.md):** contract-competent — quest
+open, evented items/coins with Scribe audits standing down both directions, roll proposals on
+the solo DC ladder with fiction-granted advantage, declared-attack combat entry, full exchange
+cycle, clean OOC — but it leaned on the unfenced-JSON rescue for 4+ of ~10 turns, and median
+TTFT ~30s (worst 72.9s, one turn nearly tripping the 90s stall guard) is disqualifying for
+ordinary play. Verdict: the experiment row works and stays experimental; Gemini-first
+production posture unchanged. P2/P3 follow-ups queued in the report (fence discipline via
+response_format if OpenAI ever graduates, stacked priming-failure banners, third-person camera
+drift, one-shot frontDirector lost to a provider outage at campaign start).
+
 **2026-08-22 · Production provider posture: Gemini-first with a hosted key — OpenAI experimental, Grok shelved for narration.**
 Vesa's call after the same-day architecture assessment: production Quest Forge runs ON
 Gemini with a hosted key, not bring-your-own-key. The stack has been optimized around

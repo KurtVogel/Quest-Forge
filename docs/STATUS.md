@@ -12,6 +12,23 @@ same-day: repeat-intent proximity, count-in-name items, sub-place settlement evi
 premise equip empty-slots-only, RAG seed/live text alignment. DECISIONS.md 2026-08-22.
 1,654 tests green, lint clean, deployed)._
 
+## 2026-08-22 — machinery → gemini-3.7-flash + first live OpenAI-narrator playtest (D3 done)
+
+Same-day pair on Vesa's order (DECISIONS.md 2026-08-22 ×3): **machinery model swapped** to
+`gemini-3.7-flash` (live-API-verified id; suite green; Scribe/journal/audits ran clean in live
+play; costlier than Lite — keyed eval:memory A/B is the open watch item), and the **OpenAI
+provider row finally exercised live** (gpt-5 DM + Gemini machinery, fresh wizard campaign,
+~12 turns — full report in PLAYTEST_REPORT_OPENAI.md, delete after review). **P1 found+fixed:**
+gpt-5 400s on non-default temperature, which bricked every DM call (priming retries exhausted,
+frontDirector one-shot burned → campaign kept the single fallback front); the shared factory
+now takes `temperatureUnsupported` (openai: `/^(gpt-5|o\d)/`; grok unaffected), pinned in
+tests, and devSettingsSeed learned `'openai'`. **Verdict:** gpt-5 honors the contract (quest
+open, evented loot/coins with audit stand-downs BOTH directions incl. the 500 cp reward
+cover, DC-ladder proposals with fiction-granted advantage, declared-attack combat entry, full
+exchange cycle + engine XP, clean OOC) but rode the unfenced-JSON rescue on 4+ of ~10 turns
+and ran median TTFT ~30s / worst 72.9s — **stays experimental; Gemini-first posture
+unchanged.** 1,656 tests green, lint clean. New P2/P3s queued in the report.
+
 ## Current focus (adopted 2026-08-22): post-hardening focus plan
 
 Vesa's call, same-day DECISIONS.md entry: **production runs hosted-Gemini** (OpenAI stays

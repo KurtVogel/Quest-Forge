@@ -12,11 +12,11 @@
  * to start a turn until `isMachineryReady` passes, so background tasks can
  * assume a key exists (their own key guards remain as cheap safety nets).
  */
-// Current-gen Flash-Lite (IDEAS.md "Machinery model upgrade", gated on the
-// 2026-07-18 eval:memory pass): ~5x cheaper per token than 2.5 Flash and off
-// the legacy-deprecation track. Extraction-sensitive consumers (Scribe
-// appearance/stance merges, roll audits) were the quality gate.
-export const MACHINERY_MODEL = 'gemini-3.1-flash-lite';
+// Current-gen full Flash (Vesa 2026-08-22, up from 3.1-flash-lite): id verified
+// against the live models API (no 3.7-flash-lite variant exists). Costs more per
+// token than Lite; extraction-sensitive consumers (Scribe appearance/stance
+// merges, roll audits) remain the quality gate on any future swap.
+export const MACHINERY_MODEL = 'gemini-3.7-flash';
 
 /** The Gemini key powering embeddings/RAG and background extraction, or ''. */
 export function getMachineryGeminiKey(settings) {
