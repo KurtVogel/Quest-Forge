@@ -387,6 +387,20 @@ embedded into RAG, so it fell through every durable tier once the 20-message win
 - Further idea: tune the extractor after real play if it records too many or too few
   player-authored details.
 
+### Experience scorecard: shift directed playtests from defense to offense — status: `planned` (2026-08-22 focus plan, track C)
+The hardening program has converged (queue at 0 P1s; playtest #10's finds were P2/P3 edge
+cases), so the next unit of "significantly better" comes from the magic, not the engine.
+Add an experience-quality section to the directed-playtest brief and score it with the same
+rigor as the bug hunts: callback conversion rate (DRAMATIC CALLBACK cards injected vs
+actually woven in well — the memory inspector already records injections, so the
+denominator exists), stance/bond-informed NPC dialogue (do NPCs speak from their recorded
+stance and history?), quiet-scene quality (tempo QUIET scenes should be complete scenes,
+not filler), ordinary-turn brevity (LLM-rich ≠ verbose, per the north star), consequence
+follow-through, and foe/scenery variety beyond what FOE FATIGUE already forces. Extends the
+WOW layer's open "real-provider eval for natural recall" idea from memory mechanics to felt
+play quality. Findings feed salience tuning (WOW layer's open item), the scenery/motif
+fatigue idea (2026-08-03), and the cross-faction-contradiction guard idea (2026-07-14).
+
 ## Gameplay & Mechanics
 
 ### [strengthening] Incapacitating conditions don't stop an enemy's own turn — status: `shipped` (2026-07-14, confirmed 2026-07-26)
@@ -1063,7 +1077,7 @@ synonyms: "repair" vs needle "mend"; all four landmarks named vs needle "landmar
 console errors AND zero warnings (prior runs had warnings), extraction budgets held
 (44 facts / 48 cards / 12 NPCs / 6 journal entries over 78 messages), fronts paced correctly.
 
-### Explicit thinking budget for the machinery calls — status: `idea` `[strengthening]` (2026-08-08 audit)
+### Explicit thinking budget for the machinery calls — status: `shipped` (2026-08-09)
 Grep-confirmed: the repo sets **no** `thinkingConfig` anywhere, so every Gemini call runs at the
 model's default thinking level under `maxOutputTokens: 32768` — and on thinking-capable models
 reasoning tokens count against that cap and are billed as output. The machinery model
@@ -1080,13 +1094,50 @@ current single module constant. Extraction quality is the gate exactly as it was
 swap: Scribe appearance/stance merges and roll audits are the sensitive consumers, so pair it
 with the golden fixtures + a keyed `eval:memory` pass before shipping. Non-Gemini providers are
 unaffected (the machinery is Gemini-only by design).
+**Shipped (2026-08-09):** exactly the shape above — `thinkingBudget: 0` + 8k `maxOutputTokens`
+on the machinery path via `getBackgroundConfig`, threaded through `adapter.js`/`formatMessages`
+as per-call options; DM calls untouched. (Status was stale as `idea` until 2026-08-22.)
 
-### Hosted-tier key proxy (server-side) — status: `idea`, blocks hosted monetization only
+### Verify the prompt cache actually engages: usageMetadata instrumentation — status: `planned` (2026-08-22 focus plan, track A)
+The 2026-07-18 cache entry shipped a byte-stable prefix and assumed Gemini implicit caching
+would key on it — but nothing in src reads `usageMetadata` off Gemini responses, so the
+cache-hit rate has never been observed once: the regression test locks OUR side
+byte-identical, Google's side is faith. Wire `providers/gemini.js` to surface
+`usageMetadata` (`promptTokenCount`, `candidatesTokenCount`, `cachedContentTokenCount`,
+`thoughtsTokenCount`), log it beside the existing `[LLM timing]` lines, and aggregate a
+per-session summary: tokens in/out, cache-hit %, estimated $/turn from PRODUCT.md prices,
+TTFT p50/p95. One playtest after wiring answers whether the $0.06 → $0.02/turn
+efficient-stack math is real. If implicit hits are poor, the follow-up is explicit
+context caching for the static prefix (Gemini-only, scoped). Matters double now that
+production is hosted-Gemini (DECISIONS.md 2026-08-22): these are Vesa's own unit costs.
+
+### Gemini `responseSchema` structured outputs on the JSON-only lanes — status: `planned` (2026-08-22 focus plan, track B)
+`responseSchema`/`responseMimeType` appear nowhere in src — every JSON-only call (combat
+intent, Scribe extraction, the directors, journal summaries) relies on prompt discipline
+plus the repair parser. With Gemini-first production settled (DECISIONS.md 2026-08-22)
+there is no cross-provider abstraction tax: adopt native structured outputs where no
+streaming is lost and a malformed response costs the most. Order: (1) the combat-intent
+call — JSON-only by design, bounded enums (the ideal schema case), and a bad parse there is
+a lost combat turn; (2) Scribe + directors — the machinery is Gemini-only already, so
+`directorUtils.parseDirectorJson` becomes the fallback rather than the path. The main DM
+call keeps narrate + trailing JSON: streamed prose is the feel, and the parser is
+battle-hardened on that lane. Keep the parser as belt-and-braces everywhere and as the
+primary for non-Gemini DM providers.
+
+### Hosted-tier key proxy (server-side) — status: `idea`, **launch-critical since 2026-08-22** (production = hosted Gemini)
 BYOK launch needs none of this. A hosted paid tier requires a thin server-side proxy so
 provider keys never reach the browser: per-user auth + metering, rate limits, fair-use
 enforcement, model routing (standard vs premium-model turns). This is where the unit economics
 get enforced; it is deliberately NOT part of the client architecture (no backend stays true
 for BYOK). Scope it as its own project when the public-launch gate opens (STATUS "Up next" #5).
+**2026-08-22:** Vesa settled production as hosted-Gemini rather than BYOK (DECISIONS.md), so
+this is now on the launch critical path — still scoped as its own project, still not started.
+The same gate carries three sibling decisions: stable-model pinning for the DM (the current
+id is a *preview* model; every swap gets the eval:combat + eval:memory + golden-fixtures
+gate), the hosted content-policy posture (the adult-capable default DM prompt runs on Vesa's
+key against Gemini ToS — needs an explicit call), and the production image chain (hosted xAI
+key for Grok Imagine vs shipping Gemini-image-only, which is already the labeled
+full-quality fallback).
 
 ### Inventory-panel "Give to <companion>" buttons for weapons/armor — status: `shipped` (2026-07-22, `GIVE_GEAR_TO_COMPANION` + `deriveGiftAC`; live-verified in playtest #11)
 Mirror of the potion `→ Name` buttons: an engine-owned UI path that drives the same

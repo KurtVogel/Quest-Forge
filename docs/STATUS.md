@@ -12,6 +12,27 @@ same-day: repeat-intent proximity, count-in-name items, sub-place settlement evi
 premise equip empty-slots-only, RAG seed/live text alignment. DECISIONS.md 2026-08-22.
 1,654 tests green, lint clean, deployed)._
 
+## Current focus (adopted 2026-08-22): post-hardening focus plan
+
+Vesa's call, same-day DECISIONS.md entry: **production runs hosted-Gemini** (OpenAI stays
+experimental, Grok shelved for narration, xAI kept for scene art), and with the queue at
+0 P1s the defense war is won — effort shifts to the magic and the money math. Tracks, in
+order: **(A) verify turn economics first** — wire `usageMetadata` cache/token logging into
+the Gemini provider and aggregate $/turn + cache-hit % + TTFT per session; nothing has ever
+observed whether the 2026-07-18 byte-stable prefix actually earns implicit-cache discounts,
+and on a hosted key these are our own unit costs (escalation: explicit context caching).
+**(B)** Gemini `responseSchema` structured outputs on the JSON-only lanes — combat intent
+first, then Scribe/directors; parser stays as fallback. **(C) the magic** — playtest #11
+runs an experience scorecard (callback conversion, stance-informed NPC dialogue,
+quiet-scene quality, ordinary-turn brevity; carried watch items folded in), findings feed
+salience/motif tuning, then companion relationship depth v1 (affinity consequences, downed
+arcs — the strongest `idea` in IDEAS.md). **(D)** stability tail: mobile drawer/a11y P2
+early (production players are phone-heavy), Magic Missile split, one OpenAI directed run
+when a key lands in `.env`. **(E) launch gate, scheduled not built:** key proxy (now
+launch-critical), stable-model pinning + eval-gated swaps, hosted content-policy call,
+production image chain, first-ten-minutes onboarding. Full rationale in IDEAS.md `planned`
+entries (2026-08-22).
+
 ## 2026-08-22 — directed playtest #10 (Brakka Ironmouth / Marrowdal) + same-day fix batch
 
 Agent-driven live run on the dev server immediately after deploying 89a065c (report in repo

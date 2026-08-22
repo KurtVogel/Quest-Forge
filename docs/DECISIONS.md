@@ -8,6 +8,24 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-22 · Production provider posture: Gemini-first with a hosted key — OpenAI experimental, Grok shelved for narration.**
+Vesa's call after the same-day architecture assessment: production Quest Forge runs ON
+Gemini with a hosted key, not bring-your-own-key. The stack has been optimized around
+Gemini for months — the machinery layer is Gemini-only by design, the DM defaults to Gemini
+Pro, and the prompt-cache prefix and both eval baselines are Gemini-tuned — so the provider
+choice recognizes reality rather than changing it. OpenAI stays on the menu as an
+experiment (one directed playtest when a key lands in `.env`; the row has never been
+exercised live). Grok/xAI is shelved as a DM narration provider after weak live behavior
+(kept as the scene-art primary — different key, different job); the multi-provider DM
+surface stays in the code as cheap optionality but gets no further polish. Consequences,
+tracked in the 2026-08-22 focus plan (STATUS.md Current focus + IDEAS.md `planned`
+entries): the hosted-tier key proxy moves from "blocks monetization only" to
+launch-critical; Gemini-native `responseSchema` structured outputs become adoptable on the
+JSON-only lanes with no cross-provider abstraction tax; turn economics (cache hit rate,
+$/session) become Vesa's own unit costs and need observed numbers, not assumptions; and the
+hosted content-policy posture (the adult-capable default DM prompt running on Vesa's key,
+against Gemini ToS) needs an explicit decision before launch.
+
 **2026-08-22 · Playtest #10 fix batch: repeat-intent needs PROXIMITY (co-occurrence double-granted a reward), counts come out of item names, sub-places prove settlements, premise equip fills empty slots only, and live RAG embeds must match the seed's text byte-for-byte.**
 Six rulings from directed playtest #10 (PLAYTEST_REPORT.md), run live against the freshly
 deployed #9 batch — whose fixes all held under fire (the exact killer sentence "counts out
