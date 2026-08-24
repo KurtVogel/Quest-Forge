@@ -1217,6 +1217,22 @@ turns dead state into pacing texture, and would make repeated symptoms visibly i
 Why: cheapest available upgrade to how *varied* the hidden world feels, and it retires a
 persisted field that currently earns nothing. Alternative if rejected: shrink the cap.
 
+### [strengthening] Split `scribe.js` into its four actual roles — status: `idea` (2026-08-24)
+`llm/scribe.js` is 1,252 lines / 85 KB — the largest non-component file in the repo — and holds
+four unrelated LLM roles behind one filename: the per-turn extraction pass (`runScribe`), the
+five-way event audit family (`narrated_loot`/`_payment`/`_losses`/`_casts` + gear handoffs, ~340
+lines), the journal-cadence reflection (`runNpcFrontReflection`, which drives fronts, tempo, and
+emergent-front proposals), and the on-demand art director (`composeScenePrompt`). They share no
+state and no consumer: SceneArt imports only the art director, `worldJournal.js` only the
+reflection, `turnOrchestrator.js` only extraction + the `buildKnown*` context builders. Why it
+matters beyond tidiness: the audit family is the highest-churn code in the repo (five live
+playtest fixes since 2026-07-31, each adding a near-duplicate reconciler), and every new one is
+authored inside a file where the reviewer's context is already spent on three unrelated prompts.
+A split into `llm/scribe/{extraction,audit,reflection,sceneDirector}.js` (re-exporting from
+`scribe.js` so no import site changes) gives the audit family its own test file and its own
+diff surface, and makes the shared-preamble extraction in the same queue entry obvious rather
+than optional. From the 2026-08-24 strengthening audit (scribe, Lap 4).
+
 ### Low-level death-save lethality with a companion present — status: `observation` (playtest #11, 2026-07-22)
 The low-level solo 0-HP mercy (non-lethal setback) correctly does NOT apply when a
 battle-ready companion is present (`isCompanionActive`, DECISIONS.md 2026-07-17) — so a
