@@ -106,6 +106,81 @@ describe('companion state', () => {
     });
 });
 
+describe('REMOVE_COMPANION reference resolution (2026-08-25 player report)', () => {
+    const party = () => ([
+        { id: 'companion-1-aaa', name: 'Garrick Stonehand', level: 2, hp: 18, maxHp: 18, ac: 14 },
+        { id: 'companion-2-bbb', name: 'Kaarina', level: 1, hp: 9, maxHp: 9, ac: 12 },
+    ]);
+
+    it('removes by the id the DM sees in the party block', () => {
+        const next = gameReducer(makeState({ party: party() }), {
+            type: 'REMOVE_COMPANION',
+            payload: { name: '', id: 'companion-1-aaa' },
+        });
+
+        expect(next.party.map(c => c.name)).toEqual(['Kaarina']);
+        expect(next.messages.at(-1).content).toContain('Garrick Stonehand is no longer travelling');
+    });
+
+    it('removes when a bare string entry carried the id instead of a name', () => {
+        const next = gameReducer(makeState({ party: party() }), {
+            type: 'REMOVE_COMPANION',
+            payload: { name: 'companion-2-bbb', id: '' },
+        });
+
+        expect(next.party.map(c => c.name)).toEqual(['Garrick Stonehand']);
+    });
+
+    it('removes on casing and whitespace drift in the name', () => {
+        const next = gameReducer(makeState({ party: party() }), {
+            type: 'REMOVE_COMPANION',
+            payload: { name: '  kaarina ' },
+        });
+
+        expect(next.party.map(c => c.name)).toEqual(['Garrick Stonehand']);
+    });
+
+    it('removes on the short name the DM uses in prose', () => {
+        const next = gameReducer(makeState({ party: party() }), {
+            type: 'REMOVE_COMPANION',
+            payload: { name: 'Garrick' },
+        });
+
+        expect(next.party.map(c => c.name)).toEqual(['Kaarina']);
+    });
+
+    it('removes nobody when a fuzzy name is ambiguous', () => {
+        const state = makeState({
+            party: [
+                { id: 'c1', name: 'Garrick Stonehand', level: 1, hp: 9, maxHp: 9, ac: 12 },
+                { id: 'c2', name: 'Garrick Vale', level: 1, hp: 9, maxHp: 9, ac: 12 },
+            ],
+        });
+        const next = gameReducer(state, { type: 'REMOVE_COMPANION', payload: { name: 'Garrick' } });
+
+        expect(next.party).toHaveLength(2);
+        expect(next.messages).toHaveLength(0);
+    });
+
+    it('is a silent no-op when nothing matches', () => {
+        const state = makeState({ party: party() });
+        const next = gameReducer(state, { type: 'REMOVE_COMPANION', payload: { name: 'Someone Else' } });
+
+        expect(next).toBe(state);
+    });
+
+    it('keeps the departed companion roster record so the bond survives', () => {
+        const state = makeState({
+            party: party(),
+            npcs: [{ id: 'npc-1', name: 'Kaarina', stanceToPlayer: 'Loyal to the hero.', bondMoments: [] }],
+        });
+        const next = gameReducer(state, { type: 'REMOVE_COMPANION', payload: { id: 'companion-2-bbb' } });
+
+        expect(next.party.map(c => c.name)).toEqual(['Garrick Stonehand']);
+        expect(next.npcs.find(n => n.name === 'Kaarina')?.stanceToPlayer).toBe('Loyal to the hero.');
+    });
+});
+
 describe('companion gear', () => {
     const gearedState = (companion = {}) => makeState({
         party: [{

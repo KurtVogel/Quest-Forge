@@ -66,7 +66,10 @@ describe('event-channel registry agreement', () => {
         expect(events.frontUpdates).toEqual([{ id: 'front-1' }]);
         expect(events.addCompanions).toEqual([{ name: 'Terho' }]);
         expect(events.updateCompanions).toEqual([{ id: 'companion-1' }]);
-        expect(events.removeCompanions).toEqual(['Terho', 'Kaarina']);
+        expect(events.removeCompanions).toEqual([
+            { name: 'Terho', id: '' },
+            { name: 'Kaarina', id: '' },
+        ]);
         expect(events.enemyUpdates).toEqual([{ id: 'enemy-1' }]);
         expect(events.conditionsGained).toEqual(['poisoned']);
         expect(events.conditionsRemoved).toEqual(['prone']);
@@ -77,6 +80,22 @@ describe('event-channel registry agreement', () => {
         ]);
         expect(events.questUpdates).toEqual([{ name: 'Find the ferry', status: 'new' }]);
         expect(events.memoryUpdates).toEqual([{ id: 'mem-1', used: true }]);
+    });
+
+    it('keeps an id-only companion removal instead of dropping it', () => {
+        const events = normalizeEvents({
+            remove_companions: [
+                { id: 'companion-1-aaa' },
+                { companion_id: 'companion-2-bbb' },
+                { name: 'Terho', id: 'companion-3-ccc' },
+                { role: 'guard' },
+            ],
+        });
+        expect(events.removeCompanions).toEqual([
+            { name: '', id: 'companion-1-aaa' },
+            { name: '', id: 'companion-2-bbb' },
+            { name: 'Terho', id: 'companion-3-ccc' },
+        ]);
     });
 
     it('defaults a missing outside-combat DC to 10, never the repudiated 15', () => {

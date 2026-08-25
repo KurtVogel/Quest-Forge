@@ -321,10 +321,19 @@ export const EVENT_CHANNELS = [
     { wire: 'update_companions', key: 'updateCompanions', read: raw => guardedList(raw.update_companions, { cap: 6 }) },
     {
         wire: 'remove_companions', key: 'removeCompanions',
-        // Entries are companion names; an object entry contributes its `name`.
+        // Entries reference a companion by name OR by the id the party block
+        // shows the DM. An id-only object used to normalize to an empty name and
+        // get dropped here, so the departure never reached the reducer at all
+        // (2026-08-25). A bare string stays ambiguous on purpose — the reducer
+        // resolves it against ids first, then names.
         read: raw => guardedList(raw.remove_companions, { allowStrings: true, cap: 6, map: entry => {
-            const name = typeof entry === 'string' ? entry.trim() : String(entry.name || '').trim();
-            return name || null;
+            if (typeof entry === 'string') {
+                const value = entry.trim();
+                return value ? { name: value, id: '' } : null;
+            }
+            const name = String(entry.name || '').trim();
+            const id = String(entry.id || entry.companion_id || '').trim();
+            return name || id ? { name, id } : null;
         } }),
     },
     {

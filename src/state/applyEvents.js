@@ -379,8 +379,8 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     for (const comp of events.updateCompanions) {
         dispatch({ type: 'UPDATE_COMPANION', payload: comp });
     }
-    for (const compName of events.removeCompanions) {
-        dispatch({ type: 'REMOVE_COMPANION', payload: { name: compName } });
+    for (const compRef of events.removeCompanions) {
+        dispatch({ type: 'REMOVE_COMPANION', payload: compRef });
     }
 
     if (events.worldFacts.length > 0) {

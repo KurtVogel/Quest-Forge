@@ -433,7 +433,9 @@ When game events occur, include a structured JSON block at the END of your respo
   "update_companions": [
     { "id": "companion-id", "name": "<existing companion name>", "hp": 10, "affinity": 75, "weapon": "Longsword +1", "ac": 16, "keepsake": "<sentimental gift they now carry>" }
   ],
-  "remove_companions": [],
+  "remove_companions": [
+    { "id": "companion-id", "name": "<existing companion name>" }
+  ],
   "player_death": null
 }
 \`\`\`
@@ -750,6 +752,7 @@ ${party.map(c => {
         return bond.length > 0 ? `${line}\n${bond.join('\n')}` : line;
     }).join('\n')}
 A DOWNED companion is unconscious but ALIVE and recoverable through healing or rest — never narrate their death as a side remark. If the fiction genuinely, deliberately kills a companion, you MUST emit \`remove_companions\` for them in that same response; while they remain on this list, they are alive.
+**Leaving the party is the same channel.** Whenever a companion stops travelling with the hero for ANY reason — the player dismisses them, they part ways, storm off, stay behind, are sent on an errand they won't return from, betray the party, or die — you MUST emit \`remove_companions\` in that SAME response, with their \`id\` from the line above (their name alone also works). Narrating a departure without the event leaves them standing in the player's party panel, still fighting in combat. Never claim you have removed someone without emitting it; the engine, not the prose, owns the roster.
 Companions are people, not gear: play an established "Toward the hero" stance and personal history consistently in every scene. When an exchange genuinely shifts how a companion regards the hero, record it exactly as for any NPC — \`npc_updates\` with \`stanceToPlayer\` (the complete revised stance, restating still-true parts in their existing wording — same rule as any NPC) and \`bondMoment\` (the moment itself); \`update_companions\` carries only mechanics, affinity, and keepsakes.
 When the player's own action brings a downed companion back (a potion, healing magic, dragging them to safety), that is a natural moment to warm the companion's affinity via \`update_companions\` and their personal stance via \`npc_updates\`; repeatedly leaving them downed and unaided naturally cools it.`;
 }

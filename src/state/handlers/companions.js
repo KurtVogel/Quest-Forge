@@ -3,6 +3,7 @@
  * announcements, and the engine-owned gear handoff.
  */
 import { deriveGiftAC } from '../../engine/companionGear.js';
+import { namesMatch } from '../../engine/npcRoster.js';
 import { gameReducer } from '../gameReducer.js';
 import { ensureCompanionRosterRecord, normalizeCompanion, systemMessage, withInventoryAndAC } from './shared.js';
 
@@ -58,9 +59,44 @@ export const handlers = {
     },
 
     REMOVE_COMPANION(state, action) {
+        // The DM references a departing companion however the party block showed
+        // them: by id, by their exact roster name, or by the short name it uses
+        // in prose. The old strict `name !== payload.name && id !== payload.id`
+        // filter matched none of those when only an id was given (payload.id was
+        // undefined, so every live companion survived the filter) and broke on
+        // any casing or name-form drift — the fiction wrote a companion out of
+        // the party while the panel kept showing them (2026-08-25 player report).
+        const party = state.party || [];
+        const rawId = String(action.payload?.id || '').trim();
+        const rawName = String(action.payload?.name || '').trim();
+        if (party.length === 0 || (!rawId && !rawName)) return state;
+
+        // A bare string entry is ambiguous (name or id), so both candidates are
+        // checked against ids before any name matching runs.
+        let target = party.find(c => c.id && (c.id === rawId || c.id === rawName));
+        if (!target && rawName) {
+            target = party.find(c => String(c.name || '').trim().toLowerCase() === rawName.toLowerCase());
+        }
+        if (!target && rawName) {
+            // Fuzzy only when it names exactly ONE companion — "Garrick" for
+            // "Garrick Stonehand" is unambiguous; an ambiguous hit removes nobody
+            // rather than guessing which ally the fiction sent away.
+            const matches = party.filter(c => namesMatch(c.name, rawName));
+            if (matches.length === 1) [target] = matches;
+        }
+        if (!target) {
+            console.warn(`[REMOVE_COMPANION] No party member matches "${rawName || rawId}" — nobody left the party.`);
+            return state;
+        }
+
         return {
             ...state,
-            party: (state.party || []).filter(c => c.name !== action.payload.name && c.id !== action.payload.id),
+            party: party.filter(c => c !== target),
+            // Silent party changes are a bug (D6): the roster shrinking is a
+            // mechanical fact the player must see, even when the narration was
+            // vague about who actually left. The companion's roster NPC record
+            // (bond, stance, shared history) deliberately stays behind.
+            messages: [...state.messages, systemMessage(`👤 ${target.name} is no longer travelling with the party.`)],
         };
     },
 

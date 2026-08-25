@@ -8,6 +8,30 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-25 · Companion removal resolves the DM's reference (id → exact name → unique short name) and announces itself; `remove_companions` covers every departure, not just death.**
+Player report: the DM said it was removing a companion "by companion ID" and the party panel kept
+showing them. Three compounding faults, all on the removal path. (1) `REMOVE_COMPANION` filtered
+with `c.name !== payload.name && c.id !== payload.id`, and applyEvents only ever built
+`{ name }` — so an id reference left `payload.id` undefined, every companion survived the filter,
+and nothing was removed; even a name reference had to match byte-for-byte, so casing or the short
+name the DM uses in prose ("Garrick" for "Garrick Stonehand") silently failed. (2) The
+`remove_companions` channel reader mapped entries to a bare name, so an id-only object
+(`{"id": "companion-…"}`) normalized to an empty name and was DROPPED before reaching the reducer
+— the departure never existed. (3) The prompt only ever mentioned the channel for companion
+*death*, while the party block hands the DM each companion's `id`: dismissal, parting ways, and
+staying behind had no documented event at all. Fix: the channel keeps both `name` and `id` (also
+accepting `companion_id`), the reducer resolves by exact id (against either field, since a bare
+string is ambiguous) → case-insensitive exact name → `namesMatch` containment when it hits exactly
+ONE companion (ambiguity removes nobody rather than guessing which ally the fiction sent away),
+and the roster shrinking now posts a 👤 system line — silent party mutation is a bug (D6), and the
+player's complaint was precisely about not seeing it happen. The departed companion's roster NPC
+record (stance, bond moments) deliberately stays behind: "one system owns all bonds" (2026-07-23)
+means leaving the party is not forgetting the person. Prompt now states that ANY reason a companion
+stops travelling with the hero requires the event in that same response, and that claiming a
+removal in prose without emitting it leaves them in the panel and in combat.
+
+---
+
 **2026-08-22 · Controlled narrator comparison: gemini-3.1-pro-preview vs gpt-5.6-terra — both contract-clean; Gemini the dramatist, Terra the fast plotter; Gemini-first posture holds with Terra as a near-peer alternate.**
 New reusable harness `scripts/playtest_provider_compare.cjs`: two fully scripted 13-action runs
 (identical premise/hero/player messages/machinery, isolated profiles, production preview build)

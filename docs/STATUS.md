@@ -6,11 +6,24 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-22 (directed playtest #10 ran live against the freshly deployed #9
+_Last updated: 2026-08-25 (companion-removal bug fixed from a live player report — see below. Previously: directed playtest #10 ran live against the freshly deployed #9
 batch — every #9 fix held under fire, 1 new P1 + several P2/P3s found and ALL fixed
 same-day: repeat-intent proximity, count-in-name items, sub-place settlement evidence,
 premise equip empty-slots-only, RAG seed/live text alignment. DECISIONS.md 2026-08-22.
 1,654 tests green, lint clean, deployed)._
+
+## 2026-08-25 — player-reported bug: companions never left the party
+
+Live report (Vesa): the DM announced it was removing a companion "with the companion ID" and the
+Companions panel kept listing them. Three faults on one path, all fixed (DECISIONS.md 2026-08-25):
+the `remove_companions` channel DROPPED id-only entries before the reducer ever saw them; the
+`REMOVE_COMPANION` filter could not match an id at all (applyEvents only built `{ name }`, so
+`payload.id` was undefined and every companion survived the filter) and required byte-exact name
+equality otherwise; and the prompt documented the channel only for companion *death*, never for
+dismissal or parting ways. Now: the channel carries `name` + `id` (`companion_id` too), the reducer
+resolves exact id → case-insensitive name → unique `namesMatch` short name (ambiguous = remove
+nobody), removal posts a 👤 system line, and the departed companion's roster NPC record (stance,
+bond moments) stays behind by design. 1,665 tests green (+9), lint clean. **Not yet deployed.**
 
 ## 2026-08-22 — controlled narrator comparison: Gemini Pro vs GPT-5.6 Terra
 

@@ -907,7 +907,18 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_ENEMY', payload: { id: 'e1', hp: 3 } });
         expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_COMPANION', payload: { name: 'Garrick' } });
         expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_COMPANION', payload: { name: 'Garrick', hp: 8 } });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_COMPANION', payload: { name: 'Garrick' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_COMPANION', payload: { name: 'Garrick', id: '' } });
+    });
+
+    it('carries an id-only companion removal through to the reducer', () => {
+        // The DM is shown each companion's id in the party block and routinely
+        // references it instead of the name; dropping those entries left the
+        // departed companion in the party panel (2026-08-25).
+        const dispatch = run({ remove_companions: [{ id: 'companion-17-abc' }] });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'REMOVE_COMPANION',
+            payload: { name: '', id: 'companion-17-abc' },
+        });
     });
 
     it('dispatches END_COMBAT with whether the DM already awarded XP', () => {
