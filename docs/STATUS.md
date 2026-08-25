@@ -26,7 +26,7 @@ untouched) — plus a **12-message spend window** (was 4, i.e. ~2 turns), a **di
 system line on every coin movement** (`−20 gp paid — purse: …`), the DM event path having been
 the only coin channel that moved money silently. Governing rule adopted: the engine may refuse
 to take money on suspicion, never to give it — hence the gain window stays at 4. 1,683 tests
-green (+18, 8 of them written as failing repros first), lint clean. **Not yet deployed.**
+green (+18, 8 of them written as failing repros first), lint clean, deployed.
 
 ## 2026-08-25 — player-reported bug: companions never left the party
 
