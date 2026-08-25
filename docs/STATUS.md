@@ -23,7 +23,7 @@ equality otherwise; and the prompt documented the channel only for companion *de
 dismissal or parting ways. Now: the channel carries `name` + `id` (`companion_id` too), the reducer
 resolves exact id → case-insensitive name → unique `namesMatch` short name (ambiguous = remove
 nobody), removal posts a 👤 system line, and the departed companion's roster NPC record (stance,
-bond moments) stays behind by design. 1,665 tests green (+9), lint clean. **Not yet deployed.**
+bond moments) stays behind by design. 1,665 tests green (+9), lint clean, deployed to quest-forge-99ab1.
 
 ## 2026-08-22 — controlled narrator comparison: Gemini Pro vs GPT-5.6 Terra
 
