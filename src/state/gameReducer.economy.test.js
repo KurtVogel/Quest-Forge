@@ -709,7 +709,9 @@ describe('APPLY_COIN_LOSS', () => {
             type: 'APPLY_COIN_LOSS',
             payload: { silver: 2, _meta: { sourceId: 'msg-pay-1' } },
         });
-        const later = addMessages(paid, 6);
+        // The spend-side window widened to 12 conversational messages on
+        // 2026-08-25 (a payment recapped 3 turns later was still being charged).
+        const later = addMessages(paid, 14);
         const second = gameReducer(later, {
             type: 'APPLY_COIN_LOSS',
             payload: { silver: 2, _meta: { sourceId: 'msg-pay-2' } },
@@ -927,7 +929,7 @@ describe('direction covers (2026-08-20 playtest: reward misread as payment nette
             type: 'ADD_COIN_GRANT',
             payload: { silver: 20, _meta: { sourceId: 'msg-reward' } },
         });
-        const later = addMessages(rewarded, 6);
+        const later = addMessages(rewarded, 14); // past the widened spend window
         const audited = gameReducer(later, {
             type: 'AUDIT_COIN_PAYMENT',
             payload: { silver: 20, _meta: { sourceId: 'msg-late:scribe-loot:payment', audit: true } },
@@ -993,7 +995,7 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
         });
         expect(bundled.character.gold).toBe(4); // one gold total, not two
         expect(bundled.character.copper).toBe(7);
-        expect(bundled.messages.at(-1).content).toMatch(/Adjusted a bundled coin charge/);
+        expect(bundled.messages.some(m => /Adjusted a bundled coin charge/.test(m.content))).toBe(true);
     });
 
     it('keeps the full charge when the player names the repeated denomination', () => {
@@ -1017,7 +1019,7 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
             type: 'APPLY_COIN_LOSS',
             payload: { gold: 1, _meta: { sourceId: 'msg-1' } },
         });
-        const later = addMessages(paid, 6);
+        const later = addMessages(paid, 14); // past the widened spend window (2026-08-25)
         const second = gameReducer(later, {
             type: 'APPLY_COIN_LOSS',
             payload: { gold: 1, copper: 3, _meta: { sourceId: 'msg-2', playerMessage: 'I drop the coins in the box.' } },
@@ -1039,7 +1041,7 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
         });
         expect(bundled.character.gold).toBe(state.character.gold + 10); // reward once
         expect(bundled.character.silver).toBe(5);
-        expect(bundled.messages.at(-1).content).toMatch(/Adjusted a bundled coin grant/);
+        expect(bundled.messages.some(m => /Adjusted a bundled coin grant/.test(m.content))).toBe(true);
     });
 
     it('suppresses a recap bundle assembled ENTIRELY from split prior grants (live playtest #7: 2 gp leak)', () => {
@@ -1058,7 +1060,7 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
             type: 'ADD_COIN_GRANT',
             payload: { gold: 25, silver: 50, _meta: { sourceId: 'msg-purse-turn' } },
         });
-        expect(second.messages.at(-1).content).toMatch(/granted 28 gp/);
+        expect(second.messages.some(m => /granted 28 gp/.test(m.content))).toBe(true);
         const goldAfterBoth = second.character.gold;
         const silverAfterBoth = second.character.silver;
         const recap = gameReducer(addMessages(second, 1), {
@@ -1090,7 +1092,7 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
         expect(recap.character.gold).toBe(9);   // charged once, not twice
         expect(recap.character.silver).toBe(8); // charged once, not twice
         expect(recap.character.copper).toBe(5); // only the genuinely new part
-        expect(recap.messages.at(-1).content).toMatch(/Adjusted a bundled coin charge/);
+        expect(recap.messages.some(m => /Adjusted a bundled coin charge/.test(m.content))).toBe(true);
     });
 });
 
@@ -1259,5 +1261,194 @@ describe('playtest #8: audit value drift — a re-narrated reward/payment must n
         });
         expect(audited.character.silver).toBe(10 - 2 - 1 - 5);
         expect(audited.messages.at(-1).content).toMatch(/Payment settled from narration/);
+    });
+});
+
+describe('2026-08-25 player report: "money removed multiple turns after I paid, silently"', () => {
+    function addMessage(state, message) {
+        return gameReducer(state, { type: 'ADD_MESSAGE', payload: message });
+    }
+    /** Advance the conversation by `turns` ordinary player/DM message pairs. */
+    function playTurns(state, turns) {
+        let next = state;
+        for (let i = 0; i < turns; i++) {
+            next = addMessage(next, { id: `u${i}`, role: 'user', content: `Scene beat ${i}.` });
+            next = addMessage(next, { id: `a${i}`, role: 'assistant', content: `The story moves on ${i}.` });
+        }
+        return next;
+    }
+    const purseCp = state => state.character.gold * 100 + state.character.silver * 10 + (state.character.copper || 0);
+    const richState = () => makeState({ character: { gold: 200, silver: 0, copper: 0 } });
+
+    it('a loose coin loss recapping a PURCHASE already paid does not charge again', () => {
+        // The hole: the purchase deducted 75 gp and recorded it in recentPurchases,
+        // while APPLY_COIN_LOSS only ever consulted recentCoinLosses.
+        const bought = gameReducer(richState(), {
+            type: 'PURCHASE_ITEM',
+            payload: { name: 'Chain Mail', priceCp: 7500, _meta: { sourceId: 'msg-buy', playerMessage: 'I buy the chain mail.' } },
+        });
+        const afterPurchase = purseCp(bought);
+
+        const recap = gameReducer(playTurns(bought, 1), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 75, _meta: { sourceId: 'msg-recap', playerMessage: 'I strap the armor on and head out.' } },
+        });
+
+        expect(purseCp(recap)).toBe(afterPurchase);
+        expect(recap.messages.at(-1).content).toMatch(/already paid/i);
+    });
+
+    it('an audited payment recapping a PURCHASE already paid does not charge again', () => {
+        const bought = gameReducer(richState(), {
+            type: 'PURCHASE_ITEM',
+            payload: { name: 'Chain Mail', priceCp: 7500, _meta: { sourceId: 'msg-buy' } },
+        });
+        const afterPurchase = purseCp(bought);
+
+        const audited = gameReducer(playTurns(bought, 1), {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { gold: 75, _meta: { sourceId: 'msg-recap:scribe-loot:payment', audit: true } },
+        });
+
+        expect(purseCp(audited)).toBe(afterPurchase);
+    });
+
+    it('a loose coin gain recapping a SALE already paid out does not credit again', () => {
+        const sold = gameReducer(makeState({
+            character: { gold: 5 },
+            inventory: [{ id: 'i1', name: 'Longsword', itemKey: 'longsword', quantity: 1, valueCp: 1500 }],
+        }), { type: 'SELL_ITEM', payload: { itemKey: 'longsword', _meta: { sourceId: 'msg-sell' } } });
+        const afterSale = purseCp(sold);
+
+        const recap = gameReducer(playTurns(sold, 1), {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 7, silver: 5, _meta: { sourceId: 'msg-recap', playerMessage: 'I pocket the coin and leave.' } },
+        });
+
+        expect(purseCp(recap)).toBe(afterSale);
+    });
+
+    it('a payment re-emitted three turns later is still suppressed', () => {
+        // The old 4-message window covered ~2 turns; the DM recapping a payment
+        // later escaped it entirely and the money vanished with no system line.
+        const paid = gameReducer(richState(), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 20, _meta: { sourceId: 'msg-pay', playerMessage: 'I pay the smith twenty gold.' } },
+        });
+        const afterPayment = purseCp(paid);
+
+        const replay = gameReducer(playTurns(paid, 3), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 20, _meta: { sourceId: 'msg-later', playerMessage: 'We ride north through the pass.' } },
+        });
+
+        expect(purseCp(replay)).toBe(afterPayment);
+    });
+
+    it('a player DISPUTING an earlier payment never authorizes a repeat charge', () => {
+        // "I already paid" contains a payment verb, so the repeat-phrasing bypass
+        // fired on precisely the turns the player was objecting to.
+        const paid = gameReducer(richState(), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 20, _meta: { sourceId: 'msg-pay', playerMessage: 'I pay the smith twenty gold.' } },
+        });
+        const afterPayment = purseCp(paid);
+
+        const disputed = gameReducer(addMessage(paid, { id: 'm1', role: 'assistant', content: 'The smith nods.' }), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 20, _meta: { sourceId: 'msg-again', playerMessage: 'Wait — I already paid you for that!' } },
+        });
+
+        expect(purseCp(disputed)).toBe(afterPayment);
+    });
+
+    it.each([
+        ['I pay him two silver.', true],
+        ['I hand over twenty gold for the room.', true],
+        ['I buy another round — two more gold.', true],
+        ['I pay the toll again.', true],
+        ['Wait — I already paid you for that!', false],
+        ["Didn't I pay for this already?", false],
+        ['You already took my gold.', false],
+        ['I paid earlier, at the gate.', false],
+        ['We ride north through the pass.', false],
+    ])('repeat-charge phrasing %j authorizes a second identical charge: %s', (playerMessage, authorizes) => {
+        const paid = gameReducer(richState(), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 20, _meta: { sourceId: 'msg-pay', playerMessage: 'I settle up with the smith.' } },
+        });
+        const afterPayment = purseCp(paid);
+
+        const second = gameReducer(addMessage(paid, { id: 'm1', role: 'assistant', content: 'The smith nods.' }), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 20, _meta: { sourceId: 'msg-second', playerMessage } },
+        });
+
+        expect(purseCp(second)).toBe(authorizes ? afterPayment - 2000 : afterPayment);
+    });
+
+    it('announces every applied coin loss and gain with the resulting purse', () => {
+        const paid = gameReducer(richState(), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 20, _meta: { sourceId: 'msg-pay', playerMessage: 'I pay the smith twenty gold.' } },
+        });
+        expect(paid.messages.at(-1).content).toMatch(/20 gp/);
+
+        const found = gameReducer(richState(), {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 8, _meta: { sourceId: 'msg-loot' } },
+        });
+        expect(found.messages.at(-1).content).toMatch(/8 gp/);
+    });
+
+    it('delivers the item without charging twice when a loose coin loss already paid for it', () => {
+        // The mirror sequence: the DM narrates the handover as loose coin on one
+        // turn and emits the atomic purchase a turn later. Suppressing the whole
+        // purchase would swallow the item, so the goods arrive and the purse
+        // stays put.
+        const paid = gameReducer(richState(), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 75, _meta: { sourceId: 'msg-pay', playerMessage: 'I pay for the chain mail.' } },
+        });
+        const afterPayment = purseCp(paid);
+
+        const delivered = gameReducer(playTurns(paid, 1), {
+            type: 'PURCHASE_ITEM',
+            payload: { name: 'Chain Mail', priceCp: 7500, _meta: { sourceId: 'msg-buy', playerMessage: 'I strap it on.' } },
+        });
+
+        expect(purseCp(delivered)).toBe(afterPayment);
+        expect(delivered.inventory.some(i => i.name === 'Chain Mail')).toBe(true);
+        expect(delivered.messages.at(-1).content).toMatch(/already paid/i);
+    });
+
+    it('still charges a genuinely new, differently-priced payment right after a purchase', () => {
+        const bought = gameReducer(richState(), {
+            type: 'PURCHASE_ITEM',
+            payload: { name: 'Chain Mail', priceCp: 7500, _meta: { sourceId: 'msg-buy' } },
+        });
+        const afterPurchase = purseCp(bought);
+
+        const tipped = gameReducer(playTurns(bought, 1), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 5, _meta: { sourceId: 'msg-tip', playerMessage: 'I tip the smith five silver for the rush job.' } },
+        });
+
+        expect(purseCp(tipped)).toBe(afterPurchase - 50);
+    });
+
+    it('still charges an explicit repeat the player asks for', () => {
+        const paid = gameReducer(richState(), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 2, _meta: { sourceId: 'msg-round-1', playerMessage: 'I buy a round for the table — two gold.' } },
+        });
+        const afterFirst = purseCp(paid);
+
+        const second = gameReducer(addMessage(paid, { id: 'm1', role: 'assistant', content: 'Cheers go up.' }), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 2, _meta: { sourceId: 'msg-round-2', playerMessage: 'Another two gold for a second round!' } },
+        });
+
+        expect(purseCp(second)).toBe(afterFirst - 200);
     });
 });

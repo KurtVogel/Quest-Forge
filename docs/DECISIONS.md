@@ -8,6 +8,37 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-25 · One purse, one guarded surface: the coin ledgers now cross-check each other, the spend window is 12 messages wide, a player's dispute never unlocks a repeat charge, and every coin movement is announced.**
+Player report: "money is still being removed multiple turns after I've paid for something, and
+this happens silently." Four prior fix rounds (2026-07-21, 07-22, 07-31, 08-20) had each
+hardened ONE channel's ledger, which is exactly why the bug kept coming back — the purse has
+FOUR ledgers (`recentCoinLosses`, `recentPurchases`, `recentCoinGrants`, `recentSales`) and every
+guard only ever consulted its own. The commonest real sequence was therefore unguarded end to
+end: the hero BUYS something (price deducted, recorded in `recentPurchases`), and a turn or two
+later the DM re-narrates the handover as loose `gold_lost` — a channel whose ledger has never
+heard of that purchase — so the money went again, with no system line, because the DM event path
+was the ONE coin channel that moved money silently (purchases, sales and audited payments all
+announced). Root causes, all four fixed together: (1) **no cross-channel view** — added
+`spendLedgerView` (coin losses ∪ purchases) behind the bundle strip and `findCrossChannelCover`
+for exact-value covers on both sides, plus the mirror case in `PURCHASE_ITEM`, where a purchase
+already paid as loose coin now DELIVERS THE ITEM without charging again (suppressing the whole
+event would swallow the goods); (2) **the window was ~2 turns** — the spend side widened from 4
+to 12 conversational messages; (3) **the repeat-phrasing bypass fired on disputes** — "I already
+paid you for that!" contains a payment verb, so the bypass unlocked precisely the second charge
+the player was objecting to; `PAYMENT_RECAP_RE` now blocks recap/dispute phrasings while explicit
+repeat intent ("another two gold", "pay the toll again") is still honored first; (4) **silence** —
+every applied coin loss/grant posts `**−N** paid / **+N** received — purse: …`, so any future
+leak is legible and disputable instead of infuriating. Governing rule adopted for the asymmetry
+between the 12-message spend window and the unchanged 4-message gain window: **the engine may
+refuse to take money on suspicion, but never refuses to give it on suspicion** — an
+over-suppressed charge is visible and player-favorable, an over-suppressed reward silently robs
+them. That is also why the gain side gets only the exact-value sale cover and no bundle-strip
+union. Coin system lines are excluded from the DM's message window (`buildMessageWindow` passes
+only roll lines), so this adds no prompt context and no re-narration risk; the ECONOMY prompt now
+also states a purchase is fully paid when emitted and must never be re-billed as loose coin later.
+
+---
+
 **2026-08-25 · Companion removal resolves the DM's reference (id → exact name → unique short name) and announces itself; `remove_companions` covers every departure, not just death.**
 Player report: the DM said it was removing a companion "by companion ID" and the party panel kept
 showing them. Three compounding faults, all on the removal path. (1) `REMOVE_COMPANION` filtered

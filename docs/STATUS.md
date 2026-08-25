@@ -6,11 +6,27 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-25 (companion-removal bug fixed from a live player report — see below. Previously: directed playtest #10 ran live against the freshly deployed #9
+_Last updated: 2026-08-25 (two live player-report bugs fixed: the recurring silent coin double-charge and companion removal — see below. Previously: directed playtest #10 ran live against the freshly deployed #9
 batch — every #9 fix held under fire, 1 new P1 + several P2/P3s found and ALL fixed
 same-day: repeat-intent proximity, count-in-name items, sub-place settlement evidence,
 premise equip empty-slots-only, RAG seed/live text alignment. DECISIONS.md 2026-08-22.
 1,654 tests green, lint clean, deployed)._
+
+## 2026-08-25 — player-reported bug: the recurring silent coin double-charge, root-caused
+
+Live report (Vesa): "money is still being removed multiple turns after I've paid for something,
+silently — this has been tried to be fixed multiple times." It kept coming back because four
+earlier rounds each hardened ONE channel's ledger, while the purse has FOUR
+(`recentCoinLosses`/`recentPurchases`/`recentCoinGrants`/`recentSales`) and no guard ever read
+another's. Reproduced all of it in tests first, then fixed the class (DECISIONS.md 2026-08-25):
+**cross-channel covers** — a purchase re-narrated later as loose `gold_lost` (and the mirror,
+where the atomic `purchase` arrives after a loose payment: the item is delivered, the purse
+untouched) — plus a **12-message spend window** (was 4, i.e. ~2 turns), a **dispute guard** so
+"I already paid you!" no longer unlocks the repeat-charge bypass it used to, and a **visible
+system line on every coin movement** (`−20 gp paid — purse: …`), the DM event path having been
+the only coin channel that moved money silently. Governing rule adopted: the engine may refuse
+to take money on suspicion, never to give it — hence the gain window stays at 4. 1,683 tests
+green (+18, 8 of them written as failing repros first), lint clean. **Not yet deployed.**
 
 ## 2026-08-25 — player-reported bug: companions never left the party
 
