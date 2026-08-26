@@ -1,6 +1,7 @@
 import { sendMessage } from './adapter.js';
 import { cleanText, parseDirectorJson } from './directorUtils.js';
-import { FRONTS_VERSION, normalizeFront } from '../engine/fronts.js';
+import { FRONTS_VERSION, normalizeFaction, normalizeFront } from '../engine/fronts.js';
+import { WEB_TARGET_FRONTS } from '../engine/worldTempo.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 
@@ -48,7 +49,7 @@ export function shouldGenerateCampaignFronts(state) {
 
 export function sanitizeGeneratedFronts(rawFronts) {
     if (!Array.isArray(rawFronts)) return [];
-    return rawFronts.slice(0, 3).map((front, index) => {
+    return rawFronts.slice(0, WEB_TARGET_FRONTS).map((front, index) => {
         const title = cleanText(front?.title || front?.name, 90);
         const goal = cleanText(front?.goal, 280);
         const stakes = cleanText(front?.stakes, 280);
@@ -56,9 +57,9 @@ export function sanitizeGeneratedFronts(rawFronts) {
             .map(portent => cleanText(portent, 240))
             .filter(Boolean)
             .slice(0, 5);
-        const factionName = cleanText(front?.faction?.name, 100);
-        const factionGoal = cleanText(front?.faction?.goal, 280);
-        if (!title || !goal || !stakes || grimPortents.length < 3 || !factionName || !factionGoal) return null;
+        // The shared engine sanitizer (goal checked here — generated factions must have one).
+        const faction = normalizeFaction(front?.faction);
+        if (!title || !goal || !stakes || grimPortents.length < 3 || !faction?.goal) return null;
         return normalizeFront({
             id: `front-v2-${index + 1}`,
             title,
@@ -74,15 +75,7 @@ export function sanitizeGeneratedFronts(rawFronts) {
                 .filter(Boolean)
                 .slice(0, 1),
             notes: cleanText(front.notes, 500),
-            faction: {
-                name: factionName,
-                goal: factionGoal,
-                stance: cleanText(front.faction.stance, 180),
-                relationships: (Array.isArray(front.faction.relationships) ? front.faction.relationships : [])
-                    .map(relationship => cleanText(relationship, 220))
-                    .filter(Boolean)
-                    .slice(0, 4),
-            },
+            faction,
         });
     }).filter(Boolean);
 }

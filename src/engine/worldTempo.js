@@ -39,6 +39,22 @@ export const TEMPO_TIMING_DIE_SIDES = 5;
 export const TEMPO_WINDOW_MESSAGES = 24;
 export const MAX_RECENT_ENCOUNTERS = 10;
 export const MAX_ACTIVE_FRONTS = 4;
+/**
+ * The creation/upgrade TARGET size of the front web (2–3 pressures), distinct
+ * from MAX_ACTIVE_FRONTS (the hard active cap emergent installs may reach).
+ * Counting rule (2026-08-26, the 4-front-upgrade P1): sizing against the target
+ * counts NON-RESOLVED fronts (active + dormant — resolved fronts are history,
+ * never web members), while the aftermath/regional installers keep topping up
+ * against ACTIVE-only counts as before.
+ */
+export const WEB_TARGET_FRONTS = 3;
+/**
+ * DM-channel front clock/stage GAIN throttle (2026-08-26): one +1 per front
+ * per this many conversational messages through `front_updates` — roughly the
+ * journal cadence, matching the cadence engine's one-gain-per-cadence pacing.
+ * Softening and symptom/notes/status updates are never throttled.
+ */
+export const DM_CLOCK_GAIN_WINDOW = 10;
 /** A foe family fielded in this many ledger encounters is fatigued — the DM must vary. */
 export const FOE_FATIGUE_THRESHOLD = 3;
 /** How long (in conversational messages) a resolved front's absence keeps being echoed to the DM. */

@@ -1,6 +1,7 @@
 import { sendMessage } from './adapter.js';
 import { cleanText, parseDirectorJson } from './directorUtils.js';
 import { normalizeFront } from '../engine/fronts.js';
+import { MAX_ACTIVE_FRONTS, WEB_TARGET_FRONTS } from '../engine/worldTempo.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH, CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 
@@ -101,7 +102,9 @@ export function buildFrontMigrationContext(state) {
         })),
         notableInventory: (state.inventory || []).filter(item => item.equipped || item.magicBonus || item.questItem).slice(0, 16).map(item => cleanText(item.name, 100)),
         recentEvents: (state.messages || []).slice(-30).map(compactMessage).filter(Boolean).slice(-16),
-        existingHiddenFronts: (state.fronts || []).slice(0, 3).map(front => ({
+        // Every NON-RESOLVED front rides along (2026-08-24 P1: slicing to 3 hid a
+        // legitimate 4th active front from the upgrade's enrichment pass).
+        existingHiddenFronts: (state.fronts || []).filter(front => (front.status || 'active') !== 'resolved').slice(0, MAX_ACTIVE_FRONTS).map(front => ({
             id: cleanText(front.id, 100),
             title: cleanText(front.title, 100),
             goal: cleanText(front.goal, 300),
@@ -188,7 +191,8 @@ export async function generateContextualFronts(state) {
     });
 
     const existingTitles = new Set((state.fronts || []).map(front => front.title?.toLowerCase()).filter(Boolean));
-    const availableSlots = Math.max(0, 3 - (state.fronts || []).length);
+    const webCount = (state.fronts || []).filter(front => (front.status || 'active') !== 'resolved').length;
+    const availableSlots = Math.max(0, WEB_TARGET_FRONTS - webCount);
     const fronts = sanitizeMigratedFronts(parsed.fronts)
         .filter(front => !existingTitles.has(front.title.toLowerCase()))
         .slice(0, availableSlots)

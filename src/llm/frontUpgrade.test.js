@@ -92,6 +92,46 @@ describe('upgrade safety rails (queue 2026-07-07)', () => {
         expect(sendMessage).not.toHaveBeenCalled();
     });
 
+    it('enriches ALL FOUR fronts of a 4-active campaign — no silent slice, no new fronts (2026-08-24 P1)', async () => {
+        const makeFront = (i) => ({
+            id: `front-${i}`, title: `Pressure ${i}`, goal: 'g.', stakes: 's.',
+            grimPortents: ['a.', 'b.', 'c.'], clock: 1, maxClock: 6, stage: 0, status: 'active',
+        });
+        const state = vesaCampaign({ fronts: [1, 2, 3, 4].map(makeFront) });
+        sendMessage.mockResolvedValue(JSON.stringify({
+            front_enrichments: [1, 2, 3, 4].map(i => ({ id: `front-${i}`, faction: { name: `Faction ${i}`, goal: 'push.' } })),
+            new_fronts: [],
+        }));
+        const result = await upgradeCampaignFrontsV2(state);
+        expect(result.enrichments).toHaveLength(4);
+        expect(result.newFronts).toHaveLength(0);
+        // The LLM context carries all four fronts — none hidden by a slice.
+        const request = sendMessage.mock.calls[0][0];
+        for (const i of [1, 2, 3, 4]) expect(request.userMessage).toContain(`"id":"front-${i}"`);
+    });
+
+    it('excludes resolved fronts from enrichment demands and the web count', async () => {
+        const state = vesaCampaign({
+            fronts: [
+                ...vesaCampaign().fronts,
+                { id: 'front-done', title: 'Old Victory', goal: 'g.', stakes: 's.', grimPortents: ['a.', 'b.', 'c.'], clock: 6, maxClock: 6, stage: 3, status: 'resolved' },
+            ],
+        });
+        sendMessage.mockResolvedValue(JSON.stringify({
+            front_enrichments: [{ id: 'front-local-pressure', faction: { name: 'Kraul’s Remnants', goal: 'Choose a successor.' } }],
+            new_fronts: [{
+                title: 'The Sealed Bounty', goal: 'Suppress the bargain.', stakes: 'Witnesses disappear.',
+                grimPortents: ['A witness recants.', 'Records burn.', 'A hunter arrives.'],
+                faction: { name: 'Agents', goal: 'Bury it.' },
+            }],
+        }));
+        const result = await upgradeCampaignFrontsV2(state);
+        // The resolved front demanded no enrichment and left both new-front slots open.
+        expect(result.enrichments).toHaveLength(1);
+        expect(result.newFronts).toHaveLength(1);
+        expect(sendMessage.mock.calls[0][0].userMessage).not.toContain('front-done');
+    });
+
     it('aborts atomically when an existing faction-less front was not enriched', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             front_enrichments: [], // the existing front has no faction and gets none

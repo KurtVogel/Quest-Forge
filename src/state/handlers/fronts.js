@@ -11,11 +11,33 @@ import {
     normalizeFront,
     normalizeFrontUpdate,
 } from '../../engine/fronts.js';
-import { MAX_ACTIVE_FRONTS, normalizeTempoDirective } from '../../engine/worldTempo.js';
+import { DM_CLOCK_GAIN_WINDOW, MAX_ACTIVE_FRONTS, normalizeTempoDirective, WEB_TARGET_FRONTS } from '../../engine/worldTempo.js';
+import { conversationalDistance } from '../../engine/replayLedger.js';
 import { awardExperience, getFrontResolutionMilestoneXp } from '../../engine/progression.js';
 import { upsertLocation } from '../../engine/locationRegistry.js';
 import { gameReducer } from '../gameReducer.js';
 import { systemMessage } from './shared.js';
+
+/**
+ * Shared installer core for the aftermath/regional one-shot proposals
+ * (2026-08-24 P2: the two handlers carried the same 25-line loop twice).
+ * Validates each proposal complete-or-nothing via normalizeEmergentFront —
+ * which already returns a fully normalized front, so re-stamping the id is a
+ * plain spread, not a second normalization pass.
+ */
+function buildProposedFrontAdditions(fronts, proposals, room, idPrefix) {
+    const additions = [];
+    for (const proposal of (Array.isArray(proposals) ? proposals : []).slice(0, 2)) {
+        if (additions.length >= room) break;
+        const front = normalizeEmergentFront(proposal, [...fronts, ...additions]);
+        if (!front) continue;
+        additions.push({
+            ...front,
+            id: `${idPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        });
+    }
+    return additions;
+}
 
 export const handlers = {
     INSTALL_GENERATED_FRONTS(state, action) {
@@ -34,7 +56,7 @@ export const handlers = {
                 && !(existingFronts[0].clock > 0)
                 && !(existingFronts[0].stage > 0));
         if (visibleCount > 2 && !untouchedFallback) return state;
-        const fronts = action.payload.fronts.slice(0, 3).map(front => normalizeFront(front));
+        const fronts = action.payload.fronts.slice(0, WEB_TARGET_FRONTS).map(front => normalizeFront(front));
         if (fronts.length < 2) return state;
         return {
             ...state,
@@ -112,7 +134,14 @@ export const handlers = {
         const enriched = existingFronts.map(front => enrichmentById.has(front.id)
             ? normalizeFront({ ...front, faction: enrichmentById.get(front.id) }, front)
             : front);
-        if (enriched.some(front => !front.faction?.name || !front.faction?.goal)) return state;
+        // Web-membership counting rule (WEB_TARGET_FRONTS, 2026-08-26): resolved
+        // fronts are history — they need no faction, block nothing, and don't
+        // count toward the 2–3 target. This mirrors upgradeCampaignFrontsV2
+        // exactly, so a promise that resolves can no longer be rejected here
+        // (the 2026-08-24 P1: 4 actives "upgraded" in the dialog, state unchanged).
+        const isWebMember = (front) => (front.status || 'active') !== 'resolved';
+        if (enriched.some(front => isWebMember(front) && (!front.faction?.name || !front.faction?.goal))) return state;
+        const webCount = enriched.filter(isWebMember).length;
 
         const existingIds = new Set(enriched.map(front => front.id));
         const existingTitles = new Set(enriched.map(front => front.title?.toLowerCase()).filter(Boolean));
@@ -121,10 +150,11 @@ export const handlers = {
                 && Array.isArray(front?.grimPortents) && front.grimPortents.length >= 3
                 && front?.faction?.name && front?.faction?.goal
                 && !existingIds.has(front.id) && !existingTitles.has(front.title.toLowerCase()))
-            .slice(0, Math.max(0, 3 - enriched.length))
+            .slice(0, Math.max(0, WEB_TARGET_FRONTS - webCount))
             .map(front => normalizeFront(front));
         const fronts = [...enriched, ...additions];
-        if (fronts.length < 2 || fronts.length > 3) return state;
+        const webTotal = webCount + additions.length;
+        if (webTotal < 2 || webTotal > Math.max(WEB_TARGET_FRONTS, webCount)) return state;
 
         return {
             ...state,
@@ -151,15 +181,34 @@ export const handlers = {
         const idx = fronts.findIndex(f => f.id === update.id || f.title?.toLowerCase() === update.title?.toLowerCase());
         if (idx === -1) return state;
         const existing = fronts[idx];
+        // DM clock-GAIN throttle (2026-08-24 P2: front_updates was the last
+        // DM-writable numeric channel with no replay guard — a re-emitted +1
+        // walked a clock 0→max in maxClock turns around the cadence pacing).
+        // One +1 per front per DM_CLOCK_GAIN_WINDOW conversational messages;
+        // softening and symptom/notes/status updates are NEVER throttled —
+        // player interference always lands, the applyFrontAdvanceBatch rule.
+        const wantsGain = (update.clock !== undefined && update.clock > (existing.clock || 0))
+            || (update.stage !== undefined && update.stage > (existing.stage || 0));
+        const gainThrottled = wantsGain
+            && Number.isFinite(existing.lastDmClockGainMessage)
+            && conversationalDistance(state.messages, existing.lastDmClockGainMessage, (state.messages || []).length) <= DM_CLOCK_GAIN_WINDOW;
         const boundedUpdate = {
             ...update,
             ...(update.clock !== undefined && {
-                clock: Math.max((existing.clock || 0) - 1, Math.min((existing.clock || 0) + 1, update.clock)),
+                clock: gainThrottled
+                    ? Math.min(existing.clock || 0, Math.max((existing.clock || 0) - 1, update.clock))
+                    : Math.max((existing.clock || 0) - 1, Math.min((existing.clock || 0) + 1, update.clock)),
+            }),
+            ...(wantsGain && !gainThrottled && {
+                lastDmClockGainMessage: (state.messages || []).length,
             }),
             // Stage is non-regressing (like the cadence engine, fronts.js): portents
             // already manifest in the world stay manifest. Clock may soften instead.
+            // A throttled update keeps the existing stage (never regresses).
             ...(update.stage !== undefined && {
-                stage: Math.max(existing.stage || 0, Math.min((existing.stage || 0) + 1, update.stage)),
+                stage: gainThrottled
+                    ? (existing.stage || 0)
+                    : Math.max(existing.stage || 0, Math.min((existing.stage || 0) + 1, update.stage)),
             }),
             maxClock: existing.maxClock || DEFAULT_MAX_CLOCK,
         };
@@ -243,17 +292,8 @@ export const handlers = {
         const activeCount = fronts.filter(f => (f.status || 'active') === 'active').length;
         // Successors top the web back up toward the creation-size 2–3, never
         // beyond: a crowded world doesn't need the vacuum filled.
-        const room = Math.min(2, Math.max(0, 3 - activeCount));
-        const additions = [];
-        for (const proposal of (Array.isArray(payload.fronts) ? payload.fronts : []).slice(0, 2)) {
-            if (additions.length >= room) break;
-            const front = normalizeEmergentFront(proposal, [...fronts, ...additions]);
-            if (!front) continue;
-            additions.push(normalizeFront({
-                ...front,
-                id: `front-aftermath-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            }, front));
-        }
+        const room = Math.min(2, Math.max(0, WEB_TARGET_FRONTS - activeCount));
+        const additions = buildProposedFrontAdditions(fronts, payload.fronts, room, 'front-aftermath');
         // Private like every front: no system line, the player only ever feels it.
         return {
             ...state,
@@ -285,16 +325,7 @@ export const handlers = {
         // filled the web) must never be able to lock the last slot away from
         // the region the hero actually travels to next.
         const room = Math.min(2, Math.max(0, (MAX_ACTIVE_FRONTS - 1) - activeCount));
-        const additions = [];
-        for (const proposal of (Array.isArray(payload.fronts) ? payload.fronts : []).slice(0, 2)) {
-            if (additions.length >= room) break;
-            const front = normalizeEmergentFront(proposal, [...fronts, ...additions]);
-            if (!front) continue;
-            additions.push(normalizeFront({
-                ...front,
-                id: `front-region-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            }, front));
-        }
+        const additions = buildProposedFrontAdditions(fronts, payload.fronts, room, 'front-region');
         if (additions.length === 0) return { ...state, session };
         let locations = state.locations || [];
         for (const front of additions) {

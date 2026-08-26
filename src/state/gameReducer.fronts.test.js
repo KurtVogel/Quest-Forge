@@ -380,6 +380,33 @@ describe('hidden campaign fronts', () => {
         expect(next.fronts[0]).toMatchObject({ clock: 2, stage: 2 }); // clock softens, stage holds
     });
 
+    it('throttles a re-emitted DM clock gain inside the window while symptoms and softening still land (2026-08-24 P2)', () => {
+        const msg = (i) => ({ id: `m-${i}`, role: 'assistant', content: `turn ${i}`, timestamp: i });
+        const state = {
+            ...initialGameState,
+            messages: [msg(0), msg(1)],
+            fronts: [normalizeFront({ id: 'known', title: 'Known', clock: 2, stage: 1, maxClock: 6 })],
+        };
+        const first = gameReducer(state, { type: 'UPDATE_FRONT', payload: { id: 'known', clock: 3 } });
+        expect(first.fronts[0].clock).toBe(3);
+        expect(first.fronts[0].lastDmClockGainMessage).toBe(2);
+
+        // The echo two conversational messages later: clock held, notes land.
+        const echoState = { ...first, messages: [...first.messages, msg(2), msg(3)] };
+        const echoed = gameReducer(echoState, { type: 'UPDATE_FRONT', payload: { id: 'known', clock: 4, notes: 'still moving' } });
+        expect(echoed.fronts[0].clock).toBe(3);
+        expect(echoed.fronts[0].notes).toBe('still moving');
+
+        // Softening inside the same window is never throttled.
+        const softened = gameReducer(echoState, { type: 'UPDATE_FRONT', payload: { id: 'known', clock: 2 } });
+        expect(softened.fronts[0].clock).toBe(2);
+
+        // A gain outside the window is a fresh, legitimate advance.
+        const laterMessages = [...first.messages, ...Array.from({ length: 12 }, (_, i) => msg(2 + i))];
+        const later = gameReducer({ ...first, messages: laterMessages }, { type: 'UPDATE_FRONT', payload: { id: 'known', clock: 4 } });
+        expect(later.fronts[0].clock).toBe(4);
+    });
+
     // The legacy MIGRATE_FRONTS (v1 contextual migration) action was removed in
     // the 2026-07-31 dead-code sweep — the shipped upgrade path is UPGRADE_FRONTS_V2.
 
@@ -427,6 +454,66 @@ describe('hidden campaign fronts', () => {
             version: 2, generationVersion: 2, source: 'existing-campaign-upgrade', lastJournalEnd: 20,
         });
         expect(gameReducer(upgraded, action)).toBe(upgraded);
+    });
+
+    it('upgrades a 4-active-front campaign when every front is enriched — no new fronts needed (2026-08-24 P1)', () => {
+        const makeFront = (i) => normalizeFront({
+            id: `front-${i}`, title: `Pressure ${i}`, goal: 'g', stakes: 's',
+            grimPortents: ['a', 'b', 'c'], clock: i, maxClock: 6, stage: 0, status: 'active',
+        });
+        const state = {
+            ...initialGameState,
+            character,
+            session: { id: 'four-front-campaign' },
+            fronts: [1, 2, 3, 4].map(makeFront),
+        };
+        const upgraded = gameReducer(state, {
+            type: 'UPGRADE_FRONTS_V2',
+            payload: {
+                sessionId: 'four-front-campaign',
+                enrichments: [1, 2, 3, 4].map(i => ({ id: `front-${i}`, faction: { name: `Faction ${i}`, goal: 'push' } })),
+                newFronts: [],
+                counts: {},
+            },
+        });
+        expect(upgraded).not.toBe(state);
+        expect(upgraded.fronts).toHaveLength(4);
+        expect(upgraded.fronts.every(f => f.faction?.name)).toBe(true);
+        expect(upgraded.session.frontDirector.generationVersion).toBe(2);
+    });
+
+    it('exempts resolved fronts from the enrichment requirement and the web count', () => {
+        const active = normalizeFront({
+            id: 'front-live', title: 'Live Pressure', goal: 'g', stakes: 's',
+            grimPortents: ['a', 'b', 'c'], status: 'active',
+        });
+        const resolved = normalizeFront({
+            id: 'front-done', title: 'Old Victory', goal: 'g', stakes: 's',
+            grimPortents: ['a', 'b', 'c'], status: 'resolved',
+        });
+        const state = {
+            ...initialGameState,
+            character,
+            session: { id: 'campaign' },
+            fronts: [active, resolved],
+        };
+        const upgraded = gameReducer(state, {
+            type: 'UPGRADE_FRONTS_V2',
+            payload: {
+                sessionId: 'campaign',
+                enrichments: [{ id: 'front-live', faction: { name: 'The Living', goal: 'push' } }],
+                newFronts: [{
+                    id: 'front-upgrade-2', title: 'New Pressure', goal: 'g', stakes: 's',
+                    grimPortents: ['a', 'b', 'c'], clock: 0, maxClock: 6, stage: 0, status: 'active',
+                    faction: { name: 'The Newcomers', goal: 'arrive' },
+                }],
+                counts: {},
+            },
+        });
+        expect(upgraded).not.toBe(state);
+        // Resolved history rides along un-enriched; the live web is 2 (active + addition).
+        expect(upgraded.fronts.map(f => f.id).sort()).toEqual(['front-done', 'front-live', 'front-upgrade-2']);
+        expect(upgraded.fronts.find(f => f.id === 'front-done').faction).toBeNull();
     });
 });
 

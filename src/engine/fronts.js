@@ -28,7 +28,11 @@ function normalizeRecentTextArray(value, fallback = []) {
         .slice(-6);
 }
 
-function normalizeFaction(value, fallback = null) {
+// THE faction sanitizer (2026-08-26): frontDirector and frontUpgrade used to
+// carry private copies with a diverging relationship cap (6 here vs 4 there);
+// 4 is the unified cap. Goal is optional at this boundary — LLM-side callers
+// that require a goal (enrichments, generated fronts) check `.goal` themselves.
+export function normalizeFaction(value, fallback = null) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback;
     const name = cleanText(value.name).slice(0, 100);
     if (!name) return fallback;
@@ -36,7 +40,7 @@ function normalizeFaction(value, fallback = null) {
         name,
         goal: cleanText(value.goal).slice(0, 280),
         stance: cleanText(value.stance).slice(0, 180),
-        relationships: normalizeTextArray(value.relationships).map(text => text.slice(0, 220)),
+        relationships: normalizeTextArray(value.relationships).map(text => text.slice(0, 220)).slice(0, 4),
     };
 }
 
@@ -140,6 +144,13 @@ export function normalizeFront(front = {}, existing = null) {
     const resolvedAtMessage = Number.isFinite(resolvedAtMessageRaw)
         ? Math.max(0, Math.round(resolvedAtMessageRaw))
         : (existing?.resolvedAtMessage ?? null);
+    // DM-channel clock-gain throttle stamp (2026-08-26): must survive
+    // normalization and reloads like resolvedAtMessage, or the UPDATE_FRONT
+    // pacing guard resets on every save/load.
+    const lastDmClockGainMessageRaw = Number(front.lastDmClockGainMessage);
+    const lastDmClockGainMessage = Number.isFinite(lastDmClockGainMessageRaw)
+        ? Math.max(0, Math.round(lastDmClockGainMessageRaw))
+        : (existing?.lastDmClockGainMessage ?? null);
 
     return {
         id: cleanText(front.id, existing?.id || `front-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
@@ -159,6 +170,7 @@ export function normalizeFront(front = {}, existing = null) {
         faction: normalizeFaction(front.faction, existing?.faction || null),
         resolvedAtMessage,
         resolution: cleanText(front.resolution, existing?.resolution || '').slice(0, 240),
+        lastDmClockGainMessage,
     };
 }
 
