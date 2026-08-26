@@ -1,25 +1,36 @@
 .dice-panel {
-    padding: 1rem;
-    overflow-y: auto;
-    height: 100%;
+    padding: 0.5rem 1rem;
     display: flex;
     flex-direction: column;
+    flex: 0 0 auto;
+}
+
+.dice-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.35rem 0.2rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+}
+
+.dice-toggle:hover .dice-title {
+    color: var(--gold-bright, var(--gold));
 }
 
 .dice-title {
     font-family: var(--font-heading);
     color: var(--gold);
     font-size: 1rem;
-    margin: 0 0 0.75rem 0;
-    text-align: center;
     display: flex;
     align-items: center;
-    justify-content: center;
     gap: 0.45rem;
 }
 
-.dice-title::before,
-.dice-title::after {
+.dice-title::before {
     content: "";
     width: 0.42rem;
     height: 0.42rem;
@@ -27,15 +38,43 @@
     transform: rotate(45deg);
 }
 
+.dice-latest {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dice-latest.crit {
+    color: var(--gold);
+}
+
+.dice-latest.critfail {
+    color: var(--danger);
+}
+
+.dice-caret {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-left: auto;
+}
+
+/* When the latest-roll summary is shown it takes the auto margin instead. */
+.dice-latest ~ .dice-caret {
+    margin-left: 0;
+}
+
 .dice-log {
-    flex: 1;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    margin-top: 0.4rem;
 }
 
 .dice-log-entries {
-    flex: 1;
+    max-height: 40vh;
     overflow-y: auto;
     display: flex;
     flex-direction: column;

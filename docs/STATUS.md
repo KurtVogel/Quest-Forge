@@ -11,6 +11,13 @@ replay ledger + the quest/boss XP ruling shipped — and then Vesa's "clean the 
 queue-clearing sweep: the strengthening queue went from 2 P1s + ~19 P2s to EMPTY except the
 pronoun watch item. See below. Both deployed)._
 
+## 2026-08-26 — Dice Log collapsed by default (small UX follow-up)
+
+Vesa: the always-open roll history made the right column very tall and it's rarely
+important. `DicePanel` is now a collapsible: closed by default behind a "Dice Log ▸"
+toggle (aria-expanded, latest roll shown inline in the header while closed), expanded
+log capped at 40vh with internal scroll. Verified live in the browser; deployed.
+
 ## 2026-08-26 — "clean the table": the strengthening queue is EMPTY (except one watch item)
 
 Vesa's order after the XP sweep. Eight commits, each cluster committed separately
