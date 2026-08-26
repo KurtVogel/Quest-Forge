@@ -6,11 +6,29 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-25 (two live player-report bugs fixed: the recurring silent coin double-charge and companion removal — see below. Previously: directed playtest #10 ran live against the freshly deployed #9
-batch — every #9 fix held under fire, 1 new P1 + several P2/P3s found and ALL fixed
-same-day: repeat-intent proximity, count-in-name items, sub-place settlement evidence,
-premise equip empty-slots-only, RAG seed/live text alignment. DECISIONS.md 2026-08-22.
-1,654 tests green, lint clean, deployed)._
+_Last updated: 2026-08-26 (double-XP fix sweep: the exp_awarded/level_up replay ledger closes
+Vesa's reported "same XP on two turns" echo, and the awaiting-go quest/boss XP ruling shipped —
+quest completions and decisive boss kills now pay engine-computed XP. See below. Previously
+2026-08-25: silent coin double-charge + companion removal, both deployed)._
+
+## 2026-08-26 — double-XP fix sweep: XP replay ledger + engine-owned quest/boss XP
+
+Live report (Vesa, seen at least twice): asked the DM for forgotten XP, it promised it "on your
+next action", then awarded the same amount on the TWO next turns. Two commits, reviewed as one
+sweep (DECISIONS.md 2026-08-26 ×2): **(1) engine-owned quest-completion + boss XP** — the
+awaiting-go rpg-balance-master ruling implemented as designed: `COMPLETE_QUEST` pays 12.5% of
+the level threshold (8 quests = 1 level at any level; same-turn/never-tracked quests flat 25;
+failure 0; the quest's own prior status is the one-shot guard), `combat_start` takes an
+untrusted `boss: true` honored only when `hp*2+ac*3 ≥ 300`, max 2/fight, kill-or-surrender only
+(fled bosses pay ordinary), capped at the quest tier; applyEvents suppresses `exp_awarded`
+riding a completion (generous models double-paid every quest). **(2) `recentExpAwards` replay
+ledger** — the 2026-07-21 "XP stays prompt-only" exemption ended per its own escape clause:
+value-signature guard at the tight 4-message gain window on BOTH lanes (`ADD_EXP` with `_meta`,
+and `LEVEL_UP` via a constant `levelup` marker + its riding bonusExp — a recap that upgrades the
+echo to level_up applies the level once, the XP never), visible "Duplicate XP award ignored"
+lines, "another 150 xp" repeat-intent escape hatch; engine XP dispatches bare numbers and is
+never guarded. damage/healing keeps its exemption (poison ticks legitimately repeat). 1,715
+tests green (+32 across the sweep), lint clean.
 
 ## 2026-08-25 — player-reported bug: the recurring silent coin double-charge, root-caused
 

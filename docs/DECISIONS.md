@@ -8,6 +8,65 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-26 · The exp_awarded exemption is spent: `recentExpAwards` replay-guards XP awards AND milestone level-ups; the damage/healing exemption stands.**
+Vesa's live report (observed at least twice): asked the DM for XP it had forgotten, the DM
+promised it "on your next in-game action" — then awarded the same amount on the TWO next turns.
+The 2026-07-21 one-shot-mechanics entry left `exp_awarded` deliberately prompt-only with an
+explicit escape clause ("if either is ever observed double-applying in play, that observation
+overrides this paragraph and it gets a ledger with whatever escape hatch fits"); that clause has
+now fired. The original objection — "two distinct same-amount awards close together are
+legitimate and there is no player-intent escape hatch" — is answered by what the 2026-08-25 coin
+fix proved out: the escape hatch is `repeatIntentNearNoun` on XP nouns ("another 150 xp"), and a
+visible suppression line makes a rare false positive cost one sentence instead of being a silent
+wrong. Shape: `recentExpAwards` reuses the recentCoinGrants transaction machinery (value
+signature `exp|<amount>`, conversational-distance window) at the TIGHT gain-side width (4, not
+the spend side's 12 — XP is a gift; hesitate to take, not to give). BOTH DM dispatch lanes are
+guarded, because the echo arrives through either: `ADD_EXP` checks the ledger when its payload
+carries `_meta` (applyEvents threads `transactionMeta` through), and `LEVEL_UP` checks a
+constant-signature `levelup` marker (value-keying on the reached level could never match — the
+first echo already raised it) plus the exp ledger for its riding `bonusExp`, so a recap turn
+that upgrades the echo to `level_up: true` + the same bonus applies the level at most once and
+the XP zero times. Engine-computed XP (combat, quest, front milestones) dispatches bare numbers
+with no `_meta` and bypasses the ledger entirely — one-shot by construction, never suppressed.
+The prompt's exp_awarded rules now also target the exact reported conversation: check for the
+system line before honoring "did I get my XP?", award the missing amount ONCE, never re-emit.
+**Deliberately NOT ledgered, still:** out-of-combat `damage_taken`/`healing` — poison and
+burning legitimately repeat identical amounts on consecutive turns, so a value-signature ledger
+would break correct behavior; that half of the 2026-07-21 exemption stands until observed
+misbehaving.
+
+---
+
+**2026-08-26 · Quest-completion XP and boss XP are engine-owned (rpg-balance-master ruling 2026-08-22 implemented as designed; exp_awarded demoted to freeform bonuses).**
+Vesa's go, as part of the double-XP fix sweep. Implementation follows the ruling file
+(`.claude/agent-memory/rpg-balance-master/quest_and_boss_xp_ruling.md`) exactly; the deciding
+evidence was the Terra/Gemini comparison — +75 XP vs 0 for the identical scripted quest, i.e.
+quest XP was provider-mood-dependent. **Quest XP** (`quests.js`): `COMPLETE_QUEST` pays
+`getQuestCompletionXp(level)` = 12.5% of the current level's threshold — exactly 1/4 of a front
+resolution, so "4 quests = 1 front = half a level; 8 quests = 1 level" holds at any level
+(rounds up at .5, so 8 × L1-tier ≥ 300 clears the level). One-shot guard is the quest's own
+prior status (a re-emitted completion re-writes a terminal status without XP — no new ledger
+needed); `ADD_QUEST` stamps `openedAtMessage` AFTER the payload spread (untrusted input cannot
+pre-age a row into the full tier); same-turn open-and-close and the never-tracked fallback
+insert pay a flat `QUEST_INSTANT_XP` (25) — the turn boundary is the anti-farming lever, and the
+known duplicate-row bug now leaks at most 25 XP; failure pays nothing, ever. **Boss XP**
+(`progression.js`): `combat_start` enemies take an untrusted `boss: true` (captured beside
+`is_undead`, whitelisted in `sanitizeLoadedEnemy`, normalized in START_COMBAT so it survives
+saves and exchange snapshots); the estimator honors it only when the raw statline already maxes
+the ordinary clamp (`hp*2+ac*3 ≥ 300`), at most 2 per fight in array order, and only on kill or
+surrender — a FLED boss pays ordinary flee-XP, which closes flee-and-return farming without a
+boss-identity ledger. Qualifying bosses pay `raw*2` capped by the quest tier and floored at 300,
+so boss XP deliberately degenerates to the ordinary ceiling at L1–3 and no single fight can
+rival a front resolution. `estimateCombatExperience` gained a `level` param (END_COMBAT passes
+it; legacy no-level calls behave exactly as before). **Transition guard** (`applyEvents`): an
+`exp_awarded` emitted alongside a `completed` quest_update is suppressed with a console.warn —
+the purchase/loose-coin-loss pattern applied to XP — because generous models would otherwise
+double-pay every completion; the engine's own quest-XP system line keeps the outcome visible.
+Prompt updated in the same commits: engine pays combat/quests/bosses, `exp_awarded` is small
+freeform bonuses only.
+
+---
+
 **2026-08-25 · One purse, one guarded surface: the coin ledgers now cross-check each other, the spend window is 12 messages wide, a player's dispute never unlocks a repeat charge, and every coin movement is announced.**
 Player report: "money is still being removed multiple turns after I've paid for something, and
 this happens silently." Four prior fix rounds (2026-07-21, 07-22, 07-31, 08-20) had each

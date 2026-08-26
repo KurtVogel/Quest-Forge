@@ -403,7 +403,7 @@ fatigue idea (2026-08-03), and the cross-faction-contradiction guard idea (2026-
 
 ## Gameplay & Mechanics
 
-### Engine-owned quest-completion XP + boss-enemy XP — status: `designed` (2026-08-22, rpg-balance-master ruling), awaiting Vesa's go
+### Engine-owned quest-completion XP + boss-enemy XP — status: `shipped` (2026-08-26, implemented as designed; DECISIONS.md 2026-08-26)
 Vesa (during the Terra playtest evening): quests finishing should reward XP, and notable
 NPCs/bosses should pay more than mooks. Today's controlled provider comparison proved the
 gap: for the SAME scripted quest, Terra awarded +75 XP via `exp_awarded` while Gemini Pro

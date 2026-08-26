@@ -1,12 +1,15 @@
 ---
 name: quest_and_boss_xp_ruling
-description: Ruling on (1) engine-owned quest-completion XP and (2) a boss/notable-enemy XP multiplier, both NOT YET IMPLEMENTED as of writing (2026-08-22). Formulas, anti-farming gates, and exact reducer/prompt sites.
+description: Ruling on (1) engine-owned quest-completion XP and (2) a boss/notable-enemy XP multiplier — IMPLEMENTED as designed 2026-08-26 (DECISIONS.md 2026-08-26). Formulas, anti-farming gates, and exact reducer/prompt sites.
 type: project
 ---
 
 # Quest-completion XP + boss/notable-enemy XP — ruling (2026-08-22)
 
-Status: **design only, not implemented.** Written for Vesa's two-proposal request; verified
+Status: **implemented as designed, 2026-08-26** (Vesa's go during the double-XP fix sweep;
+DECISIONS.md 2026-08-26 — one note: `getQuestCompletionXp` uses `Math.round`, so the L1 tier
+is 38, not the table's 37, which is what makes 8 × L1-quests ≥ 300 clear the level exactly).
+Originally written for Vesa's two-proposal request; verified
 against live code (`src/engine/progression.js`, `src/state/handlers/{quests,combat,fronts}.js`,
 `src/llm/eventChannels.js`) on 2026-08-22. See [[milestone_xp_front_resolution]] for the sibling
 front-resolution ruling this one is built to sit under.
