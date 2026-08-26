@@ -28,7 +28,7 @@ and `LEVEL_UP` via a constant `levelup` marker + its riding bonusExp — a recap
 echo to level_up applies the level once, the XP never), visible "Duplicate XP award ignored"
 lines, "another 150 xp" repeat-intent escape hatch; engine XP dispatches bare numbers and is
 never guarded. damage/healing keeps its exemption (poison ticks legitimately repeat). 1,715
-tests green (+32 across the sweep), lint clean.
+tests green (+32 across the sweep), lint clean, deployed to quest-forge-99ab1.
 
 ## 2026-08-25 — player-reported bug: the recurring silent coin double-charge, root-caused
 
