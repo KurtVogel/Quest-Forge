@@ -13,7 +13,9 @@ describe('buildPortraitPrompt (hero)', () => {
             'Compact and wiry, pale grey eyes.',
             ['Scale Mail', 'Mace'],
         );
-        expect(prompt).toContain('Tuuli Rautio, a woman dwarf cleric');
+        // "(woman)" beside the name — the art director's inviolable-gender tag
+        // convention, unified across every portrait prompt 2026-08-26.
+        expect(prompt).toContain('Tuuli Rautio (woman), a dwarf cleric');
         expect(prompt).toContain('Compact and wiry, pale grey eyes.');
         expect(prompt).toContain('Wearing/carrying: Scale Mail, Mace.');
     });

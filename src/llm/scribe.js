@@ -1209,7 +1209,7 @@ export function preserveSceneSituation(situation, maxLength = 1800) {
  *
  * @returns {Promise<string|null>} A finished image prompt, or null on failure.
  */
-export async function composeScenePrompt({ situation, character, npcs = [], combat, currentLocation, settings }) {
+export async function composeScenePrompt({ situation, character, party = [], npcs = [], combat, currentLocation, settings }) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey) return null;
 
@@ -1225,12 +1225,23 @@ export async function composeScenePrompt({ situation, character, npcs = [], comb
         lines.push(`Player character — ${character.name}${gender ? ` (${gender})` : ''}: ${desc}${equipped ? ` Wearing/wielding: ${equipped}.` : ''}`);
     }
 
-    // NPCs likely in frame: most recently active first, capped for prompt size.
-    // Filter BEFORE the cap — a nameless roster entry in the top 4 must not
+    // Party companions stand beside the hero in nearly every frame — they get
+    // guaranteed lines BEFORE any roster NPC (2026-08-20 audit P2: a quiet
+    // companion lost their frame slot to a shopkeeper two towns back).
+    const companionNames = new Set();
+    for (const c of (party || []).filter(c => c?.name)) {
+        companionNames.add(c.name.toLowerCase());
+        const gender = c.gender?.trim() || '';
+        const desc = (c.appearance || c.notes || '').trim() || `${c.role || 'companion'}`.trim();
+        lines.push(`Party companion — ${c.name}${gender ? ` (${gender})` : ''}: ${desc}${c.weapon ? ` Wielding ${c.weapon}.` : ''}`);
+    }
+
+    // Roster NPCs likely in frame: the shared prompt curation (location-aware,
+    // pinned-first) replaces raw recency; companions already listed are skipped.
+    // Filter BEFORE the cap — a nameless roster entry in the top slots must not
     // silently shrink the cast the art director is told about.
-    const recentNpcs = npcs
-        .filter(n => n.name)
-        .sort((a, b) => (b.lastSeen || b.firstMet || 0) - (a.lastSeen || a.firstMet || 0))
+    const recentNpcs = curateNpcsForPrompt(npcs.filter(n => n.name), { location: currentLocation || '', limit: 6 })
+        .filter(n => !companionNames.has(n.name.toLowerCase()))
         .slice(0, 4);
     for (const n of recentNpcs) {
         const gender = n.gender?.trim() || '';

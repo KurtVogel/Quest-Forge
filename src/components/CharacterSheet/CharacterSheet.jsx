@@ -5,7 +5,7 @@ import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/charact
 import { downloadCharacterExport } from '../../engine/characterVault.js';
 import { saveRosterCharacter } from '../../state/persistence.js';
 import { getExperienceThreshold, isMaxLevel } from '../../engine/progression.js';
-import { generatePortraitImage } from '../../llm/providers/imageGen.js';
+import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
@@ -138,16 +138,22 @@ export default function CharacterSheet() {
         setIsGeneratingPortrait(true);
         setPortraitError('');
         try {
-            const portraitUrl = await generatePortraitImage(portraitPrompt, state.settings.imageApiKey, {
+            const result = await generatePortraitImageDetailed(portraitPrompt, state.settings.imageApiKey, {
                 geminiApiKey: getMachineryGeminiKey(state.settings),
+                sessionScope: state.session?.id || '',
+                // Regenerate must paint a genuinely NEW image — the prompt is
+                // deterministic, so without the bypass the second click returned
+                // the identical cached portrait (2026-08-20 audit P1).
+                bypassCache: !!character.portraitUrl,
             });
-            if (!portraitUrl) throw new Error('No portrait returned.');
+            if (!result?.url) throw new Error('No portrait returned.');
             dispatch({
                 type: 'UPDATE_CHARACTER',
                 payload: {
                     appearance,
-                    portraitUrl,
+                    portraitUrl: result.url,
                     portraitPrompt,
+                    portraitProvider: result.provider || '',
                     portraitUpdatedAt: Date.now(),
                 },
             });
@@ -361,6 +367,11 @@ export default function CharacterSheet() {
                             </button>
                         </div>
                         {portraitError && <div className="cs-portrait-error">{portraitError}</div>}
+                        {character.portraitUrl && character.portraitProvider && character.portraitProvider !== 'xai' && (
+                            <div className="cs-portrait-provider">
+                                Rendered by {character.portraitProvider === 'gemini' ? 'Gemini (quality fallback)' : character.portraitProvider}
+                            </div>
+                        )}
                     </div>
 
                     {/* Class Resources */}

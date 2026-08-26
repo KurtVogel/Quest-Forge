@@ -150,6 +150,7 @@ export default function JournalPanel({ isOpen, onClose }) {
             const result = await generatePortraitImageDetailed(prompt, state.settings?.imageApiKey, {
                 geminiApiKey: getMachineryGeminiKey(state.settings),
                 bypassCache: !!npc.portraitUrl, // reroll must paint a genuinely new image
+                sessionScope: state.session?.id || '',
             });
             if (!result?.url) throw new Error('No portrait returned.');
             const portraitAction = {

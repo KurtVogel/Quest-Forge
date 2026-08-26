@@ -170,6 +170,9 @@ export default function CharacterCreation() {
             const result = await generatePortraitImageDetailed(prompt, state.settings?.imageApiKey, {
                 geminiApiKey: getMachineryGeminiKey(state.settings),
                 bypassCache: !!portraitUrl, // reroll must paint a genuinely new image
+                // Pre-session (the wizard runs before the campaign exists) — the
+                // draft scope keeps wizard renders apart from any live campaign.
+                sessionScope: 'creation-wizard',
             });
             if (!result?.url) throw new Error('No portrait returned.');
             setPortraitUrl(result.url);

@@ -4,6 +4,7 @@ import { generatePortraitImageDetailed, generateSceneImageDetailed, peekCachedIm
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
 import { namesMatch } from '../../engine/npcRoster.js';
 import { composeScenePrompt } from '../../llm/scribe.js';
+import { PORTRAIT_STYLE } from '../CharacterSheet/portraitPrompt.js';
 import './SceneArt.css';
 
 function equippedSummary(inventory = []) {
@@ -58,7 +59,7 @@ function buildFocusedPrompt(target, location) {
         `Focused waist-up portrait of ${target.label}.`,
         description,
         location && `Current setting: ${location}.`,
-        'Adult low-fantasy tabletop RPG portrait, grounded and believable, expressive face, practical clothing and gear, painterly realism, dark neutral background, soft rim light, no text, no frame.',
+        PORTRAIT_STYLE,
     ].filter(Boolean).join(' ');
 }
 
@@ -159,6 +160,7 @@ export default function SceneArt() {
         const genOptions = {
             geminiApiKey: getMachineryGeminiKey(state.settings),
             bypassCache: reroll,
+            sessionScope: state.session?.id || '',
         };
 
         setIsLoading(true);
@@ -201,6 +203,7 @@ export default function SceneArt() {
                 const cached = peekCachedImage(sceneCacheKey, {
                     imageApiKey: state.settings.imageApiKey,
                     geminiApiKey: genOptions.geminiApiKey,
+                    sessionScope: genOptions.sessionScope,
                 });
                 if (cached) {
                     setCurrentImage({ url: cached.url, caption: location, shape: 'scene' });
@@ -210,9 +213,12 @@ export default function SceneArt() {
             }
 
             // Scribe composes the prompt from the situation + known visual details.
+            // Companions ride with their linked roster record's gender/appearance
+            // merged in (the same dossier merge the focus-target list uses).
             const composed = await composeScenePrompt({
                 situation,
                 character: state.character ? { ...state.character, equippedSummary: gear } : null,
+                party: visualTargets.filter(t => t.type === 'companion').map(t => t.entity),
                 npcs: state.npcs || [],
                 combat: state.combat,
                 currentLocation: location,

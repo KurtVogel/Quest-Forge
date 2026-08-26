@@ -100,7 +100,6 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
     const normalizedImageApiKey = normalizeXaiApiKey(imageApiKey);
     const geminiApiKey = (options.geminiApiKey || '').trim();
     const aspectRatio = options.aspectRatio || '16:9';
-    const resolution = options.resolution || '1k';
     const fallbackWidth = options.fallbackWidth || 1280;
     const fallbackHeight = options.fallbackHeight || 720;
     // options.cacheKey lets the caller key on the render's INPUTS instead of
@@ -108,7 +107,11 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
     // so a prompt-derived key could never hit for them — every repeat Visualize
     // paid a compose call + a full generation and pushed another full-res
     // base64 into the cache (2026-08-01 audit P1).
-    const baseCacheKey = options.cacheKey || `${aspectRatio}|${resolution}|${prompt.toLowerCase().trim()}`;
+    // options.sessionScope folds the campaign id into every key so one
+    // campaign's cached render is unreachable from another BY CONSTRUCTION —
+    // the clearImageCache() calls at campaign boundaries are now belt-and-braces,
+    // not the only defense (2026-08-20 audit P2: START_CHARACTER never cleared).
+    const baseCacheKey = `${options.sessionScope || ''}|${options.cacheKey || `${aspectRatio}|${prompt.toLowerCase().trim()}`}`;
     const preferredProvider = normalizedImageApiKey ? 'xai' : (geminiApiKey ? 'gemini' : 'pollinations');
     const preferredCacheKey = `${preferredProvider}|${baseCacheKey}`;
     // bypassCache is the reroll affordance: generation is the point of the
@@ -227,7 +230,6 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
 export async function generateSceneImageDetailed(prompt, imageApiKey, extraOptions = {}) {
     return generateImageResult(prompt, imageApiKey, {
         aspectRatio: '16:9',
-        resolution: '1k',
         fallbackWidth: 1280,
         fallbackHeight: 720,
         ...extraOptions,
@@ -237,7 +239,6 @@ export async function generateSceneImageDetailed(prompt, imageApiKey, extraOptio
 export async function generatePortraitImageDetailed(prompt, imageApiKey, extraOptions = {}) {
     return generateImageResult(prompt, imageApiKey, {
         aspectRatio: '3:4',
-        resolution: '1k',
         fallbackWidth: 768,
         fallbackHeight: 1024,
         maxWidth: 480,
@@ -247,24 +248,18 @@ export async function generatePortraitImageDetailed(prompt, imageApiKey, extraOp
     });
 }
 
-/** URL-only portrait wrapper (CharacterSheet's hero portrait uses it). */
-export async function generatePortraitImage(prompt, imageApiKey, extraOptions = {}) {
-    const result = await generatePortraitImageDetailed(prompt, imageApiKey, extraOptions);
-    return result?.url || null;
-}
-
 /**
  * Probe the cache by an input-derived key (see options.cacheKey) WITHOUT
  * generating — lets SceneArt short-circuit before the compose call. Honors the
  * provider-chain preference, so a cached fallback-provider result never blocks
  * a retry on a better provider.
  */
-export function peekCachedImage(cacheKey, { imageApiKey, geminiApiKey } = {}) {
+export function peekCachedImage(cacheKey, { imageApiKey, geminiApiKey, sessionScope } = {}) {
     if (!cacheKey) return null;
     const preferred = normalizeXaiApiKey(imageApiKey)
         ? 'xai'
         : ((geminiApiKey || '').trim() ? 'gemini' : 'pollinations');
-    return IMAGE_CACHE.get(`${preferred}|${cacheKey}`) || null;
+    return IMAGE_CACHE.get(`${preferred}|${sessionScope || ''}|${cacheKey}`) || null;
 }
 
 /**
