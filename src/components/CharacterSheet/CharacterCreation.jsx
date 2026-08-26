@@ -565,9 +565,10 @@ export default function CharacterCreation() {
                                                     <button
                                                         className="stat-value assigned"
                                                         onClick={() => handleUnassignStat(ability)}
+                                                        aria-label={`${ability} ${statAssignment[ability]} — unassign`}
                                                     >
                                                         {statAssignment[ability]}
-                                                        <span className="stat-remove">✕</span>
+                                                        <span className="stat-remove" aria-hidden="true">✕</span>
                                                     </button>
                                                 ) : (
                                                     <div className="stat-choices">
@@ -576,6 +577,7 @@ export default function CharacterCreation() {
                                                                 key={v}
                                                                 className={`stat-choice${v === suggested ? ' recommended' : ''}`}
                                                                 title={v === suggested ? `Recommended for a ${classData.name}` : undefined}
+                                                                aria-label={`Assign ${v} to ${ability}${v === suggested ? ' (recommended)' : ''}`}
                                                                 onClick={() => handleAssignStat(ability, v)}
                                                             >
                                                                 {v}

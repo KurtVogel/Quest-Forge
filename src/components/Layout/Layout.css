@@ -204,6 +204,11 @@
     /* On Desktop, naturally pass sidebars up to the flex container */
 }
 
+/* The drawer's own close control exists only in the mobile drawer view. */
+.mobile-drawer-close {
+    display: none;
+}
+
 /* === Responsive === */
 
 @media (max-width: 1024px) {
@@ -290,6 +295,24 @@
 
     .mobile-menu-drawer.drawer-open {
         transform: translateX(0);
+    }
+
+    /* Visible way out of the 85vw drawer (Codex 2026-08-09 a11y: it covered
+       its own opener and offered no close control beyond the backdrop). */
+    .mobile-drawer-close {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        flex: 0 0 auto;
+        margin: 0.5rem 0.75rem 0.25rem;
+        padding: 0.5rem 0.75rem;
+        background: transparent;
+        border: 1px solid var(--border-primary);
+        border-radius: 6px;
+        color: var(--gold);
+        font-size: 0.85rem;
+        cursor: pointer;
     }
 
     .drawer-overlay {

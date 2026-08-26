@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGame, useSaveToast } from '../../state/GameContext.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import ChatPanel from '../Chat/ChatPanel.jsx';
@@ -22,6 +22,26 @@ export default function AppShell() {
     const [isInspectorOpen, setIsInspectorOpen] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const inspectorEnabled = isMemoryInspectorEnabled(state.settings);
+    const hamburgerRef = useRef(null);
+    const drawerCloseRef = useRef(null);
+
+    // Dialog behavior for the mobile drawer (Codex 2026-08-09 a11y): Escape
+    // closes, focus moves to the close control on open and back to the opener
+    // on close — without this the 85vw drawer covered its own opener with no
+    // visible way out and no keyboard path.
+    useEffect(() => {
+        if (!isMobileMenuOpen) return undefined;
+        const opener = hamburgerRef.current;
+        drawerCloseRef.current?.focus();
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') setIsMobileMenuOpen(false);
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => {
+            window.removeEventListener('keydown', onKeyDown);
+            opener?.focus();
+        };
+    }, [isMobileMenuOpen]);
 
     const handleOpenSettings = () => {
         dispatch({ type: 'SET_UI', payload: { isSettingsOpen: true } });
@@ -32,9 +52,12 @@ export default function AppShell() {
             <header className="app-header">
                 <div className="header-left">
                     <button
+                        ref={hamburgerRef}
                         className="header-btn mobile-hamburger-btn"
                         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                         title="Open Menu"
+                        aria-label="Open game menu"
+                        aria-expanded={isMobileMenuOpen}
                     >
                         ☰
                     </button>
@@ -76,8 +99,20 @@ export default function AppShell() {
             </header>
 
             <div className="app-body">
-                {/* Unified Mobile Drawer Container */}
-                <div className={`mobile-menu-drawer ${isMobileMenuOpen ? 'drawer-open' : ''}`}>
+                {/* Unified Mobile Drawer Container. Dialog semantics only while
+                    OPEN — on desktop these are the plain always-visible sidebars. */}
+                <div
+                    className={`mobile-menu-drawer ${isMobileMenuOpen ? 'drawer-open' : ''}`}
+                    {...(isMobileMenuOpen && { role: 'dialog', 'aria-modal': true, 'aria-label': 'Game menu' })}
+                >
+                    <button
+                        ref={drawerCloseRef}
+                        className="mobile-drawer-close"
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        aria-label="Close game menu"
+                    >
+                        ✕ Close
+                    </button>
                     <aside className="sidebar sidebar-left">
                         <div className="sidebar-section">
                             <ErrorBoundary label="Character Sheet">

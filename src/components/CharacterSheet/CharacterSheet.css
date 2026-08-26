@@ -444,7 +444,37 @@
     width: 100%;
     max-height: 85vh;
     overflow-y: auto;
+    /* A visible scroll affordance: the default hairline scrollbar was the only
+       hint that the stats step continued below the fold at 1280×720. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--gold) transparent;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 244, 214, 0.05);
+}
+
+/* Short-viewport compaction (1280×720 laptops — Codex 2026-08-09): trim the
+   chrome so the stats step needs little to no scrolling to reach Next. */
+@media (max-height: 760px) {
+    .char-creation-modal {
+        padding: 1.1rem 2rem;
+        max-height: 94vh;
+    }
+
+    .char-creation-title {
+        font-size: 1.4rem;
+        margin-bottom: 0.6rem;
+    }
+
+    .char-creation-steps {
+        margin-bottom: 0.9rem;
+    }
+
+    .creation-step h3 {
+        margin-bottom: 0.5rem;
+    }
+
+    .creation-hint {
+        margin-bottom: 0.5rem;
+    }
 }
 
 .char-creation-title {
