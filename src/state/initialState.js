@@ -29,6 +29,7 @@ export const initialGameState = {
     recentItemGrants: [], // Item twin of recentCoinGrants — prevents an items_found re-emitted on a later turn from granting twice
     recentRulings: [], // Roleplay-check rulings that ended without dice — injected so the DM cannot re-propose overruled/set-aside checks from scratch
     recentChecks: [], // Compact out-of-combat check-proposal ledger — heat input for diceless-but-tense arcs (chases, heists)
+    recentExpAwards: [], // XP twin of recentCoinGrants — prevents an exp_awarded/level_up re-emitted on a later turn from paying twice
     recentSpellCasts: [], // "sourceId|spellKey" replay guard so a re-parsed spell_cast never double-spends a slot
     recentRests: [], // "sourceId|restType|messageIndex" replay guard — a DM re-emitting rest_taken must not re-run the rest
     recentHearsay: [], // "deedKey|locationKey|messageIndex" — a hero deed is offered as traveling rumor at a given place only once

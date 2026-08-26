@@ -793,13 +793,19 @@ describe('applyEvents dispatch coverage', () => {
 
     it('dispatches an explicit LEVEL_UP without also awarding raw exp', () => {
         const dispatch = run({ level_up: true, exp_awarded: 50 });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'LEVEL_UP', payload: { bonusExp: 50, reason: 'milestone' } });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'LEVEL_UP',
+            payload: expect.objectContaining({ bonusExp: 50, reason: 'milestone', _meta: expect.any(Object) }),
+        });
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_EXP' }));
     });
 
-    it('dispatches ADD_EXP when no explicit level-up is signaled', () => {
+    it('dispatches ADD_EXP with replay-guard meta when no explicit level-up is signaled', () => {
         const dispatch = run({ exp_awarded: 25 });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_EXP', payload: 25 });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'ADD_EXP',
+            payload: expect.objectContaining({ amount: 25, _meta: expect.any(Object) }),
+        });
     });
 
     it('suppresses exp_awarded emitted alongside a quest completion — the engine pays quest XP itself', () => {
@@ -814,7 +820,10 @@ describe('applyEvents dispatch coverage', () => {
             exp_awarded: 75,
             quest_updates: [{ status: 'updated', id: 'q1', name: 'Find the relic' }],
         });
-        expect(updatedOnly).toHaveBeenCalledWith({ type: 'ADD_EXP', payload: 75 });
+        expect(updatedOnly).toHaveBeenCalledWith({
+            type: 'ADD_EXP',
+            payload: expect.objectContaining({ amount: 75 }),
+        });
     });
 
     it('dispatches a rest, conditions, and quest updates', () => {

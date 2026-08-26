@@ -8,12 +8,47 @@ import { awardExperience } from '../../engine/progression.js';
 import {
     applyDeath,
     applyEarlyDefeat,
+    currentMessageIndex,
+    findRecentTransactionDuplicate,
     isLowLevelSolo,
+    rememberTransaction,
+    repeatIntentNearNoun,
     reviveCharacter,
     systemMessage,
     withCondition,
     withInventoryAndAC,
 } from './shared.js';
+
+// XP replay ledger (2026-08-26, Vesa's live report: "asked the DM for the XP it
+// forgot, it promised it on my next action, then awarded the same amount on the
+// TWO next turns"). The DECISIONS.md 2026-07-21 exemption for exp_awarded ended
+// on that observation, per its own escape clause. XP is gain-side, so the coin
+// asymmetry rule keeps the window TIGHT (the coin-grant 4, not the loss 12):
+// over-suppressing a reward robs the player; the visible "Duplicate XP award
+// ignored" line plus the repeat-intent escape hatch ("award it again") make a
+// rare false positive one sentence to fix. Guards only DM-path dispatches
+// (payload carries _meta) — engine-computed XP (combat, quests, fronts) is
+// one-shot by construction and must never be suppressed.
+const RECENT_EXP_AWARD_MESSAGE_WINDOW = 4;
+// Bare alternation for the repeat-intent proximity test ("another 100 xp",
+// "give me the experience again").
+const EXP_NOUN_SRC = /(?:xp|exp|experience)/;
+
+function buildExpAwardTransaction(amount) {
+    return {
+        // Value-based signature — a re-emission is the same award (the coin rule).
+        signature: `exp|${amount}`,
+        item: { itemKey: 'exp-award', name: `${amount} XP` },
+        quantity: 1,
+        priceCp: amount,
+    };
+}
+
+function playerMessageSupportsRepeatExpAward(playerMessage) {
+    const text = String(playerMessage || '');
+    if (!text.trim()) return false;
+    return repeatIntentNearNoun(text, EXP_NOUN_SRC);
+}
 
 export const handlers = {
     START_CHARACTER(state, action) {
@@ -198,12 +233,39 @@ export const handlers = {
     },
 
     ADD_EXP(state, action) {
-        const result = awardExperience(state.character, action.payload, {
+        // DM-path dispatches arrive as { amount, _meta }; engine/legacy callers
+        // pass a bare number and bypass the ledger entirely.
+        const isDmPath = action.payload && typeof action.payload === 'object';
+        const amount = Math.max(0, Math.floor(Number(isDmPath ? action.payload.amount : action.payload) || 0));
+        const meta = isDmPath ? (action.payload._meta || {}) : null;
+        let recentExpAwards = state.recentExpAwards || [];
+        if (meta && amount > 0) {
+            const transaction = buildExpAwardTransaction(amount);
+            const sourceId = String(meta.sourceId || '').slice(0, 160);
+            const messageIndex = currentMessageIndex(state);
+            const duplicate = findRecentTransactionDuplicate(
+                recentExpAwards, transaction, sourceId, messageIndex, RECENT_EXP_AWARD_MESSAGE_WINDOW, state.messages
+            );
+            const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
+            if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatExpAward(meta.playerMessage))) {
+                return {
+                    ...state,
+                    recentExpAwards: rememberTransaction(recentExpAwards, transaction, sourceId, messageIndex, 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        systemMessage(`Duplicate XP award ignored — **+${amount} XP** matches an award just granted. If a second identical award is genuinely owed, ask the DM for it again.`),
+                    ],
+                };
+            }
+            recentExpAwards = rememberTransaction(recentExpAwards, transaction, sourceId, messageIndex);
+        }
+        const result = awardExperience(state.character, amount, {
             reason: action.reason,
         });
         return {
             ...state,
             character: result.character,
+            recentExpAwards,
             messages: [...state.messages, ...result.messages],
             // Remember XP was earned mid-fight so the manual End-Combat fallback won't re-award.
             combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
@@ -228,14 +290,66 @@ export const handlers = {
     },
 
     LEVEL_UP(state, action) {
-        const result = awardExperience(state.character, action.payload?.bonusExp || 0, {
+        const meta = action.payload?._meta;
+        let bonusExp = Math.max(0, Math.floor(Number(action.payload?.bonusExp) || 0));
+        let recentExpAwards = state.recentExpAwards || [];
+        const extraMessages = [];
+        // DM-path milestone level-ups ride the same ledger: a level_up re-emitted
+        // while the first one's narration is still in the DM's window would
+        // otherwise silently hand out a whole second level (the rest_taken echo
+        // pattern at maximum stakes). The signature is constant — value-keying on
+        // the reached level would never match, since the first echo already
+        // raised it. No player-phrasing escape: milestones are DM initiative.
+        if (meta) {
+            const sourceId = String(meta.sourceId || '').slice(0, 160);
+            const messageIndex = currentMessageIndex(state);
+            const levelUpMarker = {
+                signature: 'levelup',
+                item: { itemKey: 'level-up', name: 'milestone level-up' },
+                quantity: 1,
+                priceCp: 0,
+            };
+            const duplicate = findRecentTransactionDuplicate(
+                recentExpAwards, levelUpMarker, sourceId, messageIndex, RECENT_EXP_AWARD_MESSAGE_WINDOW, state.messages
+            );
+            if (duplicate) {
+                return {
+                    ...state,
+                    recentExpAwards: rememberTransaction(recentExpAwards, levelUpMarker, sourceId, messageIndex, 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        systemMessage('Duplicate level-up ignored — a milestone level-up was just applied.'),
+                    ],
+                };
+            }
+            recentExpAwards = rememberTransaction(recentExpAwards, levelUpMarker, sourceId, messageIndex);
+            // The bonus XP riding the level-up answers to the exp ledger too — the
+            // observed double-award lands here whenever the recap turn adds
+            // level_up: true beside the re-emitted exp_awarded.
+            if (bonusExp > 0) {
+                const transaction = buildExpAwardTransaction(bonusExp);
+                const bonusDuplicate = findRecentTransactionDuplicate(
+                    recentExpAwards, transaction, sourceId, messageIndex, RECENT_EXP_AWARD_MESSAGE_WINDOW, state.messages
+                );
+                const exactSourceReplay = !!sourceId && bonusDuplicate?.sourceId === sourceId;
+                if (bonusDuplicate && (exactSourceReplay || !playerMessageSupportsRepeatExpAward(meta.playerMessage))) {
+                    recentExpAwards = rememberTransaction(recentExpAwards, transaction, sourceId, messageIndex, 'ignored');
+                    extraMessages.push(systemMessage(`Duplicate XP award ignored — **+${bonusExp} XP** matches an award just granted; the level-up itself stands.`));
+                    bonusExp = 0;
+                } else {
+                    recentExpAwards = rememberTransaction(recentExpAwards, transaction, sourceId, messageIndex);
+                }
+            }
+        }
+        const result = awardExperience(state.character, bonusExp, {
             milestoneLevelUp: true,
             reason: action.payload?.reason || 'milestone',
         });
         return {
             ...state,
             character: result.character,
-            messages: [...state.messages, ...result.messages],
+            recentExpAwards,
+            messages: [...state.messages, ...extraMessages, ...result.messages],
             combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
         };
     },
