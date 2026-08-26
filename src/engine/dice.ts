@@ -34,40 +34,31 @@ const DICE_COUNT_BACKSTOP = 1000;
 
 /**
  * Roll a single die with the given number of sides using crypto-random.
+ * Thin alias over the one fairness kernel below (2026-08-20 audit: two
+ * independent rejection-sampling implementations drifted here before).
  */
 export function rollDie(sides: number): number {
-  // `x % 0` is NaN in JS and NaN is sticky through every downstream sum —
-  // a corrupted "1d0" profile must fail loudly here, not poison HP math silently.
-  if (!Number.isInteger(sides) || sides <= 0 || sides > MAX_DIE_SIDES) {
-    throw new Error(`Invalid die: d${sides}`);
-  }
-  // Rejection-sample away the modulo bias: raw Uint32 % sides slightly favors low
-  // faces on non-power-of-2 dice (~1 in 2^32 — negligible, but the crypto-fair
-  // guarantee should be exact). Values in the truncated final cycle are re-rolled;
-  // for any playable die the rejection chance is < 1 in 60000 per draw.
-  const limit = 0x100000000 - (0x100000000 % sides);
-  const array = new Uint32Array(1);
-  let value: number;
-  do {
-    crypto.getRandomValues(array);
-    value = array[0];
-  } while (value >= limit);
-  return (value % sides) + 1;
+  return rollDice(1, sides)[0];
 }
 
 /**
- * Roll multiple dice.
+ * Roll multiple dice — THE crypto-fairness kernel.
+ *
+ * Rejection-samples away the modulo bias: raw Uint32 % sides slightly favors
+ * low faces on non-power-of-2 dice (~1 in 2^32 — negligible, but the
+ * crypto-fair guarantee should be exact). Values in the truncated final cycle
+ * are discarded and redrawn; for any playable die the rejection chance is
+ * < 1 in 60000 per draw. One batched crypto draw covers the whole pool.
  */
 export function rollDice(count: number, sides: number): number[] {
   if (!Number.isInteger(count) || count < 1 || count > DICE_COUNT_BACKSTOP) {
     throw new Error(`Invalid dice count: ${count}`);
   }
+  // `x % 0` is NaN in JS and NaN is sticky through every downstream sum —
+  // a corrupted "1d0" profile must fail loudly here, not poison HP math silently.
   if (!Number.isInteger(sides) || sides <= 0 || sides > MAX_DIE_SIDES) {
     throw new Error(`Invalid die: d${sides}`);
   }
-  // One batched crypto draw for the whole pool (rollDie allocated a Uint32Array
-  // per die). Same rejection sampling as rollDie: values past the truncated
-  // final cycle are discarded and redrawn, so fairness is bit-identical.
   const limit = 0x100000000 - (0x100000000 % sides);
   const results: number[] = [];
   const array = new Uint32Array(count);
@@ -105,6 +96,9 @@ export function rollWithModifier(
     modifier,
     total,
     description,
+    // The universal natural-20/1 facts only. Class-specific crit thresholds
+    // (Champion 19-20) are stamped by combatMath.stampCriticalRoll — the single
+    // owner of the crit RULE — at both attack paths; rules stay out of dice.
     isCritical: sides === 20 && count === 1 && rolls[0] === 20,
     isCritFail: sides === 20 && count === 1 && rolls[0] === 1,
   };

@@ -18,6 +18,7 @@ import {
     normalizeRecentTransactions,
     RECENT_REST_LIMIT,
     RECENT_SPELL_CAST_LIMIT,
+    ROLL_HISTORY_CAP,
     sanitizeWorldFactPayload,
 } from './shared.js';
 
@@ -90,8 +91,11 @@ function validateSaveState(payload) {
         // buildSystemPrompt (q.status / c.status / r.rolls.join / journal .join /
         // namesMatch on a non-string npc name) on EVERY turn — same class as the
         // 07-25 messages fix above.
+        // Capped like every other rollHistory boundary (append + serialize are
+        // both 50) — a hand-edited save must not carry an unbounded array into
+        // live state until the next append (2026-08-20 audit).
         rollHistory: Array.isArray(payload.rollHistory)
-            ? payload.rollHistory.filter(r => r && typeof r === 'object' && Array.isArray(r.rolls))
+            ? payload.rollHistory.filter(r => r && typeof r === 'object' && Array.isArray(r.rolls)).slice(-ROLL_HISTORY_CAP)
             : [],
         quests: Array.isArray(payload.quests)
             ? payload.quests.filter(q => q && typeof q === 'object')

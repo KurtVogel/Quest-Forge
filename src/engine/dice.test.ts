@@ -3,7 +3,7 @@
  * cheat the dice" guarantee. Every other combat/roll test file mocks this module
  * away, so these are the only tests exercising the actual implementation.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
     MAX_DICE_COUNT,
     MAX_DIE_SIDES,
@@ -39,6 +39,30 @@ describe('rollDie', () => {
         expect(() => rollDie(-6)).toThrow(/Invalid die/);
         expect(() => rollDie(2.5)).toThrow(/Invalid die/);
         expect(() => rollDie(NaN)).toThrow(/Invalid die/);
+    });
+
+    it('redraws values in the truncated final cycle instead of biasing low faces (2026-08-20 audit)', () => {
+        // d6: limit = 2^32 - (2^32 % 6) = 4294967292. Raw draws at/above the
+        // limit MUST be rejected and redrawn — this loop is the rejection-
+        // sampling half of the crypto-fairness guarantee and is unreachable
+        // by chance in ~60k rolls, so it gets a deterministic stub.
+        const draws = [
+            Uint32Array.from([4294967295]), // in the truncated cycle → rejected
+            Uint32Array.from([4294967292]), // exactly at the limit → rejected
+            Uint32Array.from([9]),          // accepted → (9 % 6) + 1 = 4
+        ];
+        const spy = vi.spyOn(crypto, 'getRandomValues').mockImplementation((array) => {
+            const target = array as Uint32Array;
+            const next = draws.shift() ?? Uint32Array.from([9]);
+            target.set(next.subarray(0, target.length));
+            return array;
+        });
+        try {
+            expect(rollDie(6)).toBe(4);
+            expect(spy).toHaveBeenCalledTimes(3);
+        } finally {
+            spy.mockRestore();
+        }
     });
 });
 

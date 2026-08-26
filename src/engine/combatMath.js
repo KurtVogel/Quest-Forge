@@ -88,6 +88,21 @@ export function isCriticalNatural(character, natural) {
 }
 
 /**
+ * Stamp a d20 roll's display flags with THIS character's crit rule and return
+ * whether it crit. dice.ts only knows the universal natural 20; a Champion's
+ * 19 was rendered as a crit in the Dice Log out of combat but not in combat
+ * (2026-08-20 audit P2 — rollResolver stamped, combatExchange pushed the roll
+ * unstamped). Both attack paths now stamp through this single owner.
+ */
+export function stampCriticalRoll(character, roll, natural) {
+    if (roll && !roll.isCritical && isCriticalNatural(character, natural)) {
+        roll.isCritical = true;
+        if (natural === 19) roll.criticalThreshold = 'Champion 19-20';
+    }
+    return !!roll?.isCritical;
+}
+
+/**
  * Roll weapon/spell damage with crit doubling, Great Weapon Fighting rerolls,
  * and Rogue Sneak Attack. Returns raw data:
  *   { roll, total, notation, rerolls: ["2→5", ...], sneakAttackDetail: { diceCount, rolls, total } | null }

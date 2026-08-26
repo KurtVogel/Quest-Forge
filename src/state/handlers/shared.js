@@ -24,7 +24,7 @@ import {
 // Live rollHistory cap, matching persistence's MAX_SAVED_ROLLS: only 50 are
 // ever persisted, 20 render, 5 reach the prompt — but the live array grew
 // unbounded for the whole session (2026-08-01 audit).
-const ROLL_HISTORY_CAP = 50;
+export const ROLL_HISTORY_CAP = 50;
 
 /** Append roll(s) to a rollHistory array, keeping only the newest 50. */
 export function appendRollHistory(rollHistory, rolls) {

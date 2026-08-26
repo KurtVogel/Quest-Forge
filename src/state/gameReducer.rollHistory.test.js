@@ -30,4 +30,16 @@ describe('rollHistory cap', () => {
         expect(state.rollHistory[0].id).toBe('roll-10'); // oldest 10 dropped
         expect(state.rollHistory[49].id).toBe('roll-59'); // newest kept
     });
+
+    it('LOAD_GAME caps a hand-edited unbounded save at the same 50 (2026-08-20 audit)', () => {
+        const loaded = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                messages: [],
+                rollHistory: Array.from({ length: 120 }, (_, i) => makeRoll(i)),
+            },
+        });
+        expect(loaded.rollHistory).toHaveLength(50);
+        expect(loaded.rollHistory[49].id).toBe('roll-119'); // newest kept
+    });
 });

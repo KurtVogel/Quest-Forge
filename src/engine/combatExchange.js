@@ -20,7 +20,7 @@ import {
 import {
     applyUncannyDodge,
     conditionAwareAttackModifiers,
-    isCriticalNatural,
+    stampCriticalRoll,
     rollD20Kept as rollD20,
     rollDamage,
 } from './combatMath.js';
@@ -1063,7 +1063,7 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
                 modifiers.disadvantage
             );
             rolls.push(attack.roll);
-            const critical = isCriticalNatural(character, attack.natural);
+            const critical = stampCriticalRoll(character, attack.roll, attack.natural);
             const hit = attack.natural !== 1 && (critical || attack.roll.total >= enemy.ac);
             let damage = 0;
             let sneakAttackDetail = null;

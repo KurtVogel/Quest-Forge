@@ -16,7 +16,7 @@
 import { rollWithModifier } from './dice.ts';
 import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES } from './rules.js';
 import { validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
-import { applyUncannyDodge, conditionAwareAttackModifiers, isCriticalNatural, rollD20Kept, rollDamage } from './combatMath.js';
+import { applyUncannyDodge, conditionAwareAttackModifiers, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
 
 const ABILITY_NAMES = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 
@@ -453,29 +453,27 @@ export async function handleRequestedRolls(requestedRolls, {
 // --- Internal Resolution Functions ---
 
 /**
- * Roll a d20 with advantage, disadvantage, or plain — returns a rollWithModifier result
- * extended with an `advantageDetail` string for display.
+ * Roll ONE d20 with advantage, disadvantage, or plain — returns a
+ * rollWithModifier result extended with an `advantageDetail` display string.
+ * (The old count/sides params were dead — every call site passed 1, 20 — and
+ * any other value would have silently DROPPED advantage instead of failing;
+ * 2026-08-20 audit P2.)
  */
-function rollWithAdvantage(count, sides, modifier, description, advantage, disadvantage) {
-    if ((advantage || disadvantage) && count === 1 && sides === 20) {
+function rollWithAdvantage(modifier, description, advantage, disadvantage) {
+    if (advantage || disadvantage) {
         // Kernel note: advantage AND disadvantage now cancel to one die (correct
         // 5e; the old copy quietly kept the advantage bias when a DM emitted both).
         const { roll, first, second } = rollD20Kept(modifier, description, advantage, disadvantage, { secondDescription: description });
         roll.advantageDetail = first != null ? ` (d20: ${first}, ${second} → kept ${roll.rolls[0]})` : '';
         return roll;
     }
-    const result = rollWithModifier(count, sides, modifier, description);
+    const result = rollWithModifier(1, 20, modifier, description);
     result.advantageDetail = '';
     return result;
 }
 
 function applyPlayerAttackCritical(character, result) {
-    const die = result.rolls?.[0];
-    if (!result.isCritical && isCriticalNatural(character, die)) {
-        result.isCritical = true;
-        result.criticalThreshold = die === 19 ? 'Champion 19-20' : undefined;
-    }
-    return !!result.isCritical;
+    return stampCriticalRoll(character, result, result.rolls?.[0]);
 }
 
 /** Kernel-backed damage roll that preserves this file's display contract (fightingStyleDetail string, throw-on-invalid). */
@@ -553,7 +551,7 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetCo
         condNote = eff.note ? ` (target${eff.note})` : '';
     }
 
-    const result = rollWithAdvantage(1, 20, npcMod, roll.description || `${roll.attacker || 'Enemy'} attack`, effAdvantage, effDisadvantage);
+    const result = rollWithAdvantage(npcMod, roll.description || `${roll.attacker || 'Enemy'} attack`, effAdvantage, effDisadvantage);
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     // Determine the DC to beat. Saves use the spell/ability DC; attacks use the target's AC.
@@ -678,7 +676,7 @@ function resolveDeathSave(character, dispatch) {
 }
 
 function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
-    const result = rollWithAdvantage(1, 20, mod, label, roll.advantage, roll.disadvantage);
+    const result = rollWithAdvantage(mod, label, roll.advantage, roll.disadvantage);
     const critical = applyPlayerAttackCritical(character, result);
     dispatch({ type: 'ADD_ROLL', payload: result });
 
@@ -760,7 +758,7 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     }
 
     const isAttack = roll.type === 'attack_roll' || skillName === 'attack';
-    const result = rollWithAdvantage(1, 20, mod, label, effRoll.advantage, effRoll.disadvantage);
+    const result = rollWithAdvantage(mod, label, effRoll.advantage, effRoll.disadvantage);
     const critical = isAttack ? applyPlayerAttackCritical(character, result) : result.isCritical;
     dispatch({ type: 'ADD_ROLL', payload: result });
 
