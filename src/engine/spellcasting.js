@@ -205,6 +205,7 @@ export function describeSpellcastingForPrompt(character) {
         if (targeting.side === 'self') return ', self';
         const noun = targeting.side === 'ally' ? 'ally' : 'foe';
         if (targeting.mode === 'upTo3') return `, up to 3 ${noun === 'ally' ? 'allies' : 'foes'}`;
+        if (targeting.mode === 'darts') return ', 3 darts (+1 per upcast level) — splittable among foes via "targets"';
         return `, ONE ${noun}`;
     };
     const lines = known.map(spell => {

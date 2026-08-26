@@ -665,7 +665,14 @@ function validatePlayerSlots(exchange, state) {
 
 /** Resolve an enemy-side spell (attack rolls, engine-rolled saves, auto damage). */
 function resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events, rolls }) {
-    const targetLimit = spell.targeting.mode === 'upTo3' ? 3 : 1;
+    // Dart spells (Magic Missile): 3 darts +1 per upcast level, each dart a
+    // legal target — the player's declared split is honored (Codex 2026-08-09
+    // P2: a legal two-wisp split was silently dumped into one wisp and the
+    // narration invented a magnetic pull to cover it).
+    const dartCount = spell.targeting.mode === 'darts'
+        ? 3 + Math.max(0, (slotLevel || spell.level) - spell.level)
+        : 0;
+    const targetLimit = spell.targeting.mode === 'upTo3' ? 3 : (dartCount || 1);
     const named = castTargetRefs(slot)
         .map(target => findByRef(enemies, target))
         .filter(isEnemyActive);
@@ -751,7 +758,26 @@ function resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events,
         return;
     }
 
-    // Auto-hit damage (Magic Missile): no roll to hit, only the effect dice.
+    // Dart split: distribute the darts round-robin in DECLARED order (the
+    // first-named foe takes any extras), one pooled roll per foe. Magic
+    // Missile is the only darts spell — each dart is 1d4+1, so N darts on one
+    // foe roll as Nd4+N (a single target gets the classic 3d4+3 unchanged).
+    if (dartCount > 0) {
+        targets.forEach((enemy, index) => {
+            const darts = Math.floor(dartCount / targets.length) + (index < dartCount % targets.length ? 1 : 0);
+            const damageRoll = rollDamage(`${darts}d4+${darts}`, `${spell.name} (${darts} dart${darts === 1 ? '' : 's'}) at ${enemy.name}`, {});
+            rolls.push(damageRoll.roll);
+            enemy.hp = Math.max(0, enemy.hp - damageRoll.total);
+            enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
+            events.push({
+                type: 'note',
+                text: `**${spell.name}** sends ${darts} unerring dart${darts === 1 ? '' : 's'} into ${enemy.name} for **${damageRoll.total}** damage. ${enemy.hp <= 0 ? `${enemy.name} is down.` : `${enemy.name} remains alive at ${enemy.hp}/${enemy.maxHp} HP.`}`,
+            });
+        });
+        return;
+    }
+
+    // Auto-hit damage: no roll to hit, only the effect dice.
     for (const enemy of targets) {
         const damageRoll = rollDamage(spellDamageNotation(spell, character, slotLevel), `${spell.name} damage`, {});
         rolls.push(damageRoll.roll);

@@ -597,6 +597,64 @@ describe('engine-owned exchange resolution', () => {
         expect(planCombatExchange(wizard, unsupported)).toMatchObject({ ok: false, error: expect.stringContaining('not on this character\'s engine-owned spell list') });
     });
 
+    describe('Magic Missile dart split (Codex 2026-08-09 P2)', () => {
+        const wizardState = (overrides = {}) => state({
+            character: {
+                class: 'wizard',
+                level: overrides.level || 1,
+                abilityScores: { ...character().abilityScores, intelligence: 16 },
+                spellSlots: buildSpellSlots(overrides.level || 1),
+            },
+            enemies: overrides.enemies,
+        });
+
+        it('honors a declared two-target split — darts round-robin in declared order, first-named takes the extra', () => {
+            // 3 darts over [A, B]: A gets 2 (2d4+2), B gets 1 (1d4+1).
+            rollQueue.push(3, 3, 4);
+            const plan = planCombatExchange(
+                wizardState({ enemies: [enemy('A', { hp: 8, maxHp: 8 }), enemy('B', { hp: 5, maxHp: 5 })] }),
+                normalizeCombatExchange({
+                    player_slots: [{ action: 'cast', spell: 'magic missile', targets: ['A', 'B'] }],
+                    enemy_intents: [],
+                })
+            );
+            expect(plan.ok).toBe(true);
+            const notes = plan.payload.result.events.filter(e => e.type === 'note' && e.text.includes('dart'));
+            expect(notes[0].text).toContain('2 unerring darts into A for **8**'); // 3+3+2
+            expect(notes[1].text).toContain('1 unerring dart into B for **5**'); // 4+1
+            expect(plan.payload.enemies.find(e => e.id === 'A').hp).toBe(0);
+            expect(plan.payload.enemies.find(e => e.id === 'B').hp).toBe(0);
+        });
+
+        it('keeps the classic 3d4+3 total on a single target', () => {
+            rollQueue.push(1, 1, 1); // 3 + 3 = 6
+            const plan = planCombatExchange(
+                wizardState({ enemies: [enemy('A', { hp: 10, maxHp: 10 })] }),
+                normalizeCombatExchange({
+                    player_slots: [{ action: 'cast', spell: 'magic missile', target: 'A' }],
+                    enemy_intents: [{ enemy_id: 'A', action: 'defend' }],
+                })
+            );
+            expect(plan.payload.enemies[0].hp).toBe(4);
+            expect(plan.payload.result.events.some(e => e.text?.includes('3 unerring darts'))).toBe(true);
+        });
+
+        it('an upcast adds a dart: level-2 slot splits 4 darts as 2/2', () => {
+            rollQueue.push(2, 2, 2, 2);
+            const plan = planCombatExchange(
+                wizardState({ level: 3, enemies: [enemy('A', { hp: 20, maxHp: 20 }), enemy('B', { hp: 20, maxHp: 20 })] }),
+                normalizeCombatExchange({
+                    player_slots: [{ action: 'cast', spell: 'magic missile', targets: ['A', 'B'], slot_level: 2 }],
+                    enemy_intents: [{ enemy_id: 'A', action: 'defend' }, { enemy_id: 'B', action: 'defend' }],
+                })
+            );
+            expect(plan.ok).toBe(true);
+            const notes = plan.payload.result.events.filter(e => e.type === 'note' && e.text.includes('dart'));
+            expect(notes[0].text).toContain('2 unerring darts into A for **6**'); // 2+2+2
+            expect(notes[1].text).toContain('2 unerring darts into B for **6**');
+        });
+    });
+
     it('keeps an unresolved death-save state in combat and lets a natural 20 resume play', () => {
         const dying = state({
             character: { level: 3, currentHP: 0, dying: true, deathSaves: { successes: 0, failures: 0 } },

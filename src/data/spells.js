@@ -42,10 +42,14 @@ export const SPELLS = {
     },
     magicMissile: {
         key: 'magicMissile', name: 'Magic Missile', level: 1, classes: ['wizard'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'single' }, resolution: 'auto',
+        // 'darts' mode (2026-08-26, Codex retest P2): 3 darts +1 per upcast
+        // level, splittable across foes by naming multiple targets; the
+        // exchange engine distributes darts round-robin in declared order.
+        // damage.dice stays as the single-target total for display/fallbacks.
+        targeting: { side: 'enemy', mode: 'darts' }, resolution: 'auto',
         damage: { dice: '3d4+3', upcastPerLevel: 1 },
         combatAvailable: true, outOfCombatAvailable: false,
-        summary: 'Unerring force darts — never misses, no roll to hit.',
+        summary: 'Unerring force darts — never miss; name several foes to split the darts.',
     },
     sleep: {
         key: 'sleep', name: 'Sleep', level: 1, classes: ['wizard'], castTime: 'action',
