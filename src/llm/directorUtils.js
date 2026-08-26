@@ -41,3 +41,32 @@ export function parseDirectorJson(response, anchorKey, label, { missingMessage, 
         }
     }
 }
+
+/**
+ * Non-throwing sibling of parseDirectorJson for the fire-and-forget Scribe
+ * passes (per-turn extraction, cadence reflection), whose failure contract is
+ * "log and quietly do nothing" rather than an error surface. Returns the
+ * parsed object, or null when no anchored JSON exists or repair fails.
+ */
+export function tryParseDirectorJson(response, anchorKey, label) {
+    const text = String(response || '');
+    const anchors = Array.isArray(anchorKey) ? anchorKey : [anchorKey];
+    let extracted = null;
+    for (const anchor of anchors) {
+        extracted = extractBalancedJson(text, anchor);
+        if (extracted) break;
+    }
+    if (!extracted) return null;
+    try {
+        return JSON.parse(extracted.json);
+    } catch {
+        try {
+            const parsed = JSON.parse(repairJson(extracted.json));
+            console.warn(`[${label}] JSON repaired before parsing.`);
+            return parsed;
+        } catch (e) {
+            console.warn(`[${label}] JSON parse failed after repair:`, e.message);
+            return null;
+        }
+    }
+}
