@@ -6,10 +6,33 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-26 (double-XP fix sweep: the exp_awarded/level_up replay ledger closes
-Vesa's reported "same XP on two turns" echo, and the awaiting-go quest/boss XP ruling shipped —
-quest completions and decisive boss kills now pay engine-computed XP. See below. Previously
-2026-08-25: silent coin double-charge + companion removal, both deployed)._
+_Last updated: 2026-08-26 (TWO sweeps in one day: the double-XP fix sweep — exp_awarded/level_up
+replay ledger + the quest/boss XP ruling shipped — and then Vesa's "clean the table"
+queue-clearing sweep: the strengthening queue went from 2 P1s + ~19 P2s to EMPTY except the
+pronoun watch item. See below. Both deployed)._
+
+## 2026-08-26 — "clean the table": the strengthening queue is EMPTY (except one watch item)
+
+Vesa's order after the XP sweep. Eight commits, each cluster committed separately
+(DECISIONS.md 2026-08-26 sweep-rulings entry; every queue item ticked with a dated note):
+**fronts** — the 4-front Dynamic World upgrade P1 (silent no-op that reported success) fixed
+at both hiding sites with a resolved-fronts-excluded counting rule the reducer mirrors;
+`WEB_TARGET_FRONTS` named; installers deduped; the ONE faction sanitizer; `front_updates`
+clock/stage gains throttled (the last unguarded DM numeric channel); first direct
+`engine/fronts.test.js`. **Scene-art** — the no-op Regenerate portrait button P1 (bypassCache +
+provider label), shared PORTRAIT_STYLE + "(woman)" tag on hero portraits, party-aware
+location-aware scene composition, session-scoped image cache keys, dead resolution knob
+removed. **Dice** — Champion nat-19 crits now display in combat (stampCriticalRoll single
+owner), one fairness kernel, LOAD_GAME rollHistory cap, dead rollWithAdvantage params, the
+rejection-sampling redraw loop pinned by a crypto stub. **Scribe** — split into scribe.js +
+scribeAudits.js + sceneDirector.js, tryParseDirectorJson, claimAuditSource, hasAuditPayload
+everywhere. **Quests** — fuzzy-but-strict quest identity (drifted completions close the arc;
+the phantom-duplicate-row P3, post-ruling a 25 XP leak). **Magic Missile** — darts mode: a
+declared split is honored round-robin. **Mobile UX** — the drawer is a real dialog (visible
+close, Escape, focus cycle, aria) and ability buttons have real accessible names;
+live-verified in the browser at 375×812 / 1280×720 / 1400×900. Left open BY DESIGN: the NPC
+pronoun-flip WATCH item (prompt fix shipped 2026-08-09, zero flips since — needs live
+evidence before more machinery). 1,754 tests green (+39 this sweep), lint clean, deployed.
 
 ## 2026-08-26 — double-XP fix sweep: XP replay ledger + engine-owned quest/boss XP
 

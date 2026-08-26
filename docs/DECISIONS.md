@@ -8,6 +8,36 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-26 · Queue-clearing sweep rulings: web-size counting excludes resolved fronts, DM front gains are throttled, Magic Missile is a darts spell, quest identity is fuzzy-but-strict, and every image cache key is session-scoped.**
+Vesa's "clean the table" order emptied the strengthening queue (2 P1s + 17 P2s + the mobile-UX
+and Magic Missile items; only the NPC pronoun-flip WATCH item stays open, correctly, pending live
+evidence). The sweep settled several small design questions worth logging beyond the queue's own
+tick notes: **(1) front-web counting** — `WEB_TARGET_FRONTS` (3) is named beside
+`MAX_ACTIVE_FRONTS` (4), and web sizing counts NON-RESOLVED fronts everywhere on the
+generation/upgrade path (resolved fronts are history: never sent to the LLM, never enriched,
+never counted — this was the 4-front upgrade P1's root), while the aftermath/regional installers
+keep their active-only top-up counting; **(2) the DM's `front_updates` clock/stage GAINS are
+engine-throttled** (one per front per 10 conversational messages via a normalization-surviving
+`lastDmClockGainMessage` stamp; softening and symptoms never throttled) — the last DM-writable
+numeric channel without a replay guard now has one, completing the 2026-07-21 invariant's
+coverage; **(3) Magic Missile is a `darts` targeting mode** (3 +1/upcast, declared multi-target
+casts split round-robin in declared order, single target keeps 3d4+3) — the engine honors a
+player's legal dart split instead of letting narration invent physics to cover an override;
+**(4) quest identity is fuzzy with two guardrails** — shared-textMatch containment PLUS
+near-equality (the smaller name must cover >half the larger: "The Relic of Kel" is "Find the
+Relic of Kel", but "The Cellar Rats" never swallows "Rats in the Cellar Shrine") and
+unambiguity (2+ candidates → today's insert behavior, never a guess); **(5) every image cache
+key folds in a `sessionScope`** so cross-campaign stale hits are structurally unreachable (the
+boundary `clearImageCache()` calls remain as belt-and-braces), and the hero portrait prompt
+joined the "(woman)" inviolable-gender tag convention; **(6) the crit RULE's display stamp has
+one owner** (`combatMath.stampCriticalRoll`; dice.ts keeps only the universal natural-20 fact);
+**(7) scribe.js split on its two clean seams** (audits → `scribeAudits.js` behind
+`runNarrationAudits`, art director → `sceneDirector.js` with re-exports; extraction + reflection
+deliberately stay together — they share context builders). Mobile drawer became a real dialog
+(visible close, Escape, focus cycle, aria semantics — live-verified at 375×812/1280×720).
+
+---
+
 **2026-08-26 · The exp_awarded exemption is spent: `recentExpAwards` replay-guards XP awards AND milestone level-ups; the damage/healing exemption stands.**
 Vesa's live report (observed at least twice): asked the DM for XP it had forgotten, the DM
 promised it "on your next in-game action" — then awarded the same amount on the TWO next turns.
