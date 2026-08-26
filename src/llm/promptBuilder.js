@@ -408,7 +408,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "combat_start": {
     "surprise": "none",
     "enemies": [
-      { "id": "goblin-1", "name": "Goblin", "hp": 15, "ac": 13, "attack_bonus": 4, "damage": "1d6+2", "save_bonus": 2, "is_undead": false }
+      { "id": "goblin-1", "name": "Goblin", "hp": 15, "ac": 13, "attack_bonus": 4, "damage": "1d6+2", "save_bonus": 2, "is_undead": false, "boss": false }
     ]
   },
   "spell_cast": { "spell": "cure wounds", "slot_level": 1, "target": "self" },
@@ -451,6 +451,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 ## QUEST TRACKING INSTRUCTIONS
 - The Quests panel only shows what you emit — whenever the hero ACCEPTS a job, deal, debt, errand, hunt, or investigation (even an informal handshake like "clear the rats and the room is yours"), emit \`quest_updates\` with \`status: "new"\`, a short name, and what was agreed (task, payment/stakes, who asked).
 - When an objective meaningfully changes, emit \`status: "updated"\` with the new situation; when it is fulfilled or becomes impossible, emit \`status: "completed"\` or \`status: "failed"\` in the same response that narrates it.
+- Completing a quest pays engine-computed XP automatically (a visible system line confirms it). NEVER emit \`exp_awarded\` for a quest completion — that double-pays. Failed quests pay nothing.
 - One quest per actual agreement — don't open quests for vague rumors, mere invitations, or things the hero declined.
 - A patron is NOT required: when the hero TAKES UP a pursuit on their own initiative and acts on it — investigating a disappearance, hunting a beast, tracking a debt — open the quest the moment they act on it (a full missing-family investigation with no quest entry is the failure mode; a passing question is not a quest).
 - Use \`world_facts\` to canonize important outcomes: deaths, alliances, discoveries, betrayals, destroyed places, established lore
@@ -511,6 +512,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
 - Use "combat_start" when combat begins and list every foe 1:1 with a unique stable "id", plus "name", "hp", "ac", "attack_bonus", and "damage". Mark skeletons, zombies, ghouls, and other undead with "is_undead": true, and optionally give tough foes a flat "save_bonus" (-5..15, default +2) used for spell saving throws. Never silently add or drop combatants. If the same response also contains "combat_exchange", every player/companion/enemy reference must use one of those exact combat_start ids.
 - Set combat_start "surprise" to "player" only when the player is genuinely caught unaware, "enemies" only when the foes are caught unaware, otherwise "none". The engine converts this into Opening Initiative; never grant surprise attacks in narration yourself.
+- Mark a NAMED, narratively significant, notably tougher-than-mooks antagonist with "boss": true in combat_start — a campaign villain, a monstrous alpha, a duel-worthy champion. Not every elite, never generic guards or numbered minions. The engine independently verifies the foe's toughness before paying elevated XP, so inflating a fake boss's stats just makes an unusually hard ordinary fight; a decisive kill or surrender of a genuine boss pays a larger engine-computed reward automatically (a boss that flees does not).
 - Every committed player turn includes exactly one \`combat_exchange\`. A question or clarification includes none, so nobody acts.
 - \`player_slots\`: normally exactly one; when ACTION SURGE ACTIVE is shown, exactly two. Each slot is independently \`attack\`, \`cast\`, \`channel\`, \`check\`, \`save\`, \`dodge\`, \`dash\`, \`disengage\`, \`flee\`, \`interact\`, \`pass\`, \`death_save\`, or \`second_wind\`.
 - An Attack slot uses \`strikes: [{"target":"<living enemy id>"}]\`. A Fighter with Extra Attack may name two strikes in one Attack slot, including different targets. Action Surge grants another action slot, not automatically another attack.
@@ -571,8 +573,9 @@ REST & RESOURCES:
 - Do NOT manually heal via the "healing" field when a rest occurs — the system handles it. Use "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC casts a healing spell on the player).
 
 PROGRESSION & STATUS EFFECTS:
-- The engine awards combat XP automatically for defeated, surrendered, or fled threats. Use "exp_awarded" only for non-combat objectives and quests; never duplicate combat XP.
-- "exp_awarded" is one-shot: award XP for an accomplishment exactly once, in the response that resolves it — never re-emit XP in a later response that references the same accomplishment.
+- The engine awards XP automatically for combat (defeated, surrendered, or fled threats — with a larger reward for a decisively beaten "boss": true foe) AND for every quest completed via quest_updates. NEVER emit "exp_awarded" for winning a fight or completing a quest — the engine already paid; an award on top double-pays.
+- Use "exp_awarded" ONLY for small freeform bonuses the engine cannot see: clever roleplay, a brilliant solution, a discovery, a personal milestone outside any quest. Keep it modest (tens to low hundreds of XP).
+- "exp_awarded" is one-shot: award XP for an accomplishment exactly once, in the response that resolves it — never re-emit XP in a later response that references, recaps, or confirms the same accomplishment, even if the player asks whether XP was granted (the engine shows every award as a system line; if none appeared, it was not granted — award the missing amount ONCE, then never again).
 - **LEVELING:** The client owns XP thresholds, HP gain, hit dice, feature unlocks, and level-up messages. Do NOT narrate HP or stat changes yourself. Use "level_up": true only for a deliberate story milestone where the character should gain exactly one level regardless of current XP; otherwise award XP normally and let the system decide.
 - **FIGHTER EXTRA ATTACK:** Fighters of level 5+ may declare two targetable strikes inside each Attack slot. The engine rolls and applies both.
 - **ROGUE CLASS FEATURES (Level 1–5):**

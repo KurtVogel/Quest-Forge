@@ -802,6 +802,21 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_EXP', payload: 25 });
     });
 
+    it('suppresses exp_awarded emitted alongside a quest completion — the engine pays quest XP itself', () => {
+        const dispatch = run({
+            exp_awarded: 75,
+            quest_updates: [{ status: 'completed', id: 'q1', name: 'Find the relic' }],
+        });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_QUEST', payload: { id: 'q1', name: 'Find the relic' } });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_EXP' }));
+        // Non-completion statuses keep the award: nothing engine-side pays for them.
+        const updatedOnly = run({
+            exp_awarded: 75,
+            quest_updates: [{ status: 'updated', id: 'q1', name: 'Find the relic' }],
+        });
+        expect(updatedOnly).toHaveBeenCalledWith({ type: 'ADD_EXP', payload: 75 });
+    });
+
     it('dispatches a rest, conditions, and quest updates', () => {
         const dispatch = run({
             rest_taken: 'short',

@@ -107,6 +107,9 @@ export function validateCombatStart(combatStart) {
                 ...(damage !== undefined && { damage }),
                 ...(saveBonus !== undefined && { saveBonus }),
                 isUndead: e.is_undead === true || e.isUndead === true,
+                // Untrusted narrative flag — the XP estimator independently gates it
+                // on the enemy's raw statline before honoring the boss tier.
+                boss: e.boss === true || e.isBoss === true,
             };
         });
 

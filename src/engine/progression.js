@@ -26,6 +26,16 @@ export function isMaxLevel(level) {
     return Math.max(1, Number(level) || 1) >= MAX_CHARACTER_LEVEL;
 }
 
+/*
+ * THE THREE LEVEL-SCALED REWARD TIERS (rpg-balance-master rulings 2026-08-05
+ * and 2026-08-22): front resolution (50% of the current level's threshold) >
+ * quest completion ≈ boss kill (12.5%, i.e. exactly 1/4 of a front — so 4
+ * quests = 1 front = half a level, 8 quests = 1 level, at ANY level) >
+ * ordinary combat (flat 25–300 per enemy clamp, deliberately non-scaling).
+ * All three are engine-computed only — never routed through the LLM-declared
+ * exp_awarded channel, which is reserved for small freeform bonuses.
+ */
+
 /**
  * Milestone XP for decisively ending a hidden campaign front (DECISIONS.md
  * 2026-08-05 ×2, rpg-balance-master ruling): half the XP gap from the
@@ -38,6 +48,23 @@ export function isMaxLevel(level) {
  */
 export function getFrontResolutionMilestoneXp(level) {
     return Math.round(0.5 * getExperienceThreshold(Math.max(1, Number(level) || 1)));
+}
+
+// Flat award for a quest opened and resolved inside a single DM response (or
+// recorded terminal via the never-tracked fallback insert): deliberately
+// near-zero at high level so same-turn quest minting can never be farmed.
+export const QUEST_INSTANT_XP = 25;
+
+/**
+ * Engine-owned XP for completing a tracked quest (rpg-balance-master ruling
+ * 2026-08-22): 12.5% of the current level's threshold — exactly 1/4 of a front
+ * resolution, so the "8 completed quests = 1 level" invariant holds at every
+ * level. Chosen over the LLM's exp_awarded channel on live evidence: for the
+ * identical scripted quest, gpt-5.6 awarded +75 XP and gemini-3.1-pro-preview
+ * awarded 0.
+ */
+export function getQuestCompletionXp(level) {
+    return Math.round(0.125 * getExperienceThreshold(Math.max(1, Number(level) || 1)));
 }
 
 function createSystemMessage(kind, content) {
@@ -152,7 +179,15 @@ export function awardExperience(character, amount = 0, options = {}) {
     return { character: updatedCharacter, messages };
 }
 
-export function estimateCombatExperience(enemies = []) {
+// A boss flag only pays boss XP when the statline was already going to max out
+// the ordinary per-enemy clamp anyway — the flag is untrusted LLM input, the
+// raw score is engine-verifiable (rpg-balance-master ruling 2026-08-22).
+const BOSS_RAW_FLOOR = 300;
+// Even floor-qualifying bosses are honored at most twice per fight: flagging a
+// whole wave of elites must not turn one encounter into a front-scale payday.
+const MAX_BOSS_AWARDS_PER_FIGHT = 2;
+
+export function estimateCombatExperience(enemies = [], level = 1) {
     // Fallback-estimator inputs come straight from LLM-authored enemy records —
     // an object-valued stat would poison the whole sum with NaN (Math.max(25, NaN)
     // is NaN), so coerce each stat and skip junk entries entirely.
@@ -160,11 +195,28 @@ export function estimateCombatExperience(enemies = []) {
         const n = Number(value);
         return Number.isFinite(n) && n > 0 ? n : 0;
     };
+    let bossAwards = 0;
     return (Array.isArray(enemies) ? enemies : []).reduce((sum, enemy) => {
         if (!enemy || typeof enemy !== 'object') return sum;
         const hp = positive(enemy.maxHp) || positive(enemy.hp) || 10;
         const ac = positive(enemy.ac) || 12;
         const raw = hp * 2 + ac * 3;
+        // Boss tier: kill or surrender only — a fled boss can narratively return,
+        // and with no persistent boss-identity ledger the elevated tier would
+        // double-dip on every reappearance. Fled bosses pay ordinary flee-XP.
+        const qualifiesAsBoss = enemy.boss === true
+            && raw >= BOSS_RAW_FLOOR
+            && enemy.combatStatus !== 'fled'
+            && bossAwards < MAX_BOSS_AWARDS_PER_FIGHT;
+        if (qualifiesAsBoss) {
+            bossAwards += 1;
+            // Ceiling pinned to the quest tier so a single fight, however dramatic,
+            // never rivals a front resolution; never below the ordinary 300 clamp
+            // the boss already had to clear (at L1–3 the quest tier is under 300,
+            // where boss XP deliberately degenerates to the ordinary ceiling).
+            const ceiling = Math.max(BOSS_RAW_FLOOR, getQuestCompletionXp(level));
+            return sum + Math.max(BOSS_RAW_FLOOR, Math.min(Math.round(raw * 2), ceiling));
+        }
         return sum + Math.max(25, Math.min(300, Math.round(raw)));
     }, 0);
 }

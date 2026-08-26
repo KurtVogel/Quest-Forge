@@ -312,13 +312,22 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         });
     }
 
+    // Completing a tracked quest pays engine-owned XP in COMPLETE_QUEST (rpg-balance-master
+    // ruling 2026-08-22). The DM is told never to ALSO award exp_awarded for the completion,
+    // but some models do it every time (live evidence: gpt-5.6 added +75 on an identical
+    // scripted completion) — the purchase/loose-coin-loss suppression pattern, applied to XP.
+    let expAwarded = events.expAwarded || 0;
+    if (expAwarded > 0 && events.questUpdates.some(q => q.status === 'completed')) {
+        console.warn('[applyEvents] Ignored exp_awarded emitted alongside a quest completion — the engine pays quest XP itself.');
+        expAwarded = 0;
+    }
     if (events.levelUp) {
         // Explicit level-up from the DM — skip ADD_EXP to avoid double-leveling
         // if the awarded XP would also cross the threshold. Any bonus XP carries
         // over as progress toward the next level.
-        dispatch({ type: 'LEVEL_UP', payload: { bonusExp: events.expAwarded || 0, reason: 'milestone' } });
-    } else if (events.expAwarded > 0) {
-        dispatch({ type: 'ADD_EXP', payload: events.expAwarded });
+        dispatch({ type: 'LEVEL_UP', payload: { bonusExp: expAwarded, reason: 'milestone' } });
+    } else if (expAwarded > 0) {
+        dispatch({ type: 'ADD_EXP', payload: expAwarded });
     }
 
     if (events.restTaken === 'short' || events.restTaken === 'long') {

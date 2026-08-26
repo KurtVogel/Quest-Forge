@@ -226,7 +226,7 @@ describe('sanitizeLoadedEnemy', () => {
         expect(cleaned.junkPayload).toBeUndefined();
         expect(cleaned.portraitUrl).toBeUndefined();
         expect(Object.keys(cleaned).sort()).toEqual([
-            'ac', 'combatStatus', 'condition', 'conditions', 'defending',
+            'ac', 'boss', 'combatStatus', 'condition', 'conditions', 'defending',
             'hp', 'id', 'initiative', 'isUndead', 'maxHp', 'name', 'saveBonus',
         ].sort());
     });

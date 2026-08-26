@@ -595,6 +595,31 @@ describe('END_COMBAT client-side XP fallback', () => {
         expect(next.messages.at(-1).content).toContain('foes slain before the fight ended: Goblin');
     });
 
+    it('pays boss-tier XP for a killed floor-qualifying boss and ordinary XP for a fled one', () => {
+        const base = endCombatState([
+            { id: 'e1', name: 'Kroll the Butcher', hp: 0, maxHp: 200, ac: 20, condition: 'dead', boss: true },
+        ]);
+        const state = { ...base, character: { ...base.character, level: 5 } };
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
+        // raw = 200*2 + 20*3 = 460 → boss pays min(920, quest tier 938) = 920 at L5.
+        expect(next.character.exp).toBe(920);
+
+        const fledBase = endCombatState([
+            { id: 'e1', name: 'Kroll the Butcher', hp: 120, maxHp: 200, ac: 20, combatStatus: 'fled', boss: true },
+        ]);
+        const fledState = { ...fledBase, character: { ...fledBase.character, level: 5 } };
+        const fledNext = gameReducer(fledState, { type: 'END_COMBAT', payload: {} });
+        expect(fledNext.character.exp).toBe(300); // ordinary flee-XP, no elevated tier
+    });
+
+    it('ignores a boss flag on a below-floor mook (untrusted input)', () => {
+        const state = endCombatState([
+            { id: 'e1', name: 'Goblin "Boss"', hp: 0, maxHp: 7, ac: 13, condition: 'dead', boss: true },
+        ]);
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
+        expect(next.character.exp).toBe(53); // plain 7*2 + 13*3
+    });
+
     it('stays silent when the DM already awarded XP this turn (llmAwardedXp)', () => {
         const state = endCombatState([
             { id: 'e1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' },

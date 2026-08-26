@@ -133,6 +133,7 @@ export function sanitizeLoadedEnemy(enemy) {
         combatStatus: ['active', 'fled', 'surrendered'].includes(enemy.combatStatus) ? enemy.combatStatus : 'active',
         defending: !!enemy.defending,
         isUndead: !!enemy.isUndead,
+        boss: enemy.boss === true,
     };
     if (typeof enemy.initiative === 'number' && Number.isFinite(enemy.initiative)) {
         cleaned.initiative = enemy.initiative;

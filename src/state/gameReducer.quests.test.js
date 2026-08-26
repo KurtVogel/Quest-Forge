@@ -107,6 +107,102 @@ describe('REMOVE_QUEST and bare-id completion (2026-08-04 queue P2)', () => {
     });
 });
 
+describe('engine-owned quest completion XP (rpg-balance-master ruling 2026-08-22)', () => {
+    const hero = {
+        name: 'Astra',
+        race: 'human',
+        class: 'fighter',
+        level: 2,
+        exp: 0,
+        maxHP: 20,
+        currentHP: 20,
+        abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 },
+        features: [],
+        classResources: {},
+        hitDice: { total: 2, remaining: 2, die: 10 },
+    };
+    const message = (i) => ({ id: `m-${i}`, role: 'assistant', content: `turn ${i}`, timestamp: i });
+    const withHero = () => ({ ...initialGameState, character: { ...hero } });
+    const passTurns = (state, count) => ({
+        ...state,
+        messages: [...state.messages, ...Array.from({ length: count }, (_, i) => message(state.messages.length + i))],
+    });
+
+    it('pays the full tier (12.5% of threshold) for a tracked quest completed on a later turn', () => {
+        let state = gameReducer(withHero(), { type: 'ADD_QUEST', payload: { id: 'q-rats', name: 'Clear the Cellar Rats' } });
+        state = passTurns(state, 4);
+        const next = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-rats', name: 'Clear the Cellar Rats' } });
+
+        expect(next.quests[0].status).toBe('completed');
+        expect(next.character.exp).toBe(75); // 12.5% of the 600 XP L2→3 threshold
+        expect(next.messages.at(-1).content).toContain('quest completed: Clear the Cellar Rats');
+    });
+
+    it('caps a quest opened and closed in the SAME turn at the flat instant tier', () => {
+        const state = gameReducer(withHero(), { type: 'ADD_QUEST', payload: { id: 'q-fast', name: 'Fetch the Ledger' } });
+        const next = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-fast', name: 'Fetch the Ledger' } });
+        expect(next.character.exp).toBe(25);
+    });
+
+    it('pays the never-tracked fallback insert the flat instant tier only', () => {
+        const next = gameReducer(withHero(), {
+            type: 'COMPLETE_QUEST',
+            payload: { name: "The Ferrywoman's Letter", description: 'Delivered off-screen.' },
+        });
+        expect(next.quests[0].status).toBe('completed');
+        expect(next.character.exp).toBe(25);
+    });
+
+    it('pays NOTHING for a failed quest — matched or never-tracked', () => {
+        let state = gameReducer(withHero(), { type: 'ADD_QUEST', payload: { id: 'q-debt', name: 'Collect the Debt' } });
+        state = passTurns(state, 4);
+        const failed = gameReducer(state, { type: 'FAIL_QUEST', payload: { id: 'q-debt', name: 'Collect the Debt' } });
+        expect(failed.quests[0].status).toBe('failed');
+        expect(failed.character.exp).toBe(0);
+
+        const fallbackFailed = gameReducer(withHero(), { type: 'FAIL_QUEST', payload: { name: 'A Doomed Errand' } });
+        expect(fallbackFailed.character.exp).toBe(0);
+    });
+
+    it('never pays twice: re-emitting the same completion on a later turn re-writes a terminal status without XP', () => {
+        let state = gameReducer(withHero(), { type: 'ADD_QUEST', payload: { id: 'q-rats', name: 'Clear the Cellar Rats' } });
+        state = passTurns(state, 4);
+        state = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-rats', name: 'Clear the Cellar Rats' } });
+        expect(state.character.exp).toBe(75);
+
+        state = passTurns(state, 3);
+        const replay = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-rats', name: 'Clear the Cellar Rats' } });
+        expect(replay.character.exp).toBe(75); // unchanged
+        expect(replay.quests).toHaveLength(1);
+    });
+
+    it('treats a pre-ruling row without openedAtMessage as not-same-turn (full tier, non-exploitable direction)', () => {
+        const state = {
+            ...withHero(),
+            quests: [{ id: 'q-old', name: 'An Old Promise', status: 'active', addedAt: 1 }],
+        };
+        const next = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-old', name: 'An Old Promise' } });
+        expect(next.character.exp).toBe(75);
+    });
+
+    it('untrusted payloads cannot pre-age openedAtMessage to fake the full tier', () => {
+        let state = withHero();
+        state = passTurns(state, 6);
+        // A hostile/echoed payload claiming the quest opened long ago must still
+        // be stamped with the CURRENT message count on creation.
+        state = gameReducer(state, { type: 'ADD_QUEST', payload: { id: 'q-inject', name: 'Instant Riches', openedAtMessage: 0 } });
+        const next = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-inject', name: 'Instant Riches' } });
+        expect(next.character.exp).toBe(25);
+    });
+
+    it('completes without XP or crash when no character exists yet', () => {
+        const state = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q-pre', name: 'Prologue Task' } });
+        const next = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-pre', name: 'Prologue Task' } });
+        expect(next.quests[0].status).toBe('completed');
+        expect(next.character).toBeNull();
+    });
+});
+
 describe('finished quests stay closed (documented 2026-07-23)', () => {
     it('a new quest reusing a completed quest name opens a NEW arc instead of reopening the old one', () => {
         const state = {

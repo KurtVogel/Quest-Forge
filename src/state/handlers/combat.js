@@ -64,6 +64,7 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
         combatStatus: 'active',
         defending: false,
         isUndead: !!enemy?.isUndead,
+        boss: enemy?.boss === true,
     };
 }
 
@@ -190,7 +191,7 @@ export const handlers = {
             const defeatedEnemies = (state.combat.enemies || []).filter(e => slainXpOnly
                 ? ((e.hp ?? 0) <= 0 || e.condition === 'dead')
                 : !isEnemyActive(e));
-            const fallbackXp = estimateCombatExperience(defeatedEnemies);
+            const fallbackXp = estimateCombatExperience(defeatedEnemies, state.character.level);
 
             if (fallbackXp > 0) {
                 const enemyNames = defeatedEnemies.map(e => e.name).join(', ');

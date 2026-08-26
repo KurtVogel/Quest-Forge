@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { awardExperience, estimateCombatExperience, getExperienceThreshold, isMaxLevel, MAX_CHARACTER_LEVEL } from './progression.js';
+import { awardExperience, estimateCombatExperience, getExperienceThreshold, getQuestCompletionXp, isMaxLevel, MAX_CHARACTER_LEVEL, QUEST_INSTANT_XP } from './progression.js';
 import { normalizeAbilityScoreImprovementState } from './characterUtils.js';
 
 const character = {
@@ -191,6 +191,65 @@ describe('estimateCombatExperience (End-Combat XP fallback)', () => {
 
     it('returns 0 for an empty encounter', () => {
         expect(estimateCombatExperience([])).toBe(0);
+    });
+});
+
+describe('quest-completion XP tiers (rpg-balance-master ruling 2026-08-22)', () => {
+    it('pays 12.5% of the current level threshold so 8 quests always make a level', () => {
+        expect(getQuestCompletionXp(1)).toBe(38); // round(37.5) — rounds UP so 8 quests clear 300
+        expect(getQuestCompletionXp(2)).toBe(75);
+        expect(getQuestCompletionXp(4)).toBe(475);
+        expect(getQuestCompletionXp(5)).toBe(938);
+        expect(getQuestCompletionXp(10)).toBe(2625);
+        for (const level of [1, 5, 10, 19]) {
+            expect(getQuestCompletionXp(level) * 8).toBeGreaterThanOrEqual(getExperienceThreshold(level));
+        }
+    });
+
+    it('keeps the instant tier flat and near-zero at any level', () => {
+        expect(QUEST_INSTANT_XP).toBe(25);
+    });
+
+    it('clamps junk levels to level 1', () => {
+        expect(getQuestCompletionXp(0)).toBe(38);
+        expect(getQuestCompletionXp(NaN)).toBe(38);
+        expect(getQuestCompletionXp(undefined)).toBe(38);
+    });
+});
+
+describe('boss XP (statline-floor gated, rpg-balance-master ruling 2026-08-22)', () => {
+    it('ignores the boss flag on a foe below the 300-raw floor — untrusted input pays ordinary XP', () => {
+        // raw = 6*2 + 10*3 = 42 — a flagged mook is just a mook.
+        expect(estimateCombatExperience([{ maxHp: 6, ac: 10, boss: true }], 5)).toBe(42);
+    });
+
+    it('pays raw*2 capped by the quest tier for a floor-qualifying boss', () => {
+        // raw = 200*2 + 20*3 = 460 ≥ 300 → boss pays min(920, max(300, 938)) = 920 at L5.
+        expect(estimateCombatExperience([{ maxHp: 200, ac: 20, boss: true }], 5)).toBe(920);
+    });
+
+    it('degenerates to the ordinary 300 ceiling at low level (quest tier < 300)', () => {
+        expect(estimateCombatExperience([{ maxHp: 200, ac: 20, boss: true }], 1)).toBe(300);
+        // Never pays LESS than the 300 the boss already had to clear.
+        expect(estimateCombatExperience([{ maxHp: 200, ac: 20, boss: true }], 3)).toBe(300);
+    });
+
+    it('honors at most two floor-qualifying bosses per fight, in array order', () => {
+        const wave = [
+            { maxHp: 200, ac: 20, boss: true }, // 920 (boss 1)
+            { maxHp: 200, ac: 20, boss: true }, // 920 (boss 2)
+            { maxHp: 200, ac: 20, boss: true }, // 300 (excess — ordinary cap)
+        ];
+        expect(estimateCombatExperience(wave, 5)).toBe(2140);
+    });
+
+    it('pays a FLED boss ordinary XP only — the elevated tier needs a kill or surrender', () => {
+        expect(estimateCombatExperience([{ maxHp: 200, ac: 20, boss: true, combatStatus: 'fled' }], 5)).toBe(300);
+        expect(estimateCombatExperience([{ maxHp: 200, ac: 20, boss: true, combatStatus: 'surrendered' }], 5)).toBe(920);
+    });
+
+    it('keeps legacy no-level calls at the ordinary ceiling (backward compatibility)', () => {
+        expect(estimateCombatExperience([{ maxHp: 200, ac: 20, boss: true }])).toBe(300);
     });
 });
 
