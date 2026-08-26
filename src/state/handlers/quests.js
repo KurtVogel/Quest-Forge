@@ -7,7 +7,34 @@
  * pays twice.
  */
 import { awardExperience, getQuestCompletionXp, QUEST_INSTANT_XP } from '../../engine/progression.js';
+import { containment, tokenSet } from '../../engine/textMatch.js';
 import { normalizeRefToken } from './shared.js';
+
+// Quest-name stopwords: articles/fillers that survive normalizeRefToken but
+// carry no identity ("The Cellar Rats" ≈ "Clear the Cellar Rats").
+const QUEST_NAME_STOP_WORDS = new Set(['the', 'a', 'an', 'of', 'for', 'to', 'and']);
+const questTokens = (name) => tokenSet(String(name || ''), {
+    stopWords: QUEST_NAME_STOP_WORDS,
+    minLength: 2,
+    foldPossessives: true,
+});
+
+/**
+ * Fuzzy quest-name identity (rpg-balance-master ruling follow-up, 2026-08-26;
+ * the 2026-08-22 Terra playtest P3): a re-phrased completion ("The Relic" for
+ * "Find the Relic") used to miss the exact-token match and mint a phantom
+ * SECOND completed row via the fallback insert. Same shared textMatch core as
+ * the loot audits: symmetric token containment over stopword-stripped names.
+ */
+function questNamesFuzzyMatch(a, b) {
+    const setA = questTokens(a);
+    const setB = questTokens(b);
+    if (setA.size === 0 || setB.size === 0 || containment(setA, setB) < 0.99) return false;
+    // Near-equality, not bare subset: "The Relic of Kel" is "Find the Relic of
+    // Kel" (one dropped verb), but "The Cellar Rats" must NOT swallow "Rats in
+    // the Cellar Shrine" — a name twice as long is a different quest.
+    return Math.min(setA.size, setB.size) / Math.max(setA.size, setB.size) > 0.5;
+}
 
 export const handlers = {
     ADD_QUEST(state, action) {
@@ -17,12 +44,19 @@ export const handlers = {
         // a completed/failed quest is table history and stays closed; a new quest
         // reusing its name is a new arc ("Guard the caravan" can recur), never a
         // silent reopen that would erase how the first one ended.
-        const existing = state.quests.find(quest =>
+        let existing = state.quests.find(quest =>
             quest.status === 'active' && (
                 (payload.id && quest.id === payload.id) ||
                 (nameToken && normalizeRefToken(quest.name) === nameToken)
             )
         );
+        // Fuzzy fallback, unambiguous only: a re-phrased "updated" must refresh
+        // the tracked arc, not mint a drifted twin beside it.
+        if (!existing && nameToken) {
+            const fuzzy = state.quests.filter(quest =>
+                quest.status === 'active' && questNamesFuzzyMatch(quest.name, payload.name));
+            if (fuzzy.length === 1) existing = fuzzy[0];
+        }
         if (existing) {
             return {
                 ...state,
@@ -55,7 +89,22 @@ export const handlers = {
         const refId = typeof ref === 'object' ? ref.id : ref;
         const refName = typeof ref === 'object' ? ref.name : ref;
         const nameToken = normalizeRefToken(refName);
-        const isMatch = (q) => q.id === refId || (nameToken && normalizeRefToken(q.name) === nameToken);
+        let isMatch = (q) => q.id === refId || (nameToken && normalizeRefToken(q.name) === nameToken);
+        if (!state.quests.some(isMatch) && nameToken) {
+            // Fuzzy fallback before the fallback INSERT: a drifted completion name
+            // ("The Relic" for "Find the Relic") closes the tracked arc instead of
+            // minting a phantom second terminal row. Unambiguous only — active
+            // rows preferred, and 2+ candidates keep the exact-match behavior
+            // (the insert), never a guess.
+            const fuzzy = state.quests.filter(q => questNamesFuzzyMatch(q.name, refName));
+            const pool = fuzzy.some(q => q.status === 'active')
+                ? fuzzy.filter(q => q.status === 'active')
+                : fuzzy;
+            if (pool.length === 1) {
+                const matchedId = pool[0].id;
+                isMatch = (q) => q.id === matchedId;
+            }
+        }
         const matched = state.quests.some(isMatch);
         if (matched) {
             let next = {

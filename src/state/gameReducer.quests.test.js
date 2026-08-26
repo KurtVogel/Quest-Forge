@@ -203,6 +203,53 @@ describe('engine-owned quest completion XP (rpg-balance-master ruling 2026-08-22
     });
 });
 
+describe('fuzzy quest-name identity (Terra playtest P3, ruling follow-up 2026-08-26)', () => {
+    it('a drifted completion name closes the tracked quest instead of minting a phantom second row', () => {
+        const added = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { id: 'q-relic', name: 'Find the Relic of Kel' },
+        });
+        const next = gameReducer(added, { type: 'COMPLETE_QUEST', payload: { name: 'The Relic of Kel' } });
+        expect(next.quests).toHaveLength(1);
+        expect(next.quests[0]).toMatchObject({ id: 'q-relic', status: 'completed' });
+    });
+
+    it('an ambiguous fuzzy match falls through to the fallback insert — never a guess', () => {
+        let state = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q-1', name: 'The Cellar Rats' } });
+        state = gameReducer(state, { type: 'ADD_QUEST', payload: { id: 'q-2', name: 'Rats in the Cellar Shrine' } });
+        const next = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'Cellar Rats Dealt With', description: 'd' } });
+        expect(next.quests.find(q => q.id === 'q-1').status).toBe('active');
+        expect(next.quests.find(q => q.id === 'q-2').status).toBe('active');
+        expect(next.quests).toHaveLength(3); // recorded as its own table history
+    });
+
+    it('a re-emitted completion with drifted phrasing is a harmless terminal re-write — no second row, no XP', () => {
+        const hero = { name: 'Astra', race: 'human', class: 'fighter', level: 2, exp: 0, maxHP: 20, currentHP: 20, abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 }, features: [], classResources: {}, hitDice: { total: 2, remaining: 2, die: 10 } };
+        let state = gameReducer({ ...initialGameState, character: hero }, {
+            type: 'ADD_QUEST',
+            payload: { id: 'q-debt', name: 'Collect the Ferry Debt' },
+        });
+        state = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-debt', name: 'Collect the Ferry Debt' } });
+        const paidOnce = state.character.exp;
+        const replay = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'The Ferry Debt' } });
+        expect(replay.quests).toHaveLength(1);
+        expect(replay.character.exp).toBe(paidOnce);
+    });
+
+    it('ADD_QUEST "updated" with a drifted name refreshes the tracked arc instead of duplicating it', () => {
+        const added = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { id: 'q-relic', name: 'Find the Relic of Kel', description: 'It was lost long ago.' },
+        });
+        const next = gameReducer(added, {
+            type: 'ADD_QUEST',
+            payload: { name: 'The Relic of Kel', description: 'The trail leads to the sunken vault.' },
+        });
+        expect(next.quests).toHaveLength(1);
+        expect(next.quests[0].description).toBe('The trail leads to the sunken vault.');
+    });
+});
+
 describe('finished quests stay closed (documented 2026-07-23)', () => {
     it('a new quest reusing a completed quest name opens a NEW arc instead of reopening the old one', () => {
         const state = {
