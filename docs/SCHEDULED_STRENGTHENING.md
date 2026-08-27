@@ -47,8 +47,8 @@ it under Process notes.
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-08-08 |
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-08-05 |
 | prompt-building | `llm/promptBuilder.js` | 2026-08-18 |
-| roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-08-03 |
-| combat-exchange | `engine/combatExchange.js`, `engine/combatMath.js`, `state/handlers/combat.js`, opening initiative | 2026-08-03 |
+| roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-08-27 |
+| combat-exchange | `engine/combatExchange.js`, `engine/combatMath.js`, `state/handlers/combat.js`, opening initiative | 2026-08-27 |
 | enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-08-05 |
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-08-24 |
 | living-world | `engine/regionalHearsay.js`, `llm/absenceDrift.js`, `llm/frontAftermath.js`, `llm/regionalFronts.js` | 2026-08-19 |
@@ -71,32 +71,36 @@ Refreshed by the audit **at most weekly** (when older than 7 days), via:
 `npm.cmd install --no-save @vitest/coverage-v8 && npx.cmd vitest run --coverage --coverage.all --coverage.include='src/**/*.{js,jsx,ts}'`
 Used only to bias feature picking toward weak spots; per-file statement % for registry files.
 
-**2026-08-18** (1530 tests / 84 files passing). % Statements per registry file:
+**2026-08-27** (1754 tests / 92 files passing). % Statements per registry file. "Absent" = the
+recurring v8-report quirk where a file with its own passing suite drops out of `--coverage.all`;
+this run it hit more files than usual (dice.ts, responseParser/jsonExtractor, combatExchange,
+outOfCombatRollPolicy, turnOrchestrator, characterVault/-Utils, currency, openaiCompatible, xai,
+regionalHearsay, frontAftermath, regionalFronts, autosavePolicy — all verified to have suites):
 
 | Feature ID | File | % Stmts |
 |---|---|---|
-| dice-engine | `engine/dice.ts` | 100 (present again in this v8 report) |
+| dice-engine | `engine/dice.ts` | absent (quirk; own suite passes) |
 | rules-math | `engine/rules.js` | 93.83 |
 | progression | `engine/progression.js` | 100 |
-| response-parsing | `responseParser.js` / `jsonExtractor.js` | 97.97 / absent from this v8 report (tooling quirk — same class as currency.js; its own suite passes) |
-| prompt-building | `promptBuilder.js` | 97.64 |
-| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 81.30 / 100 |
-| combat-exchange | `combatExchange.js` / `combatMath.js` | 84.63 / 90.56 |
+| response-parsing | `responseParser.js` / `jsonExtractor.js` | absent / absent (quirk; both suites pass) |
+| prompt-building | `promptBuilder.js` | 97.67 |
+| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 81.37 / absent (quirk) |
+| combat-exchange | `combatExchange.js` / `combatMath.js` | absent (quirk) / 91.37 |
 | enemy-stats-conditions | `enemyStats.js` | 97.36 |
-| hidden-fronts | `fronts.js` / `frontDirector.js` / `frontUpgrade.js` / `worldTempo.js` | 90.75 / 90.69 / 87.93 / 98.10 |
-| living-world | `regionalHearsay.js` / `absenceDrift.js` / `frontAftermath.js` / `regionalFronts.js` | 94.28 / 79.41 / **0** / **0** (the two 0% llm modules have no test file at all) |
-| scribe | `scribe.js` | 84.75 |
+| hidden-fronts | `engine/fronts.js` / `frontDirector.js` / `frontUpgrade.js` / `worldTempo.js` | 93.38 / 87.50 / 97.77 / 98.13 |
+| living-world | `regionalHearsay.js` / `absenceDrift.js` / `frontAftermath.js` / `regionalFronts.js` | absent / 89.83 / absent / absent (aftermath + regional gained suites 2026-08-18; the 0%s are gone) |
+| scribe | `scribe.js` | 86.98 (audit family now in `scribeAudits.js`, art director in `sceneDirector.js`) |
 | memory-journal | `worldJournal.js` | 100 |
 | story-memory | `storyMemory.js` | 96.95 |
-| vector-memory-rag | `vectorMemory.js` | 95.00 |
-| persistence | `persistence.js` | 86.06 (`GameContext.jsx` 0; `autosavePolicy.js` absent from this v8 report — quirk, has its own passing suite) |
+| vector-memory-rag | `vectorMemory.js` | 94.59 |
+| persistence | `persistence.js` | 86.06 (`GameContext.jsx` 0; `autosavePolicy.js` absent — quirk) |
 | cloud-sync | `cloudSync.js` / `auth.js` | 96.22 / 0 (auth.js untested — thin Firebase wrapper) |
-| character-vault | `characterVault.js` / `characterUtils.js` | 88.75 / 96.25 |
-| inventory-economy | `items.js` / `equipment.js` / `handlers/inventory.js` | 98.63 / 100 / 92.56 (currency.js absent from v8 report — tooling quirk, has its own passing test file) |
+| character-vault | `characterVault.js` / `characterUtils.js` | absent / absent (quirk; both suites pass) |
+| inventory-economy | `items.js` / `equipment.js` / `handlers/inventory.js` | 99.03 / 100 / 92.10 (currency.js absent — quirk) |
 | quests | `state/handlers/quests.js` | 100 |
-| scene-art | `imageGen.js` | 88.88 |
-| providers-adapter | `adapter.js` / `gemini.js` / `openaiCompatible.js` | 98.18 / 91.26 / 98.33 (openai.js / xai.js absent from v8 report — same quirk; both have passing test files) |
-| chat-orchestration | `ChatPanel.jsx` / `turnOrchestrator.js` | 0 / 62.27 |
+| scene-art | `imageGen.js` | 90.35 |
+| providers-adapter | `adapter.js` / `gemini.js` / `openai.js` | 98.18 / 91.66 / 100 (openaiCompatible.js / xai.js absent — quirk) |
+| chat-orchestration | `ChatPanel.jsx` / `turnOrchestrator.js` | 0 / absent (quirk; 4 orchestrator suites pass) |
 
 ## Open Findings Queue
 
@@ -325,6 +329,15 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P2** (scribe, 2026-08-24): the audit family repeats a 6-line claim-source preamble 4× (suffix-only variance) and mirrors the coin stand-down twice; extract `claimAuditSource(lootAudit, dispatch, suffix)` → state-or-null and `coinAuditStandsDown(appliedEvents)` before the next `narrated_*` channel copies them again, and note at the call site that `reconcileNarratedCasts` deliberately skips the preamble — `llm/scribe.js:281-289,405-411,421-427,550-575,610-618,919`. *Fixed 2026-08-26: `claimAuditSource(lootAudit, dispatch, suffix, label)` serves all four claim sites (byte-identical warns), with the casts exemption documented on the helper; the two coin stand-downs deliberately KEEP their distinct direction-specific logs — they are watched by name in playtest checklists, and the two blocks diverge structurally (loot zeroes the shortfall and continues for items; payment returns).*
 - [x] **P2** (scribe, 2026-08-24): `captureScribePass` computes five "audited" flags three different ways while `hasAuditPayload` already handles arrays and objects — the exact shape of the 2026-07-23 bug that left two flags permanently false; also the file header still says "Gemini 2.5 Flash" while `MACHINERY_MODEL` is `gemini-3.7-flash` — `llm/scribe.js:2-9,244,930-934`, `llm/machinery.js:19`. *Fixed 2026-08-26: all five inspector flags go through `hasAuditPayload`, and the header points at MACHINERY_MODEL instead of naming a model generation.*
 - [x] **P2** (dice-engine, 2026-08-20): `rollDice`'s outer redraw loop — the rejection-sampling refill that upholds the crypto-fairness guarantee — is unreachable at real die sizes and completely untested; a `crypto.getRandomValues` stub returning above-`limit` values once would pin it — `src/engine/dice.ts:74-81`. *Fixed 2026-08-26: deterministic stub test — two rejected draws (in-cycle and exactly-at-limit) then an accepted one; also covers rollDie via its new kernel alias.*
+- [ ] **P1** (combat-exchange, 2026-08-27): a bonus-action exchange lane (`second_wind` slot, Cleric bonus-cast) never sets `combat.bonusActionUsed` — `APPLY_COMBAT_EXCHANGE` leaves the flag false, so a healing potion's bonus action is still available in the same round (the UI enables it during `AWAITING_NARRATION`, when `currentTurn` is already the player's); the guard is one-way (potion-first blocks Second Wind, not the reverse), against the documented "system tracks UI-owned bonus actions" invariant — `state/handlers/combat.js:225-292`, `engine/combatExchange.js:508,953-968`, `llm/promptBuilder.js:656`.
+- [ ] **P2** (combat-exchange, 2026-08-27): `planOpeningExchange` lacks the null-character guard `planCombatExchange` gained 2026-07-25 (reads `state.character.currentHP` bare) — `engine/combatExchange.js:1573`.
+- [ ] **P2** (combat-exchange, 2026-08-27): `REJECT_COMBAT_EXCHANGE` has no phase guard (contrast APPLY's four) — a reject in `OPENING`/`AWAITING_NARRATION` would force `AWAITING_PLAYER` and abandon pending narration/round bookkeeping; UI-unreachable today, defense-in-depth — `state/handlers/combat.js:323`.
+- [ ] **P2** (combat-exchange, 2026-08-27): a check slot's `on_success` condition applies to a dead enemy (no `isEnemyActive` at resolve time; contrast the `:1443` guard) — `engine/combatExchange.js:1052-1054`.
+- [ ] **P2** (combat-exchange, 2026-08-27): the hit/crit/damage/event assembly is quadruplicated across player weapon strike / player spell attack / companion / enemy resolution — extract a `resolveAttackRoll` kernel step into `combatMath.js` — `engine/combatExchange.js:690-721,1074-1123,1158-1188,1269-1307`.
+- [ ] **P2** (roll-resolution, 2026-08-27): `roll.dc || 15` fallbacks contradict the parser's deliberate DC-10 default (`dc: 0` silently becomes DC 15) — drop them — `engine/rollResolver.js:683,783`, `llm/eventChannels.js:139`.
+- [ ] **P2** (roll-resolution, 2026-08-27): fighter L5+ out-of-combat Extra Attack and the legacy `initiative` skill branch are both untested (uncovered this run); initiative has been reducer-owned since the exchange machine yet the parser still whitelists it — pin the former, decide the latter's fate via DECISIONS — `engine/rollResolver.js:753-757,766-781`, `llm/responseParser.js:48`.
+- [ ] **P2** (roll-resolution, 2026-08-27): `npc_attack` targeting a companion ignores the companion's conditions (only AC is resolved), while every other attack path is condition-aware — thread `targetConditions` through — `engine/rollResolver.js:126-131`.
+- [ ] **P2** (roll-resolution, 2026-08-27): `resolveSinglePlayerAttackRoll` and `resolvePlayerRoll`'s tail duplicate the attack outcome/crit-label formatting (Champion-19 label in both) — fold to one formatter — `engine/rollResolver.js:678-708,760-810`.
 
 ## Entry template
 
@@ -348,6 +361,34 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-27 — roll-resolution + combat-exchange (Lap 4: simplification & design)
+
+`npm test`: 1754 passing / 92 files (green — run via this week's coverage refresh, same vitest suite)
+
+### combat-exchange
+- **Scope examined:** `engine/combatExchange.js` (all 1,669 lines), `engine/combatMath.js`, `state/handlers/combat.js`, the ChatPanel commit/reject/narration effects + `eventRouting` dispatch sites; `combatExchange.test.js` (13 describes).
+- **Findings:**
+  - **P1:** bonus-action exchange lanes never mark `combat.bonusActionUsed` — a `second_wind` slot (`combatExchange.js:953-968`) or Cleric bonus-cast lane spends its resource, but `APPLY_COMBAT_EXCHANGE` (`state/handlers/combat.js:225-292`) leaves the flag false. The guard is one-way: potion-first blocks Second Wind (`combatExchange.js:508`), but Second-Wind-first leaves the potion's bonus action available in the same round (during `AWAITING_NARRATION`, `currentTurn` is already the player's, so the UI enables it). Breaks the documented "the system tracks UI-owned bonus actions" invariant (`promptBuilder.js:656`).
+  - **P2:** `planOpeningExchange` lacks the null-character guard `planCombatExchange` gained 2026-07-25 — reads `state.character.currentHP` bare (`combatExchange.js:1573`); same latent-but-load-reachable class (combat save stranded in phase `opening`).
+  - **P2:** `REJECT_COMBAT_EXCHANGE` has no phase guard (`state/handlers/combat.js:323`) while `APPLY` carries four — a reject dispatched during `OPENING`/`AWAITING_NARRATION` would force `AWAITING_PLAYER`, abandoning pending narration + round bookkeeping. UI-unreachable today (`combatInputLocked`); defense-in-depth parity.
+  - **P2:** a check slot's `onSuccess` condition applies to a dead enemy — no `isEnemyActive` at resolve time (`combatExchange.js:1052-1054`; contrast the guard at `:1443`), so "X gains: prone" can print for a foe killed earlier in the same exchange.
+  - **P2 (design):** the hit/crit/damage/event assembly is quadruplicated — player weapon strike (`:1074-1123`), player spell attack (`:690-721`), companion (`:1158-1188`), enemy (`:1269-1307`) each re-implement `natural !== 1 && (critical || total >= ac)` + the event push; the kernel owns dice but not the hit pipeline, so a hit-rule change edits four sites. (Trivia: `resolveCompanions` is called with a `state` key it doesn't declare, `:1511`.)
+- **Suggested improvements:** (1) set `bonusActionUsed: true` in `APPLY_COMBAT_EXCHANGE` when the plan consumed a bonus lane (flag it on the payload) + a Second-Wind-then-potion test; (2) copy the `!state.character` guard into `planOpeningExchange`; (3) phase-guard `REJECT` to `AWAITING_PLAYER`/`AWAITING_INTENT`; (4) `isEnemyActive` before `onSuccess`; (5) extract a `resolveAttackRoll` kernel step in combatMath.
+
+### roll-resolution
+- **Scope examined:** `engine/rollResolver.js` (811 lines), `engine/outOfCombatRollPolicy.js`, parser `normalizeRequestedRoll`, proposal flow dispatch sites; `rollResolver.test.js` (18 describes), `outOfCombatRollPolicy.test.js`.
+- **Findings:**
+  - **P2:** the `roll.dc || 15` fallbacks (`rollResolver.js:683,783`) contradict the parser's deliberate DC-10 default (`eventChannels.js:139`, whose comment cites "never default DC 15") — unreachable via parsed events except `dc: 0`, which silently becomes DC 15. Drop them / defer to the parser default.
+  - **P2:** fighter L5+ out-of-combat Extra Attack (`:753-757`) and the `initiative` skill branch (`:766-781`) are untested (uncovered in this run's report) — and the initiative branch is legacy: initiative has been reducer-owned since the exchange machine, yet `responseParser.js:48` still whitelists `'initiative'`. Document as legacy or remove with a DECISIONS entry.
+  - **P2:** `npc_attack` targeting a companion resolves only the companion's AC (`:126-131`), ignoring the companion's conditions — while `companion_attack` passes enemy conditions (`:106`) and in-combat `resolveEnemyAttack` uses `targetConditions`. A prone companion grants no advantage out of combat; parity gap vs the 2026-07-30 kernel work.
+  - **P2 (design):** `resolveSinglePlayerAttackRoll` (`:678-708`) and `resolvePlayerRoll`'s tail (`:760-810`) duplicate the attack outcome/crit-label formatting (the Champion-19 label lives in both) — fold to one shared formatter; the Extra Attack fork is the only reason for the split.
+- **Suggested improvements:** (1) delete the DC-15 fallbacks; (2) pin Extra Attack out-of-combat (two strikes, two damage applications on the same work copy) and decide the initiative branch's fate; (3) thread companion conditions into the npc_attack path (one-line `targetConditions` pass); (4) unify the two attack formatters.
+
+### Process notes
+- Coverage snapshot refreshed (was 9 days old). `frontAftermath.js`/`regionalFronts.js` moved from 0% (no test file) to having their own suites — now absent from the v8 report under the known has-own-suite quirk instead.
+- Queue verification: only one open item remains (npc-consistency 2026-08-09) — a live-playtest watch item, not statically verifiable; left open.
+- No registry changes; Lap 4 has now covered 8 of 22 features.
 
 ## 2026-08-24 — hidden-fronts + scribe (Lap 4: simplification & design)
 
