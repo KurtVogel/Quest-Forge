@@ -109,6 +109,19 @@ describe('worldJournal context builder', () => {
         expect(ungendered).toContain('**Kaldor** (friendly)');
     });
 
+    it('shows registered species beside gender so the DM cannot drift a goblin human', () => {
+        const npcs = [{
+            name: 'Vex',
+            species: 'goblin',
+            gender: 'woman',
+            disposition: 'wary',
+            lastNotes: 'Fence in the undermarket.',
+            lastSeen: 1000,
+        }];
+        const context = buildJournalContext([], npcs, 'Brackwater');
+        expect(context).toContain('**Vex** (goblin, woman, wary)');
+    });
+
     it('injects the NPC\'s personal stance toward the hero and their shared history', () => {
         const npcs = [{
             name: 'Maren',

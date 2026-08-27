@@ -6,10 +6,18 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-26 (TWO sweeps in one day: the double-XP fix sweep — exp_awarded/level_up
-replay ledger + the quest/boss XP ruling shipped — and then Vesa's "clean the table"
-queue-clearing sweep: the strengthening queue went from 2 P1s + ~19 P2s to EMPTY except the
-pronoun watch item. See below. Both deployed)._
+_Last updated: 2026-08-27 (NPC species field shipped; strengthening audit ran twice —
+persistence + cloud-sync round found no P0/P1)._
+
+## 2026-08-27 — NPC species: a goblin can no longer quietly turn human
+
+Vesa's live finding (goblin NPC carded as just "woman, yellow eyes"). `species` is now a
+first-class 40-char plain-replace roster field mirroring gender end-to-end (DECISIONS.md
+2026-08-27): Scribe budget-exempt first-knowable capture, DM `npc_updates.species` channel,
+"Deepen memory" backfill for existing campaigns (run it on the goblin!), and rendering in
+KNOWN NPCs / RAG / KNOWN APPEARANCES / Journal card chip / portrait + scene-art `(goblin
+woman)` tags, with the art director's inviolable rule extended to species. 5 new tests;
+suite 1759 green; NOT yet deployed to hosting.
 
 ## 2026-08-26 — Dice Log collapsed by default (small UX follow-up)
 

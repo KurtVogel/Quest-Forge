@@ -8,7 +8,7 @@ import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromNam
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
-import { NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX } from '../../config/contentLimits.js';
+import { NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isCompanionActive } from '../../engine/combatExchange.js';
 import {
     appendBondMoments,
@@ -492,10 +492,14 @@ export function upsertNpc(npcs, payload) {
     if (update.appearance) {
         update.appearance = String(update.appearance).trim().slice(0, NPC_DOSSIER_FIELD_MAX);
     }
-    // Short current-state field (like appearance, plain replace): feeds scene art,
-    // the KNOWN NPCs block, and NPC RAG so generated images stop misgendering.
+    // Short current-state fields (like appearance, plain replace): feed scene art,
+    // the KNOWN NPCs block, and NPC RAG so generated images stop misgendering —
+    // and so a goblin stays a goblin instead of defaulting to a human figure.
     if (update.gender) {
         update.gender = String(update.gender).trim().slice(0, NPC_GENDER_MAX);
+    }
+    if (update.species) {
+        update.species = String(update.species).trim().slice(0, NPC_SPECIES_MAX);
     }
     if (update.stanceToPlayer) {
         update.stanceToPlayer = clampNpcDossierField(update.stanceToPlayer);

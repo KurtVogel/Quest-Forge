@@ -42,6 +42,17 @@ describe('buildNpcPortraitPrompt', () => {
         expect(prompt).toContain('Context: Runs the Kuusisaari ferry crossing.');
     });
 
+    it('combines registered species and gender into one identity tag', () => {
+        const prompt = buildNpcPortraitPrompt({
+            name: 'Vex Nailbiter',
+            species: 'goblin',
+            gender: 'woman',
+            appearance: 'Yellow eyes, filed teeth, patchwork leathers.',
+        });
+        // "(goblin woman)" — without the species the painter defaults to a human figure.
+        expect(prompt).toContain('Vex Nailbiter (goblin woman)');
+    });
+
     it('never leaks privateNotes into the painter context', () => {
         const prompt = buildNpcPortraitPrompt({
             name: 'Onni Rautakallio',

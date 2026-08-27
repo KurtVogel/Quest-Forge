@@ -16,7 +16,7 @@ Rules:
 - Do not add generic party members, soldiers, bystanders, creatures, or props that are not supported by the supplied situation and entity details.
 - Make the player character the visual anchor when present. State other subjects' spatial relationship to them so the image model cannot quietly omit half the scene.
 - Use the EXACT appearance details provided for each named character so they look consistent across scenes. If a character has no given appearance, infer modestly from their race/class/equipment — do not contradict known details.
-- A character's stated gender is inviolable: when a name carries "(woman)", "(man)", or the situation establishes gender, the rendered figure MUST read unmistakably as that gender — never default a described woman to a generic male figure or vice versa.
+- A character's stated gender and species are inviolable: when a name carries "(woman)", "(man)", "(goblin woman)", or the situation establishes them, the rendered figure MUST read unmistakably as that gender and species — never default a described woman to a generic male figure, and never default a goblin, dwarf, or other non-human to a human figure.
 - Depict only what the situation supports. This is an adult, gritty world: render violence, grime, and mature/sensual content frankly and unvarnished when the scene calls for it — bodies as established, not idealized — but keep it grounded, never gratuitous. Describe bodies in neutral anatomical language, never profanity or crude slang.
 - End with this quality direction: "grounded cinematic dark-fantasy realism, professional concept art, anatomically coherent figures, detailed materials, dramatic natural lighting, not cartoonish or childlike".
 - Do NOT include any on-image text, captions, watermarks, UI, or speech bubbles.`;
@@ -60,9 +60,9 @@ export async function composeScenePrompt({ situation, character, party = [], npc
     const companionNames = new Set();
     for (const c of (party || []).filter(c => c?.name)) {
         companionNames.add(c.name.toLowerCase());
-        const gender = c.gender?.trim() || '';
+        const identity = [c.species, c.gender].map(v => String(v || '').trim()).filter(Boolean).join(' ');
         const desc = (c.appearance || c.notes || '').trim() || `${c.role || 'companion'}`.trim();
-        lines.push(`Party companion — ${c.name}${gender ? ` (${gender})` : ''}: ${desc}${c.weapon ? ` Wielding ${c.weapon}.` : ''}`);
+        lines.push(`Party companion — ${c.name}${identity ? ` (${identity})` : ''}: ${desc}${c.weapon ? ` Wielding ${c.weapon}.` : ''}`);
     }
 
     // Roster NPCs likely in frame: the shared prompt curation (location-aware,
@@ -73,9 +73,9 @@ export async function composeScenePrompt({ situation, character, party = [], npc
         .filter(n => !companionNames.has(n.name.toLowerCase()))
         .slice(0, 4);
     for (const n of recentNpcs) {
-        const gender = n.gender?.trim() || '';
+        const identity = [n.species, n.gender].map(v => String(v || '').trim()).filter(Boolean).join(' ');
         const desc = n.appearance?.trim() || `${n.disposition || ''} NPC`.trim();
-        lines.push(`NPC — ${n.name}${gender ? ` (${gender})` : ''}: ${desc}`);
+        lines.push(`NPC — ${n.name}${identity ? ` (${identity})` : ''}: ${desc}`);
     }
 
     if (combat?.active && combat.enemies?.length > 0) {

@@ -11,7 +11,7 @@ import {
     NPC_PLACE_FIELD_MAX,
     clampNpcDossierField,
 } from '../engine/npcRoster.js';
-import { NPC_GENDER_MAX } from '../config/contentLimits.js';
+import { NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../config/contentLimits.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
@@ -94,6 +94,7 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
             disposition: npc.disposition,
             lastNotes: npc.lastNotes || npc.notes,
             gender: npc.gender,
+            species: npc.species,
             appearance: npc.appearance,
             personality: npc.personality,
             goals: npc.goals,
@@ -127,6 +128,7 @@ Output ONLY valid JSON:
   "bondMoments": ["up to 3 one-line records of significant personal moments between the hero and this NPC that the context establishes — flirtation, confession, shared danger, gift, promise, betrayal, deep insult"],
   "appearance": "the NPC's COMPLETE physical/visual description — build, body proportions, face, hair, clothing, distinguishing and intimate features — merging the existing record with any concrete visual details the recent conversation states. Omit unless the context actually establishes looks",
   "gender": "the NPC's gender as the context establishes or makes clearly apparent (pronouns, titles, explicit statements) — 'woman', 'man', or the fiction's own wording. Omit only if genuinely unknowable",
+  "species": "the NPC's species/ancestry as the context establishes it — 'goblin', 'human', 'dwarf', 'high elf'. Omit only if genuinely unknowable",
   "personality": "stable traits and how they present, only if grounded in context",
   "goals": "longer-term wants if established",
   "privateNotes": "hidden intent, blind spots, or unrevealed motive useful for DM consistency",
@@ -219,6 +221,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
     // COMPLETE merged look (600-char clamp mirrors the per-turn Scribe path).
     if (cleanText(parsed.appearance)) update.appearance = clampNpcDossierField(parsed.appearance);
     if (cleanText(parsed.gender)) update.gender = cleanText(parsed.gender).slice(0, NPC_GENDER_MAX);
+    if (cleanText(parsed.species)) update.species = cleanText(parsed.species).slice(0, NPC_SPECIES_MAX);
     if (cleanText(parsed.personality)) update.personality = clampNpcDossierField(parsed.personality);
     if (cleanText(parsed.goals)) update.goals = clampNpcDossierField(parsed.goals);
     if (cleanText(parsed.privateNotes)) update.privateNotes = clampNpcDossierField(parsed.privateNotes);

@@ -47,6 +47,17 @@ describe('formatNpcEmbeddingText', () => {
         });
         expect(text).toContain('Maera (woman, wary)');
     });
+
+    it('carries registered species ahead of gender so a goblin stays a goblin', () => {
+        const text = formatNpcEmbeddingText({
+            name: 'Vex',
+            species: 'goblin',
+            gender: 'woman',
+            disposition: 'wary',
+            appearance: 'Yellow eyes, filed teeth.',
+        });
+        expect(text).toContain('Vex (goblin, woman, wary)');
+    });
 });
 
 describe('player-relationship memory (stanceToPlayer + bondMoments)', () => {

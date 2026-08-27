@@ -74,6 +74,25 @@ describe('gameReducer NPC roster gating', () => {
         expect(overlong.npcs[0].gender).toHaveLength(40);
     });
 
+    it('registers and clamps a species field so a goblin can never drift human', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Vex Nailbiter',
+                disposition: 'wary',
+                lastNotes: 'Goblin fence in the undermarket.',
+                species: '  goblin  ',
+            },
+        });
+        expect(next.npcs[0].species).toBe('goblin');
+
+        const overlong = gameReducer(next, {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Vex Nailbiter', species: 'x'.repeat(200) },
+        });
+        expect(overlong.npcs[0].species).toHaveLength(40);
+    });
+
     it('promotes relationship tension into story memory', () => {
         const next = gameReducer(initialGameState, {
             type: 'UPDATE_NPC',

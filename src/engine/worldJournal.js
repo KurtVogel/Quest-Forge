@@ -409,9 +409,10 @@ export function buildJournalContext(journal, npcs, currentLocation) {
         const hiddenCount = Math.max(0, rosterNpcs.length - shown.length);
 
         const npcList = shown.map(n => {
-            // Gender rides next to the name (not buried in extras): scene art and
-            // pronoun consistency both depend on the DM never re-guessing it.
-            const identity = [n.gender, n.disposition].filter(Boolean).join(', ');
+            // Species and gender ride next to the name (not buried in extras):
+            // scene art, pronoun consistency, and the DM's own prose all depend
+            // on never re-guessing them — a goblin must never drift human.
+            const identity = [n.species, n.gender, n.disposition].filter(Boolean).join(', ');
             const disp = identity ? ` (${identity})` : '';
             const notes = n.lastNotes || n.notes || '';
             // Show the latest relationship shift so the DM keeps a changed bond

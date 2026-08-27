@@ -290,6 +290,15 @@ describe('buildKnownAppearances', () => {
         const context = buildKnownAppearances(gendered, 'Maera waits by the gate.');
         expect(context).toContain('Maera (woman): Close-cropped white hair');
     });
+
+    it('tags registered species ahead of gender so appearance merges keep it', () => {
+        const state = {
+            character: null,
+            npcs: [{ name: 'Vex', species: 'goblin', gender: 'woman', appearance: 'Yellow eyes, filed teeth.' }],
+        };
+        const context = buildKnownAppearances(state, 'Vex grins from the stall.');
+        expect(context).toContain('Vex (goblin woman): Yellow eyes, filed teeth');
+    });
 });
 
 describe('buildKnownStances', () => {
@@ -413,7 +422,7 @@ describe('cadenced living-world reflection', () => {
         expect(payload).toBe(JSON.stringify(JSON.parse(payload)));
 
         const ALLOWED_NPC_KEYS = new Set([
-            'name', 'gender', 'disposition', 'personality', 'goals', 'secrets',
+            'name', 'gender', 'species', 'disposition', 'personality', 'goals', 'secrets',
             'agenda', 'relationshipTension', 'stanceToPlayer', 'lastNotes',
             'callbackHooks', 'bondMoments', 'basedIn', 'lastLocation',
         ]);

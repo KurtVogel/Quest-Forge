@@ -20,6 +20,11 @@ export const MAX_COIN_EVENT = 10000;
  * wording) — reducer boundary and NPC enrichment share the cap. */
 export const NPC_GENDER_MAX = 40;
 
+/** Short plain-replace roster species field ("goblin", "human", "high elf") —
+ * same contract as gender: captured once knowable, anchors portraits, scene
+ * art, and the DM's own prose so a goblin can never quietly turn human. */
+export const NPC_SPECIES_MAX = 40;
+
 export function normalizeCampaignPremise(value) {
     return String(value || '').trim().slice(0, CAMPAIGN_PREMISE_MAX_LENGTH);
 }

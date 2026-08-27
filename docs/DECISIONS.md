@@ -8,7 +8,29 @@ Format: date · decision · why. Newest first.
 
 ---
 
-**2026-08-26 · Queue-clearing sweep rulings: web-size counting excludes resolved fronts, DM front gains are throttled, Magic Missile is a darts spell, quest identity is fuzzy-but-strict, and every image cache key is session-scoped.**
+**2026-08-27 · NPC species is a first-class roster field, mirroring gender end-to-end.**
+Vesa's live finding: a goblin NPC's card read just "woman, yellow eyes" — the Scribe's
+appearance schema asks for build/face/hair/clothing but never species, so nothing durable
+recorded that she was a goblin. Once the original "goblin" mentions get journal-pruned, BOTH
+failure modes open: the art chain (portrait + scene art) defaults the figure to a human, and
+the DM itself can drift her human in prose "during her absence". Gender solved this exact
+class on 2026-07-25; species now rides the identical rails: a 40-char plain-replace roster
+field (`NPC_SPECIES_MAX`, clamped in `upsertNpc`), captured budget-exempt by the Scribe the
+FIRST time the fiction makes ancestry knowable (including obvious humans — an explicit
+"human" protects art too), emittable by the DM (`npc_updates.species`, documented in
+RESPONSE_FORMAT + NPC UPDATE INSTRUCTIONS as never-contradict canon), backfilled for
+existing campaigns by "Deepen memory" (npcEnrichment — this is what fixes already-thin
+goblins), and rendered everywhere identity already showed: KNOWN NPCs (`(goblin, woman,
+wary)`), NPC RAG embedding text, the Scribe's KNOWN APPEARANCES, the reflection projection,
+the Journal card chip ("goblin woman"), and the whole art chain — `buildNpcPortraitPrompt`
+and scene-art subject lines emit a combined `(goblin woman)` tag, and the art director's
+inviolable-gender rule is now an inviolable-identity rule covering species ("never default
+a goblin, dwarf, or other non-human to a human figure"). Companions inherit it through the
+linked roster record like gender. The hero needs nothing: `character.race` was already
+explicit in every portrait/scene prompt. Plain-replace (not merge) is deliberate, same as
+gender: polymorph/disguise must be able to change the record.
+
+ web-size counting excludes resolved fronts, DM front gains are throttled, Magic Missile is a darts spell, quest identity is fuzzy-but-strict, and every image cache key is session-scoped.**
 Vesa's "clean the table" order emptied the strengthening queue (2 P1s + 17 P2s + the mobile-UX
 and Magic Missile items; only the NPC pronoun-flip WATCH item stays open, correctly, pending live
 evidence). The sweep settled several small design questions worth logging beyond the queue's own

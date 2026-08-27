@@ -27,18 +27,20 @@ function describeEntity(target) {
     }
     if (target.type === 'companion') {
         const c = target.entity;
+        const identity = [c.species, c.gender].filter(Boolean).join(' ');
         return [
-            `${c.name}${c.gender ? ` (${c.gender})` : ''}, ${c.role || 'companion'}`,
+            `${c.name}${identity ? ` (${identity})` : ''}, ${c.role || 'companion'}`,
             c.appearance || c.notes,
             c.weapon && `Wielding ${c.weapon}.`,
         ].filter(Boolean).join('. ');
     }
     if (target.type === 'npc') {
         const n = target.entity;
+        const identity = [n.species, n.gender].filter(Boolean).join(' ');
         return [
-            // The registered gender rides right beside the name — the art
-            // director's inviolable-gender rule keys on this "(woman)" tag.
-            `${n.name}${n.gender ? ` (${n.gender})` : ''}, ${n.disposition || 'NPC'}`,
+            // The registered species + gender ride right beside the name — the art
+            // director's inviolable-identity rule keys on this "(goblin woman)" tag.
+            `${n.name}${identity ? ` (${identity})` : ''}, ${n.disposition || 'NPC'}`,
             n.appearance || n.lastNotes || n.notes,
             n.lastLocation && `Last seen at ${n.lastLocation}.`,
         ].filter(Boolean).join('. ');
@@ -114,8 +116,8 @@ export default function SceneArt() {
             entity: state.character,
             gear,
         },
-        // A companion's gender/appearance live on their linked roster record
-        // (DECISIONS.md 2026-07-23, one system owns all bonds) — merge them in.
+        // A companion's species/gender/appearance live on their linked roster
+        // record (DECISIONS.md 2026-07-23, one system owns all bonds) — merge them in.
         ...(state.party || []).map(c => {
             const dossier = (state.npcs || []).find(n => namesMatch(n.name, c.name));
             return {
@@ -123,7 +125,7 @@ export default function SceneArt() {
                 type: 'companion',
                 label: c.name,
                 entity: dossier
-                    ? { ...c, gender: c.gender || dossier.gender, appearance: c.appearance || dossier.appearance }
+                    ? { ...c, gender: c.gender || dossier.gender, species: c.species || dossier.species, appearance: c.appearance || dossier.appearance }
                     : c,
             };
         }),
