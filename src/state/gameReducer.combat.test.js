@@ -540,6 +540,62 @@ describe('REJECT_COMBAT_EXCHANGE', () => {
         const rejected = gameReducer(state, { type: 'REJECT_COMBAT_EXCHANGE', payload: {} });
         expect(rejected).toBe(state);
     });
+
+    it('is a no-op during OPENING and AWAITING_NARRATION — a stray reject must not abandon pending bookkeeping (2026-08-27 audit)', () => {
+        for (const phase of ['opening', 'awaiting_narration']) {
+            const base = lockedState();
+            const state = { ...base, combat: { ...base.combat, phase } };
+            const rejected = gameReducer(state, { type: 'REJECT_COMBAT_EXCHANGE', payload: { reason: 'stray' } });
+            expect(rejected).toBe(state);
+        }
+    });
+});
+
+describe('bonus-action lane marks combat.bonusActionUsed (2026-08-27 audit P1)', () => {
+    function readyState(combatOverrides = {}) {
+        return {
+            ...makeState(),
+            combat: {
+                ...initialGameState.combat,
+                active: true,
+                phase: 'awaiting_player',
+                round: 2,
+                enemies: [{ id: 'e1', name: 'Goblin', hp: 7, maxHp: 7, ac: 12, condition: 'healthy', combatStatus: 'active' }],
+                turnOrder: [{ type: 'player', name: 'Astra', initiative: 12 }],
+                currentTurn: 0,
+                ...combatOverrides,
+            },
+        };
+    }
+    const payloadFor = (extra = {}) => ({
+        exchangeId: 'exchange-bw',
+        enemies: readyState().combat.enemies,
+        party: [],
+        playerDamage: 0,
+        rolls: [],
+        consumeActionSurge: false,
+        result: { exchangeId: 'exchange-bw', kind: 'exchange', terminal: null, summary: 'Second Wind.' },
+        ...extra,
+    });
+
+    it('an exchange that spent the bonus action locks the flag until the round ends', () => {
+        const committed = gameReducer(readyState(), {
+            type: 'APPLY_COMBAT_EXCHANGE',
+            payload: payloadFor({ bonusActionUsed: true }),
+        });
+        expect(committed.combat.bonusActionUsed).toBe(true);
+        // COMPLETE_COMBAT_NARRATION resets the flag for the next round.
+        const narrated = gameReducer(committed, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'exchange-bw' } });
+        expect(narrated.combat.bonusActionUsed).toBe(false);
+    });
+
+    it('a plain exchange never clears a potion-set flag mid-round', () => {
+        const committed = gameReducer(readyState({ bonusActionUsed: true }), {
+            type: 'APPLY_COMBAT_EXCHANGE',
+            payload: payloadFor(),
+        });
+        expect(committed.combat.bonusActionUsed).toBe(true);
+    });
 });
 
 describe('END_COMBAT client-side XP fallback', () => {

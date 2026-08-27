@@ -8,6 +8,49 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-27 · Queue-clearing sweep rulings: saves stop embedding settings, the legacy
+initiative roll lane is retired, and combat bonus-action lanes mark the round's bonus
+action spent.**
+The 2026-08-27 audit batch (combat-exchange, roll-resolution, persistence, cloud-sync) is
+cleared; three of its items were design calls worth logging beyond the queue's tick notes.
+**(1) Settings are stripped from the save snapshot entirely** (`serializeGameState` now
+strips `settings` like `user`/`ui`; LOAD_GAME ignores a legacy save's embedded copy
+wholesale). The audit offered two ways to complete the "live settings win" rule: strip, or
+let saved keys beat untouched defaults. Ruled STRIP — the live settings object always
+carries every key (initial + localStorage), so the embedded copy was fully shadowed on
+every load since the rule landed: pure write-only ballast, multi-KB of `customSystemPrompt`
+in every autosave and cloud chunk, and on a fresh device defaults won anyway, so nothing
+actually traveled today either. The saved-keys-win alternative would need fragile
+"untouched default" bookkeeping and could silently flip a device's provider/model from a
+loaded save. If the custom DM prompt should ever travel between devices, that is a
+deliberate future feature (settings sync or an export), not save-file resurrection.
+**(2) The legacy `initiative` roll lane is retired.** Initiative has been engine-owned
+since the exchange machine — START_COMBAT rolls it for every actor, and legacy
+`requested_rolls` are rejected in combat — so an out-of-combat initiative request produced
+a number that ordered nothing. The prose-detector whitelist (`responseParser.js`
+KNOWN_SKILLS) no longer detects it, and `rollResolver` skips a requested initiative roll
+with a visible "rolled automatically by the engine" note and no dice.
+**(3) The bonus action is one per round across BOTH owners (the audit P1).** A bonus-action
+exchange lane (`second_wind` slot, Cleric bonus-time cast) never set
+`combat.bonusActionUsed`, so the potion button (UI-owned bonus action) was still live in
+the same round — and the guard was one-way (potion-first blocked Second Wind, not the
+reverse). Now `planCombatExchange` reports `bonusActionUsed` in its payload,
+`APPLY_COMBAT_EXCHANGE` commits the flag (COMPLETE_COMBAT_NARRATION still resets it each
+round), and `validatePlayerSlots` also rejects a bonus-time cast after a potion — two-way.
+Also in the batch, engineering not policy: the quadruplicated hit/crit/damage assembly
+folded into a `resolveAttackRoll` kernel in `combatMath.js` (player weapon strike, player
+spell attack, companion, enemy — HP bookkeeping and event fields stay with each caller);
+one shared player d20 outcome formatter and `roll.dc ?? 10` so an explicit `dc: 0` no
+longer silently becomes DC 15; `npc_attack` on a companion now honors the companion's
+conditions; REJECT_COMBAT_EXCHANGE got APPLY's phase guard and `planOpeningExchange` the
+null-character guard; a check's `on_success` no longer lands conditions on a dead foe;
+cloud autosave write-path vestiges dropped (`isAuto`, the `'Auto-Save'` name default —
+`cloudDocId` + list exclusion kept as documented legacy-data guards);
+`SettingsModal.handleLoad/handleDelete` surface local failures like App.jsx; `listSaves`
+is a strip-`state` destructure; and the autosave dirty-flag/debounce choreography moved to
+`state/autosaveRuntime.js` (the autosavePolicy extraction pattern) with full coverage,
+plus first suites for `auth.js` and the legacy-payload load fallback.
+
 **2026-08-27 · NPC species is a first-class roster field, mirroring gender end-to-end.**
 Vesa's live finding: a goblin NPC's card read just "woman, yellow eyes" — the Scribe's
 appearance schema asks for build/face/hair/clothing but never species, so nothing durable

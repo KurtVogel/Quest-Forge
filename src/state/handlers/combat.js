@@ -277,6 +277,11 @@ export const handlers = {
             combat: {
                 ...next.combat,
                 enemies: Array.isArray(payload.enemies) ? payload.enemies : next.combat.enemies,
+                // An exchange that carried a bonus-action lane (Second Wind slot,
+                // Cleric bonus cast) spends the round's one bonus action — the
+                // potion button stays locked until COMPLETE_COMBAT_NARRATION
+                // resets the flag for the next round (2026-08-27 audit P1).
+                bonusActionUsed: payload.bonusActionUsed ? true : next.combat.bonusActionUsed,
                 phase: COMBAT_PHASES.AWAITING_NARRATION,
                 currentTurn: playerIdx >= 0 ? playerIdx : next.combat.currentTurn,
                 lastExchangeResult: payload.result,
@@ -322,6 +327,10 @@ export const handlers = {
 
     REJECT_COMBAT_EXCHANGE(state, action) {
         if (!state.combat.active) return state;
+        // Defense-in-depth mirror of APPLY's phase guards: a stray reject during
+        // OPENING or AWAITING_NARRATION would force AWAITING_PLAYER and abandon
+        // the pending opening/narration bookkeeping (2026-08-27 audit).
+        if (![COMBAT_PHASES.AWAITING_PLAYER, COMBAT_PHASES.AWAITING_INTENT].includes(state.combat.phase)) return state;
         const playerIdx = state.combat.turnOrder.findIndex(actor => actor.type === 'player');
         return {
             ...state,

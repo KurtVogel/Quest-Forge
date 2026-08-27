@@ -4,7 +4,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useReducer, useEffect, useCallback, useState, useRef } from 'react';
 import { gameReducer, initialGameState } from './gameReducer.js';
-import { buildAutosaveSnapshot, hasGameplayChange } from './autosavePolicy.js';
+import { createAutosaveRuntime } from './autosaveRuntime.js';
 import { loadSettings, saveSettings, autoSave } from './persistence.js';
 import { PROVIDERS } from '../llm/adapter.js';
 import { initializeFirebase } from '../config/firebase.js';
@@ -60,30 +60,29 @@ export function GameProvider({ children }) {
         window.__QF_STATE__ = snapshot;
     }, [state]);
 
-    // Declared here (before flushAutoSave) so the explicit flush can cancel a
-    // pending debounce write. `autosaveDirtyRef` tracks whether anything changed
-    // since the last landed save — the hide flush consults it so backgrounding
-    // an idle tab doesn't rewrite an unchanged multi-MB snapshot (2026-08-04 P2).
-    const autosaveTimerRef = useRef(null);
-    const autosaveDirtyRef = useRef(false);
-
-    const flushAutoSave = useCallback(async ({ action = null } = {}) => {
-        // The snapshot replays the just-dispatched action through the pure
-        // reducer (see buildAutosaveSnapshot), so a debounce timer scheduled by
-        // EARLIER changes is fully covered by this write — cancel it.
-        const snapshot = buildAutosaveSnapshot(stateRef.current, { action });
-        if (!snapshot) return;
-        if (autosaveTimerRef.current) {
-            clearTimeout(autosaveTimerRef.current);
-            autosaveTimerRef.current = null;
-        }
-        const source = stateRef.current;
-        const saved = await autoSave(snapshot);
-        // Only a flush without a replay can prove the live state is clean: with
-        // an action, the action's own re-render marks dirty again anyway.
-        if (saved && !action && stateRef.current === source) autosaveDirtyRef.current = false;
-        showSaveToast(saved ? 'local' : 'save-error');
+    // The dirty-flag + debounce choreography lives in autosaveRuntime.js
+    // (extracted 2026-08-27 so it is testable without a DOM); this component
+    // only wires its three entry points to React's lifecycle. Created in an
+    // effect (never during render — react-hooks/refs) and held in a ref; every
+    // consumer below runs post-mount, after this first effect has populated it.
+    const autosaveRuntimeRef = useRef(null);
+    useEffect(() => {
+        const runtime = createAutosaveRuntime({
+            getState: () => stateRef.current,
+            autoSave,
+            showSaveToast,
+        });
+        autosaveRuntimeRef.current = runtime;
+        return () => {
+            runtime.dispose();
+            autosaveRuntimeRef.current = null;
+        };
     }, [showSaveToast]);
+
+    const flushAutoSave = useCallback(
+        async (options) => autosaveRuntimeRef.current?.flush(options),
+        []
+    );
 
     // Auto-save settings when they change. Settings carries the LLM API key —
     // a silent persist failure (quota, private browsing) must not let the player
@@ -104,14 +103,7 @@ export function GameProvider({ children }) {
     useEffect(() => {
         const flushOnHide = () => {
             if (document.visibilityState !== 'hidden') return;
-            // Nothing changed since the last landed save → nothing to protect;
-            // don't rewrite the full snapshot on every tab switch.
-            if (!autosaveDirtyRef.current) return;
-            const snapshot = buildAutosaveSnapshot(stateRef.current);
-            if (!snapshot) return;
-            autosaveDirtyRef.current = false;
-            // If the write fails (and the page survives), the state is still dirty.
-            autoSave(snapshot).then(saved => { if (!saved) autosaveDirtyRef.current = true; });
+            autosaveRuntimeRef.current?.flushOnHide();
         };
         document.addEventListener('visibilitychange', flushOnHide);
         window.addEventListener('pagehide', flushOnHide);
@@ -172,34 +164,10 @@ export function GameProvider({ children }) {
     useEffect(() => {
         const prev = lastAutosaveSeenRef.current;
         lastAutosaveSeenRef.current = state;
-        if (!state.session.id || !state.character) return;
-        // The diff itself lives in autosavePolicy.js (testable): a change
-        // touching ONLY user/ui/settings neither schedules a save nor resets a
-        // pending debounce timer.
-        if (prev && !hasGameplayChange(prev, state)) return;
-        autosaveDirtyRef.current = true;
-        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-        autosaveTimerRef.current = setTimeout(() => {
-            autosaveTimerRef.current = null;
-            // Save the LATEST state at fire time, stamped so cross-device sync
-            // can pick the newest file.
-            const source = stateRef.current;
-            const snapshot = buildAutosaveSnapshot(source);
-            if (!snapshot) return;
-            // Autosaves are deliberately local-per-device: each browser keeps its own
-            // "Continue" session. Only manual saves sync to the cloud (SettingsModal).
-            // The toast must reflect reality: a quota error or broken IndexedDB
-            // otherwise means silent progress loss behind a green checkmark.
-            autoSave(snapshot).then(saved => {
-                // Clean only if nothing changed while the write was in flight.
-                if (saved && stateRef.current === source) autosaveDirtyRef.current = false;
-                showSaveToast(saved ? 'local' : 'save-error');
-            });
-        }, 2000);
-    }, [state, showSaveToast]);
-    useEffect(() => () => {
-        if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    }, []);
+        // The diff lives in autosavePolicy.js and the debounce/dirty machinery
+        // in autosaveRuntime.js (both testable without a DOM).
+        autosaveRuntimeRef.current?.noteStateChange(prev, state);
+    }, [state]);
 
     return (
         <GameContext.Provider value={state}>

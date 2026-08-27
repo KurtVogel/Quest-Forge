@@ -20,7 +20,7 @@ import {
 import {
     applyUncannyDodge,
     conditionAwareAttackModifiers,
-    stampCriticalRoll,
+    resolveAttackRoll,
     rollD20Kept as rollD20,
     rollDamage,
 } from './combatMath.js';
@@ -516,6 +516,11 @@ function validatePlayerSlots(exchange, state) {
     // ride alongside one normal action — the caster's "do two things" lever,
     // parallel to Rogue Cunning Action and Fighter Action Surge.
     const bonusCastCount = slots.filter(slot => isBonusCastSlot(state.character, slot)).length;
+    if (bonusCastCount > 0 && state.combat?.bonusActionUsed) {
+        // Mirror of the Second Wind guard above: a potion already spent the
+        // round's one bonus action, so a bonus-time spell cannot ride this turn.
+        return { ok: false, error: 'The bonus action is already used this turn; a bonus-action spell must wait for a later turn.' };
+    }
     const casterBonusTurn = isSpellcaster(state.character?.class) && bonusCastCount === 1;
 
     const maxSlots = hasCunningActionFeature || surge || casterBonusTurn ? 2 : 1;
@@ -691,16 +696,17 @@ function resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events,
         for (const enemy of targets) {
             const ruling = rulingFlags(slot.situationalRuling);
             const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, ruling.advantage, ruling.disadvantage || !!enemy.defending);
-            const attack = rollD20(getSpellAttackBonus(character), `${character.name || 'Player'} casts ${spell.name} at ${enemy.name}`, modifiers.advantage, modifiers.disadvantage);
-            rolls.push(attack.roll);
-            const critical = attack.natural === 20;
-            const hit = attack.natural !== 1 && (critical || attack.roll.total >= enemy.ac);
-            let damage = 0;
-            if (hit) {
-                const damageRoll = rollDamage(spellDamageNotation(spell, character, slotLevel), `${spell.name} damage`, { critical });
-                rolls.push(damageRoll.roll);
-                damage = damageRoll.total;
-                enemy.hp = Math.max(0, enemy.hp - damage);
+            const outcome = resolveAttackRoll({
+                attacker: character,
+                attackBonus: getSpellAttackBonus(character),
+                description: `${character.name || 'Player'} casts ${spell.name} at ${enemy.name}`,
+                modifiers,
+                targetAc: enemy.ac,
+                damage: { notation: spellDamageNotation(spell, character, slotLevel), description: `${spell.name} damage` },
+                rolls,
+            });
+            if (outcome.hit) {
+                enemy.hp = Math.max(0, enemy.hp - outcome.damage);
                 enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
                 if (spell.condition && isEnemyActive(enemy)) {
                     applyEnemyConditionDelta(enemy, { add: [spell.condition], remove: [] }, events);
@@ -713,9 +719,10 @@ function resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events,
                 // the cast is invisible (playtest #4: Sacred Flame showed as
                 // "attacks ... Hit for 2" with nothing naming the spell).
                 spellName: spell.name,
-                rolled: attack.roll.total, natural: attack.natural, dc: enemy.ac,
-                mode: rollModeLabel(attack, modifiers, slot.situationalRuling),
-                hit, critical, damage, remainingHp: enemy.hp, maxHp: enemy.maxHp,
+                rolled: outcome.attack.roll.total, natural: outcome.natural, dc: enemy.ac,
+                mode: rollModeLabel(outcome.attack, modifiers, slot.situationalRuling),
+                hit: outcome.hit, critical: outcome.critical, damage: outcome.damage,
+                remainingHp: enemy.hp, maxHp: enemy.maxHp,
             });
         }
         return;
@@ -1051,7 +1058,9 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
             });
             if (success && slot.action === 'check' && slot.onSuccess) {
                 const enemy = findByRef(enemies, slot.onSuccess.target);
-                applyEnemyConditionDelta(enemy, slot.onSuccess, events);
+                // Same-exchange ordering can down the target before the check
+                // resolves — a condition never lands on a dead foe (the :1443 rule).
+                if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, slot.onSuccess, events);
             }
             continue;
         }
@@ -1082,43 +1091,36 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
                 || (standingFlankIds?.has(enemy.id) ? STANDING_FLANK_RULING : null);
             const ruling = rulingFlags(appliedRuling);
             const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, ruling.advantage, ruling.disadvantage || !!enemy.defending);
-            const attack = rollD20(
-                getWeaponAttackBonus(character, attackInventory),
-                `${character.name || 'Player'} attacks ${enemy.name}`,
-                modifiers.advantage,
-                modifiers.disadvantage
-            );
-            rolls.push(attack.roll);
-            const critical = stampCriticalRoll(character, attack.roll, attack.natural);
-            const hit = attack.natural !== 1 && (critical || attack.roll.total >= enemy.ac);
-            let damage = 0;
-            let sneakAttackDetail = null;
-            if (hit) {
-                const hasAlly = (state.party || []).some(isCompanionActive);
-                const damageRoll = rollDamage(
-                    getWeaponDamageNotation(character, attackInventory, '1d4'),
-                    `Damage to ${enemy.name}`,
-                    {
-                        critical,
+            const outcome = resolveAttackRoll({
+                attacker: character,
+                attackBonus: getWeaponAttackBonus(character, attackInventory),
+                description: `${character.name || 'Player'} attacks ${enemy.name}`,
+                modifiers,
+                targetAc: enemy.ac,
+                damage: {
+                    notation: getWeaponDamageNotation(character, attackInventory, '1d4'),
+                    description: `Damage to ${enemy.name}`,
+                    options: {
                         character,
                         inventory: attackInventory,
                         advantage: modifiers.advantage,
                         disadvantage: modifiers.disadvantage,
-                        hasAlly,
-                    }
-                );
-                rolls.push(damageRoll.roll);
-                damage = damageRoll.total;
-                sneakAttackDetail = damageRoll.sneakAttackDetail;
-                enemy.hp = Math.max(0, enemy.hp - damage);
+                        hasAlly: (state.party || []).some(isCompanionActive),
+                    },
+                },
+                rolls,
+            });
+            if (outcome.hit) {
+                enemy.hp = Math.max(0, enemy.hp - outcome.damage);
                 enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
             }
             events.push({
                 type: 'attack', actor: character.name || 'Player', target: enemy.name,
-                rolled: attack.roll.total, natural: attack.natural, dc: enemy.ac,
-                mode: rollModeLabel(attack, modifiers, appliedRuling),
-                hit, critical, damage, remainingHp: enemy.hp, maxHp: enemy.maxHp,
-                sneakAttackDetail,
+                rolled: outcome.attack.roll.total, natural: outcome.natural, dc: enemy.ac,
+                mode: rollModeLabel(outcome.attack, modifiers, appliedRuling),
+                hit: outcome.hit, critical: outcome.critical, damage: outcome.damage,
+                remainingHp: enemy.hp, maxHp: enemy.maxHp,
+                sneakAttackDetail: outcome.damageRoll?.sneakAttackDetail ?? null,
             });
         }
     }
@@ -1163,26 +1165,22 @@ function resolveCompanionAttack(companion, target, events, rolls, situationalRul
         ? { mode: 'advantage', reason: 'flanking' }
         : situationalRuling;
     const modifiers = conditionAwareAttackModifiers(companion.conditions, target.conditions, ruling.advantage || companionFlanking, ruling.disadvantage || !!target.defending);
-    const attack = rollD20(
-        (companion.attackBonus ?? 2) + companionWeaponBonus(companion),
-        `${companion.name} attacks ${target.name}`,
-        modifiers.advantage,
-        modifiers.disadvantage
-    );
-    rolls.push(attack.roll);
-    const critical = attack.natural === 20;
-    const hit = attack.natural !== 1 && (critical || attack.roll.total >= target.ac);
-    let damage = 0;
-    if (hit) {
-        const damageRoll = rollDamage(companionDamageNotation(companion), `${companion.name} damage`, { critical });
-        rolls.push(damageRoll.roll);
-        damage = damageRoll.total;
-        target.hp = Math.max(0, target.hp - damage);
+    const outcome = resolveAttackRoll({
+        attackBonus: (companion.attackBonus ?? 2) + companionWeaponBonus(companion),
+        description: `${companion.name} attacks ${target.name}`,
+        modifiers,
+        targetAc: target.ac,
+        damage: { notation: companionDamageNotation(companion), description: `${companion.name} damage` },
+        rolls,
+    });
+    if (outcome.hit) {
+        target.hp = Math.max(0, target.hp - outcome.damage);
         target.condition = enemyHealthCondition(target.hp, target.maxHp);
     }
     events.push({
-        type: 'attack', actor: companion.name, target: target.name, rolled: attack.roll.total,
-        natural: attack.natural, dc: target.ac, mode: rollModeLabel(attack, modifiers, effectiveRuling), hit, critical, damage,
+        type: 'attack', actor: companion.name, target: target.name, rolled: outcome.attack.roll.total,
+        natural: outcome.natural, dc: target.ac, mode: rollModeLabel(outcome.attack, modifiers, effectiveRuling),
+        hit: outcome.hit, critical: outcome.critical, damage: outcome.damage,
         remainingHp: target.hp, maxHp: target.maxHp,
     });
 }
@@ -1268,26 +1266,21 @@ function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions,
 
     const ruling = rulingFlags(situationalRuling);
     const modifiers = conditionAwareAttackModifiers(enemy.conditions, targetConditions, ruling.advantage, ruling.disadvantage || targetDisadvantage);
-    const attackBonus = validateEnemyAttackBonus(enemy.attackBonus) ?? DEFAULT_ENEMY_ATTACK_BONUS;
-    const attack = rollD20(attackBonus, `${enemy.name} attacks ${targetName}`, modifiers.advantage, modifiers.disadvantage);
-    rolls.push(attack.roll);
-    const critical = attack.natural === 20;
-    const hit = attack.natural !== 1 && (critical || attack.roll.total >= targetAc);
-    let damage = 0;
+    const outcome = resolveAttackRoll({
+        attackBonus: validateEnemyAttackBonus(enemy.attackBonus) ?? DEFAULT_ENEMY_ATTACK_BONUS,
+        description: `${enemy.name} attacks ${targetName}`,
+        modifiers,
+        targetAc,
+        damage: { notation: sanitizeEnemyDamage(enemy.damage) || DEFAULT_ENEMY_DAMAGE, description: `${enemy.name} damage` },
+        rolls,
+    });
+    let damage = outcome.damage;
     let uncannyDodgeApplied = false;
-    if (hit) {
-        const notation = sanitizeEnemyDamage(enemy.damage) || DEFAULT_ENEMY_DAMAGE;
-        const damageRoll = rollDamage(notation, `${enemy.name} damage`, { critical });
-        rolls.push(damageRoll.roll);
-        damage = damageRoll.total;
-        
+    if (outcome.hit) {
         if (targetType === 'player') {
             const dodge = applyUncannyDodge(character, damage, uncannyDodgeState);
             damage = dodge.damage;
             uncannyDodgeApplied = dodge.applied;
-        }
-
-        if (targetType === 'player') {
             playerHp = Math.max(0, playerHp - damage);
         } else {
             target.hp = Math.max(0, target.hp - damage);
@@ -1295,10 +1288,10 @@ function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions,
         }
     }
     events.push({
-        type: 'attack', actor: enemy.name, target: targetName, rolled: attack.roll.total,
-        natural: attack.natural, dc: targetAc,
-        mode: rollModeLabel(attack, modifiers, situationalRuling),
-        hit, critical, damage,
+        type: 'attack', actor: enemy.name, target: targetName, rolled: outcome.attack.roll.total,
+        natural: outcome.natural, dc: targetAc,
+        mode: rollModeLabel(outcome.attack, modifiers, situationalRuling),
+        hit: outcome.hit, critical: outcome.critical, damage,
         remainingHp: targetType === 'player' ? playerHp : target.hp,
         maxHp: targetType === 'player' ? character.maxHP : target.maxHp,
         uncannyDodgeApplied,
@@ -1432,6 +1425,13 @@ export function planCombatExchange(state, exchange) {
     const validation = validatePlayerSlots(exchange, state);
     if (!validation.ok) return validation;
 
+    // A bonus-action lane (Second Wind slot, Cleric bonus-time cast) spends the
+    // round's one bonus action; the reducer marks combat.bonusActionUsed so the
+    // potion button (UI-owned bonus action) can't grant a second one this round
+    // (2026-08-27 audit P1 — the guard was one-way before this).
+    const usedBonusAction = (exchange.playerSlots || [])
+        .some(slot => slot.action === 'second_wind' || isBonusCastSlot(state.character, slot));
+
     const exchangeId = makeExchangeId('exchange', state.combat);
     const enemies = (state.combat.enemies || []).map(enemy => ({ ...enemy }));
     // Stances are declared per exchange; stale defend/guard flags must not carry over.
@@ -1482,6 +1482,7 @@ export function planCombatExchange(state, exchange) {
                 rolls,
                 result,
                 flankedEnemyIds: [],
+                bonusActionUsed: usedBonusAction,
                 consumeActionSurge: !!state.character.pendingActionSurge,
             },
         };
@@ -1552,6 +1553,7 @@ export function planCombatExchange(state, exchange) {
             rolls,
             result,
             flankedEnemyIds,
+            bonusActionUsed: usedBonusAction,
             consumeActionSurge: !!state.character.pendingActionSurge,
         },
     };
@@ -1562,6 +1564,9 @@ export function planOpeningExchange(state) {
     if (!state.combat?.active || state.combat.phase !== COMBAT_PHASES.OPENING) {
         return { ok: false, error: 'Combat has no pending Opening Initiative.' };
     }
+    // Same load-reachable hole planCombatExchange closed 2026-07-25: a
+    // characterless save with a pending opening would throw mid-resolve.
+    if (!state.character) return { ok: false, error: 'No active character — the opening cannot resolve.' };
     const actorIds = new Set(state.combat.openingActorIds || []);
     const exchangeId = makeExchangeId('opening', state.combat);
     const enemies = (state.combat.enemies || []).map(enemy => ({ ...enemy }));

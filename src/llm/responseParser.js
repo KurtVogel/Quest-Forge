@@ -45,7 +45,9 @@ const KNOWN_SKILLS = [
     'arcana', 'history', 'nature', 'religion', 'medicine', 'survival',
     'animal handling', 'performance', 'thieves tools', "thieves' tools",
     'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma',
-    'attack', 'initiative',
+    // 'initiative' retired 2026-08-27 (DECISIONS.md): initiative is engine-owned
+    // (START_COMBAT rolls it); a detected prose request had no consumer.
+    'attack',
 ];
 
 // Outcome language that should never appear BEFORE dice are rolled

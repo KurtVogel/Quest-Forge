@@ -121,16 +121,18 @@ export const SAVE_VERSION = CURRENT_SAVE_VERSION;
  * Excluded on purpose:
  *  - `user`: live auth session, never restored from a save (LOAD_GAME keeps the live one)
  *  - `ui`: transient panel/modal state
- *  - secrets in `settings`: API keys / Firebase config persist separately via saveSettings()
+ *  - `settings`: device-local by design, persisted separately via saveSettings()
+ *    (DECISIONS.md 2026-08-27: LOAD_GAME's "live settings win" rule always
+ *    overrode the embedded copy, so it was write-only ballast — multi-KB of
+ *    customSystemPrompt in every autosave — and is now stripped like user/ui)
  */
 export function serializeGameState(gameState) {
-    const { user: _user, ui: _ui, ...persisted } = gameState;
+    const { user: _user, ui: _ui, settings: _settings, ...persisted } = gameState;
     return {
         ...persisted,
         saveVersion: SAVE_VERSION,
         rollHistory: (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS),
         combat: gameState.combat || { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
-        settings: { ...gameState.settings, apiKey: undefined, geminiApiKey: undefined, imageApiKey: undefined, firebaseConfig: undefined },
     };
 }
 
@@ -239,25 +241,14 @@ export async function listSaves() {
             const saves = request.result
                 .filter(s => s.slotId !== AUTOSAVE_SLOT)
                 .sort((a, b) => b.savedAt - a.savedAt)
-                .map(s => ({
-                    slotId: s.slotId,
-                    sessionId: s.sessionId || null, // absent on legacy saves
-                    name: s.name,
-                    characterName: s.characterName,
-                    characterLevel: s.characterLevel,
-                    characterClass: s.characterClass,
-                    characterHP: s.characterHP,
-                    characterMaxHP: s.characterMaxHP,
-                    characterAC: s.characterAC,
-                    gold: s.gold,
-                    silver: s.silver,
-                    copper: s.copper,
-                    inventoryCount: s.inventoryCount,
-                    location: s.location,
-                    questCount: s.questCount,
-                    partySize: s.partySize,
-                    savedAt: s.savedAt,
-                    messageCount: s.messageCount,
+                // Strip-`state` destructure instead of re-enumerating every
+                // metadata field (a drop-prone duplicate of buildSaveMetadata's
+                // list — 2026-08-27 audit). Post-v3 records are metadata-only;
+                // `state` only exists on legacy records whose payload never
+                // migrated out.
+                .map(({ state: _state, ...meta }) => ({
+                    ...meta,
+                    sessionId: meta.sessionId || null, // absent on legacy saves
                 }));
             resolve(saves);
         };

@@ -1577,3 +1577,84 @@ describe('Second Wind bonus-action lane (Codex 2026-08-09)', () => {
         expect(plan).toMatchObject({ ok: false, error: expect.stringContaining('death saving throw') });
     });
 });
+
+describe('bonus-action lane reporting + guards (2026-08-27 audit P1)', () => {
+    const windState = () => state({
+        character: { currentHP: 8, classResources: { secondWind: { used: 0, max: 1 } } },
+    });
+    const clericState = (combatOverrides = {}) => state({
+        character: {
+            class: 'cleric', level: 5, currentHP: 10,
+            abilityScores: { strength: 12, dexterity: 10, constitution: 14, intelligence: 10, wisdom: 16, charisma: 12 },
+            spellSlots: buildSpellSlots(5),
+        },
+        combat: combatOverrides,
+    });
+
+    it('a Second Wind lane reports bonusActionUsed: true in the payload', () => {
+        rollQueue.push(5, 1); // heal d10=5, goblin nat 1 miss
+        const plan = planCombatExchange(windState(), normalizeCombatExchange({
+            player_slots: [{ action: 'second_wind' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+        }));
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.bonusActionUsed).toBe(true);
+    });
+
+    it('a Cleric bonus-time cast reports bonusActionUsed: true', () => {
+        rollQueue.push(3, 2); // healing word 1d4=3, goblin 2+4=6 misses the cleric
+        const plan = planCombatExchange(clericState(), normalizeCombatExchange({
+            player_slots: [{ action: 'cast', spell: 'healing word', target: 'self' }],
+            enemy_intents: [],
+        }));
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.bonusActionUsed).toBe(true);
+    });
+
+    it('a plain attack exchange reports bonusActionUsed: false', () => {
+        rollQueue.push(2, 1); // attack 2+5=7 misses AC 12, goblin nat 1 miss
+        const plan = planCombatExchange(state(), exchange());
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.bonusActionUsed).toBe(false);
+    });
+
+    it('rejects a bonus-time cast when the bonus action is already used this turn (the potion-first mirror)', () => {
+        const plan = planCombatExchange(
+            clericState({ bonusActionUsed: true }),
+            normalizeCombatExchange({ player_slots: [{ action: 'cast', spell: 'healing word', target: 'self' }] })
+        );
+        expect(plan).toMatchObject({ ok: false, error: expect.stringContaining('bonus action is already used') });
+        expect(rollQueue).toHaveLength(0);
+    });
+});
+
+describe('check on_success never lands a condition on a dead foe (2026-08-27 audit)', () => {
+    it('a target overcome earlier in the same exchange takes no condition', () => {
+        // Surge fighter: attack kills the Goblin (15+5 hits, 8+3=11 damage vs 10 HP),
+        // then the check succeeds (12+3=15 vs DC 10) — its on_success must not
+        // stamp `prone` onto the corpse.
+        rollQueue.push(15, 8, 12);
+        const plan = planCombatExchange(
+            state({ character: { pendingActionSurge: true } }),
+            normalizeCombatExchange({
+                player_slots: [
+                    { action: 'attack', strikes: [{ target: 'Goblin' }] },
+                    { action: 'check', skill: 'athletics', dc: 10, on_success: { target: 'Goblin', add: ['prone'] } },
+                ],
+                enemy_intents: [],
+            })
+        );
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.enemies[0].hp).toBe(0);
+        expect(plan.payload.enemies[0].conditions || []).not.toContain('prone');
+    });
+});
+
+describe('planOpeningExchange null-character guard (2026-08-27 audit)', () => {
+    it('fails cleanly instead of throwing mid-resolve on a characterless save', () => {
+        const opening = state({ combat: { phase: 'opening', openingActorIds: ['Goblin'] } });
+        opening.character = null;
+        const plan = planOpeningExchange(opening);
+        expect(plan).toMatchObject({ ok: false, error: expect.stringContaining('No active character') });
+    });
+});

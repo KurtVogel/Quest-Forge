@@ -598,15 +598,16 @@ describe('LOAD_GAME live-session invariants (user + settings)', () => {
             },
         });
 
-        // LOAD_GAME merge semantics (gameReducer.js ~3656-3661): `user: state.user`
-        // — the live auth reference verbatim, never the save's stale copy...
+        // LOAD_GAME merge semantics: `user: state.user` — the live auth
+        // reference verbatim, never the save's stale copy...
         expect(next.user).toBe(liveState.user);
-        // ...and settings spread initial ← save ← LIVE, so every live key wins.
+        // ...and settings are entirely the device's own (initial ← LIVE).
         expect(next.settings.paceDial).toBe('breakneck');
         expect(next.settings.apiKey).toBe('live-key');
         expect(next.settings.llmProvider).toBe('gemini'); // live default beats the save's 'openai'
-        // A save-only key absent from live settings survives the merge: saved
-        // settings fill gaps, they never override.
-        expect(next.settings.legacyOnlyKey).toBe('kept');
+        // DECISIONS.md 2026-08-27: settings are device-local — a legacy save's
+        // embedded settings copy is ignored wholesale, never merged (new saves
+        // no longer embed one at all).
+        expect(next.settings.legacyOnlyKey).toBeUndefined();
     });
 });

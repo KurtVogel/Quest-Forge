@@ -262,17 +262,17 @@ export const handlers = {
         // versioned migration pipeline (migrations.js) — which owns the ONE
         // character-heal path plus the inventory/session/fronts heals and
         // stamps CURRENT_SAVE_VERSION. Assembly below layers live-session
-        // fields on top: the live user is kept verbatim, live settings win
-        // over the save's (older saves have stale/missing values), the NPC
-        // roster is deduped/legacy-migrated with companion records minted,
-        // and UI state resets.
+        // fields on top: the live user is kept verbatim, settings are entirely
+        // the device's own (DECISIONS.md 2026-08-27: saves no longer embed a
+        // settings copy, and the legacy embedded copy on old saves was always
+        // fully shadowed by live settings anyway), the NPC roster is deduped/
+        // legacy-migrated with companion records minted, and UI state resets.
         const save = migrateLoadedSave(validateSaveState(action.payload));
         return {
             ...save,
             user: state.user,
             settings: {
                 ...initialGameState.settings,
-                ...(save.settings || {}),
                 ...state.settings,
             },
             // Companion relationship records ride the NPC roster; mint any that

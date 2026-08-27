@@ -167,6 +167,35 @@ export function rollDamage(notation, description, {
 }
 
 /**
+ * One attack-roll step: kept d20 vs AC with the crit rule stamped, the
+ * natural-1 auto-miss, crit-beats-AC, and (on a hit) the damage roll. This
+ * exact hit/crit/damage sequence was quadruplicated across the exchange
+ * machine's player weapon strike, player spell attack, companion, and enemy
+ * resolution (2026-08-27 audit); target HP bookkeeping and event fields stay
+ * with each caller.
+ *
+ * `attacker` owns the crit rule (Champion 19-20 via stampCriticalRoll;
+ * companions/enemies fall through to the universal natural 20). When `rolls`
+ * is given, the attack roll (and the damage roll, if any) are pushed onto it.
+ * `damage` is { notation, description, options } — rolled only on a hit,
+ * with `critical` supplied here.
+ */
+export function resolveAttackRoll({ attacker = null, attackBonus, description, modifiers, targetAc, damage = null, rolls = null }) {
+    const attack = rollD20Kept(attackBonus, description, modifiers.advantage, modifiers.disadvantage);
+    if (rolls) rolls.push(attack.roll);
+    const critical = stampCriticalRoll(attacker, attack.roll, attack.natural);
+    const hit = attack.natural !== 1 && (critical || attack.roll.total >= targetAc);
+    let damageTotal = 0;
+    let damageRoll = null;
+    if (hit && damage) {
+        damageRoll = rollDamage(damage.notation, damage.description, { ...(damage.options || {}), critical });
+        if (rolls) rolls.push(damageRoll.roll);
+        damageTotal = damageRoll.total;
+    }
+    return { attack, natural: attack.natural, critical, hit, damage: damageTotal, damageRoll };
+}
+
+/**
  * Uncanny Dodge (Rogue 5+): halve incoming attack damage, once per turn/batch.
  * The caller owns the once-per-scope state object ({ used: boolean }).
  * Returns the (possibly halved) damage and whether it applied.

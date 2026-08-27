@@ -131,20 +131,25 @@ export default function SettingsModal() {
             setSyncStatus('Sign in with Google to load cloud saves — your session has expired or you are signed out.');
             return;
         }
-        let savedState = null;
-        if (isCloud) {
-            savedState = await loadGameFromCloud(state.user.uid, slotId);
+        // Mirror App.jsx's start-screen pattern (2026-08-27 audit): a failed or
+        // missing LOCAL load surfaces feedback instead of silently no-oping, and
+        // a rejection never escapes as an unhandled promise.
+        try {
+            const savedState = isCloud
+                ? await loadGameFromCloud(state.user.uid, slotId)
+                : await loadGame(slotId);
             if (!savedState) {
-                setSyncStatus('Cloud save could not be loaded — details in the browser console.');
+                setSyncStatus(isCloud
+                    ? 'Cloud save could not be loaded — details in the browser console.'
+                    : 'That save could not be loaded — details in the browser console.');
                 return;
             }
-        } else {
-            savedState = await loadGame(slotId);
-        }
-        if (savedState) {
             clearImageCache(); // Scene-art cache is per-campaign — never show another campaign's art
             dispatch({ type: 'LOAD_GAME', payload: savedState });
             handleClose();
+        } catch (e) {
+            console.error('Failed to load save', e);
+            setSyncStatus(e?.message || 'That save could not be loaded — details in the browser console.');
         }
     };
 
@@ -157,7 +162,13 @@ export default function SettingsModal() {
         // re-embed transparently on the campaign's next load.
         const deletedSessionId = saves.find(s => s.slotId === slotId)?.sessionId
             || await getSaveSessionId(slotId).catch(() => null);
-        await deleteSave(slotId);
+        try {
+            await deleteSave(slotId);
+        } catch (e) {
+            console.error('Failed to delete save', e);
+            setSyncStatus(`Failed to delete the save — ${e?.message || 'details in the browser console'}`);
+            return;
+        }
         await loadSavesList();
         try {
             const autosaveSessionId = await getSaveSessionId('__autosave__').catch(() => null);

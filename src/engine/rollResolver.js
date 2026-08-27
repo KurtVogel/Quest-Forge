@@ -121,14 +121,20 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
                 continue;
             }
 
-            // Resolve the to-hit vs the correct target's AC (companion AC if targeting one).
+            // Resolve the to-hit vs the correct target's AC (companion AC if targeting
+            // one) — and the companion's conditions, same target-side treatment every
+            // other attack path already gets (2026-08-27 audit).
             let targetAC;
+            let targetConditions;
             if (roll.type === 'npc_attack' && roll.target && roll.target !== 'player' && roll.target !== 'self') {
                 const comp = findCompanion(roll.target);
-                if (comp) targetAC = comp.ac;
+                if (comp) {
+                    targetAC = comp.ac;
+                    targetConditions = comp.conditions;
+                }
             }
 
-            const result = resolveNpcRoll(roll, character, dispatch, inventory, targetAC);
+            const result = resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetConditions);
             if (!result) continue;
             results.push(result);
 
@@ -675,23 +681,36 @@ function resolveDeathSave(character, dispatch) {
     return { type: 'death_save', rolled: die, outcome, successes: Math.min(successes, 3), failures: Math.min(failures, 3) };
 }
 
+// One formatter for the player d20 outcome line — resolveSinglePlayerAttackRoll
+// and resolvePlayerRoll's tail carried duplicate copies (Champion-19 label in
+// both) until the 2026-08-27 audit folded them here.
+function playerD20OutcomeLine({ label, result, dc, isAttack, critical, success, advantage, disadvantage }) {
+    const advLabel = advantage ? ' *(advantage)*' : disadvantage ? ' *(disadvantage)*' : '';
+    const hitMiss = isAttack
+        ? (success ? '**Hit!**' : '**Miss!**')
+        : (success ? '**Success!**' : '**Failure!**');
+    const critLabel = isAttack && critical
+        ? (result.rolls?.[0] === 19 ? ' Champion critical on natural 19!' : ' Natural 20!')
+        : (!isAttack && result.isCritical ? ' Natural 20!' : '');
+    const dcLabel = isAttack ? `vs AC ${dc}` : `DC ${dc}`;
+    return `**${label}**${advLabel} (${dcLabel}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${critLabel}${result.isCritFail ? ' Natural 1!' : ''}`;
+}
+
 function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
     const result = rollWithAdvantage(mod, label, roll.advantage, roll.disadvantage);
     const critical = applyPlayerAttackCritical(character, result);
     dispatch({ type: 'ADD_ROLL', payload: result });
 
-    const dc = roll.dc || 15;
+    // The parser's deliberate default is DC 10 (never 15 — the solo-play ladder's
+    // own rule); ?? keeps an explicit dc of 0 instead of silently re-pricing it.
+    const dc = roll.dc ?? 10;
     const success = critical || result.total >= dc;
-    const advLabel = roll.advantage ? ' *(advantage)*' : roll.disadvantage ? ' *(disadvantage)*' : '';
-    const hitMiss = success ? '**Hit!**' : '**Miss!**';
-    const critLabel = critical
-        ? (result.rolls?.[0] === 19 ? ' Champion critical on natural 19!' : ' Natural 20!')
-        : '';
-    const rollMsg = `**${label}**${advLabel} (vs AC ${dc}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${critLabel}${result.isCritFail ? ' Natural 1!' : ''}`;
-
     dispatch({
         type: 'ADD_MESSAGE',
-        payload: { role: 'system', content: rollMsg },
+        payload: {
+            role: 'system',
+            content: playerD20OutcomeLine({ label, result, dc, isAttack: true, critical, success, advantage: roll.advantage, disadvantage: roll.disadvantage }),
+        },
     });
 
     return {
@@ -709,6 +728,17 @@ function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
 
 function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     const skillName = roll.skill.toLowerCase();
+
+    // Initiative retired 2026-08-27 (DECISIONS.md): the exchange machine has
+    // owned initiative since combat_start rolls it engine-side — a DM-requested
+    // initiative roll has no consumer and only ever confused the table.
+    if (skillName === 'initiative') {
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: { role: 'system', content: 'Initiative is rolled automatically by the engine when combat starts — the requested roll is skipped.' },
+        });
+        return null;
+    }
 
     const ability = SKILL_ABILITIES[skillName];
     const isAbilityName = ABILITY_NAMES.includes(skillName);
@@ -762,44 +792,22 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     const critical = isAttack ? applyPlayerAttackCritical(character, result) : result.isCritical;
     dispatch({ type: 'ADD_ROLL', payload: result });
 
-    // Initiative is just a number for turn ordering — no DC or pass/fail
-    if (skillName === 'initiative') {
-        const advLabel = effRoll.advantage ? ' *(advantage)*' : effRoll.disadvantage ? ' *(disadvantage)*' : '';
-        const rollMsg = `**${label}**${advLabel}: Rolled **${result.total}**${result.advantageDetail}`;
-        dispatch({
-            type: 'ADD_MESSAGE',
-            payload: { role: 'system', content: rollMsg },
-        });
-        return {
-            type: 'initiative',
-            skill: roll.skill,
-            dc: null,
-            rolled: result.total,
-            success: true,
-            description: roll.description,
-        };
-    }
-
-    const success = (isAttack && critical) || result.isCritical || result.total >= (roll.dc || 15);
-    const advLabel = effRoll.advantage ? ' *(advantage)*' : effRoll.disadvantage ? ' *(disadvantage)*' : '';
-    const dcLabel = isAttack ? `vs AC ${roll.dc}` : `DC ${roll.dc}`;
-    const hitMiss = isAttack
-        ? (success ? '**Hit!**' : '**Miss!**')
-        : (success ? '**Success!**' : '**Failure!**');
-    const critLabel = isAttack && critical
-        ? (result.rolls?.[0] === 19 ? ' Champion critical on natural 19!' : ' Natural 20!')
-        : (result.isCritical ? ' Natural 20!' : '');
-    const rollMsg = `**${label}**${advLabel} (${dcLabel}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${critLabel}${result.isCritFail ? ' Natural 1!' : ''}`;
-
+    // roll.dc ?? 10 matches the parser's deliberate default (never 15); an
+    // explicit dc of 0 stays 0 instead of silently becoming 15 (2026-08-27 audit).
+    const dc = roll.dc ?? 10;
+    const success = critical || result.isCritical || result.total >= dc;
     dispatch({
         type: 'ADD_MESSAGE',
-        payload: { role: 'system', content: rollMsg },
+        payload: {
+            role: 'system',
+            content: playerD20OutcomeLine({ label, result, dc, isAttack, critical, success, advantage: effRoll.advantage, disadvantage: effRoll.disadvantage }),
+        },
     });
 
     return {
         type: roll.type || 'skill_check',
         skill: roll.skill,
-        dc: roll.dc,
+        dc,
         rolled: result.total,
         success,
         critical,

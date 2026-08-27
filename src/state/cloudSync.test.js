@@ -119,8 +119,9 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         const loaded = await loadGameFromCloud('u1', 'slot-1');
         expect(loaded.fronts).toHaveLength(1);
         expect(loaded.messages).toHaveLength(2); // summarized messages are no longer trimmed
-        expect(loaded.settings.apiKey).toBeUndefined();
-        expect(loaded.settings.geminiApiKey).toBeUndefined();
+        // Settings (secrets included) are stripped from the snapshot entirely —
+        // device-local by design (DECISIONS.md 2026-08-27).
+        expect(loaded.settings).toBeUndefined();
         expect(loaded.user).toBeUndefined();
         expect(loaded.saveVersion).toBe(SAVE_VERSION);
     });

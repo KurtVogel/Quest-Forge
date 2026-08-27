@@ -98,14 +98,35 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         expect(await loadGame('never-saved')).toBeNull();
     });
 
-    it('strips secrets (apiKey, geminiApiKey, imageApiKey, firebaseConfig) from the persisted settings', async () => {
+    it('falls back to a legacy embedded-state metadata record when no payload record exists (2026-08-27 audit)', async () => {
+        // Pre-v3 records embedded the full state in the `saves` store; a record
+        // whose payload never migrated/landed must still load through the belt.
+        await saveGame('slot-seed', makeGameState()); // ensure the DB exists at v3
+        await new Promise((resolve, reject) => {
+            const open = indexedDB.open('rpg-client-saves', 3);
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+                const db = open.result;
+                const tx = db.transaction('saves', 'readwrite');
+                tx.objectStore('saves').put({
+                    slotId: 'legacy-slot',
+                    name: 'Legacy',
+                    savedAt: 1,
+                    state: { character: { name: 'Old Hero' }, currentLocation: 'The Old Keep' },
+                });
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onabort = () => { db.close(); reject(tx.error); };
+            };
+        });
+        const loaded = await loadGame('legacy-slot');
+        expect(loaded.character.name).toBe('Old Hero');
+        expect(loaded.currentLocation).toBe('The Old Keep');
+    });
+
+    it('strips settings (secrets included) entirely from the snapshot — device-local by design (DECISIONS.md 2026-08-27)', async () => {
         await saveGame('slot-1', makeGameState());
         const loaded = await loadGame('slot-1');
-        expect(loaded.settings.apiKey).toBeUndefined();
-        expect(loaded.settings.geminiApiKey).toBeUndefined();
-        expect(loaded.settings.imageApiKey).toBeUndefined();
-        expect(loaded.settings.firebaseConfig).toBeUndefined();
-        expect(loaded.settings.llmProvider).toBe('gemini');
+        expect(loaded.settings).toBeUndefined();
     });
 
     it('caps persisted rollHistory at the most recent 50 entries', async () => {

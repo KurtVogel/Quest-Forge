@@ -768,3 +768,55 @@ describe('exchange-machine parity via the combat math kernel (2026-07-30)', () =
         expect(results[0].damage).toBeGreaterThan(0);
     });
 });
+
+describe('fighter L5+ out-of-combat Extra Attack (pinned 2026-08-27)', () => {
+    it('resolves two independently rolled strikes, each with its own outcome', () => {
+        rollQueue.push(20, 1); // strike 1 crits, strike 2 fumbles — modifier-independent
+        const { results, dispatch } = run(
+            [{ type: 'attack_roll', skill: 'attack', dc: 13, description: 'Sword strike' }],
+            { level: 5 }
+        );
+        expect(results).toHaveLength(2);
+        expect(results[0].description).toContain('(Attack 1)');
+        expect(results[0].success).toBe(true);
+        expect(results[0].critical).toBe(true);
+        expect(results[1].description).toContain('(Extra Attack)');
+        expect(results[1].success).toBe(false);
+        const messages = messagesFrom(dispatch);
+        expect(messages).toContain('(Attack 1)');
+        expect(messages).toContain('(Extra Attack)');
+    });
+});
+
+describe('legacy initiative lane retired (DECISIONS.md 2026-08-27)', () => {
+    it('skips a requested initiative roll with a system note and rolls no dice', () => {
+        // The empty rollQueue proves no die is drawn — the mock throws on an empty queue.
+        const { results, dispatch } = run([{ type: 'skill_check', skill: 'initiative', dc: 10 }]);
+        expect(results).toHaveLength(0);
+        expect(messagesFrom(dispatch)).toContain('Initiative is rolled automatically');
+    });
+});
+
+describe('DC fallback honors the parser default (2026-08-27 audit)', () => {
+    it('an explicit dc of 0 stays 0 instead of silently becoming DC 15', () => {
+        rollQueue.push(2);
+        const { results } = run([{ type: 'skill_check', skill: 'athletics', dc: 0 }]);
+        expect(results[0].dc).toBe(0);
+        expect(results[0].success).toBe(true);
+    });
+});
+
+describe('npc_attack against a companion honors the companion conditions (2026-08-27 audit)', () => {
+    it('a prone companion grants the attacker advantage', () => {
+        rollQueue.push(5, 18, 4); // advantage pair (18 kept), then 1d6 damage
+        const party = [{ id: 'mara', name: 'Mara', hp: 10, maxHp: 10, ac: 12, conditions: ['prone'], status: 'active' }];
+        const { results, dispatch } = runWithContext(
+            [{ type: 'npc_attack', attacker: 'Bandit', target: 'mara', modifier: 3, damage: '1d6' }],
+            { party }
+        );
+        expect(results[0].success).toBe(true);
+        expect(results[0].rolled).toBe(21); // the kept high die + modifier
+        expect(messagesFrom(dispatch)).toContain('*(advantage)*');
+        expect(dispatch.mock.calls.some(([a]) => a.type === 'UPDATE_COMPANION' && a.payload.hp === 6)).toBe(true);
+    });
+});

@@ -9,10 +9,14 @@ import { serializeGameState, buildSaveMetadata } from "./persistence.js";
  */
 
 /**
- * Firestore REJECTS document IDs that begin and end with double underscores
- * ("Resource id is invalid because it is reserved"), so the app's local autosave
- * slot name "__autosave__" can't be used as a cloud document ID. Callers keep
- * passing "__autosave__"; we map it to a legal doc ID at this boundary.
+ * LEGACY-DATA GUARDS. Nothing writes the autosave slot to the cloud anymore
+ * (cloud sync carries manual saves only), but old accounts may still hold an
+ * autosave doc from the era when it did. `cloudDocId` keeps the mapping so a
+ * legacy doc stays addressable (Firestore REJECTS IDs that begin and end with
+ * double underscores — "Resource id is invalid because it is reserved"), and
+ * `listCloudSaves` keeps excluding it from the manual-saves list. Do not grow
+ * these into a write path (2026-08-27 audit: the write-side vestiges were
+ * dropped).
  */
 const AUTOSAVE_SLOT = '__autosave__';
 const CLOUD_AUTOSAVE_DOC_ID = 'autosave';
@@ -75,10 +79,8 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         const metadata = {
             slotId,
             ...buildSaveMetadata(gameState),
-            name: gameState.session?.name || 'Auto-Save',
             savedAt: new Date().toISOString(),
             messageCount: messages.length,
-            isAuto: slotId === AUTOSAVE_SLOT
         };
 
         // The state is stored as a stringified JSON blob (avoids Firestore's

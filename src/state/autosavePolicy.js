@@ -9,9 +9,9 @@ import { gameReducer } from './gameReducer.js';
 
 /**
  * Fields whose changes never schedule an autosave: `user`/`ui` are stripped by
- * serializeGameState; `settings` persists separately via saveSettings (the
- * save's embedded settings copy may lag a keystroke behind — harmless,
- * LOAD_GAME merges live settings on top). Must mirror serializeGameState's
+ * serializeGameState; `settings` persists separately via saveSettings and is
+ * stripped from the snapshot entirely (DECISIONS.md 2026-08-27 — device-local
+ * by design, LOAD_GAME never restored it). Must mirror serializeGameState's
  * exclusions.
  */
 const AUTOSAVE_IGNORED_FIELDS = new Set(['user', 'ui', 'settings']);

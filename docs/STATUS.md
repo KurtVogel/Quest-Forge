@@ -6,8 +6,30 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-27 (NPC species field shipped; strengthening audit ran twice —
-persistence + cloud-sync round found no P0/P1)._
+_Last updated: 2026-08-27 (species field + the same-day queue sweep: the 2026-08-27 audit
+batch is fully cleared, queue back to only the pronoun-flip watch item)._
+
+## 2026-08-27 — same-day queue sweep: the whole 2026-08-27 audit batch cleared (1 P1 + 13 P2s)
+
+All open items from the morning's two audit runs fixed in one session (DECISIONS.md
+2026-08-27 sweep-rulings entry; every item ticked with a dated note). **Combat** — the
+bonus-action P1: a `second_wind` slot or Cleric bonus-time cast now marks
+`combat.bonusActionUsed` through the exchange payload, and a bonus cast after a potion is
+rejected — the one-bonus-action-per-round guard is finally two-way; plus REJECT phase
+guard, opening null-character guard, dead-foe `on_success` guard, and the quadruplicated
+hit/crit/damage assembly folded into a `resolveAttackRoll` kernel in `combatMath.js`.
+**Roll resolution** — one shared player d20 outcome formatter; `roll.dc ?? 10` so an
+explicit `dc: 0` no longer silently becomes DC 15; `npc_attack` on a companion honors the
+companion's conditions; fighter L5+ out-of-combat Extra Attack pinned; the legacy
+`initiative` roll lane RETIRED (engine-owned since the exchange machine — DECISIONS ruling).
+**Persistence/cloud** — RULED: saves stop embedding `settings` (stripped like `user`/`ui`;
+live-settings-win made structural, multi-KB customSystemPrompt ballast gone — DECISIONS.md
+2026-08-27); `listSaves` is a strip-`state` destructure; cloud autosave write vestiges
+dropped (legacy guards documented); SettingsModal load/delete surface failures like
+App.jsx; autosave dirty-flag/debounce choreography extracted to `state/autosaveRuntime.js`
+with a full suite; first tests for `auth.js` and the legacy-payload load fallback.
+1,793 tests green (+34), lint clean, deployed to hosting. Queue: only the NPC pronoun-flip
+WATCH item remains open (by design, pending live evidence).
 
 ## 2026-08-27 — NPC species: a goblin can no longer quietly turn human
 
@@ -674,8 +696,9 @@ generation + victory echo land.**
 
 ## Strengthening queue & watch items
 
-Open in SCHEDULED_STRENGTHENING.md after the 2026-08-20 sweep: **0 P1s, 3 P2s** (mobile
-drawer/a11y UX, Magic Missile dart split, NPC pronoun-flip watch item — playtest #9 saw
+Open in SCHEDULED_STRENGTHENING.md after the 2026-08-27 sweep: **0 P1s, 0 P2s** — the one
+open line is the NPC pronoun-flip WATCH item (left open by design: prompt fix shipped
+2026-08-09, zero flips since, needs live evidence before more machinery; playtest #9 saw
 zero flips across six NPCs, but no generated art exercised the visual half). Carried
 watch items (need live play / Vesa's eyes): stance-stutter self-clean on the Saima save
 (other browser profile), Scribe gender backfill on pre-gender campaigns, Grok art
