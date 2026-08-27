@@ -17,7 +17,7 @@ first-class 40-char plain-replace roster field mirroring gender end-to-end (DECI
 "Deepen memory" backfill for existing campaigns (run it on the goblin!), and rendering in
 KNOWN NPCs / RAG / KNOWN APPEARANCES / Journal card chip / portrait + scene-art `(goblin
 woman)` tags, with the art director's inviolable rule extended to species. 5 new tests;
-suite 1759 green; NOT yet deployed to hosting.
+suite 1759 green; deployed to hosting.
 
 ## 2026-08-26 — Dice Log collapsed by default (small UX follow-up)
 
