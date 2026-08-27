@@ -56,8 +56,8 @@ it under Process notes.
 | memory-journal | `engine/worldJournal.js` | 2026-08-18 |
 | story-memory | `engine/storyMemory.js` | 2026-08-06 |
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-08-06 |
-| persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-04 |
-| cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-08-04 |
+| persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-27 |
+| cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-08-27 |
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-08-04 |
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-08-05 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-08-04 |
@@ -338,6 +338,12 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (roll-resolution, 2026-08-27): fighter L5+ out-of-combat Extra Attack and the legacy `initiative` skill branch are both untested (uncovered this run); initiative has been reducer-owned since the exchange machine yet the parser still whitelists it — pin the former, decide the latter's fate via DECISIONS — `engine/rollResolver.js:753-757,766-781`, `llm/responseParser.js:48`.
 - [ ] **P2** (roll-resolution, 2026-08-27): `npc_attack` targeting a companion ignores the companion's conditions (only AC is resolved), while every other attack path is condition-aware — thread `targetConditions` through — `engine/rollResolver.js:126-131`.
 - [ ] **P2** (roll-resolution, 2026-08-27): `resolveSinglePlayerAttackRoll` and `resolvePlayerRoll`'s tail duplicate the attack outcome/crit-label formatting (Champion-19 label in both) — fold to one formatter — `engine/rollResolver.js:678-708,760-810`.
+- [ ] **P2** (persistence, 2026-08-27): every save embeds a settings copy (incl. the multi-KB `customSystemPrompt`) that LOAD_GAME's merge unconditionally overrides with live settings — even on a fresh device, defaults win, so a custom DM prompt never travels with a cloud save and the copy is write-only autosave ballast; strip `settings` from the snapshot like `user`/`ui`, or give saved keys precedence over untouched defaults (DECISIONS entry either way — completes, not reverses, the "live settings win" rule) — `state/persistence.js:133`, `state/handlers/session.js:273-277`.
+- [ ] **P2** (persistence, 2026-08-27): `listSaves` hand-re-enumerates all 17 metadata fields (drop-prone duplicate of `buildSaveMetadata`'s list; post-v3 records are already metadata-only) — replace with a strip-`state` destructure — `state/persistence.js:238-261`.
+- [ ] **P2** (persistence, 2026-08-27): untested — `loadGame`'s legacy-metadata fallback branch (`state/persistence.js:215-219`) and GameContext's autosave dirty-flag choreography (three mutation sites, 0% file) — `state/GameContext.jsx:67-202`.
+- [ ] **P2** (cloud-sync, 2026-08-27): `SettingsModal.handleLoad`'s LOCAL branch silently no-ops on a null load and lacks try/catch (unhandled rejection, zero UI feedback) — the asymmetry the 2026-07-25 audit fixed for the cloud branch; `handleDelete` likewise uncaught; mirror App.jsx's start-screen pattern — `components/Settings/SettingsModal.jsx:141-148,151-161` vs `App.jsx:81-93`.
+- [ ] **P2** (cloud-sync, 2026-08-27): cloud-autosave write path is vestigial (`isAuto` stamp, `|| 'Auto-Save'` name default diverging from `'Unnamed Save'`) — nothing writes `__autosave__` to the cloud anymore; keep `cloudDocId` + the list exclusion as legacy-data guards, document them as such, drop the write-side vestiges — `state/cloudSync.js:17-21,78-81,190`.
+- [ ] **P2** (cloud-sync, 2026-08-27): `auth.js` at 0% — pin `subscribeToAuth`'s no-auth `callback(null)` path and both throw guards — `state/auth.js`.
 
 ## Entry template
 
@@ -361,6 +367,30 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-27 — persistence + cloud-sync (Lap 4: simplification & design) — second run
+
+`npm test`: 1754 passing / 92 files (green)
+
+### persistence
+- **Scope examined:** `state/persistence.js` (whole file), `state/GameContext.jsx` (autosave wiring), `state/autosavePolicy.js`, LOAD_GAME's settings merge (`handlers/session.js:270-277`), App.jsx Continue flow; `persistence.test.js` (33 cases), `autosavePolicy.test.js`.
+- **Findings:** no P0/P1 — this module has absorbed three prior audit rounds and it shows.
+  - **P2 (design):** `serializeGameState` embeds a full settings copy (incl. the multi-KB `customSystemPrompt`) in every save, but LOAD_GAME's merge (`{...initial, ...save.settings, ...state.settings}`) makes live settings win unconditionally — even on a fresh device, pristine defaults override the save's copy, so a custom DM prompt does NOT travel with a cloud save and the embedded copy is write-only ballast in the 2s-debounce autosave path. Either strip `settings` from the snapshot like `user`/`ui`, or give saved keys precedence over untouched defaults. Completes (not reverses) the documented "live settings win" rule — `state/persistence.js:133`, `state/handlers/session.js:273-277`.
+  - **P2 (design):** `listSaves` hand-re-enumerates all 17 metadata fields — duplicating `buildSaveMetadata`'s list; post-v3 records are already metadata-only, so the projection exists only to strip legacy embedded `state`, and a field added to `buildSaveMetadata` silently vanishes from the list until re-added here (`sessionId` needed exactly that in 2026-08-06). Replace with `const { state: _s, ...meta } = record` — `state/persistence.js:238-261`.
+  - **P2 (tests):** `loadGame`'s legacy-metadata fallback (payload record missing, metadata still embeds `state`, `:215-219`) is untested — the v3 migration test covers only the migrated path. And `GameContext.jsx` is the last 0% link in the autosave chain: the dirty-flag choreography (three mutation sites: flush, hide-flush, debounce effect) and timer glue are React-side only now that `autosavePolicy` is extracted — a hook-level test would pin them — `state/GameContext.jsx:67-202`.
+- **Suggested improvements:** (1) settle the settings-in-saves question with a DECISIONS entry (strip it, or make the merge meaningful); (2) the one-line `listSaves` projection fix; (3) legacy-fallback + dirty-flag tests.
+
+### cloud-sync
+- **Scope examined:** `state/cloudSync.js` (whole file), `state/auth.js`, the SettingsModal save/load/overwrite/delete/upload flows, App.jsx cloud load; `cloudSync.test.js` (12 cases) + `cloudSync.nodb.test.js` (8).
+- **Findings:** no P0/P1. Chunking, transactions, and failure surfacing are all pinned; a torn concurrent read degrades to a failed load (missing chunk throw / truncated-JSON parse error → null), never corruption — verified, no action needed.
+  - **P2:** `SettingsModal.handleLoad`'s LOCAL branch still silently no-ops on a null load and has no try/catch (an IDB read rejection is an unhandled rejection with zero UI feedback) — the exact asymmetry the 2026-07-25 audit fixed for the cloud branch, and App.jsx's start-screen twin (`App.jsx:81-93`) already does both branches right; `handleDelete` likewise has no catch around `deleteSave` — `components/Settings/SettingsModal.jsx:141-148,151-161`.
+  - **P2 (design):** the cloud-autosave WRITE path is vestigial — nothing calls `saveGameToCloud` with `__autosave__` (autosaves are local-only by design; `handleUploadLocalSaves` lists via `listSaves`, which excludes it), so the `isAuto` metadata stamp and the `|| 'Auto-Save'` name default are dead-in-practice, and that default also diverges from `buildSaveMetadata`'s `'Unnamed Save'`. Keep `cloudDocId` + the `listCloudSaves` autosave exclusion (legacy autosave docs exist in real Firestore projects) but document them as legacy-data guards and drop the write-side vestiges — `state/cloudSync.js:17-21,78-81,190`.
+  - **P2 (tests):** `auth.js` is 0% — thin wrapper, but `subscribeToAuth`'s no-auth `callback(null)` path and both throw guards are unpinned; cheap to cover — `state/auth.js`.
+- **Suggested improvements:** (1) mirror App.jsx's error surfacing into SettingsModal's local load/delete; (2) trim/document the cloud-autosave vestiges; (3) a small auth.js suite.
+
+### Process notes
+- Second run today (user-requested); coverage snapshot from this morning still current.
+- Both features came out of Lap 1–3 hardening well: this lap's findings are consumer-flow asymmetries and write-path ballast, not engine bugs. Lap 4 has now covered 10 of 22 features.
 
 ## 2026-08-27 — roll-resolution + combat-exchange (Lap 4: simplification & design)
 
