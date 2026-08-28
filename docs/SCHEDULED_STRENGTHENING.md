@@ -58,9 +58,9 @@ it under Process notes.
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-08-06 |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-27 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-08-27 |
-| character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-08-04 |
+| character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-08-28 |
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-08-05 |
-| quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-08-04 |
+| quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-08-28 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-08-20 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-08-08 |
 | chat-orchestration | `components/Chat/ChatPanel.jsx`, `llm/turnOrchestrator.js` (turn pipeline, `applyEvents`, message window) | 2026-08-19 |
@@ -344,6 +344,11 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P2** (cloud-sync, 2026-08-27): `SettingsModal.handleLoad`'s LOCAL branch silently no-ops on a null load and lacks try/catch (unhandled rejection, zero UI feedback) — the asymmetry the 2026-07-25 audit fixed for the cloud branch; `handleDelete` likewise uncaught; mirror App.jsx's start-screen pattern — `components/Settings/SettingsModal.jsx:141-148,151-161` vs `App.jsx:81-93`. *Fixed 2026-08-27: both branches try/caught with syncStatus feedback mirroring App.jsx; handleDelete surfaces failures too.*
 - [x] **P2** (cloud-sync, 2026-08-27): cloud-autosave write path is vestigial (`isAuto` stamp, `|| 'Auto-Save'` name default diverging from `'Unnamed Save'`) — nothing writes `__autosave__` to the cloud anymore; keep `cloudDocId` + the list exclusion as legacy-data guards, document them as such, drop the write-side vestiges — `state/cloudSync.js:17-21,78-81,190`. *Fixed 2026-08-27: write-side vestiges dropped (metadata name now comes from buildSaveMetadata's 'Unnamed Save'); cloudDocId + list exclusion kept and documented as legacy-data guards.*
 - [x] **P2** (cloud-sync, 2026-08-27): `auth.js` at 0% — pin `subscribeToAuth`'s no-auth `callback(null)` path and both throw guards — `state/auth.js`. *Fixed 2026-08-27: auth.test.js pins the no-auth callback(null) path, both signInWithGoogle guards, logOut, and the delegation paths against mocked firebase/auth.*
+- [ ] **P0** (character-vault, 2026-08-28): a wizard/cleric started from the roster or a file import cannot cast any leveled spell for the whole first session — `sanitizeCharacter` never mints `spellSlots`/`sustainedSpell` (createCharacter does, `characterUtils.js:228`), START_CHARACTER doesn't heal, `TAKE_REST`'s refill is gated on existing slots (`state/handlers/resources.js:281-283`) so the rejection's "Rest to recover slots" advice cannot work; self-heals only on reload or level-up. Mint the spellcaster pair in sanitizeCharacter (+ caster round-trip test), and let a long rest mint missing caster slots as defense in depth — `engine/characterVault.js:147-190`.
+- [ ] **P1** (quests, 2026-08-28): recurring quest names rewrite closed-arc history — COMPLETE/FAIL's exact `isMatch` matches by normalized name across ALL statuses and the map rewrites every match, so failing arc 2 of a reused name flips arc 1's `completed` row to `failed` (and the mirror). Scope exact matches active-first like the fuzzy pool, keeping the terminal rewrite only when no active row matches (it is the one-shot XP guard) — `state/handlers/quests.js:92,112`.
+- [ ] **P2** (quests, 2026-08-28): `normalizeQuestUpdate` defaults every unknown status to `'new'` — a DM emitting `"complete"`/`"done"`/`"finished"` silently downgrades a completion into an upsert refresh and the quest never closes (no audit backstop covers quest closure). Alias the obvious completion/failure synonyms before defaulting — `llm/eventChannels.js:203`.
+- [ ] **P2** (quests, 2026-08-28): `ADD_QUEST` spreads `...payload` after `status: 'active'`, so a payload carrying `status` (or other junk keys) overrides/rides in — controlled today, latent trap; pick fields explicitly — `state/handlers/quests.js:74-82`.
+- [ ] **P2** (character-vault, 2026-08-28): fold the `createCharacter`/`sanitizeCharacter` parallel hero-shape builders into one shared derived-fields core — `spellSlots` (the P0) and `levelBonusRetired` are proven drift between the twin literals — `engine/characterVault.js:147-190`, `engine/characterUtils.js:202-248`.
 
 ## Entry template
 
@@ -367,6 +372,32 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-28 — character-vault + quests (Lap 4: simplification & design)
+
+`npm test`: 1793 passing / 94 files (green)
+
+### character-vault
+- **Scope examined:** `engine/characterVault.js` (whole file), `engine/characterUtils.js` (createCharacter as the parallel builder), roster flows in `CharacterCreation.jsx` (begin-from-roster `:252-265`, import `:267-279`), `START_CHARACTER` (`state/handlers/character.js:54-73`), the spellSlots heal in `state/migrations.js:248-256`, rest refill (`state/handlers/resources.js:279-294`); `characterVault.test.js` (31 cases).
+- **Findings:**
+  - **P0:** a wizard/cleric started from the roster or a file import cannot cast ANY leveled spell for the whole first session. `sanitizeCharacter` rebuilds every derived field EXCEPT the spellcaster pair — `createCharacter` mints `spellSlots`/`sustainedSpell` (`characterUtils.js:228`) but the vault's hand-maintained twin literal (`characterVault.js:147-190`) omits them, and every downstream stage assumes they exist: `START_CHARACTER` doesn't mint (it only recomputes AC), `TAKE_REST`'s refill is gated `if (newSpellSlots)` (`resources.js:281-283`), and `chooseSlotLevel(undefined, …)` returns null so `CAST_SPELL` rejects with "no level 1+ spell slot remains. **Rest to recover slots**" (`handlers/spellcasting.js:88-91`) — advice that cannot work. Combat cast slots fail the same way. Self-heals only on reload (`migrations.js:254`) or level-up (`progression.js:112`); no data loss, but 2 of 4 classes are broken in a shipped flow ("re-sanitize on the way out" runs on EVERY roster begin, not just imports). No vault test involves a caster.
+  - **P2 (design — the lap's lens):** root cause is the duplicated builder: `createCharacter` and `sanitizeCharacter` construct the same hero shape as two parallel literals that must be updated in lockstep. spellSlots is the proven drift; `levelBonusRetired` is a second instance (harmless today only because the retirement notice migration is version-gated ≤v2). Extract one shared derived-fields builder (or have sanitize delegate to a common core) so spellcasting-v2-style features can't repeat this.
+  - **P2:** sanitizeCharacter deliberately omits `armorClass` (START_CHARACTER recomputes) but the contract is implicit — an inline comment would stop a future "fix" that trusts file AC.
+- **Suggested improvements:** (1) mint `...(isSpellcaster(raw.class) && { spellSlots: buildSpellSlots(level), sustainedSpell: null })` in sanitizeCharacter + a caster round-trip test; (2) defense in depth: let a long rest mint missing caster slots instead of no-opping; (3) fold the two builders.
+
+### quests
+- **Scope examined:** `state/handlers/quests.js` (whole file incl. the 2026-08-26 fuzzy identity), `normalizeQuestUpdate`/`guardedList` (`llm/eventChannels.js:191-205,316`), the applyEvents quest loop + exp_awarded suppression (`state/applyEvents.js:315-365`), QuestPanel dispatches; `gameReducer.quests.test.js` (24 cases).
+- **Findings:**
+  - **P1:** terminal history rewrite on recurring quest names. The exact path's `isMatch` (`quests.js:92`) matches by normalized name across ALL statuses and the map (`quests.js:112`) rewrites every match — under the documented recurring-name design (ADD dedupe is active-only, 2026-07-23), failing arc 2 of "Guard the caravan" also flips arc 1's closed row `completed`→`failed` (and the mirror: a completed rerun flips an old `failed`→`completed`). Erases exactly the table history the 2026-07-23 decision protects. XP stays correct (`paying` picks the non-terminal row); only the FUZZY fallback has active-first scoping (`quests.js:100-102`). Fix: scope exact name matches active-first too, keeping the terminal-row rewrite ONLY when no active row matches (that harmless rewrite is the one-shot XP guard — preserve it).
+  - **P2:** `ADD_QUEST` spreads `...payload` AFTER `status: 'active'` (`quests.js:74-82`) — a payload carrying `status` would override it. Both current dispatch sites are controlled; still a latent trap for any future caller passing a whole normalized update. Pick fields explicitly.
+  - **P2:** `normalizeQuestUpdate` defaults every unknown status to `'new'` (`eventChannels.js:203`) — a DM writing `"complete"`/`"done"`/`"finished"` silently downgrades a completion into an upsert refresh and the quest never closes (no Scribe backstop covers quest closure; the missing-events nudge only fires on NO json). Alias the obvious completion/failure synonyms before defaulting.
+  - **P2 (marginal):** the same-turn XP gate (`quests.js:127`) compares `openedAtMessage` against a message count other same-batch dispatches can grow — a second quest's award line landing between one quest's ADD and COMPLETE slips it from instant to full tier. Anti-farming edge only.
+- **Suggested improvements:** (1) active-first exact matching + a recurring-name fail/complete regression test; (2) status synonym aliasing; (3) explicit ADD_QUEST field picking.
+
+### Process notes
+- Queue verification: the one open item (npc-consistency 2026-08-09) is a live-playtest watch item, not statically verifiable — left open. Everything else in the queue is checked.
+- Coverage snapshot from 2026-08-27 is current (1 day old); not refreshed.
+- No registry changes; Lap 4 has now covered 12 of 22 features.
 
 ## 2026-08-27 — persistence + cloud-sync (Lap 4: simplification & design) — second run
 
