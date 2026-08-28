@@ -156,9 +156,78 @@ export function mergeNpcDossierText(existingText, incomingText, max = NPC_DOSSIE
  * join the record, restatements are dropped, and the oldest fall off at the cap. */
 export const MAX_NPC_CALLBACK_HOOKS = 5;
 
+// Words that cannot legitimately END an English phrase — a hook ending on one
+// was cut (a repaired truncated JSON string, or the old render trimmer's
+// leftovers). Deliberately conservative: function words with common phrase-final
+// idioms stay OUT (for: "worth fighting for"; with: "reckoned with"; about:
+// "won't talk about"; against: "up against"; been/was/that and the modals:
+// elliptical finals) — over-trimming mutilates healthy hooks, which is how the
+// old "strip any short last word" heuristic turned the stored hook "The sound
+// of her blade being drawn" into the displayed stub "The sound of her blade
+// being". Known cosmetic cost: a hook ending in the idiom "for the time being"
+// still trims — the truncation reading is far more common in this register.
+const HOOK_NEVER_FINAL_WORDS = new Set([
+    'a', 'an', 'the', 'and', 'or', 'but', 'nor', 'of', 'to', 'at', 'by',
+    'from', 'into', 'onto', 'upon', 'as', 'than', 'which', 'who', 'whom',
+    'whose', 'while', 'because', 'though', 'although', 'unless', 'whether',
+    'toward', 'towards', 'during', 'despite', 'versus', 'via', 'per',
+    'being', 'having', 'their', 'its', 'my', 'our', 'your', 'if',
+]);
+// Function words a mid-word cut can leave a recognizable prefix of ("abou" →
+// about, "bein" → being, "becaus" → because) — includes phrase-final-capable
+// ones the never-final set deliberately omits.
+const HOOK_FRAGMENT_PREFIX_SOURCES = [
+    ...HOOK_NEVER_FINAL_WORDS,
+    'about', 'with', 'for', 'against', 'without', 'within', 'since', 'when',
+    'where', 'that', 'would', 'could', 'should', 'there', 'them', 'they',
+    'been', 'have', 'does', 'might', 'must', 'shall', 'will',
+];
+// Real words that happen to be prefixes of the sources above ("with" ⊂
+// "without", "again" ⊂ "against") — never treated as fragments.
+const HOOK_PREFIX_EXEMPT_WORDS = new Set(['again', 'with', 'whet', 'thou']);
+// 1-2 letter tokens that are real words and may legitimately end a phrase
+// ("never gave up", "how she survived it").
+const HOOK_SHORT_FINAL_WORDS = new Set(['up', 'it', 'me', 'us', 'he', 'we', 'go', 'so', 'no', 'do', 'ok', 'on', 'in']);
+
+/**
+ * Normalize one callback hook, unwinding the tail a truncation leaves behind:
+ * a repaired truncated JSON string stores fragments like "The sound of her
+ * blade being dr", and a phrase can never end on a dangling function word.
+ * A hook that terminates in sentence punctuation is complete and untouched;
+ * healthy unpunctuated hooks ("Owes the hero three silver") pass verbatim —
+ * unlike the pre-2026-08-28 heuristic, a short final CONTENT word ("again",
+ * "drawn", "blade") is never eaten. A hook trimmed down to under three words
+ * was mostly truncation — dropped, a stub is worse than no hook.
+ */
+export function normalizeCallbackHook(value) {
+    const cleaned = clampNpcDossierField(typeof value === 'string' ? value : value?.text, NPC_HOOK_FIELD_MAX);
+    if (!cleaned) return '';
+    if (/[.!?…]["')\]]*$/.test(cleaned)) return cleaned;
+
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    if (words.length <= 1) return cleaned;
+    const core = word => word.toLowerCase().replace(/[^\p{L}\p{N}'’-]/gu, '');
+
+    let end = words.length;
+    const last = core(words[end - 1]);
+    const lastLooksCut =
+        (last.length > 0 && last.length <= 2 && !/\p{N}/u.test(last)
+            && !HOOK_SHORT_FINAL_WORDS.has(last) && !HOOK_NEVER_FINAL_WORDS.has(last))
+        || (last.length >= 4 && !HOOK_PREFIX_EXEMPT_WORDS.has(last)
+            && HOOK_FRAGMENT_PREFIX_SOURCES.some(w => w.length > last.length && w.startsWith(last)));
+    if (lastLooksCut) end -= 1;
+    while (end > 0 && HOOK_NEVER_FINAL_WORDS.has(core(words[end - 1]))) end -= 1;
+
+    if (end === words.length) return cleaned;
+    if (end < 3) return '';
+    return words.slice(0, end).join(' ').trim();
+}
+
 export function appendCallbackHooks(existing = [], additions = []) {
+    // normalizeCallbackHook runs on the EXISTING list too, so a stored
+    // truncation fragment self-cleans the next time this NPC's hooks merge.
     const clean = list => (Array.isArray(list) ? list : [])
-        .map(hook => clampNpcDossierField(typeof hook === 'string' ? hook : hook?.text, NPC_HOOK_FIELD_MAX))
+        .map(hook => normalizeCallbackHook(hook))
         .filter(Boolean);
     let next = clean(existing);
     for (const hook of clean(additions)) {

@@ -8,6 +8,29 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-28 · Callback hooks get ONE truncation-aware normalizer, applied at the reducer
+boundary — and it may only trim words that cannot end an English phrase.**
+Vesa's live report: an NPC card hook read "The sound of her blade being" — cut mid-phrase,
+not by layout. Two stacked causes: truncated machinery JSON (repairJson deliberately closes
+an open string, so a cut hook like "…being dr" persists) AND the old render-time heuristic
+in npcEnrichment.js, which stripped ANY unpunctuated last word ≤5 chars — so it both left
+"being" dangling after removing the half-word "dr" and, worse, mutilated perfectly healthy
+hooks (stored "…blade being drawn" displayed as the exact reported stub; "…the hero again"
+lost "again"). Ruling: `normalizeCallbackHook` lives in npcRoster.js and runs inside
+`appendCallbackHooks`, so every producer (per-turn Scribe, cadence reflection, DM
+npc_updates, enrichment) stores normalized hooks and pre-fix fragments self-clean on the
+NPC's next hook merge; the Journal card renders through the same function, so storage and
+display can never disagree. Design: punctuated hooks are complete and untouched; trimming
+unwinds only a closed-class NEVER-FINAL tail (articles, of/to/at/by, conjunctions,
+being/having, possessive determiners…), plus a last token that is a ≥4-char prefix of a
+function word ("abou", "bein") or a 1-2 letter orphan — content words are never eaten,
+whatever their length. Function words with common phrase-final idioms (for, with, about,
+against, been, was, modals — "worth fighting for", "reckoned with") are deliberately
+EXCLUDED from the trim set: over-trimming is the failure mode that caused this bug, so
+ambiguity resolves toward keeping the text. A hook trimmed below three words is dropped —
+a stub is worse than no hook. Accepted cosmetic cost (documented in code): a hook ending
+in the idiom "for the time being" still trims.
+
 **2026-08-28 · Queue-clearing sweep rulings: coin ledgers record only coin that actually
 moved, one item-identity rule serves audits AND reducer item refs, and both hero builders
 share one derived-fields core.**

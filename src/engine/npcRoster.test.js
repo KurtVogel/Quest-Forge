@@ -19,6 +19,7 @@ import {
     mergeNpcDossierText,
     migrateLegacyNpc,
     normalizeBondMoments,
+    normalizeCallbackHook,
     scoreNpcForPrompt,
     getCoreNpcName,
     namesMatch,
@@ -360,6 +361,48 @@ describe('appendCallbackHooks', () => {
         expect(many).toHaveLength(MAX_NPC_CALLBACK_HOOKS);
         expect(many.at(-1)).toContain('chandlery');
         expect(many).not.toContain('The carved whalebone comb, still in her pocket.');
+    });
+});
+
+describe('normalizeCallbackHook — truncation fragments vs healthy hooks (2026-08-28, live "blade being" card report)', () => {
+    it('unwinds the dangling tail a repaired truncated JSON string leaves behind', () => {
+        // A mid-word cut plus the old single-word render trim produced the
+        // reported card text "The sound of her blade being".
+        expect(normalizeCallbackHook('The sound of her blade being dr')).toBe('The sound of her blade');
+        expect(normalizeCallbackHook('The sound of her blade being')).toBe('The sound of her blade');
+        expect(normalizeCallbackHook('Promised to meet her at the')).toBe('Promised to meet her');
+        expect(normalizeCallbackHook('She may be worried abou')).toBe('She may be worried');
+    });
+
+    it('never eats a legitimate short final content word (the old heuristic did)', () => {
+        // The old "strip any unpunctuated last word ≤5 chars" rule turned this
+        // healthy stored hook into the exact reported stub.
+        expect(normalizeCallbackHook('The sound of her blade being drawn')).toBe('The sound of her blade being drawn');
+        expect(normalizeCallbackHook('Wants to see the hero again')).toBe('Wants to see the hero again');
+        expect(normalizeCallbackHook('She never gave up')).toBe('She never gave up');
+        expect(normalizeCallbackHook('A force to be reckoned with')).toBe('A force to be reckoned with');
+        expect(normalizeCallbackHook('Owes the hero three silver')).toBe('Owes the hero three silver');
+    });
+
+    it('keeps punctuated hooks untouched and drops truncation stubs entirely', () => {
+        expect(normalizeCallbackHook('For the time being.')).toBe('For the time being.');
+        expect(normalizeCallbackHook('Owes the')).toBe('');
+        expect(normalizeCallbackHook('The sound of')).toBe('');
+    });
+
+    it('appendCallbackHooks stores the trimmed form and self-cleans stored fragments on the next merge', () => {
+        const stored = appendCallbackHooks([], ['The sound of her blade being dr']);
+        expect(stored).toEqual(['The sound of her blade']);
+
+        // A campaign that persisted the fragment before this fix heals the next
+        // time the NPC's hooks merge — even when the addition is unrelated.
+        const healed = appendCallbackHooks(
+            ['The sound of her blade being', 'Owes the hero three silver'],
+            ['The harbor sergeant remembers her name'],
+        );
+        expect(healed[0]).toBe('The sound of her blade');
+        expect(healed[1]).toBe('Owes the hero three silver');
+        expect(healed[2]).toBe('The harbor sergeant remembers her name');
     });
 });
 describe('namesMatch containment + dedupeNpcRoster (fork guard, 2026-07-23 romance playtest)', () => {

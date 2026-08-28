@@ -6,8 +6,21 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-28 (same-day queue sweep: the 2026-08-28 audit batch — 1 P0, 3 P1s,
-6 P2s — fully cleared; queue back to only the pronoun-flip watch item)._
+_Last updated: 2026-08-28 (queue sweep + the player-reported cut-hook fix on NPC cards)._
+
+## 2026-08-28 — player-reported bug: NPC card hooks cut mid-phrase ("The sound of her blade being")
+
+Vesa's live report, root-caused and fixed (DECISIONS.md 2026-08-28 hook-normalizer entry):
+truncated machinery JSON stores mid-word hook fragments (repairJson closes the open string
+by design), and the old render trimmer stripped ANY unpunctuated ≤5-char last word — which
+both left dangling function words behind fragments AND mutilated healthy hooks (stored
+"…blade being drawn" displayed as exactly the reported stub). `normalizeCallbackHook` now
+lives in npcRoster.js with a closed-class NEVER-FINAL design (content words are never
+eaten; function-word-prefix fragments like "abou"/"bein" caught; sub-3-word stubs dropped),
+runs inside `appendCallbackHooks` so all four hook producers store normalized text and
+already-persisted fragments self-clean on the NPC's next hook merge, and the Journal card
+renders through the same function. Vesa's stored hook displays as "The sound of her blade"
+immediately. 1,818 tests green (+4 incl. the mutilation-regression pin), lint clean.
 
 ## 2026-08-28 — same-day queue sweep: the whole 2026-08-28 audit batch cleared (1 P0 + 3 P1s + 6 P2s)
 

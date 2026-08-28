@@ -7,9 +7,9 @@
 import {
     NPC_BOND_MOMENT_MAX,
     NPC_DOSSIER_FIELD_MAX,
-    NPC_HOOK_FIELD_MAX,
     NPC_PLACE_FIELD_MAX,
     clampNpcDossierField,
+    normalizeCallbackHook,
 } from '../engine/npcRoster.js';
 import { NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../config/contentLimits.js';
 import { sendMessage } from './adapter.js';
@@ -23,21 +23,10 @@ function mentionsName(text, name) {
     return needle.length > 1 && hay.includes(needle);
 }
 
-/** Trim dangling word fragments from truncated JSON/model output. */
-export function normalizeCallbackHook(value) {
-    const cleaned = clampNpcDossierField(value, NPC_HOOK_FIELD_MAX);
-    if (!cleaned) return '';
-    if (/[.!?…]"?'?$/.test(cleaned)) return cleaned;
-
-    const words = cleaned.split(/\s+/).filter(Boolean);
-    if (words.length <= 1) return cleaned;
-
-    const last = words[words.length - 1];
-    if (last.length <= 5 && !/[.!?,;:]/.test(last)) {
-        return words.slice(0, -1).join(' ').trim();
-    }
-    return cleaned;
-}
+// The dangling-fragment trimmer lives in npcRoster.js since 2026-08-28 — one
+// rule for capture (appendCallbackHooks), enrichment, and the Journal card
+// render, so storage and display can never disagree about a hook again.
+export { normalizeCallbackHook };
 
 export function normalizeCallbackHooks(hooks = []) {
     return (Array.isArray(hooks) ? hooks : [])
