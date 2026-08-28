@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { containment, coverage, overlapCount, tokenSet } from './textMatch.js';
+import { containment, coverage, itemIdentityMatches, overlapCount, tokenSet } from './textMatch.js';
 
 describe('tokenSet', () => {
     it('keeps non-ASCII tokens intact (the old story-memory tokenizer dropped them)', () => {
@@ -39,5 +39,19 @@ describe('containment / coverage', () => {
         expect(containment(new Set(), tokenSet('anything'))).toBe(0);
         expect(coverage(new Set(), tokenSet('anything'))).toBe(0);
         expect(overlapCount(new Set(), new Set(['a']))).toBe(0);
+    });
+});
+
+describe('itemIdentityMatches (shared by the Scribe audits and name-referenced removal, 2026-08-28)', () => {
+    it('matches a narrated raw name against its catalog-cased row', () => {
+        expect(itemIdentityMatches('hempen rope', 'Hempen Rope (50 ft)')).toBe(true);
+        expect(itemIdentityMatches('wax candles', 'Wax Candles (x5)')).toBe(true);
+        expect(itemIdentityMatches('Torch', 'torch')).toBe(true);
+    });
+
+    it('does not match unrelated items or empty input', () => {
+        expect(itemIdentityMatches('healing potion', 'Hempen Rope (50 ft)')).toBe(false);
+        expect(itemIdentityMatches('', 'Torch')).toBe(false);
+        expect(itemIdentityMatches(null, undefined)).toBe(false);
     });
 });

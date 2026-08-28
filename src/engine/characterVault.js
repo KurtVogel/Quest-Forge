@@ -10,8 +10,8 @@
 import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
-import { getMaxHitPoints, getModifier, getProficiencyBonus } from './rules.js';
-import { ABILITY_NAMES, SKILL_LABELS, buildClassResources, getAllFeaturesUpToLevel, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
+import { getMaxHitPoints, getModifier } from './rules.js';
+import { ABILITY_NAMES, SKILL_LABELS, buildDerivedCharacterFields, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 import { normalizeEquippedSlots } from './equipment.js';
 import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
@@ -158,18 +158,14 @@ export function sanitizeCharacter(raw) {
         maxHP,
         currentHP: maxHP,
         tempHP: 0,
-        proficiencyBonus: getProficiencyBonus(level),
+        // Shared derived core (also mints caster spellSlots/sustainedSpell — the
+        // 2026-08-28 P0: roster/import wizards and clerics had no slots until a
+        // reload or level-up healed them).
+        ...buildDerivedCharacterFields(raw.race, raw.class, level),
         skillProficiencies,
         expertiseSkills,
-        savingThrowProficiencies: [...(charClass.savingThrows || [])],
         fightingStyle: normalizeFightingStyle(raw.class, raw.fightingStyle),
         martialArchetype: normalizeMartialArchetype(raw.class, level, raw.martialArchetype),
-        speed: race.speed || 30,
-        traits: [...(race.traits || [])],
-        features: getAllFeaturesUpToLevel(raw.class, level),
-        classResources: buildClassResources(raw.class, level),
-        hitDice: { total: level, remaining: level, die: charClass.hitDie },
-        conditions: [],
         gender: String(raw.gender || '').trim().slice(0, 60),
         background: String(raw.background || '').trim().slice(0, 2000),
         appearance: String(raw.appearance || '').trim().slice(0, CHARACTER_APPEARANCE_MAX),

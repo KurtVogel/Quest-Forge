@@ -4,6 +4,7 @@
  */
 import { normalizeItem, normalizeItemKey } from '../../data/items.js';
 import { isEquippableItem, normalizeEquippedSlots } from '../../engine/equipment.js';
+import { itemIdentityMatches } from '../../engine/textMatch.js';
 import { rollNotation } from '../../engine/dice.ts';
 import { gameReducer } from '../gameReducer.js';
 import {
@@ -11,6 +12,7 @@ import {
     consumeItem,
     appendRollHistory,
     currentMessageIndex,
+    findInventoryItemByRef,
     findRecentTransactionDuplicate,
     isPlayerCombatTurn,
     mintOwnedItem,
@@ -41,52 +43,8 @@ function isBonusActionConsumable(item) {
     return item?.actionType === 'bonus' || item?.consumableType === 'healing';
 }
 
-function equipmentKindMatches(item, kind) {
-    const k = String(kind || '').toLowerCase();
-    if (!k) return false;
-    if (k === 'armor') return item.type === 'armor' && !item.isShield;
-    if (k === 'shield') return item.type === 'shield' || item.isShield;
-    if (k === 'weapon') return item.type === 'weapon';
-    return false;
-}
-
-function findInventoryItemByRef(inventory, ref, { preferEquipped = false } = {}) {
-    const payload = typeof ref === 'string' ? { name: ref } : (ref || {});
-    const candidates = preferEquipped
-        ? [...inventory].sort((a, b) => Number(!!b.equipped) - Number(!!a.equipped))
-        : inventory;
-
-    const id = payload.itemId || payload.id;
-    if (id) {
-        const byId = candidates.find(i => i.id === id);
-        if (byId) return byId;
-    }
-
-    const itemKey = normalizeItemKey(payload.itemKey || payload.key || '');
-    if (itemKey) {
-        const byKey = candidates.find(i => i.itemKey === itemKey);
-        if (byKey) return byKey;
-    }
-
-    const name = payload.name || payload.item || '';
-    const nameKey = normalizeItemKey(name);
-    if (nameKey) {
-        const byNameKey = candidates.find(i => i.itemKey === nameKey);
-        if (byNameKey) return byNameKey;
-    }
-
-    const nameToken = normalizeRefToken(name);
-    if (nameToken) {
-        const byName = candidates.find(i =>
-            normalizeRefToken(i.name) === nameToken ||
-            normalizeRefToken(i.itemKey) === nameToken
-        );
-        if (byName) return byName;
-    }
-
-    const kind = payload.type || payload.slot || payload.category || name;
-    return candidates.find(i => equipmentKindMatches(i, kind)) || null;
-}
+// findInventoryItemByRef moved to shared.js (2026-08-28): the same resolution
+// ladder now serves equip/unequip, name-referenced removal, and SELL_ITEM.
 
 export const handlers = {
     ADD_ITEM(state, action) {
@@ -330,11 +288,31 @@ export const handlers = {
     },
 
     REMOVE_ITEM_BY_NAME(state, action) {
-        const nameToRemove = (action.payload || '').toLowerCase();
-        const matchToRemove = state.inventory.find(i => i.name?.toLowerCase() === nameToRemove);
+        const ref = String(action.payload || '').trim();
+        if (!ref) return state;
+        // Drifted DM names must still land (2026-08-28 P1: "hempen rope" left
+        // "Hempen Rope (50 ft)" untouched with only a console warn, and the loss
+        // audit stood down because the items_lost event HAD been emitted). Exact
+        // name first, then the equip channel's ref resolver (catalog keys,
+        // descriptor prefixes), then the audits' fuzzy token-containment — the
+        // fuzzy tier only when it is UNAMBIGUOUS, because removal takes whole
+        // stacks and must never guess between two candidates.
+        let matchToRemove = state.inventory.find(i => String(i.name || '').toLowerCase() === ref.toLowerCase())
+            || findInventoryItemByRef(state.inventory, ref);
+        let failureNote = `Could not remove "${ref}" — nothing in the pack matches it.`;
         if (!matchToRemove) {
-            console.warn(`[Reducer] Could not find item to remove by name: "${action.payload}"`);
-            return state;
+            const fuzzy = state.inventory.filter(i =>
+                itemIdentityMatches(ref, i.name) || (i.itemKey && itemIdentityMatches(ref, i.itemKey)));
+            if (fuzzy.length === 1) matchToRemove = fuzzy[0];
+            else if (fuzzy.length > 1) failureNote = `Could not remove "${ref}" — it matches ${fuzzy.length} different stacks; say which one.`;
+        }
+        if (!matchToRemove) {
+            // Visible failure — a silent console warn left the sheet and the
+            // fiction disagreeing with no trace the player could dispute.
+            return {
+                ...state,
+                messages: [...state.messages, systemMessage(failureNote)],
+            };
         }
         return withInventoryAndAC(state, state.inventory.filter(i => i.id !== matchToRemove.id));
     },

@@ -173,6 +173,35 @@ export function getAllFeaturesUpToLevel(className, level) {
 }
 
 /**
+ * Derived fields shared by BOTH hero builders (creation wizard's createCharacter
+ * and the vault's sanitizeCharacter). Everything here is a pure function of
+ * race/class/level — the "engine owns the math" core. One copy on purpose: the
+ * two builders used to be twin literals, and they drifted twice (roster/import
+ * casters got no spellSlots — a P0; imported heroes missed levelBonusRetired).
+ */
+export function buildDerivedCharacterFields(raceName, className, level) {
+    const race = RACES[raceName];
+    const charClass = CLASSES[className];
+    if (!race || !charClass) {
+        throw new Error(`Invalid race "${raceName}" or class "${className}"`);
+    }
+    return {
+        proficiencyBonus: getProficiencyBonus(level),
+        savingThrowProficiencies: [...(charClass.savingThrows || [])],
+        speed: race.speed || 30,
+        traits: [...(race.traits || [])],
+        features: getAllFeaturesUpToLevel(className, level),
+        classResources: buildClassResources(className, level),
+        ...(isSpellcaster(className) && { spellSlots: buildSpellSlots(level), sustainedSpell: null }),
+        hitDice: { total: level, remaining: level, die: charClass.hitDie },
+        conditions: [],
+        // Post-2026-07-19 builds never had the legacy Fighter level bonus, so the
+        // one-time LOAD_GAME retirement notice must never fire for these heroes.
+        levelBonusRetired: true,
+    };
+}
+
+/**
  * Create a new character object.
  * @param {string} name
  * @param {string} raceName
@@ -213,21 +242,13 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         maxHP,
         currentHP: maxHP,
         tempHP: 0,
-        proficiencyBonus: getProficiencyBonus(1),
+        ...buildDerivedCharacterFields(raceName, className, 1),
         skillProficiencies: allSkills,
         expertiseSkills: className === 'rogue' ? (options.expertiseSkills || []) : [],
-        savingThrowProficiencies: [...(charClass.savingThrows || [])],
         fightingStyle: normalizeFightingStyle(className, options.fightingStyle),
         martialArchetype: normalizeMartialArchetype(className, 1, options.martialArchetype),
         abilityScoreImprovementsApplied: 0,
         pendingAbilityScoreImprovements: 0,
-        speed: race.speed || 30,
-        traits: [...(race.traits || [])],
-        features: [...(charClass.features?.['1'] || [])],
-        classResources: buildClassResources(className, 1),
-        ...(isSpellcaster(className) && { spellSlots: buildSpellSlots(1), sustainedSpell: null }),
-        hitDice: { total: 1, remaining: 1, die: charClass.hitDie },
-        conditions: [],
         // Player-authored identity, all optional. Appearance caps at the shared
         // Scribe-merge clamp (a longer seed would truncate on the first merged
         // update); background matches the notes/vault 2000 cap.
@@ -237,9 +258,6 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         notes: '',
         createdAt: Date.now(),
         startingGoldRolls,
-        // Post-2026-07-19 characters never had the legacy Fighter level bonus, so the
-        // one-time LOAD_GAME retirement notice must never fire for them.
-        levelBonusRetired: true,
     };
 
     return {

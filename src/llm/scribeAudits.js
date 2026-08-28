@@ -7,7 +7,7 @@
  * report to runNarrationAudits.
  */
 import { conversationalDistance } from '../engine/replayLedger.js';
-import { containment, tokenSet } from '../engine/textMatch.js';
+import { itemIdentityMatches } from '../engine/textMatch.js';
 import { isSpellcaster, resolveSpellForCharacter } from '../engine/spellcasting.js';
 import { MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
 export const LOOT_AUDIT_RULES = `
@@ -251,26 +251,13 @@ function appliedCoinCp(events) {
     return { gainCp, lossCp };
 }
 
-const auditItemToken = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-const itemTokenSet = value => tokenSet(String(value || ''), { minLength: 2 });
-
-/**
- * Item identity match for the whole audit family: exact compact-token equality
- * OR symmetric meaningful-token containment, so the narrative's "hempen rope"
- * matches the catalog's "Hempen Rope (50 ft)" and "wax candles" matches "Wax
- * Candles (x5)". Live playtest 2026-08-20: exact-only matching let a purchase
- * turn's Scribe re-report mint lowercase duplicate inventory rows the load-time
- * heal could not merge back. Under-matching mints phantom duplicates; over-
- * matching merely skips a grant — the documented safe direction for audits.
- */
-function itemIdentityMatches(a, b) {
-    const compactA = auditItemToken(a);
-    const compactB = auditItemToken(b);
-    if (compactA && compactA === compactB) return true;
-    const setA = itemTokenSet(a);
-    const setB = itemTokenSet(b);
-    return setA.size > 0 && setB.size > 0 && containment(setA, setB) >= 0.99;
-}
+// Item identity for the whole audit family lives in the shared textMatch core
+// since 2026-08-28 (REMOVE_ITEM_BY_NAME resolves with the same matcher — one
+// identity rule across the audit and the reducer). Live playtest 2026-08-20:
+// exact-only matching let a purchase turn's Scribe re-report mint lowercase
+// duplicate inventory rows the load-time heal could not merge back. Under-
+// matching mints phantom duplicates; over-matching merely skips a grant — the
+// documented safe direction for audits.
 
 /** True when any identity string in the pool matches the narrated item. */
 function matchesAnyItemIdentity(item, identities) {

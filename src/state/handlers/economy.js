@@ -9,6 +9,7 @@ import { conversationalDistance } from '../../engine/replayLedger.js';
 import {
     consumeItem,
     currentMessageIndex,
+    findInventoryItemByRef,
     findRecentTransactionDuplicate,
     mintOwnedItem,
     normalizeRecentTransactions,
@@ -523,15 +524,19 @@ export const handlers = {
         const bundleNote = bundled
             ? [systemMessage(`Adjusted a bundled coin charge — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago; charged ${formatCurrency(chargeTransaction.priceCp)}.`)]
             : [];
-        const recentCoinLosses = rememberTransaction(state.recentCoinLosses, chargeTransaction, sourceId, messageIndex);
         const result = spendCurrency(state.character, charge);
         if (!result.paid) {
+            // An unpayable charge is NOT ledgered (2026-08-28 P1): no coin moved,
+            // so recording an "applied" spend fed every cover/strip with a
+            // movement that never happened — an exact-price purchase later
+            // delivered FREE via the loss cover, and a legitimate re-charge of
+            // the never-paid debt was suppressed as "already paid".
             return {
                 ...state,
-                recentCoinLosses,
                 messages: [...state.messages, ...bundleNote, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)],
             };
         }
+        const recentCoinLosses = rememberTransaction(state.recentCoinLosses, chargeTransaction, sourceId, messageIndex);
         // Coin leaving the purse ALWAYS says so (D6, and the other half of the
         // 2026-08-25 report: "this happens silently"). Before this, the DM event
         // path was the one coin channel with no system line at all — purchases,
@@ -673,7 +678,6 @@ export const handlers = {
             ? buildCoinLossTransaction(charge.gold, charge.silver, charge.copper)
             : transaction;
         const chargeCp = chargeTransaction.priceCp;
-        const recentCoinLosses = rememberTransaction(state.recentCoinLosses, chargeTransaction, sourceId, messageIndex);
         const result = spendCurrency(state.character, charge);
         const strippedNote = bundled
             ? [systemMessage(`Adjusted an audited payment — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago.`)]
@@ -682,7 +686,7 @@ export const handlers = {
             return {
                 ...state,
                 character: result.character,
-                recentCoinLosses,
+                recentCoinLosses: rememberTransaction(state.recentCoinLosses, chargeTransaction, sourceId, messageIndex),
                 messages: [
                     ...state.messages,
                     ...strippedNote,
@@ -692,9 +696,11 @@ export const handlers = {
         }
         const availableCp = chargeCp - result.missingCp;
         if (availableCp <= 0) {
+            // Empty purse: nothing moved, so nothing is ledgered (2026-08-28 P1 —
+            // a phantom "applied" spend fed the covers/strips and suppressed a
+            // legitimate later charge of the same debt).
             return {
                 ...state,
-                recentCoinLosses,
                 messages: [
                     ...state.messages,
                     ...strippedNote,
@@ -703,10 +709,14 @@ export const handlers = {
             };
         }
         const partial = spendCurrency(state.character, { copper: availableCp });
+        // Partial settle: the ledger remembers the value ACTUALLY deducted, not
+        // the narrated charge — covers and strips must only ever see real coin
+        // movement (2026-08-28 P1).
+        const partialTransaction = buildCoinLossTransaction(0, 0, availableCp);
         return {
             ...state,
             character: partial.character,
-            recentCoinLosses,
+            recentCoinLosses: rememberTransaction(state.recentCoinLosses, partialTransaction, sourceId, messageIndex),
             messages: [
                 ...state.messages,
                 ...strippedNote,
@@ -787,12 +797,10 @@ export const handlers = {
         // fence, or a motivated buyer.
         const payload = action.payload || {};
         const ref = payload.itemId || payload.itemKey || payload.name || '';
-        const lc = String(ref).toLowerCase();
-        const item = state.inventory.find(i =>
-            (payload.itemId && i.id === payload.itemId) ||
-            (payload.itemKey && i.itemKey === payload.itemKey) ||
-            (i.name && i.name.toLowerCase() === lc)
-        );
+        // Same resolution ladder as equip/remove (2026-08-28 audit): a drifted
+        // DM name ("hempen rope" for "Hempen Rope (50 ft)") resolves through
+        // catalog keys and descriptor prefixes instead of failing on exact-name.
+        const item = findInventoryItemByRef(state.inventory, payload);
         if (!item) {
             return {
                 ...state,

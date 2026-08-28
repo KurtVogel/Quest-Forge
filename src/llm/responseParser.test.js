@@ -912,6 +912,31 @@ describe('applyEvents dispatch coverage', () => {
         expect(questCalls.map(([action]) => action.payload.name)).toEqual(['Accepted Job', 'Typo Quest']);
     });
 
+    it('aliases obvious completion/failure status synonyms instead of downgrading them to new (2026-08-28)', () => {
+        // "complete"/"done"/"finished" used to default to 'new', silently
+        // turning a completion into an upsert refresh — and no audit backstop
+        // covers quest closure.
+        const dispatch = run({
+            quest_updates: [
+                { status: 'complete', id: 'q1', name: 'Find the Relic' },
+                { status: 'done', id: 'q2', name: 'Escort the Merchant' },
+                { status: 'finished', id: 'q3', name: 'Clear the Mine' },
+                { status: 'fail', id: 'q4', name: 'Save the Caravan' },
+                { status: 'abandoned', id: 'q5', name: 'Guard the Shrine' },
+                { status: 'in progress', id: 'q6', name: 'Chart the Marsh' },
+            ],
+        });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_QUEST', payload: { id: 'q1', name: 'Find the Relic' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_QUEST', payload: { id: 'q2', name: 'Escort the Merchant' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_QUEST', payload: { id: 'q3', name: 'Clear the Mine' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'FAIL_QUEST', payload: { id: 'q4', name: 'Save the Caravan' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'FAIL_QUEST', payload: { id: 'q5', name: 'Guard the Shrine' } });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'ADD_QUEST',
+            payload: { id: 'q6', name: 'Chart the Marsh' },
+        });
+    });
+
     it('caps a quest_updates flood at 8 entries', () => {
         const { events } = parseResponse(fence({
             quest_updates: Array.from({ length: 40 }, (_, i) => ({ status: 'new', name: `Quest ${i}` })),

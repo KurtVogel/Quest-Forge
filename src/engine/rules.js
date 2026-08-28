@@ -38,10 +38,13 @@ export function getArmorClass(dexMod, armor = null, shield = false) {
         // normalizeItem clamps these at the trust boundary, but saves predating
         // the clamps (LOAD_GAME does not re-normalize inventory) can still carry
         // unbounded non-catalog stats — re-clamp so hero AC has a ceiling on
-        // every path. Ceilings mirror plate (18) and +3 magic.
-        const baseAC = Number.isFinite(armor.baseAC) ? Math.min(18, armor.baseAC) : armor.baseAC;
-        const armorBonus = Math.min(3, armor.acBonus || armor.magicBonus || 0);
-        switch (armor.armorType) {
+        // every path. Ceilings mirror plate (18) and +3 magic. Number() first:
+        // a string "12" from a hand-edited save string-concatenated straight
+        // through the old clamp into AC "122000" (2026-08-28 audit).
+        const rawBase = Number(armor.baseAC);
+        const baseAC = Number.isFinite(rawBase) ? Math.min(18, rawBase) : null;
+        const armorBonus = Math.min(3, Number(armor.acBonus) || Number(armor.magicBonus) || 0);
+        switch (baseAC === null ? 'unarmored' : armor.armorType) {
             case 'light':
                 ac = baseAC + dexMod + armorBonus;
                 break;
@@ -51,16 +54,22 @@ export function getArmorClass(dexMod, armor = null, shield = false) {
             case 'heavy':
                 ac = baseAC + armorBonus;
                 break;
+            case 'unarmored':
+                // Junk baseAC on every branch degrades to unarmored, never NaN.
+                ac = 10 + dexMod;
+                break;
             default:
                 // Unknown armorType but a real baseAC: honor it medium-style so
                 // the engine agrees with the [AC N] line the DM prompt shows.
-                ac = Number.isFinite(baseAC) ? baseAC + Math.min(dexMod, 2) + armorBonus : 10 + dexMod;
+                ac = baseAC + Math.min(dexMod, 2) + armorBonus;
         }
     }
 
     if (shield) {
         if (typeof shield === 'object') {
-            ac += Math.min(3, shield.shieldAC || 2) + Math.min(3, shield.acBonus || shield.magicBonus || 0);
+            // Number() for the same reason as baseAC above — junk degrades to
+            // the plain +2 shield instead of NaN-poisoning the AC.
+            ac += Math.min(3, Number(shield.shieldAC) || 2) + Math.min(3, Number(shield.acBonus) || Number(shield.magicBonus) || 0);
         } else {
             ac += 2;
         }
@@ -173,7 +182,6 @@ export function getWeaponAttackBonus(character, inventory = []) {
 
 export function getWeaponDamageNotation(character, inventory = [], fallback = '1d4') {
     const weapon = getEquippedWeapon(inventory);
-    const dice = weapon?.damage || fallback;
     const abilityMod = getWeaponAbilityModifier(character, weapon);
     const itemBonus = Math.min(3, weapon?.damageBonus || weapon?.magicBonus || 0);
     const styleBonus = character?.class === 'fighter'
@@ -183,13 +191,18 @@ export function getWeaponDamageNotation(character, inventory = [], fallback = '1
         && !weapon.twoHanded
         ? 2
         : 0;
-    const modifier = abilityMod + itemBonus + styleBonus;
 
-    if (!/^\d+d\d+/i.test(String(dice))) {
-        // Junk damage notation falls back to fists, but keeps the wielder's
-        // modifier — a broken weapon should not hit softer than a bare hand.
-        return `${fallback}${modifier >= 0 ? '+' : ''}${modifier}`;
-    }
+    // Full-shape validation, not a prefix check (2026-08-28 audit): "1d8
+    // slashing" used to pass the old prefix test, produce "1d8 slashing+3",
+    // throw in parseNotation, and land on rollDamage's flat modifier-less 1d4
+    // fallback — softer than a bare fist. An embedded modifier ("1d6+2") is
+    // folded into ours so the appended total stays parseable.
+    const match = String(weapon?.damage || fallback).trim().match(/^(\d+d\d+)\s*(?:([+-])\s*(\d+))?$/i);
+    // Junk damage notation falls back to fists, but keeps the wielder's
+    // modifier — a broken weapon should not hit softer than a bare hand.
+    const dice = match ? match[1] : fallback;
+    const embedded = match?.[2] ? (match[2] === '-' ? -1 : 1) * Number(match[3]) : 0;
+    const modifier = abilityMod + itemBonus + styleBonus + embedded;
 
     return `${dice}${modifier >= 0 ? '+' : ''}${modifier}`;
 }

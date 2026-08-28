@@ -432,10 +432,36 @@ describe('item removal (2026-08-05 queue P2 — previously untested)', () => {
         expect(next.character.armorClass).toBe(13);
     });
 
-    it('REMOVE_ITEM_BY_NAME is a no-op for an unknown name', () => {
+    it('REMOVE_ITEM_BY_NAME leaves the inventory alone AND says so visibly for an unknown name (2026-08-28)', () => {
         const state = makeState();
         const next = gameReducer(state, { type: 'REMOVE_ITEM_BY_NAME', payload: 'Crown of Nothing' });
         expect(next.inventory).toHaveLength(state.inventory.length);
+        // A silent console warn left the sheet and the fiction disagreeing with
+        // no trace the player could dispute.
+        expect(next.messages.at(-1).content).toMatch(/Could not remove "Crown of Nothing"/);
+    });
+
+    it('REMOVE_ITEM_BY_NAME resolves a drifted DM name via fuzzy containment (2026-08-28 P1)', () => {
+        const state = makeState();
+        state.inventory.push({ id: 'rope-1', itemKey: 'ropeHempen', name: 'Hempen Rope (50 ft)', type: 'gear', quantity: 1 });
+        // Reproduced live: items_lost "hempen rope" left "Hempen Rope (50 ft)"
+        // untouched, and the loss audit stood down because the event HAD been
+        // emitted — the item never left the pack.
+        const next = gameReducer(state, { type: 'REMOVE_ITEM_BY_NAME', payload: 'hempen rope' });
+        expect(next.inventory.find(i => i.id === 'rope-1')).toBeUndefined();
+    });
+
+    it('REMOVE_ITEM_BY_NAME refuses an AMBIGUOUS fuzzy match with a visible line', () => {
+        const state = makeState();
+        state.inventory.push(
+            { id: 'rope-1', itemKey: 'ropeHempen', name: 'Hempen Rope (50 ft)', type: 'gear', quantity: 1 },
+            { id: 'rope-2', itemKey: 'ropeSilk', name: 'Silk Rope (50 ft)', type: 'gear', quantity: 1 },
+        );
+        // Removal takes whole stacks — two candidate ropes must never be a guess.
+        const next = gameReducer(state, { type: 'REMOVE_ITEM_BY_NAME', payload: 'rope' });
+        expect(next.inventory.find(i => i.id === 'rope-1')).toBeTruthy();
+        expect(next.inventory.find(i => i.id === 'rope-2')).toBeTruthy();
+        expect(next.messages.at(-1).content).toMatch(/matches 2 different stacks/);
     });
 });
 

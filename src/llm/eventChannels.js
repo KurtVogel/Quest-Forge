@@ -179,6 +179,19 @@ function normalizeStartingItem(item) {
 }
 
 const QUEST_UPDATE_STATUSES = new Set(['new', 'updated', 'completed', 'failed']);
+// Obvious synonyms alias to their canonical status BEFORE the 'new' default —
+// a DM emitting "complete"/"done"/"finished" used to silently downgrade a
+// completion into an upsert refresh, and no audit backstop covers quest
+// closure (2026-08-28 audit).
+const QUEST_STATUS_ALIASES = {
+    complete: 'completed', done: 'completed', finished: 'completed',
+    finish: 'completed', fulfilled: 'completed', resolved: 'completed',
+    success: 'completed', succeeded: 'completed',
+    fail: 'failed', failure: 'failed', abandoned: 'failed', botched: 'failed',
+    update: 'updated', progress: 'updated', in_progress: 'updated',
+    'in progress': 'updated', ongoing: 'updated', active: 'updated',
+    added: 'new', accepted: 'new', started: 'new', opened: 'new',
+};
 
 /**
  * Type-guard a quest update at the parser boundary (mirrors the world-fact
@@ -195,7 +208,8 @@ function normalizeQuestUpdate(raw) {
     const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 160) : '';
     if (!id && !name) return null;
     const description = typeof raw.description === 'string' ? raw.description.trim().slice(0, 800) : '';
-    const status = typeof raw.status === 'string' ? raw.status.trim().toLowerCase() : '';
+    const rawStatus = typeof raw.status === 'string' ? raw.status.trim().toLowerCase() : '';
+    const status = QUEST_STATUS_ALIASES[rawStatus] || rawStatus;
     return {
         ...(id && { id }),
         ...(name && { name }),

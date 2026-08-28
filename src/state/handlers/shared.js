@@ -4,6 +4,7 @@
  */
 import { computeACFromInventory } from '../../engine/rules.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
+import { itemIdentityMatches } from '../../engine/textMatch.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
@@ -601,4 +602,67 @@ export function upsertNpc(npcs, payload) {
         kind: classified.kind || 'character',
         importance: classified.importance,
     })];
+}
+
+function equipmentKindMatches(item, kind) {
+    const k = String(kind || '').toLowerCase();
+    if (!k) return false;
+    if (k === 'armor') return item.type === 'armor' && !item.isShield;
+    if (k === 'shield') return item.type === 'shield' || item.isShield;
+    if (k === 'weapon') return item.type === 'weapon';
+    return false;
+}
+
+/**
+ * Resolve a DM-supplied item reference (id, catalog key, name, or generic
+ * armor/shield/weapon kind) against the live inventory. Shared by the
+ * equip/unequip channel, name-referenced removal, and sales — one resolution
+ * ladder so a name that equips also sells and removes (2026-08-28 audit).
+ */
+export function findInventoryItemByRef(inventory, ref, { preferEquipped = false } = {}) {
+    const payload = typeof ref === 'string' ? { name: ref } : (ref || {});
+    const candidates = preferEquipped
+        ? [...inventory].sort((a, b) => Number(!!b.equipped) - Number(!!a.equipped))
+        : inventory;
+
+    const id = payload.itemId || payload.id;
+    if (id) {
+        const byId = candidates.find(i => i.id === id);
+        if (byId) return byId;
+    }
+
+    const itemKey = normalizeItemKey(payload.itemKey || payload.key || '');
+    if (itemKey) {
+        const byKey = candidates.find(i => i.itemKey === itemKey);
+        if (byKey) return byKey;
+    }
+
+    const name = payload.name || payload.item || '';
+    const nameKey = normalizeItemKey(name);
+    if (nameKey) {
+        const byNameKey = candidates.find(i => i.itemKey === nameKey);
+        if (byNameKey) return byNameKey;
+    }
+
+    const nameToken = normalizeRefToken(name);
+    if (nameToken) {
+        const byName = candidates.find(i =>
+            normalizeRefToken(i.name) === nameToken ||
+            normalizeRefToken(i.itemKey) === nameToken
+        );
+        if (byName) return byName;
+    }
+
+    // Fuzzy token-containment, UNAMBIGUOUS only (2026-08-28): a narrated
+    // "hempen rope" resolves to "Hempen Rope (50 ft)" — the same identity rule
+    // the Scribe audits use — but two candidate stacks resolve to nothing
+    // rather than a guess.
+    if (name) {
+        const fuzzy = candidates.filter(i =>
+            itemIdentityMatches(name, i.name) || (i.itemKey && itemIdentityMatches(name, i.itemKey)));
+        if (fuzzy.length === 1) return fuzzy[0];
+    }
+
+    const kind = payload.type || payload.slot || payload.category || name;
+    return candidates.find(i => equipmentKindMatches(i, kind)) || null;
 }

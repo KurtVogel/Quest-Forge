@@ -250,6 +250,21 @@ describe('SELL_ITEM', () => {
         expect(next.messages.at(-1).content).toMatch(/Can't sell/);
     });
 
+    it('resolves a drifted DM name through the shared ref ladder (2026-08-28)', () => {
+        // The old lookup was exact-name-only: "hempen rope" failed against the
+        // catalog-cased "Hempen Rope (50 ft)" even though every other item
+        // channel resolved it.
+        const state = makeState({
+            inventory: [{ id: 'rope-1', itemKey: 'ropeHempen', name: 'Hempen Rope (50 ft)', type: 'gear', valueCp: 100, quantity: 1 }],
+        });
+        const next = gameReducer(state, {
+            type: 'SELL_ITEM',
+            payload: { name: 'hempen rope' },
+        });
+        expect(next.inventory.find(i => i.id === 'rope-1')).toBeUndefined();
+        expect(next.messages.at(-1).content).toMatch(/Sold Hempen Rope/);
+    });
+
     it('sells a partial stack and keeps the remainder', () => {
         const state = makeState({
             inventory: [{ id: 'torch-1', itemKey: 'torch', name: 'Torch', type: 'gear', valueCp: 1, quantity: 5 }],
@@ -719,7 +734,11 @@ describe('APPLY_COIN_LOSS', () => {
         expect(second.character.silver).toBe(6);
     });
 
-    it('reports insufficient funds without paying, and still stamps the ledger', () => {
+    it('reports insufficient funds without paying, and does NOT ledger the unpaid charge', () => {
+        // 2026-08-28 P1: an unpayable charge used to be remembered as an APPLIED
+        // spend, feeding the covers/strips with a movement that never happened —
+        // an exact-price purchase later arrived free, and a legitimate re-charge
+        // of the never-paid debt was suppressed as "already paid".
         const state = makeState({ character: { gold: 0, silver: 1, copper: 0 } });
         const next = gameReducer(state, {
             type: 'APPLY_COIN_LOSS',
@@ -727,7 +746,41 @@ describe('APPLY_COIN_LOSS', () => {
         });
         expect(next.character.silver).toBe(1);
         expect(next.messages.at(-1).content).toMatch(/Not enough coin/);
-        expect(next.recentCoinLosses).toHaveLength(1);
+        expect(next.recentCoinLosses).toHaveLength(0);
+    });
+
+    it('a never-paid debt can be charged again once the hero can pay (no false "already paid")', () => {
+        const state = makeState({ character: { gold: 0, silver: 1, copper: 0 } });
+        const failed = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 6, _meta: { sourceId: 'msg-pay-1' } },
+        });
+        // The hero earns coin, the DM legitimately re-charges the same debt.
+        const funded = { ...failed, character: { ...failed.character, silver: 10 } };
+        const recharged = gameReducer(funded, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { silver: 6, _meta: { sourceId: 'msg-pay-2' } },
+        });
+        expect(recharged.character.silver).toBe(4);
+    });
+
+    it('an unpaid charge cannot cover a later audited payment of the same value', () => {
+        const state = makeState({ character: { gold: 1, silver: 0, copper: 0 } });
+        const failed = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 2, _meta: { sourceId: 'msg-pay-1' } },
+        });
+        expect(failed.character.gold).toBe(1);
+        // Later, funded, the Scribe audits a genuine unevented 2 gp payment —
+        // the phantom "applied" loss used to satisfy the >=costCp cover and
+        // deliver the payment free.
+        const funded = { ...failed, character: { ...failed.character, gold: 3 } };
+        const audited = gameReducer(funded, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { gold: 2, _meta: { sourceId: 'msg-audit-1:scribe-loot:payment' } },
+        });
+        expect(audited.character.gold).toBe(1);
+        expect(audited.messages.at(-1).content).toMatch(/Payment settled from narration/);
     });
 
     it('ignores empty and negative losses', () => {
@@ -801,6 +854,29 @@ describe('AUDIT_COIN_PAYMENT', () => {
         });
         expect(next.character.gold).toBe(0);
         expect(next.messages.at(-1).content).toMatch(/purse is empty/);
+    });
+
+    // 2026-08-28 P1: the ledger must only ever record coin that actually moved.
+    it('does not ledger an empty-purse audit at all', () => {
+        const state = makeState({ character: { gold: 0, silver: 0, copper: 0 } });
+        const next = gameReducer(state, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { gold: 3, _meta: { sourceId: 'msg-a1:scribe-loot:payment' } },
+        });
+        expect(next.recentCoinLosses).toHaveLength(0);
+    });
+
+    it('a partial settle ledgers the value actually deducted, not the narrated charge', () => {
+        const state = makeState({ character: { gold: 1, silver: 0, copper: 0 } });
+        const next = gameReducer(state, {
+            type: 'AUDIT_COIN_PAYMENT',
+            payload: { gold: 5, _meta: { sourceId: 'msg-a2:scribe-loot:payment' } },
+        });
+        expect(next.character.gold).toBe(0);
+        expect(next.recentCoinLosses).toHaveLength(1);
+        // 100 cp was all the purse held — that is the movement of record, so a
+        // later cover/strip can never pretend the full 500 cp charge happened.
+        expect(next.recentCoinLosses[0].priceCp).toBe(100);
     });
 });
 

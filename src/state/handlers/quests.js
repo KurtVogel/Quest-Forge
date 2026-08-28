@@ -69,15 +69,17 @@ export const handlers = {
                     : quest),
             };
         }
+        // Fields are picked explicitly — a payload spread would let untrusted
+        // input override status/addedAt or ride junk keys into the save.
         return {
             ...state,
             quests: [...state.quests, {
                 id: payload.id || `quest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                name: payload.name,
+                description: payload.description || '',
+                ...(payload.source ? { source: payload.source } : {}),
                 status: 'active',
                 addedAt: Date.now(),
-                ...payload,
-                // Stamped AFTER the payload spread so untrusted input can never
-                // pre-age a quest into the full completion tier on its opening turn.
                 openedAtMessage: (state.messages || []).length,
             }],
         };
@@ -90,6 +92,17 @@ export const handlers = {
         const refName = typeof ref === 'object' ? ref.name : ref;
         const nameToken = normalizeRefToken(refName);
         let isMatch = (q) => q.id === refId || (nameToken && normalizeRefToken(q.name) === nameToken);
+        // Recurring quest names must never rewrite closed-arc history: when an
+        // exact match hits BOTH an active row and a terminal row (arc 2 of a
+        // reused name), scope the rewrite to the active rows only — failing arc 2
+        // used to flip arc 1's completed row to failed. Terminal-only matches
+        // keep the rewrite: re-writing a terminal status is harmless and is the
+        // one-shot guard against the DM re-emitting a completion later.
+        const exactMatches = state.quests.filter(isMatch);
+        if (exactMatches.some(q => q.status === 'active')) {
+            const activeIds = new Set(exactMatches.filter(q => q.status === 'active').map(q => q.id));
+            isMatch = (q) => activeIds.has(q.id);
+        }
         if (!state.quests.some(isMatch) && nameToken) {
             // Fuzzy fallback before the fallback INSERT: a drifted completion name
             // ("The Relic" for "Find the Relic") closes the tracked arc instead of

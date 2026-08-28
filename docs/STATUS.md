@@ -6,8 +6,36 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-27 (species field + the same-day queue sweep: the 2026-08-27 audit
-batch is fully cleared, queue back to only the pronoun-flip watch item)._
+_Last updated: 2026-08-28 (same-day queue sweep: the 2026-08-28 audit batch — 1 P0, 3 P1s,
+6 P2s — fully cleared; queue back to only the pronoun-flip watch item)._
+
+## 2026-08-28 — same-day queue sweep: the whole 2026-08-28 audit batch cleared (1 P0 + 3 P1s + 6 P2s)
+
+All open items from the morning's two audit runs fixed in one session (DECISIONS.md
+2026-08-28 sweep-rulings entry; every item ticked with a dated note). **The P0** —
+roster/import wizards and clerics got NO spell slots for their whole first session
+(`sanitizeCharacter` never minted them and TAKE_REST's refill was gated on slots existing):
+fixed structurally by folding both hero builders onto one shared
+`buildDerivedCharacterFields` core in characterUtils.js (which also gives imports the
+missed `levelBonusRetired` — both proven drifts between the twin literals), plus a
+long-rest slot mint as defense in depth. **Quests** — terminal COMPLETE/FAIL rewrites
+scope active-first, so failing arc 2 of a reused name no longer flips arc 1's completed
+row (terminal-only matches keep the harmless rewrite = the one-shot XP guard); status
+synonyms ("complete"/"done"/"finished"/"fail"/…) alias to their canonical status instead
+of silently downgrading to `new`; ADD_QUEST picks fields explicitly. **Economy/inventory**
+— RULED: coin ledgers record only coin that actually moved (unpaid charges and empty-purse
+audits no longer ledger; a partial audit settle remembers the deducted value — the phantom
+"applied" spends had delivered a purchase free and suppressed a legitimate re-charge as
+"already paid"); `itemIdentityMatches` promoted to shared textMatch.js and
+`findInventoryItemByRef` (now in handlers/shared.js, with an unambiguous fuzzy rung)
+serves equip/sell/remove alike — drifted `items_lost` names ("hempen rope") finally remove
+"Hempen Rope (50 ft)", and failures/ambiguities post visible system lines instead of
+console warns. **Rules math** — `getArmorClass` coerces with Number() so a string baseAC
+can never concat into AC "122000" (junk degrades to unarmored on every branch, shield
+included); `getWeaponDamageNotation` validates the full notation shape and folds embedded
+modifiers ("1d6+2" no longer becomes the unparseable "1d6+2+3"; "1d8 slashing" falls back
+to 1d4+mod, not a flat 1d4). 1,814 tests green (+22 incl. one rewritten pin of the old
+unpaid-ledger behavior), lint clean.
 
 ## 2026-08-27 — same-day queue sweep: the whole 2026-08-27 audit batch cleared (1 P1 + 13 P2s)
 
@@ -696,7 +724,7 @@ generation + victory echo land.**
 
 ## Strengthening queue & watch items
 
-Open in SCHEDULED_STRENGTHENING.md after the 2026-08-27 sweep: **0 P1s, 0 P2s** — the one
+Open in SCHEDULED_STRENGTHENING.md after the 2026-08-28 sweep: **0 P1s, 0 P2s** — the one
 open line is the NPC pronoun-flip WATCH item (left open by design: prompt fix shipped
 2026-08-09, zero flips since, needs live evidence before more machinery; playtest #9 saw
 zero flips across six NPCs, but no generated art exercised the visual half). Carried

@@ -58,3 +58,21 @@ export function containment(a, b) {
     const large = a.size <= b.size ? b : a;
     return overlapCount(small, large) / small.size;
 }
+
+/**
+ * Item identity match shared by the Scribe audit family AND the reducer's
+ * name-referenced item removal: exact compact-token equality OR symmetric
+ * meaningful-token containment, so a narrated "hempen rope" matches the
+ * catalog's "Hempen Rope (50 ft)" and "wax candles" matches "Wax Candles (x5)".
+ * One copy on purpose (2026-08-28 P1): the audits matched fuzzily while
+ * REMOVE_ITEM_BY_NAME stayed exact-only, so a drifted-name items_lost
+ * dead-ended at both layers.
+ */
+export function itemIdentityMatches(a, b) {
+    const compactA = String(a || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const compactB = String(b || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (compactA && compactA === compactB) return true;
+    const setA = tokenSet(String(a || ''), { minLength: 2 });
+    const setB = tokenSet(String(b || ''), { minLength: 2 });
+    return setA.size > 0 && setB.size > 0 && containment(setA, setB) >= 0.99;
+}

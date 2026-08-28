@@ -5,7 +5,7 @@
 import { CLASSES } from '../../data/classes.js';
 import { computeACFromInventory, getModifier } from '../../engine/rules.js';
 import { rollDie, rollNotation } from '../../engine/dice.ts';
-import { applyArcaneRecovery, refillSpellSlots, summarizeSpellSlots } from '../../engine/spellcasting.js';
+import { applyArcaneRecovery, buildSpellSlots, isSpellcaster, refillSpellSlots, summarizeSpellSlots } from '../../engine/spellcasting.js';
 import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
 import {
     appendRollHistory,
@@ -278,7 +278,13 @@ export const handlers = {
 
         // Spellcasting: a long rest refills every slot; a wizard's first short
         // rest per long-rest cycle triggers Arcane Recovery automatically.
+        // Defense in depth (2026-08-28 P0): a caster stranded without slots by an
+        // older builder gets them minted here — the rejection message's "Rest to
+        // recover your slots" advice must actually work.
         let newSpellSlots = state.character.spellSlots || null;
+        if (!newSpellSlots && isLong && isSpellcaster(state.character.class)) {
+            newSpellSlots = buildSpellSlots(state.character.level || 1);
+        }
         let recoveryNote = '';
         if (newSpellSlots) {
             if (isLong) {

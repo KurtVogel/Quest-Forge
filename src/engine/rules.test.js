@@ -169,6 +169,18 @@ describe('armor class', () => {
         expect(getArmorClass(3, { baseAC: 14 })).toBe(16); // 14 + DEX capped at 2
         expect(getArmorClass(1, {})).toBe(11); // no baseAC at all → unarmored
     });
+
+    it('coerces a string baseAC instead of string-concatenating it (2026-08-28)', () => {
+        // Reproduced: a hand-edited save's baseAC "12" concatenated straight
+        // through the old clamp into AC "122000" — an unhittable hero.
+        expect(getArmorClass(2, { armorType: 'light', baseAC: '12' })).toBe(14); // 12 + DEX 2
+        expect(getArmorClass(0, { armorType: 'heavy', baseAC: '30' })).toBe(18); // clamped to plate
+        // Junk on ANY typed branch degrades to unarmored, never NaN.
+        expect(getArmorClass(2, { armorType: 'light', baseAC: 'twelve' })).toBe(12);
+        expect(getArmorClass(1, { armorType: 'heavy', baseAC: {} })).toBe(11);
+        // Shield junk degrades to the plain +2 shield.
+        expect(getArmorClass(0, null, { shieldAC: 'huge' })).toBe(12);
+    });
 });
 
 describe('getEquippedWeapon', () => {
@@ -202,6 +214,22 @@ describe('weapon stat bounds', () => {
     it('keeps the wielder modifier when weapon damage notation is junk', () => {
         const junk = [{ type: 'weapon', category: 'martialMelee', damage: 'special', equipped: true }];
         expect(getWeaponDamageNotation(fighter, junk)).toBe('1d4+3'); // STR 3, not bare 1d4
+    });
+
+    it('validates the FULL notation shape — a trailing damage type falls back to 1d4+mod, not a flat 1d4 (2026-08-28)', () => {
+        // "1d8 slashing" passed the old prefix test, produced "1d8 slashing+3",
+        // threw in parseNotation, and landed on rollDamage's modifier-less 1d4
+        // fallback — softer than a bare fist.
+        const typed = [{ type: 'weapon', category: 'martialMelee', damage: '1d8 slashing', equipped: true }];
+        expect(getWeaponDamageNotation(fighter, typed)).toBe('1d4+3');
+    });
+
+    it('folds an embedded modifier into the appended one so the result stays parseable', () => {
+        // "1d6+2" used to become the unparseable "1d6+2+3".
+        const embedded = [{ type: 'weapon', category: 'martialMelee', damage: '1d6+2', equipped: true }];
+        expect(getWeaponDamageNotation(fighter, embedded)).toBe('1d6+5'); // STR 3 + embedded 2
+        const negative = [{ type: 'weapon', category: 'martialMelee', damage: '1d6-1', equipped: true }];
+        expect(getWeaponDamageNotation(fighter, negative)).toBe('1d6+2');
     });
 
     it('clamps a runaway item attackBonus from a stale save to +3', () => {

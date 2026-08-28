@@ -8,6 +8,37 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-28 · Queue-clearing sweep rulings: coin ledgers record only coin that actually
+moved, one item-identity rule serves audits AND reducer item refs, and both hero builders
+share one derived-fields core.**
+The 2026-08-28 audit batch (character-vault, quests, inventory-economy, rules-math) is
+cleared; three of its items are standing rules worth logging beyond the queue's tick notes.
+**(1) Ledgers record movements, never intentions.** `APPLY_COIN_LOSS`'s unpayable path and
+`AUDIT_COIN_PAYMENT`'s empty-purse path stop writing to `recentCoinLosses`, and the audit's
+partial path remembers the value actually deducted, not the narrated charge. The old
+"stamp before spending" order fed every cover/strip with phantom applied spends —
+reproduced live as a free exact-price purchase (the phantom loss covered it) and a
+never-paid debt whose legitimate re-charge was suppressed as "already paid". The rule
+generalizes: any future ledger writes AFTER the mutation commits, recording what actually
+changed. (The deliberate flip side stays: suppressed/ignored entries are still recorded as
+`ignored` for idempotency — they just never count as applied movement.)
+**(2) One item-identity rule.** `itemIdentityMatches` (exact compact token OR symmetric
+meaningful-token containment) moved from scribeAudits.js into the shared
+`engine/textMatch.js`, and `findInventoryItemByRef` (now in handlers/shared.js) gained it
+as an UNAMBIGUOUS-only final rung before the kind fallback. Equip/unequip, sell,
+name-referenced removal, and the Scribe audits now resolve "hempen rope" to
+"Hempen Rope (50 ft)" identically; two candidate stacks resolve to nothing plus a visible
+line, never a guess — removal and sales take whole stacks, so guessing is worse than
+refusing. Failure is player-visible (system line), not a console warn.
+**(3) One derived-fields core for heroes.** `buildDerivedCharacterFields(race, class,
+level)` in characterUtils.js owns every pure race/class/level-derived field; both
+`createCharacter` and the vault's `sanitizeCharacter` spread it. The twin literals had
+drifted twice with real damage — imported/roster casters got no `spellSlots` at all (the
+P0: a wizard who could not cast for a whole session, with TAKE_REST's refill gated on
+slots existing so even "rest to recover" was a dead end) and imports missed
+`levelBonusRetired`. A long rest additionally mints missing caster slots as defense in
+depth for heroes already stranded by the old builder.
+
 **2026-08-27 · Queue-clearing sweep rulings: saves stop embedding settings, the legacy
 initiative roll lane is retired, and combat bonus-action lanes mark the round's bonus
 action spent.**

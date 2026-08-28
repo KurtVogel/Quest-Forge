@@ -203,6 +203,23 @@ describe('rest slot recovery and sustained lifecycle', () => {
         expect(next.messages.at(-1).content).toMatch(/Spell slots restored/);
     });
 
+    it('a long rest mints slots for a caster stranded without any (2026-08-28 P0 defense in depth)', () => {
+        // Roster/import casters built by the pre-fix sanitizer have no
+        // spellSlots at all; the refill used to be gated on existing slots, so
+        // the "Rest to recover your slots" advice could never work.
+        const state = clericState({ character: { level: 5, spellSlots: undefined } });
+        const next = gameReducer(state, { type: 'TAKE_REST', payload: 'long' });
+        expect(next.character.spellSlots).toBeTruthy();
+        expect(next.character.spellSlots[3]).toEqual({ used: 0, max: 2 });
+        expect(next.messages.at(-1).content).toMatch(/Spell slots restored/);
+    });
+
+    it('a short rest does NOT mint missing slots (long-rest-only defense)', () => {
+        const state = clericState({ character: { level: 5, spellSlots: undefined, currentHP: 10 } });
+        const next = gameReducer(state, { type: 'TAKE_REST', payload: 'short' });
+        expect(next.character.spellSlots).toBeUndefined();
+    });
+
     it('gives a wizard Arcane Recovery on the first short rest per long-rest cycle only', () => {
         const wizard = clericState({
             character: {

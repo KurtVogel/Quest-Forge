@@ -83,6 +83,61 @@ describe('quest identity', () => {
         expect(next.quests).toHaveLength(1);
         expect(next.quests[0].status).toBe('active');
     });
+
+    // 2026-08-28 P1: recurring quest names must never rewrite closed-arc history.
+    it('failing arc 2 of a reused name leaves arc 1\'s completed row untouched', () => {
+        let state = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { id: 'q-caravan-1', name: 'Guard the Caravan' },
+        });
+        state = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'Guard the Caravan' } });
+        // Same name recurs as a new arc (deliberate ADD_QUEST behavior).
+        state = gameReducer(state, {
+            type: 'ADD_QUEST',
+            payload: { id: 'q-caravan-2', name: 'Guard the Caravan' },
+        });
+        const failed = gameReducer(state, { type: 'FAIL_QUEST', payload: { name: 'Guard the Caravan' } });
+        expect(failed.quests.find(q => q.id === 'q-caravan-1').status).toBe('completed');
+        expect(failed.quests.find(q => q.id === 'q-caravan-2').status).toBe('failed');
+    });
+
+    it('completing arc 2 of a reused name leaves arc 1\'s failed row untouched (the mirror)', () => {
+        let state = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { id: 'q-caravan-1', name: 'Guard the Caravan' },
+        });
+        state = gameReducer(state, { type: 'FAIL_QUEST', payload: { name: 'Guard the Caravan' } });
+        state = gameReducer(state, {
+            type: 'ADD_QUEST',
+            payload: { id: 'q-caravan-2', name: 'Guard the Caravan' },
+        });
+        const completed = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'Guard the Caravan' } });
+        expect(completed.quests.find(q => q.id === 'q-caravan-1').status).toBe('failed');
+        expect(completed.quests.find(q => q.id === 'q-caravan-2').status).toBe('completed');
+    });
+
+    it('a terminal-only exact match still accepts the harmless terminal rewrite (one-shot XP guard)', () => {
+        let state = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { id: 'q-done', name: 'Deliver the Letter' },
+        });
+        state = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'Deliver the Letter' } });
+        // A DM re-emitting the completion later matches only the terminal row —
+        // the rewrite is a no-op-shaped guard, never a new arc insert.
+        const again = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'Deliver the Letter' } });
+        expect(again.quests).toHaveLength(1);
+        expect(again.quests[0].status).toBe('completed');
+    });
+
+    it('ADD_QUEST picks fields explicitly — payload status/addedAt junk cannot ride in', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { name: 'Sneaky Quest', status: 'completed', addedAt: 1, junkKey: 'x' },
+        });
+        expect(next.quests[0].status).toBe('active');
+        expect(next.quests[0].addedAt).not.toBe(1);
+        expect(next.quests[0]).not.toHaveProperty('junkKey');
+    });
 });
 
 describe('REMOVE_QUEST and bare-id completion (2026-08-04 queue P2)', () => {

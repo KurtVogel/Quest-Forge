@@ -64,6 +64,41 @@ describe('export round-trip', () => {
         expect(oversized.appearance).toHaveLength(600);
     });
 
+    it('imported and roster casters get authoritative spell slots (2026-08-28 P0)', () => {
+        // sanitizeCharacter never minted spellSlots/sustainedSpell, so a
+        // wizard/cleric started from the roster or a file import could not cast
+        // a single leveled spell for the whole first session — TAKE_REST's
+        // refill is gated on existing slots, so even the rejection's "rest"
+        // advice was a dead end.
+        const wizard = createCharacter('Aiv', 'human', 'wizard', BASE_SCORES, ['arcana']);
+        const imported = parseCharacterExport(JSON.stringify(buildCharacterExport(wizard, createStartingInventory('wizard'))));
+        expect(imported.character.spellSlots).toEqual(wizard.spellSlots);
+        expect(imported.character.spellSlots['1'].max).toBeGreaterThan(0);
+        expect(imported.character.sustainedSpell).toBeNull();
+
+        // A leveled cleric mints the level's full table (rested import).
+        const cleric = sanitizeCharacter({
+            name: 'Brunhild', race: 'dwarf', class: 'cleric', level: 5,
+            abilityScores: BASE_SCORES,
+        });
+        expect(cleric.spellSlots['3']).toEqual({ used: 0, max: 2 });
+
+        // Non-casters stay slot-free.
+        const fighter = sanitizeCharacter({
+            name: 'Borin', race: 'dwarf', class: 'fighter', level: 5,
+            abilityScores: BASE_SCORES,
+        });
+        expect(fighter.spellSlots).toBeUndefined();
+    });
+
+    it('imports carry levelBonusRetired so the one-time retirement notice never fires for them', () => {
+        const fighter = sanitizeCharacter({
+            name: 'Borin', race: 'dwarf', class: 'fighter', level: 4,
+            abilityScores: BASE_SCORES,
+        });
+        expect(fighter.levelBonusRetired).toBe(true);
+    });
+
     it('imports arrive rested: full HP, no conditions, fresh resources', () => {
         const { character, inventory } = makeFighter();
         const wounded = {
