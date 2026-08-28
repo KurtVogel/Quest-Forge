@@ -11,7 +11,7 @@ import {
     pickMergedCardText,
 } from '../../engine/storyMemory.js';
 import { gameReducer } from '../gameReducer.js';
-import { sanitizeWorldFactPayload } from './shared.js';
+import { sanitizeWorldFactPayload, stampNpcRelationshipArcs } from './shared.js';
 
 // --- World-fact near-duplicate detection (Scribe over-extraction guard) ---
 const FACT_STOP_WORDS = new Set([
@@ -162,6 +162,9 @@ export const handlers = {
             // low-salience cards silent for DORMANCY_JOURNAL_CYCLES cadences
             // go dormant (a Scribe re-report revives them).
             storyMemory: applyStoryMemoryDormancy(state.storyMemory, journal),
+            // ...and as the relationship-arc stamp: a disposition shift enters
+            // an NPC's history only if it held until this cadence (2026-08-28).
+            npcs: stampNpcRelationshipArcs(state.npcs),
         };
     },
 

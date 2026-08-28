@@ -132,6 +132,23 @@ function dropLeadingSentence(text) {
     return text.slice(match[0].length).trim();
 }
 
+/** Split dossier prose into comparable clause units — sentences AND
+ * semicolon-joined clauses. The Scribe writes stance fields as semicolon lists,
+ * which is exactly where verbatim repeats hid from the whole-field check
+ * (live 2026-08-28: "Hysterical, burning hatred." accreted four times on one
+ * card, and "Deep physical intimacy and mutual desire" twice). */
+function splitDossierClauses(text) {
+    return String(text || '')
+        .split(/(?<=[.!?…]["')\]]*)\s+|;\s*/)
+        .map(clause => clause.trim())
+        .filter(Boolean);
+}
+
+// A clause whose meaningful tokens are ~all inside one existing clause is a
+// restatement of that clause. Lower than the whole-field 0.85: clauses are
+// short, so a repeat usually covers completely or not at all.
+const CLAUSE_RESTATEMENT_THRESHOLD = 0.8;
+
 export function mergeNpcDossierText(existingText, incomingText, max = NPC_DOSSIER_FIELD_MAX) {
     const prev = clampNpcDossierField(existingText, max);
     const next = clampNpcDossierField(incomingText, max);
@@ -143,7 +160,26 @@ export function mergeNpcDossierText(existingText, incomingText, max = NPC_DOSSIE
     if (coversTokens(nextTokens, prevTokens, 0.85)) return next;
     if (coversTokens(prevTokens, nextTokens, 0.85)) return prev;
 
-    let merged = /[.!?…]["')\]]*$/.test(prev) ? `${prev} ${next}` : `${prev}; ${next}`;
+    // Clause-level novelty filter (2026-08-28): an incoming update usually
+    // restates most of the known record and adds one new beat. The old
+    // whole-field append kept the restated clauses too, so records accreted the
+    // same sentence in slightly different costumes. Append ONLY the clauses no
+    // known clause already covers; kept clauses keep their punctuation.
+    const knownClauses = splitDossierClauses(prev).map(clause => meaningfulTokens(clause));
+    const keptTokenSets = [];
+    const novelClauses = [];
+    for (const clause of splitDossierClauses(next)) {
+        const tokens = meaningfulTokens(clause);
+        const restates = [...knownClauses, ...keptTokenSets]
+            .some(known => coversTokens(known, tokens, CLAUSE_RESTATEMENT_THRESHOLD));
+        if (restates) continue;
+        keptTokenSets.push(tokens);
+        novelClauses.push(/[.!?…]["')\]]*$/.test(clause) ? clause : `${clause}.`);
+    }
+    if (novelClauses.length === 0) return prev;
+    const addition = novelClauses.join(' ');
+
+    let merged = /[.!?…]["')\]]*$/.test(prev) ? `${prev} ${addition}` : `${prev}; ${addition}`;
     while (merged.length > max) {
         const shorter = dropLeadingSentence(merged);
         if (!shorter) return clampNpcDossierField(merged, max);
@@ -463,6 +499,34 @@ function clampImportance(value, fallback = 3) {
     return Math.max(1, Math.min(5, Math.round(n)));
 }
 
+/**
+ * Same-sitting arc noise (2026-08-28, Vesa's "+9 earlier in one tavern
+ * evening" report): pre-fix records stamped a relationshipHistory transition on
+ * EVERY Scribe disposition re-read, so mood flicker minted Neutral↔Friendly↔Wary
+ * chains with no arc meaning. Collapse runs of entries closer than 30 minutes
+ * into one first→last transition (dropped entirely when it lands back where it
+ * started). Applied only to records the cadence stamper has never touched —
+ * once `arcDisposition` exists, entries are cadence-grade history and stay.
+ */
+const ARC_SAME_SITTING_MS = 30 * 60 * 1000;
+
+export function compactRelationshipHistory(history = []) {
+    const entries = (Array.isArray(history) ? history : []).filter(e => e && e.from && e.to);
+    if (entries.length <= 1) return entries;
+    const compacted = [];
+    let run = null;
+    for (const entry of entries) {
+        if (run && Number.isFinite(entry.at) && Number.isFinite(run.at) && entry.at - run.at <= ARC_SAME_SITTING_MS) {
+            run = { ...run, to: entry.to, at: entry.at, note: entry.note || run.note };
+        } else {
+            if (run && run.from !== run.to) compacted.push(run);
+            run = { ...entry };
+        }
+    }
+    if (run && run.from !== run.to) compacted.push(run);
+    return compacted;
+}
+
 /** Grandfather legacy saves: every pre-existing NPC becomes a durable character. */
 export function migrateLegacyNpc(npc = {}) {
     const merged = {
@@ -492,6 +556,9 @@ export function migrateLegacyNpc(npc = {}) {
     if (!merged.rosterTier) merged.rosterTier = 'character';
     if (!merged.kind) merged.kind = 'character';
     merged.bondMoments = normalizeBondMoments(merged.bondMoments);
+    if (!merged.arcDisposition) {
+        merged.relationshipHistory = compactRelationshipHistory(merged.relationshipHistory);
+    }
     if (merged.portraitUrl && !(typeof merged.portraitUrl === 'string' && SAFE_PORTRAIT_URL.test(merged.portraitUrl))) {
         delete merged.portraitUrl;
     }

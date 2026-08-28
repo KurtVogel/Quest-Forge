@@ -449,3 +449,76 @@ describe('gameReducer NPC archive/migration actions', () => {
         expect(next).toBe(state);
     });
 });
+describe('cadence-stamped relationship arcs (2026-08-28 — "+9 hops in one tavern evening")', () => {
+    const withNpc = (extra = {}) => gameReducer(initialGameState, {
+        type: 'UPDATE_NPC',
+        payload: {
+            name: 'Ketta Mor',
+            disposition: 'neutral',
+            lastNotes: 'Met in the common room.',
+            relationshipTension: 'appraising interest',
+            ...extra,
+        },
+    });
+    const journalEntry = (state) => gameReducer(state, {
+        type: 'ADD_JOURNAL_ENTRY',
+        payload: { summary: 'The evening at the Copper Kettle.', keyDecisions: [], consequences: [] },
+    });
+    const setDisposition = (state, disposition) => gameReducer(state, {
+        type: 'UPDATE_NPC',
+        payload: { name: 'Ketta Mor', disposition },
+    });
+
+    it('per-update disposition flips no longer mint history entries', () => {
+        let state = withNpc();
+        state = setDisposition(state, 'friendly');
+        state = setDisposition(state, 'wary');
+        state = setDisposition(state, 'friendly');
+        expect(state.npcs[0].disposition).toBe('friendly');
+        expect(state.npcs[0].relationshipHistory).toEqual([]);
+    });
+
+    it('the journal cadence stamps ONE transition for a shift that held', () => {
+        let state = withNpc();
+        state = journalEntry(state); // anchors arcDisposition at neutral
+        state = setDisposition(state, 'friendly');
+        state = setDisposition(state, 'wary');
+        state = setDisposition(state, 'friendly');
+        state = journalEntry(state);
+        expect(state.npcs[0].relationshipHistory).toHaveLength(1);
+        expect(state.npcs[0].relationshipHistory[0]).toMatchObject({ from: 'neutral', to: 'friendly' });
+        expect(state.npcs[0].arcDisposition).toBe('friendly');
+    });
+
+    it('a shift that reverted before the cadence stamps nothing', () => {
+        let state = withNpc();
+        state = journalEntry(state);
+        state = setDisposition(state, 'wary');
+        state = setDisposition(state, 'neutral'); // back where it started
+        state = journalEntry(state);
+        expect(state.npcs[0].relationshipHistory).toEqual([]);
+    });
+
+    it('a legacy record derives its anchor from its history tail — no retroactive transition', () => {
+        const legacy = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...initialGameState,
+                character: initialGameState.character,
+                inventory: initialGameState.inventory,
+                messages: [],
+                npcs: [{
+                    name: 'Lady Celeste Jewelglade',
+                    disposition: 'wary',
+                    relationshipHistory: [{ from: 'neutral', to: 'wary', at: 1 }],
+                }],
+            },
+        });
+        const stamped = gameReducer(legacy, {
+            type: 'ADD_JOURNAL_ENTRY',
+            payload: { summary: 'Quiet days.', keyDecisions: [], consequences: [] },
+        });
+        expect(stamped.npcs[0].relationshipHistory).toHaveLength(1);
+        expect(stamped.npcs[0].arcDisposition).toBe('wary');
+    });
+});

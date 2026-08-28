@@ -17,6 +17,7 @@ import {
     MAX_NPC_BOND_MOMENTS,
     MAX_NPC_CALLBACK_HOOKS,
     mergeNpcDossierText,
+    compactRelationshipHistory,
     migrateLegacyNpc,
     normalizeBondMoments,
     normalizeCallbackHook,
@@ -340,6 +341,78 @@ describe('mergeNpcDossierText', () => {
         expect(merged.length).toBeLessThanOrEqual(130);
         expect(merged).not.toContain('lighthouse rock');
         expect(merged).toContain('owes the hero her life');
+    });
+
+    // 2026-08-28 (live "Hysterical, burning hatred ×4" card): an incoming
+    // update usually restates known clauses and adds one new beat — only the
+    // genuinely novel clauses may append.
+    it('appends only the NOVEL clauses of a mixed restatement-plus-news update', () => {
+        const known = 'Hysterical, burning hatred. Convinced Vesa is an abductor and brute, he will not rest until the estate garrison rides him down.';
+        const incoming = 'Hysterical, burning hatred. He has posted riders on the western road.';
+        const merged = mergeNpcDossierText(known, incoming);
+        expect(merged).toContain('posted riders on the western road');
+        // The restated lead clause did NOT accrete a second copy.
+        expect(merged.match(/Hysterical, burning hatred/g)).toHaveLength(1);
+    });
+
+    it('dedupes semicolon-joined clause repeats the whole-field check could not see', () => {
+        const known = 'Deep physical intimacy and mutual desire coupled with gritty professional camaraderie.';
+        const incoming = 'Deep physical intimacy and mutual desire; comfortable and unashamed in their shared closeness.';
+        const merged = mergeNpcDossierText(known, incoming);
+        expect(merged).toContain('comfortable and unashamed');
+        expect(merged.match(/Deep physical intimacy and mutual desire/g)).toHaveLength(1);
+    });
+
+    it('returns the record untouched when every incoming clause is a restatement', () => {
+        const known = 'Wary but intrigued by the promise of gold; views him as a potentially dangerous but paying client.';
+        const incoming = 'Wary but intrigued by the promise of gold.';
+        expect(mergeNpcDossierText(known, incoming)).toBe(known);
+    });
+});
+
+describe('compactRelationshipHistory (2026-08-28 same-sitting arc noise)', () => {
+    const MIN = 60 * 1000;
+    const hop = (from, to, at, note = '') => ({ from, to, at, note });
+
+    it('collapses a tavern evening of flip-flops into the transition that held', () => {
+        const evening = [
+            hop('neutral', 'friendly', 0 * MIN),
+            hop('friendly', 'wary', 5 * MIN),
+            hop('wary', 'friendly', 12 * MIN),
+            hop('friendly', 'wary', 20 * MIN),
+            hop('wary', 'friendly', 28 * MIN, 'shared a bed'),
+        ];
+        expect(compactRelationshipHistory(evening)).toEqual([
+            hop('neutral', 'friendly', 28 * MIN, 'shared a bed'),
+        ]);
+    });
+
+    it('drops a run that lands back where it started', () => {
+        const flicker = [
+            hop('neutral', 'wary', 0),
+            hop('wary', 'neutral', 5 * MIN),
+        ];
+        expect(compactRelationshipHistory(flicker)).toEqual([]);
+    });
+
+    it('keeps transitions from separate sittings apart', () => {
+        const arcs = [
+            hop('neutral', 'friendly', 0),
+            hop('friendly', 'hostile', 3 * 60 * MIN, 'the betrayal'),
+        ];
+        expect(compactRelationshipHistory(arcs)).toEqual(arcs);
+    });
+
+    it('migrateLegacyNpc compacts noisy pre-fix histories but never cadence-stamped ones', () => {
+        const noisy = [
+            { from: 'neutral', to: 'friendly', at: 0 },
+            { from: 'friendly', to: 'wary', at: 5 * MIN },
+        ];
+        const healed = migrateLegacyNpc({ name: 'Ketta Mor', relationshipHistory: noisy });
+        expect(healed.relationshipHistory).toEqual([{ from: 'neutral', to: 'wary', at: 5 * MIN }]);
+
+        const stamped = migrateLegacyNpc({ name: 'Ketta Mor', arcDisposition: 'wary', relationshipHistory: noisy });
+        expect(stamped.relationshipHistory).toEqual(noisy);
     });
 });
 

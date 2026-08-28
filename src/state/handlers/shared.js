@@ -313,6 +313,46 @@ export function clearSustainedSpellState(character, party, inventory) {
 /** How many disposition shifts to keep per NPC — enough to show an arc, bounded for state size. */
 const MAX_NPC_HISTORY = 10;
 
+/**
+ * Cadence-stamped relationship arcs (2026-08-28): a transition enters
+ * relationshipHistory only when it SURVIVES to a journal cadence — the live
+ * `disposition` chip still moves per turn, but Neutral↔Friendly↔Wary flicker
+ * inside one sitting collapses to wherever the relationship actually landed.
+ * `arcDisposition` anchors the last stamped state; legacy records derive it
+ * from their history tail (or current disposition) on first stamp, so the fix
+ * never mints a retroactive transition. The 'unknown' → X establishment is
+ * not an arc beat, matching the old rule.
+ */
+export function stampNpcRelationshipArcs(npcs) {
+    if (!Array.isArray(npcs) || npcs.length === 0) return npcs;
+    let changed = false;
+    const next = npcs.map(npc => {
+        const history = Array.isArray(npc.relationshipHistory) ? npc.relationshipHistory : [];
+        const anchor = npc.arcDisposition
+            || history[history.length - 1]?.to
+            || npc.disposition
+            || 'unknown';
+        if (!npc.disposition || npc.disposition === anchor) {
+            if (npc.arcDisposition === anchor) return npc;
+            changed = true;
+            return { ...npc, arcDisposition: anchor };
+        }
+        changed = true;
+        if (anchor === 'unknown') {
+            return { ...npc, arcDisposition: npc.disposition };
+        }
+        return {
+            ...npc,
+            arcDisposition: npc.disposition,
+            relationshipHistory: [
+                ...history,
+                { from: anchor, to: npc.disposition, at: Date.now(), note: npc.lastNotes || '' },
+            ].slice(-MAX_NPC_HISTORY),
+        };
+    });
+    return changed ? next : npcs;
+}
+
 function clampNumber(value, min, max, fallback) {
     const n = Number(value);
     if (!Number.isFinite(n)) return fallback;
@@ -529,19 +569,11 @@ export function upsertNpc(npcs, payload) {
         if (!classified.allowRoster && existing.rosterTier !== 'character' && !existing.pinned) {
             return npcs;
         }
-        // Record a genuine disposition shift between known stances (skip the initial
-        // 'unknown' → X establishment) so the relationship's arc is preserved. A friend
-        // turning hostile — or an enemy won over — is exactly the beat the DM and player
-        // should remember.
-        if (update.disposition && existing.disposition &&
-            existing.disposition !== 'unknown' &&
-            update.disposition !== existing.disposition) {
-            const history = Array.isArray(existing.relationshipHistory) ? existing.relationshipHistory : [];
-            update.relationshipHistory = [
-                ...history,
-                { from: existing.disposition, to: update.disposition, at: Date.now(), note: update.lastNotes || '' },
-            ].slice(-MAX_NPC_HISTORY);
-        }
+        // Disposition updates live here, but arc HISTORY is no longer stamped
+        // per update (2026-08-28): every Scribe mood re-read used to mint a
+        // transition, so one tavern evening produced nine meaningless hops.
+        // stampNpcRelationshipArcs records a transition on the journal cadence,
+        // only for shifts that actually held.
         if (bondAdditions.length > 0) {
             update.bondMoments = appendBondMoments(existing.bondMoments, bondAdditions);
         }
