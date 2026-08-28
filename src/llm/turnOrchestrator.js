@@ -32,7 +32,7 @@ import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '.
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownLocations, buildKnownStances, runScribe } from './scribe.js';
 import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
-import { addMemory, retrieveRelevant } from '../engine/vectorMemory.js';
+import { addMemory, findSubjectsInText, retrieveRelevant } from '../engine/vectorMemory.js';
 import { getMachineryGeminiKey } from './machinery.js';
 import { curateStoryMemory, formatSecrecyTag } from '../engine/storyMemory.js';
 import { captureInjection } from '../debug/memoryInspectorStore.js';
@@ -74,7 +74,13 @@ export function createTurnRunner({
                 // matched the seed's bare text, so every journal entry was
                 // re-embedded (and duplicated in retrieval) on each reload
                 // (live playtest #10, 2026-08-22: 40 re-embeds on Continue).
-                await addMemory(machineryKey, result.journalEntry.summary, 'journal', result.journalEntry.location).catch(() => {});
+                // Subjects tagged like the seed does, so live rows get the same
+                // presence-aware retrieval treatment (2026-08-28).
+                const rosterNames = (getState().npcs || []).map(n => n?.name).filter(Boolean);
+                await addMemory(
+                    machineryKey, result.journalEntry.summary, 'journal', result.journalEntry.location,
+                    findSubjectsInText(result.journalEntry.summary, rosterNames),
+                ).catch(() => {});
             }
         } catch (e) {
             console.error('[Journal RAG Seeding] Failed:', e);

@@ -403,6 +403,17 @@ fatigue idea (2026-08-03), and the cross-faction-contradiction guard idea (2026-
 
 ## Gameplay & Mechanics
 
+### Journal entry editing (redaction-free factual corrections) — status: `idea` (2026-08-28)
+Considered during the refusal-cascade batch and deliberately NOT built as the answer to
+dark-canon retrieval (ruled with Vesa: history stays whole, retrieval etiquette handles
+when it surfaces — DECISIONS.md 2026-08-28). Still worth having for its honest use case:
+the summarizer occasionally records something factually WRONG, and today no surface lets
+the player correct recorded history (NPC cards have Deepen/Archive; chat has message
+removal). Technically tidy: `journal` is a mutable RAG category, so an edited entry
+re-embeds and its stale row prunes on the next seed automatically. Keep it an explicit
+"correct the record" affordance, not a beautify pass.
+
+
 ### Engine-owned quest-completion XP + boss-enemy XP — status: `shipped` (2026-08-26, implemented as designed; DECISIONS.md 2026-08-26)
 Vesa (during the Terra playtest evening): quests finishing should reward XP, and notable
 NPCs/bosses should pay more than mooks. Today's controlled provider comparison proved the

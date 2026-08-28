@@ -6,7 +6,33 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-28 (queue sweep + the player-reported cut-hook fix on NPC cards)._
+_Last updated: 2026-08-28 (refusal-cascade batch: safety settings, message scrub,
+presence-aware retrieval, NPC record quality — plus the earlier queue sweep + cut-hook fix)._
+
+## 2026-08-28 — the refusal-cascade batch (player-reported "sorry, I can't continue" in an adult campaign)
+
+Root-caused live with Vesa: refusals reproduced across devices and DM models because the
+causes travel with the campaign, not the model (DECISIONS.md 2026-08-28 refusal-cascade
+entry). Shipped as one coordinated batch: **(a)** Gemini `safetySettings: BLOCK_NONE` on
+every text call — the app had NEVER declared its content policy, so Google's defaults
+silently governed the DM AND the machinery (the known journal safety blocks); in-band
+refusals on truly prohibited content remain the hosted model's floor, stated as such.
+**(b)** DELETE_MESSAGE soft-delete + ✕ affordance (two-click confirm) so refusal turns can
+be scrubbed — a refusal in the window/save primes the next one; flag honored everywhere
+`hidden` is, indexes never shift. **(c)** Presence-aware retrieval: person-tagged memories
+(`subjects` on journal/npc/story rows, cached rows patched at seed) take a gate-affecting
+0.12 penalty when their person is nowhere in the scene — ruled WITH Vesa against redacting
+dark canon ("dormant, not deleted"; the coercion arc stays campaign history and returns at
+full weight when the fiction reaches for it). **(d)** MMR-lite diversity: ≥0.9 mutual-cosine
+rows share one slot (three same-night journal entries stop crowding the scene's context).
+**(e)** NPC dossier merges go clause-level (the Steward's "Hysterical, burning hatred" ×4
+class of accretion is dead). **(f)** relationship arcs are cadence-stamped ("+9 hops in one
+tavern evening" → transitions only when they hold to a journal cadence; legacy histories
+compact same-sitting runs once). **(g)** REGISTER rule inlined into the Scribe's
+bondMoment/hook field descriptions (both machinery models quoted scene diction into durable
+records despite the global rule). 1,841 tests green (+23), lint clean. Player-side steps
+for the live campaign: scrub the stored refusal messages, unpin Lady Celeste, optionally
+"Deepen memory" on the crude-register cards (Gretka, Ketta).
 
 ## 2026-08-28 — player-reported bug: NPC card hooks cut mid-phrase ("The sound of her blade being")
 

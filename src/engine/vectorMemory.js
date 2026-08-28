@@ -180,14 +180,62 @@ function cosineSimilarity(a, b) {
     return denom === 0 ? 0 : dot / denom;
 }
 
+/** Clamp an untrusted subjects list to a small array of clean name strings. */
+function normalizeSubjects(subjects) {
+    const list = (Array.isArray(subjects) ? subjects : [])
+        .map(name => String(name || '').replace(/\s+/g, ' ').trim().slice(0, 80))
+        .filter(Boolean)
+        .slice(0, 4);
+    return list.length > 0 ? list : null;
+}
+
+// Name tokens that identify nobody on their own — articles, particles, and
+// titles ("The Steward" must match on "steward", never on "the"; "Lady
+// Celeste" on "celeste", never on every scene containing a lady).
+const NAME_TOKEN_STOP_WORDS = new Set([
+    'the', 'and', 'of', 'von', 'van', 'der', 'den', 'del', 'della',
+    'lady', 'lord', 'sir', 'dame', 'master', 'mistress', 'miss', 'madam',
+    'captain', 'king', 'queen', 'prince', 'princess', 'mother', 'father',
+    'brother', 'sister', 'old', 'young', 'elder',
+]);
+
+function identifyingNameTokens(name) {
+    return String(name || '').toLowerCase().split(/[^\p{L}\p{N}]+/u)
+        .filter(token => token.length >= 3 && !NAME_TOKEN_STOP_WORDS.has(token));
+}
+
+/**
+ * Roster names that appear in a text — the seed/live-add helper for tagging a
+ * memory's `subjects`. Matches on any identifying name token of 3+ characters
+ * so "Lady Celeste" in a journal entry matches the roster's
+ * "Lady Celeste Jewelglade".
+ */
+export function findSubjectsInText(text, names, cap = 4) {
+    const hay = String(text || '').toLowerCase();
+    if (!hay) return null;
+    const found = [];
+    for (const name of (Array.isArray(names) ? names : [])) {
+        const clean = String(name || '').trim();
+        if (!clean) continue;
+        const tokens = identifyingNameTokens(clean);
+        if (tokens.length > 0 && tokens.some(token => hay.includes(token))) {
+            found.push(clean);
+            if (found.length >= cap) break;
+        }
+    }
+    return found.length > 0 ? found : null;
+}
+
 /**
  * Add a memory entry and embed it. Also persists to IndexedDB.
  * Silently skips if embedding fails.
  * @param {string} apiKey - Gemini API key
  * @param {string} text - The memory text
  * @param {string} [category] - e.g. 'world_fact', 'journal', 'npc', 'event'
+ * @param {string|null} [location]
+ * @param {string[]|null} [subjects] - people this memory is ABOUT (presence-aware retrieval)
  */
-export async function addMemory(apiKey, text, category = 'general', location = null) {
+export async function addMemory(apiKey, text, category = 'general', location = null, subjects = null) {
     // `?.` guards null/undefined but not type — an object-valued world fact from
     // the parser would throw on .trim() inside this async fn (2026-07-28 audit).
     if (!apiKey || typeof text !== 'string' || !text.trim()) return;
@@ -201,13 +249,14 @@ export async function addMemory(apiKey, text, category = 'general', location = n
         return;
     }
 
-    storeMemoryEntry({ text, vector, category, location });
+    storeMemoryEntry({ text, vector, category, location, subjects });
     enforceCampaignCap();
 }
 
 /** Store one already-embedded entry (dedupe + persist) — shared by addMemory and the batch seed. */
-function storeMemoryEntry({ text, vector, category = 'general', location = null }) {
+function storeMemoryEntry({ text, vector, category = 'general', location = null, subjects = null }) {
     if (memoryStore.some(m => m.text === text)) return;
+    const cleanSubjects = normalizeSubjects(subjects);
     const entry = {
         // Campaign key — rows are persisted per campaign so a switch loads its own
         // cache instead of wiping everything. An entry added before any seed set a
@@ -220,6 +269,10 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null 
         // memories from elsewhere so the DM doesn't transplant local color across
         // the map. Optional; older cached embeddings simply have no tag.
         ...(typeof location === 'string' && location.trim() && { location: location.trim().slice(0, 80) }),
+        // Who this memory is ABOUT — presence-aware retrieval (2026-08-28)
+        // down-weights person-tied memories in scenes that person is nowhere
+        // near. Optional; untagged rows are never gated.
+        ...(cleanSubjects && { subjects: cleanSubjects }),
         schema: GEMINI_EMBED_SCHEMA,
         timestamp: Date.now(),
     };
@@ -268,6 +321,21 @@ export async function seedMemories(apiKey, items, sessionId = null) {
     // cold device ~300 sequential trips before RAG was warm); a failed vector
     // skips its item exactly like the per-item path, and the next mount's seed
     // retries whatever the cache is still missing.
+    // Cached rows predate the `subjects` tag — when the current seed knows a
+    // row's subjects and the cached row doesn't, patch the metadata in place
+    // (same [sessionId, text] key, so persist is an upsert; no re-embed).
+    const seedByText = new Map((items || [])
+        .filter(item => typeof item?.text === 'string' && item.text.trim())
+        .map(item => [item.text, item]));
+    for (const entry of memoryStore) {
+        const seedItem = seedByText.get(entry.text);
+        const cleanSubjects = seedItem ? normalizeSubjects(seedItem.subjects) : null;
+        if (cleanSubjects && !entry.subjects) {
+            entry.subjects = cleanSubjects;
+            if (entry.sessionId != null) persistEmbedding(entry);
+        }
+    }
+
     const existingTexts = new Set(persisted.map(m => m.text));
     const newItems = (items || [])
         .filter(item => typeof item?.text === 'string' && item.text.trim())
@@ -277,7 +345,7 @@ export async function seedMemories(apiKey, items, sessionId = null) {
         const vectors = await embedTexts(apiKey, newItems.map(item => item.text), { inputType: 'document' });
         newItems.forEach((item, i) => {
             if (vectors?.[i]) {
-                storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location });
+                storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location, subjects: item.subjects });
             } else {
                 console.error('[VectorMemory] Embedding failed for:', item.text.slice(0, 80));
             }
@@ -299,6 +367,11 @@ export async function seedMemories(apiKey, items, sessionId = null) {
  * @param {number} [minScore=0.55] - Minimum similarity threshold
  * @returns {Promise<Array<{text: string, category: string, score: number}>>}
  */
+/** How much similarity an absent-subject memory must additionally clear. */
+export const PRESENCE_ABSENT_PENALTY = 0.12;
+/** Two rows at or above this mutual cosine are one memory for slot purposes. */
+export const NEAR_DUPLICATE_SIMILARITY = 0.9;
+
 export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55) {
     if (!apiKey || !query || memoryStore.length === 0) return [];
 
@@ -318,20 +391,47 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55)
         npc: 0.02,
     };
 
-    // The relevance threshold gates on RAW similarity; the category boost only
-    // orders the survivors. Boost-before-gate let a sub-threshold boosted hit
-    // pass while dropping an above-threshold narrative one (2026-08-06 audit).
-    const scored = memoryStore
-        .map(m => ({ entry: m, similarity: cosineSimilarity(queryVector, m.vector) }))
-        .filter(({ similarity }) => similarity >= minScore)
-        .map(({ entry, similarity }) => ({
-            ...entry,
-            score: similarity + (categoryBoost[entry.category] || 0),
-        }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, topN);
+    // Presence-aware retrieval (2026-08-28, "dormant, not deleted"): a memory
+    // tagged with the people it is ABOUT loses ground when none of them are in
+    // the scene — pure semantic similarity had the hero's darkest recorded
+    // nights following him into every unrelated intimate scene, because to a
+    // cosine "sex is sex". The moment the person, place, or thread re-enters
+    // the conversation the query names them and the memory returns at full
+    // weight. Unlike the category boost (order-only by the 2026-08-06 rule),
+    // this penalty deliberately affects the GATE too: keeping a row out is the
+    // safe direction; it can never let a sub-threshold row in.
+    const queryLower = String(query).toLowerCase();
+    const subjectsPresent = (subjects) => subjects.some(name => {
+        const tokens = identifyingNameTokens(name);
+        // A name with no identifying tokens ("The Lady") can't be judged
+        // absent — treat as present so the row is never permanently penalized.
+        return tokens.length === 0 || tokens.some(token => queryLower.includes(token));
+    });
 
-    return scored.map(m => ({ text: m.text, category: m.category, score: m.score, ...(m.location && { location: m.location }) }));
+    const scored = memoryStore
+        .map(m => {
+            const similarity = cosineSimilarity(queryVector, m.vector);
+            const absentSubject = Array.isArray(m.subjects) && m.subjects.length > 0 && !subjectsPresent(m.subjects);
+            return { entry: m, gated: similarity - (absentSubject ? PRESENCE_ABSENT_PENALTY : 0) };
+        })
+        .filter(({ gated }) => gated >= minScore)
+        .map(({ entry, gated }) => ({
+            ...entry,
+            score: gated + (categoryBoost[entry.category] || 0),
+        }))
+        .sort((a, b) => b.score - a.score);
+
+    // Diversity pass (MMR-lite): near-duplicate rows — three consecutive journal
+    // entries about the same night — share ONE slot instead of crowding out the
+    // current scene's actual context. Greedy: keep the best of each cluster.
+    const chosen = [];
+    for (const candidate of scored) {
+        if (chosen.length >= topN) break;
+        if (chosen.some(sel => cosineSimilarity(sel.vector, candidate.vector) >= NEAR_DUPLICATE_SIMILARITY)) continue;
+        chosen.push(candidate);
+    }
+
+    return chosen.map(m => ({ text: m.text, category: m.category, score: m.score, ...(m.location && { location: m.location }) }));
 }
 
 /**
@@ -388,6 +488,13 @@ export function shouldPurgeCampaignEmbeddings({ deletedSessionId, liveSessionId 
  */
 export function getMemoryCount() {
     return memoryStore.length;
+}
+
+/** Texts currently in the store — store inspection for tests/diagnostics
+ * (retrieval is no longer a faithful mirror: the diversity pass collapses
+ * near-duplicate vectors by design). */
+export function getMemoryTexts() {
+    return memoryStore.map(m => m.text);
 }
 
 /**

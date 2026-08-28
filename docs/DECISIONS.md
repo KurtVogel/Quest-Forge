@@ -8,6 +8,52 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-28 · The refusal-cascade batch: the app declares its content policy to Gemini,
+refusals become scrubbable, dark canon goes dormant-not-deleted in retrieval, and NPC
+records stop accreting/flickering.**
+Root-caused from Vesa's live "sorry, I can't continue with explicit narration" reports
+(campaign long-established as adult fiction; refusals reproduced across devices AND DM
+models, following the cloud save). Six coordinated rulings:
+**(1) `safetySettings: BLOCK_NONE` on every Gemini text call** (DM + machinery; the four
+non-restricted harm categories, CIVIC_INTEGRITY deliberately omitted). The app had NEVER
+sent safety settings, so Google's default thresholds silently governed an app whose
+documented design is unvarnished adult fiction on the player's own key — the known
+journal-summarizer safety blocks and part of the refusal cascade. API-side classifier
+blocks are ours to configure; in-band model refusals on genuinely prohibited content
+(e.g. sexual coercion scenes) remain the hosted model's own floor and are accepted as such.
+**(2) DELETE_MESSAGE, soft-delete only.** A refusal message in the 20-message window is
+the strongest known predictor of the next refusal (models double down on a refusal they
+can see themselves having made), and it travels in saves. The ✕ affordance (two-click
+confirm) flags `deleted: true`; the row STAYS in the array so every stored messageIndex
+(replay ledgers, openedAtMessage, journal ranges) keeps pointing at the right slot, and
+the flag is honored everywhere `hidden` is: render, DM window, journal batches, director
+contexts, chronicler, and conversationalDistance.
+**(3) Presence-aware retrieval ("dormant, not deleted").** Ruled with Vesa AGAINST
+editing/redacting dark canon — the moment-of-wrongness stays in the record (it is what
+adult narration is for, and the shame-free/unvarnished contracts already forbid
+laundering). The fix is retrieval etiquette: memories tagged with the people they are
+ABOUT (`subjects` on journal/npc/story rows; seed patches the tag onto cached rows without
+re-embedding) take a 0.12 penalty when none of those people are in the scene — and unlike
+the order-only category boost (2026-08-06 rule), this penalty deliberately affects the
+gate: keeping a row OUT is the safe direction, it can never let a sub-threshold row in.
+The moment the person/thread re-enters the conversation the memory returns at full weight.
+**(4) Diversity pass (MMR-lite):** retrieved rows at ≥0.9 mutual cosine share one slot —
+three consecutive journal entries about the same night no longer crowd out the current
+scene's actual context.
+**(5) NPC dossier merges go clause-level.** The whole-field containment merge let
+synonym-swapped restatements accrete ("Hysterical, burning hatred" four times on one
+card; semicolon-joined clause repeats invisible to the field-level check). Incoming
+updates are split into sentence/semicolon clauses and only genuinely novel clauses append.
+**(6) Relationship arcs are cadence-stamped.** A transition enters `relationshipHistory`
+only when it survives to a journal cadence (`arcDisposition` anchors the last stamped
+state); the live disposition chip still moves per turn, but one tavern evening can no
+longer mint nine Neutral↔Friendly↔Wary hops. Legacy pre-fix histories compact same-sitting
+runs (<30 min apart) into the transition that held, once, on records the stamper has never
+touched. Plus: the Scribe's bondMoment/callbackHooks field descriptions now carry the
+REGISTER rule inline (both models quoted scene diction — "cock", "fuck" — into durable
+records despite the global rule; field-local wording is what extraction models actually
+obey).
+
 **2026-08-28 · Callback hooks get ONE truncation-aware normalizer, applied at the reducer
 boundary — and it may only trim words that cannot end an English phrase.**
 Vesa's live report: an NPC card hook read "The sound of her blade being" — cut mid-phrase,

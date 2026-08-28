@@ -29,7 +29,9 @@ import {
     buildRetrievedMemoriesBlock,
     clearMemories,
     deleteCampaignMemories,
+    findSubjectsInText,
     getMemoryCount,
+    getMemoryTexts,
     MAX_CAMPAIGN_MEMORIES,
     retrieveRelevant,
     seedMemories,
@@ -39,6 +41,17 @@ import {
 function unitVector(index) {
     const vector = Array(768).fill(0);
     vector[index] = 1;
+    return vector;
+}
+
+// Query-aligned but mutually DISTINCT vectors: cosine vs unitVector(0) is
+// exactly `cos`, and two aligned vectors on different axes score cos_a*cos_b
+// against each other — below the diversity ceiling, so multi-result ranking
+// tests are not collapsed by the near-duplicate pass.
+function alignedVector(index, cos) {
+    const vector = Array(768).fill(0);
+    vector[0] = cos;
+    vector[index] = Math.sqrt(1 - cos * cos);
     return vector;
 }
 
@@ -250,11 +263,11 @@ describe('retrieveRelevant guards, scoring, and ranking', () => {
     });
 
     it('limits results to topN, highest score first', async () => {
-        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        embedTextMock.mockResolvedValueOnce(alignedVector(1, 0.9));
         await addMemory('key', 'Fact A.', 'world_fact');
-        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        embedTextMock.mockResolvedValueOnce(alignedVector(2, 0.8));
         await addMemory('key', 'Fact B.', 'world_fact');
-        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        embedTextMock.mockResolvedValueOnce(alignedVector(3, 0.7));
         await addMemory('key', 'Fact C.', 'world_fact');
 
         embedTextMock.mockResolvedValueOnce(unitVector(0));
@@ -263,9 +276,9 @@ describe('retrieveRelevant guards, scoring, and ranking', () => {
     });
 
     it('applies a category boost that can reorder equally-similar matches', async () => {
-        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        embedTextMock.mockResolvedValueOnce(alignedVector(1, 0.8));
         await addMemory('key', 'A plain narrative beat.', 'narrative'); // boost -0.04
-        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        embedTextMock.mockResolvedValueOnce(alignedVector(2, 0.8));
         await addMemory('key', 'An important NPC fact.', 'npc_character'); // boost +0.08
 
         embedTextMock.mockResolvedValueOnce(unitVector(0));
@@ -496,9 +509,7 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
         // The stale wordings are gone from DISK too: a re-seed can't resurrect them.
         await seedMemories('key', seed, 's1');
         expect(getMemoryCount()).toBe(4);
-        embedTextMock.mockResolvedValue(unitVector(0));
-        const matches = await retrieveRelevant('key', 'What about Marn and the gate?', 10, 0.1);
-        const texts = matches.map(m => m.text);
+        const texts = getMemoryTexts();
         expect(texts).not.toContain('Marn (friendly): guards the old gate.');
         expect(texts).not.toContain('Marn: promised the hero a map.');
         expect(texts).not.toContain('[Location: The coast] The party reached the coast.');
@@ -523,9 +534,7 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
 
         expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
         // The two OLDEST transient rows went; the newest transient survived.
-        embedTextMock.mockResolvedValue(unitVector(0));
-        const matches = await retrieveRelevant('key', 'query', MAX_CAMPAIGN_MEMORIES, 0.1);
-        const texts = new Set(matches.map(m => m.text));
+        const texts = new Set(getMemoryTexts());
         expect(texts.has('player action one')).toBe(false);
         expect(texts.has('player action two')).toBe(false);
         expect(texts.has('narrative beat three')).toBe(true);
@@ -548,8 +557,7 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
         await addMemory('key', 'A brand new fact.', 'world_fact');
 
         expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
-        const matches = await retrieveRelevant('key', 'query', MAX_CAMPAIGN_MEMORIES, 0.1);
-        const texts = new Set(matches.map(m => m.text));
+        const texts = new Set(getMemoryTexts());
         expect(texts.has('old player chatter')).toBe(false);
         expect(texts.has('A brand new fact.')).toBe(true);
     });
@@ -697,5 +705,88 @@ describe('IndexedDB degradation paths (2026-07-28 audit)', () => {
 
         await expect(clearMemories()).resolves.toBeUndefined();
         expect(db.closed).toBe(true);
+    });
+});
+
+describe('presence-aware + diversity-aware retrieval (2026-08-28, "dormant, not deleted")', () => {
+    beforeEach(() => {
+        clearMemories();
+        globalThis.indexedDB = new IDBFactory();
+        embedTextMock.mockReset();
+    });
+
+    it('gates out a person-tied memory when that person is nowhere in the scene', async () => {
+        // Borderline similarity (0.60): with the 0.12 absence penalty it falls
+        // below the 0.55 gate. The identical untagged row stays retrievable.
+        embedTextMock.mockResolvedValueOnce(alignedVector(1, 0.6));
+        await addMemory('key', 'Celeste submitted to the demands at the cabin.', 'journal', null, ['Lady Celeste Jewelglade']);
+        embedTextMock.mockResolvedValueOnce(alignedVector(2, 0.6));
+        await addMemory('key', 'A night of shared warmth at the inn.', 'journal');
+
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const matches = await retrieveRelevant('key', 'Vesa and Ketta share a bed at the Copper Kettle', 8, 0.55);
+        expect(matches.map(m => m.text)).toEqual(['A night of shared warmth at the inn.']);
+    });
+
+    it('returns the memory at full weight the moment its person enters the conversation', async () => {
+        embedTextMock.mockResolvedValueOnce(alignedVector(1, 0.6));
+        await addMemory('key', 'Celeste submitted to the demands at the cabin.', 'journal', null, ['Lady Celeste Jewelglade']);
+
+        // Any name token of 3+ chars counts — "Celeste" matches the full
+        // roster name "Lady Celeste Jewelglade".
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const matches = await retrieveRelevant('key', 'I ask around about Celeste and the ledger', 8, 0.55);
+        expect(matches.map(m => m.text)).toEqual(['Celeste submitted to the demands at the cabin.']);
+    });
+
+    it('a strongly similar person-tied memory still clears the raised bar (dormant, never deleted)', async () => {
+        embedTextMock.mockResolvedValueOnce(alignedVector(1, 0.8));
+        await addMemory('key', 'Celeste submitted to the demands at the cabin.', 'journal', null, ['Lady Celeste Jewelglade']);
+
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const matches = await retrieveRelevant('key', 'an unrelated but very similar scene', 8, 0.55);
+        expect(matches).toHaveLength(1); // 0.8 - 0.12 = 0.68 >= 0.55
+    });
+
+    it('near-duplicate rows share ONE slot instead of crowding out scene context', async () => {
+        // Three same-arc entries on one axis (mutually identical vectors) and
+        // one distinct memory on another: the trio collapses to its best row.
+        for (const text of ['Cabin entry one.', 'Cabin entry two.', 'Cabin entry three.']) {
+            embedTextMock.mockResolvedValueOnce(alignedVector(1, 0.9));
+            await addMemory('key', text, 'journal');
+        }
+        embedTextMock.mockResolvedValueOnce(alignedVector(2, 0.7));
+        await addMemory('key', 'The harbor toll doubled last week.', 'journal');
+
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const matches = await retrieveRelevant('key', 'query', 8, 0.55);
+        expect(matches.map(m => m.text)).toEqual(['Cabin entry one.', 'The harbor toll doubled last week.']);
+    });
+
+    it('findSubjectsInText tags roster people named in a text and skips the rest', () => {
+        const roster = ['Lady Celeste Jewelglade', 'Ketta Mor', 'The Steward'];
+        expect(findSubjectsInText('Lady Celeste submits over the table.', roster)).toEqual(['Lady Celeste Jewelglade']);
+        expect(findSubjectsInText('Ketta rode beside the wagon.', roster)).toEqual(['Ketta Mor']);
+        expect(findSubjectsInText('A quiet day at the market.', roster)).toBeNull();
+        expect(findSubjectsInText('', roster)).toBeNull();
+    });
+
+    it('seeding patches subjects onto cached rows that predate the tag (no re-embed)', async () => {
+        await putEmbedding({
+            sessionId: 's1',
+            text: 'Celeste submitted at the cabin.',
+            category: 'journal',
+            timestamp: 1,
+            vector: alignedVector(1, 0.6),
+            schema: SCHEMA,
+        });
+        await seedMemories('key', [
+            { text: 'Celeste submitted at the cabin.', category: 'journal', subjects: ['Lady Celeste Jewelglade'] },
+        ], 's1');
+        expect(embedTextMock).not.toHaveBeenCalled(); // cached — patched, not re-embedded
+
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const away = await retrieveRelevant('key', 'a scene far from her', 8, 0.55);
+        expect(away).toHaveLength(0); // the patched tag gates it
     });
 });
