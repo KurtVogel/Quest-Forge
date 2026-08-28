@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, memo } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { createTurnRunner } from '../../llm/turnOrchestrator.js';
@@ -7,7 +7,7 @@ import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningEx
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildKnownAppearances, buildKnownLocations, buildKnownStances, runScribe } from '../../llm/scribe.js';
 import { isTableTalkMessage } from '../../llm/tableTalk.js';
-import { addMemory, seedMemories } from '../../engine/vectorMemory.js';
+import { addMemory, findSubjectsInText, seedMemories } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/frontAftermath.js';
@@ -104,6 +104,10 @@ export default function ChatPanel() {
     const [showJumpToLatest, setShowJumpToLatest] = useState(false);
     const abortControllerRef = useRef(null);
     const inputRef = useRef(null);
+    // Stable so the memoized ChatMessage rows don't re-render per panel paint.
+    const handleDeleteMessage = useCallback((id) => {
+        dispatch({ type: 'DELETE_MESSAGE', payload: id });
+    }, [dispatch]);
     const hasPrimedRef = useRef(false); // True while an opening-scene attempt is in flight (reset on failure so it can retry)
     const [primingRetryToken, setPrimingRetryToken] = useState(0); // Bumped after a failed attempt to re-arm the priming effect
     const primingAttemptsRef = useRef(0); // Bounded so a persistently failing key can't loop the opening call
@@ -342,15 +346,25 @@ export default function ChatPanel() {
 
         memorySeededRef.current = true; // Prevent concurrent attempts
 
+        const rosterNames = (s.npcs || []).map(n => n?.name).filter(Boolean);
         const items = [
             // Secret facts/cards keep their knower boundary inside the embedded
             // text, so a RAG hit re-surfaces the SECRET tag along with the canon.
             ...(s.worldFacts || []).map(f => ({ text: `${formatSecrecyTag(f.knownBy)}${f.fact}`, category: f.category || 'world_fact' })),
-            ...(s.journal || []).map(j => ({ text: j.summary, category: 'journal', location: j.location })),
+            // `subjects` = who a memory is ABOUT (presence-aware retrieval,
+            // 2026-08-28): person-tied rows go dormant in scenes their person
+            // is nowhere near, instead of semantically shadowing the hero.
+            ...(s.journal || []).map(j => ({
+                text: j.summary,
+                category: 'journal',
+                location: j.location,
+                subjects: findSubjectsInText(j.summary, rosterNames),
+            })),
             ...(s.npcs || []).filter(n => n.lastNotes || n.notes).map(n => ({
                 text: `${n.name} (${n.disposition || 'unknown'}): ${n.lastNotes || n.notes}`,
                 category: 'npc',
                 location: n.basedIn || n.lastLocation,
+                subjects: [n.name],
             })),
             // Non-active cards stay out of retrieval: a resolved promise or a
             // dormant scene beat retrieving beside live ones invites the DM to
@@ -360,6 +374,7 @@ export default function ChatPanel() {
                 text: `${formatSecrecyTag(m.knownBy)}${m.subject ? `${m.subject}: ` : ''}${m.text}`,
                 category: `story_${m.type || 'callback'}`,
                 location: m.location,
+                subjects: Array.isArray(m.linkedNpcNames) && m.linkedNpcNames.length > 0 ? m.linkedNpcNames : null,
             })),
         ];
 
@@ -770,7 +785,7 @@ export default function ChatPanel() {
                     ? state.messages.slice(-renderWindow)
                     : state.messages
                 ).map((msg) => (
-                    <ChatMessage key={msg.id} message={msg} />
+                    <ChatMessage key={msg.id} message={msg} onDelete={handleDeleteMessage} />
                 ))}
 
                 {isLoading && streamingMessage && (
@@ -940,7 +955,16 @@ function RoleplayCheckPanel({
 // Memoized: message objects are immutable once appended, so a streaming-paint
 // re-render of the panel must not re-render (and re-parse markdown for) every
 // transcript message — that was O(campaign × chunks) per DM turn.
-const ChatMessage = memo(function ChatMessage({ message }) {
+const ChatMessage = memo(function ChatMessage({ message, onDelete }) {
+    // Two-click delete confirm (armed state resets after a moment) — a single
+    // misclick must never expunge a turn from the record.
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
+    useEffect(() => {
+        if (!confirmingDelete) return undefined;
+        const timer = setTimeout(() => setConfirmingDelete(false), 4000);
+        return () => clearTimeout(timer);
+    }, [confirmingDelete]);
+
     const roleLabels = {
         user: 'You',
         assistant: 'Dungeon Master',
@@ -953,13 +977,33 @@ const ChatMessage = memo(function ChatMessage({ message }) {
         system: 'Sys',
     };
 
-    if (message.hidden) return null;
+    if (message.hidden || message.deleted) return null;
 
     return (
         <div className={`chat-message ${message.role}`}>
             <div className="message-avatar">{avatars[message.role]}</div>
             <div className="message-content">
-                <div className="message-role">{roleLabels[message.role]}</div>
+                <div className="message-role">
+                    {roleLabels[message.role]}
+                    {onDelete && (
+                        <button
+                            className={`message-delete${confirmingDelete ? ' confirming' : ''}`}
+                            title={confirmingDelete
+                                ? 'Click again to remove this message from the campaign record'
+                                : 'Remove this message from the record (e.g. scrub a refusal the DM would otherwise keep seeing)'}
+                            aria-label={confirmingDelete ? 'Confirm remove message' : 'Remove message'}
+                            onClick={() => {
+                                if (confirmingDelete) {
+                                    onDelete(message.id);
+                                } else {
+                                    setConfirmingDelete(true);
+                                }
+                            }}
+                        >
+                            {confirmingDelete ? 'Remove?' : '✕'}
+                        </button>
+                    )}
+                </div>
                 {message.revealedSetup && (
                     <div className="message-setup-note">Revealed after the check was set aside — no dice were rolled.</div>
                 )}

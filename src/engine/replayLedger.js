@@ -20,7 +20,7 @@ export function conversationalDistance(messages, fromIndex, toIndex) {
     let distance = 0;
     for (let i = Math.max(0, fromIndex + 1); i <= Math.min(toIndex, messages.length - 1); i++) {
         const message = messages[i];
-        if (!message || message.role === 'system' || message.hidden) continue;
+        if (!message || message.role === 'system' || message.hidden || message.deleted) continue;
         distance += 1;
     }
     return distance;

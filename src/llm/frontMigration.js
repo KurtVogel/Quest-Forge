@@ -40,7 +40,7 @@ Rules:
 - Keep every field compact and specific. Hidden front titles, clocks, and notes are private and must never be exposed to the player.`;
 
 function compactMessage(message) {
-    if (!message || message.hidden || !['user', 'assistant'].includes(message.role)) return null;
+    if (!message || message.hidden || message.deleted || !['user', 'assistant'].includes(message.role)) return null;
     const content = cleanText(message.content, 900);
     return content ? { role: message.role, content } : null;
 }

@@ -69,7 +69,7 @@ function compactFront(front) {
 }
 
 function compactMessage(message) {
-    if (!message || message.hidden || !['user', 'assistant'].includes(message.role)) return null;
+    if (!message || message.hidden || message.deleted || !['user', 'assistant'].includes(message.role)) return null;
     const content = cleanText(message.content, 900);
     return content ? { role: message.role, content } : null;
 }

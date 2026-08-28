@@ -66,7 +66,7 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
     // verbatim — flirtation, warmth, friction — before the journal compresses them
     // into event summaries. Without it, "Deepen memory" can only see plot, not bond.
     const recentConversation = (state.messages || [])
-        .filter(message => !message.hidden
+        .filter(message => !message.hidden && !message.deleted
             && (message.role === 'user' || message.role === 'assistant')
             && mentionsName(message.content, name))
         .slice(-8)

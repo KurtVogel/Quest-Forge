@@ -81,7 +81,7 @@ export function dropOrphanCombatExchange(events, combatActive) {
  */
 export function buildMessageWindow(messages, windowSize) {
     const unsummarized = (messages || []).filter(m => {
-        if (m.summarized || m.hidden || m.exchangeLine) return false;
+        if (m.summarized || m.hidden || m.deleted || m.exchangeLine) return false;
         if (m.role === 'system') {
             return /rolled \*\*/i.test(m.content || '');
         }

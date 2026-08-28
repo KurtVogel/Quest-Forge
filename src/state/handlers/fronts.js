@@ -48,7 +48,7 @@ export const handlers = {
         // result routinely lands after the opening exchange. A late install is
         // safe as long as the deterministic fallback front hasn't started
         // moving — once it has clock/stage history, keep it (2026-07-14 eval).
-        const visibleCount = (state.messages || []).filter(message => !message.hidden).length;
+        const visibleCount = (state.messages || []).filter(message => !message.hidden && !message.deleted).length;
         const existingFronts = state.fronts || [];
         const untouchedFallback = existingFronts.length === 0
             || (existingFronts.length === 1

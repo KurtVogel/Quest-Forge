@@ -187,7 +187,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         // Get the unsummarized messages (bounded batch, per-message clamp)
         const messagesToSummarize = state.messages.slice(lastSummarizedIndex, batchEnd);
         const recentMessages = messagesToSummarize
-            .filter(m => !m.hidden)
+            .filter(m => !m.hidden && !m.deleted)
             .map(m => `[${m.role.toUpperCase()}]: ${clampText(m.content, MAX_MESSAGE_CHARS)}`)
             .join('\n\n');
 

@@ -5,7 +5,7 @@
  */
 export function shouldPrimeCampaignOpening(state) {
     const visibleAssistantMessages = (state.messages || [])
-        .filter(message => !message.hidden && message.role === 'assistant');
+        .filter(message => !message.hidden && !message.deleted && message.role === 'assistant');
 
     return Boolean(
         state.character

@@ -81,6 +81,26 @@ export const handlers = {
         };
     },
 
+    // Soft-delete a chat message (2026-08-28, refusal-scrub affordance): the
+    // record stays in the array so every stored messageIndex (replay ledgers,
+    // quest openedAtMessage, journal messageRange) keeps pointing at the right
+    // slot, but the message leaves the render, the DM window, journal batches,
+    // director contexts, and conversational-distance counting. Built for
+    // scrubbing model refusals — a "sorry, I can't continue" line in the window
+    // is the strongest known predictor of the NEXT refusal — but works on any
+    // message. Deliberately NOT reversible from the UI: the flag persists.
+    DELETE_MESSAGE(state, action) {
+        const messageId = typeof action.payload === 'object' ? action.payload?.id : action.payload;
+        if (!messageId) return state;
+        let deleted = false;
+        const messages = state.messages.map(msg => {
+            if (msg.id !== messageId || msg.deleted) return msg;
+            deleted = true;
+            return { ...msg, deleted: true };
+        });
+        return deleted ? { ...state, messages } : state;
+    },
+
     // Un-hide a withheld roll-setup narration when no dice will ever supersede it
     // (the player changed approach). Once revealed, the text is player-visible AND
     // back in the DM's history window, so its fiction stays canon.

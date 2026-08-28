@@ -42,7 +42,7 @@ function stripEventBlocks(text) {
 export function collectChapterMessages(messages = [], fromIndex = 0, toIndex = Infinity) {
     return (messages || [])
         .slice(fromIndex, toIndex === Infinity ? undefined : toIndex + 1)
-        .filter(m => m && !m.hidden && typeof m.content === 'string' && m.content.trim());
+        .filter(m => m && !m.hidden && !m.deleted && typeof m.content === 'string' && m.content.trim());
 }
 
 function renderTranscript(chunk, heroName) {

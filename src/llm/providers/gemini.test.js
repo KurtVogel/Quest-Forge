@@ -260,6 +260,27 @@ describe('sendGeminiMessage', () => {
 
         expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal);
     });
+
+    it('declares the app content policy via safetySettings on every request (2026-08-28)', () => {
+        // Without this, Google's DEFAULT thresholds silently governed every DM
+        // turn and machinery call — the journal-summarizer safety blocks and
+        // part of the live refusal cascade. CIVIC_INTEGRITY deliberately absent.
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+            candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'ok' }] } }],
+        }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        return sendGeminiMessage(SEND_ARGS).then(() => {
+            const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+            expect(body.safetySettings).toEqual([
+                { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+                { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+            ]);
+            expect(body.safetySettings.some(s => s.category === 'HARM_CATEGORY_CIVIC_INTEGRITY')).toBe(false);
+        });
+    });
 });
 
 describe('streamGeminiMessage', () => {
@@ -289,6 +310,19 @@ describe('streamGeminiMessage', () => {
 
         expect(fullText).toBe('You step into the hall. ```json\n{}\n```');
         expect(onChunk.mock.calls.map(([chunk]) => chunk)).toEqual(['You step ', 'into the hall. ```json\n{}\n```']);
+    });
+
+    it('carries the same safetySettings on the streaming path', async () => {
+        const chunks = [
+            sseEvent({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'ok' }] } }] }),
+        ];
+        const fetchMock = vi.fn().mockResolvedValue(streamResponse(chunks));
+        vi.stubGlobal('fetch', fetchMock);
+
+        await streamGeminiMessage({ ...SEND_ARGS, onChunk: vi.fn() });
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.safetySettings.map(s => s.threshold)).toEqual(['BLOCK_NONE', 'BLOCK_NONE', 'BLOCK_NONE', 'BLOCK_NONE']);
     });
 
     it('throws after the stream ends when the finish reason marks truncation', async () => {

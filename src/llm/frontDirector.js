@@ -43,7 +43,7 @@ export function shouldGenerateCampaignFronts(state) {
     if (!state?.character || !state?.session?.id || !state?.settings?.apiKey) return false;
     if (state.combat?.active || state.session?.frontDirector?.version >= FRONTS_VERSION) return false;
     if (state.session?.frontMigration?.version >= 1) return false;
-    const visibleMessages = (state.messages || []).filter(message => !message.hidden);
+    const visibleMessages = (state.messages || []).filter(message => !message.hidden && !message.deleted);
     return !!state.session.createdAt && visibleMessages.length <= 2;
 }
 

@@ -54,7 +54,7 @@ Rules:
 - Keep every field compact and specific. All of this is private and never shown to the player.`;
 
 function compactMessage(message) {
-    if (!message || message.hidden || !['user', 'assistant'].includes(message.role)) return null;
+    if (!message || message.hidden || message.deleted || !['user', 'assistant'].includes(message.role)) return null;
     const content = cleanText(message.content, 700);
     return content ? { role: message.role, content } : null;
 }

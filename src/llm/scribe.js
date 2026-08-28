@@ -59,10 +59,10 @@ Output ONLY valid JSON:
       "agenda": "what this NPC is likely trying to accomplish next (only if implied or revealed)",
       "relationshipTension": "compact note about attraction, rivalry, resentment, debt, loyalty, fear, or trust strain",
       "stanceToPlayer": "how this NPC personally regards the HERO right now — affection, attraction, romantic interest, friendship, gratitude, respect, amusement, resentment, fear, obligation, rivalry. Written from the NPC's side, complete and current (only when this exchange establishes or shifts it)",
-      "bondMoment": "one-line record of a significant personal moment between the hero and this NPC THIS turn — flirtation, confession, kiss, shared secret, gift, rescue, promise, betrayal, deep insult. Omit for ordinary interaction",
+      "bondMoment": "one-line record of a significant personal moment between the hero and this NPC THIS turn — flirtation, confession, kiss, shared secret, gift, rescue, promise, betrayal, deep insult. Omit for ordinary interaction. The REGISTER rule binds THIS field hardest: an intimate moment is recorded in neutral anatomical language, never the scene's own crude diction",
       "trust": 0,
       "privateNotes": "hidden NPC intent or unrevealed motive useful for future consistency",
-      "callbackHooks": ["short hooks this NPC could later bring back naturally"]
+      "callbackHooks": ["short hooks this NPC could later bring back naturally — complete phrases in the neutral REGISTER, never crude slang"]
     }
   ],
   "story_memory": [
@@ -383,7 +383,7 @@ Output ONLY valid JSON:
       "stanceToPlayer": "their current personal stance toward the hero — affection, attraction, respect, resentment, obligation — complete, written from the NPC's side",
       "trust": 50,
       "privateNotes": "hidden intent or secret pressure",
-      "callbackHooks": ["one or two details they could naturally bring back later"]
+      "callbackHooks": ["one or two details they could naturally bring back later — complete phrases in neutral anatomical language, never crude slang"]
     }
   ],
   "front_advances": [

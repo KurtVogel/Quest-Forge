@@ -69,6 +69,25 @@ function extractCandidateText(candidate) {
 }
 
 /**
+ * The app's declared content policy (DECISIONS.md 2026-08-28): Quest Forge is
+ * an adult-fiction game running on the player's own API key, and its records
+ * are contractually unvarnished — but until 2026-08-28 no call ever declared
+ * that to the API, so Google's DEFAULT thresholds silently governed every DM
+ * turn AND every machinery call (the known journal-summarizer safety blocks on
+ * explicit narration, and part of the live "sorry, I can't continue" refusal
+ * cascade). BLOCK_NONE disables the API-side classifiers on the player's key;
+ * in-band model refusals on genuinely prohibited content remain the model's
+ * own floor. CIVIC_INTEGRITY is deliberately not listed (restricted category,
+ * defaults apply).
+ */
+const GEMINI_SAFETY_SETTINGS = [
+    { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+];
+
+/**
  * Convert our message format to Gemini's content format.
  */
 function formatMessages(systemPrompt, messageHistory, userMessage, temperature, { thinkingBudget, maxOutputTokens } = {}) {
@@ -93,6 +112,7 @@ function formatMessages(systemPrompt, messageHistory, userMessage, temperature, 
             parts: [{ text: systemPrompt }],
         },
         contents,
+        safetySettings: GEMINI_SAFETY_SETTINGS,
         generationConfig: {
             // 0.9 suits creative DM narration; extraction tasks (Scribe, journal,
             // roll policy) pass a low temperature for reliable JSON.
