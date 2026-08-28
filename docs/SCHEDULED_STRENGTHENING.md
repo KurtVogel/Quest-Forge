@@ -43,7 +43,7 @@ it under Process notes.
 | Feature ID | Scope (primary files) | Last audited |
 |---|---|---|
 | dice-engine | `engine/dice.ts` | 2026-08-20 |
-| rules-math | `engine/rules.js` | 2026-08-05 |
+| rules-math | `engine/rules.js` | 2026-08-28 |
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-08-08 |
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js` | 2026-08-05 |
 | prompt-building | `llm/promptBuilder.js` | 2026-08-18 |
@@ -59,7 +59,7 @@ it under Process notes.
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-27 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-08-27 |
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-08-28 |
-| inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-08-05 |
+| inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-08-28 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-08-28 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-08-20 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-08-08 |
@@ -349,6 +349,11 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (quests, 2026-08-28): `normalizeQuestUpdate` defaults every unknown status to `'new'` — a DM emitting `"complete"`/`"done"`/`"finished"` silently downgrades a completion into an upsert refresh and the quest never closes (no audit backstop covers quest closure). Alias the obvious completion/failure synonyms before defaulting — `llm/eventChannels.js:203`.
 - [ ] **P2** (quests, 2026-08-28): `ADD_QUEST` spreads `...payload` after `status: 'active'`, so a payload carrying `status` (or other junk keys) overrides/rides in — controlled today, latent trap; pick fields explicitly — `state/handlers/quests.js:74-82`.
 - [ ] **P2** (character-vault, 2026-08-28): fold the `createCharacter`/`sanitizeCharacter` parallel hero-shape builders into one shared derived-fields core — `spellSlots` (the P0) and `levelBonusRetired` are proven drift between the twin literals — `engine/characterVault.js:147-190`, `engine/characterUtils.js:202-248`.
+- [ ] **P1** (inventory-economy, 2026-08-28): an unpayable coin charge is ledgered as an APPLIED spend (before the `result.paid` check), feeding every cover/strip with a movement that never happened — reproduced: an exact-price purchase later delivered FREE via the loss cover, and a legitimate re-charge of the never-paid debt suppressed with a false "already paid". Stop ledgering the unpaid path (PURCHASE_ITEM's insufficiency path already doesn't) and make AUDIT_COIN_PAYMENT's partial path remember the actually-deducted value — `state/handlers/economy.js:526-533,676,693-715`.
+- [ ] **P1** (inventory-economy, 2026-08-28): drifted-name `items_lost` dead-ends silently at both layers — `REMOVE_ITEM_BY_NAME` is exact-name-only with console-only failure ("hempen rope" leaves "Hempen Rope (50 ft)" untouched, reproduced), and the loss audit stands down against `appliedEvents.itemsLost` (the EMITTED list, not what removed) so the backstop skips exactly this case. Route the handler through `findInventoryItemByRef` (same file) + a visible failure line — `state/handlers/inventory.js:332-340`, `llm/scribeAudits.js:532-541`.
+- [ ] **P2** (inventory-economy, 2026-08-28): `SELL_ITEM`'s item lookup is exact-name-only too (fails visibly at least) — resolve refs via normalizeItemKey/findInventoryItemByRef like the other paths — `state/handlers/economy.js:791-795`.
+- [ ] **P2** (rules-math, 2026-08-28): the legacy-save AC re-clamp passes non-numeric `baseAC` through — a string "12" from a pre-clamp/hand-edited save string-concatenates to AC "122000" (reproduced; unhittable hero, garbage sheet). Coerce with `Number()` once and guard the light/medium/heavy branches like the default case — `engine/rules.js:42-58`.
+- [ ] **P2** (rules-math, 2026-08-28): `getWeaponDamageNotation` validates only a notation PREFIX, so "1d8 slashing" produces "1d8 slashing+3" which throws in parseNotation and lands on rollDamage's flat modifier-less 1d4 fallback — softer than a bare fist, against the function's own comment. Validate the full shape so junk falls back to `1d4+mod` — `engine/rules.js:188-194`, `engine/combatMath.js:129-135`.
 
 ## Entry template
 
@@ -372,6 +377,34 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-28 — inventory-economy + rules-math (Lap 4: simplification & design) — second run
+
+`npm test`: 1793 passing / 94 files (green)
+
+All findings below were **reproduced empirically** against the real modules (scratch scripts outside the repo, loaded via Node type-stripping — zero repo changes), not just read.
+
+### inventory-economy
+- **Scope examined:** `state/handlers/economy.js` (whole file), `state/handlers/inventory.js` (whole file), `data/items.js`, `engine/equipment.js`, `engine/currency.js`, the ledger helpers in `handlers/shared.js:157-248`, applyEvents dispatch (`:248-260`), the loss audit's stand-down (`llm/scribeAudits.js:518-565`).
+- **Findings:**
+  - **P1:** a coin charge the hero CANNOT pay is ledgered as an APPLIED spend — `APPLY_COIN_LOSS` calls `rememberTransaction` (default status `'applied'`) before checking `result.paid` and the "Not enough coin" return keeps it (`economy.js:526-533`); `AUDIT_COIN_PAYMENT`'s empty-purse/partial paths likewise record the FULL charge (`economy.js:676,693-715`). Every cover/strip filters on `status === 'applied'`, so the phantom feeds them all. Reproduced both edges: (a) a later purchase at the exact failed-charge price is delivered **free** via the cross-channel loss cover ("its 50 gp was already paid moments ago; purse unchanged"); (b) the DM legitimately re-charging the never-paid debt inside the 12-message window is suppressed with a false "was already paid moments ago". Fix: don't ledger the unpaid path at all (`PURCHASE_ITEM`'s insufficiency path already doesn't — `:758-767`), and have the audit's partial path remember the actually-deducted value.
+  - **P1:** a drifted-name `items_lost` dead-ends silently at BOTH layers. `REMOVE_ITEM_BY_NAME` matches exact lowercase name only (`inventory.js:332-340`; console.warn, no system line) — reproduced: `"hempen rope"` leaves "Hempen Rope (50 ft)" untouched — and the loss-audit backstop is structurally blind to this case: it stands down against `appliedEvents.itemsLost`, the EMITTED list, not what actually got removed (`scribeAudits.js:532-541`, fuzzy `itemIdentityMatches`), so the evented-but-failed loss reads as "already removed by the event path". The exact drift class the 2026-08-20 fuzzy-audit decision documents as live. Fix: route the handler through `findInventoryItemByRef` (same file, `inventory.js:53-89`) + a visible failure line.
+  - **P2:** `SELL_ITEM` shares the exact-name-only lookup (`economy.js:791-795`) — reproduced: selling `"hempen rope"` fails against "Hempen Rope (50 ft)". At least it fails visibly; resolve refs like the other paths.
+  - **P2 (design — the lap's lens):** item-ref resolution now exists at THREE strengths in three places — `findInventoryItemByRef` (id→key→nameKey→token→kind), the loss audit's inline exact→fuzzy-unambiguous, and SELL/REMOVE's exact-only — one resolver should own it. And `economy.js`'s three coin handlers repeat the suppress-and-return block (`rememberTransaction(..., 'ignored')` + systemMessage) ~12×; a shared helper would cut ~80 lines from an already-finicky 845-line file (extract with care — every branch encodes a settled decision).
+- **Suggested improvements:** (1) stop ledgering unpaid charges + partial-audit true-value fix, with regression tests for both reproduced edges; (2) `findInventoryItemByRef` in REMOVE_ITEM_BY_NAME/SELL_ITEM; (3) the resolver/suppress-block consolidations.
+
+### rules-math
+- **Scope examined:** `engine/rules.js` end to end (AC, weapon math, proficiency, skills, conditions, sneak attack, HP), consumers in combatExchange/rollResolver, `combatMath.rollDamage`'s fallback contract.
+- **Findings:**
+  - **P2:** the legacy-save AC re-clamp passes NON-NUMERIC `baseAC` straight through — `Number.isFinite(armor.baseAC) ? clamp : armor.baseAC` (`rules.js:42`), then light/medium/heavy concatenate strings: reproduced `getArmorClass(2, {armorType:'light', baseAC:'12'})` → `"1220"`, and `computeACFromInventory` → `"122000"` — an unhittable hero with a garbage sheet. Only the default case has the finite guard (`:57`). Reachable exactly by the path the comment itself names (LOAD_GAME never re-normalizes inventory; `normalizeItem` deletes non-finite baseAC so event-path items are safe). Fix: coerce with `Number()` once, guard all branches.
+  - **P2:** `getWeaponDamageNotation`'s junk-notation guard tests only a PREFIX (`/^\d+d\d+/i`, `:188`) — `"1d8 slashing"` passes, producing `"1d8 slashing+3"`, which `parseNotation` throws on (reproduced); `rollDamage`'s fallback then rolls a flat modifier-less `1d4` (`combatMath.js:129-135`) — quietly contradicting this function's own documented intent ("a broken weapon should not hit softer than a bare hand", `:190`). Validate the full notation shape so junk falls back to `1d4+mod` here.
+  - **P2 (design):** `getAllSkills` re-implements `getSkillModifier`'s computation inline (`rules.js:243-260` vs `:227-238`) — fold to one call per skill; `getMaxHitPoints`'s `className` param is dead (`:382`).
+- **Suggested improvements:** (1) numeric coercion + all-branch guard in getArmorClass, pinned with a string-baseAC save test; (2) full-shape notation validation; (3) the getAllSkills fold.
+
+### Process notes
+- Second run today (user-requested). Coverage snapshot from 2026-08-27 still current; not refreshed.
+- The morning run's findings were re-verified empirically first (8/8 confirmed against the live modules — the character-vault P0, quests P1, and both P2s all reproduce exactly as written).
+- Feature pick: rules-math/response-parsing/enemy-stats-conditions/inventory-economy tied oldest (2026-08-05); tie broken toward the two lowest concrete coverage numbers (92.10 / 93.83). No registry changes; Lap 4 has now covered 14 of 22 features.
 
 ## 2026-08-28 — character-vault + quests (Lap 4: simplification & design)
 
