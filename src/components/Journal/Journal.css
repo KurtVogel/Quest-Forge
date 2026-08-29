@@ -801,3 +801,34 @@
 .chronicle-chapter-text p {
     margin: 0 0 0.7rem;
 }
+
+.chronicle-chapter-actions {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0 0.85rem 0.75rem;
+}
+
+.chronicle-remove-btn {
+    font-size: 0.72rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 4px;
+    border: 1px solid var(--border-primary);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.chronicle-remove-btn:hover:not(:disabled) {
+    color: var(--text-secondary);
+    border-color: rgba(200, 80, 80, 0.45);
+}
+
+.chronicle-remove-btn.confirm {
+    color: #d98080;
+    border-color: rgba(200, 80, 80, 0.55);
+}
+
+.chronicle-remove-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}

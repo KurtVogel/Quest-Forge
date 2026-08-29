@@ -6,7 +6,7 @@ import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js'
 import { scoreNpcForPrompt } from '../../engine/npcRoster.js';
 import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
-import { writeChronicleChapter, chronicleToMarkdown, collectChapterMessages, CHRONICLE_MIN_MESSAGES } from '../../llm/chronicler.js';
+import { writeChronicleChapters, chronicleToMarkdown, collectChapterMessages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNK_SIZE, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
 import './Journal.css';
 
 const DISPOSITION_MARK = {
@@ -112,21 +112,32 @@ export default function JournalPanel({ isOpen, onClose }) {
         setChronicleStatus('');
         setWritingChapter(true);
         try {
-            const chapter = await writeChronicleChapter({
+            const { chapters, warning } = await writeChronicleChapters({
                 state,
                 title: chapterTitle,
                 onProgress: setChronicleStatus,
             });
-            const chapterAction = { type: 'ADD_CHRONICLE_CHAPTER', payload: chapter };
+            // One action carries every part — the flushAutoSave action-replay
+            // then persists the whole multi-part close atomically.
+            const chapterAction = { type: 'ADD_CHRONICLE_CHAPTER', payload: chapters };
             dispatch(chapterAction);
             setChapterTitle('');
-            setChronicleStatus(chapter.warning || 'Chapter written.');
+            setChronicleStatus(warning || (chapters.length > 1
+                ? `Chapter closed as ${chapters.length} parts.`
+                : 'Chapter written.'));
             await flushAutoSave({ action: chapterAction });
         } catch (error) {
             setChronicleStatus(error.message || 'The chronicler failed.');
         } finally {
             setWritingChapter(false);
         }
+    };
+
+    const handleRemoveChapter = async (id) => {
+        const removeAction = { type: 'REMOVE_CHRONICLE_CHAPTER', payload: { id } };
+        dispatch(removeAction);
+        setChronicleStatus('Chapter removed — its play re-opens for the next close.');
+        await flushAutoSave({ action: removeAction }).catch(() => {});
     };
 
     const handleExportChronicle = () => {
@@ -222,6 +233,7 @@ export default function JournalPanel({ isOpen, onClose }) {
                             status={chronicleStatus}
                             onWrite={handleWriteChapter}
                             onExport={handleExportChronicle}
+                            onRemove={handleRemoveChapter}
                             suggestedTitle={state.session?.chapterCloseSuggested?.title || null}
                         />
                     )}
@@ -290,10 +302,15 @@ export default function JournalPanel({ isOpen, onClose }) {
     );
 }
 
-function ChronicleTab({ chapters, messages, chapterTitle, onChapterTitle, writing, status, onWrite, onExport, suggestedTitle }) {
+function ChronicleTab({ chapters, messages, chapterTitle, onChapterTitle, writing, status, onWrite, onExport, onRemove, suggestedTitle }) {
+    const [removeArmed, setRemoveArmed] = useState(false);
     const lastChronicled = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) : -1;
     const pendingCount = collectChapterMessages(messages, lastChronicled + 1).length;
     const canWrite = pendingCount >= CHRONICLE_MIN_MESSAGES;
+    // Sequential DM-model passages run ~25-40s each — a big backlog deserves an
+    // honest heads-up before the player commits to a long write.
+    const estPassages = Math.ceil(pendingCount / CHRONICLE_CHUNK_SIZE);
+    const estMinutes = Math.max(1, Math.round(estPassages * 0.5));
 
     return (
         <div className="chronicle-tab">
@@ -310,6 +327,7 @@ function ChronicleTab({ chapters, messages, chapterTitle, onChapterTitle, writin
                     to the DM. {pendingCount > 0
                         ? `${pendingCount} message${pendingCount === 1 ? '' : 's'} of play await the quill.`
                         : 'No new play since the last chapter.'}
+                    {estPassages > 3 && ` The chronicler will write ~${estPassages} passages${estPassages > CHRONICLE_CHUNKS_PER_CHAPTER ? ` as ${Math.ceil(estPassages / CHRONICLE_CHUNKS_PER_CHAPTER)} chapters` : ''} — expect roughly ${estMinutes} minutes.`}
                 </p>
                 <div className="chronicle-compose-row">
                     <input
@@ -360,6 +378,42 @@ function ChronicleTab({ chapters, messages, chapterTitle, onChapterTitle, writin
                             <div className="chronicle-chapter-text">
                                 {chapter.text.split(/\n{2,}/).map((para, i) => <p key={i}>{para}</p>)}
                             </div>
+                            {idx === 0 && onRemove && (
+                                // Only the newest chapter is removable: its span
+                                // re-opens for the next close (the recovery path
+                                // for a bad or truncated retelling).
+                                <div className="chronicle-chapter-actions">
+                                    {removeArmed ? (
+                                        <>
+                                            <button
+                                                type="button"
+                                                className="chronicle-remove-btn confirm"
+                                                disabled={writing}
+                                                onClick={() => { setRemoveArmed(false); onRemove(chapter.id); }}
+                                            >
+                                                Really remove — its play re-opens for the next close
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="chronicle-remove-btn"
+                                                onClick={() => setRemoveArmed(false)}
+                                            >
+                                                Keep
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="chronicle-remove-btn"
+                                            disabled={writing}
+                                            title="Remove this chapter so its span can be retold — the messages themselves are never deleted"
+                                            onClick={() => setRemoveArmed(true)}
+                                        >
+                                            Remove chapter
+                                        </button>
+                                    )}
+                                </div>
+                            )}
                         </details>
                     ))}
                 </div>

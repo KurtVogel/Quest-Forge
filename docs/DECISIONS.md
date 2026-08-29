@@ -8,6 +8,32 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-29 · A long chronicle span closes as MULTIPLE chapters — the 60k slice was
+silently discarding paid-for prose; only the newest chapter is removable (the recovery
+path).**
+Vesa's first live "Close chapter" on the very long campaign: 59 passages over ~25 minutes,
+and the opened chapter ended mid-sentence about a third of the way in. Root cause: the
+chronicler joined ALL passages into one chapter and sliced to `CHAPTER_TEXT_MAX` (60k
+chars) — a 59-passage run produces ~180k, so the last ~40 passages were generated, paid
+for, and discarded, while `toIndex` still claimed the entire span as chronicled (the lost
+two-thirds could never be retold). Ruling: **the cap is a split boundary, not a slice** —
+`writeChronicleChapters` closes a chapter every `CHRONICLE_CHUNKS_PER_CHAPTER` (10) chunks
+(~300 messages, ~30–45k chars of prose, safely under the reducer's 60k clamp which stays
+as a hostile-input backstop) with honest contiguous `fromIndex`/`toIndex` per part; the
+continuation tail threads ACROSS part boundaries so the saga still reads seamlessly, and
+custom titles become "Name — Part N". All parts ship in ONE `ADD_CHRONICLE_CHAPTER` action
+(payload may be an array) so the flushAutoSave action-replay persists the whole close
+atomically. Salvage generalizes: completed parts always survive a mid-run failure.
+**Removal:** new `REMOVE_CHRONICLE_CHAPTER` + a two-click "Remove chapter" on the NEWEST
+chapter only — the next close always resumes after the last chapter's `toIndex`, so
+removing the newest one re-opens exactly its span (deleting a middle chapter would leave a
+hole no future close could retell; refused in the reducer). Source messages are never
+deleted, so a bad chapter costs only the prose + a re-run. The compose hint now estimates
+passages/parts/minutes up front for big backlogs. Separately diagnosed, NOT fixable: the
+campaign's missing opening is real data loss from the 2026-03-12→2026-06-01 era when both
+save paths stripped journal-summarized messages from payloads ("trim saves", fixed in
+`eb41db9`) — the chronicler correctly starts at the earliest surviving message.
+
 **2026-08-29 · Queue-sweep rulings: the whole 2026-08-29 audit batch (3 P1s + 8 P2s from
 both runs) fixed in one session.**
 Every open item from the day's two audits (response-parsing + enemy-stats-conditions Lap 4;

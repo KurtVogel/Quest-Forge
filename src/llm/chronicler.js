@@ -11,16 +11,26 @@
  *
  * Runs on the DM model (creative work, not extraction — the frontDirector
  * precedent), chunked for long spans: each passage call receives the tail of
- * the previous passage for seamless continuation, then passages concatenate.
+ * the previous passage for seamless continuation. A very long span closes as
+ * multiple chapters (Part 1, 2, …) rather than one — a single chapter would
+ * hit the reducer's 60k text clamp and silently lose the overflow.
  */
 import { sendMessage } from './adapter.js';
 import { isTableTalkMessage } from './tableTalk.js';
 
 export const CHRONICLE_MIN_MESSAGES = 6;
-const CHUNK_SIZE = 30;
+export const CHRONICLE_CHUNK_SIZE = 30; // exported so the UI can estimate passages/duration
+const CHUNK_SIZE = CHRONICLE_CHUNK_SIZE;
 const MESSAGE_CLIP = 4000;
 const TAIL_CONTEXT = 700;
-const CHAPTER_TEXT_MAX = 60000;
+// A run closes a chapter every CHUNKS_PER_CHAPTER chunks (~300 messages,
+// ~30–45k chars of prose) — safely under the reducer's 60k text clamp. The
+// old design joined ALL passages into one chapter and sliced to 60k: a
+// 59-chunk first close of a long campaign silently discarded two-thirds of
+// the paid-for retelling mid-sentence while toIndex still claimed the whole
+// span as chronicled (2026-08-29, live campaign).
+export const CHRONICLE_CHUNKS_PER_CHAPTER = 10;
+const CHUNKS_PER_CHAPTER = CHRONICLE_CHUNKS_PER_CHAPTER;
 
 const CHRONICLER_PROMPT = `You are the CHRONICLER of a tabletop RPG campaign. You receive the raw table transcript of one span of play and retell it as a single continuous narrative passage — a chapter of the saga the player will keep and reread.
 
@@ -83,10 +93,13 @@ function renderTranscript(chunk, heroName) {
 }
 
 /**
- * Write the next chronicle chapter from every message played since the last
- * one. Returns { title, text, fromIndex, toIndex } — the caller dispatches.
+ * Retell every message played since the last chapter. A span longer than
+ * CHUNKS_PER_CHAPTER chunks closes as MULTIPLE chapters (Part 1, Part 2, …)
+ * with honest contiguous fromIndex/toIndex — no text is ever discarded.
+ * Returns { chapters: [{ title, text, fromIndex, toIndex }], salvaged?,
+ * warning? } — the caller dispatches the whole array as one action.
  */
-export async function writeChronicleChapter({ state, title = '', onProgress = null }) {
+export async function writeChronicleChapters({ state, title = '', onProgress = null }) {
     const settings = state?.settings || {};
     if (!settings.apiKey) {
         throw new Error('Add your AI provider API key in Settings before writing a chapter.');
@@ -106,16 +119,44 @@ export async function writeChronicleChapter({ state, title = '', onProgress = nu
         chunks.push(eligible.slice(i, i + CHUNK_SIZE));
     }
 
-    const passages = [];
+    // Part titles: a single-part close keeps the classic titling; a multi-part
+    // close shares the custom name ("Saga — Part 2") or numbers each part as
+    // its own chapter so the tab's numbering stays continuous. The custom base
+    // is clipped so the reducer's 80-char title clamp can never eat the suffix.
+    const multiPart = chunks.length > CHUNKS_PER_CHAPTER;
+    const customTitle = String(title || '').trim().slice(0, multiPart ? 68 : 80);
+    const partTitle = (partNumber) => {
+        if (!multiPart) return customTitle || `Chapter ${chapters.length + 1}`;
+        return customTitle
+            ? `${customTitle} — Part ${partNumber}`
+            : `Chapter ${chapters.length + partNumber}`;
+    };
+
+    const out = [];
+    let passages = []; // the part currently being written
+    let partFromIndex = fromIndex;
+    let previousTail = '';
+    let completedChunks = 0;
     let salvaged = false;
+
+    const closePart = (coveredToIndex) => {
+        out.push({
+            title: partTitle(out.length + 1),
+            text: passages.join('\n\n'),
+            fromIndex: partFromIndex,
+            toIndex: coveredToIndex,
+        });
+        partFromIndex = coveredToIndex + 1;
+        passages = [];
+    };
+
     for (let i = 0; i < chunks.length; i++) {
         if (onProgress) onProgress(`Writing passage ${i + 1} of ${chunks.length}…`);
-        const previousTail = passages.length > 0
-            ? passages[passages.length - 1].slice(-TAIL_CONTEXT)
-            : '';
         const userMessage = [
             `HERO: ${heroName}`,
             premise ? `CAMPAIGN PREMISE (background canon, not events of this span): ${premise}` : null,
+            // The tail threads across part boundaries too — the saga reads
+            // seamlessly even where the storage splits into chapters.
             previousTail ? `PREVIOUS PASSAGE (continue seamlessly, do not recap):\n…${previousTail}` : null,
             `TRANSCRIPT OF THIS SPAN:\n${renderTranscript(chunks[i].map(entry => entry.message), heroName)}`,
         ].filter(Boolean).join('\n\n');
@@ -133,29 +174,34 @@ export async function writeChronicleChapter({ state, title = '', onProgress = nu
             const passage = stripEventBlocks(response);
             if (!passage) throw new Error('The chronicler returned an empty passage.');
             passages.push(passage);
+            previousTail = passage.slice(-TAIL_CONTEXT);
+            completedChunks = i + 1;
         } catch (error) {
             // Salvage completed passages instead of discarding paid-for DM-model
-            // work: close a SHORTER chapter covering the chunks already written —
-            // toIndex lands on the last retold message, so the next "Close
-            // chapter" resumes exactly there (2026-08-29 audit). A first-chunk
-            // failure still throws: there is nothing to keep.
-            if (passages.length === 0) throw error;
-            console.warn(`[Chronicler] Passage ${i + 1} of ${chunks.length} failed (${error.message || error}) — salvaging the ${passages.length} completed passage(s) as a shorter chapter.`);
+            // work: close what was already written — toIndex lands on the last
+            // retold message, so the next "Close chapter" resumes exactly there
+            // (2026-08-29 audit). A failure before ANY passage exists still
+            // throws: there is nothing to keep.
+            if (out.length === 0 && passages.length === 0) throw error;
+            console.warn(`[Chronicler] Passage ${i + 1} of ${chunks.length} failed (${error.message || error}) — salvaging the ${completedChunks} completed passage(s).`);
             salvaged = true;
             break;
         }
+
+        const lastChunkOfRun = i === chunks.length - 1;
+        if (passages.length === CHUNKS_PER_CHAPTER || lastChunkOfRun) {
+            // The final part of a clean run claims the RAW span end so trailing
+            // hidden/system messages never stay "pending"; every earlier
+            // boundary lands on the last message its chunk retold.
+            closePart(lastChunkOfRun ? toIndex : chunks[i][chunks[i].length - 1].index);
+        }
+    }
+    if (salvaged && passages.length > 0) {
+        closePart(chunks[completedChunks - 1][chunks[completedChunks - 1].length - 1].index);
     }
 
-    const lastCoveredChunk = chunks[passages.length - 1];
-    const coveredToIndex = salvaged
-        ? lastCoveredChunk[lastCoveredChunk.length - 1].index
-        : toIndex;
-
     return {
-        title: String(title || '').trim().slice(0, 80) || `Chapter ${chapters.length + 1}`,
-        text: passages.join('\n\n').slice(0, CHAPTER_TEXT_MAX),
-        fromIndex,
-        toIndex: coveredToIndex,
+        chapters: out,
         ...(salvaged && {
             salvaged: true,
             warning: 'The chronicler failed partway — the completed passages were kept as a shorter chapter. Close another chapter to retell the rest.',

@@ -33,21 +33,26 @@ function isNearDuplicateFact(candidate, existingSets) {
 }
 
 /**
- * Append a chronicle chapter; shared by ADD_CHRONICLE_CHAPTER and
- * flushAutoSave's pre-render merge.
+ * Append chronicle chapter(s). The payload may be one chapter or an array —
+ * a very long "Close chapter" span arrives as multiple parts in ONE action so
+ * the flushAutoSave action-replay persists them all atomically (2026-08-29).
  */
 export function appendChronicleChapter(chronicle = [], payload = {}) {
-    const text = String(payload.text || '').trim();
-    if (!text) return chronicle || [];
-    const chapters = chronicle || [];
-    return [...chapters, {
-        id: `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        title: String(payload.title || '').trim().slice(0, 80) || `Chapter ${chapters.length + 1}`,
-        text: text.slice(0, 60000),
-        fromIndex: Number.isFinite(payload.fromIndex) ? payload.fromIndex : 0,
-        toIndex: Number.isFinite(payload.toIndex) ? payload.toIndex : 0,
-        createdAt: Date.now(),
-    }];
+    const items = Array.isArray(payload) ? payload : [payload];
+    let chapters = chronicle || [];
+    for (const item of items) {
+        const text = String(item?.text || '').trim();
+        if (!text) continue;
+        chapters = [...chapters, {
+            id: `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            title: String(item.title || '').trim().slice(0, 80) || `Chapter ${chapters.length + 1}`,
+            text: text.slice(0, 60000),
+            fromIndex: Number.isFinite(item.fromIndex) ? item.fromIndex : 0,
+            toIndex: Number.isFinite(item.toIndex) ? item.toIndex : 0,
+            createdAt: Date.now(),
+        }];
+    }
+    return chapters;
 }
 
 export const handlers = {
@@ -176,5 +181,18 @@ export const handlers = {
             ? { ...state.session, chapterCloseSuggested: null }
             : state.session;
         return { ...state, chronicle, session };
+    },
+
+    REMOVE_CHRONICLE_CHAPTER(state, action) {
+        // Only the NEWEST chapter is removable: the next "Close chapter" always
+        // resumes after the last chapter's toIndex, so removing the newest one
+        // re-opens exactly its span for a fresh retelling (the recovery path for
+        // a bad/truncated chapter), while removing a middle chapter would leave
+        // a hole no future close could ever retell. The source messages are
+        // never deleted, so nothing is lost but the prose.
+        const chapters = state.chronicle || [];
+        const last = chapters[chapters.length - 1];
+        if (!last || !action.payload?.id || last.id !== action.payload.id) return state;
+        return { ...state, chronicle: chapters.slice(0, -1) };
     },
 };

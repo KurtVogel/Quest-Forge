@@ -5,7 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendMessage } from './adapter.js';
-import { writeChronicleChapter, collectChapterMessages, chronicleToMarkdown, CHRONICLE_MIN_MESSAGES } from './chronicler.js';
+import { writeChronicleChapters, collectChapterMessages, chronicleToMarkdown, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNK_SIZE, CHRONICLE_CHUNKS_PER_CHAPTER } from './chronicler.js';
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 
 vi.mock('./adapter.js', () => ({
@@ -56,14 +56,14 @@ describe('collectChapterMessages', () => {
     });
 });
 
-describe('writeChronicleChapter', () => {
+describe('writeChronicleChapters', () => {
     beforeEach(() => {
         sendMessage.mockReset();
     });
 
     it('refuses a chapter with too little new play', async () => {
         const state = { settings: SETTINGS, messages: makeMessages(3), chronicle: [] };
-        await expect(writeChronicleChapter({ state })).rejects.toThrow(/Not enough new play/);
+        await expect(writeChronicleChapters({ state })).rejects.toThrow(/Not enough new play/);
         expect(sendMessage).not.toHaveBeenCalled();
     });
 
@@ -76,7 +76,7 @@ describe('writeChronicleChapter', () => {
             messages: makeMessages(CHRONICLE_MIN_MESSAGES),
             chronicle: [],
         };
-        const chapter = await writeChronicleChapter({ state });
+        const { chapters, warning } = await writeChronicleChapters({ state });
 
         expect(sendMessage).toHaveBeenCalledTimes(1);
         const request = sendMessage.mock.calls[0][0];
@@ -85,10 +85,12 @@ describe('writeChronicleChapter', () => {
         expect(request.systemPrompt).toContain('NEVER invent events');
         expect(request.userMessage).toContain('PLAYER (Eero Kaskinen):');
         expect(request.userMessage).toContain('CAMPAIGN PREMISE');
-        expect(chapter.title).toBe('Chapter 1');
-        expect(chapter.text).toContain('river road');
-        expect(chapter.fromIndex).toBe(0);
-        expect(chapter.toIndex).toBe(CHRONICLE_MIN_MESSAGES - 1);
+        expect(warning).toBeUndefined();
+        expect(chapters).toHaveLength(1);
+        expect(chapters[0].title).toBe('Chapter 1');
+        expect(chapters[0].text).toContain('river road');
+        expect(chapters[0].fromIndex).toBe(0);
+        expect(chapters[0].toIndex).toBe(CHRONICLE_MIN_MESSAGES - 1);
     });
 
     it('chunks a long span and threads the previous passage tail through', async () => {
@@ -102,13 +104,14 @@ describe('writeChronicleChapter', () => {
             messages: makeMessages(40),
             chronicle: [],
         };
-        const chapter = await writeChronicleChapter({ state, title: 'The Ferry Debt' });
+        const { chapters } = await writeChronicleChapters({ state, title: 'The Ferry Debt' });
 
         expect(sendMessage).toHaveBeenCalledTimes(2);
         expect(sendMessage.mock.calls[1][0].userMessage).toContain('PREVIOUS PASSAGE');
         expect(sendMessage.mock.calls[1][0].userMessage).toContain('First passage of the saga.');
-        expect(chapter.title).toBe('The Ferry Debt');
-        expect(chapter.text).toBe('First passage of the saga.\n\nSecond passage continuing.');
+        expect(chapters).toHaveLength(1);
+        expect(chapters[0].title).toBe('The Ferry Debt');
+        expect(chapters[0].text).toBe('First passage of the saga.\n\nSecond passage continuing.');
     });
 
     it('starts the next chapter where the last one ended and strips event blocks', async () => {
@@ -125,14 +128,63 @@ describe('writeChronicleChapter', () => {
             messages,
             chronicle: [{ id: 'c1', title: 'Chapter 1', text: 'Earlier.', fromIndex: 0, toIndex: 9 }],
         };
-        const chapter = await writeChronicleChapter({ state });
+        const { chapters } = await writeChronicleChapters({ state });
 
-        expect(chapter.fromIndex).toBe(10);
-        expect(chapter.toIndex).toBe(messages.length - 1);
+        expect(chapters[0].fromIndex).toBe(10);
+        expect(chapters[0].toIndex).toBe(messages.length - 1);
         const transcript = sendMessage.mock.calls[0][0].userMessage;
         expect(transcript).toContain('Aune took the letter.');
         expect(transcript).not.toContain('quest_updates');
         expect(transcript).not.toContain('Play beat number 0.'); // chapter 1's span stays closed
+    });
+
+    it('splits a giant backlog into multiple chapters with contiguous honest spans (2026-08-29 live bug)', async () => {
+        // 330 eligible messages = 11 chunks = CHUNKS_PER_CHAPTER + 1: the run
+        // closes as TWO chapters instead of one 60k-sliced casualty. The old
+        // single-chapter design discarded every passage past the slice while
+        // toIndex claimed the whole span as chronicled.
+        let call = 0;
+        sendMessage.mockImplementation(() => Promise.resolve(`Passage ${++call}.`));
+        const messageCount = CHRONICLE_CHUNK_SIZE * (CHRONICLE_CHUNKS_PER_CHAPTER + 1);
+        const state = {
+            settings: SETTINGS,
+            character: { name: 'Eero' },
+            session: {},
+            messages: makeMessages(messageCount),
+            chronicle: [],
+        };
+        const { chapters, warning } = await writeChronicleChapters({ state });
+
+        expect(sendMessage).toHaveBeenCalledTimes(11);
+        expect(warning).toBeUndefined();
+        expect(chapters).toHaveLength(2);
+        expect(chapters[0].title).toBe('Chapter 1');
+        expect(chapters[1].title).toBe('Chapter 2');
+        expect(chapters[0].text).toContain('Passage 1.');
+        expect(chapters[0].text).toContain('Passage 10.');
+        expect(chapters[0].text).not.toContain('Passage 11.');
+        expect(chapters[1].text).toBe('Passage 11.');
+        // Contiguous spans: part 2 resumes exactly after part 1's last retold message.
+        expect(chapters[0].fromIndex).toBe(0);
+        expect(chapters[0].toIndex).toBe(CHRONICLE_CHUNK_SIZE * CHRONICLE_CHUNKS_PER_CHAPTER - 1);
+        expect(chapters[1].fromIndex).toBe(chapters[0].toIndex + 1);
+        expect(chapters[1].toIndex).toBe(messageCount - 1);
+        // The continuation tail threads ACROSS the part boundary too.
+        expect(sendMessage.mock.calls[10][0].userMessage).toContain('Passage 10.');
+    });
+
+    it('a custom title names every part of a split close', async () => {
+        let call = 0;
+        sendMessage.mockImplementation(() => Promise.resolve(`Passage ${++call}.`));
+        const state = {
+            settings: SETTINGS,
+            character: { name: 'Eero' },
+            session: {},
+            messages: makeMessages(CHRONICLE_CHUNK_SIZE * (CHRONICLE_CHUNKS_PER_CHAPTER + 1)),
+            chronicle: [],
+        };
+        const { chapters } = await writeChronicleChapters({ state, title: 'The Long Road' });
+        expect(chapters.map(c => c.title)).toEqual(['The Long Road — Part 1', 'The Long Road — Part 2']);
     });
 
     it('salvages completed passages as a shorter chapter when a later chunk fails (2026-08-29 audit)', async () => {
@@ -149,13 +201,36 @@ describe('writeChronicleChapter', () => {
             messages: makeMessages(40),
             chronicle: [],
         };
-        const chapter = await writeChronicleChapter({ state });
+        const { chapters, salvaged, warning } = await writeChronicleChapters({ state });
 
-        expect(chapter.text).toBe('First passage of the saga.');
-        expect(chapter.fromIndex).toBe(0);
-        expect(chapter.toIndex).toBe(29); // last message of chunk 1, not 39
-        expect(chapter.salvaged).toBe(true);
-        expect(chapter.warning).toMatch(/failed partway/);
+        expect(chapters).toHaveLength(1);
+        expect(chapters[0].text).toBe('First passage of the saga.');
+        expect(chapters[0].fromIndex).toBe(0);
+        expect(chapters[0].toIndex).toBe(29); // last message of chunk 1, not 39
+        expect(salvaged).toBe(true);
+        expect(warning).toMatch(/failed partway/);
+    });
+
+    it('a failure right AFTER a part boundary keeps the completed part(s)', async () => {
+        // 11 chunks; call 11 (part 2's first chunk) fails: part 1 was already
+        // closed complete and survives, the run reports salvaged.
+        let call = 0;
+        sendMessage.mockImplementation(() => {
+            call += 1;
+            if (call > CHRONICLE_CHUNKS_PER_CHAPTER) return Promise.reject(new Error('provider timeout'));
+            return Promise.resolve(`Passage ${call}.`);
+        });
+        const state = {
+            settings: SETTINGS,
+            character: { name: 'Eero' },
+            session: {},
+            messages: makeMessages(CHRONICLE_CHUNK_SIZE * (CHRONICLE_CHUNKS_PER_CHAPTER + 1)),
+            chronicle: [],
+        };
+        const { chapters, salvaged } = await writeChronicleChapters({ state });
+        expect(chapters).toHaveLength(1);
+        expect(chapters[0].toIndex).toBe(CHRONICLE_CHUNK_SIZE * CHRONICLE_CHUNKS_PER_CHAPTER - 1);
+        expect(salvaged).toBe(true);
     });
 
     it('a mid-run EMPTY passage salvages the same way as a throw', async () => {
@@ -169,10 +244,10 @@ describe('writeChronicleChapter', () => {
             messages: makeMessages(40),
             chronicle: [],
         };
-        const chapter = await writeChronicleChapter({ state });
-        expect(chapter.text).toBe('First passage of the saga.');
-        expect(chapter.toIndex).toBe(29);
-        expect(chapter.salvaged).toBe(true);
+        const { chapters, salvaged } = await writeChronicleChapters({ state });
+        expect(chapters[0].text).toBe('First passage of the saga.');
+        expect(chapters[0].toIndex).toBe(29);
+        expect(salvaged).toBe(true);
     });
 
     it('a FIRST-chunk failure still throws — there is nothing to salvage', async () => {
@@ -184,7 +259,7 @@ describe('writeChronicleChapter', () => {
             messages: makeMessages(CHRONICLE_MIN_MESSAGES),
             chronicle: [],
         };
-        await expect(writeChronicleChapter({ state })).rejects.toThrow(/provider down/);
+        await expect(writeChronicleChapters({ state })).rejects.toThrow(/provider down/);
     });
 
     it('an entirely empty single-passage response throws the empty-passage error', async () => {
@@ -196,20 +271,7 @@ describe('writeChronicleChapter', () => {
             messages: makeMessages(CHRONICLE_MIN_MESSAGES),
             chronicle: [],
         };
-        await expect(writeChronicleChapter({ state })).rejects.toThrow(/empty passage/);
-    });
-
-    it('clamps a runaway chapter to the 60k character ceiling', async () => {
-        sendMessage.mockResolvedValue('x'.repeat(70000));
-        const state = {
-            settings: SETTINGS,
-            character: { name: 'Eero' },
-            session: {},
-            messages: makeMessages(CHRONICLE_MIN_MESSAGES),
-            chronicle: [],
-        };
-        const chapter = await writeChronicleChapter({ state });
-        expect(chapter.text).toHaveLength(60000);
+        await expect(writeChronicleChapters({ state })).rejects.toThrow(/empty passage/);
     });
 });
 
@@ -232,5 +294,61 @@ describe('ADD_CHRONICLE_CHAPTER + export', () => {
     it('ignores an empty chapter payload', () => {
         const next = gameReducer(initialGameState, { type: 'ADD_CHRONICLE_CHAPTER', payload: { title: 'Ghost', text: '   ' } });
         expect(next.chronicle).toHaveLength(0);
+    });
+
+    it('appends a multi-part close from ONE array action, numbering defaults in sequence', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'ADD_CHRONICLE_CHAPTER',
+            payload: [
+                { text: 'Part one prose.', fromIndex: 0, toIndex: 299 },
+                { text: 'Part two prose.', fromIndex: 300, toIndex: 329 },
+            ],
+        });
+        expect(next.chronicle).toHaveLength(2);
+        expect(next.chronicle.map(c => c.title)).toEqual(['Chapter 1', 'Chapter 2']);
+        expect(next.chronicle[1].fromIndex).toBe(300);
+    });
+
+    it('clamps a runaway chapter text to the 60k character ceiling at the reducer boundary', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'ADD_CHRONICLE_CHAPTER',
+            payload: { title: 'Flood', text: 'x'.repeat(70000), fromIndex: 0, toIndex: 5 },
+        });
+        expect(next.chronicle[0].text).toHaveLength(60000);
+    });
+});
+
+describe('REMOVE_CHRONICLE_CHAPTER', () => {
+    const stateWithChapters = () => gameReducer(initialGameState, {
+        type: 'ADD_CHRONICLE_CHAPTER',
+        payload: [
+            { title: 'One', text: 'First.', fromIndex: 0, toIndex: 9 },
+            { title: 'Two', text: 'Second.', fromIndex: 10, toIndex: 19 },
+        ],
+    });
+
+    it('removes the newest chapter by id so its span re-opens for the next close', () => {
+        const state = stateWithChapters();
+        const next = gameReducer(state, {
+            type: 'REMOVE_CHRONICLE_CHAPTER',
+            payload: { id: state.chronicle[1].id },
+        });
+        expect(next.chronicle).toHaveLength(1);
+        expect(next.chronicle[0].title).toBe('One');
+    });
+
+    it('refuses to remove a middle chapter — that would leave an unretellable hole', () => {
+        const state = stateWithChapters();
+        const next = gameReducer(state, {
+            type: 'REMOVE_CHRONICLE_CHAPTER',
+            payload: { id: state.chronicle[0].id },
+        });
+        expect(next).toBe(state);
+    });
+
+    it('ignores an unknown or missing id', () => {
+        const state = stateWithChapters();
+        expect(gameReducer(state, { type: 'REMOVE_CHRONICLE_CHAPTER', payload: { id: 'nope' } })).toBe(state);
+        expect(gameReducer(state, { type: 'REMOVE_CHRONICLE_CHAPTER', payload: {} })).toBe(state);
     });
 });

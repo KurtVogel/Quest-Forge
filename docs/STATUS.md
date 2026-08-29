@@ -6,8 +6,24 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-29 (same-day queue sweep: the whole 2026-08-29 audit batch cleared —
-3 P1s + 8 P2s across response-parsing, enemy-stats-conditions, spellcasting, chronicler)._
+_Last updated: 2026-08-29 (evening: chronicle 60k-slice truncation fixed — long spans now
+close as multiple chapters, newest chapter removable)._
+
+## 2026-08-29 — player-reported bug: first chronicle close on the long campaign truncated mid-sentence
+
+Vesa's first live "Close chapter": 59 passages, ~25 min, and the chapter ended mid-phrase
+a third of the way in. Root cause (DECISIONS.md 2026-08-29 chronicle entry): the chronicler
+joined all passages and sliced to 60k chars — ~40 of the 59 passages were paid for and
+silently discarded while `toIndex` claimed the whole span as chronicled. Fixed: long spans
+now close as MULTIPLE chapters (`writeChronicleChapters`, 10 chunks/part, honest contiguous
+spans, tail threads across parts, one array-payload ADD_CHRONICLE_CHAPTER action so the
+flush persists atomically; salvage keeps completed parts); new `REMOVE_CHRONICLE_CHAPTER` +
+two-click "Remove chapter" on the NEWEST chapter re-opens its span for a fresh close — the
+recovery path for the broken live chapter (remove it, close again on the fixed code); the
+compose hint estimates passages/parts/minutes up front. Also diagnosed: the chapter "not
+starting from the beginning" is unfixable data loss — the 2026-03→2026-06 save-trimming era
+stripped summarized messages from payloads, so the campaign's early scrollback is gone from
+the save (journal summaries survive). 1,869 tests green (+7), lint clean.
 
 ## 2026-08-29 — same-day queue sweep: the whole 2026-08-29 audit batch cleared (3 P1s + 8 P2s)
 
