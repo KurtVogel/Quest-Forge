@@ -92,38 +92,85 @@ export const handlers = {
             spellSlots = spendSpellSlot(spellSlots, slotLevel);
         }
 
-        // Recipient: the hero by default, or a named living companion.
-        const targetRef = String(payload.target || '').trim();
-        const lcTarget = targetRef.toLowerCase();
-        const targetsSelf = !targetRef || ['self', 'me', 'player'].includes(lcTarget)
-            || lcTarget === String(character.name || '').toLowerCase();
-        const companion = !targetsSelf
-            ? (state.party || []).find(c => c.id === targetRef || c.name?.toLowerCase() === lcTarget)
-            : null;
-        if (!targetsSelf && spell.targeting.side === 'ally' && (!companion || companion.status === 'dead')) {
-            return { ...state, messages: [...state.messages, systemMessage(`${spell.name} has no valid recipient "${targetRef}" — nothing was spent or applied.`)] };
+        // Recipients: the hero by default, or named living companions. upTo3
+        // ally spells (Mass Healing Word / Mass Cure Wounds) accept a `targets`
+        // list of up to 3 allies — the combat resolver's per-ally loop finally
+        // has an out-of-combat parallel; a promised group heal used to be
+        // mechanically impossible outside a fight (2026-08-29 audit P1).
+        const resolveRecipient = (ref) => {
+            const targetRef = String(ref || '').trim();
+            const lcTarget = targetRef.toLowerCase();
+            const targetsSelf = !targetRef || ['self', 'me', 'player'].includes(lcTarget)
+                || lcTarget === String(character.name || '').toLowerCase();
+            if (targetsSelf) return { type: 'self' };
+            const found = (state.party || []).find(c => c.id === targetRef || c.name?.toLowerCase() === lcTarget);
+            if (spell.targeting.side === 'ally' && (!found || found.status === 'dead')) {
+                return { type: 'invalid', ref: targetRef };
+            }
+            return found ? { type: 'companion', companion: found } : { type: 'self' };
+        };
+        const targetLimit = spell.targeting.mode === 'upTo3' ? 3 : 1;
+        const targetRefs = targetLimit > 1 && Array.isArray(payload.targets) && payload.targets.length > 0
+            ? payload.targets.slice(0, targetLimit)
+            : [payload.target];
+        const recipients = [];
+        const invalidRefs = [];
+        for (const ref of targetRefs) {
+            const resolved = resolveRecipient(ref);
+            if (resolved.type === 'invalid') {
+                invalidRefs.push(resolved.ref);
+            } else if (!recipients.some(r => r.type === resolved.type && r.companion?.id === resolved.companion?.id)) {
+                recipients.push(resolved);
+            }
         }
+        if (recipients.length === 0) {
+            return { ...state, messages: [...state.messages, systemMessage(`${spell.name} has no valid recipient "${invalidRefs.join('", "')}" — nothing was spent or applied.`)] };
+        }
+        // USE_ITEM's dead-hero guard twin (2026-08-29 audit): healing revives
+        // `dying` but never the dead. A heal aimed only at the dead hero rejects
+        // before the slot is spent; a mixed multi-target cast still reaches the
+        // living and skips the corpse inside the healing loop below.
+        if (spell.healing && character.isDead && recipients.every(r => r.type === 'self')) {
+            return { ...state, messages: [...state.messages, systemMessage(`${spell.name} cannot help the dead — nothing was spent or applied.`)] };
+        }
+        // Single-target branches below (cleanse/sustain/stabilize) keep their
+        // one-recipient semantics; only the healing branch loops recipients.
+        const companion = recipients[0].type === 'companion' ? recipients[0].companion : null;
 
         let nextCharacter = { ...character, ...(spell.level > 0 && { spellSlots }) };
         let nextParty = state.party || [];
         const lines = [`**${character.name || 'The hero'} casts ${spell.name}**${slotLevel > spell.level ? ` using a level ${slotLevel} slot` : ''}${spell.level > 0 ? ` (slots left: ${summarizeSpellSlots(spellSlots)})` : ''}.`];
 
         if (spell.healing) {
-            const roll = rollNotation(spellHealingNotation(spell, character, slotLevel), spell.name);
-            if (companion) {
-                const maxHp = companion.maxHp || companion.hp || 1;
-                const hp = Math.min(maxHp, (companion.hp || 0) + roll.total);
-                nextParty = nextParty.map(c => c.id === companion.id
-                    ? normalizeCompanion({ hp, status: companionStatus(hp, maxHp) }, c)
-                    : c);
-                lines.push(`${companion.name} recovers **${roll.total}** HP (now ${hp}/${maxHp}). Rolled: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}.`);
-            } else {
-                const healed = Math.min(character.maxHP, character.currentHP + roll.total);
-                const gained = healed - character.currentHP;
-                nextCharacter = gained > 0
-                    ? reviveCharacter({ ...nextCharacter, currentHP: healed })
-                    : nextCharacter;
-                lines.push(`${character.name || 'The hero'} recovers **${gained}** HP (now ${healed}/${character.maxHP}). Rolled: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}.`);
+            // One roll per recipient — the combat resolver's per-ally pattern.
+            for (const recipient of recipients) {
+                const roll = rollNotation(spellHealingNotation(spell, character, slotLevel), spell.name);
+                if (recipient.type === 'companion') {
+                    const target = recipient.companion;
+                    const maxHp = target.maxHp || target.hp || 1;
+                    const priorHp = nextParty.find(c => c.id === target.id)?.hp ?? target.hp ?? 0;
+                    const hp = Math.min(maxHp, priorHp + roll.total);
+                    nextParty = nextParty.map(c => c.id === target.id
+                        ? normalizeCompanion({ hp, status: companionStatus(hp, maxHp) }, c)
+                        : c);
+                    lines.push(`${target.name} recovers **${roll.total}** HP (now ${hp}/${maxHp}). Rolled: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}.`);
+                } else if (character.isDead) {
+                    // USE_ITEM's guard twin: healing revives `dying` but never the
+                    // dead — a DM-emitted cure on an isDead hero used to mint a
+                    // currentHP>0 corpse state (2026-08-29 audit).
+                    lines.push(`${spell.name} cannot help the dead — ${character.name || 'the hero'} is beyond its reach.`);
+                } else {
+                    const priorHp = nextCharacter.currentHP;
+                    const healed = Math.min(character.maxHP, priorHp + roll.total);
+                    const gained = healed - priorHp;
+                    nextCharacter = gained > 0
+                        ? reviveCharacter({ ...nextCharacter, currentHP: healed })
+                        : nextCharacter;
+                    lines.push(`${character.name || 'The hero'} recovers **${gained}** HP (now ${healed}/${character.maxHP}). Rolled: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}.`);
+                }
+            }
+            for (const missed of invalidRefs) {
+                lines.push(`No valid recipient "${missed}" — that share of the spell is lost.`);
             }
         } else if (spell.removeConditions) {
             const matches = condition => spell.removeConditions === 'any'

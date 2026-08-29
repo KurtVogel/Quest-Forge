@@ -47,7 +47,7 @@ import {
 import { awardExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { normalizeEquippedSlots } from '../engine/equipment.js';
 import { createInitialFronts } from '../engine/fronts.js';
-import { isSpellcaster, sanitizeSpellSlots } from '../engine/spellcasting.js';
+import { isSpellcaster, sanitizeSpellSlots, sanitizeSustainedSpell } from '../engine/spellcasting.js';
 import { initialGameState } from './initialState.js';
 import { coverage, tokenSet } from '../engine/textMatch.js';
 import { applyEarlyDefeat, isLowLevelSolo, systemMessage } from './handlers/shared.js';
@@ -246,13 +246,12 @@ function healLoadedCharacter(character) {
         abilityScores,
     };
     if (!isSpellcaster(healed.class)) return healed;
-    const sustained = healed.sustainedSpell && typeof healed.sustainedSpell === 'object' && healed.sustainedSpell.key
-        ? healed.sustainedSpell
-        : null;
     return {
         ...healed,
         spellSlots: sanitizeSpellSlots(level, healed.spellSlots),
-        sustainedSpell: sustained,
+        // Catalog-rebuilt, never trusted from the save: an in-band poisoned
+        // acBonus was a permanent unclamped hero AC (2026-08-29 audit).
+        sustainedSpell: sanitizeSustainedSpell(healed.sustainedSpell),
     };
 }
 

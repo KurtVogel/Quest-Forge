@@ -13,6 +13,27 @@ export function stripMarkdownFences(text) {
 }
 
 /**
+ * Extract → parse → repair one keyword-anchored balanced object, returning the
+ * parsed value AND where it starts in `text` (callers slicing narrative off the
+ * front need the index). ONE implementation of the anchors→parse→repair walk —
+ * responseParser's unfenced fallback used to re-implement it inline just for
+ * `startIndex` (2026-08-29 audit). Never throws — null on failure.
+ */
+export function parseBalancedJsonAt(text, keyword) {
+    const jsonMatch = extractBalancedJson(text, keyword);
+    if (!jsonMatch?.json) return null;
+    try {
+        return { value: JSON.parse(jsonMatch.json), startIndex: jsonMatch.startIndex };
+    } catch {
+        try {
+            return { value: JSON.parse(repairJson(jsonMatch.json)), startIndex: jsonMatch.startIndex };
+        } catch {
+            return null;
+        }
+    }
+}
+
+/**
  * Parse a JSON object from LLM output, trying repair and optional keyword anchors.
  * Never throws — returns null on failure.
  */
@@ -20,20 +41,19 @@ export function parseJsonObjectLoose(text, keywords = []) {
     const cleaned = stripMarkdownFences(text);
     if (!cleaned) return null;
 
-    const anchors = [...keywords, null];
-    for (const keyword of anchors) {
-        const jsonMatch = keyword
-            ? extractBalancedJson(cleaned, keyword)
-            : (cleaned.startsWith('{') ? { json: cleaned } : null);
-        if (!jsonMatch?.json) continue;
-
+    for (const keyword of keywords) {
+        const parsed = parseBalancedJsonAt(cleaned, keyword);
+        if (parsed) return parsed.value;
+    }
+    // No anchor matched — a response that IS the object, fences already stripped.
+    if (cleaned.startsWith('{')) {
         try {
-            return JSON.parse(jsonMatch.json);
+            return JSON.parse(cleaned);
         } catch {
             try {
-                return JSON.parse(repairJson(jsonMatch.json));
+                return JSON.parse(repairJson(cleaned));
             } catch {
-                // try next anchor
+                // fall through
             }
         }
     }

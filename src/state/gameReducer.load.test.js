@@ -425,6 +425,48 @@ describe('LOAD_GAME progression migrations', () => {
         expect(next.combat.lastExchangeResult.postState.enemies[0].conditions).toEqual(['prone']);
     });
 
+    it('whitelists stored exchange-result postState enemies — junk keys do not survive load (2026-08-29 audit)', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...baseCharacter },
+                inventory: [],
+                messages: [],
+                combat: {
+                    active: true,
+                    phase: 'awaiting_narration',
+                    enemies: [{
+                        id: 'worg', name: 'Cave-Worg', hp: 9, maxHp: 32, ac: 14,
+                        condition: 'critical', conditions: [], combatStatus: 'active',
+                    }],
+                    turnOrder: [{ type: 'player', name: 'Survivor', initiative: 15 }],
+                    currentTurn: 0,
+                    round: 5,
+                    lastExchangeResult: {
+                        exchangeId: 'exchange-5',
+                        kind: 'exchange',
+                        round: 5,
+                        terminal: null,
+                        summary: 'Cave-Worg remains alive.',
+                        events: [],
+                        postState: {
+                            player: { name: 'Survivor', hp: 12, maxHp: 12 },
+                            enemies: [{
+                                name: 'Cave-Worg', hp: 9, maxHp: 32, status: 'active', conditions: [],
+                                hostilePayload: 'x'.repeat(50), attackBonus: 99,
+                            }],
+                            companions: [],
+                        },
+                    },
+                },
+            },
+        });
+        const stored = next.combat.lastExchangeResult.postState.enemies[0];
+        expect(stored.hostilePayload).toBeUndefined();
+        expect(stored.attackBonus).toBeUndefined(); // narration snapshots carry no offensive stats
+        expect(stored).toMatchObject({ name: 'Cave-Worg', hp: 9, maxHp: 32, status: 'active' });
+    });
+
     it('hydrates appliedLootSourceIds and recentPurchases from save state and backfills missing arrays', () => {
         const withIds = gameReducer(initialGameState, {
             type: 'LOAD_GAME',

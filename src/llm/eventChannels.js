@@ -17,15 +17,9 @@
  * Application (events → dispatches) lives in src/state/applyEvents.js.
  */
 
-import { validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
+import { canonicalEnemyId, validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 import { MAX_COIN_EVENT } from '../config/contentLimits.js';
-
-/** Cryptographically random integer in [min, max] — replaces Math.random() fallbacks. */
-function cryptoRandInt(min, max) {
-    const range = max - min + 1;
-    return min + (crypto.getRandomValues(new Uint32Array(1))[0] % range);
-}
 
 /**
  * Clamp a numeric LLM value to a sane range; unusable values become the fallback.
@@ -59,21 +53,6 @@ function guardedList(raw, { allowStrings = false, cap = Infinity, map = null } =
     return list.slice(0, cap);
 }
 
-function canonicalEnemyId(enemy, index, usedIds) {
-    const fragment = String(enemy?.id || enemy?.name || index + 1)
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 80) || String(index + 1);
-    const base = fragment.startsWith('enemy-') ? fragment : `enemy-${fragment}`;
-    let id = base;
-    let suffix = 2;
-    while (usedIds.has(id)) id = `${base}-${suffix++}`;
-    usedIds.add(id);
-    return id;
-}
-
 /**
  * Validate and sanitize combat_start data from the LLM.
  * Ensures every enemy has required fields with sensible defaults.
@@ -102,7 +81,6 @@ export function validateCombatStart(combatStart) {
                 hp: clampEnemyHP(e.hp),
                 ac: clampEnemyAC(e.ac),
                 conditions: normalizeEnemyConditions(e.conditions),
-                initiative: (typeof e.initiative === 'number') ? e.initiative : cryptoRandInt(1, 20),
                 ...(attackBonus !== undefined && { attackBonus }),
                 ...(damage !== undefined && { damage }),
                 ...(saveBonus !== undefined && { saveBonus }),
@@ -115,14 +93,16 @@ export function validateCombatStart(combatStart) {
 
     if (sanitizedEnemies.length === 0) return null;
 
+    // Initiative is deliberately ABSENT from this contract: START_COMBAT
+    // engine-rolls every combatant's initiative with real dice and reads no
+    // DM-supplied value (pinned by test). The old accept-and-thread pipeline
+    // was dead code that misleadingly suggested the DM controlled initiative
+    // (2026-08-29 audit).
     return {
         enemies: sanitizedEnemies,
         surprise: ['player', 'enemies'].includes(String(combatStart.surprise || '').toLowerCase())
             ? String(combatStart.surprise).toLowerCase()
             : 'none',
-        player_initiative: (typeof combatStart.player_initiative === 'number')
-            ? combatStart.player_initiative
-            : cryptoRandInt(1, 20),
     };
 }
 
@@ -228,32 +208,47 @@ function normalizeSpellCasts(raw) {
             const spell = String(entry.spell || entry.name || entry.key || '').trim().slice(0, 80);
             if (!spell) return null;
             const rawLevel = entry.slot_level ?? entry.slotLevel;
+            // upTo3 ally spells (Mass Healing Word / Mass Cure Wounds) name
+            // their recipients via `targets` — the darts pattern's ally twin.
+            // CAST_SPELL honors the list only for spells whose catalog entry
+            // actually allows multiple targets.
+            const targets = Array.isArray(entry.targets)
+                ? entry.targets
+                    .filter(t => typeof t === 'string' && t.trim())
+                    .map(t => t.trim().slice(0, 100))
+                    .slice(0, 3)
+                : [];
             return {
                 spell,
                 slotLevel: Number.isFinite(rawLevel) ? Math.max(1, Math.min(5, Math.round(rawLevel))) : null,
-                target: entry.target ? String(entry.target).trim().slice(0, 100) : null,
+                target: entry.target ? String(entry.target).trim().slice(0, 100) : (targets[0] ?? null),
+                ...(targets.length > 0 && { targets }),
             };
         })
         .filter(Boolean);
 }
 
 function normalizeMemoryUpdate(update) {
+    // Aliases fold HERE (the exchange-normalizer policy): the snake_case and
+    // legacy twins (memory_id, mark_used, emotional_charge, linked_npc_names)
+    // collapse to one canonical spelling so downstream never re-handles three
+    // spellings of the same field (2026-08-29 audit).
+    const id = update.id ?? update.memoryId ?? update.memory_id;
+    const used = update.used ?? update.markUsed ?? update.mark_used;
+    const emotionalCharge = update.emotionalCharge ?? update.emotional_charge;
+    const linkedNpcNames = Array.isArray(update.linkedNpcNames)
+        ? update.linkedNpcNames
+        : Array.isArray(update.linked_npc_names) ? update.linked_npc_names : null;
     return {
-        ...(update.id && { id: String(update.id) }),
-        ...(update.memoryId && { memoryId: String(update.memoryId) }),
-        ...(update.memory_id && { memory_id: String(update.memory_id) }),
+        ...(id && { id: String(id) }),
         ...(update.subject && { subject: String(update.subject) }),
         ...(update.text && { text: String(update.text) }),
         ...(update.status && { status: String(update.status) }),
-        ...(update.used !== undefined && { used: !!update.used }),
-        ...(update.markUsed !== undefined && { markUsed: !!update.markUsed }),
-        ...(update.mark_used !== undefined && { mark_used: !!update.mark_used }),
+        ...(used !== undefined && { used: !!used }),
         ...(typeof update.salience === 'number' && { salience: update.salience }),
-        ...(typeof update.emotionalCharge === 'number' && { emotionalCharge: update.emotionalCharge }),
-        ...(typeof update.emotional_charge === 'number' && { emotional_charge: update.emotional_charge }),
+        ...(typeof emotionalCharge === 'number' && { emotionalCharge }),
         ...(Array.isArray(update.tags) && { tags: update.tags.map(String) }),
-        ...(Array.isArray(update.linkedNpcNames) && { linkedNpcNames: update.linkedNpcNames.map(String) }),
-        ...(Array.isArray(update.linked_npc_names) && { linked_npc_names: update.linked_npc_names.map(String) }),
+        ...(linkedNpcNames && { linkedNpcNames: linkedNpcNames.map(String) }),
         ...(update.location && { location: String(update.location) }),
     };
 }
@@ -304,13 +299,17 @@ export const EVENT_CHANNELS = [
                 .slice(0, 10);
         },
     },
+    // The uniform element-shape guard everywhere: a null element in a
+    // "purchases": [null, …] array used to throw in applyEvents BEFORE any
+    // dispatch, silently dropping every event the response carried
+    // (2026-08-29 audit — the last two array channels bypassing guardedList).
     {
         wire: 'purchase', aliases: ['purchases'], key: 'purchases',
-        read: raw => (Array.isArray(raw.purchases) ? raw.purchases : (raw.purchase ? [raw.purchase] : [])),
+        read: raw => guardedList(Array.isArray(raw.purchases) ? raw.purchases : (raw.purchase ? [raw.purchase] : []), { cap: 6 }),
     },
     {
         wire: 'sell', aliases: ['sells'], key: 'sells',
-        read: raw => (Array.isArray(raw.sells) ? raw.sells : (raw.sell ? [raw.sell] : [])),
+        read: raw => guardedList(Array.isArray(raw.sells) ? raw.sells : (raw.sell ? [raw.sell] : []), { cap: 6 }),
     },
     { wire: 'gold_found', key: 'goldFound', read: raw => clamp(raw.gold_found, 0, MAX_COIN_EVENT) },
     { wire: 'gold_lost', key: 'goldLost', read: raw => clamp(raw.gold_lost, 0, MAX_COIN_EVENT) },

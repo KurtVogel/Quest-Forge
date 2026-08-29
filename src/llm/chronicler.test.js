@@ -34,6 +34,26 @@ describe('collectChapterMessages', () => {
         expect(eligible[0].content).toBe('I open the door.');
         expect(eligible[1].content).toBe('The hinges scream.');
     });
+
+    it('skips OOC table talk and its assistant reply — a recap is not story (2026-08-29 audit)', () => {
+        // Table-talk turns are excluded from RAG, the Scribe, and the DM window
+        // by design; the chronicler must not retell the rules chat as saga.
+        const messages = [
+            { role: 'user', content: 'I open the door.' },
+            { role: 'assistant', content: 'The hinges scream.' },
+            { role: 'user', content: 'OOC: can you recap what I owe the ferrywoman?' },
+            { role: 'assistant', content: 'Out of character: you owe her 3 silver from the crossing.' },
+            { role: 'user', content: 'I pay her the silver.' },
+            { role: 'assistant', content: 'She bites the coin and nods.' },
+        ];
+        const eligible = collectChapterMessages(messages, 0);
+        expect(eligible.map(m => m.content)).toEqual([
+            'I open the door.',
+            'The hinges scream.',
+            'I pay her the silver.',
+            'She bites the coin and nods.',
+        ]);
+    });
 });
 
 describe('writeChronicleChapter', () => {
@@ -113,6 +133,83 @@ describe('writeChronicleChapter', () => {
         expect(transcript).toContain('Aune took the letter.');
         expect(transcript).not.toContain('quest_updates');
         expect(transcript).not.toContain('Play beat number 0.'); // chapter 1's span stays closed
+    });
+
+    it('salvages completed passages as a shorter chapter when a later chunk fails (2026-08-29 audit)', async () => {
+        // 40 eligible messages = 2 chunks of 30 + 10. Chunk 2 fails: the paid-for
+        // first passage is kept as a shorter chapter whose toIndex lands on the
+        // last message chunk 1 retold, so the next chapter resumes exactly there.
+        sendMessage
+            .mockResolvedValueOnce('First passage of the saga.')
+            .mockRejectedValueOnce(new Error('provider timeout'));
+        const state = {
+            settings: SETTINGS,
+            character: { name: 'Eero' },
+            session: {},
+            messages: makeMessages(40),
+            chronicle: [],
+        };
+        const chapter = await writeChronicleChapter({ state });
+
+        expect(chapter.text).toBe('First passage of the saga.');
+        expect(chapter.fromIndex).toBe(0);
+        expect(chapter.toIndex).toBe(29); // last message of chunk 1, not 39
+        expect(chapter.salvaged).toBe(true);
+        expect(chapter.warning).toMatch(/failed partway/);
+    });
+
+    it('a mid-run EMPTY passage salvages the same way as a throw', async () => {
+        sendMessage
+            .mockResolvedValueOnce('First passage of the saga.')
+            .mockResolvedValueOnce('   '); // strips to empty → internal throw
+        const state = {
+            settings: SETTINGS,
+            character: { name: 'Eero' },
+            session: {},
+            messages: makeMessages(40),
+            chronicle: [],
+        };
+        const chapter = await writeChronicleChapter({ state });
+        expect(chapter.text).toBe('First passage of the saga.');
+        expect(chapter.toIndex).toBe(29);
+        expect(chapter.salvaged).toBe(true);
+    });
+
+    it('a FIRST-chunk failure still throws — there is nothing to salvage', async () => {
+        sendMessage.mockRejectedValue(new Error('provider down'));
+        const state = {
+            settings: SETTINGS,
+            character: { name: 'Eero' },
+            session: {},
+            messages: makeMessages(CHRONICLE_MIN_MESSAGES),
+            chronicle: [],
+        };
+        await expect(writeChronicleChapter({ state })).rejects.toThrow(/provider down/);
+    });
+
+    it('an entirely empty single-passage response throws the empty-passage error', async () => {
+        sendMessage.mockResolvedValue('```json\n{"quest_updates": []}\n```');
+        const state = {
+            settings: SETTINGS,
+            character: { name: 'Eero' },
+            session: {},
+            messages: makeMessages(CHRONICLE_MIN_MESSAGES),
+            chronicle: [],
+        };
+        await expect(writeChronicleChapter({ state })).rejects.toThrow(/empty passage/);
+    });
+
+    it('clamps a runaway chapter to the 60k character ceiling', async () => {
+        sendMessage.mockResolvedValue('x'.repeat(70000));
+        const state = {
+            settings: SETTINGS,
+            character: { name: 'Eero' },
+            session: {},
+            messages: makeMessages(CHRONICLE_MIN_MESSAGES),
+            chronicle: [],
+        };
+        const chapter = await writeChronicleChapter({ state });
+        expect(chapter.text).toHaveLength(60000);
     });
 });
 

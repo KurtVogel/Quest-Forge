@@ -12,7 +12,7 @@
  * This file owns only text → parsed-JSON extraction and the prose detectors.
  */
 
-import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { parseBalancedJsonAt, parseJsonObjectLoose, repairJson } from './utils/jsonExtractor.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { normalizeEvents, EVENT_CHANNELS } from './eventChannels.js';
@@ -87,10 +87,17 @@ export function detectTextRollRequests(narrative) {
         }
     }
 
-    // Pattern 2: "[Skill] check" standing alone (e.g. "a Perception check")
+    // Pattern 2: "[Skill] check" NEAR a request verb (e.g. "give me a Perception
+    // check"). A request verb is required like Pattern 1 — the bare noun phrase
+    // fired on RECAP prose ("your earlier Perception check served you well") and
+    // minted a phantom DC-10 proposal (2026-08-29 audit). Genuinely verb-less
+    // prose requests stay covered by the semantic detector + arbiter.
     if (rolls.length === 0) {
         for (const skill of KNOWN_SKILLS) {
-            const skillPattern = new RegExp(`\\b${skill.replace(/['"]/g, ".")}\\s+(?:check|save|saving throw)`, 'i');
+            const skillPattern = new RegExp(
+                `\\b(?:rolls?|makes?|attempts?|gives? me|need)\\b[\\s\\S]{0,40}?\\b${skill.replace(/['"]/g, ".")}\\s+(?:check|save|saving throw)`,
+                'i'
+            );
             if (skillPattern.test(narrative)) {
                 const type = /save|saving throw/i.test(narrative.match(skillPattern)?.[0] || '') ? 'saving_throw' : 'skill_check';
                 rolls.push({ type, skill, dc, description: `${skill} check (DC ${dc})` });
@@ -130,23 +137,14 @@ export function parseResponse(response) {
     if (!jsonMatch) {
         // Fallback 1: unfenced event JSON — balanced-brace extraction anchored on
         // each registry wire key in turn. The anchors usually point into the same
-        // object, so the first parseable extraction wins.
+        // object, so the first parseable extraction wins. The extract→parse→repair
+        // walk is the shared jsonExtractor one; startIndex slices the narrative off.
         for (const anchor of UNFENCED_EVENT_ANCHORS) {
-            const looseJson = extractBalancedJson(response, anchor);
-            if (!looseJson) continue;
-            let parsed = null;
-            try {
-                parsed = JSON.parse(looseJson.json);
-            } catch {
-                try {
-                    parsed = JSON.parse(repairJson(looseJson.json));
-                } catch {
-                    continue; // try the next anchor
-                }
-            }
+            const parsed = parseBalancedJsonAt(response, anchor);
+            if (!parsed) continue; // try the next anchor
             console.warn(`[ResponseParser] Parsed unfenced JSON (anchor: ${anchor}).`);
-            const narrative = response.slice(0, looseJson.startIndex).trim();
-            return { narrative, events: normalizeEvents(parsed) };
+            const narrative = response.slice(0, parsed.startIndex).trim();
+            return { narrative, events: normalizeEvents(parsed.value) };
         }
 
         // Fallback 2: text roll detector — DM put roll request in narrative prose
@@ -257,16 +255,11 @@ Output ONLY the JSON, no prose outside the JSON.`;
             temperature: 0.2, // roll detection — determinism over flair
         });
 
-        const jsonMatch = extractBalancedJson(response, 'requested_rolls');
-        if (!jsonMatch) return null;
-
-        let parsed;
-        try {
-            parsed = JSON.parse(jsonMatch.json);
-        } catch {
-            return null;
-        }
-        return Array.isArray(parsed.requested_rolls) ? parsed.requested_rolls : null;
+        // The shared loose parser gives this machinery consumer the same fence-strip
+        // + repair path as its siblings — a truncated detector response used to
+        // silently return null on a raw JSON.parse (2026-08-29 audit).
+        const parsed = parseJsonObjectLoose(response, ['requested_rolls']);
+        return Array.isArray(parsed?.requested_rolls) ? parsed.requested_rolls : null;
     } catch (e) {
         console.warn('[ResponseParser] Semantic roll detection failed:', e.message || e);
         return null;

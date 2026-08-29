@@ -187,6 +187,71 @@ describe('CAST_SPELL (out of combat)', () => {
         expect(next.character.conditions).toEqual(['Exhausted']);
         expect(next.messages.at(-1).content).toMatch(/cleansed of: Poisoned/);
     });
+
+    it('Mass Healing Word heals up to 3 named allies out of combat (2026-08-29 audit)', () => {
+        // The promised group heal was mechanically impossible outside a fight:
+        // no targets channel existed and CAST_SPELL read one target.
+        const state = clericState({
+            party: [
+                { id: 'mara', name: 'Mara', hp: 2, maxHp: 12, status: 'wounded', conditions: [] },
+                { id: 'brann', name: 'Brann', hp: 0, maxHp: 14, status: 'downed', conditions: [] },
+            ],
+        });
+        const next = gameReducer(state, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'mass healing word', targets: ['self', 'Mara', 'Brann'], _meta: { sourceId: 'msg-1' } },
+        });
+        expect(next.character.currentHP).toBeGreaterThan(10);
+        expect(next.party.find(c => c.id === 'mara').hp).toBeGreaterThan(2);
+        expect(next.party.find(c => c.id === 'brann').hp).toBeGreaterThan(0);
+        expect(next.character.spellSlots[3].used).toBe(1); // one slot pays for all three
+        const line = next.messages.at(-1).content;
+        expect(line).toMatch(/Maren recovers/);
+        expect(line).toMatch(/Mara recovers/);
+        expect(line).toMatch(/Brann recovers/);
+    });
+
+    it('a single-target spell ignores a stray targets list beyond its first entry', () => {
+        const state = clericState({
+            party: [{ id: 'mara', name: 'Mara', hp: 2, maxHp: 12, status: 'wounded', conditions: [] }],
+        });
+        const next = gameReducer(state, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', target: 'Mara', targets: ['Mara', 'self'] },
+        });
+        expect(next.party[0].hp).toBeGreaterThan(2);
+        expect(next.character.currentHP).toBe(10); // the hero was NOT healed
+    });
+
+    it('a heal aimed only at the dead hero rejects without spending the slot (2026-08-29 audit)', () => {
+        // USE_ITEM's guard twin: healing revives `dying` but never the dead —
+        // a DM-emitted cure used to mint a currentHP>0 corpse state.
+        const state = clericState({ character: { isDead: true, currentHP: 0 } });
+        const next = gameReducer(state, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', target: 'self', _meta: { sourceId: 'msg-1' } },
+        });
+        expect(next.character.currentHP).toBe(0);
+        expect(next.character.isDead).toBe(true);
+        expect(next.character.spellSlots[1].used).toBe(0);
+        expect(next.messages.at(-1).content).toMatch(/cannot help the dead/);
+    });
+
+    it('a mixed multi-target heal reaches the living and skips the dead hero', () => {
+        const state = clericState({
+            character: { isDead: true, currentHP: 0 },
+            party: [{ id: 'mara', name: 'Mara', hp: 2, maxHp: 12, status: 'wounded', conditions: [] }],
+        });
+        const next = gameReducer(state, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'mass healing word', targets: ['self', 'Mara'] },
+        });
+        expect(next.character.currentHP).toBe(0);
+        expect(next.character.isDead).toBe(true);
+        expect(next.party[0].hp).toBeGreaterThan(2);
+        expect(next.character.spellSlots[3].used).toBe(1);
+        expect(next.messages.at(-1).content).toMatch(/cannot help the dead/);
+    });
 });
 
 describe('rest slot recovery and sustained lifecycle', () => {
@@ -314,6 +379,44 @@ describe('exchange commits and save loading', () => {
         };
         const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: legacySave });
         expect(next.character.spellSlots).toEqual(buildSpellSlots(5));
+        expect(next.character.sustainedSpell).toBeNull();
+    });
+
+    it('LOAD_GAME rebuilds sustainedSpell mechanics from the catalog — a poisoned acBonus cannot survive (2026-08-29 audit)', () => {
+        // In-band poison: a hand-edited {key:'shieldOfFaith', acBonus:30} used to
+        // flow raw into computeACFromInventory — a permanent unclamped hero AC
+        // (the 2026-08-05 AC-clamp class, missed on the sustained-buff lane).
+        const poisoned = {
+            ...clericState(),
+            character: {
+                ...clericState().character,
+                sustainedSpell: { key: 'shieldOfFaith', name: 'Totally Legit Ward', acBonus: 30, targetType: 'self', junkField: 'x' },
+            },
+            session: { id: 'save-1', name: 'Poisoned' },
+        };
+        const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: poisoned });
+        expect(next.character.sustainedSpell).toEqual({
+            key: 'shieldOfFaith',
+            name: 'Shield of Faith',
+            acBonus: 2,
+            targetType: 'self',
+        });
+        // AC recomputed from the catalog bonus: unarmored 10 + DEX 0 + 2.
+        expect(next.character.armorClass).toBe(12);
+    });
+
+    it('LOAD_GAME drops a sustainedSpell whose key is not a sustained catalog spell', () => {
+        const bogus = {
+            ...clericState(),
+            character: {
+                ...clericState().character,
+                // cure wounds is a real spell but NOT sustained — an invented
+                // sustained record must not survive with hallucinated mechanics.
+                sustainedSpell: { key: 'cureWounds', acBonus: 5, targetType: 'self' },
+            },
+            session: { id: 'save-1', name: 'Bogus' },
+        };
+        const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: bogus });
         expect(next.character.sustainedSpell).toBeNull();
     });
 });

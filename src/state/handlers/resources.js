@@ -3,12 +3,13 @@
  * spending, and the short/long rest pipeline (with the rest replay guard).
  */
 import { CLASSES } from '../../data/classes.js';
-import { computeACFromInventory, getModifier } from '../../engine/rules.js';
+import { getModifier } from '../../engine/rules.js';
 import { rollDie, rollNotation } from '../../engine/dice.ts';
 import { applyArcaneRecovery, buildSpellSlots, isSpellcaster, refillSpellSlots, summarizeSpellSlots } from '../../engine/spellcasting.js';
 import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
 import {
     appendRollHistory,
+    clearSustainedSpellState,
     companionStatus,
     currentMessageIndex,
     isPlayerCombatTurn,
@@ -299,7 +300,11 @@ export const handlers = {
             }
         }
 
-        // Any rest ends a sustained spell (the v1 concentration model).
+        // Any rest ends a sustained spell (the v1 concentration model). The
+        // release itself runs through the shared clearSustainedSpellState below
+        // (the CAST_SPELL/END_COMBAT helper) — the old inline re-implementation
+        // meant a future sustained-effect field would silently miss the rest
+        // path (2026-08-29 audit).
         const endedSustained = state.character.sustainedSpell || null;
 
         // Long Rests clear common minor conditions
@@ -313,9 +318,6 @@ export const handlers = {
         if (clearsEarlyDefeat) {
             currentConditions = currentConditions.filter(c => c.toLowerCase() !== 'unconscious');
         }
-        if (endedSustained?.condition && endedSustained.targetType !== 'companion') {
-            currentConditions = currentConditions.filter(c => String(c).toLowerCase() !== String(endedSustained.condition).toLowerCase());
-        }
 
         // Companions rest too (dead ones excepted): full heal on a long rest,
         // 25% of maxHp (min 1) on a short one. Computed before the message so
@@ -326,19 +328,11 @@ export const handlers = {
             const companionHp = isLong
                 ? maxHp
                 : Math.min(maxHp, (companion.hp || 0) + Math.max(1, Math.ceil(maxHp * 0.25)));
-            const restedCompanion = normalizeCompanion({
+            return normalizeCompanion({
                 hp: companionHp,
                 conditions: isLong ? [] : companion.conditions,
                 status: companionStatus(companionHp, maxHp),
             }, companion);
-            if (endedSustained?.targetId === companion.id) {
-                delete restedCompanion.spellAcBonus;
-                if (endedSustained.condition) {
-                    restedCompanion.conditions = (restedCompanion.conditions || [])
-                        .filter(c => String(c).toLowerCase() !== String(endedSustained.condition).toLowerCase());
-                }
-            }
-            return restedCompanion;
         });
         const companionRecoveries = restedParty
             .filter((companion, i) => (companion.hp ?? 0) > ((state.party || [])[i]?.hp ?? 0))
@@ -347,6 +341,21 @@ export const handlers = {
             ? ` Companions recover: ${companionRecoveries.join(', ')}.`
             : '';
 
+        // The shared sustained-spell release (condition strip on hero or
+        // companion, companion spellAcBonus drop, AC recompute) — one owner
+        // with CAST_SPELL and END_COMBAT.
+        const released = clearSustainedSpellState({
+            ...state.character,
+            currentHP: healed,
+            conditions: currentConditions,
+            classResources: newResources,
+            hitDice: newHitDice,
+            pendingActionSurge: false,
+            ...(newSpellSlots && { spellSlots: newSpellSlots }),
+        }, restedParty, state.inventory);
+        const restedBase = released.character;
+        const finalParty = released.party;
+
         // Build rest message
         const healedAmount = healed - state.character.currentHP;
         const restMsg = {
@@ -354,7 +363,7 @@ export const handlers = {
             timestamp: Date.now(),
             role: 'system',
             content: (isLong
-                ? `**Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${newSpellSlots ? ' Spell slots restored.' : ''}${currentConditions.length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}${companionNote}`
+                ? `**Long Rest** — Fully restored to ${healed} HP. Hit dice recovered. All abilities recharged.${newSpellSlots ? ' Spell slots restored.' : ''}${(restedBase.conditions || []).length < (state.character.conditions || []).length ? ' Conditions cleared.' : ''}${companionNote}`
                 : `**Short Rest** — Recovered ${healedAmount} HP (now ${healed}/${state.character.maxHP}). Short-rest abilities recharged. Hit dice remaining: ${newHitDice.remaining}/${newHitDice.total}.${recoveryNote}${companionNote}`)
                 // Announce the sustained-spell fade — a silent clear leaves the DM
                 // (and player) believing the ward still holds (live playtest #7).
@@ -371,25 +380,6 @@ export const handlers = {
             }),
         };
 
-        const spellFields = {
-            ...(newSpellSlots && { spellSlots: newSpellSlots }),
-            ...(endedSustained && { sustainedSpell: null }),
-        };
-        const restedBase = {
-            ...state.character,
-            currentHP: healed,
-            conditions: currentConditions,
-            classResources: newResources,
-            hitDice: newHitDice,
-            pendingActionSurge: false,
-            ...spellFields,
-        };
-        // Ending a sustained AC buff (Mage Armor / Shield of Faith) must
-        // immediately reflect in the stored armor class.
-        if (endedSustained?.acBonus && endedSustained.targetType !== 'companion') {
-            restedBase.armorClass = computeACFromInventory(state.inventory || [], restedBase);
-        }
-
         return {
             ...state,
             character: healed > 0 ? reviveCharacter({
@@ -397,7 +387,7 @@ export const handlers = {
                 lowLevelDefeat: clearsEarlyDefeat ? false : state.character.lowLevelDefeat,
                 deathSaves: clearsEarlyDefeat ? { successes: 0, failures: 0 } : state.character.deathSaves,
             }) : restedBase,
-            party: restedParty,
+            party: finalParty,
             messages: [...state.messages, restMsg],
             recentRests: rememberLedgerEntry(recentRests, {
                 sourceId: restMeta.sourceId,

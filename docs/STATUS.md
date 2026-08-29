@@ -6,8 +6,30 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-28 (refusal-cascade batch: safety settings, message scrub,
-presence-aware retrieval, NPC record quality — plus the earlier queue sweep + cut-hook fix)._
+_Last updated: 2026-08-29 (same-day queue sweep: the whole 2026-08-29 audit batch cleared —
+3 P1s + 8 P2s across response-parsing, enemy-stats-conditions, spellcasting, chronicler)._
+
+## 2026-08-29 — same-day queue sweep: the whole 2026-08-29 audit batch cleared (3 P1s + 8 P2s)
+
+All open items from the day's two audit runs (the regular Lap-4 rotation plus the
+registry-blind-spot run that first audited spellcasting and the chronicler) fixed in one
+session (DECISIONS.md 2026-08-29 sweep-rulings entry; every item ticked with a dated note).
+**The P1s:** purchases/sells finally routed through `guardedList` (a null element used to
+throw in applyEvents before ANY dispatch, dropping the response's every event);
+opening-initiative foes now obey the fight-starting response's `enemy_condition_updates`
+(the queued exchange's sync applies before the opening loop — a stunned foe can no longer
+attack unimpaired in its ambush slot); and a loaded `sustainedSpell` is catalog-rebuilt
+(`sanitizeSustainedSpell` — a hand-edited acBonus:30 was a permanent unclamped hero AC).
+**Also:** the dead DM-initiative pipeline deleted with the absence pinned; one
+`canonicalEnemyId` + whitelist projections on the remaining enemy spread sites; text-detector
+Pattern 2 verb-gated (no more phantom proposals from recap prose); one shared
+extract→parse→repair walk (`parseBalancedJsonAt`) with the semantic-roll detector gaining
+the repair path; memory_update aliases fold at the boundary; Mass Healing Word / Mass Cure
+Wounds heal up to 3 named allies out of combat via `spell_cast.targets` (prompt contract
+updated); CAST_SPELL gained USE_ITEM's dead-hero guard; TAKE_REST folded onto the shared
+`clearSustainedSpellState`; the chronicler excludes OOC table-talk pairs from saga chapters
+and salvages completed passages as a shorter chapter on mid-run failure (warning surfaced
+in the Journal). 1,862 tests green (+21), lint clean.
 
 ## 2026-08-28 — the refusal-cascade batch (player-reported "sorry, I can't continue" in an adult campaign)
 
@@ -763,7 +785,7 @@ generation + victory echo land.**
 
 ## Strengthening queue & watch items
 
-Open in SCHEDULED_STRENGTHENING.md after the 2026-08-28 sweep: **0 P1s, 0 P2s** — the one
+Open in SCHEDULED_STRENGTHENING.md after the 2026-08-29 sweep: **0 P1s, 0 P2s** — the one
 open line is the NPC pronoun-flip WATCH item (left open by design: prompt fix shipped
 2026-08-09, zero flips since, needs live evidence before more machinery; playtest #9 saw
 zero flips across six NPCs, but no generated art exercised the visual half). Carried

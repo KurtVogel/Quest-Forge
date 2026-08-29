@@ -30,6 +30,28 @@ const SUPPORTED_ENEMY_CONDITIONS = new Set([
     'invisible', 'stunned', 'paralyzed', 'unconscious',
 ]);
 
+/**
+ * Canonical `enemy-…` id for a DM-declared foe, unique within one fight via
+ * `usedIds`. ONE implementation shared by the parser boundary
+ * (validateCombatStart) and the reducer (START_COMBAT) — they were byte-
+ * identical duplicates whose suffix/prefix policy could silently drift
+ * (2026-08-29 audit).
+ */
+export function canonicalEnemyId(enemy, index, usedIds) {
+    const fragment = String(enemy?.id || enemy?.name || index + 1)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80) || String(index + 1);
+    const base = fragment.startsWith('enemy-') ? fragment : `enemy-${fragment}`;
+    let id = base;
+    let suffix = 2;
+    while (usedIds.has(id)) id = `${base}-${suffix++}`;
+    usedIds.add(id);
+    return id;
+}
+
 /** Bounded, normalized conditions that the combat engine knows how to resolve. */
 export function normalizeEnemyConditions(value) {
     if (!Array.isArray(value)) return [];

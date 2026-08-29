@@ -120,7 +120,7 @@ export default function JournalPanel({ isOpen, onClose }) {
             const chapterAction = { type: 'ADD_CHRONICLE_CHAPTER', payload: chapter };
             dispatch(chapterAction);
             setChapterTitle('');
-            setChronicleStatus('Chapter written.');
+            setChronicleStatus(chapter.warning || 'Chapter written.');
             await flushAutoSave({ action: chapterAction });
         } catch (error) {
             setChronicleStatus(error.message || 'The chronicler failed.');

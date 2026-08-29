@@ -34,9 +34,17 @@ function sanitizeStoredExchangeResult(result) {
                 ? { ...result.postState.player }
                 : null,
             enemies: Array.isArray(result.postState.enemies)
+                // enemySnapshot's exact projection — a hostile save's junk keys on a
+                // stored exchange result must not survive load and re-persist
+                // (the sanitizeLoadedEnemy whitelist policy, 2026-08-29 audit).
                 ? result.postState.enemies.slice(0, 30).map(enemy => ({
-                    ...enemy,
+                    id: enemy?.id,
+                    name: enemy?.name,
+                    hp: enemy?.hp,
+                    maxHp: enemy?.maxHp,
+                    condition: enemy?.condition,
                     conditions: normalizeEnemyConditions(enemy?.conditions),
+                    status: enemy?.status,
                 }))
                 : [],
             companions: Array.isArray(result.postState.companions)

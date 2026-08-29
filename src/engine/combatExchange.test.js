@@ -850,6 +850,43 @@ describe('Opening Initiative', () => {
         )).toBe(true);
     });
 
+    it('applies the queued exchange\'s condition sync before the opening acts (2026-08-29 audit)', () => {
+        // The fight-starting response synced "Frozen" as paralyzed via
+        // enemy_condition_updates riding the QUEUED exchange — which resolves
+        // only after the opening, so the foe used to attack unimpaired in its
+        // opening slot (the 2026-07-13 incapacitated-foe class, opening lane).
+        const openingState = state({
+            enemies: [enemy('Frozen'), enemy('Loose')],
+            combat: {
+                phase: COMBAT_PHASES.OPENING,
+                openingActorIds: ['Frozen', 'Loose'],
+                turnOrder: [
+                    { type: 'enemy', id: 'Frozen', name: 'Frozen', initiative: 19 },
+                    { type: 'enemy', id: 'Loose', name: 'Loose', initiative: 17 },
+                    { type: 'player', name: 'Vesa', initiative: 15 },
+                ],
+                queuedExchange: normalizeCombatExchange({
+                    player_slots: [{ action: 'pass' }],
+                    enemy_condition_updates: [{ enemy_id: 'Frozen', add: ['paralyzed'] }],
+                }),
+            },
+        });
+        rollQueue.push(15, 2); // Loose only: to-hit, damage
+
+        const plan = planOpeningExchange(openingState);
+        expect(plan.ok).toBe(true);
+        const attacks = plan.payload.result.events.filter(event => event.type === 'attack');
+        expect(attacks.map(event => event.actor)).toEqual(['Loose']);
+        expect(plan.payload.result.events.some(event =>
+            event.type === 'note' && event.text.includes('Frozen gains: paralyzed')
+        )).toBe(true);
+        expect(plan.payload.result.events.some(event =>
+            event.type === 'note' && event.text.includes('Frozen is paralyzed and cannot act')
+        )).toBe(true);
+        // The synced condition persists on the committed enemy snapshot.
+        expect(plan.payload.enemies.find(e => e.name === 'Frozen').conditions).toContain('paralyzed');
+    });
+
     it('shares one Uncanny Dodge across all opening enemies against a level 5+ Rogue', () => {
         // Ambush: both enemies won initiative, each resolved by its own per-actor
         // resolveEnemies call — the once-per-turn reaction must still fire only once.

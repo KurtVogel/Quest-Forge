@@ -6,6 +6,7 @@ import { computeACFromInventory, getModifier } from '../../engine/rules.js';
 import { rollDie, rollWithModifier } from '../../engine/dice.ts';
 import { awardExperience, estimateCombatExperience } from '../../engine/progression.js';
 import {
+    canonicalEnemyId,
     clampEnemyAC,
     clampEnemyCurrentHP,
     clampEnemyHP,
@@ -20,21 +21,6 @@ import { initialGameState } from '../initialState.js';
 import { gameReducer } from '../gameReducer.js';
 import { appendRollHistory, clearSustainedSpellState, reviveCharacter, systemMessage } from './shared.js';
 
-function canonicalCombatEnemyId(enemy, index, usedIds) {
-    const fragment = String(enemy?.id || enemy?.name || index + 1)
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 80) || String(index + 1);
-    const base = fragment.startsWith('enemy-') ? fragment : `enemy-${fragment}`;
-    let id = base;
-    let suffix = 2;
-    while (usedIds.has(id)) id = `${base}-${suffix++}`;
-    usedIds.add(id);
-    return id;
-}
-
 function normalizeCombatEnemy(enemy, index, usedIds) {
     const hp = clampEnemyHP(enemy?.hp);
     const ac = clampEnemyAC(enemy?.ac);
@@ -44,14 +30,13 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
     // though the parser already ran); otherwise the roll resolver fills flat defaults at roll
     // time, so older saves whose enemies lack these fields still work.
     const attackProfile = normalizeEnemyAttackProfile(enemy);
-    // Drop the raw attackBonus/damage/saveBonus before spreading so an out-of-range value
-    // can't survive when the validated profile omits it; re-add only the sanitized fields.
-    const { attackBonus: _rawAb, damage: _rawDmg, saveBonus: _rawSb, ...rest } = enemy || {};
     const saveBonus = validateEnemySaveBonus(enemy?.saveBonus);
 
+    // Whitelist projection, no raw spread: every key validateCombatStart emits is
+    // set explicitly below, and an unknown key on this trust boundary must not
+    // survive into combat state — the sanitizeLoadedEnemy policy (2026-08-29 audit).
     return {
-        ...rest,
-        id: canonicalCombatEnemyId(enemy, index, usedIds),
+        id: canonicalEnemyId(enemy, index, usedIds),
         name: String(enemy?.name || `Enemy ${index + 1}`).trim().slice(0, 100) || `Enemy ${index + 1}`,
         maxHp: hp,
         hp,

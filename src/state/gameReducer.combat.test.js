@@ -93,6 +93,24 @@ describe('combat start initiative', () => {
         expect(next.combat.phase).toBe('awaiting_player');
     });
 
+    it('whitelists combat_start enemy fields — unknown keys never enter combat state (2026-08-29 audit)', () => {
+        rollQueue.push(4, 12, 9); // enemy, player, companion
+        const next = gameReducer(makeState(), {
+            type: 'START_COMBAT',
+            payload: {
+                enemies: [{
+                    name: 'Goblin', hp: 7, ac: 13,
+                    sneakyPayload: 'persisted-through-every-autosave',
+                    __proto__pollution: true,
+                }],
+            },
+        });
+        const enemy = next.combat.enemies[0];
+        expect(enemy.sneakyPayload).toBeUndefined();
+        expect(enemy['__proto__pollution']).toBeUndefined();
+        expect(enemy).toMatchObject({ name: 'Goblin', hp: 7, maxHp: 7, ac: 13, combatStatus: 'active' });
+    });
+
     it('creates one Opening Initiative slot for actors who beat the player and queues the initiating action', () => {
         rollQueue.push(18, 10, 9); // enemy, player +2 = 12, companion
         const queuedExchange = {

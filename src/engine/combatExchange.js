@@ -1575,6 +1575,18 @@ export function planOpeningExchange(state) {
     const events = [];
     const rolls = [];
 
+    // The fight-starting response's enemy_condition_updates ride the QUEUED
+    // exchange, which resolves only after the opening — so a foe the DM synced
+    // as stunned/prone in that same response used to act unimpaired in its
+    // opening slot (the 2026-07-13 incapacitated-foe class, opening lane —
+    // 2026-08-29 audit). Apply the condition sync (never the intents) before
+    // the initiative winners act; the queued exchange re-applying the same
+    // delta later is a no-op, so nothing double-fires.
+    for (const update of state.combat.queuedExchange?.enemyConditionUpdates || []) {
+        const enemy = findByRef(enemies, update.target);
+        if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, update, events);
+    }
+
     let playerHp = state.character.currentHP;
     let playerDamage = 0;
     // One Uncanny Dodge for the entire opening round — the per-actor resolveEnemies

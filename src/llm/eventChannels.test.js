@@ -61,6 +61,11 @@ describe('event-channel registry agreement', () => {
             world_facts: [...junk, 'The bridge fell.', { fact: 'The Duke is dead.' }],
             quest_updates: [...junk, { name: 'Find the ferry' }],
             memory_updates: [...junk, { id: 'mem-1', used: true }],
+            // The last two array channels to join the guard (2026-08-29 audit):
+            // a null purchase element used to throw in applyEvents BEFORE any
+            // dispatch, dropping every event the response carried.
+            purchases: [...junk, { itemKey: 'dagger', priceCp: 200 }],
+            sells: [...junk, { itemKey: 'rope', priceCp: 50 }],
         });
         expect(events.npcUpdates).toEqual([{ name: 'Aune' }]);
         expect(events.frontUpdates).toEqual([{ id: 'front-1' }]);
@@ -80,6 +85,49 @@ describe('event-channel registry agreement', () => {
         ]);
         expect(events.questUpdates).toEqual([{ name: 'Find the ferry', status: 'new' }]);
         expect(events.memoryUpdates).toEqual([{ id: 'mem-1', used: true }]);
+        expect(events.purchases).toEqual([{ itemKey: 'dagger', priceCp: 200 }]);
+        expect(events.sells).toEqual([{ itemKey: 'rope', priceCp: 50 }]);
+    });
+
+    it('caps flooded purchase/sell arrays at 6 entries each', () => {
+        const flood = Array.from({ length: 20 }, (_, i) => ({ itemKey: `item-${i}` }));
+        const events = normalizeEvents({ purchases: flood, sells: flood });
+        expect(events.purchases).toHaveLength(6);
+        expect(events.sells).toHaveLength(6);
+    });
+
+    it('folds memory_update aliases to one canonical spelling at the boundary (2026-08-29 audit)', () => {
+        const events = normalizeEvents({
+            memory_updates: [{
+                memory_id: 'mem-7',
+                mark_used: true,
+                emotional_charge: 4,
+                linked_npc_names: ['Aune'],
+                subject: 'the ribbon',
+            }],
+        });
+        expect(events.memoryUpdates).toEqual([{
+            id: 'mem-7',
+            used: true,
+            emotionalCharge: 4,
+            linkedNpcNames: ['Aune'],
+            subject: 'the ribbon',
+        }]);
+    });
+
+    it('spell_cast accepts a bounded targets list for multi-ally casts', () => {
+        const events = normalizeEvents({
+            spell_cast: {
+                spell: 'mass healing word',
+                targets: ['self', 'Mara', 'Brann', 'FourthDropped', 42, null],
+            },
+        });
+        expect(events.spellCasts).toEqual([{
+            spell: 'mass healing word',
+            slotLevel: null,
+            target: 'self',
+            targets: ['self', 'Mara', 'Brann'],
+        }]);
     });
 
     it('keeps an id-only companion removal instead of dropping it', () => {

@@ -8,6 +8,56 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-29 · Queue-sweep rulings: the whole 2026-08-29 audit batch (3 P1s + 8 P2s from
+both runs) fixed in one session.**
+Every open item from the day's two audits (response-parsing + enemy-stats-conditions Lap 4;
+spellcasting + chronicler first-timers) cleared, each ticked in SCHEDULED_STRENGTHENING.md
+with its fix note. The rulings worth recording:
+**(1) purchases/sells join `guardedList`** (plain objects only, cap 6) — the last two array
+channels outside the uniform element-shape guard; a null element used to throw in
+applyEvents before ANY dispatch, silently dropping the whole response's events.
+**(2) The DM initiative pipeline is deleted, not documented.** `validateCombatStart`'s
+per-enemy `initiative` + `player_initiative` acceptance and applyEvents' threading were
+dead end-to-end (START_COMBAT engine-rolls both, pinned by test) — dead code that
+misleadingly implied the DM controls initiative on the one stat family the engine owns
+outright. The parser now pins the fields ABSENT.
+**(3) Opening-initiative foes obey the fight-starting response's condition sync.**
+`planOpeningExchange` applies `queuedExchange.enemyConditionUpdates` (sync only, never
+intents) before the initiative winners act; the delta is change-only, so the queued
+exchange re-applying it after the opening is a no-op. A stunned/prone foe declared in the
+combat-starting response can no longer attack unimpaired in its opening slot.
+**(4) One `canonicalEnemyId`, whitelists on every enemy trust boundary.** The byte-identical
+parser/reducer id builders folded into `engine/enemyStats.js`; `normalizeCombatEnemy` and
+`sanitizeStoredExchangeResult`'s postState enemies became whitelist projections (the
+sanitizeLoadedEnemy policy) instead of raw spreads.
+**(5) Text-detector Pattern 2 requires a request verb**, like Pattern 1 — the bare
+"[Skill] check" noun phrase minted phantom DC-10 proposals from recap prose; genuinely
+verb-less prose requests remain the semantic detector + arbiter's job. Pattern 2 still
+earns its keep on verb-adjacent phrasings Pattern 1's "a/an" article misses.
+**(6) One extract→parse→repair walk** (`parseBalancedJsonAt` in jsonExtractor) behind the
+unfenced-anchor loop, `parseJsonObjectLoose`, and `detectSemanticTextRolls` — the detector
+lane finally gets the repair path every sibling machinery consumer had; memory_update
+aliases fold to canonical camelCase at the parser boundary (storyMemory keeps its belt for
+non-parser dispatchers).
+**(7) Loaded `sustainedSpell` mechanics are catalog-rebuilt** (`sanitizeSustainedSpell`):
+acBonus/condition always come from `findSpell(key)`, unknown/non-sustained keys drop —
+the 2026-08-05 AC-clamp class closed on its last open lane. CAST_SPELL also gained
+USE_ITEM's dead-hero guard (a heal aimed only at the corpse rejects pre-spend; a mixed
+multi-target cast heals the living and skips the dead visibly).
+**(8) upTo3 ally spells work out of combat**: `spell_cast` carries a bounded `targets`
+list, CAST_SPELL rolls per recipient like the combat resolver, prompt contract updated —
+Mass Healing Word's promised post-fight party heal was mechanically impossible outside a
+fight. TAKE_REST's inline sustained-release re-implementation folded onto the shared
+`clearSustainedSpellState`.
+**(9) The chronicler respects table privacy and salvages paid work**: OOC table-talk
+pairs are excluded from saga chapters (the RAG/Scribe/window exclusion extended to the
+last reader of raw messages), and a mid-run passage failure now closes a SHORTER chapter
+over the completed passages (toIndex = last retold message; `warning` surfaced in the
+Journal) instead of discarding paid DM-model output — a first-chunk failure still throws.
+1,862 tests green (+21), lint clean.
+
+---
+
 **2026-08-28 · The refusal-cascade batch: the app declares its content policy to Gemini,
 refusals become scrubbable, dark canon goes dormant-not-deleted in retrieval, and NPC
 records stop accreting/flickering.**

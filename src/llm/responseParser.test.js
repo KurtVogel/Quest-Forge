@@ -280,17 +280,24 @@ describe('defenses against LLM misbehavior', () => {
         expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'skill_check', skill: 'perception', dc: 10 });
     });
 
-    it('detects a standalone "[Skill] check" phrase without a roll verb', () => {
-        // Deliberately no outcome language here — narrating a result ("reveals...",
-        // "you notice...") before dice exist is the pre-narrated-outcome failure mode
-        // this parser is supposed to catch, not something a clean roll request looks like.
-        const { events } = parseResponse('A Perception check is called for as you scan the room.');
+    it('detects a "[Skill] check" phrase near a request verb Pattern 1 misses', () => {
+        // "make one final ... check" dodges Pattern 1's required "a/an" article;
+        // Pattern 2 catches it because a request verb precedes the skill noun.
+        const { events } = parseResponse('You make one final Perception check as you scan the room.');
         expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'skill_check', skill: 'perception' });
     });
 
-    it('detects a standalone "[Skill] saving throw" phrase as a saving_throw', () => {
-        const { events } = parseResponse('A constitution saving throw is called for as the poison spreads.');
+    it('detects a "[Skill] saving throw" near a request verb as a saving_throw', () => {
+        const { events } = parseResponse('Give me one constitution saving throw as the poison spreads.');
         expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'saving_throw', skill: 'constitution' });
+    });
+
+    it('does NOT mint a phantom proposal from verb-less recap prose (2026-08-29 audit)', () => {
+        // "your earlier Perception check served you well" is a recap, not a
+        // request — the old bare-noun Pattern 2 staged a visible DC-10 proposal
+        // from it that only a Challenge or the arbiter could walk back.
+        const { events } = parseResponse('Your earlier Perception check served you well; the corridor holds no more surprises.');
+        expect(events?.requestedRolls ?? []).toEqual([]);
     });
 });
 
@@ -304,8 +311,10 @@ describe('combat_start validation', () => {
         expect(enemy.hp).toBeGreaterThan(0);
         expect(enemy.ac).toBeGreaterThan(0);
         expect(enemy.conditions).toEqual([]);
-        expect(enemy.initiative).toBeGreaterThanOrEqual(1);
-        expect(enemy.initiative).toBeLessThanOrEqual(20);
+        // Initiative is engine-owned: the DM-supplied values are not accepted
+        // and no fallback is minted here (dead pipeline deleted 2026-08-29).
+        expect(enemy.initiative).toBeUndefined();
+        expect(events.combatStart.player_initiative).toBeUndefined();
     });
 
     it('rejects combat_start with no valid enemies', () => {
@@ -704,6 +713,21 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'REMOVE_ITEM_BY_NAME' }));
     });
 
+    it('survives a null purchase element without dropping the response\'s other events (2026-08-29 audit)', () => {
+        // A "purchases": [null, …] used to throw on `p.itemKey` in applyEvents
+        // BEFORE any dispatch — the narrative was already committed, so every
+        // event the response carried (quest closures, coins, the valid
+        // purchases) vanished with only the generic error line.
+        const dispatch = run({
+            purchases: [null, { itemKey: 'torch' }],
+            sells: ['junk-string-entry', { itemKey: 'dagger' }],
+            quest_updates: [{ name: 'Buy supplies', status: 'completed' }],
+        });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'PURCHASE_ITEM', payload: { itemKey: 'torch' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'SELL_ITEM', payload: { itemKey: 'dagger' } });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'COMPLETE_QUEST' }));
+    });
+
     it('passes source and player-message metadata to sell transactions when available', () => {
         const { events } = parseResponse(fence({ sell: { itemKey: 'dagger' } }));
         const dispatch = vi.fn();
@@ -1052,6 +1076,14 @@ describe('detectSemanticTextRolls', () => {
         sendMessage.mockResolvedValue('{ requested_rolls: [broken] }');
         const rolls = await detectSemanticTextRolls('Make an Insight check to read her.', { apiKey: 'k', llmProvider: 'gemini' });
         expect(rolls).toBeNull();
+    });
+
+    it('repairs a truncated detector response instead of silently dropping it (2026-08-29 audit)', async () => {
+        // Every sibling machinery consumer gets the repair path via the shared
+        // loose parser; this lane used raw JSON.parse until the consolidation.
+        sendMessage.mockResolvedValue('{"requested_rolls": [{"type": "skill_check", "skill": "insight", "dc": 12');
+        const rolls = await detectSemanticTextRolls('Make an Insight check to read her.', { apiKey: 'k', llmProvider: 'gemini' });
+        expect(rolls).toEqual([{ type: 'skill_check', skill: 'insight', dc: 12 }]);
     });
 
     it('returns null when requested_rolls is missing or not an array', async () => {

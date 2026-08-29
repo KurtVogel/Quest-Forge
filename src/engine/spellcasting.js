@@ -65,6 +65,30 @@ export function sanitizeSpellSlots(level, value) {
     return buildSpellSlots(level, value && typeof value === 'object' ? value : null);
 }
 
+/**
+ * Rebuild a loaded sustainedSpell from the catalog. The mechanical fields
+ * (acBonus, condition) come from `findSpell(key)`, never from the save — a
+ * hand-edited `{key:'mageArmor', acBonus:30}` used to flow raw into
+ * computeACFromInventory as a permanent unclamped hero AC (the 2026-08-05
+ * AC-clamp class, missed on the sustained-buff lane — 2026-08-29 audit).
+ * Unknown or non-sustained keys drop to null.
+ */
+export function sanitizeSustainedSpell(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const spell = findSpell(raw.key);
+    if (!spell?.sustained) return null;
+    const targetType = raw.targetType === 'companion' ? 'companion' : 'self';
+    return {
+        key: spell.key,
+        name: spell.name,
+        ...(spell.acBonus && { acBonus: spell.acBonus }),
+        ...(spell.condition && { condition: spell.condition }),
+        targetType,
+        ...(targetType === 'companion' && raw.targetId != null && { targetId: raw.targetId }),
+        ...(targetType === 'companion' && raw.targetName && { targetName: String(raw.targetName).slice(0, 100) }),
+    };
+}
+
 export function getSpellSaveDC(character) {
     const ability = getCastingAbility(character?.class);
     return 8 + getProficiencyBonus(character?.level || 1) + getModifier(character?.abilityScores?.[ability] || 10);
@@ -204,7 +228,7 @@ export function describeSpellcastingForPrompt(character) {
         if (!targeting) return '';
         if (targeting.side === 'self') return ', self';
         const noun = targeting.side === 'ally' ? 'ally' : 'foe';
-        if (targeting.mode === 'upTo3') return `, up to 3 ${noun === 'ally' ? 'allies' : 'foes'}`;
+        if (targeting.mode === 'upTo3') return `, up to 3 ${noun === 'ally' ? 'allies' : 'foes'} via "targets"`;
         if (targeting.mode === 'darts') return ', 3 darts (+1 per upcast level) — splittable among foes via "targets"';
         return `, ONE ${noun}`;
     };

@@ -34,7 +34,6 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                 type: 'START_COMBAT',
                 payload: {
                     enemies: events.combatStart.enemies || [],
-                    playerInitiative: events.combatStart.player_initiative,
                     surprise: events.combatStart.surprise,
                     queuedExchange: events.combatExchange,
                 },
@@ -369,7 +368,6 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             type: 'START_COMBAT',
             payload: {
                 enemies: events.combatStart.enemies || [],
-                playerInitiative: events.combatStart.player_initiative,
                 surprise: events.combatStart.surprise,
             },
         });

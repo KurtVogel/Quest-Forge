@@ -14,6 +14,7 @@
  * the previous passage for seamless continuation, then passages concatenate.
  */
 import { sendMessage } from './adapter.js';
+import { isTableTalkMessage } from './tableTalk.js';
 
 export const CHRONICLE_MIN_MESSAGES = 6;
 const CHUNK_SIZE = 30;
@@ -38,11 +39,38 @@ function stripEventBlocks(text) {
     return String(text || '').replace(/```json[\s\S]*?```/g, '').trim();
 }
 
+/**
+ * The chronicle-eligible entries of a raw span with their RAW message indexes
+ * (salvaged shorter-span chapters need the true toIndex): visible play only,
+ * minus OOC table talk — a table-talk turn is excluded from RAG, the Scribe,
+ * and the DM window by design, and its recap/rules exchange must not be retold
+ * as story either (2026-08-29 audit). The player's table-talk message and its
+ * immediately following assistant reply skip together.
+ */
+function collectChapterEntries(messages = [], fromIndex = 0, toIndex = Infinity) {
+    const entries = [];
+    let skipNextAssistant = false;
+    (messages || []).forEach((m, index) => {
+        if (index < fromIndex || index > toIndex) return;
+        if (!m || m.hidden || m.deleted || typeof m.content !== 'string' || !m.content.trim()) return;
+        if (m.role === 'user') {
+            skipNextAssistant = false;
+            if (isTableTalkMessage(m.content)) {
+                skipNextAssistant = true;
+                return;
+            }
+        } else if (m.role === 'assistant' && skipNextAssistant) {
+            skipNextAssistant = false;
+            return;
+        }
+        entries.push({ message: m, index });
+    });
+    return entries;
+}
+
 /** The chronicle-eligible messages of a raw span: visible play only. */
 export function collectChapterMessages(messages = [], fromIndex = 0, toIndex = Infinity) {
-    return (messages || [])
-        .slice(fromIndex, toIndex === Infinity ? undefined : toIndex + 1)
-        .filter(m => m && !m.hidden && !m.deleted && typeof m.content === 'string' && m.content.trim());
+    return collectChapterEntries(messages, fromIndex, toIndex).map(entry => entry.message);
 }
 
 function renderTranscript(chunk, heroName) {
@@ -66,7 +94,7 @@ export async function writeChronicleChapter({ state, title = '', onProgress = nu
     const chapters = state.chronicle || [];
     const fromIndex = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) + 1 : 0;
     const toIndex = (state.messages || []).length - 1;
-    const eligible = collectChapterMessages(state.messages, fromIndex, toIndex);
+    const eligible = collectChapterEntries(state.messages, fromIndex, toIndex);
     if (eligible.length < CHRONICLE_MIN_MESSAGES) {
         throw new Error('Not enough new play to close a chapter yet — keep adventuring first.');
     }
@@ -79,6 +107,7 @@ export async function writeChronicleChapter({ state, title = '', onProgress = nu
     }
 
     const passages = [];
+    let salvaged = false;
     for (let i = 0; i < chunks.length; i++) {
         if (onProgress) onProgress(`Writing passage ${i + 1} of ${chunks.length}…`);
         const previousTail = passages.length > 0
@@ -88,28 +117,49 @@ export async function writeChronicleChapter({ state, title = '', onProgress = nu
             `HERO: ${heroName}`,
             premise ? `CAMPAIGN PREMISE (background canon, not events of this span): ${premise}` : null,
             previousTail ? `PREVIOUS PASSAGE (continue seamlessly, do not recap):\n…${previousTail}` : null,
-            `TRANSCRIPT OF THIS SPAN:\n${renderTranscript(chunks[i], heroName)}`,
+            `TRANSCRIPT OF THIS SPAN:\n${renderTranscript(chunks[i].map(entry => entry.message), heroName)}`,
         ].filter(Boolean).join('\n\n');
 
-        const response = await sendMessage({
-            provider: settings.llmProvider,
-            apiKey: settings.apiKey,
-            model: settings.model,
-            systemPrompt: CHRONICLER_PROMPT,
-            messageHistory: [],
-            userMessage,
-            temperature: 0.8, // narrative voice, but bound to transcript facts
-        });
-        const passage = stripEventBlocks(response);
-        if (!passage) throw new Error('The chronicler returned an empty passage.');
-        passages.push(passage);
+        try {
+            const response = await sendMessage({
+                provider: settings.llmProvider,
+                apiKey: settings.apiKey,
+                model: settings.model,
+                systemPrompt: CHRONICLER_PROMPT,
+                messageHistory: [],
+                userMessage,
+                temperature: 0.8, // narrative voice, but bound to transcript facts
+            });
+            const passage = stripEventBlocks(response);
+            if (!passage) throw new Error('The chronicler returned an empty passage.');
+            passages.push(passage);
+        } catch (error) {
+            // Salvage completed passages instead of discarding paid-for DM-model
+            // work: close a SHORTER chapter covering the chunks already written —
+            // toIndex lands on the last retold message, so the next "Close
+            // chapter" resumes exactly there (2026-08-29 audit). A first-chunk
+            // failure still throws: there is nothing to keep.
+            if (passages.length === 0) throw error;
+            console.warn(`[Chronicler] Passage ${i + 1} of ${chunks.length} failed (${error.message || error}) — salvaging the ${passages.length} completed passage(s) as a shorter chapter.`);
+            salvaged = true;
+            break;
+        }
     }
+
+    const lastCoveredChunk = chunks[passages.length - 1];
+    const coveredToIndex = salvaged
+        ? lastCoveredChunk[lastCoveredChunk.length - 1].index
+        : toIndex;
 
     return {
         title: String(title || '').trim().slice(0, 80) || `Chapter ${chapters.length + 1}`,
         text: passages.join('\n\n').slice(0, CHAPTER_TEXT_MAX),
         fromIndex,
-        toIndex,
+        toIndex: coveredToIndex,
+        ...(salvaged && {
+            salvaged: true,
+            warning: 'The chronicler failed partway — the completed passages were kept as a shorter chapter. Close another chapter to retell the rest.',
+        }),
     };
 }
 
