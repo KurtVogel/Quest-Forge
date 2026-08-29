@@ -64,6 +64,8 @@ it under Process notes.
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-08-20 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-08-08 |
 | chat-orchestration | `components/Chat/ChatPanel.jsx`, `llm/turnOrchestrator.js` (turn pipeline, `applyEvents`, message window) | 2026-08-19 |
+| spellcasting | `engine/spellcasting.js`, `data/spells.js`, `state/handlers/spellcasting.js`, rest/sustained interplay | 2026-08-29 |
+| chronicler | `llm/chronicler.js`, chronicle reducer paths + Journal Chronicle tab | 2026-08-29 |
 
 ## Coverage Snapshot
 
@@ -361,6 +363,12 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (response-parsing, 2026-08-29): text-detector Pattern 2 mints a phantom DC-10 check proposal from recap prose — a JSON-less narrative containing "your earlier Perception check served you well" stages a visible roll proposal; require a request verb like Pattern 1, or drop Pattern 2 (semantic detector + arbiter cover prose requests) — `llm/responseParser.js:91-99`.
 - [ ] **P2** (response-parsing, 2026-08-29): extractor consolidation — the unfenced-anchor loop re-implements `parseJsonObjectLoose` because it needs `startIndex`, and `detectSemanticTextRolls` parses without the repair path every sibling machinery consumer gets; extend `parseJsonObjectLoose` to return `startIndex` and route both through it — `llm/responseParser.js:134-150,260-268`, `llm/utils/jsonExtractor.js:19-41`.
 - [ ] **P2** (response-parsing, 2026-08-29): `normalizeMemoryUpdate` passes snake_case AND camelCase twins through (`memoryId`/`memory_id`, `markUsed`/`mark_used`, …) so downstream re-handles all three spellings; fold aliases at the boundary like the exchange normalizer — `llm/eventChannels.js:240-259`, `engine/storyMemory.js:167,181`.
+- [ ] **P1** (spellcasting, 2026-08-29): a loaded `sustainedSpell` is never validated against the catalog — `healLoadedCharacter` keeps any object with a `key` and `computeACFromInventory` adds its `acBonus` raw, so a hand-edited save `{key:'mageArmor', acBonus:30}` grants a permanent unclamped hero AC (the 2026-08-05 AC-clamp class, missed on the sustained-buff lane); rebuild acBonus/condition from `findSpell(key)`, drop unknown keys — `state/migrations.js:249-255`, `engine/rules.js:110-112`.
+- [ ] **P1** (spellcasting, 2026-08-29): `upTo3` ally spells are single-target out of combat — `normalizeSpellCasts` has no `targets` array and CAST_SPELL reads one `target`, while the catalog + caster prompt block advertise "up to 3 allies" for Mass Healing Word / Mass Cure Wounds (both out-of-combat available; post-fight party heal is their natural use). Accept `targets` and roll per catalog (the darts pattern) — `llm/eventChannels.js:222-238`, `state/handlers/spellcasting.js:96-105`, `llm/promptBuilder.js:414`.
+- [ ] **P2** (spellcasting, 2026-08-29): CAST_SPELL healing lacks USE_ITEM's dead-hero guard — a DM-emitted cure wounds on an `isDead` hero heals the corpse into currentHP>0 + isDead; add the guard twin — `state/handlers/spellcasting.js:111-127` vs `state/handlers/inventory.js:210`.
+- [ ] **P2** (spellcasting, 2026-08-29): TAKE_REST re-implements `clearSustainedSpellState` inline (condition strip, companion buff strip, AC recompute) instead of calling the shared helper CAST_SPELL/END_COMBAT use — drift risk for future sustained-effect fields — `state/handlers/resources.js:316-318,334-341,389-391`, `state/handlers/shared.js:292-310`.
+- [ ] **P2** (chronicler, 2026-08-29): OOC table talk leaks into saga chapters — excluded from RAG/Scribe/DM window by design but the chronicler reads raw messages with no filter or prompt rule; skip a table-talk user message + its following assistant reply via `isTableTalkMessage` in `collectChapterMessages` — `llm/chronicler.js:42-46`, `llm/tableTalk.js`.
+- [ ] **P2** (chronicler, 2026-08-29): no partial-progress salvage — a mid-run passage failure discards completed passages and re-pays them on retry, and the failure paths (mid-run throw, empty passage, 60k clamp) are exactly the untested ones — `llm/chronicler.js:82-106`.
 
 ## Entry template
 
@@ -384,6 +392,32 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-29 — spellcasting + chronicler (Lap 1: correctness & test depth — newly registered features) — second run
+
+`npm test`: 1841 passing / 95 files (green)
+
+### spellcasting
+- **Scope examined:** `engine/spellcasting.js` + `data/spells.js` end to end; `state/handlers/spellcasting.js` (CAST_SPELL); TAKE_REST slot/sustained interplay (`resources.js:280-318,334-341,374-391`); `clearSustainedSpellState`; applyEvents spell path (`:113-118,341-343` — cast-before-combat_start ordering confirmed); `healLoadedCharacter` (`migrations.js:248-256`); both suites (23 tests).
+- **Findings:**
+  - **P1**: a loaded `sustainedSpell` is never validated against the catalog — `healLoadedCharacter` keeps any object bearing a `key` (`migrations.js:249-255`) and `computeACFromInventory` adds its `acBonus` raw (`rules.js:110-112`). A hand-edited/hostile save `{key:'mageArmor', acBonus:30, targetType:'self'}` gives the hero a permanent unclamped AC — the exact channel class the 2026-08-05 AC-clamp sweep closed for items and the companion 21-cap closed for allies, missed on the sustained-buff lane. The existing LOAD test pins only the key-LESS junk drop; in-band poison survives. Rebuild `acBonus`/`condition` from `findSpell(key)`, drop unknown keys.
+  - **P1**: `upTo3` ally spells are single-target out of combat — `normalizeSpellCasts` carries no `targets` array (`eventChannels.js:222-238`), CAST_SPELL reads one `target`, and RESPONSE_FORMAT documents single-target only (`promptBuilder.js:414`) — while the catalog and the caster's own prompt block advertise "up to 3 allies" for Mass Healing Word / Mass Cure Wounds (both `outOfCombatAvailable: true`, and heal-the-party-after-the-fight is their natural use). A multi-name target ("Mara and Brann") matches no companion and rejects visibly; the promised group heal cannot mechanically happen outside combat. Mirror the darts pattern: accept `targets`, roll per catalog.
+  - **P2**: CAST_SPELL healing lacks USE_ITEM's dead-hero guard (`inventory.js:210` vs none in `spellcasting.js:111-127`) — a DM-emitted cure wounds on an `isDead` hero heals the corpse into a currentHP>0 + isDead zombie state (`reviveCharacter` clears dying only, by design).
+  - **P2**: TAKE_REST re-implements `clearSustainedSpellState` inline (condition strip `:316-318`, companion buff strip `:334-340`, conditional AC recompute `:389-391`) instead of calling the shared helper CAST_SPELL/END_COMBAT use (`shared.js:292-310`) — a future sustained-effect field silently misses the rest path.
+  - Clean bill otherwise: slot table RAW-correct for 1-10 + freeze; spent slots survive level-ups; the spell replay ledger (exact + nearby + conversational distance + player-recast bypass) is the mature pattern; the 08-28 long-rest slot mint pinned both ways; suite coverage of the lifecycle is genuinely good.
+- **Suggested improvements:** (1) catalog-validate loaded sustainedSpell; (2) out-of-combat `targets` support for upTo3 ally spells; (3) dead-hero cast guard; (4) fold TAKE_REST onto the shared clear helper.
+
+### chronicler
+- **Scope examined:** `llm/chronicler.js` end to end; `appendChronicleChapter`/ADD_CHRONICLE_CHAPTER (`worldMemory.js:39-51,171-178`); JournalPanel write/export flow; message-index stability across saves (`persistence.js:173-190` — full array persisted, `prunedMessageCount` is metadata only); `chronicler.test.js` (8 tests).
+- **Findings:**
+  - Sound core: chapter spans anchor on raw indexes and those are stable by construction (saves keep every message; DELETE_MESSAGE is soft precisely so indexes never shift); a mid-run throw dispatches nothing (no corruption); the `writingChapter` flag guards double-writes; the dispatch rides `flushAutoSave({action})`.
+  - **P2**: OOC table talk leaks into the saga — table-talk exchanges are deliberately excluded from RAG, the Scribe, and the DM window, but the chronicler reads raw messages with no exclusion and no prompt instruction: an OOC recap or rules question is retold as story. `isTableTalkMessage` is deterministic and exported — skip a table-talk user message plus its immediately following assistant reply in `collectChapterMessages` — `llm/chronicler.js:42-46`, `llm/tableTalk.js`.
+  - **P2**: no partial-progress salvage — chunk 3-of-5 throwing discards passages 1-2 and the retry re-pays them on the DM model (a long backlog writes many sequential ~120k-char calls); and the untested paths cluster exactly there: mid-run failure, the empty-passage throw, and the 60k chapter clamp — `llm/chronicler.js:82-106`.
+- **Suggested improvements:** (1) table-talk filter; (2) salvage completed passages on failure (dispatch a shorter-span chapter or cache passages for retry) + tests for the failure paths.
+
+### Process notes
+- Run at user request with a deliberate brief: find what the system itself has been blind to. Answer: the Feature Registry had NO row for two whole subsystems, so the rotation never visited them — spellcasting (shipped 2026-07-17) and the chronicler (shipped 2026-07-26). Both added to the registry below and audited here as first-timers (Lap 1 lens), while the main rotation continues Lap 4.
+- Remaining registry near-gaps noted for future consideration, not added now: `engine/locationRegistry.js` and `engine/npcRoster.js` are audited only implicitly (via living-world / scribe scopes) despite being live-playtest hotspots; `engine/replayLedger.js` likewise rides inventory-economy.
 
 ## 2026-08-29 — response-parsing + enemy-stats-conditions (Lap 4: simplification & design)
 
