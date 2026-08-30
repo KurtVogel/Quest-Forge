@@ -698,6 +698,12 @@ export function buildStoryMemoryPromotion(npc = {}) {
     const salience = npc.pinned ? 5 : ((tension || stance) ? 4 : 3);
 
     return {
+        // Stable identity (2026-08-30 P1): the promotion's type flips with the
+        // dossier (agenda-only → npcAgenda, any stance/tension → relationship)
+        // while every non-id match rung requires SAME type — without a stable
+        // id, the flip stranded the old-type card as an immortal stale twin
+        // (salience 3 is dormancy-exempt). The id rung matches across types.
+        ...(npc.id && { id: `npc-bond-${npc.id}` }),
         type: (tension || stance) ? 'relationship' : (agenda ? 'npcAgenda' : 'callback'),
         text,
         subject: name,
@@ -708,6 +714,48 @@ export function buildStoryMemoryPromotion(npc = {}) {
         location: cleanText(npc.basedIn) || cleanText(npc.lastLocation) || undefined,
         source: 'npc_roster',
     };
+}
+
+/**
+ * Load-time heal for promotion cards stranded before the stable-id fix above
+ * (2026-08-30 P1): a roster NPC whose dossier type flipped left one stale
+ * `npc_roster` card per type transition, never matched again. Same-subject
+ * roster promotions are ONE card by construction — keep the newest snapshot
+ * (a promotion always replaces text wholesale, so the newest IS the current
+ * dossier), drop the stranded twins, and stamp the survivor with its stable
+ * `npc-bond-` id so future promotions match by the id rung. Idempotent.
+ */
+export function healPromotedStoryMemoryTwins(storyMemory = [], npcs = []) {
+    const cards = Array.isArray(storyMemory) ? storyMemory : [];
+    const groups = new Map();
+    cards.forEach((card, index) => {
+        if (card?.source !== 'npc_roster') return;
+        const key = cleanText(card.subject).toLowerCase();
+        if (!key) return;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(index);
+    });
+
+    const drop = new Set();
+    const reId = new Map();
+    for (const indexes of groups.values()) {
+        let keep = indexes[0];
+        for (const index of indexes) {
+            if ((cards[index].lastSeenAt || 0) > (cards[keep].lastSeenAt || 0)) keep = index;
+        }
+        for (const index of indexes) {
+            if (index !== keep) drop.add(index);
+        }
+        const npc = (Array.isArray(npcs) ? npcs : []).find(n => namesMatch(n?.name, cards[keep].subject));
+        if (npc?.id) {
+            const stableId = `npc-bond-${npc.id}`;
+            if (cards[keep].id !== stableId) reId.set(keep, stableId);
+        }
+    }
+    if (drop.size === 0 && reId.size === 0) return cards;
+    return cards
+        .map((card, index) => (reId.has(index) ? { ...card, id: reId.get(index) } : card))
+        .filter((_, index) => !drop.has(index));
 }
 
 /**

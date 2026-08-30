@@ -522,3 +522,77 @@ describe('cadence-stamped relationship arcs (2026-08-28 — "+9 hops in one tave
         expect(stamped.npcs[0].arcDisposition).toBe('wary');
     });
 });
+
+describe('UPDATE_NPC story-memory promotion (reducer-level pins, 2026-08-30)', () => {
+    const introduce = (state, payload) => gameReducer(state, { type: 'UPDATE_NPC', payload });
+
+    it('births ONE stable-id card with a firstSeenMessage stamp', () => {
+        const base = { ...initialGameState, messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'yo' }] };
+        const next = introduce(base, {
+            name: 'Odo Grells',
+            disposition: 'neutral',
+            lastNotes: 'Runs the eel stall by the quay.',
+            agenda: 'Corner the eel market before winter.',
+        });
+        const cards = next.storyMemory.filter(c => c.source === 'npc_roster');
+        expect(cards).toHaveLength(1);
+        expect(cards[0].type).toBe('npcAgenda');
+        expect(cards[0].id).toBe(`npc-bond-${next.npcs[0].id}`);
+        expect(cards[0].firstSeenMessage).toBe(2);
+    });
+
+    it('a later stance UPDATES the same card across the type flip instead of stranding an immortal twin', () => {
+        const born = introduce(initialGameState, {
+            name: 'Odo Grells',
+            disposition: 'neutral',
+            lastNotes: 'Runs the eel stall by the quay.',
+            agenda: 'Corner the eel market before winter.',
+        });
+        const flipped = introduce(born, {
+            name: 'Odo Grells',
+            stanceToPlayer: 'Resents the hero for undercutting his prices.',
+        });
+        const cards = flipped.storyMemory.filter(c => c.source === 'npc_roster');
+        expect(cards).toHaveLength(1);
+        expect(cards[0].type).toBe('relationship');
+        expect(cards[0].text).toContain('Resents the hero');
+        expect(cards[0].id).toBe(`npc-bond-${flipped.npcs[0].id}`);
+    });
+
+    it('the promotion merge replaces the snapshot wholesale (regenerated dossier, not a Scribe re-report)', () => {
+        const born = introduce(initialGameState, {
+            name: 'Odo Grells',
+            disposition: 'neutral',
+            lastNotes: 'Runs the eel stall by the quay.',
+            agenda: 'Corner the eel market before winter with bribes on the quay.',
+        });
+        // `agenda` is a plain-replace dossier field: the regenerated snapshot
+        // legitimately SHRINKS, and the promotion merge must mirror it — the
+        // ADD handler's fragment guard would have kept the stale longer text.
+        const narrowed = introduce(born, {
+            name: 'Odo Grells',
+            agenda: 'Corner the eel market.',
+        });
+        const card = narrowed.storyMemory.find(c => c.source === 'npc_roster');
+        expect(card.text).toBe('Agenda: Corner the eel market.');
+    });
+
+    it('LOAD_GAME heals pre-fix stranded type-twins down to one stable-id card', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...initialGameState,
+                messages: [],
+                npcs: [{ id: 'npc-77', name: 'Odo Grells', disposition: 'neutral', lastNotes: 'Eel merchant.' }],
+                storyMemory: [
+                    { id: 'mem-strand', type: 'npcAgenda', subject: 'Odo Grells', text: 'Agenda: corner the eel market.', source: 'npc_roster', lastSeenAt: 100, salience: 3 },
+                    { id: 'mem-live', type: 'relationship', subject: 'Odo Grells', text: 'Toward the hero: resentful.', source: 'npc_roster', lastSeenAt: 200, salience: 4 },
+                ],
+            },
+        });
+        const cards = next.storyMemory.filter(c => c.source === 'npc_roster');
+        expect(cards).toHaveLength(1);
+        expect(cards[0].text).toBe('Toward the hero: resentful.');
+        expect(cards[0].id).toBe('npc-bond-npc-77');
+    });
+});

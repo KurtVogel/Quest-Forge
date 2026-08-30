@@ -65,10 +65,22 @@ export const handlers = {
                 const idx = findStoryMemoryMatch(storyMemory, promotion);
                 if (idx === -1) {
                     const card = normalizeStoryMemoryCard(promotion);
-                    if (card) storyMemory = [...storyMemory, card];
+                    // Birth stamps firstSeenMessage like ADD_STORY_MEMORY_CARD
+                    // (2026-08-30 audit — the stamp is an invariant of card
+                    // birth, even though promotions are never `witnessed`).
+                    if (card) {
+                        storyMemory = [...storyMemory, { ...card, firstSeenMessage: (state.messages || []).length }];
+                    }
                 } else {
+                    // Deliberate divergence from ADD_STORY_MEMORY_CARD's merge:
+                    // a promotion is a REGENERATED dossier snapshot, so its
+                    // text/salience/charge replace the card wholesale — the
+                    // fragment guard and salience-max are for Scribe re-reports
+                    // of one beat, not for a snapshot that must also SHRINK
+                    // when a stance softens. The promotion's stable id wins so
+                    // a pre-fix `mem-` card migrates to the id rung here.
                     storyMemory = storyMemory.map((card, i) => (
-                        i === idx ? normalizeStoryMemoryCard({ ...promotion, id: card.id }, card) : card
+                        i === idx ? normalizeStoryMemoryCard(promotion, card) : card
                     ));
                 }
             }

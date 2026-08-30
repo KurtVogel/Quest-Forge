@@ -68,3 +68,43 @@ describe('Ability Score Improvement', () => {
         expect(next.messages.at(-1).content).toContain('cannot be raised above 20');
     });
 });
+
+describe('ASI CON heal while the hero is down (2026-08-30 audit)', () => {
+    it('grows maxHP alone while dying — no HP nudge into a not-dying-yet-not-conscious limbo', () => {
+        const next = gameReducer(makeState({
+            currentHP: 0,
+            dying: true,
+            deathSaves: { successes: 1, failures: 1 },
+            conditions: ['Unconscious'],
+        }), {
+            type: 'APPLY_ABILITY_SCORE_IMPROVEMENT',
+            payload: { increases: { strength: 1, constitution: 1 } },
+        });
+
+        expect(next.character.maxHP).toBe(32);
+        expect(next.character.currentHP).toBe(0);
+        expect(next.character.dying).toBe(true);
+        expect(next.character.conditions).toContain('Unconscious');
+    });
+
+    it('never writes currentHP on a dead hero', () => {
+        const next = gameReducer(makeState({ currentHP: 0, isDead: true }), {
+            type: 'APPLY_ABILITY_SCORE_IMPROVEMENT',
+            payload: { increases: { strength: 1, constitution: 1 } },
+        });
+
+        expect(next.character.maxHP).toBe(32);
+        expect(next.character.currentHP).toBe(0);
+        expect(next.character.isDead).toBe(true);
+    });
+
+    it('still raises currentHP alongside maxHP for a hero on their feet', () => {
+        const next = gameReducer(makeState(), {
+            type: 'APPLY_ABILITY_SCORE_IMPROVEMENT',
+            payload: { increases: { constitution: 2 } },
+        });
+
+        expect(next.character.maxHP).toBe(32); // CON 15 → 17 is still a +1 mod step
+        expect(next.character.currentHP).toBe(24);
+    });
+});

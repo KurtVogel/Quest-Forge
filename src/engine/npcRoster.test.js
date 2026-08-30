@@ -11,6 +11,7 @@ import {
     dedupeNpcRoster,
     formatNpcEmbeddingText,
     hasNpcNarrativeWeight,
+    healPromotedStoryMemoryTwins,
     isGenericCreatureName,
     listArchivableFodder,
     locationMatchesPlace,
@@ -543,5 +544,53 @@ describe('namesMatch containment + dedupeNpcRoster (fork guard, 2026-07-23 roman
         expect(npcs).toHaveLength(1);
         expect(npcs[0].name).toBe('Saima Aallotar');
         expect(npcs[0].bondMoments.map(m => m.text)).toContain('She shared his mug and held his gaze.');
+    });
+});
+
+describe('story-memory promotion identity (2026-08-30 P1: type-flip stranded twins)', () => {
+    it('stamps a stable npc-bond id derived from the roster id', () => {
+        const promotion = buildStoryMemoryPromotion({
+            id: 'npc-123-abc',
+            name: 'Maren',
+            rosterTier: 'character',
+            stanceToPlayer: 'Quietly charmed by the hero.',
+        });
+        expect(promotion.id).toBe('npc-bond-npc-123-abc');
+    });
+
+    it('keeps the same id across the agenda → relationship type flip', () => {
+        const npc = { id: 'npc-9', name: 'Odo', rosterTier: 'character', agenda: 'Corner the eel market.' };
+        const agendaCard = buildStoryMemoryPromotion(npc);
+        const flipped = buildStoryMemoryPromotion({ ...npc, stanceToPlayer: 'Resents the hero.' });
+        expect(agendaCard.type).toBe('npcAgenda');
+        expect(flipped.type).toBe('relationship');
+        expect(flipped.id).toBe(agendaCard.id);
+    });
+
+    it('healPromotedStoryMemoryTwins merges stranded same-subject roster cards, keeping the newest snapshot', () => {
+        const cards = [
+            { id: 'mem-old', type: 'npcAgenda', subject: 'Odo', text: 'Agenda: corner the eel market.', source: 'npc_roster', lastSeenAt: 100, salience: 3 },
+            { id: 'mem-scribe', type: 'promise', subject: 'Odo', text: 'Odo promised the hero a boat.', source: 'scribe', lastSeenAt: 150, salience: 4 },
+            { id: 'mem-new', type: 'relationship', subject: 'Odo', text: 'Toward the hero: resentful.', source: 'npc_roster', lastSeenAt: 200, salience: 4 },
+        ];
+        const healed = healPromotedStoryMemoryTwins(cards, [{ id: 'npc-9', name: 'Odo' }]);
+        expect(healed).toHaveLength(2);
+        const roster = healed.find(c => c.source === 'npc_roster');
+        expect(roster.text).toBe('Toward the hero: resentful.');
+        expect(roster.id).toBe('npc-bond-npc-9'); // stamped so the id rung matches from now on
+        expect(healed.find(c => c.id === 'mem-scribe')).toBeTruthy(); // non-roster cards untouched
+    });
+
+    it('healPromotedStoryMemoryTwins is a no-op on healthy pools and without a resolvable NPC keeps ids as-is', () => {
+        const healthy = [
+            { id: 'npc-bond-npc-9', type: 'relationship', subject: 'Odo', text: 'Toward the hero: resentful.', source: 'npc_roster', lastSeenAt: 200 },
+            { id: 'mem-1', type: 'wound', subject: 'the hero', text: 'A scar across the palm.', source: 'scribe', lastSeenAt: 50 },
+        ];
+        expect(healPromotedStoryMemoryTwins(healthy, [{ id: 'npc-9', name: 'Odo' }])).toEqual(healthy);
+
+        const orphan = [
+            { id: 'mem-a', type: 'npcAgenda', subject: 'Vanished One', text: 'Agenda: unknown.', source: 'npc_roster', lastSeenAt: 10 },
+        ];
+        expect(healPromotedStoryMemoryTwins(orphan, [])[0].id).toBe('mem-a');
     });
 });

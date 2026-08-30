@@ -1,5 +1,5 @@
 import { CLASSES } from '../data/classes.js';
-import { getModifier } from './rules.js';
+import { getModifier, perLevelHpGain } from './rules.js';
 import { buildClassResources, getFeaturesForLevel, normalizeAbilityScoreImprovementState, normalizeMartialArchetype } from './characterUtils.js';
 import { buildSpellSlots, isSpellcaster } from './spellcasting.js';
 
@@ -81,9 +81,20 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
     const hitDie = classData?.hitDie || 8;
     const conMod = getModifier(character.abilityScores?.constitution || 10);
     const averageHp = Math.floor(hitDie / 2) + 1;
-    const hpGain = Math.max(1, averageHp + conMod);
+    const hpGain = perLevelHpGain(hitDie, conMod);
     const newLevel = (Number(character.level) || 1) + 1;
     const newMaxHP = character.maxHP + hpGain;
+
+    // Death is permanent (resurrection is deliberately cut): a level crossed by
+    // post-mortem XP (a slainXpOnly loss paying for foes killed before the end)
+    // grows the sheet but must never write currentHP — no "Fully healed!" on a
+    // corpse. And the full heal has REVIVE semantics ("heals revive dying"): a
+    // hero who levels while dying or defeated stands back up — death saves
+    // cannot continue at full HP. Mirrors reviveCharacter in
+    // state/handlers/shared.js (kept inline: importing it here would cycle
+    // progression ⇄ handlers/shared).
+    const isDead = !!character.isDead;
+    const revived = !isDead && (!!character.dying || !!character.lowLevelDefeat);
 
     const newFeatures = getFeaturesForLevel(character.class, newLevel);
     const existingFeatures = character.features || [];
@@ -102,7 +113,13 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
         ...character,
         level: newLevel,
         maxHP: newMaxHP,
-        currentHP: newMaxHP,
+        currentHP: isDead ? character.currentHP : newMaxHP,
+        ...(revived && {
+            dying: false,
+            lowLevelDefeat: false,
+            deathSaves: { successes: 0, failures: 0 },
+            conditions: (character.conditions || []).filter(c => String(c).toLowerCase() !== 'unconscious'),
+        }),
         features: updatedFeatures,
         // Spent uses carry over — newly unlocked resources start fresh, but a
         // level-up mid-day never hands back the day's spent abilities.
@@ -128,12 +145,15 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
         ? `\nNew features: **${newFeatures.join('**, **')}**`
         : '';
     const milestoneMsg = milestone ? ' Milestone level-up.' : '';
+    const healMsg = isDead
+        ? ''
+        : (revived ? ' Fully healed — back on your feet, no longer dying!' : ' Fully healed!');
 
     return {
         character: updatedCharacter,
         message: createSystemMessage(
             'lvl',
-            `**Level Up!** You are now **Level ${newLevel}**!${milestoneMsg} Average HP **${averageHp}** from d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${character.maxHP} → ${newMaxHP}). Fully healed!${featureMsg}`
+            `**Level Up!** You are now **Level ${newLevel}**!${milestoneMsg} Average HP **${averageHp}** from d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${character.maxHP} → ${newMaxHP}).${healMsg}${featureMsg}`
         ),
     };
 }

@@ -50,6 +50,30 @@ function playerMessageSupportsRepeatExpAward(playerMessage) {
     return repeatIntentNearNoun(text, EXP_NOUN_SRC);
 }
 
+/**
+ * One ledger dance for both DM XP lanes — ADD_EXP and LEVEL_UP's riding
+ * bonusExp used to hand-copy it (2026-08-30 audit): probe for a
+ * value-signature duplicate inside the window, honor the exact-source replay
+ * and the player's repeat-intent escape hatch, and record the outcome. Returns
+ * the updated ledger plus whether the award was suppressed — each caller owns
+ * its own player-facing suppression line.
+ */
+function guardExpAwardLedger(recentExpAwards, amount, meta, messageIndex, messages) {
+    const transaction = buildExpAwardTransaction(amount);
+    const sourceId = String(meta.sourceId || '').slice(0, 160);
+    const duplicate = findRecentTransactionDuplicate(
+        recentExpAwards, transaction, sourceId, messageIndex, RECENT_EXP_AWARD_MESSAGE_WINDOW, messages
+    );
+    const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
+    const suppressed = !!duplicate && (exactSourceReplay || !playerMessageSupportsRepeatExpAward(meta.playerMessage));
+    return {
+        recentExpAwards: rememberTransaction(
+            recentExpAwards, transaction, sourceId, messageIndex, suppressed ? 'ignored' : 'applied'
+        ),
+        suppressed,
+    };
+}
+
 export const handlers = {
     START_CHARACTER(state, action) {
         const inventory = Array.isArray(action.payload.inventory) ? action.payload.inventory : [];
@@ -103,11 +127,19 @@ export const handlers = {
         const oldConMod = getModifier(state.character.abilityScores.constitution || 10);
         const newConMod = getModifier(abilityScores.constitution || 10);
         const hpGain = Math.max(0, newConMod - oldConMod) * (state.character.level || 1);
+        // The CON gain raises currentHP only for a hero on their feet: while
+        // dying, defeated, or dead it grows maxHP alone — a sheet-menu click
+        // must never nudge a 0-HP hero into a not-dying-yet-not-conscious limbo
+        // or write HP onto a corpse (2026-08-30 audit; the level-up heal owns
+        // revive semantics, an ability-point spend does not).
+        const heroDown = state.character.isDead || state.character.dying || state.character.lowLevelDefeat;
         const improvedCharacter = {
             ...state.character,
             abilityScores,
             maxHP: state.character.maxHP + hpGain,
-            currentHP: Math.min(state.character.maxHP + hpGain, state.character.currentHP + hpGain),
+            currentHP: heroDown
+                ? state.character.currentHP
+                : Math.min(state.character.maxHP + hpGain, state.character.currentHP + hpGain),
             abilityScoreImprovementsApplied: (state.character.abilityScoreImprovementsApplied || 0) + 1,
             pendingAbilityScoreImprovements: Math.max(0, (state.character.pendingAbilityScoreImprovements || 0) - 1),
         };
@@ -240,24 +272,18 @@ export const handlers = {
         const meta = isDmPath ? (action.payload._meta || {}) : null;
         let recentExpAwards = state.recentExpAwards || [];
         if (meta && amount > 0) {
-            const transaction = buildExpAwardTransaction(amount);
-            const sourceId = String(meta.sourceId || '').slice(0, 160);
-            const messageIndex = currentMessageIndex(state);
-            const duplicate = findRecentTransactionDuplicate(
-                recentExpAwards, transaction, sourceId, messageIndex, RECENT_EXP_AWARD_MESSAGE_WINDOW, state.messages
-            );
-            const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
-            if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatExpAward(meta.playerMessage))) {
+            const guarded = guardExpAwardLedger(recentExpAwards, amount, meta, currentMessageIndex(state), state.messages);
+            recentExpAwards = guarded.recentExpAwards;
+            if (guarded.suppressed) {
                 return {
                     ...state,
-                    recentExpAwards: rememberTransaction(recentExpAwards, transaction, sourceId, messageIndex, 'ignored'),
+                    recentExpAwards,
                     messages: [
                         ...state.messages,
                         systemMessage(`Duplicate XP award ignored — **+${amount} XP** matches an award just granted. If a second identical award is genuinely owed, ask the DM for it again.`),
                     ],
                 };
             }
-            recentExpAwards = rememberTransaction(recentExpAwards, transaction, sourceId, messageIndex);
         }
         const result = awardExperience(state.character, amount, {
             reason: action.reason,
@@ -327,17 +353,11 @@ export const handlers = {
             // observed double-award lands here whenever the recap turn adds
             // level_up: true beside the re-emitted exp_awarded.
             if (bonusExp > 0) {
-                const transaction = buildExpAwardTransaction(bonusExp);
-                const bonusDuplicate = findRecentTransactionDuplicate(
-                    recentExpAwards, transaction, sourceId, messageIndex, RECENT_EXP_AWARD_MESSAGE_WINDOW, state.messages
-                );
-                const exactSourceReplay = !!sourceId && bonusDuplicate?.sourceId === sourceId;
-                if (bonusDuplicate && (exactSourceReplay || !playerMessageSupportsRepeatExpAward(meta.playerMessage))) {
-                    recentExpAwards = rememberTransaction(recentExpAwards, transaction, sourceId, messageIndex, 'ignored');
+                const guarded = guardExpAwardLedger(recentExpAwards, bonusExp, meta, messageIndex, state.messages);
+                recentExpAwards = guarded.recentExpAwards;
+                if (guarded.suppressed) {
                     extraMessages.push(systemMessage(`Duplicate XP award ignored — **+${bonusExp} XP** matches an award just granted; the level-up itself stands.`));
                     bonusExp = 0;
-                } else {
-                    recentExpAwards = rememberTransaction(recentExpAwards, transaction, sourceId, messageIndex);
                 }
             }
         }

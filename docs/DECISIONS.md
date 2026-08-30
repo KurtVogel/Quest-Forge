@@ -8,6 +8,53 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-30 · Queue-sweep rulings: the whole 2026-08-30 audit batch (2 P1s + 4 P2s plus
+two note-level items) fixed in one session.**
+Every open item from the day's two audits (story-memory + vector-memory-rag; progression +
+providers-adapter, both Lap 4) cleared, each ticked in SCHEDULED_STRENGTHENING.md with its
+fix note. The rulings worth recording:
+**(1) The level-up full heal has REVIVE semantics; death stays permanent.** A hero who
+levels while `dying`/`lowLevelDefeat` stands back up (dying cleared, death saves reset,
+Unconscious stripped — death saves cannot continue at full HP), consistent with the
+standing "heals revive dying" rule; an `isDead` hero levels the sheet (post-mortem
+slainXpOnly XP is legitimate) but `currentHP` is never written and no "Fully healed!" is
+claimed — resurrection remains cut. The revive is mirrored inline in progression.js rather
+than importing `reviveCharacter` (a progression ⇄ handlers/shared import cycle).
+**(2) An ability-point spend is not a heal.** APPLY_ABILITY_SCORE_IMPROVEMENT's CON hpGain
+raises `currentHP` only for a hero on their feet; while dying, defeated, or dead it grows
+maxHP alone — a sheet-menu click must never nudge a 0-HP hero into a
+not-dying-yet-not-conscious limbo (revive semantics belong to actual heals and the
+level-up surge, not bookkeeping).
+**(3) Story-memory promotions have a stable identity: `npc-bond-${npc.id}`.** The
+promotion's TYPE flips with the dossier (agenda-only → npcAgenda, any stance →
+relationship) while every non-id match rung requires same type, so each flip stranded the
+old card as an immortal dormancy-exempt twin. The id rung now matches across types, the
+merge stamps the stable id onto legacy `mem-` cards, and `healPromotedStoryMemoryTwins`
+(load path) collapses already-stranded same-subject `npc_roster` twins to the newest
+snapshot. **The promotion merge stays a deliberate wholesale replace** — a regenerated
+dossier snapshot must also SHRINK when a stance/agenda narrows, which the ADD handler's
+fragment guard and salience-max would refuse; the divergence is now documented in place
+and the birth stamps `firstSeenMessage` like every other card birth.
+**(4) Name presence is whole-word, one helper.** `findSubjectsInText` (tagging) and the
+retrieval presence gate shared a raw-substring `includes` that counted "Ash" present in
+"ashes"/"Ashford", quietly re-admitting exactly the person-tied rows the gate means to
+rest; both now run through one Unicode word-boundary helper (unidentifiable names stay
+unjudgeable: skipped by tagging, treated present by the gate).
+**(5) `clearMemories` is TEST/MAINTENANCE-only, by ruling.** Campaign-keyed rows made a
+global wipe needless in every product flow (campaign switch replaces the store, save
+deletion purges per-campaign); the export stays as the test-suite reset hook and console
+escape hatch, documented as such — wire it into UI only as part of an explicit
+reset-all-app-data flow.
+**(6) One SSE reader for all streaming providers.** `llm/providers/sse.js` owns the
+read/decode/split/parse skeleton, the no-finish-reason truncation guard, a
+reason-vocabulary-parameterized completion guard, and the shared HTTP-error factory
+(which also fixes the "[object Object]" fallback for message-less object error bodies);
+Gemini and the OpenAI-compatible factory both consume it, so the factory's own header
+promise — stream-truncation fixes land once — finally covers all three providers. Also
+folded: the duplicated per-level HP term (`perLevelHpGain` in rules.js) and the
+hand-copied bonusExp ledger dance (`guardExpAwardLedger` serving both DM XP lanes).
+1,885 tests green (+16), lint clean.
+
 **2026-08-29 · A long chronicle span closes as MULTIPLE chapters — the 60k slice was
 silently discarding paid-for prose; only the newest chapter is removable (the recovery
 path).**

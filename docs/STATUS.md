@@ -6,8 +6,28 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-29 (evening: chronicle 60k-slice truncation fixed — long spans now
-close as multiple chapters, newest chapter removable)._
+_Last updated: 2026-08-30 (queue sweep: the whole 2026-08-30 audit batch cleared — both
+P1s, all four P2s, plus the two note-level items)._
+
+## 2026-08-30 — same-day queue sweep: the whole 2026-08-30 audit batch cleared (2 P1s + 4 P2s + 2 notes)
+
+All open items from the day's two audit runs (story-memory + vector-memory-rag;
+progression + providers-adapter) fixed in one session (DECISIONS.md 2026-08-30
+sweep-rulings entry; every item ticked with a dated note). **The P1s:** the level-up full
+heal gained revive semantics — a hero leveling while dying/defeated stands back up (death
+saves cannot continue at full HP), an `isDead` hero levels the sheet but currentHP is
+never written (no "Fully healed!" on a corpse after a slainXpOnly loss), and the ASI CON
+gain raises currentHP only for a hero on their feet; story-memory promotions carry a
+stable `id: npc-bond-${npc.id}` so the dossier type flip (npcAgenda → relationship) can
+never again strand an immortal stale twin, with `healPromotedStoryMemoryTwins` collapsing
+already-stranded twins on load and re-stamping the survivor. **Also:** promotion birth
+stamps `firstSeenMessage` and the wholesale-replace merge is documented + pinned (a
+narrowed agenda's shorter snapshot wins); one Unicode word-boundary name-presence helper
+serves RAG tagging AND the presence gate ("ashes" is no longer "Ash"); `CATEGORY_BOOST`
+hoisted; `clearMemories` ruled test/maintenance-only; `perLevelHpGain` shared by rules.js
+and progression.js; `guardExpAwardLedger` serves both DM XP lanes; and the new
+`llm/providers/sse.js` owns the SSE reader + completion/HTTP-error guards for Gemini and
+the OpenAI-compatible factory alike. 1,885 tests green (+16), lint clean.
 
 ## 2026-08-29 — player-reported bug: first chronicle close on the long campaign truncated mid-sentence
 

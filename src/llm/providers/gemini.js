@@ -2,6 +2,7 @@
  * Google Gemini API provider.
  * Uses the REST API directly (no SDK dependency needed).
  */
+import { assertStreamComplete, makeCompletionGuard, makeHttpError, readSseStream } from './sse.js';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1alpha/models';
 const GEMINI_EMBED_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -32,25 +33,13 @@ function formatEmbeddingInput(text, inputType) {
  */
 const GEMINI_MAX_OUTPUT_TOKENS = 32768;
 
-/**
- * A finishReason other than STOP means the text is truncated or blocked; treating
- * it as a complete response silently drops the trailing JSON event block. Fail
- * loudly instead — the caller surfaces a retryable error to the player.
- */
-function assertCompleteResponse(finishReason) {
-    if (!finishReason || finishReason === 'STOP') return;
-    if (finishReason === 'MAX_TOKENS') {
-        throw new Error('The model hit its output token cap mid-response (MAX_TOKENS) — the reply would be truncated. Please retry.');
-    }
-    throw new Error(`The model stopped early (${finishReason}) — the response is blocked or incomplete. Please retry or rephrase.`);
-}
+const assertCompleteResponse = makeCompletionGuard({
+    completeReason: 'STOP',
+    truncatedReason: 'MAX_TOKENS',
+    truncatedLabel: ' (MAX_TOKENS)',
+});
 
-async function httpError(response) {
-    const error = await response.json().catch(() => ({}));
-    const err = new Error(`Gemini API error (${response.status}): ${error.error?.message || response.statusText}`);
-    err.status = response.status; // lets the adapter retry transient failures
-    return err;
-}
+const httpError = makeHttpError('Gemini');
 
 /**
  * Thinking-capable models may return several parts per candidate (and flag
@@ -283,50 +272,19 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
         throw await httpError(response);
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
     let fullText = '';
-    let buffer = '';
     let finishReason = null;
 
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Parse SSE events
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-            if (line.startsWith('data: ')) {
-                const jsonStr = line.slice(6).trim();
-                if (jsonStr === '[DONE]') continue;
-
-                try {
-                    const data = JSON.parse(jsonStr);
-                    const candidate = data.candidates?.[0];
-                    if (candidate?.finishReason) finishReason = candidate.finishReason;
-                    const text = extractCandidateText(candidate);
-                    if (text) {
-                        fullText += text;
-                        onChunk(text);
-                    }
-                } catch {
-                    // Ignore malformed JSON lines
-                }
-            }
+    await readSseStream(response, (data) => {
+        const candidate = data.candidates?.[0];
+        if (candidate?.finishReason) finishReason = candidate.finishReason;
+        const text = extractCandidateText(candidate);
+        if (text) {
+            fullText += text;
+            onChunk(text);
         }
-    }
+    });
 
-    // A truncated stream looks complete but is missing its tail — usually the JSON
-    // event block. A clean close that never delivered a finishReason is the same
-    // failure (dropped connection, proxy close, or a mid-stream error payload as
-    // the final event) — the lenient no-reason pass is only right for non-streaming.
-    if (!finishReason) {
-        throw new Error('The connection dropped mid-response — the reply is incomplete. Please retry.');
-    }
-    assertCompleteResponse(finishReason);
+    assertStreamComplete(finishReason, assertCompleteResponse);
     return fullText;
 }

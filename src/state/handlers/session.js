@@ -12,7 +12,7 @@ import { MAX_RECENT_ENCOUNTERS } from '../../engine/worldTempo.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES, normalizeCombatExchange } from '../../engine/combatExchange.js';
-import { dedupeNpcRoster, migrateLegacyNpc } from '../../engine/npcRoster.js';
+import { dedupeNpcRoster, healPromotedStoryMemoryTwins, migrateLegacyNpc } from '../../engine/npcRoster.js';
 import {
     ensureCompanionRosterRecord,
     normalizeRecentTransactions,
@@ -74,6 +74,9 @@ function sanitizeStoredExchangeResult(result) {
  * result was discarded.
  */
 function validateSaveState(payload) {
+    const npcs = Array.isArray(payload.npcs)
+        ? payload.npcs.filter(n => n && typeof n === 'object' && typeof n.name === 'string' && n.name.trim())
+        : [];
     return {
         ...payload,
         inventory: Array.isArray(payload.inventory) ? payload.inventory : [],
@@ -119,9 +122,7 @@ function validateSaveState(payload) {
                     consequences: Array.isArray(e.consequences) ? e.consequences : [],
                 }))
             : [],
-        npcs: Array.isArray(payload.npcs)
-            ? payload.npcs.filter(n => n && typeof n === 'object' && typeof n.name === 'string' && n.name.trim())
-            : [],
+        npcs,
         // Heal poisoned saves: a pre-guard non-string fact/category crashed prompt
         // building on every turn — re-type what's fixable, drop what isn't.
         worldFacts: (Array.isArray(payload.worldFacts) ? payload.worldFacts : [])
@@ -130,9 +131,15 @@ function validateSaveState(payload) {
                 return sanitized ? { ...f, ...sanitized } : null;
             })
             .filter(Boolean),
-        storyMemory: Array.isArray(payload.storyMemory)
-            ? payload.storyMemory.map(m => normalizeStoryMemoryCard(m)).filter(Boolean)
-            : [],
+        // Promotion-twin heal (2026-08-30 P1): merges stale same-subject
+        // `npc_roster` cards stranded by pre-stable-id type flips and stamps
+        // the survivor's stable id. No-op on healthy saves.
+        storyMemory: healPromotedStoryMemoryTwins(
+            Array.isArray(payload.storyMemory)
+                ? payload.storyMemory.map(m => normalizeStoryMemoryCard(m)).filter(Boolean)
+                : [],
+            npcs
+        ),
         fronts: Array.isArray(payload.fronts) ? payload.fronts.map(f => normalizeFront(f)) : [],
         party: Array.isArray(payload.party)
             ? payload.party.filter(c => c && typeof c === 'object')

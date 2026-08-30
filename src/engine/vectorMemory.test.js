@@ -771,6 +771,26 @@ describe('presence-aware + diversity-aware retrieval (2026-08-28, "dormant, not 
         expect(findSubjectsInText('', roster)).toBeNull();
     });
 
+    it('name presence is whole-word: "ashes" never counts as Ash (2026-08-30 audit)', async () => {
+        const roster = ['Ash Veyla'];
+        // Tagging side: a substring inside another word is not the person.
+        expect(findSubjectsInText('The barn burned to ashes overnight.', roster)).toBeNull();
+        expect(findSubjectsInText('They rode through Ashford at dusk.', roster)).toBeNull();
+        expect(findSubjectsInText('Ash counted the coins twice.', roster)).toEqual(['Ash Veyla']);
+
+        // Gating side: a query about ashes must not re-admit an Ash-tied row.
+        embedTextMock.mockResolvedValueOnce(alignedVector(1, 0.6));
+        await addMemory('key', 'Ash confessed at the cabin.', 'journal', null, ['Ash Veyla']);
+
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const away = await retrieveRelevant('key', 'I sift the cold ashes of the campfire', 8, 0.55);
+        expect(away).toHaveLength(0); // 0.6 - 0.12 penalty applies: "ashes" is not Ash
+
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const present = await retrieveRelevant('key', 'I ask Ash about the cabin', 8, 0.55);
+        expect(present.map(m => m.text)).toEqual(['Ash confessed at the cabin.']);
+    });
+
     it('seeding patches subjects onto cached rows that predate the tag (no re-embed)', async () => {
         await putEmbedding({
             sessionId: 's1',

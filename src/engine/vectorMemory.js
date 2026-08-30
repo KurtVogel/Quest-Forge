@@ -205,20 +205,42 @@ function identifyingNameTokens(name) {
 }
 
 /**
+ * THE name-presence tokenizer (2026-08-30 audit): lowercase words on Unicode
+ * boundaries, so "Ash" is present in "Ash swore it" but never in "ashes" or
+ * "Ashford" — the old raw-substring check quietly re-admitted exactly the
+ * person-tied rows the presence gate means to rest. Shared by
+ * findSubjectsInText (tagging) and retrieveRelevant's presence gate (scoring).
+ */
+function textWordSet(text) {
+    return new Set(String(text || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+}
+
+/**
+ * Whole-word presence of any identifying token of `name` in a word set.
+ * Returns null when the name has no identifying tokens ("The Lady") — the
+ * caller decides what unjudgeable means (tagging skips it; the presence gate
+ * treats it as present so the row is never permanently penalized).
+ */
+function nameTokensPresent(wordSet, name) {
+    const tokens = identifyingNameTokens(name);
+    if (tokens.length === 0) return null;
+    return tokens.some(token => wordSet.has(token));
+}
+
+/**
  * Roster names that appear in a text — the seed/live-add helper for tagging a
  * memory's `subjects`. Matches on any identifying name token of 3+ characters
  * so "Lady Celeste" in a journal entry matches the roster's
  * "Lady Celeste Jewelglade".
  */
 export function findSubjectsInText(text, names, cap = 4) {
-    const hay = String(text || '').toLowerCase();
-    if (!hay) return null;
+    const words = textWordSet(text);
+    if (words.size === 0) return null;
     const found = [];
     for (const name of (Array.isArray(names) ? names : [])) {
         const clean = String(name || '').trim();
         if (!clean) continue;
-        const tokens = identifyingNameTokens(clean);
-        if (tokens.length > 0 && tokens.some(token => hay.includes(token))) {
+        if (nameTokensPresent(words, clean) === true) {
             found.push(clean);
             if (found.length >= cap) break;
         }
@@ -371,25 +393,25 @@ export async function seedMemories(apiKey, items, sessionId = null) {
 export const PRESENCE_ABSENT_PENALTY = 0.12;
 /** Two rows at or above this mutual cosine are one memory for slot purposes. */
 export const NEAR_DUPLICATE_SIMILARITY = 0.9;
+/** Rank-only category nudges (order, never the gate — 2026-08-06 rule). */
+export const CATEGORY_BOOST = {
+    npc_character: 0.08,
+    story_relationship: 0.07,
+    story_npcAgenda: 0.07,
+    story_callback: 0.05,
+    story_promise: 0.05,
+    story_playerCanon: 0.04,
+    world_fact: 0.03,
+    journal: 0.02,
+    narrative: -0.04,
+    npc: 0.02,
+};
 
 export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55) {
     if (!apiKey || !query || memoryStore.length === 0) return [];
 
     const queryVector = await embedText(apiKey, query, { inputType: 'query' });
     if (!queryVector) return [];
-
-    const categoryBoost = {
-        npc_character: 0.08,
-        story_relationship: 0.07,
-        story_npcAgenda: 0.07,
-        story_callback: 0.05,
-        story_promise: 0.05,
-        story_playerCanon: 0.04,
-        world_fact: 0.03,
-        journal: 0.02,
-        narrative: -0.04,
-        npc: 0.02,
-    };
 
     // Presence-aware retrieval (2026-08-28, "dormant, not deleted"): a memory
     // tagged with the people it is ABOUT loses ground when none of them are in
@@ -400,13 +422,10 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55)
     // weight. Unlike the category boost (order-only by the 2026-08-06 rule),
     // this penalty deliberately affects the GATE too: keeping a row out is the
     // safe direction; it can never let a sub-threshold row in.
-    const queryLower = String(query).toLowerCase();
-    const subjectsPresent = (subjects) => subjects.some(name => {
-        const tokens = identifyingNameTokens(name);
-        // A name with no identifying tokens ("The Lady") can't be judged
-        // absent — treat as present so the row is never permanently penalized.
-        return tokens.length === 0 || tokens.some(token => queryLower.includes(token));
-    });
+    const queryWords = textWordSet(query);
+    // null (no identifying tokens, "The Lady") can't be judged absent — treat
+    // as present so the row is never permanently penalized.
+    const subjectsPresent = (subjects) => subjects.some(name => nameTokensPresent(queryWords, name) !== false);
 
     const scored = memoryStore
         .map(m => {
@@ -417,7 +436,7 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55)
         .filter(({ gated }) => gated >= minScore)
         .map(({ entry, gated }) => ({
             ...entry,
-            score: gated + (categoryBoost[entry.category] || 0),
+            score: gated + (CATEGORY_BOOST[entry.category] || 0),
         }))
         .sort((a, b) => b.score - a.score);
 
@@ -436,9 +455,13 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55)
 
 /**
  * Clear the in-memory store and the ENTIRE persisted cache (all campaigns).
- * Since rows became campaign-keyed this is a maintenance/reset tool, not part
- * of the campaign-switch path — seeding a campaign replaces the in-memory
- * store and reads only that campaign's rows.
+ * TEST/MAINTENANCE ONLY — zero production call sites by design (2026-08-30
+ * ruling): since rows became campaign-keyed, campaign switch replaces the
+ * in-memory store and reads only that campaign's rows, and save deletion
+ * purges per-campaign rows via deleteCampaignMemories, so no product flow
+ * needs a global wipe. Kept as the test suite's reset hook and a console
+ * escape hatch; wire it into UI only as part of an explicit
+ * reset-all-app-data flow, never a campaign-level action.
  */
 export function clearMemories() {
     memoryStore = [];

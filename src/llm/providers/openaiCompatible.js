@@ -5,6 +5,7 @@
  * label, and (for xAI) a key normalizer differ. Keeping one implementation
  * means stream-truncation fixes land once instead of being hand-copied.
  */
+import { assertStreamComplete, makeCompletionGuard, makeHttpError, readSseStream } from './sse.js';
 
 /**
  * Output cap is a glitch-loop guard, not a budget — 4096 silently truncated
@@ -14,14 +15,11 @@
  */
 const MAX_TOKENS = 16384;
 
-/** A finish_reason of "length" means the reply was truncated mid-response. */
-function assertCompleteResponse(finishReason) {
-    if (!finishReason || finishReason === 'stop') return;
-    if (finishReason === 'length') {
-        throw new Error('The model hit its output token cap mid-response — the reply would be truncated. Please retry.');
-    }
-    throw new Error(`The model stopped early (${finishReason}) — the response is blocked or incomplete. Please retry or rephrase.`);
-}
+/** "length" means the reply was truncated mid-response. */
+const assertCompleteResponse = makeCompletionGuard({
+    completeReason: 'stop',
+    truncatedReason: 'length',
+});
 
 /**
  * Convert our message format to the OpenAI-compatible chat format.
@@ -62,15 +60,7 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
  * @returns {{ send: function, stream: function }}
  */
 export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens', temperatureUnsupported = () => false }) {
-    async function httpError(response) {
-        const error = await response.json().catch(() => ({}));
-        // The string fallback covers xAI's occasional string-shaped error bodies
-        // ({ "error": "Invalid API key" }); it is harmless for OpenAI's
-        // { "error": { "message": ... } } shape.
-        const err = new Error(`${label} API error (${response.status}): ${error.error?.message || error.error || response.statusText}`);
-        err.status = response.status; // lets the adapter retry transient failures
-        return err;
-    }
+    const httpError = makeHttpError(label);
 
     /** Send a non-streaming message. (thinkingBudget is Gemini-only; ignored here.) */
     async function send({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, maxOutputTokens, signal }) {
@@ -124,49 +114,20 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             throw await httpError(response);
         }
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
         let fullText = '';
-        let buffer = '';
         let finishReason = null;
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = line.slice(6).trim();
-                    if (data === '[DONE]') continue;
-
-                    try {
-                        const parsed = JSON.parse(data);
-                        const choice = parsed.choices?.[0];
-                        if (choice?.finish_reason) finishReason = choice.finish_reason;
-                        const text = choice?.delta?.content || '';
-                        if (text) {
-                            fullText += text;
-                            onChunk(text);
-                        }
-                    } catch {
-                        // Ignore malformed lines
-                    }
-                }
+        await readSseStream(response, (parsed) => {
+            const choice = parsed.choices?.[0];
+            if (choice?.finish_reason) finishReason = choice.finish_reason;
+            const text = choice?.delta?.content || '';
+            if (text) {
+                fullText += text;
+                onChunk(text);
             }
-        }
+        });
 
-        // A truncated stream looks complete but is missing its tail — usually the JSON
-        // event block. A clean close that never delivered a finish_reason is the same
-        // failure (dropped connection or proxy close) — the lenient no-reason pass is
-        // only right for non-streaming.
-        if (!finishReason) {
-            throw new Error('The connection dropped mid-response — the reply is incomplete. Please retry.');
-        }
-        assertCompleteResponse(finishReason);
+        assertStreamComplete(finishReason, assertCompleteResponse);
         return fullText;
     }
 

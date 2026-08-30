@@ -304,6 +304,62 @@ describe('class resources across level-ups (2026-08-08 audit P1)', () => {
     });
 });
 
+describe('level-up heal revival semantics (2026-08-30 P1)', () => {
+    const dyingHero = {
+        ...character,
+        level: 1,
+        exp: 0,
+        maxHP: 12,
+        currentHP: 0,
+        dying: true,
+        deathSaves: { successes: 1, failures: 2 },
+        conditions: ['Unconscious', 'Restrained'],
+        hitDice: { total: 1, remaining: 1, die: 10 },
+    };
+
+    it('revives a dying hero on level-up — full HP with death saves ended, not continued', () => {
+        const result = awardExperience(dyingHero, 300);
+        expect(result.character.level).toBe(2);
+        expect(result.character.currentHP).toBe(result.character.maxHP);
+        expect(result.character.dying).toBe(false);
+        expect(result.character.deathSaves).toEqual({ successes: 0, failures: 0 });
+        expect(result.character.conditions).toEqual(['Restrained']);
+        expect(result.messages.some(m => m.content.includes('back on your feet'))).toBe(true);
+    });
+
+    it('clears a low-level defeat setback on level-up', () => {
+        const result = awardExperience({
+            ...dyingHero,
+            dying: false,
+            lowLevelDefeat: true,
+            deathSaves: { successes: 0, failures: 0 },
+            conditions: ['Unconscious'],
+        }, 300);
+        expect(result.character.lowLevelDefeat).toBe(false);
+        expect(result.character.currentHP).toBe(result.character.maxHP);
+        expect(result.character.conditions).toEqual([]);
+    });
+
+    it('never writes currentHP on a dead hero — post-mortem XP grows the sheet, not the corpse', () => {
+        const result = awardExperience({
+            ...dyingHero,
+            dying: false,
+            isDead: true,
+            deathSaves: { successes: 0, failures: 0 },
+        }, 300);
+        expect(result.character.level).toBe(2);
+        expect(result.character.currentHP).toBe(0);
+        expect(result.character.isDead).toBe(true);
+        expect(result.messages.some(m => m.content.includes('Fully healed'))).toBe(false);
+    });
+
+    it('keeps the plain full-heal line for a conscious hero', () => {
+        const result = awardExperience({ ...dyingHero, dying: false, currentHP: 3, deathSaves: undefined, conditions: [] }, 300);
+        expect(result.messages.some(m => m.content.includes('Fully healed!'))).toBe(true);
+        expect(result.character.dying).toBeFalsy();
+    });
+});
+
 describe('hostile-input robustness (2026-07-28 audit)', () => {
     it('getExperienceThreshold clamps junk levels to the table bounds', () => {
         expect(getExperienceThreshold(0)).toBe(300);

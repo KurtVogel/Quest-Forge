@@ -392,17 +392,23 @@ export function getSneakAttackDice(character, weapon, advantage, disadvantage, h
  * @param {object} classData - Class data object with hitDie
  * @returns {number} Maximum HP
  */
+/**
+ * THE per-level HP term: average hit die + CON mod, floored at 1 so a very low
+ * CON can never produce zero or negative HP growth. Shared by the level-up in
+ * progression.js and the vault's exact recompute below — the two used to carry
+ * the formula independently, kept in sync only by mirror comments.
+ */
+export function perLevelHpGain(hitDie, conMod) {
+    return Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
+}
+
 export function getMaxHitPoints(className, level, conMod, classData) {
     if (!classData || !Number.isFinite(classData.hitDie)) return 10 + conMod;
 
-    // Level 1: max hit die + CON mod
-    // Subsequent levels: average hit die + CON mod per level.
-    // Both terms floor at 1 — matching progression.js's level-up formula — so a
-    // very low CON can never produce zero or negative HP growth.
+    // Level 1: max hit die + CON mod (floored at 1, like the per-level term).
     const hitDie = classData.hitDie;
     const firstLevel = Math.max(1, hitDie + conMod);
-    const perLevel = Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
-    return firstLevel + perLevel * (level - 1);
+    return firstLevel + perLevelHpGain(hitDie, conMod) * (level - 1);
 }
 
 // NOTE (2026-07-31 dead-code sweep): the classic 5/10/15/20/25/30 DC_TABLE was
