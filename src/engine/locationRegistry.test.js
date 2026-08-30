@@ -5,6 +5,8 @@ import {
     findLocationRecord,
     findPlaceRecordByName,
     getCurrentLocationRecord,
+    groupPlacesByRegion,
+    listVisitedPlaces,
     isLocationEvidencedInText,
     isMintableLocationName,
     isRegionEvidenced,
@@ -466,5 +468,76 @@ describe('sanitizeRegionName urban-locality heads (playtest #8: "the Chandlers\'
         expect(sanitizeRegionName('the Harchwold')).toBe('the Harchwold');
         expect(sanitizeRegionName('the Sallow Fen')).toBe('the Sallow Fen');
         expect(sanitizeRegionName('Vale of Reeds')).toBe('Vale of Reeds');
+    });
+});
+
+describe('listVisitedPlaces / groupPlacesByRegion (player-facing Places tab, 2026-08-30)', () => {
+    const stamp = (record, lastVisitedMessage) => ({ ...record, lastVisitedMessage });
+
+    it('includes only visited records: theater-only records never reach the projection', () => {
+        const town = stamp(normalizeLocationRecord({ name: 'Ashford', type: 'settlement', region: 'Veyrmoor' }), 12);
+        // A tempo directive placed a symptom here — the hero has never been.
+        const theater = normalizeLocationRecord({ name: 'The Sunken Chapel', theaterFrontIds: ['front-1'] });
+        const places = listVisitedPlaces([town, theater], {});
+        expect(places.map(p => p.name)).toEqual(['Ashford']);
+    });
+
+    it('never leaks theaterFrontIds even on a visited record (whitelist projection)', () => {
+        const visited = stamp(normalizeLocationRecord({ name: 'Ashford', theaterFrontIds: ['front-1'] }), 8);
+        const [place] = listVisitedPlaces([visited], {});
+        expect(place).not.toHaveProperty('theaterFrontIds');
+        expect(Object.keys(place).sort()).toEqual([
+            'aliases', 'danger', 'firstSeenAt', 'id', 'isCurrent', 'lastVisitedAt', 'name', 'region', 'type',
+        ]);
+    });
+
+    it('counts the current location as visited even without a stamp, and flags it', () => {
+        const here = normalizeLocationRecord({ name: 'The Copper Kettle' });
+        const places = listVisitedPlaces([here], { currentLocation: 'the Copper Kettle' });
+        expect(places).toHaveLength(1);
+        expect(places[0].isCurrent).toBe(true);
+    });
+
+    it('heals legacy stamp-less records through the journal transition trail', () => {
+        const legacy = normalizeLocationRecord({ name: 'Blackwater Weirs' });
+        const theater = normalizeLocationRecord({ name: 'The Sunken Chapel', theaterFrontIds: ['front-1'] });
+        const places = listVisitedPlaces([legacy, theater], {
+            journalLocations: ['Blackwater Weirs', null, ''],
+        });
+        expect(places.map(p => p.name)).toEqual(['Blackwater Weirs']);
+    });
+
+    it('sorts the current place first, then by last-visit recency', () => {
+        const old = { ...stamp(normalizeLocationRecord({ name: 'Ashford' }), 5), lastVisitedAt: 100 };
+        const fresh = { ...stamp(normalizeLocationRecord({ name: 'Cold Harbor' }), 30), lastVisitedAt: 900 };
+        const here = { ...stamp(normalizeLocationRecord({ name: 'The Copper Kettle' }), 44), lastVisitedAt: 500 };
+        const places = listVisitedPlaces([old, fresh, here], { currentLocation: 'The Copper Kettle' });
+        expect(places.map(p => p.name)).toEqual(['The Copper Kettle', 'Cold Harbor', 'Ashford']);
+    });
+
+    it('strips an alias that merely restates the canonical name', () => {
+        const record = stamp(normalizeLocationRecord({
+            name: 'Clockwork Tower',
+            aliases: ['clockwork tower', 'Library landing, Clockwork Tower'],
+        }), 3);
+        const [place] = listVisitedPlaces([record], {});
+        expect(place.aliases).toEqual(['Library landing, Clockwork Tower']);
+    });
+
+    it('groups by region with fuzzy region identity, unregioned places trailing', () => {
+        const a = { name: 'Ashford', region: 'the Veyrmoor', isCurrent: false, lastVisitedAt: 3 };
+        const b = { name: 'Ghyll', region: 'Veyrmoor', isCurrent: false, lastVisitedAt: 2 };
+        const c = { name: 'The Copper Kettle', region: null, isCurrent: false, lastVisitedAt: 9 };
+        const d = { name: 'Rimehollow', region: 'Rimefell Marches', isCurrent: false, lastVisitedAt: 1 };
+        const groups = groupPlacesByRegion([c, a, b, d]);
+        expect(groups.map(g => g.region)).toEqual(['the Veyrmoor', 'Rimefell Marches', null]);
+        expect(groups[0].places.map(p => p.name)).toEqual(['Ashford', 'Ghyll']);
+        expect(groups[2].places.map(p => p.name)).toEqual(['The Copper Kettle']);
+    });
+
+    it('tolerates empty and malformed input', () => {
+        expect(listVisitedPlaces(undefined, {})).toEqual([]);
+        expect(listVisitedPlaces([null, {}], { currentLocation: null })).toEqual([]);
+        expect(groupPlacesByRegion(undefined)).toEqual([]);
     });
 });

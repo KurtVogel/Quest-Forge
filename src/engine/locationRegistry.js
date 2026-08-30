@@ -519,6 +519,67 @@ export function areRelatedPlaces(a, b) {
     return false;
 }
 
+/**
+ * Player-facing gazetteer projection (Journal → Places tab, 2026-08-30).
+ *
+ * The raw registry is NOT safe to render: tempo directives and pending front
+ * installs upsert records purely to mark hidden-front THEATERS (handlers/
+ * fronts.js), so a record can exist for a place the hero has never seen —
+ * showing it would leak where the front machinery is staging pressure. Only
+ * genuinely visited places qualify: a `lastVisitedMessage` stamp (SET_LOCATION
+ * arrivals), being the hero's current location, or appearing in the journal's
+ * location-transition trail (heals legacy records that predate visit stamps —
+ * theater-only records never carry a journal transition, so the leak stays
+ * closed). The projection is a whitelist by construction: `theaterFrontIds`
+ * cannot reach the UI because the returned shape never contains it.
+ */
+export function listVisitedPlaces(locations = [], { currentLocation = null, journalLocations = [] } = {}) {
+    const list = Array.isArray(locations) ? locations : [];
+    const visitedIdx = new Set();
+    list.forEach((record, i) => {
+        if (Number.isFinite(record?.lastVisitedMessage)) visitedIdx.add(i);
+    });
+    const currentIdx = findLocationRecord(list, currentLocation);
+    if (currentIdx !== -1) visitedIdx.add(currentIdx);
+    for (const name of journalLocations || []) {
+        const idx = findLocationRecord(list, name);
+        if (idx !== -1) visitedIdx.add(idx);
+    }
+    const places = [...visitedIdx].map((i) => {
+        const record = list[i];
+        return {
+            id: record.id,
+            name: record.name,
+            aliases: (record.aliases || []).filter(alias => alias.toLowerCase() !== record.name.toLowerCase()),
+            type: record.type || null,
+            danger: record.danger || null,
+            region: record.region || null,
+            firstSeenAt: record.firstSeenAt || null,
+            lastVisitedAt: record.lastVisitedAt || null,
+            isCurrent: i === currentIdx,
+        };
+    });
+    places.sort((a, b) => (b.isCurrent - a.isCurrent) || ((b.lastVisitedAt || 0) - (a.lastVisitedAt || 0)));
+    return places;
+}
+
+/**
+ * Group a listVisitedPlaces result by region for display. Groups keep the
+ * input's recency order (the current place's region leads); places with no
+ * known region gather in one trailing null-region group.
+ */
+export function groupPlacesByRegion(places = []) {
+    const groups = [];
+    for (const place of places || []) {
+        const group = place.region
+            ? groups.find(g => g.region && isSameRegion(g.region, place.region))
+            : groups.find(g => !g.region);
+        if (group) group.places.push(place);
+        else groups.push({ region: place.region || null, places: [place] });
+    }
+    return [...groups.filter(g => g.region), ...groups.filter(g => !g.region)];
+}
+
 /** The record for the hero's current location, if the registry knows it. */
 export function getCurrentLocationRecord(locations = [], currentLocation) {
     const idx = findLocationRecord(locations, currentLocation);

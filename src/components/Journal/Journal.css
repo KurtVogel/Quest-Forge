@@ -685,6 +685,125 @@
     cursor: wait;
 }
 
+/* Places — the visited gazetteer, grouped by the lands places lie in */
+
+.journal-places {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.journal-place-region-name {
+    font-family: var(--font-heading);
+    color: var(--gold);
+    font-size: 0.95rem;
+    margin: 0 0 0.4rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.journal-place-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.journal-place {
+    padding: 0.6rem 0.75rem;
+    background:
+        var(--texture-noise),
+        var(--texture-grain),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent),
+        var(--surface-primary);
+    background-size: 180px 180px, auto, 100% 100%, 100% 100%;
+    background-blend-mode: overlay, normal, normal, normal;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    border-left: 3px solid var(--text-muted);
+}
+
+.journal-place.current {
+    border-color: rgba(215, 180, 90, 0.45);
+    border-left-color: var(--gold);
+    box-shadow: inset 0 0 0 1px rgba(215, 180, 90, 0.12);
+}
+
+.journal-place-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.journal-place-name {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.journal-place-here {
+    font-size: 0.62rem;
+    color: var(--gold);
+    border: 1px solid rgba(215, 180, 90, 0.35);
+    border-radius: 4px;
+    padding: 0.05rem 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.journal-place-type {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 600;
+    background: rgba(120, 130, 200, 0.15);
+    color: var(--text-muted);
+}
+
+.journal-place-danger {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 600;
+}
+
+.journal-place-danger.low {
+    background: rgba(150, 150, 150, 0.15);
+    color: var(--text-muted);
+}
+
+.journal-place-danger.moderate {
+    background: rgba(230, 162, 60, 0.15);
+    color: #e6a23c;
+}
+
+.journal-place-danger.high,
+.journal-place-danger.deadly {
+    background: rgba(244, 67, 54, 0.15);
+    color: var(--danger);
+}
+
+.journal-place-aliases {
+    margin: 0.25rem 0 0;
+    font-size: 0.72rem;
+    font-style: italic;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.journal-place-visits {
+    margin: 0.25rem 0 0;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.75rem;
+}
+
 /* Campaign Chronicle — player-facing saga chapters retold from real play */
 
 .chronicle-compose {

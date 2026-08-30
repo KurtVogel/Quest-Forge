@@ -6,8 +6,22 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-30 (queue sweep: the whole 2026-08-30 audit batch cleared — both
-P1s, all four P2s, plus the two note-level items)._
+_Last updated: 2026-08-30 (Journal → Places tab: the visited gazetteer goes player-facing)._
+
+## 2026-08-30 — Journal → Places tab: see where you've been
+
+Vesa's ask ("it would serve the experience to sort of see where you've been") shipped as a
+read-only gazetteer tab in the World Journal: visited places as cards grouped by the lands
+they lie in (fuzzy region identity, "Uncharted lands" trailing), each with type/danger
+chips from the Scribe's profile, folded aliases ("Also known as …"), first/last-visited
+dates, and a "You are here" marker. The design call (DECISIONS.md 2026-08-30 Places
+entry): the raw registry is a SPOILER SURFACE — theater-only records mark hidden-front
+territory for places the hero has never seen — so `listVisitedPlaces` in
+`engine/locationRegistry.js` is the one door to the UI: visited-only (visit stamp, current
+location, or the journal transition trail as the legacy-save heal) and a whitelist
+projection that structurally cannot carry `theaterFrontIds` (key-set pinned).
+`groupPlacesByRegion` beside it owns the display grouping. 1,893 tests green (+8), lint
+clean.
 
 ## 2026-08-30 — same-day queue sweep: the whole 2026-08-30 audit batch cleared (2 P1s + 4 P2s + 2 notes)
 

@@ -4,6 +4,7 @@ import { enrichNpcProfile, needsNpcEnrichment, normalizeCallbackHook } from '../
 import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
 import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js';
 import { scoreNpcForPrompt } from '../../engine/npcRoster.js';
+import { groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
 import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 import { writeChronicleChapters, chronicleToMarkdown, collectChapterMessages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNK_SIZE, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
@@ -31,6 +32,16 @@ export default function JournalPanel({ isOpen, onClose }) {
     const [chronicleStatus, setChronicleStatus] = useState('');
 
     const imageKeyAvailable = !!(state.settings?.imageApiKey || getMachineryGeminiKey(state.settings));
+
+    // Visited-only projection: theater-only registry records (hidden front
+    // territory) never reach this list — see listVisitedPlaces.
+    const visitedPlaces = useMemo(
+        () => listVisitedPlaces(state.locations || [], {
+            currentLocation: state.currentLocation,
+            journalLocations: (state.journal || []).map(entry => entry.location).filter(Boolean),
+        }),
+        [state.locations, state.currentLocation, state.journal],
+    );
 
     const characterNpcs = useMemo(
         () => (state.npcs || []).filter(npc => npc.rosterTier !== 'archived_creature'),
@@ -211,6 +222,12 @@ export default function JournalPanel({ isOpen, onClose }) {
                     >
                         Characters ({characterNpcs.length})
                     </button>
+                    <button
+                        className={`journal-tab ${tab === 'places' ? 'active' : ''}`}
+                        onClick={() => setTab('places')}
+                    >
+                        Places{visitedPlaces.length > 0 ? ` (${visitedPlaces.length})` : ''}
+                    </button>
                     {archivedNpcs.length > 0 && (
                         <button
                             className={`journal-tab ${tab === 'archived' ? 'active' : ''}`}
@@ -287,6 +304,9 @@ export default function JournalPanel({ isOpen, onClose }) {
                                 portraitBusyId={portraitBusyId}
                             />
                         </>
+                    )}
+                    {tab === 'places' && (
+                        <PlacesTab places={visitedPlaces} currentLocation={state.currentLocation} />
                     )}
                     {tab === 'archived' && (
                         <NPCTab
@@ -466,6 +486,81 @@ function JournalTab({ journal, location }) {
                             </ul>
                         </div>
                     )}
+                </div>
+            ))}
+        </div>
+    );
+}
+
+const PLACE_TYPE_LABEL = {
+    haven: 'Haven',
+    settlement: 'Settlement',
+    wilderness: 'Wilderness',
+    frontier: 'Frontier',
+    hostile_site: 'Hostile ground',
+};
+
+function PlacesTab({ places, currentLocation }) {
+    if (places.length === 0) {
+        return (
+            <div className="journal-empty">
+                <p>No places charted yet.</p>
+                <p className="journal-hint">
+                    Everywhere your travels take you is recorded here — settlements, wilds,
+                    and stranger ground, gathered by the lands they lie in.
+                </p>
+                {currentLocation && (
+                    <p className="journal-hint">
+                        You are currently at <strong>{currentLocation}</strong> — it will be
+                        charted as the campaign establishes its name.
+                    </p>
+                )}
+            </div>
+        );
+    }
+
+    const groups = groupPlacesByRegion(places);
+
+    return (
+        <div className="journal-places">
+            {groups.map(group => (
+                <div key={group.region || '(uncharted)'} className="journal-place-region">
+                    <h3 className="journal-place-region-name">{group.region || 'Uncharted lands'}</h3>
+                    <div className="journal-place-list">
+                        {group.places.map(place => (
+                            <div key={place.id} className={`journal-place${place.isCurrent ? ' current' : ''}`}>
+                                <div className="journal-place-header">
+                                    <span className="journal-place-name">{place.name}</span>
+                                    {place.isCurrent && (
+                                        <span className="journal-place-here" title="Your current location">You are here</span>
+                                    )}
+                                    {place.type && (
+                                        <span className="journal-place-type">{PLACE_TYPE_LABEL[place.type] || place.type}</span>
+                                    )}
+                                    {place.danger && place.danger !== 'none' && (
+                                        <span className={`journal-place-danger ${place.danger}`} title="How dangerous this place is by its own nature">
+                                            {place.danger}
+                                        </span>
+                                    )}
+                                </div>
+                                {place.aliases.length > 0 && (
+                                    <p className="journal-place-aliases">
+                                        Also known as {place.aliases.slice(0, 4).join(' · ')}
+                                    </p>
+                                )}
+                                {(place.firstSeenAt || place.lastVisitedAt) && (
+                                    <p className="journal-place-visits">
+                                        {place.firstSeenAt && (
+                                            <span>First visited {new Date(place.firstSeenAt).toLocaleDateString()}</span>
+                                        )}
+                                        {!place.isCurrent && place.lastVisitedAt && place.lastVisitedAt !== place.firstSeenAt && (
+                                            <span>Last visited {new Date(place.lastVisitedAt).toLocaleDateString()}</span>
+                                        )}
+                                    </p>
+                                )}
+                            </div>
+                        ))}
+                    </div>
                 </div>
             ))}
         </div>

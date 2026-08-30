@@ -8,8 +8,28 @@ Format: date · decision · why. Newest first.
 
 ---
 
-**2026-08-30 · Queue-sweep rulings: the whole 2026-08-30 audit batch (2 P1s + 4 P2s plus
-two note-level items) fixed in one session.**
+**2026-08-30 · Journal → Places tab: the gazetteer goes player-facing, but VISITED-ONLY —
+the raw location registry is a spoiler surface and must never be rendered wholesale.**
+Vesa: "it would serve the experience to sort of see where you've been." The registry
+already tracked everything a places view needs (canonical names, aliases, Scribe
+type/danger profiles, regions, visit stamps), but rendering it raw would leak hidden-front
+territory: tempo directives and pending front installs upsert records purely to mark
+THEATERS (`handlers/fronts.js`), so records exist for places the hero has never seen, and
+showing one telegraphs where the front machinery is staging pressure. The ruling:
+**(1) `listVisitedPlaces` (engine/locationRegistry.js) is the one door to the UI** — a
+record qualifies only via a finite `lastVisitedMessage` (real SET_LOCATION arrival), being
+the hero's current location, or appearing in the journal's location-transition trail (the
+legacy heal: pre-living-world records carry no visit stamp, but any place the journal
+recorded a transition to was genuinely visited; theater-only records never have journal
+transitions, so the leak stays closed). **(2) The projection is a WHITELIST by
+construction** — the returned shape (id/name/aliases/type/danger/region/dates/isCurrent)
+simply never contains `theaterFrontIds`, pinned by a key-set test, matching the
+hostile-save whitelist-projection discipline. Type and danger DO render: both are
+Scribe-classified from fiction the player already lived through, and intrinsic danger is
+knowable in-world ("a ghoul-warren is dangerous because it is a ghoul-warren").
+**(3) Grouped by region** (`groupPlacesByRegion`, fuzzy `isSameRegion` identity,
+unregioned places trail as "Uncharted lands"), current place first with a "You are here"
+chip. Read-only v1 by design — no pin/rename/notes until live play asks for them.
 Every open item from the day's two audits (story-memory + vector-memory-rag; progression +
 providers-adapter, both Lap 4) cleared, each ticked in SCHEDULED_STRENGTHENING.md with its
 fix note. The rulings worth recording:
