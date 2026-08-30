@@ -54,8 +54,8 @@ it under Process notes.
 | living-world | `engine/regionalHearsay.js`, `llm/absenceDrift.js`, `llm/frontAftermath.js`, `llm/regionalFronts.js` | 2026-08-19 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-08-24 |
 | memory-journal | `engine/worldJournal.js` | 2026-08-18 |
-| story-memory | `engine/storyMemory.js` | 2026-08-06 |
-| vector-memory-rag | `engine/vectorMemory.js` | 2026-08-06 |
+| story-memory | `engine/storyMemory.js`, `state/handlers/worldMemory.js` (card reducer paths) | 2026-08-30 |
+| vector-memory-rag | `engine/vectorMemory.js` | 2026-08-30 |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-27 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-08-27 |
 | character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-08-28 |
@@ -368,6 +368,9 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P2** (spellcasting, 2026-08-29): CAST_SPELL healing lacks USE_ITEM's dead-hero guard — a DM-emitted cure wounds on an `isDead` hero heals the corpse into currentHP>0 + isDead; add the guard twin — `state/handlers/spellcasting.js:111-127` vs `state/handlers/inventory.js:210`. *Fixed 2026-08-29: a heal aimed only at the dead hero rejects before the slot is spent (USE_ITEM parity); a mixed multi-target cast reaches the living and skips the corpse with a visible line. Both pinned.*
 - [x] **P2** (spellcasting, 2026-08-29): TAKE_REST re-implements `clearSustainedSpellState` inline (condition strip, companion buff strip, AC recompute) instead of calling the shared helper CAST_SPELL/END_COMBAT use — drift risk for future sustained-effect fields — `state/handlers/resources.js:316-318,334-341,389-391`, `state/handlers/shared.js:292-310`. *Fixed 2026-08-29: all three inline fragments deleted; TAKE_REST builds the rested character/party and hands them to the shared `clearSustainedSpellState` (message text and "Conditions cleared." suffix derived from the helper's result). Existing rest-lifecycle suite pins behavior unchanged.*
 - [x] **P2** (chronicler, 2026-08-29): OOC table talk leaks into saga chapters — excluded from RAG/Scribe/DM window by design but the chronicler reads raw messages with no filter or prompt rule; skip a table-talk user message + its following assistant reply via `isTableTalkMessage` in `collectChapterMessages` — `llm/chronicler.js:42-46`, `llm/tableTalk.js`. *Fixed 2026-08-29: `collectChapterMessages` (via the new index-carrying `collectChapterEntries`) skips a table-talk user message and its immediately following assistant reply; pinned with an OOC-recap exclusion test.*
+- [ ] **P1** (story-memory, 2026-08-30): NPC promotion type-flip strands immortal stale cards — `buildStoryMemoryPromotion` has no `id` and its type flips with the dossier (agenda-only `npcAgenda` → stance `relationship`) while every match rung requires same type, so the old card is never matched again, is dormancy-exempt at salience 3, and stays curated/RAG-seeded forever; give promotions a stable `id: npc-bond-${npc.id}` + a one-time load heal merging stranded type-twins — `engine/npcRoster.js:700-710`, `state/handlers/npcs.js:63-73`, `engine/storyMemory.js:75,199`
+- [ ] **P2** (story-memory, 2026-08-30): UPDATE_NPC's card birth skips ADD_STORY_MEMORY_CARD's `firstSeenMessage` stamp and hand-rolls a divergent merge, all untested at the reducer level — fold through the ADD handler (reducer re-entry) or extract a shared birth helper, then pin birth/update/type-flip — `state/handlers/npcs.js:63-73` vs `state/handlers/worldMemory.js:85`
+- [ ] **P2** (vector-memory-rag, 2026-08-30): extract one shared word-boundary name-presence helper for `subjectsPresent` + `findSubjectsInText` (raw substring `includes` counts "Ash" as present in "ashes", quietly re-admitting person-tied rows the presence gate means to rest) — `engine/vectorMemory.js:213-227,404-409`
 - [x] **P2** (chronicler, 2026-08-29): no partial-progress salvage — a mid-run passage failure discards completed passages and re-pays them on retry, and the failure paths (mid-run throw, empty passage, 60k clamp) are exactly the untested ones — `llm/chronicler.js:82-106`. *Fixed 2026-08-29: a mid-run failure (throw OR empty passage) salvages the completed passages as a shorter chapter whose `toIndex` is the last retold message (chunks carry raw indexes), with `salvaged`/`warning` surfaced in the Journal status line; a first-chunk failure still throws. Tests: both salvage paths, first-chunk throw, empty-passage throw, 60k clamp.*
 
 ## Entry template
@@ -392,6 +395,34 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-30 — story-memory + vector-memory-rag (Lap 4: simplification & design)
+
+`npm test`: 1869 passing / 95 files
+
+### story-memory
+- **Scope examined:** `engine/storyMemory.js` end to end; reducer paths (`state/handlers/worldMemory.js` ADD/UPDATE/dormancy-on-cadence, `handlers/npcs.js:57-77` UPDATE_NPC promotion, `handlers/session.js:134` load normalize); `engine/npcRoster.js:674-711` (`buildStoryMemoryPromotion`); consumers (`promptBuilder.js:200`, `turnOrchestrator.js:185-198`); all four test files + `npcRoster.test.js:133`.
+- **Findings:**
+  - Lap credit first: every 2026-08-06 suggestion shipped and is pinned — journal-cadence dormancy (`applyStoryMemoryDormancy`, revive-on-merge), the RAG seed's active-only filter, UPDATE_STORY_MEMORY's exactly-one-match subject guard.
+  - **P1** Promotion type-flip strands immortal stale cards: `buildStoryMemoryPromotion` carries no `id` and its `type` is derived from which dossier fields exist (`npcRoster.js:701` — agenda-only → `npcAgenda`, any stance/tension → `relationship`), while every identity rung in `findStoryMemoryMatch`/`isNearDuplicateStoryCard` requires SAME type (`storyMemory.js:75,199` — cross-type never merges, pinned by test). So the normal arc "NPC introduced with an agenda, later develops a stance" births a second card and permanently strands the first: all future promotions are `relationship`-typed, the old `npcAgenda` snapshot (salience 3 → dormancy-exempt, `storyMemory.js:274`) stays active/curated/RAG-seeded forever with stale agenda text, and the duplicate subject also disables UPDATE_STORY_MEMORY's subject rung for both cards (ambiguous → no-op). One stale immortal card per roster NPC per type transition — `state/handlers/npcs.js:63-73`.
+  - **P2** Second, divergent card-birth/merge path: UPDATE_NPC's birth branch skips the `firstSeenMessage` stamp ADD_STORY_MEMORY_CARD applies (`worldMemory.js:85` vs `npcs.js:67` — inert today since promotions are never `witnessed`, but silent drift on a stamped invariant), and its merge branch replaces text wholesale (correct for a regenerated snapshot, but the divergence from `pickMergedCardText`/salience-max/tag-union is undocumented at either site).
+  - **P2** The reducer-level promotion path is unpinned — birth, update-in-place, and the type-flip behavior have zero tests; only the pure builder has one (`npcRoster.test.js:133`).
+  - **P2** (polish) `overlapScore`/`tokenContainment` are bare aliases of textMatch exports (`storyMemory.js:58,67`); `buildStoryMemoryPromptBlock` re-caps an already-capped list.
+- **Suggested improvements:** (1) give promotions a stable identity (`id: npc-bond-${npc.id}`) so the id rung matches regardless of type, plus a one-time load heal merging already-stranded type-twins (same subject + `source: 'npc_roster'`); (2) fold the birth through ADD_STORY_MEMORY_CARD (reducer re-entry, the ADD_STORY_MEMORY_CARDS pattern) or extract a shared birth helper, documenting the deliberate replace-text merge; (3) reducer tests for birth/update/type-flip.
+
+### vector-memory-rag
+- **Scope examined:** `engine/vectorMemory.js` end to end; consumers (`ChatPanel.jsx:342-394` seed effect, `turnOrchestrator.js:80-84,174-208,383,501` live adds + retrieval, `SettingsModal.jsx:176-181` purge-on-delete); `vectorMemory.test.js` (686 lines, 40 tests).
+- **Findings:**
+  - Genuinely strong file this lap: all four 2026-08-06 suggestions shipped and pinned (combat-intent skip, cap/eviction/campaign-purge lifecycle, boost-after-gate, key-after-mount reseed), and the 2026-08-28 presence/diversity pass has its own suite. Live adds mirror the seed's text shapes exactly (secrecy tags, bare journal text, subjects) — the duplicate-row class is closed by construction.
+  - **P2** Name-presence matching is duplicated and substring-loose: `subjectsPresent` (`vectorMemory.js:404-409`) and `findSubjectsInText` (`:213-227`) both re-implement "identifying token appears in text" with raw `includes`, so a short name token ("Ash") counts as present in "ashes" — the lenient direction is gate-safe by design, but it silently re-admits exactly the person-tied rows the feature means to rest. Extract one shared word-boundary helper serving both sites.
+  - **P2** `clearMemories()` has zero production call sites (grep-confirmed; only tests import it) — the v4 campaign-keyed design made the wipe unnecessary and the docblock says "maintenance/reset tool", but it remains exported production API nothing reaches; wire it into an explicit reset-all-data flow or mark it test-only. (Echo of the 2026-07-06 scene-art finding.)
+  - **P2** (polish) the `categoryBoost` literal is rebuilt on every `retrieveRelevant` call — hoist to a module const beside `PRESENCE_ABSENT_PENALTY` so the table has one named, importable home.
+  - (design note, no action yet) `seedMemories` now does five jobs in one ~70-line body (activate, load+filter, stale-prune, subjects-patch, batch-embed) — well-commented, but the next lifecycle rule should trigger the split.
+- **Suggested improvements:** (1) shared word-boundary name-presence helper + an "ashes ≠ Ash" pin; (2) decide `clearMemories`' fate; (3) hoist the boost table.
+
+### Process notes
+- Registry amended: story-memory's scope row now lists `state/handlers/worldMemory.js` (card reducer paths live there since the 2026-07-31 handlers split — the 2026-08-06 entry's deferred note).
+- Coverage snapshot is 3 days old — no refresh. Queue holds a single open item (the 2026-08-09 npc-consistency pronoun watch) — a watch item, not verifiable as fixed.
 
 ## 2026-08-29 — spellcasting + chronicler (Lap 1: correctness & test depth — newly registered features) — second run
 
