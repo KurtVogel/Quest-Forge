@@ -44,7 +44,7 @@ it under Process notes.
 |---|---|---|
 | dice-engine | `engine/dice.ts` | 2026-08-20 |
 | rules-math | `engine/rules.js` | 2026-08-28 |
-| progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-08-08 |
+| progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-08-30 |
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js`, `llm/eventChannels.js` (normalizeEvents registry) | 2026-08-29 |
 | prompt-building | `llm/promptBuilder.js` | 2026-08-18 |
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-08-27 |
@@ -62,7 +62,7 @@ it under Process notes.
 | inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-08-28 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-08-28 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-08-20 |
-| providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-08-08 |
+| providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-08-30 |
 | chat-orchestration | `components/Chat/ChatPanel.jsx`, `llm/turnOrchestrator.js` (turn pipeline, `applyEvents`, message window) | 2026-08-19 |
 | spellcasting | `engine/spellcasting.js`, `data/spells.js`, `state/handlers/spellcasting.js`, rest/sustained interplay | 2026-08-29 |
 | chronicler | `llm/chronicler.js`, chronicle reducer paths + Journal Chronicle tab | 2026-08-29 |
@@ -368,6 +368,9 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P2** (spellcasting, 2026-08-29): CAST_SPELL healing lacks USE_ITEM's dead-hero guard — a DM-emitted cure wounds on an `isDead` hero heals the corpse into currentHP>0 + isDead; add the guard twin — `state/handlers/spellcasting.js:111-127` vs `state/handlers/inventory.js:210`. *Fixed 2026-08-29: a heal aimed only at the dead hero rejects before the slot is spent (USE_ITEM parity); a mixed multi-target cast reaches the living and skips the corpse with a visible line. Both pinned.*
 - [x] **P2** (spellcasting, 2026-08-29): TAKE_REST re-implements `clearSustainedSpellState` inline (condition strip, companion buff strip, AC recompute) instead of calling the shared helper CAST_SPELL/END_COMBAT use — drift risk for future sustained-effect fields — `state/handlers/resources.js:316-318,334-341,389-391`, `state/handlers/shared.js:292-310`. *Fixed 2026-08-29: all three inline fragments deleted; TAKE_REST builds the rested character/party and hands them to the shared `clearSustainedSpellState` (message text and "Conditions cleared." suffix derived from the helper's result). Existing rest-lifecycle suite pins behavior unchanged.*
 - [x] **P2** (chronicler, 2026-08-29): OOC table talk leaks into saga chapters — excluded from RAG/Scribe/DM window by design but the chronicler reads raw messages with no filter or prompt rule; skip a table-talk user message + its following assistant reply via `isTableTalkMessage` in `collectChapterMessages` — `llm/chronicler.js:42-46`, `llm/tableTalk.js`. *Fixed 2026-08-29: `collectChapterMessages` (via the new index-carrying `collectChapterEntries`) skips a table-talk user message and its immediately following assistant reply; pinned with an OOC-recap exclusion test.*
+- [ ] **P1** (progression, 2026-08-30): level-up full heal bypasses revival cleanup — `applySingleLevelUp` sets `currentHP: newMaxHP` without clearing `dying`/`deathSaves`/Unconscious and `awardExperience` has no `isDead` guard, so END_COMBAT fallback XP can leave a full-HP hero still dying (death saves continue) or "fully heal" a dead hero's currentHP on a slainXpOnly loss; APPLY_ABILITY_SCORE_IMPROVEMENT's CON hpGain shares the no-revive gap. Revive on level-up while dying, never write currentHP on isDead, guard the ASI heal; add dying/dead-hero award tests — `engine/progression.js:105,141`, `state/handlers/character.js:110`, `state/handlers/combat.js:175-195`
+- [ ] **P2** (progression, 2026-08-30): fold the duplicated per-level HP term (`progression.js:83-84` vs `rules.js:404`, comment-synced only) into a shared `perLevelHpGain(hitDie, conMod)`, and extract LEVEL_UP's hand-copied bonusExp dedupe block into the one ADD_EXP shares — `state/handlers/character.js:242-260,329-341`
+- [ ] **P2** (providers-adapter, 2026-08-30): extract a shared SSE reader — `streamGeminiMessage` is the third hand-maintained copy of the factory's stream skeleton (plus twin `assertCompleteResponse`/`httpError`), so stream-truncation fixes currently land twice — `llm/providers/gemini.js:286-331` vs `llm/providers/openaiCompatible.js:127-170`
 - [ ] **P1** (story-memory, 2026-08-30): NPC promotion type-flip strands immortal stale cards — `buildStoryMemoryPromotion` has no `id` and its type flips with the dossier (agenda-only `npcAgenda` → stance `relationship`) while every match rung requires same type, so the old card is never matched again, is dormancy-exempt at salience 3, and stays curated/RAG-seeded forever; give promotions a stable `id: npc-bond-${npc.id}` + a one-time load heal merging stranded type-twins — `engine/npcRoster.js:700-710`, `state/handlers/npcs.js:63-73`, `engine/storyMemory.js:75,199`
 - [ ] **P2** (story-memory, 2026-08-30): UPDATE_NPC's card birth skips ADD_STORY_MEMORY_CARD's `firstSeenMessage` stamp and hand-rolls a divergent merge, all untested at the reducer level — fold through the ADD handler (reducer re-entry) or extract a shared birth helper, then pin birth/update/type-flip — `state/handlers/npcs.js:63-73` vs `state/handlers/worldMemory.js:85`
 - [ ] **P2** (vector-memory-rag, 2026-08-30): extract one shared word-boundary name-presence helper for `subjectsPresent` + `findSubjectsInText` (raw substring `includes` counts "Ash" as present in "ashes", quietly re-admitting person-tied rows the presence gate means to rest) — `engine/vectorMemory.js:213-227,404-409`
@@ -395,6 +398,32 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-30 — progression + providers-adapter (Lap 4: simplification & design) — second run
+
+`npm test`: 1869 passing / 95 files
+
+### progression
+- **Scope examined:** `engine/progression.js` end to end; every XP consumer (`state/handlers/character.js` ADD_EXP/LEVEL_UP/APPLY_ABILITY_SCORE_IMPROVEMENT + the 2026-08-26 exp ledger, `handlers/quests.js:141-174`, `handlers/combat.js:172-195` END_COMBAT fallback, `handlers/fronts.js:253-255`, `migrations.js:278`); the `rules.js:395` HP twin; `progression.test.js` (39 tests).
+- **Findings:**
+  - **P1** The level-up full heal bypasses revival cleanup: `applySingleLevelUp` sets `currentHP: newMaxHP` ("Fully healed!") but never clears `dying`/`deathSaves`/the Unconscious condition, and `awardExperience` has no `isDead` guard (`progression.js:105,141`). Deterministically reachable: a non-solo hero drops to 0 (dying), a companion finishes the fight, END_COMBAT's fallback XP crosses the threshold — the hero is now at FULL HP yet still dying+Unconscious, so the exchange machine keeps rolling death saves at full HP until some later heal incidentally runs `reviveCharacter`. Mirror on a LOST fight: `slainXpOnly` XP can level an `isDead` corpse to full `currentHP` ("Level Up! … Fully healed!" straight after "Your character dies"), against the resurrection-is-cut rule. Sibling gap: APPLY_ABILITY_SCORE_IMPROVEMENT's CON hpGain raises `currentHP` while down with no revive (`character.js:110`). None of these paths are tested. Fix: give the level-up heal revive semantics for `dying` (clear dying/deathSaves/Unconscious — consistent with "heals revive dying"), never write `currentHP` on `isDead`, and guard the ASI heal the same way.
+  - **P2** Per-level HP formula duplicated: `progression.js:83-84` and `getMaxHitPoints` (`rules.js:404`) each compute `max(1, floor(hitDie/2)+1+conMod)`, kept in sync only by mirror comments — and both are live (vault exact-recompute + level-up), the exact drift shape `buildDerivedCharacterFields` was built to kill. Extract a shared `perLevelHpGain(hitDie, conMod)`.
+  - **P2** LEVEL_UP's bonusExp ledger block hand-copies ADD_EXP's dedupe dance (~18 lines: transaction → duplicate probe → exactSourceReplay → repeat-intent escape → "ignored" line) — `character.js:242-260` vs `:329-341`; extract one shared helper before a third XP lane copies it.
+  - Otherwise clean under the lap lens: the three reward tiers are single-sourced with all four award paths routing through `awardExperience`, and the suite is genuinely deep (100% stmts).
+- **Suggested improvements:** (1) revive-on-level-up + isDead guard + the ASI twin, with dying/dead-hero award tests; (2) shared per-level HP term; (3) shared exp-dedupe helper.
+
+### providers-adapter
+- **Scope examined:** `llm/adapter.js`, `providers/gemini.js`, `providers/openaiCompatible.js` + the thin `openai.js`/`xai.js` instantiations, `xaiKey.js`; all four test files (60+ tests: retry/stall/abort matrix, SSE reassembly, truncation guards, safetySettings pins).
+- **Findings:**
+  - Lap credit: every 2026-08-08 suggestion landed — the factory consolidation genuinely killed the openai/xai copy-pair, the stall guard + `.status` stamping are pinned from both sides, and batch embedding has its own suite. Strongest registry pair this lap.
+  - **P2** Gemini's stream loop is the third hand-maintained SSE reader: `streamGeminiMessage` (`gemini.js:286-331`) duplicates the factory's skeleton (`openaiCompatible.js:127-170` — read/decode/split/`data: `-parse/no-finishReason throw) line for line, plus twin `assertCompleteResponse` and `httpError` helpers. The factory's own header promise ("stream-truncation fixes land once instead of being hand-copied") covers two of three implementations; extract a shared `readSseStream(response, onEvent)` + a reason-normalizing truncation guard so the next fix lands once.
+  - **P2** (accepted design, note only — not queued) `streamMessage` has no stall guard at all: the 2026-08-08 fix deliberately covered non-streaming only (the player has UI abort/retry on the visible turn), but a time-to-first-chunk timeout would close the "connects, then never emits" hang without touching mid-stream pacing. Revisit only if live hangs appear.
+  - **P2** (polish) the PROVIDERS model catalog hardcodes dated marketing ("released Feb 2026", "(Latest!)") that silently rots as models age — keep ids/caveats, drop the freshness claims.
+- **Suggested improvements:** (1) shared SSE reader; (2) catalog copy sweep; TTFC timeout only on live evidence.
+
+### Process notes
+- Second run today at Vesa's request. Rotation honored: with the morning entry in the last-6 window, progression + providers-adapter (both 2026-08-08) were the two least-recently-audited eligible features.
+- Lap 4 nearly closed: prompt-building and memory-journal are the last features without a Lap 4 visit.
 
 ## 2026-08-30 — story-memory + vector-memory-rag (Lap 4: simplification & design)
 
