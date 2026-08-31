@@ -151,6 +151,15 @@ export function normalizeFront(front = {}, existing = null) {
     const lastDmClockGainMessage = Number.isFinite(lastDmClockGainMessageRaw)
         ? Math.max(0, Math.round(lastDmClockGainMessageRaw))
         : (existing?.lastDmClockGainMessage ?? null);
+    // Theaters the front held at the moment it resolved (2026-08-31 P2):
+    // resolution frees the records' theaterFrontIds for future fronts, so
+    // regional hearsay needs this stamp to grade a retelling at the front's
+    // own ground as firsthand. Survives normalization and reloads.
+    const resolvedTheaterIds = (Array.isArray(front.resolvedTheaterIds)
+        ? front.resolvedTheaterIds
+        : existing?.resolvedTheaterIds || [])
+        .filter(id => typeof id === 'string' && id)
+        .slice(0, 12);
 
     return {
         id: cleanText(front.id, existing?.id || `front-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
@@ -170,6 +179,7 @@ export function normalizeFront(front = {}, existing = null) {
         faction: normalizeFaction(front.faction, existing?.faction || null),
         resolvedAtMessage,
         resolution: cleanText(front.resolution, existing?.resolution || '').slice(0, 240),
+        resolvedTheaterIds,
         lastDmClockGainMessage,
     };
 }

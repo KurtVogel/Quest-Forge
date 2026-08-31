@@ -77,6 +77,18 @@ describe('buildAbsenceDriftContext', () => {
         expect(context.npcsOfThisPlace[0].hasPersonalHistoryWithHero).toBe(true);
     });
 
+    it('counts a basedIn resident as local even when last seen elsewhere (2026-08-31 P2)', () => {
+        const state = baseState();
+        state.npcs = [
+            ...state.npcs,
+            // The Aldermill innkeeper the hero last met on the road: anchored
+            // here, lastLocation elsewhere — used to miss their own town's drift.
+            { name: 'Hedda', role: 'innkeeper', basedIn: 'Aldermill', lastLocation: 'Fen Causeway' },
+        ];
+        const context = buildAbsenceDriftContext(state);
+        expect(context.npcsOfThisPlace.map(npc => npc.name)).toContain('Hedda');
+    });
+
     it('supplies theater fronts with their live intensity band, never clocks', () => {
         const context = buildAbsenceDriftContext(baseState());
         expect(context.offScreenPressuresHoldingThisPlace).toHaveLength(1);

@@ -8,6 +8,52 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-08-31 · Queue sweep rulings: the DM gets RECEIPTS for engine coin/item movement,
+and the gain-guard asymmetry gets a bounded exception.** The whole open queue (4 P1s + 12
+actionable P2s, all ticked with fix notes in SCHEDULED_STRENGTHENING.md) cleared in one
+session. The rulings worth recording:
+**(1) Engine economy lines ride the DM window (`dmVisible`).** The live merchant-quest
+double-pay's root was structural blindness: the DM's own event JSON is stripped from its
+history and NO coin/item system line survived `buildMessageWindow`, while the ECONOMY
+prompt taught "narration without the event means the player never receives it" — so a
+reward the victory audit banked invisibly was dutifully re-emitted at quest completion.
+Now every economy line (grants, charges, purchases/sales, audit recoveries, duplicate
+suppressions) is stamped `dmVisible: true` and kept in the window (1 line each — the
+exchangeLine starvation lesson doesn't apply at this volume), and a new ECONOMY "receipts"
+rule makes the contract explicit: a receipt means banked, never re-emit, a "Duplicate …
+ignored" line means stop trying. This is the pattern for any future engine-owned state the
+DM keeps re-asserting: show it the receipt, don't just guard the replay.
+**(2) The "never refuse to give on suspicion" asymmetry survives, with one bounded
+exception.** Audit recoveries and grants riding a quest-completion response (applyEvents
+stamps `questCompletionAdjacent` when the same response completes a quest) dedupe across
+the spend side's 12-message horizon — the reward-at-handover → completion-recap gap
+routinely burns past 4 — while ordinary grants keep the tight 4 and the player
+repeat-phrasing bypass still pays on an explicit ask. Item grants mirror this exactly
+(`RECENT_ITEM_GRANT_EXTENDED_WINDOW`, scribeAudits' ledger window mirrored), and audit
+ADD_ITEMs now carry `_meta { sourceId, audit: true }` so they are LEDGERED: they skip the
+reducer's duplicate check (scribeAudits pre-filters with the strictly-broader fuzzy match
+and announces the recovery itself), but a later DM re-emission of an audit-granted reward
+finally hits the replay guard.
+**(3) Same-campaign loads remount by LOAD NONCE.** AppShell was keyed by `session.id`
+alone, so loading an earlier/later save of the SAME campaign kept every mount-scoped ref
+on the old timeline (journal baseline → memory rot or duplicate journaling, RAG seeding,
+exchange/cue narration dedupe). LOAD_GAME bumps `session.loadNonce` off the LIVE session's
+counter (so re-loading the very save that embedded the nonce still changes the key) and
+the key is `${id}:${nonce}`. Belt: the journal boundary derives fresh from the messages'
+`summarized` prefix each cadence — the runner-local mirror is gone.
+**(4) A Stop is not an error, and it must not destroy table state.** Pre-dice aborts
+restore the staged roleplay proposal (challenge unspent, hidden-setup linkage intact);
+post-dice the proposal stays cleared (restoring would reopen reroll bargaining) and
+rollResolver's "Outcome narration failed" banner no longer posts on a deliberate Stop.
+Pinned by the new `turnOrchestrator.abort.test.js` family.
+**(5) Living-world locality fixes:** an intra-settlement move keeps the live hearsay offer
+(re-stamped onto the new spelling; only an UNRELATED arrival clears it), END_COMBAT
+re-opens a hearsay window an ambush-on-arrival fight burned through (gated on the offer
+being live at `combat.startedAtMessage`, so expired offers can't resurrect), resolved
+fronts remember their territory as `resolvedTheaterIds` (stamped before resolution frees
+the records) so locals retell the hero's victory FIRSTHAND at its own ground, and
+absence-drift locality matches `basedIn` OR `lastLocation`.
+
 **2026-08-30 · Journal → Places tab: the gazetteer goes player-facing, but VISITED-ONLY —
 the raw location registry is a spoiler surface and must never be rendered wholesale.**
 Vesa: "it would serve the experience to sort of see where you've been." The registry

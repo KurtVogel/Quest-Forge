@@ -103,6 +103,27 @@ describe('buildMessageWindow', () => {
         expect(buildMessageWindow([msg('system', undefined)], 5)).toEqual([]);
     });
 
+    it('keeps dmVisible system lines — coin/loot receipts the DM must see (P1 2026-08-31)', () => {
+        // Without these the DM was structurally blind to engine coin/loot
+        // accounting and re-emitted an already-banked reward at quest completion.
+        const history = [
+            msg('user', 'I hand over the caravan papers.'),
+            msg('system', '**+2 gp** received — purse: 25 gp.', { dmVisible: true }),
+            msg('system', '**Loot recovered from narration:** Potion of Healing added to your possessions.', { dmVisible: true }),
+            msg('system', 'Autosave complete.'),
+            msg('assistant', 'The merchant counts out your pay.'),
+        ];
+        const window = buildMessageWindow(history, 20);
+        expect(window.map(m => m.content)).toEqual([
+            'I hand over the caravan papers.',
+            '**+2 gp** received — purse: 25 gp.',
+            '**Loot recovered from narration:** Potion of Healing added to your possessions.',
+            'The merchant counts out your pay.',
+        ]);
+        // System lines still travel as user role.
+        expect(window[1].role).toBe('user');
+    });
+
     it('drops combat-exchange result lines even though they match the roll-line keep rule', () => {
         // A full exchange (hero + companions + 4 foes) used to eat ~8 of 20 window
         // slots per round; the narration prompt already carries these lines as

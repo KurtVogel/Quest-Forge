@@ -336,12 +336,14 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     const knownIdentities = appliedItemIdentities(appliedEvents);
     // Cross-message ledger check (live playtest #8): the same-message stand-down
     // above cannot see a RE-narration — "you tuck the pages away" one turn after
-    // the pages were evented re-granted them because audit ADD_ITEMs deliberately
-    // carry no _meta (the announcement line must never claim more than it did).
-    // So the dedupe happens HERE: an item identity the recentItemGrants ledger
-    // shows applied within its window is a recount, not a missing grant. Window
-    // mirrors RECENT_ITEM_GRANT_MESSAGE_WINDOW in state/handlers/inventory.js.
-    const ITEM_GRANT_LEDGER_WINDOW = 4;
+    // the pages were evented re-granted them. The dedupe happens HERE, with a
+    // fuzzy identity match strictly broader than the reducer's exact-signature
+    // check (which audit dispatches therefore skip — they carry `audit: true`
+    // meta so the reducer ledgers them without double-checking or
+    // double-announcing). Window mirrors RECENT_ITEM_GRANT_EXTENDED_WINDOW in
+    // state/handlers/inventory.js (2026-08-31 P1: the old 4 let a victory-loot
+    // reward re-emit at quest completion, >4 conversational messages later).
+    const ITEM_GRANT_LEDGER_WINDOW = 12;
     const recentGrantIdentities = [];
     const currentIndex = (state?.messages || []).length;
     for (const entry of state?.recentItemGrants || []) {
@@ -373,7 +375,11 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
             },
         });
     }
-    for (const item of missingItems) dispatch({ type: 'ADD_ITEM', payload: item });
+    // Audit meta ledgers each grant in recentItemGrants so a later DM
+    // re-emission of the same reward hits the reducer's replay guard.
+    for (const item of missingItems) {
+        dispatch({ type: 'ADD_ITEM', payload: { ...item, _meta: { sourceId, audit: true } } });
+    }
 
     if (missingItems.length > 0) {
         const parts = missingItems.map(item => (item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name));
@@ -381,6 +387,9 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
             type: 'ADD_MESSAGE',
             payload: {
                 role: 'system',
+                // dmVisible: the recovery receipt rides the DM window so the DM
+                // knows the narrated loot was banked (2026-08-31 P1 root fix).
+                dmVisible: true,
                 content: `**Loot recovered from narration:** ${parts.join(', ')} added to your possessions.`,
             },
         });

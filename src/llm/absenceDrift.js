@@ -119,9 +119,11 @@ export function buildAbsenceDriftContext(state) {
             category: cleanText(fact.category, 60),
             fact: cleanText(fact.fact, 400),
         })),
+        // Journal entries have only summary/keyDecisions/consequences/location —
+        // the old title/content projection shipped `title: ""` every time and
+        // documented a schema that isn't real (2026-08-31 P2).
         journal: (state.journal || []).slice(-4).map(entry => ({
-            title: cleanText(entry.title, 120),
-            summary: cleanText(entry.summary || entry.content, 800),
+            summary: cleanText(entry.summary, 800),
         })),
         activeQuests: (state.quests || [])
             .filter(quest => !['completed', 'failed'].includes(quest.status))

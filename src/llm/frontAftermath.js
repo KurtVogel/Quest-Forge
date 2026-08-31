@@ -12,7 +12,7 @@
  * normalizeEmergentFront and owns the one-shot pending flag.
  */
 import { sendMessage } from './adapter.js';
-import { cleanText, parseDirectorJson } from './directorUtils.js';
+import { cleanText, compactMessage, parseDirectorJson } from './directorUtils.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 
@@ -68,12 +68,6 @@ function compactFront(front) {
     };
 }
 
-function compactMessage(message) {
-    if (!message || message.hidden || message.deleted || !['user', 'assistant'].includes(message.role)) return null;
-    const content = cleanText(message.content, 900);
-    return content ? { role: message.role, content } : null;
-}
-
 export function shouldGenerateFrontAftermath(state) {
     return !!(state?.session?.pendingFrontAftermath
         && state.session?.id
@@ -110,9 +104,11 @@ export function buildFrontAftermathContext(state) {
             category: cleanText(fact.category, 60),
             fact: cleanText(fact.fact, 500),
         })),
+        // Journal entries have only summary/keyDecisions/consequences/location —
+        // the old title/content projection shipped `title: ""` every time and
+        // documented a schema that isn't real (2026-08-31 P2).
         journal: (state.journal || []).slice(-6).map(entry => ({
-            title: cleanText(entry.title, 120),
-            summary: cleanText(entry.summary || entry.content, 1000),
+            summary: cleanText(entry.summary, 1000),
         })),
         activeQuests: (state.quests || [])
             .filter(quest => !['completed', 'failed'].includes(quest.status))
@@ -128,7 +124,7 @@ export function buildFrontAftermathContext(state) {
             agenda: cleanText(npc.agenda, 300),
             lastLocation: cleanText(npc.lastLocation, 120),
         })),
-        recentEvents: (state.messages || []).slice(-24).map(compactMessage).filter(Boolean).slice(-12),
+        recentEvents: (state.messages || []).slice(-24).map(m => compactMessage(m)).filter(Boolean).slice(-12),
     };
 }
 

@@ -34,6 +34,12 @@ import {
 // the very next turns, and two identical legitimate finds further apart stay
 // untouched.
 const RECENT_ITEM_GRANT_MESSAGE_WINDOW = 4;
+// Grants riding a quest-completion response guard wider (2026-08-31 P1, item
+// twin of the coin double-pay): a reward item granted at the handover gets
+// re-emitted at quest completion >4 conversational messages later. Matches the
+// spend side's 12; the ITEM_ACQUIRE_VERB_RE player-phrasing bypass stays intact
+// so a genuine "I grab another torch" still applies.
+const RECENT_ITEM_GRANT_EXTENDED_WINDOW = 12;
 // Verbs that show the player's own message re-acquiring an item this turn —
 // broader than the coin-loss commerce set on purpose: "I take/grab/pick up
 // another torch" is a genuine second acquisition.
@@ -82,9 +88,20 @@ export const handlers = {
                 signature: `item|${identity}`,
             };
             const messageIndex = currentMessageIndex(state);
-            const duplicate = findRecentTransactionDuplicate(
+            // Scribe-audit grants skip the reducer's duplicate check — scribeAudits
+            // already pre-filtered against this same ledger with a FUZZY identity
+            // match (strictly broader than the exact signature here) and announces
+            // the recovery itself — but they DO enter the ledger, so a later DM
+            // re-emission of an audit-granted reward is guarded (2026-08-31 P1:
+            // audit grants were never ledgered, leaving the victory-loot →
+            // quest-completion replay invisible to this guard).
+            const isAudit = meta.audit === true;
+            const grantWindow = (isAudit || meta.questCompletionAdjacent === true)
+                ? RECENT_ITEM_GRANT_EXTENDED_WINDOW
+                : RECENT_ITEM_GRANT_MESSAGE_WINDOW;
+            const duplicate = isAudit ? null : findRecentTransactionDuplicate(
                 state.recentItemGrants, transaction, sourceId, messageIndex,
-                RECENT_ITEM_GRANT_MESSAGE_WINDOW, state.messages
+                grantWindow, state.messages
             );
             const exactSourceReplay = !!duplicate && duplicate.sourceId === sourceId;
             if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatTransaction(item, meta.playerMessage, ITEM_ACQUIRE_VERB_RE))) {
@@ -93,7 +110,9 @@ export const handlers = {
                     recentItemGrants: rememberTransaction(state.recentItemGrants, transaction, sourceId, messageIndex, 'ignored'),
                     messages: [
                         ...state.messages,
-                        systemMessage(`Duplicate item grant ignored — ${item.name} was already added moments ago.`),
+                        // dmVisible: the DM must learn its re-emission was suppressed
+                        // (the item is already owned) or it keeps trying.
+                        systemMessage(`Duplicate item grant ignored — ${item.name} was already added moments ago.`, { dmVisible: true }),
                     ],
                 };
             }

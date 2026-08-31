@@ -622,6 +622,36 @@ describe('LOAD_GAME progression-field heal (2026-07-28 audit)', () => {
     });
 });
 
+describe('LOAD_GAME load nonce (2026-08-31 P1: same-session load must remount ChatPanel)', () => {
+    const base = {
+        character: {
+            name: 'Survivor', race: 'human', class: 'fighter', level: 1, exp: 0,
+            currentHP: 12, maxHP: 12, conditions: [],
+        },
+        inventory: [],
+        messages: [],
+        session: { id: 'same-campaign' },
+    };
+
+    it('bumps the live nonce on every load, even of the same campaign', () => {
+        const first = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: base });
+        expect(first.session.loadNonce).toBe(1);
+        const second = gameReducer(first, { type: 'LOAD_GAME', payload: base });
+        expect(second.session.loadNonce).toBe(2);
+    });
+
+    it('outruns a nonce embedded in the save itself (re-loading the save that stamped it)', () => {
+        const live = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: base });
+        // The save was serialized AFTER that load, so it embeds loadNonce 1 —
+        // identical to the live session's. The AppShell key must still change.
+        const reloaded = gameReducer(live, {
+            type: 'LOAD_GAME',
+            payload: { ...base, session: { id: 'same-campaign', loadNonce: 1 } },
+        });
+        expect(reloaded.session.loadNonce).toBe(2);
+    });
+});
+
 describe('LOAD_GAME live-session invariants (user + settings)', () => {
     it('keeps the live user verbatim and lets live settings win over the save\'s', () => {
         const liveState = {

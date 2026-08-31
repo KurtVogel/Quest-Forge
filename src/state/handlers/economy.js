@@ -68,10 +68,26 @@ function buildPurchaseTransaction(payload = {}) {
 }
 
 
+// Every coin/trade line this module posts is a purse receipt the DM must see:
+// tagged dmVisible so buildMessageWindow keeps it in the LLM history (2026-08-31
+// P1 — the DM was structurally blind to engine coin accounting, so a reward the
+// victory audit banked invisibly got re-emitted at quest completion and paid
+// twice).
+function coinLine(content) {
+    return systemMessage(content, { dmVisible: true });
+}
+
 // Coin grants replay in a tighter window than purchases: the observed failure is the DM
 // re-emitting a reward on the very next turn while narrating the pouch being counted or
 // split. Two identical legitimate finds four+ messages apart stay untouched.
 const RECENT_COIN_GRANT_MESSAGE_WINDOW = 4;
+// Audit recoveries and grants riding a quest-completion response guard wider
+// (2026-08-31 P1, live merchant-quest double-pay): the reward is narrated at the
+// handover and re-emitted at quest completion, routinely >4 conversational
+// messages later (travel + report-back). Matches the spend side's 12. The
+// player-phrasing bypass still applies to DM event grants, so "never refuse to
+// give on suspicion" survives — an explicit repeat request always pays.
+const RECENT_COIN_GRANT_EXTENDED_WINDOW = 12;
 const COIN_WORD_RE = /\b(gold|silver|copper|coins?|gp|sp|cp|payment|reward|wages?|bounty|purse)\b/i;
 
 function clampCoinAmount(value) {
@@ -309,8 +325,14 @@ export const handlers = {
         // bypass applies — the repeat-intent escape hatch is for the DM event path,
         // where the player explicitly asks for more coin on a later turn.
         const isAudit = meta.audit === true || meta.announce === 'audit';
+        // Audit recaps and completion-turn grants dedupe across the wide window;
+        // ordinary DM grants keep the tight one (two identical legitimate finds
+        // a scene apart must still both pay).
+        const grantWindow = (isAudit || meta.questCompletionAdjacent === true)
+            ? RECENT_COIN_GRANT_EXTENDED_WINDOW
+            : RECENT_COIN_GRANT_MESSAGE_WINDOW;
         const duplicate = findRecentTransactionDuplicate(
-            state.recentCoinGrants, transaction, sourceId, messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW, state.messages,
+            state.recentCoinGrants, transaction, sourceId, messageIndex, grantWindow, state.messages,
             { excludeSameBase: isAudit }
         );
         const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
@@ -320,7 +342,7 @@ export const handlers = {
                 recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`Duplicate coin grant ignored — ${transaction.item.name} was already received moments ago.`),
+                    coinLine(`Duplicate coin grant ignored — ${transaction.item.name} was already received moments ago.`),
                 ],
             };
         }
@@ -338,14 +360,14 @@ export const handlers = {
                 entry.status === 'applied'
                 && entry.priceCp >= transaction.priceCp
                 && (!base || sourceBaseOf(entry.sourceId) !== base)
-                && conversationalDistance(state.messages, entry.messageIndex, messageIndex) <= RECENT_COIN_GRANT_MESSAGE_WINDOW);
+                && conversationalDistance(state.messages, entry.messageIndex, messageIndex) <= grantWindow);
             if (covered) {
                 return {
                     ...state,
                     recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
                     messages: [
                         ...state.messages,
-                        systemMessage(`Duplicate coin grant ignored — ${transaction.item.name} repeats rewards already received moments ago.`),
+                        coinLine(`Duplicate coin grant ignored — ${transaction.item.name} repeats rewards already received moments ago.`),
                     ],
                 };
             }
@@ -358,14 +380,14 @@ export const handlers = {
             const lossEcho = normalizeRecentTransactions(state.recentCoinLosses).some(entry =>
                 entry.status === 'applied'
                 && entry.priceCp === transaction.priceCp
-                && conversationalDistance(state.messages, entry.messageIndex, messageIndex) <= RECENT_COIN_GRANT_MESSAGE_WINDOW);
+                && conversationalDistance(state.messages, entry.messageIndex, messageIndex) <= grantWindow);
             if (lossEcho) {
                 return {
                     ...state,
                     recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
                     messages: [
                         ...state.messages,
-                        systemMessage(`Coin recovery ignored — ${transaction.item.name} matches a payment you just made; treated as the same handover retold.`),
+                        coinLine(`Coin recovery ignored — ${transaction.item.name} matches a payment you just made; treated as the same handover retold.`),
                     ],
                 };
             }
@@ -376,7 +398,7 @@ export const handlers = {
         // and never against an explicit player repeat.
         const saleCover = findCrossChannelCover(
             normalizeRecentTransactions(state.recentSales), transaction.priceCp,
-            sourceId, messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW, state.messages
+            sourceId, messageIndex, grantWindow, state.messages
         );
         if (saleCover && (isAudit || !playerMessageSupportsRepeatCoinGrant(meta.playerMessage))) {
             return {
@@ -384,7 +406,7 @@ export const handlers = {
                 recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`Duplicate coin grant ignored — ${transaction.item.name} was already paid out when you sold ${saleCover.name || 'that'}.`),
+                    coinLine(`Duplicate coin grant ignored — ${transaction.item.name} was already paid out when you sold ${saleCover.name || 'that'}.`),
                 ],
             };
         }
@@ -413,7 +435,7 @@ export const handlers = {
                 recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`Duplicate coin grant ignored — ${transaction.item.name} repeats rewards already received moments ago.`),
+                    coinLine(`Duplicate coin grant ignored — ${transaction.item.name} repeats rewards already received moments ago.`),
                 ],
             };
         }
@@ -425,10 +447,10 @@ export const handlers = {
         // the purse total in chat always matches the sheet.
         const messages = [
             ...state.messages,
-            ...(bundled ? [systemMessage(`Adjusted a bundled coin grant — ${formatCurrency(bundled.strippedCp)} of it repeats a reward already received moments ago; granted ${formatCurrency(grantTransaction.priceCp)}.`)] : []),
+            ...(bundled ? [coinLine(`Adjusted a bundled coin grant — ${formatCurrency(bundled.strippedCp)} of it repeats a reward already received moments ago; granted ${formatCurrency(grantTransaction.priceCp)}.`)] : []),
             meta.announce === 'audit'
-                ? systemMessage(`**Coins recovered from narration:** ${grantTransaction.item.name} added to your purse — purse: ${purseLine(character)}.`)
-                : systemMessage(`**+${formatCurrency(grantTransaction.priceCp)}** received — purse: ${purseLine(character)}.`),
+                ? coinLine(`**Coins recovered from narration:** ${grantTransaction.item.name} added to your purse — purse: ${purseLine(character)}.`)
+                : coinLine(`**+${formatCurrency(grantTransaction.priceCp)}** received — purse: ${purseLine(character)}.`),
         ];
         return {
             ...state,
@@ -465,7 +487,7 @@ export const handlers = {
                 recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`Duplicate coin charge ignored — ${transaction.item.name} was already paid moments ago.`),
+                    coinLine(`Duplicate coin charge ignored — ${transaction.item.name} was already paid moments ago.`),
                 ],
             };
         }
@@ -485,7 +507,7 @@ export const handlers = {
                 recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`Duplicate coin charge ignored — ${transaction.item.name} was already paid when you bought ${purchaseCover.name || 'that'}.`),
+                    coinLine(`Duplicate coin charge ignored — ${transaction.item.name} was already paid when you bought ${purchaseCover.name || 'that'}.`),
                 ],
             };
         }
@@ -514,7 +536,7 @@ export const handlers = {
                 recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`Duplicate coin charge ignored — ${transaction.item.name} repeats payments already taken moments ago.`),
+                    coinLine(`Duplicate coin charge ignored — ${transaction.item.name} repeats payments already taken moments ago.`),
                 ],
             };
         }
@@ -522,7 +544,7 @@ export const handlers = {
             ? buildCoinLossTransaction(charge.gold, charge.silver, charge.copper)
             : transaction;
         const bundleNote = bundled
-            ? [systemMessage(`Adjusted a bundled coin charge — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago; charged ${formatCurrency(chargeTransaction.priceCp)}.`)]
+            ? [coinLine(`Adjusted a bundled coin charge — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago; charged ${formatCurrency(chargeTransaction.priceCp)}.`)]
             : [];
         const result = spendCurrency(state.character, charge);
         if (!result.paid) {
@@ -533,7 +555,7 @@ export const handlers = {
             // the never-paid debt was suppressed as "already paid".
             return {
                 ...state,
-                messages: [...state.messages, ...bundleNote, systemMessage(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)],
+                messages: [...state.messages, ...bundleNote, coinLine(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)],
             };
         }
         const recentCoinLosses = rememberTransaction(state.recentCoinLosses, chargeTransaction, sourceId, messageIndex);
@@ -551,7 +573,7 @@ export const handlers = {
             messages: [
                 ...state.messages,
                 ...bundleNote,
-                systemMessage(`**−${formatCurrency(chargeTransaction.priceCp)}** paid — purse: ${purseLine(result.character)}.`),
+                coinLine(`**−${formatCurrency(chargeTransaction.priceCp)}** paid — purse: ${purseLine(result.character)}.`),
             ],
         };
     },
@@ -585,7 +607,7 @@ export const handlers = {
                 recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`**Duplicate payment ignored:** ${formatCurrency(costCp)} was already deducted moments ago.`),
+                    coinLine(`**Duplicate payment ignored:** ${formatCurrency(costCp)} was already deducted moments ago.`),
                 ],
             };
         }
@@ -605,7 +627,7 @@ export const handlers = {
                 recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`**Duplicate payment ignored:** ${formatCurrency(costCp)} repeats payments already taken moments ago.`),
+                    coinLine(`**Duplicate payment ignored:** ${formatCurrency(costCp)} repeats payments already taken moments ago.`),
                 ],
             };
         }
@@ -625,7 +647,7 @@ export const handlers = {
                 recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`**Duplicate payment ignored:** ${formatCurrency(costCp)} was already paid when you bought ${purchaseCover.name || 'that'}.`),
+                    coinLine(`**Duplicate payment ignored:** ${formatCurrency(costCp)} was already paid when you bought ${purchaseCover.name || 'that'}.`),
                 ],
             };
         }
@@ -648,7 +670,7 @@ export const handlers = {
                 recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`**Payment report ignored:** ${formatCurrency(costCp)} matches coins you just received — treated as the same handover, not a new charge.`),
+                    coinLine(`**Payment report ignored:** ${formatCurrency(costCp)} matches coins you just received — treated as the same handover, not a new charge.`),
                 ],
             };
         }
@@ -670,7 +692,7 @@ export const handlers = {
                 recentCoinLosses: rememberTransaction(state.recentCoinLosses, transaction, sourceId, messageIndex, 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`**Duplicate payment ignored:** ${formatCurrency(costCp)} repeats payments already taken moments ago.`),
+                    coinLine(`**Duplicate payment ignored:** ${formatCurrency(costCp)} repeats payments already taken moments ago.`),
                 ],
             };
         }
@@ -680,7 +702,7 @@ export const handlers = {
         const chargeCp = chargeTransaction.priceCp;
         const result = spendCurrency(state.character, charge);
         const strippedNote = bundled
-            ? [systemMessage(`Adjusted an audited payment — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago.`)]
+            ? [coinLine(`Adjusted an audited payment — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago.`)]
             : [];
         if (result.paid) {
             return {
@@ -690,7 +712,7 @@ export const handlers = {
                 messages: [
                     ...state.messages,
                     ...strippedNote,
-                    systemMessage(`**Payment settled from narration:** ${formatCurrency(chargeCp)} deducted from your purse.`),
+                    coinLine(`**Payment settled from narration:** ${formatCurrency(chargeCp)} deducted from your purse.`),
                 ],
             };
         }
@@ -704,7 +726,7 @@ export const handlers = {
                 messages: [
                     ...state.messages,
                     ...strippedNote,
-                    systemMessage(`**Payment noted from narration:** ${formatCurrency(chargeCp)} was owed, but your purse is empty — nothing deducted.`),
+                    coinLine(`**Payment noted from narration:** ${formatCurrency(chargeCp)} was owed, but your purse is empty — nothing deducted.`),
                 ],
             };
         }
@@ -720,7 +742,7 @@ export const handlers = {
             messages: [
                 ...state.messages,
                 ...strippedNote,
-                systemMessage(`**Payment settled from narration:** ${formatCurrency(availableCp)} deducted (purse emptied; ${formatCurrency(result.missingCp)} short of the narrated ${formatCurrency(chargeCp)}).`),
+                coinLine(`**Payment settled from narration:** ${formatCurrency(availableCp)} deducted (purse emptied; ${formatCurrency(result.missingCp)} short of the narrated ${formatCurrency(chargeCp)}).`),
             ],
         };
     },
@@ -741,7 +763,7 @@ export const handlers = {
                 recentPurchases: rememberTransaction(state.recentPurchases, transaction, sourceId, currentMessageIndex(state), 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`Duplicate purchase ignored — ${item.name} was already bought recently.`),
+                    coinLine(`Duplicate purchase ignored — ${item.name} was already bought recently.`),
                 ],
             };
         }
@@ -759,7 +781,7 @@ export const handlers = {
                 recentPurchases: rememberTransaction(state.recentPurchases, transaction, sourceId, currentMessageIndex(state)),
                 messages: [
                     ...state.messages,
-                    systemMessage(`${quantity > 1 ? `${quantity}x ` : ''}${item.name} added — its ${formatCurrency(priceCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`),
+                    coinLine(`${quantity > 1 ? `${quantity}x ` : ''}${item.name} added — its ${formatCurrency(priceCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`),
                 ],
             };
             return withInventoryAndAC(coveredState, [...state.inventory, mintOwnedItem(item, { quantity })]);
@@ -771,7 +793,7 @@ export const handlers = {
                 ...state,
                 messages: [
                     ...state.messages,
-                    systemMessage(`Cannot buy ${item.name} — price is ${formatCurrency(priceCp)}, missing ${formatCurrency(payment.missingCp)}.`),
+                    coinLine(`Cannot buy ${item.name} — price is ${formatCurrency(priceCp)}, missing ${formatCurrency(payment.missingCp)}.`),
                 ],
             };
         }
@@ -784,7 +806,7 @@ export const handlers = {
             recentPurchases: rememberTransaction(state.recentPurchases, transaction, sourceId, currentMessageIndex(state)),
             messages: [
                 ...state.messages,
-                systemMessage(`Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)}.`),
+                coinLine(`Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)}.`),
             ],
         };
         return withInventoryAndAC(nextState, [...state.inventory, newItem]);
@@ -804,7 +826,7 @@ export const handlers = {
         if (!item) {
             return {
                 ...state,
-                messages: [...state.messages, systemMessage(`Can't sell "${ref}" — it's not in your inventory.`)],
+                messages: [...state.messages, coinLine(`Can't sell "${ref}" — it's not in your inventory.`)],
             };
         }
 
@@ -834,7 +856,7 @@ export const handlers = {
                 recentSales: rememberTransaction(state.recentSales, saleTransaction, saleSourceId, currentMessageIndex(state), 'ignored'),
                 messages: [
                     ...state.messages,
-                    systemMessage(`Duplicate sale ignored — ${item.name} was already sold recently.`),
+                    coinLine(`Duplicate sale ignored — ${item.name} was already sold recently.`),
                 ],
             };
         }
@@ -845,7 +867,7 @@ export const handlers = {
             recentSales: rememberTransaction(state.recentSales, saleTransaction, saleSourceId, currentMessageIndex(state)),
             messages: [
                 ...state.messages,
-                systemMessage(`Sold ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(proceedsCp)}.`),
+                coinLine(`Sold ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(proceedsCp)}.`),
             ],
         };
         return withInventoryAndAC(nextState, consumeItem(state.inventory, item.id, quantity));

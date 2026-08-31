@@ -189,6 +189,11 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     const transactionMeta = {
         ...(lootSourceId && { sourceId: lootSourceId }),
         ...(opts?.playerMessage && { playerMessage: opts.playerMessage }),
+        // A response that completes a quest is the canonical replay moment for
+        // its already-banked reward (2026-08-31 P1: handover pays, completion
+        // recap re-emits >4 messages later) — coin/item grants riding it dedupe
+        // across the wide window. The player-phrasing bypass still applies.
+        ...(events.questUpdates.some(q => q.status === 'completed') && { questCompletionAdjacent: true }),
     };
     const withTransactionMeta = (entry) => {
         if (Object.keys(transactionMeta).length === 0) return entry;

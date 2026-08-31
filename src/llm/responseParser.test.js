@@ -723,8 +723,17 @@ describe('applyEvents dispatch coverage', () => {
             sells: ['junk-string-entry', { itemKey: 'dagger' }],
             quest_updates: [{ name: 'Buy supplies', status: 'completed' }],
         });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'PURCHASE_ITEM', payload: { itemKey: 'torch' } });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'SELL_ITEM', payload: { itemKey: 'dagger' } });
+        // The same-response quest completion stamps questCompletionAdjacent
+        // meta on the transactions (2026-08-31 P1: wide replay horizon for
+        // completion-adjacent grants).
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'torch', _meta: { questCompletionAdjacent: true } },
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'SELL_ITEM',
+            payload: { itemKey: 'dagger', _meta: { questCompletionAdjacent: true } },
+        });
         expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'COMPLETE_QUEST' }));
     });
 

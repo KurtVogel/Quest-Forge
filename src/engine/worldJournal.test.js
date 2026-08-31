@@ -178,6 +178,24 @@ describe('worldJournal context builder', () => {
         expect(context).toContain('- **Arrival at dark caverns:** Entry 2 in SESSION HISTORY above.');
     });
 
+    it('matches alias-drifted location strings via registry containment (2026-08-31 P2)', () => {
+        // currentLocation and journal stamps carry RAW alias strings — the old
+        // normalizeLocationName exact-equality never matched "Library landing,
+        // Clockwork Tower" against "Clockwork Tower", silently suppressing the
+        // block right after travel.
+        const journal = [
+            { summary: 'Crossed the gear bridge.', location: 'The Gear Bridge' }, // Entry 1
+            { summary: 'Climbed into the tower.', location: 'Clockwork Tower' }, // Entry 2 - Transition
+            { summary: 'Searched the archives.', location: 'Library landing, Clockwork Tower' }, // Entry 3
+        ];
+
+        const context = buildJournalContext(journal, [], 'Library landing, Clockwork Tower');
+
+        expect(context).toContain('## LOCATION TRANSITION HISTORY');
+        expect(context).toContain('- **Right before entering:** Entry 1 (at The Gear Bridge) in SESSION HISTORY above.');
+        expect(context).toContain('- **Arrival at Library landing, Clockwork Tower:** Entry 2 in SESSION HISTORY above.');
+    });
+
     it('normalizeLocationName normalizes inputs correctly', () => {
         expect(normalizeLocationName('The Blackroot Cave!')).toBe('blackroot cave');
         expect(normalizeLocationName('  forest  path  ')).toBe('forest path');

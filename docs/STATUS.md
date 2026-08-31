@@ -6,7 +6,32 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-30 (Journal → Places tab: the visited gazetteer goes player-facing)._
+_Last updated: 2026-08-31 (full queue sweep: 4 P1s + 12 P2s cleared, deployed)._
+
+## 2026-08-31 — full queue sweep: coin/item double-pay root-fixed, load-nonce remount, hearsay locality
+
+The whole open strengthening queue cleared in one session (every item ticked with a fix
+note; rulings in DECISIONS.md 2026-08-31). **The headline P1 pair** (Vesa's live "double
+reward, never triple" merchant report): the DM was structurally blind to engine coin/item
+accounting — no economy system line ever reached its message window — so a reward the
+victory audit banked invisibly got re-emitted at quest completion, past the 4-message gain
+window. Root fix: economy lines (grants, charges, audit recoveries, duplicate
+suppressions) are stamped `dmVisible` and ride the DM window, with a matching ECONOMY
+"receipts" prompt rule; belt: audit + quest-completion-adjacent grants (coin AND item)
+dedupe across the spend side's 12-message horizon while ordinary grants keep 4 and the
+player repeat-phrasing bypass survives, and audit item grants are finally ledgered.
+**P1 #3:** same-campaign loads now remount ChatPanel via a LOAD_GAME-stamped
+`session.loadNonce` in the AppShell key (stale journal baseline → memory rot / duplicate
+journaling; the runner now derives the boundary fresh from the summarized prefix).
+**P1 #4:** intra-settlement movement no longer destroys the live hearsay offer (related
+arrivals keep it, re-stamped; unrelated arrivals clear). **P2s:** dying-instruction
+channels combat-gated, shared `isLowLevelSolo`, transition history alias-matched via
+`isSameLocation`, one shared NPC classify→dispatch helper (3 loops folded), director
+installs take trigger-time sessionId, resolved fronts remember `resolvedTheaterIds` for
+firsthand local hearsay, phantom journal fields dropped + `compactMessage` shared (4
+copies), ambush-on-arrival hearsay window re-opens at END_COMBAT, absence drift matches
+`basedIn`, Stop no longer discards staged roleplay proposals (new AbortError test suite).
+1,917 tests green (+11 files touched), lint clean, deployed to Firebase Hosting.
 
 ## 2026-08-30 — Journal → Places tab: see where you've been
 
@@ -835,7 +860,7 @@ generation + victory echo land.**
 
 ## Strengthening queue & watch items
 
-Open in SCHEDULED_STRENGTHENING.md after the 2026-08-29 sweep: **0 P1s, 0 P2s** — the one
+Open in SCHEDULED_STRENGTHENING.md after the 2026-08-31 sweep: **0 P1s, 0 P2s** — the one
 open line is the NPC pronoun-flip WATCH item (left open by design: prompt fix shipped
 2026-08-09, zero flips since, needs live evidence before more machinery; playtest #9 saw
 zero flips across six NPCs, but no generated art exercised the visual half). Carried

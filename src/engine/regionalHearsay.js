@@ -122,13 +122,21 @@ export function selectRegionalHearsay({
     };
 
     // Campaign-scale deeds first: a front the player ENDED is region-wide news.
+    const hereRecord = keyToRecord(locations, locKey);
     for (const front of Array.isArray(fronts) ? fronts : []) {
         if (front?.status !== 'resolved' || !Number.isFinite(front.resolvedAtMessage)) continue;
+        // At the front's own retired theater the locals WITNESSED the ending
+        // (2026-08-31 P2: hardcoded local:false had them retelling the hero's
+        // victory secondhand — "one detail wrong", garbled names — about an
+        // event in their own square). Firsthand there, like fights and cards.
+        // resolvedTheaterIds is stamped at resolution, because resolution
+        // frees the records' own theaterFrontIds for future fronts.
+        const local = !!hereRecord && (front.resolvedTheaterIds || []).includes(hereRecord.id);
         const age = distanceSince(messages, front.resolvedAtMessage, messageIndex);
-        if (age < HEARSAY_MIN_TRAVEL_DISTANCE) continue;
+        if (!local && age < HEARSAY_MIN_TRAVEL_DISTANCE) continue;
         consider(`front:${front.id}`, {
             text: `the hero ending the pressure known as "${cleanText(front.title, 90)}"${front.resolution ? ` (${cleanText(front.resolution, 160)})` : ''}`,
-            grade: gradeFor({ local: false, age }),
+            grade: gradeFor({ local, age }),
         });
     }
 
@@ -173,6 +181,25 @@ export function selectRegionalHearsay({
     }
 
     return { items, ledgerEntries };
+}
+
+/**
+ * Does a live hearsay offer survive an arrival at `here` that selected nothing?
+ * Intra-settlement movement (town square → its tavern) must keep the offer
+ * (2026-08-31 P1 r3): the cluster rule guarantees the related arrival's own
+ * selection is empty — the deeds are already ledger-burned for the whole
+ * audience — so nulling on every empty selection destroyed the offer before
+ * any NPC could voice it. Only arrival at an UNRELATED place drops it; the
+ * render guard's location match and age window still gate display.
+ */
+export function hearsayOfferSurvivesArrival(regionalHearsay, locations, here) {
+    const offerPlace = regionalHearsay?.locationName;
+    if (!offerPlace || !here) return false;
+    if (isSameLocation(offerPlace, here)) return true;
+    const offerIdx = findLocationRecord(locations || [], offerPlace);
+    const hereIdx = findLocationRecord(locations || [], here);
+    if (offerIdx === -1 || hereIdx === -1) return false;
+    return areRelatedPlaces(locations[offerIdx], locations[hereIdx]);
 }
 
 export function appendHearsayLedger(recentHearsay, ledgerEntries) {

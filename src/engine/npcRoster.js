@@ -474,6 +474,24 @@ export function classifyNpcCandidate(payload = {}, existing = null) {
     };
 }
 
+/**
+ * One classify→dispatch step shared by the per-turn Scribe (npc_updates) and
+ * the journal cadence (npcs_encountered) — 2026-08-31 P2: the journal used to
+ * hand-map its fields twice, once into the classifier and once into the
+ * dispatch payload, so a schema addition needed two edits or silently dropped.
+ * The roster-worthy candidate is dispatched wholesale with the classified
+ * kind; UPDATE_NPC's own normalization is the field boundary.
+ *
+ * @returns {boolean} true when the update was dispatched.
+ */
+export function dispatchClassifiedNpcUpdate(dispatch, candidate) {
+    if (!candidate || typeof candidate !== 'object') return false;
+    const classified = classifyNpcCandidate(candidate);
+    if (!classified.allowRoster) return false;
+    dispatch({ type: 'UPDATE_NPC', payload: { ...candidate, kind: classified.kind } });
+    return true;
+}
+
 export function computeNpcImportance(npc = {}) {
     let score = clampImportance(npc.importance, 3);
 

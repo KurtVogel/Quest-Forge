@@ -657,6 +657,60 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
         });
         expect(replay.inventory).toHaveLength(1);
     });
+
+    // 2026-08-31 P1 (item twin of the coin double-pay): the reward item granted
+    // at the handover gets re-emitted at quest completion >4 messages later.
+    it('suppresses a quest-completion-adjacent re-grant beyond the tight window (P1 2026-08-31)', () => {
+        const state = { ...makeState(), inventory: [] };
+        const first = gameReducer(state, { type: 'ADD_ITEM', payload: potionPayload('msg-handover') });
+        const completion = gameReducer(addMessages(first, 8), {
+            type: 'ADD_ITEM',
+            payload: {
+                name: 'Potion of Healing',
+                itemKey: 'potionHealing',
+                _meta: { sourceId: 'msg-completion', questCompletionAdjacent: true, playerMessage: 'I report back to the merchant.' },
+            },
+        });
+        expect(completion.inventory).toHaveLength(1);
+        expect(completion.messages.at(-1).content).toMatch(/Duplicate item grant ignored/);
+        expect(completion.messages.at(-1).dmVisible).toBe(true);
+    });
+
+    it('a Scribe-audit grant is ledgered, so a later DM re-emission is guarded (P1 2026-08-31)', () => {
+        const state = { ...makeState(), inventory: [] };
+        // The audit path pre-filters in scribeAudits and skips the reducer's own
+        // duplicate check, but the grant must still enter the ledger.
+        const audited = gameReducer(state, {
+            type: 'ADD_ITEM',
+            payload: {
+                name: 'Potion of Healing',
+                itemKey: 'potionHealing',
+                _meta: { sourceId: 'msg-victory:scribe-loot', audit: true },
+            },
+        });
+        expect(audited.inventory).toHaveLength(1);
+        expect(audited.recentItemGrants).toHaveLength(1);
+        const completion = gameReducer(addMessages(audited, 8), {
+            type: 'ADD_ITEM',
+            payload: {
+                name: 'Potion of Healing',
+                itemKey: 'potionHealing',
+                _meta: { sourceId: 'msg-completion', questCompletionAdjacent: true },
+            },
+        });
+        expect(completion.inventory).toHaveLength(1);
+        expect(completion.messages.at(-1).content).toMatch(/Duplicate item grant ignored/);
+    });
+
+    it('an ordinary re-grant beyond the tight window still applies (wide horizon is completion/audit-only)', () => {
+        const state = { ...makeState(), inventory: [] };
+        const first = gameReducer(state, { type: 'ADD_ITEM', payload: potionPayload('msg-find') });
+        const second = gameReducer(addMessages(first, 8), {
+            type: 'ADD_ITEM',
+            payload: potionPayload('msg-later'),
+        });
+        expect(second.inventory).toHaveLength(2);
+    });
 });
 
 describe('items_found quantity drift (playtest #8: the item twin of coin denomination drift)', () => {

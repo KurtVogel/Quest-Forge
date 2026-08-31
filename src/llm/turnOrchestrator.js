@@ -58,15 +58,29 @@ export function createTurnRunner({
     onStatus = noop,
     resetRoleplayChallengeUi = noop,
 }) {
-    let lastSummarizedIndex = getState()?.session?.prunedMessageCount || 0;
     let summarizeInFlight = false; // One summarize pass at a time — overlapping runs would double-journal the same range
+
+    // Journal boundary derived FRESH from state on every cadence (2026-08-31
+    // P1 belt): the old runner-local mirror survived same-session loads, so an
+    // earlier save left a stretch permanently unjournaled and a later/cloud
+    // save re-summarized already-summarized messages. The summarized flags on
+    // the live messages ARE the boundary (every advancing path in worldJournal
+    // dispatches MARK_MESSAGES_SUMMARIZED); prunedMessageCount only fast-
+    // forwards the scan when it agrees with the flags.
+    const summarizedBoundary = () => {
+        const s = getState();
+        const messages = s?.messages || [];
+        let prefix = s?.session?.prunedMessageCount || 0;
+        if (!(prefix > 0 && prefix <= messages.length && messages[prefix - 1]?.summarized)) prefix = 0;
+        while (prefix < messages.length && messages[prefix]?.summarized) prefix++;
+        return prefix;
+    };
 
     const runAutoSummarize = async () => {
         if (summarizeInFlight) return;
         summarizeInFlight = true;
         try {
-            const result = await maybeAutoSummarize(getState(), dispatch, lastSummarizedIndex);
-            lastSummarizedIndex = result.index;
+            const result = await maybeAutoSummarize(getState(), dispatch, summarizedBoundary());
             const machineryKey = getMachineryGeminiKey(getState().settings);
             if (result.journalEntry && machineryKey) {
                 // Bare summary, location as metadata — the EXACT text the mount
@@ -543,16 +557,22 @@ Translate the player's committed action into the single bounded combat_exchange 
             });
             if (!stagedFollowUp) finalizeRoleplayTurn(proposal.playerAction);
         } catch (error) {
-            if (error.name !== 'AbortError') {
-                const diceRolled = (getState().rollHistory?.length || 0) > rollCountBefore;
-                if (diceRolled) {
-                    // The dice are final; only the outcome narration failed. Point the
-                    // player at the retry path instead of stranding them in silence.
-                    dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `The dice landed (see the roll above) but the DM's outcome response failed: ${error.message}. Say "continue" to have the DM narrate the result.` } });
-                } else {
-                    dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error resolving check: ${error.message}` } });
-                    dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
-                }
+            const diceRolled = (getState().rollHistory?.length || 0) > rollCountBefore;
+            if (error.name === 'AbortError') {
+                // A deliberate Stop before any dice landed must not discard the
+                // staged adjudication (2026-08-31 P2): restore the proposal —
+                // and with it the hidden setup's path to resolution — silently
+                // (the player chose to interrupt; no error line). Post-dice the
+                // dice are final: restoring would reopen the reroll-bargaining
+                // door, so that path deliberately stays untouched.
+                if (!diceRolled) dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
+            } else if (diceRolled) {
+                // The dice are final; only the outcome narration failed. Point the
+                // player at the retry path instead of stranding them in silence.
+                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `The dice landed (see the roll above) but the DM's outcome response failed: ${error.message}. Say "continue" to have the DM narrate the result.` } });
+            } else {
+                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error resolving check: ${error.message}` } });
+                dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
             }
         } finally {
             setLoading(false);
@@ -601,7 +621,13 @@ Translate the player's committed action into the single bounded combat_exchange 
                 finalizeRoleplayTurn(proposal.playerAction);
             }
         } catch (error) {
-            if (error.name !== 'AbortError') {
+            if (error.name === 'AbortError') {
+                // Stop mid-reconsideration is always pre-dice: nothing was
+                // adjudicated, so the proposal returns to the table with the
+                // challenge unspent — never stranding the hidden setup with no
+                // staged check (2026-08-31 P2). Silent by design.
+                dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
+            } else {
                 dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error challenging check: ${error.message}` } });
                 dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
             }

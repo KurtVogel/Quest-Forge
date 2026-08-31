@@ -439,6 +439,13 @@ export async function handleRequestedRolls(requestedRolls, {
                 }
             }
         } catch (e) {
+            // A deliberate Stop is not a failure (2026-08-31 P2): the player
+            // chose the silence, the roll line above stands, and their next
+            // message resumes the scene — an error banner here was pure noise.
+            if (e?.name === 'AbortError') {
+                console.log('[RollResolver] Follow-up narration stopped by the player; the roll stands.');
+                return { resolved: rollResults.length > 0 };
+            }
             // The dice landed but the outcome narration didn't. Say so visibly — the
             // exception never escapes to ChatPanel's own error surfacing, so without
             // this line the player just sees a roll followed by silence.

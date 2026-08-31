@@ -15,7 +15,7 @@
  * off a one-shot session marker, complete-or-nothing validated install.
  */
 import { sendMessage } from './adapter.js';
-import { cleanText, parseDirectorJson } from './directorUtils.js';
+import { cleanText, compactMessage, parseDirectorJson } from './directorUtils.js';
 import { sanitizeAftermathProposals } from './frontAftermath.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 import { findLocationRecord } from '../engine/locationRegistry.js';
@@ -52,12 +52,6 @@ Rules:
 - Do not alter HP, XP, inventory, quests, combat, conditions, abilities, or any other mechanics.
 - Return an EMPTY list only if the supplied region genuinely offers nothing — a settled, peaceful land can still have a native pressure (a trade war, a failing harvest, a succession dispute).
 - Keep every field compact and specific. All of this is private and never shown to the player.`;
-
-function compactMessage(message) {
-    if (!message || message.hidden || message.deleted || !['user', 'assistant'].includes(message.role)) return null;
-    const content = cleanText(message.content, 700);
-    return content ? { role: message.role, content } : null;
-}
 
 export function shouldGenerateRegionalFronts(state) {
     return !!(state?.session?.pendingRegionalFronts
@@ -105,7 +99,7 @@ export function buildRegionalFrontsContext(state) {
                 name: cleanText(quest.name, 120),
                 description: cleanText(quest.description, 240),
             })),
-        recentNarrationInThisRegion: (state.messages || []).slice(-20).map(compactMessage).filter(Boolean).slice(-10),
+        recentNarrationInThisRegion: (state.messages || []).slice(-20).map(m => compactMessage(m, 700)).filter(Boolean).slice(-10),
     };
 }
 

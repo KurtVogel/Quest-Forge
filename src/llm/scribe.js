@@ -12,7 +12,7 @@
 
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
-import { classifyNpcCandidate, curateNpcsForPrompt } from '../engine/npcRoster.js';
+import { curateNpcsForPrompt, dispatchClassifiedNpcUpdate } from '../engine/npcRoster.js';
 import { isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { tryParseDirectorJson } from './directorUtils.js';
 import { captureReflection, captureScribePass } from '../debug/memoryInspectorStore.js';
@@ -286,16 +286,11 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         const rosteredNames = [];
         if (Array.isArray(extracted.npc_updates) && extracted.npc_updates.length > 0) {
             for (const npc of extracted.npc_updates) {
-                const classified = classifyNpcCandidate(npc);
-                if (!classified.allowRoster) continue;
-                dispatch({
-                    type: 'UPDATE_NPC',
-                    payload: {
-                        ...npc,
-                        kind: classified.kind,
-                    },
-                });
-                rosteredNames.push(npc?.name || '(unnamed)');
+                // Shared classify→dispatch with the journal's npcs_encountered
+                // loop (2026-08-31 P2 — one helper owns the roster boundary).
+                if (dispatchClassifiedNpcUpdate(dispatch, npc)) {
+                    rosteredNames.push(npc?.name || '(unnamed)');
+                }
             }
             if (rosteredNames.length > 0) {
                 console.log(`[Scribe] Updated ${rosteredNames.length} roster NPC(s)`);
@@ -540,13 +535,9 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         const reflectedNames = [];
         if (Array.isArray(reflected.npc_updates)) {
             for (const npc of reflected.npc_updates) {
-                const classified = classifyNpcCandidate(npc);
-                if (!classified.allowRoster) continue;
-                dispatch({
-                    type: 'UPDATE_NPC',
-                    payload: { ...npc, kind: classified.kind },
-                });
-                reflectedNames.push(npc?.name || '(unnamed)');
+                if (dispatchClassifiedNpcUpdate(dispatch, npc)) {
+                    reflectedNames.push(npc?.name || '(unnamed)');
+                }
             }
         }
         if (cadence?.id && Number.isFinite(cadence.journalEnd)) {

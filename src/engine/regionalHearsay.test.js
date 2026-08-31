@@ -55,6 +55,23 @@ describe('selectRegionalHearsay', () => {
         expect(items).toHaveLength(0);
     });
 
+    it('grades a resolved front firsthand at its own retired theater (2026-08-31 P2)', () => {
+        // The locals of the front's own ground WITNESSED the ending — retelling
+        // it with "one detail wrong" there was the bug. resolvedTheaterIds is
+        // stamped at resolution because the records' theaterFrontIds are freed.
+        const locations = [{ id: 'loc-mill', name: 'Millford', aliases: [], theaterFrontIds: [] }];
+        const at = 4; // fresh — a local witness needs no travel time
+        const { items } = selectRegionalHearsay({
+            fronts: [resolvedFront({ resolvedTheaterIds: ['loc-mill'] })],
+            locations,
+            locationName: 'Millford',
+            messages: msgs(at),
+            messageIndex: at,
+        });
+        expect(items).toHaveLength(1);
+        expect(items[0].grade).toBe('firsthand');
+    });
+
     it('ignores active fronts entirely', () => {
         const { items } = selectRegionalHearsay({
             fronts: [resolvedFront({ status: 'active' })],

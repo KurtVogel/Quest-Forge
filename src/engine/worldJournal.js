@@ -4,7 +4,8 @@
  * NPC tracker and world facts, then marks those messages as summarized so they
  * are excluded from future LLM history (sliding window pruning).
  *
- * Uses Gemini 2.5 Flash for cost-efficiency — summarization is a simple
+ * Runs on the Gemini machinery model (MACHINERY_MODEL in llm/machinery.js,
+ * via getBackgroundConfig) for cost-efficiency — summarization is a simple
  * extraction task that doesn't need the full DM model.
  */
 
@@ -13,11 +14,11 @@ import { getBackgroundConfig } from '../llm/machinery.js';
 import { parseJsonObjectLoose } from '../llm/utils/jsonExtractor.js';
 import {
     briefNpcFieldForPrompt,
-    classifyNpcCandidate,
     curateNpcsForPrompt,
+    dispatchClassifiedNpcUpdate,
 } from './npcRoster.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
-import { sanitizeExtractedLocation } from './locationRegistry.js';
+import { isSameLocation, sanitizeExtractedLocation } from './locationRegistry.js';
 
 export function normalizeLocationName(loc) {
     if (!loc) return '';
@@ -256,32 +257,20 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         if (Array.isArray(summary.npcs_encountered)) {
             for (const npc of summary.npcs_encountered) {
                 if (!npc.name) continue;
-                const classified = classifyNpcCandidate({
+                // Journal schema → roster schema mapped ONCE (notes → lastNotes);
+                // the shared helper classifies and dispatches, so a roster-field
+                // addition needs one edit here instead of two (2026-08-31 P2).
+                dispatchClassifiedNpcUpdate(dispatch, {
                     name: npc.name,
                     kind: npc.kind,
                     rosterEligible: npc.rosterEligible ?? npc.roster_eligible,
                     disposition: npc.disposition,
                     lastNotes: npc.notes,
-                    personality: npc.personality,
-                    goals: npc.goals,
-                    secrets: npc.secrets,
-                    lastLocation: npc.lastLocation,
-                    basedIn: npc.basedIn,
-                });
-                if (!classified.allowRoster) continue;
-                dispatch({
-                    type: 'UPDATE_NPC',
-                    payload: {
-                        name: npc.name,
-                        kind: classified.kind,
-                        disposition: npc.disposition,
-                        lastNotes: npc.notes,
-                        ...(npc.personality && { personality: npc.personality }),
-                        ...(npc.goals && { goals: npc.goals }),
-                        ...(npc.secrets && { secrets: npc.secrets }),
-                        ...(npc.lastLocation && { lastLocation: npc.lastLocation }),
-                        ...(npc.basedIn && { basedIn: npc.basedIn }),
-                    },
+                    ...(npc.personality && { personality: npc.personality }),
+                    ...(npc.goals && { goals: npc.goals }),
+                    ...(npc.secrets && { secrets: npc.secrets }),
+                    ...(npc.lastLocation && { lastLocation: npc.lastLocation }),
+                    ...(npc.basedIn && { basedIn: npc.basedIn }),
                 });
             }
         }
@@ -365,14 +354,18 @@ export function buildJournalContext(journal, npcs, currentLocation) {
     // ~2-4k chars every turn). Re-printed summaries are clamped.
     const TRANSITION_SCAN_ENTRIES = 30;
     const TRANSITION_SUMMARY_CHARS = 300;
-    const normCurrentLoc = normalizeLocationName(currentLocation);
-    if (normCurrentLoc && journal.length > 0) {
+    // Alias-tolerant match (2026-08-31 P2): currentLocation and journal-entry
+    // stamps carry RAW alias strings ("Library landing, Clockwork Tower" vs
+    // "Clockwork Tower") — normalizeLocationName exact-equality never matched
+    // them, silently suppressing this block right after travel. isSameLocation
+    // is the registry's token-containment rule.
+    if (normalizeLocationName(currentLocation) && journal.length > 0) {
         const scanFloor = Math.max(0, journal.length - TRANSITION_SCAN_ENTRIES);
         let transitionIdx = -1;
         let i = journal.length - 1;
         while (i >= scanFloor) {
-            const entryLoc = normalizeLocationName(journal[i].location);
-            if (entryLoc === normCurrentLoc) {
+            const entryLoc = journal[i].location;
+            if (entryLoc && isSameLocation(entryLoc, currentLocation)) {
                 transitionIdx = i;
             } else {
                 if (transitionIdx !== -1) {

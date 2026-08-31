@@ -22,6 +22,17 @@ export function cleanText(value, maxLength) {
  * whose messages reach the player (the migration/upgrade dialogs) override
  * them so every existing surface stays byte-identical.
  */
+/**
+ * One compact chat-message projection for director context payloads
+ * (2026-08-31 P2 — frontAftermath and regionalFronts carried private copies).
+ * Hidden, deleted, and system rows drop; content clamps to `maxChars`.
+ */
+export function compactMessage(message, maxChars = 900) {
+    if (!message || message.hidden || message.deleted || !['user', 'assistant'].includes(message.role)) return null;
+    const content = cleanText(message.content, maxChars);
+    return content ? { role: message.role, content } : null;
+}
+
 export function parseDirectorJson(response, anchorKey, label, { missingMessage, malformedMessage } = {}) {
     const text = String(response || '');
     const anchors = Array.isArray(anchorKey) ? anchorKey : [anchorKey];

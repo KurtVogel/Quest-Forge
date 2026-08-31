@@ -1,5 +1,5 @@
 import { sendMessage } from './adapter.js';
-import { cleanText, parseDirectorJson } from './directorUtils.js';
+import { cleanText, compactMessage, parseDirectorJson } from './directorUtils.js';
 import { normalizeFront } from '../engine/fronts.js';
 import { MAX_ACTIVE_FRONTS, WEB_TARGET_FRONTS } from '../engine/worldTempo.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH, CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
@@ -38,12 +38,6 @@ Rules:
 - If the hero travels alone, make at least one front naturally intersect a plausible potential companion through need, competence, rivalry, witness, rescue, shared enemies, debt, or aligned motives. Never force recruitment and never add a companion mechanically.
 - Do not alter HP, XP, inventory, quests, combat, conditions, character abilities, or any other mechanics.
 - Keep every field compact and specific. Hidden front titles, clocks, and notes are private and must never be exposed to the player.`;
-
-function compactMessage(message) {
-    if (!message || message.hidden || message.deleted || !['user', 'assistant'].includes(message.role)) return null;
-    const content = cleanText(message.content, 900);
-    return content ? { role: message.role, content } : null;
-}
 
 export function buildFrontMigrationContext(state) {
     const character = state.character || {};
@@ -101,7 +95,7 @@ export function buildFrontMigrationContext(state) {
             location: cleanText(memory.location, 120),
         })),
         notableInventory: (state.inventory || []).filter(item => item.equipped || item.magicBonus || item.questItem).slice(0, 16).map(item => cleanText(item.name, 100)),
-        recentEvents: (state.messages || []).slice(-30).map(compactMessage).filter(Boolean).slice(-16),
+        recentEvents: (state.messages || []).slice(-30).map(m => compactMessage(m)).filter(Boolean).slice(-16),
         // Every NON-RESOLVED front rides along (2026-08-24 P1: slicing to 3 hid a
         // legitimate 4th active front from the upgrade's enrichment pass).
         existingHiddenFronts: (state.fronts || []).filter(front => (front.status || 'active') !== 'resolved').slice(0, MAX_ACTIVE_FRONTS).map(front => ({

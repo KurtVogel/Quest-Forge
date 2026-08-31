@@ -5,7 +5,7 @@
 import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
-import { appendHearsayLedger, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
+import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { upsertNpc } from './shared.js';
@@ -220,13 +220,25 @@ export const handlers = {
         });
         if (selection.items.length > 0) {
             next.recentHearsay = appendHearsayLedger(state.recentHearsay, selection.ledgerEntries);
+            next.session = {
+                ...next.session,
+                regionalHearsay: { locationName: name, arrivedAtMessage: messageIndex, items: selection.items },
+            };
+        } else if (hearsayOfferSurvivesArrival(state.session?.regionalHearsay, locations, name)) {
+            // Intra-settlement movement (2026-08-31 P1 r3): the first move from
+            // the town square to its own tavern used to null the live offer —
+            // the cluster rule guarantees an empty selection at a related place
+            // while the deeds are already ledger-burned for the whole audience.
+            // Re-stamp the offer onto the new spelling (so the render guard's
+            // location match keeps working for "The Gilded Eel" with no town
+            // token); the original arrival stamp keeps the age window honest.
+            next.session = {
+                ...next.session,
+                regionalHearsay: { ...state.session.regionalHearsay, locationName: name },
+            };
+        } else {
+            next.session = { ...next.session, regionalHearsay: null };
         }
-        next.session = {
-            ...next.session,
-            regionalHearsay: selection.items.length > 0
-                ? { locationName: name, arrivedAtMessage: messageIndex, items: selection.items }
-                : null,
-        };
 
         // Absence drift: a long-enough return raises the one-shot marker the
         // background director (llm/absenceDrift.js) fires from. Cooldown: one

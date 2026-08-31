@@ -56,7 +56,7 @@ const BACKGROUND_DIRECTORS = [
         name: 'campaignFronts',
         getKey: (s) => (shouldGenerateCampaignFronts(s) ? s.session.id : null),
         generate: generateCampaignFronts,
-        install: (s, key, fronts) => ({ type: 'INSTALL_GENERATED_FRONTS', payload: { sessionId: s.session.id, fronts } }),
+        install: (sessionId, key, fronts) => ({ type: 'INSTALL_GENERATED_FRONTS', payload: { sessionId, fronts } }),
         logSuccess: (s, key, fronts) => `[Fronts] Generated ${fronts.length} private campaign pressures.`,
         failureNote: '[Fronts] Initial private generation failed; deterministic front remains active:',
     },
@@ -65,7 +65,7 @@ const BACKGROUND_DIRECTORS = [
         name: 'frontAftermath',
         getKey: (s) => (shouldGenerateFrontAftermath(s) ? s.session.pendingFrontAftermath.frontId : null),
         generate: generateFrontAftermath,
-        install: (s, key, fronts) => ({ type: 'INSTALL_AFTERMATH_FRONTS', payload: { sessionId: s.session.id, frontId: key, fronts } }),
+        install: (sessionId, key, fronts) => ({ type: 'INSTALL_AFTERMATH_FRONTS', payload: { sessionId, frontId: key, fronts } }),
         logSuccess: (s, key, fronts) => `[Fronts] Aftermath of ${key}: ${fronts.length} successor pressure(s) proposed.`,
         failureNote: '[Fronts] Aftermath generation failed; will retry:',
     },
@@ -74,7 +74,7 @@ const BACKGROUND_DIRECTORS = [
         name: 'absenceDrift',
         getKey: (s) => (shouldGenerateAbsenceDrift(s) ? s.session.pendingAbsenceDrift.key : null),
         generate: generateAbsenceDrift,
-        install: (s, key, drift) => ({ type: 'INSTALL_ABSENCE_DRIFT', payload: { sessionId: s.session.id, key, drift } }),
+        install: (sessionId, key, drift) => ({ type: 'INSTALL_ABSENCE_DRIFT', payload: { sessionId, key, drift } }),
         logSuccess: (s, key, drift) => `[LivingWorld] Absence drift for ${s.session.pendingAbsenceDrift?.locationName}: ${drift.developments.length} development(s)${drift.worldFact ? ' + fact' : ''}${drift.frontSymptom ? ' + symptom' : ''}.`,
         failureNote: '[LivingWorld] Absence-drift generation failed; will retry:',
     },
@@ -83,7 +83,7 @@ const BACKGROUND_DIRECTORS = [
         name: 'regionalFronts',
         getKey: (s) => (shouldGenerateRegionalFronts(s) ? s.session.pendingRegionalFronts.key : null),
         generate: generateRegionalFronts,
-        install: (s, key, fronts) => ({ type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId: s.session.id, key, fronts } }),
+        install: (sessionId, key, fronts) => ({ type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId, key, fronts } }),
         logSuccess: (s, key, fronts) => `[LivingWorld] Native pressures for ${s.session.pendingRegionalFronts?.region}: ${fronts.length} proposed.`,
         failureNote: '[LivingWorld] Regional front seeding failed; will retry:',
     },
@@ -307,13 +307,18 @@ export default function ChatPanel() {
      */
     useEffect(() => {
         const s = stateRef.current;
+        // Trigger-time session id, by contract (2026-08-31 P2): install runs
+        // after an await, so handing it the whole generation-time snapshot
+        // invited a future director row to read seconds-stale state. The
+        // reducer's own sessionId check then rejects a cross-campaign install.
+        const sessionId = s.session?.id;
         for (const director of BACKGROUND_DIRECTORS) {
             const key = director.getKey(s);
             if (!key || directorKeysRef.current[director.name] === key) continue;
             directorKeysRef.current[director.name] = key;
             director.generate(s)
                 .then(result => {
-                    dispatch(director.install(s, key, result));
+                    dispatch(director.install(sessionId, key, result));
                     console.info(director.logSuccess(s, key, result));
                 })
                 .catch(error => {

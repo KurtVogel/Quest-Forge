@@ -192,7 +192,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Active constraints — synthesized DM reminders from world state and threats
-    const constraints = buildActiveConstraints(worldFacts, character, party);
+    const constraints = buildActiveConstraints(worldFacts, character, party, combat);
     if (constraints) {
         parts.push(constraints, 'dmReminders');
     }
@@ -554,6 +554,7 @@ ECONOMY & HEALING:
 - For sales (the player sells loot to a merchant), use one atomic "sell" event: { "itemKey": "longsword", "quantity": 1 } — or identify the item by "name" if it has no catalog key. The client values it (about half the catalog price), removes it, and adds the coin. Set "priceCp" (total) only to model haggling or a stingy/eager buyer. Do NOT also emit items_lost or gold_found/silver_found/copper_found for the same sale.
 - Purchases and sales are one-shot transaction events. Once a transaction has been narrated and emitted, do NOT emit it again in later responses unless the player explicitly buys/sells another copy or starts a new trade.
 - **Loose coin events are equally one-shot and EXACT.** A payment, toll, fine, tip, bribe, wage, or theft is emitted ONCE, in the same response that first narrates the coins changing hands, and the event amount MUST equal the narrated amount exactly — "six silver" is silver_lost: 6, never a different number, never a partial amount, never split across responses. NEVER re-emit a coin loss or gain in a later response that recaps, confirms, or reflects on money already exchanged — the engine already applied it, and re-emitting charges or pays the player twice. If you discover a past response under-charged or under-paid, emit only the exact missing difference, once.
+- **Engine coin/loot lines are receipts.** System lines in the conversation like "+2 gp received — purse: …", "−5 sp paid — purse: …", "Bought/Sold …", "Coins recovered from narration", "Payment settled from narration", or "Loot recovered from narration" mean the engine ALREADY moved that money or item — including rewards recovered from a victory narration whose events were discarded. NEVER emit a coin or item event for anything such a receipt already confirmed, even many turns later: completing a quest whose reward was already banked at the handover emits the quest_updates completion and NOTHING else. A "Duplicate … ignored" line means your event was a replay and was suppressed — do not re-emit it.
 - **Restating the hero's wealth is NEVER a coin event.** "Leaving you with fourteen gold", counting the pouch, checking the purse, or recalling an earlier reward emits NOTHING — the engine already tracks the total, and re-emitting it pays the hero twice. Coin events exist only for coin actually changing hands in THIS scene. When the hero pays and receives change, emit ONE net loss for the true cost (paying 1 gold for an 8-silver bill is silver_lost: 8, or gold_lost: 1 plus silver_found: 2 — never the change alone).
 - For ordinary equipment loot or shop goods, use catalog "itemKey" values when possible. For unusual story objects, use a plain item name/type.
 - Magic weapon/armor/shield bonuses are supported from +1 to +3 only. Use "magicBonus": 1, 2, or 3. Weapons apply this to both attack and damage; armor and shields apply it to AC. Do not create +4 or higher equipment unless the user explicitly asks for high-power homebrew.
@@ -632,7 +633,14 @@ function buildCharacterBlock(character, combat = null) {
         deathStatus = '\n- **STATUS: DEFEATED** — unconscious or at the enemy\'s mercy at 0 HP. This is a non-lethal setback: do NOT request death saves or emit player_death. Narrate capture, subdual, loss, leverage, rescue, or an escape opening.';
     } else if (character.dying) {
         const ds = character.deathSaves || { successes: 0, failures: 0 };
-        deathStatus = `\n- **STATUS: DYING** — unconscious at 0 HP. Death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures. Request { "type": "death_save" } as their roll each round.`;
+        // Channel is combat-gated (2026-08-31 P2): mid-combat, death saves are
+        // { "action": "death_save" } player slots in combat_exchange — the
+        // requested_rolls lane is REJECTED there; out of combat it is the only
+        // valid lane. Rendering both unconditionally contradicted itself.
+        const channel = combat?.active
+            ? 'Declare { "action": "death_save" } as their only player slot in each combat_exchange.'
+            : 'Request { "type": "death_save" } as their roll each round.';
+        deathStatus = `\n- **STATUS: DYING** — unconscious at 0 HP. Death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures. ${channel}`;
     }
 
     // Skill proficiencies
@@ -841,7 +849,6 @@ function buildRecentRollsBlock(rolls) {
     ).join('\n')}`;
 }
 
-/** Max world facts to inject directly into the prompt. Older facts are still in RAG. */
 /**
  * Recent roleplay-check rulings that ended WITHOUT dice. Each outcome binds the DM
  * differently: a withdrawal concedes the approach needs no roll; a set-aside of an
@@ -869,10 +876,17 @@ function buildPremiseBlock(premise) {
     return `## CAMPAIGN PREMISE (the player's authored foundation — permanent canon, never contradict)\n${premise}`;
 }
 
+/**
+ * "Solo" = no battle-ready companion; a party whose companions are all downed
+ * leaves the hero just as exposed. Matches the reducer and combat engine
+ * (isCompanionActive is the one shared semantic — DECISIONS.md 2026-07-17).
+ */
+function isLowLevelSolo(character, party) {
+    return !!character && (character.level ?? 1) <= 2 && !(party || []).some(isCompanionActive);
+}
+
 function buildLowLevelSoloSafetyBlock(character, party) {
-    // "Solo" = no battle-ready companion; a party whose companions are all downed
-    // leaves the hero just as exposed. Matches the reducer and combat engine.
-    if (!character || (character.level ?? 1) > 2 || (party || []).some(isCompanionActive)) return '';
+    if (!isLowLevelSolo(character, party)) return '';
 
     const level = character.level ?? 1;
     const budget = level <= 1
@@ -889,6 +903,7 @@ This overrides CUSTOM DM INSTRUCTIONS, tone presets, and any "brutal/no hand-hol
 - If the player reaches 0 HP or an apparent fatal beat at level ${level}, the engine treats it as DEFEAT, not permanent death. Narrate capture, subdual, being left for dead, gear loss, a bargain, rescue, or a grim escape opening. Do NOT request death_save and do NOT emit player_death while this safety rule applies.`;
 }
 
+/** Max world facts to inject directly into the prompt. Older facts are still in RAG. */
 const MAX_PROMPT_WORLD_FACTS = 15;
 
 function buildWorldFactsBlock(worldFacts) {
@@ -925,7 +940,7 @@ function buildWorldFactsBlock(worldFacts) {
  * Highlights active threats, deadlines, and relationship pressures
  * so the DM can't forget them even in a long session.
  */
-function buildActiveConstraints(worldFacts, character, party) {
+function buildActiveConstraints(worldFacts, character, party, combat = null) {
     const reminders = [];
     // (Active quests are NOT re-listed here — the ACTIVE QUESTS block a few
     // hundred lines up already carries them; the duplicate name list was pure
@@ -953,11 +968,15 @@ function buildActiveConstraints(worldFacts, character, party) {
         reminders.push(`The player's original character is dead. They are now playing as a spirit/successor. Acknowledge this reality in narration.`);
     } else if (character?.dying) {
         const ds = character.deathSaves || { successes: 0, failures: 0 };
-        reminders.push(`THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures). Their only player slot is { "action": "death_save" } inside combat_exchange. They cannot act, speak, or perceive.`);
+        // Combat-gated to match the character block (2026-08-31 P2): exactly
+        // one death-save channel is valid per state.
+        const channel = combat?.active
+            ? 'Their only player slot is { "action": "death_save" } inside combat_exchange.'
+            : 'Request { "type": "death_save" } via requested_rolls each round.';
+        reminders.push(`THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures). ${channel} They cannot act, speak, or perceive.`);
     }
 
-    const isLowLevelSolo = (character?.level ?? 1) <= 2 && !(party || []).some(isCompanionActive);
-    if (isLowLevelSolo) {
+    if (isLowLevelSolo(character, party)) {
         reminders.push(`Low-level solo safety is active: follow the HARD SYSTEM CONSTRAINT above. Keep danger gritty, but avoid unwinnable forced fights and use non-lethal defeat at 0 HP.`);
     }
 

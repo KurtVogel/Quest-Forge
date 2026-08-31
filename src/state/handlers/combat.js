@@ -16,7 +16,9 @@ import {
     validateEnemySaveBonus,
 } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES, exchangeEventLines, isEnemyActive, mergeCharacterUpdates, reconcileStartingCombatExchange } from '../../engine/combatExchange.js';
-import { appendRecentEncounter, buildEncounterEntry } from '../../engine/worldTempo.js';
+import { appendRecentEncounter, buildEncounterEntry, distanceSince } from '../../engine/worldTempo.js';
+import { HEARSAY_WINDOW_MESSAGES } from '../../engine/regionalHearsay.js';
+import { isSameLocation } from '../../engine/locationRegistry.js';
 import { initialGameState } from '../initialState.js';
 import { gameReducer } from '../gameReducer.js';
 import { appendRollHistory, clearSustainedSpellState, reviveCharacter, systemMessage } from './shared.js';
@@ -113,6 +115,10 @@ export const handlers = {
                 lastExchangeResult: null,
                 resolvedExchangeIds: [],
                 flankedEnemyIds: [],
+                // For END_COMBAT's hearsay-window re-open (2026-08-31 P2): an
+                // ambush-on-arrival fight burns the offer's window through its
+                // rounds; this stamp proves the overlap.
+                startedAtMessage: (state.messages || []).length,
             },
             rollHistory: appendRollHistory(state.rollHistory, playerInitiativeRoll),
             messages: [
@@ -137,6 +143,24 @@ export const handlers = {
                 buildEncounterEntry(state, action.payload || {}),
             ),
         };
+        // Ambush-on-arrival (2026-08-31 P2): a fight that started while a live
+        // hearsay offer's window was open burns that window through the rounds
+        // before any local can speak. If the hero is still at the offer's place,
+        // re-open the window now that talk is possible again. The overlap check
+        // (offer still live at combat START) keeps a long-expired offer from
+        // resurrecting after an unrelated later fight.
+        {
+            const offer = state.session?.regionalHearsay;
+            const combatStartIdx = state.combat?.startedAtMessage;
+            if (offer && Number.isFinite(offer.arrivedAtMessage) && Number.isFinite(combatStartIdx)
+                && isSameLocation(offer.locationName, state.currentLocation)
+                && distanceSince(state.messages, offer.arrivedAtMessage, combatStartIdx) <= HEARSAY_WINDOW_MESSAGES) {
+                newState.session = {
+                    ...newState.session,
+                    regionalHearsay: { ...offer, arrivedAtMessage: (state.messages || []).length },
+                };
+            }
+        }
         // Combat's end releases the caster's sustained spell (v1 concentration).
         // Announce it: the fade was silent, so the DM's next narration kept
         // asserting the ward still held ("you are already protected") while the

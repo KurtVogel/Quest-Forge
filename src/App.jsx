@@ -233,10 +233,12 @@ function AppContent() {
           <CharacterCreation />
         </ErrorBoundary>
       )}
-      {/* Keyed by session so loading a different save mid-session remounts the
-          whole shell — ChatPanel's mount-scoped refs (RAG seeding, journal
-          baseline, narration dedupe) assume one mount = one campaign. */}
-      {state.character && <AppShell key={state.session?.id ?? 'no-session'} />}
+      {/* Keyed by session AND load nonce so loading ANY save mid-session —
+          including an earlier/later save of the SAME campaign, whose session.id
+          is unchanged — remounts the whole shell (2026-08-31 P1). ChatPanel's
+          mount-scoped refs (RAG seeding, journal baseline, exchange/cue
+          narration dedupe) assume one mount = one timeline. */}
+      {state.character && <AppShell key={`${state.session?.id ?? 'no-session'}:${state.session?.loadNonce ?? 0}`} />}
       {state.ui.isSettingsOpen && (
         <ErrorBoundary label="Settings">
           <SettingsModal />

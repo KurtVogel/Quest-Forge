@@ -599,7 +599,15 @@ describe('Scribe loot persistence audit', () => {
                 _meta: expect.objectContaining({ sourceId: 'msg-1:scribe-loot', announce: 'audit', audit: true }),
             }),
         }));
-        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_ITEM', payload: { name: 'Jeweled circlet', quantity: 1 } });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'ADD_ITEM',
+            payload: {
+                name: 'Jeweled circlet',
+                quantity: 1,
+                // Audit meta ledgers the grant so a later DM re-emission is guarded.
+                _meta: { sourceId: 'msg-1:scribe-loot', audit: true },
+            },
+        });
         expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
             type: 'ADD_MESSAGE',
             payload: expect.objectContaining({

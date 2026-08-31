@@ -285,6 +285,16 @@ export const handlers = {
         const save = migrateLoadedSave(validateSaveState(action.payload));
         return {
             ...save,
+            // Load nonce (2026-08-31 P1): every load — including a same-campaign
+            // save, whose session.id is unchanged — bumps a counter the AppShell
+            // key includes, so ChatPanel always remounts onto the loaded
+            // timeline. Without it, every mount-scoped ref (journal baseline,
+            // RAG seeding, exchange/cue narration dedupe) stayed on the
+            // pre-load timeline: an earlier save left a stretch permanently
+            // unjournaled, a later save re-summarized and duplicated entries.
+            // Bumps the LIVE session's nonce (not the save's embedded copy) so
+            // re-loading the very save that stamped it still changes the key.
+            session: { ...save.session, loadNonce: (state.session?.loadNonce || 0) + 1 },
             user: state.user,
             settings: {
                 ...initialGameState.settings,

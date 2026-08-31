@@ -84,8 +84,13 @@ export const ABSENCE_DRIFT_COOLDOWN_MESSAGES = 20;
  * here beside the drift constants so reducer handlers never import from llm/.
  */
 export function isAbsenceDriftLocalNpc(npc, locationName) {
-    return !!(npc?.name && npc.rosterTier !== 'archived_creature'
-        && npc.lastLocation && isSameLocation(npc.lastLocation, String(locationName || '')));
+    if (!npc?.name || npc.rosterTier === 'archived_creature') return false;
+    const here = String(locationName || '');
+    // basedIn OR lastLocation (2026-08-31 P2): an NPC anchored at the return
+    // place but last seen elsewhere — the innkeeper met on the road — used to
+    // miss their own town's drift.
+    return !!((npc.lastLocation && isSameLocation(npc.lastLocation, here))
+        || (npc.basedIn && isSameLocation(npc.basedIn, here)));
 }
 
 /**

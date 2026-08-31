@@ -130,7 +130,85 @@ describe('traveling rumor on arrival', () => {
         expect(state.recentHearsay).toHaveLength(1);
         const next = gameReducer(atMessages(state, 34), { type: 'SET_LOCATION', payload: 'E. Duskwell, Tallow & Tapers' });
         expect(next.recentHearsay).toHaveLength(1); // same audience, no second offer
-        expect(next.session.regionalHearsay).toBeNull();
+        // 2026-08-31 P1 r3: the live offer SURVIVES the related-place move
+        // (it used to be nulled here, so the shopkeeper never voiced it) —
+        // re-stamped onto the new spelling, original arrival stamp kept.
+        expect(next.session.regionalHearsay).toMatchObject({
+            locationName: 'E. Duskwell, Tallow & Tapers',
+            arrivedAtMessage: state.session.regionalHearsay.arrivedAtMessage,
+        });
+        expect(next.session.regionalHearsay.items).toEqual(state.session.regionalHearsay.items);
+    });
+
+    it('town → its tavern keeps the live offer; an unrelated departure drops it (P1 2026-08-31 r3)', () => {
+        let state = gameReducer(withDeeds(), { type: 'SET_LOCATION', payload: 'Stonebridge' });
+        expect(state.session.regionalHearsay).toMatchObject({ locationName: 'Stonebridge' });
+        // First intra-settlement move: the tavern's own selection is empty
+        // (cluster rule), but the tavern keeper must still be able to voice it.
+        const tavern = gameReducer(atMessages(state, 33), { type: 'SET_LOCATION', payload: 'The Stonebridge Tavern' });
+        expect(tavern.session.regionalHearsay).not.toBeNull();
+        expect(tavern.session.regionalHearsay.items).toEqual(state.session.regionalHearsay.items);
+        // Arrival somewhere unrelated finally clears the stale offer... unless
+        // that place earns its own — use a place whose selection is empty by
+        // making the deed already ledger-burned there.
+        const away = gameReducer(atMessages(tavern, 36), { type: 'SET_LOCATION', payload: 'Deep Fen' });
+        // Deep Fen earns a fresh offer of its own (different audience).
+        expect(away.session.regionalHearsay).toMatchObject({ locationName: 'Deep Fen' });
+        const back = gameReducer(atMessages(away, 40), { type: 'SET_LOCATION', payload: 'The Stonebridge Tavern' });
+        // Returning: the tavern's deeds are burned and the Deep Fen offer is
+        // unrelated to the tavern — the stale offer clears.
+        expect(back.session.regionalHearsay).toBeNull();
+    });
+});
+
+describe('ambush-on-arrival hearsay window (2026-08-31 P2)', () => {
+    const withOfferAndFight = ({ arrivedAt, combatStartedAt, messageCount }) => ({
+        ...initialGameState,
+        messages: msgs(messageCount),
+        currentLocation: 'Saltmarsh',
+        session: {
+            ...initialGameState.session,
+            regionalHearsay: {
+                locationName: 'Saltmarsh',
+                arrivedAtMessage: arrivedAt,
+                items: [{ text: 'the hero ending the Mill Brood', grade: 'secondhand' }],
+            },
+        },
+        combat: {
+            ...initialGameState.combat,
+            active: true,
+            enemies: [{ id: 'enemy-1', name: 'Bandit', hp: 0, maxHp: 7, ac: 12, condition: 'dead', combatStatus: 'defeated' }],
+            turnOrder: [],
+            startedAtMessage: combatStartedAt,
+        },
+    });
+
+    it('END_COMBAT re-opens a window the ambush fight burned through', () => {
+        // Arrival at 30, fight from 31, rounds burn to 50 — without the
+        // re-stamp the 10-message window is spent before any local can talk.
+        const state = withOfferAndFight({ arrivedAt: 30, combatStartedAt: 31, messageCount: 50 });
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
+        expect(next.session.regionalHearsay).toMatchObject({
+            locationName: 'Saltmarsh',
+            arrivedAtMessage: 50,
+        });
+    });
+
+    it('a long-expired offer does not resurrect after an unrelated later fight', () => {
+        // Arrival at 5, fight only from 40 — the offer's window was long dead
+        // when the fight began.
+        const state = withOfferAndFight({ arrivedAt: 5, combatStartedAt: 40, messageCount: 50 });
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
+        expect(next.session.regionalHearsay.arrivedAtMessage).toBe(5);
+    });
+
+    it('no re-stamp when the hero fought somewhere other than the offer place', () => {
+        const state = {
+            ...withOfferAndFight({ arrivedAt: 30, combatStartedAt: 31, messageCount: 50 }),
+            currentLocation: 'Deep Fen',
+        };
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
+        expect(next.session.regionalHearsay.arrivedAtMessage).toBe(30);
     });
 });
 

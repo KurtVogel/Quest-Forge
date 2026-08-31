@@ -222,6 +222,12 @@ export const handlers = {
                 ...updatedFront,
                 resolvedAtMessage: (state.messages || []).length,
                 resolution: update.notes || '',
+                // Remember the territory before it is freed below — regional
+                // hearsay grades a retelling at the front's own ground as
+                // firsthand (2026-08-31 P2).
+                resolvedTheaterIds: (state.locations || [])
+                    .filter(record => (record.theaterFrontIds || []).includes(existing.id))
+                    .map(record => record.id),
             }, updatedFront);
         }
         let next = {

@@ -69,10 +69,15 @@ export function dropOrphanCombatExchange(events, combatActive) {
  * setups were intentionally superseded by authoritative roll/exchange results —
  * sending them back can bias the narrator toward a pre-rolled outcome), and
  * system chatter EXCEPT engine roll-result lines, which the DM needs to narrate
- * from. Combat-exchange result lines (`exchangeLine`) are the exception to that
- * exception (DECISIONS.md 2026-08-04): the narration call receives them as
- * RESOLVED EVENTS and the narration prose then owns the fiction, so keeping
- * them here starved the window (~8 of 20 slots per round with a full field).
+ * from, and lines stamped `dmVisible` — coin/item movement receipts (grants,
+ * charges, audit recoveries, duplicate suppressions). Without those the DM was
+ * structurally blind to engine coin/loot accounting (2026-08-31 P1: victory
+ * narration's reward was audit-granted invisibly, so the DM re-emitted it at
+ * quest completion and double-paid). Combat-exchange result lines
+ * (`exchangeLine`) are the exception to the roll-line exception (DECISIONS.md
+ * 2026-08-04): the narration call receives them as RESOLVED EVENTS and the
+ * narration prose then owns the fiction, so keeping them here starved the
+ * window (~8 of 20 slots per round with a full field).
  * System lines travel as `user` role — providers only accept user/assistant.
  *
  * @param {Array<object>} messages - full chat history from state.
@@ -83,7 +88,7 @@ export function buildMessageWindow(messages, windowSize) {
     const unsummarized = (messages || []).filter(m => {
         if (m.summarized || m.hidden || m.deleted || m.exchangeLine) return false;
         if (m.role === 'system') {
-            return /rolled \*\*/i.test(m.content || '');
+            return m.dmVisible === true || /rolled \*\*/i.test(m.content || '');
         }
         return true;
     });

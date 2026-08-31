@@ -256,6 +256,28 @@ describe('character block', () => {
         expect(text).toContain('1/3 successes, 2/3 failures');
     });
 
+    it('prescribes exactly one death-save channel per combat state (2026-08-31 P2)', () => {
+        // (The static combat-notes rule mentions the exchange slot in general
+        // terms; these assertions pin the DYNAMIC dying instructions, which
+        // used to prescribe both channels at once.)
+        // Out of combat: only the requested_rolls lane — the exchange slot has
+        // no machine to resolve it.
+        const outOfCombat = prompt({ character: makeCharacter({ dying: true }) });
+        expect(outOfCombat).toContain('Request { "type": "death_save" } as their roll each round.');
+        expect(outOfCombat).toContain('Request { "type": "death_save" } via requested_rolls each round.');
+        expect(outOfCombat).not.toContain('Declare { "action": "death_save" }');
+        expect(outOfCombat).not.toContain('Their only player slot is');
+        // Mid-combat: only the combat_exchange slot — requested_rolls are
+        // rejected while combat is active.
+        const inCombat = prompt({
+            character: makeCharacter({ dying: true }),
+            combat: { active: true, enemies: [], turnOrder: [], round: 1 },
+        });
+        expect(inCombat).toContain('Declare { "action": "death_save" } as their only player slot in each combat_exchange.');
+        expect(inCombat).toContain('Their only player slot is { "action": "death_save" } inside combat_exchange.');
+        expect(inCombat).not.toContain('Request { "type": "death_save" }');
+    });
+
     it('lists class resources with remaining uses', () => {
         const text = prompt({
             character: makeCharacter({

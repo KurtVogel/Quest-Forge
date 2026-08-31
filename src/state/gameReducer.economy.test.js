@@ -599,6 +599,76 @@ describe('ADD_COIN_GRANT', () => {
         expect(second.character.gold).toBe(25);
     });
 
+    // 2026-08-31 P1 (live merchant-quest double-pay): the reward paid at the
+    // handover was re-emitted at quest completion, >4 conversational messages
+    // later — travel + report-back routinely burns past the tight window.
+    it('suppresses a quest-completion-adjacent re-grant beyond the tight window (P1 2026-08-31)', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-handover' } },
+        });
+        const later = addMessages(granted, 8);
+        const replayed = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: {
+                gold: 20,
+                _meta: { sourceId: 'msg-completion', questCompletionAdjacent: true, playerMessage: 'The caravan is safe. I report back to the merchant.' },
+            },
+        });
+        expect(replayed.character.gold).toBe(25);
+        expect(replayed.messages.at(-1).content).toMatch(/Duplicate coin grant ignored/);
+    });
+
+    it('a quest-completion-adjacent grant still pays on explicit repeat phrasing (never refuse to give)', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-handover' } },
+        });
+        const later = addMessages(granted, 8);
+        const repeat = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: {
+                gold: 20,
+                _meta: { sourceId: 'msg-completion', questCompletionAdjacent: true, playerMessage: 'You promised another 20 gold on completion — pay up.' },
+            },
+        });
+        expect(repeat.character.gold).toBe(45);
+    });
+
+    it('suppresses an audit recovery beyond the tight window (audits use the wide horizon)', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-handover' } },
+        });
+        const later = addMessages(granted, 8);
+        const audited = gameReducer(later, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-recap:scribe-loot', announce: 'audit', audit: true } },
+        });
+        expect(audited.character.gold).toBe(25);
+        expect(audited.recentCoinGrants.at(-1).status).toBe('ignored');
+    });
+
+    it('coin lines are stamped dmVisible so the DM window carries the receipt (P1 root fix)', () => {
+        const state = makeState();
+        const granted = gameReducer(state, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 20, _meta: { sourceId: 'msg-reward-1' } },
+        });
+        const line = granted.messages.at(-1);
+        expect(line.role).toBe('system');
+        expect(line.content).toMatch(/received — purse:/);
+        expect(line.dmVisible).toBe(true);
+        const charged = gameReducer(granted, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 5, _meta: { sourceId: 'msg-toll' } },
+        });
+        expect(charged.messages.at(-1).dmVisible).toBe(true);
+    });
+
     it('announces audit-recovered coins with a visible system line', () => {
         const state = makeState();
         const next = gameReducer(state, {
