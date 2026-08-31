@@ -51,7 +51,7 @@ it under Process notes.
 | combat-exchange | `engine/combatExchange.js`, `engine/combatMath.js`, `state/handlers/combat.js`, opening initiative | 2026-08-27 |
 | enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-08-29 |
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-08-24 |
-| living-world | `engine/regionalHearsay.js`, `llm/absenceDrift.js`, `llm/frontAftermath.js`, `llm/regionalFronts.js` | 2026-08-19 |
+| living-world | `engine/regionalHearsay.js`, `llm/absenceDrift.js`, `llm/frontAftermath.js`, `llm/regionalFronts.js` | 2026-08-31 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-08-24 |
 | memory-journal | `engine/worldJournal.js` | 2026-08-31 |
 | story-memory | `engine/storyMemory.js`, `state/handlers/worldMemory.js` (card reducer paths) | 2026-08-30 |
@@ -63,7 +63,7 @@ it under Process notes.
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-08-28 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-08-20 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-08-30 |
-| chat-orchestration | `components/Chat/ChatPanel.jsx`, `llm/turnOrchestrator.js` (turn pipeline, `applyEvents`, message window) | 2026-08-19 |
+| chat-orchestration | `components/Chat/ChatPanel.jsx`, `llm/turnOrchestrator.js` (turn pipeline, `applyEvents`, message window) | 2026-08-31 |
 | spellcasting | `engine/spellcasting.js`, `data/spells.js`, `state/handlers/spellcasting.js`, rest/sustained interplay | 2026-08-29 |
 | chronicler | `llm/chronicler.js`, chronicle reducer paths + Journal Chronicle tab | 2026-08-29 |
 
@@ -379,6 +379,11 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [ ] **P2** (prompt-building, 2026-08-31): extract a shared `isLowLevelSolo(character, party)` for the duplicated predicate (`buildLowLevelSoloSafetyBlock` vs `buildActiveConstraints`), and move the stranded `/** Max world facts… */` jsdoc down to `MAX_PROMPT_WORLD_FACTS` — `llm/promptBuilder.js:845,875,892,959`.
 - [ ] **P2** (memory-journal, 2026-08-31): LOCATION TRANSITION HISTORY matches locations by private `normalizeLocationName` exact-equality while `currentLocation` and journal-entry stamps carry RAW alias strings — "Library landing, Clockwork Tower" vs "Clockwork Tower" never match, silently suppressing the block right after travel; route through `locationRegistry.isSameLocation` (or resolve both sides to a registry record id) + alias-drift test — `engine/worldJournal.js:368-383`, `engine/locationRegistry.js:98`.
 - [ ] **P2** (memory-journal, 2026-08-31): fold the journal's `npcs_encountered` upsert loop and the Scribe's `npc_updates` loop into one shared classify→dispatch helper (the journal hand-maps its 10 fields twice; a schema addition needs two edits or silently drops), and fix the stale "Gemini 2.5 Flash" header to point at MACHINERY_MODEL — `engine/worldJournal.js:7,256-287`, `llm/scribe.js:286-303`.
+- [ ] **P1** (chat-orchestration, 2026-08-31): in-game load of a same-campaign save never remounts ChatPanel (AppShell keyed by `session.id` alone), so the runner-local `lastSummarizedIndex` stays on the pre-load timeline — an earlier save leaves a stretch permanently unjournaled (memory rot), a later/cloud save re-summarizes already-summarized messages (duplicate journal entries/facts/NPC dispatches). Fix structurally: stamp a load nonce in LOAD_GAME, key AppShell `${session.id}:${nonce}`; belt: derive the boundary fresh from the `messages[].summarized` prefix and delete the runner-local mirror; pin with a swapped-getState runner test — `llm/turnOrchestrator.js:61-69`, `src/App.jsx:239`.
+- [ ] **P2** (chat-orchestration, 2026-08-31): the same missing remount strands every mount-scoped ref on the old timeline (`memorySeededRef` — including RAG rows embedded from the undone future timeline staying retrievable, `directorKeysRef`, `narratedCombatExchangeIdsRef` — blocks auto-narration of a reloaded mid-combat save, Retry button is the only recovery — and `narratedCueIdsRef`); the load-nonce remount above clears the whole class — `components/Chat/ChatPanel.jsx:111-119,472`.
+- [ ] **P2** (chat-orchestration, 2026-08-31): background-director install callbacks receive the generation-time state snapshot `s` (only `s.session.id` is read today — safe by accident, not by contract); pass the trigger-time `sessionId` instead so a future director row can't inherit a seconds-stale snapshot — `components/Chat/ChatPanel.jsx:308-325`.
+- [ ] **P2** (living-world, 2026-08-31): resolved-front hearsay hardcodes `local: false` while fight/card sources compute locality — at the front's own theater, locals retell the hero's victory secondhand/legend-grade ("one detail wrong", garbled names) about an event they witnessed; check `theaterFrontIds` membership and grade local front deeds firsthand — `engine/regionalHearsay.js:124-133`.
+- [ ] **P2** (living-world, 2026-08-31): drop the phantom `entry.title`/`entry.content` fields from the absence-drift and aftermath journal projections (journal entries have neither; every payload ships `title: ""` and documents a schema that isn't real), and move the duplicated `compactMessage` into `directorUtils.js` with a clamp param — `llm/absenceDrift.js:123-124`, `llm/frontAftermath.js:71-75,114-115`, `llm/regionalFronts.js:56-60`.
 
 ## Entry template
 
@@ -402,6 +407,31 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-31 — living-world + chat-orchestration (Lap 1: correctness & test depth — second run, off-path lens: cross-cutting seams)
+
+`npm test`: 1893 passing / 95 files
+
+Deliberately unconventional pass (Vesa's ask): instead of walking each feature's happy paths, this run hunted the seams no lap lens looks at — async director races, module-level state surviving campaign/timeline switches, `Date.now()` id identity, Unicode in the fuzzy-match layer. The Unicode sweep came back clean (`textMatch.tokenSet` is `\p{L}\p{N}`-aware; `itemIdentityMatches`' ASCII compact path degrades symmetrically with a Unicode token fallback), as did id minting.
+
+### chat-orchestration
+- **Scope examined:** `llm/turnOrchestrator.js` (659 lines, end to end), `ChatPanel.jsx` (directors table, runner wiring, priming, narration/cue effects, handleSend), `App.jsx` mount keying, MARK_MESSAGES_SUMMARIZED/`prunedMessageCount` flow through persistence.
+- **Findings:**
+  - **P1**: **in-game load of a save of the SAME campaign never remounts ChatPanel** — `App.jsx:239` keys AppShell by `session.id` alone, and a campaign's id never changes across its saves — so the turn runner survives the load and its runner-local `lastSummarizedIndex` (`turnOrchestrator.js:61`, initialized once per mount) stays on the pre-load timeline. Both directions corrupt silently: load an EARLIER save (the retry-a-bad-outcome flow) and the stretch between the loaded save's summarized boundary and the stale index never enters any journal batch (`newMessages` even goes negative, pausing the cadence) — permanent memory rot; load a LATER save (cloud, other machine) and the next cadence re-summarizes already-summarized messages (the batch filter excludes `hidden`/`deleted` but not `summarized`) — duplicate journal entries, re-dispatched NPC updates, re-added world facts. Live state already owns the truth (`messages[].summarized`; the save path derives `prunedMessageCount` from exactly that prefix), so the cache is a mirror of state with an owner.
+  - **P2**: the same missing remount strands EVERY mount-scoped ref on the old timeline: `memorySeededRef` (no reseed — and RAG rows embedded from the now-undone future timeline stay retrievable, giving rolled-back events canon-looking provenance in the DM prompt), `directorKeysRef` (a served key blocks regenerating the reloaded save's identical pending marker), `narratedCombatExchangeIdsRef` (auto-narration of a reloaded mid-combat save is blocked at `ChatPanel.jsx:472` — recoverable only via the visible Retry button), `narratedCueIdsRef`. The code's own comments claim "one mount = one campaign"; the real invariant needed is one mount = one TIMELINE.
+  - **P2**: the background-director effect's install callbacks receive the generation-time state snapshot (`dispatch(director.install(s, key, result))`, `ChatPanel.jsx:316`) seconds-to-minutes stale. Today every row reads only `s.session.id` (safe: the mount is session-keyed), but nothing enforces that — pass the captured `sessionId` instead of `s` so a future row can't silently inherit a stale snapshot.
+  - Verified sound (the off-path suspects that held): all four director installs are `sessionId` + one-shot-`pending.key` guarded reducer-side, so a late result landing after a campaign switch is dropped even though the director `.then` has no `mountedRef` guard; INSTALL_ABSENCE_DRIFT rebuilds the symptom object against the LIVE theater front (a stale symptom can't exceed the current band); the priming retry ladder and the narration retry path both self-heal correctly.
+- **Suggested improvements:** (1) stamp a load nonce in LOAD_GAME and key AppShell by `${session.id}:${nonce}` — one structural fix that kills the P1 and the whole P2 ref class by restoring clean-remount-per-timeline; (2) belt: derive the summarize boundary fresh from the `messages[].summarized` prefix each run and delete the runner-local mirror; (3) pin with a runner-level test that swaps `getState` to a lower-`prunedMessageCount` state mid-session and asserts the next batch starts at the LOADED boundary; (4) pass `sessionId` not `s` into director installs.
+
+### living-world
+- **Scope examined:** `engine/regionalHearsay.js`, `llm/absenceDrift.js`, `llm/frontAftermath.js`, `llm/regionalFronts.js` (all end to end), the three INSTALL handlers in `state/handlers/fronts.js`/`npcs.js`, the block builders' render guards.
+- **Findings:** validation chains are in genuinely good shape — sanitize → install re-validation → render guards all held under adversarial reading. Residues:
+  - **P2**: resolved-front hearsay hardcodes `local: false` (`regionalHearsay.js:131`) while the fight and story-card sources compute locality — so at the very place a front was ended (its own theater), locals retell the hero's defining victory as "secondhand: exactly ONE detail wrong", or as name-garbling "legend" past 60 messages, about an event they watched happen. After the ~40-message RECENT VICTORY echo expires, the resolution site's own memory of it is structurally wrong-grade. Check theater membership (`record.theaterFrontIds`) for front deeds and grade local ones firsthand.
+  - **P2**: both journal context projections read phantom fields — `entry.title` and `entry.content` don't exist on journal entries (the schema is `summary`/`keyDecisions`/`consequences`/`location`), so `absenceDrift.js:123-124` and `frontAftermath.js:114-115` ship `title: ""` dead weight in every payload and document a schema that isn't real. Same copy-paste family: `compactMessage` is duplicated across `frontAftermath.js:71-75` and `regionalFronts.js:56-60` (only the clamp differs) — it belongs in `directorUtils.js` beside `cleanText`.
+- **Suggested improvements:** (1) theater-aware locality for front hearsay + a resolution-site grade test; (2) drop the phantom fields, share `compactMessage(clamp)`.
+
+### Process notes
+- The off-path lens earned its keep: the P1 lives exactly in the crack between two features (persistence's load flow × chat-orchestration's mount lifetime) that single-feature audits kept walking past — six prior audits of these features and persistence never simulated "load without remount". Worth repeating the seam lens roughly once a lap.
 
 ## 2026-08-31 — prompt-building + memory-journal (Lap 4: simplification & design — closes Lap 4)
 
