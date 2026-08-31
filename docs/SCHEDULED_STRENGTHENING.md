@@ -46,14 +46,14 @@ it under Process notes.
 | rules-math | `engine/rules.js` | 2026-08-28 |
 | progression | `engine/progression.js` (XP, leveling, ASI, fighting styles) | 2026-08-30 |
 | response-parsing | `llm/responseParser.js`, `llm/utils/jsonExtractor.js`, `llm/eventChannels.js` (normalizeEvents registry) | 2026-08-29 |
-| prompt-building | `llm/promptBuilder.js` | 2026-08-18 |
+| prompt-building | `llm/promptBuilder.js` | 2026-08-31 |
 | roll-resolution | `engine/rollResolver.js`, `engine/outOfCombatRollPolicy.js`, `pendingRoleplayCheck`/`recentRulings` reducer paths | 2026-08-27 |
 | combat-exchange | `engine/combatExchange.js`, `engine/combatMath.js`, `state/handlers/combat.js`, opening initiative | 2026-08-27 |
 | enemy-stats-conditions | `engine/enemyStats.js`, `enemy_condition_updates`, `CONDITION_EFFECTS` | 2026-08-29 |
 | hidden-fronts | `engine/fronts.js`, `llm/frontDirector.js`, `llm/frontUpgrade.js` | 2026-08-24 |
 | living-world | `engine/regionalHearsay.js`, `llm/absenceDrift.js`, `llm/frontAftermath.js`, `llm/regionalFronts.js` | 2026-08-19 |
 | scribe | `llm/scribe.js` (extraction, loot audit, appearance, reflection) | 2026-08-24 |
-| memory-journal | `engine/worldJournal.js` | 2026-08-18 |
+| memory-journal | `engine/worldJournal.js` | 2026-08-31 |
 | story-memory | `engine/storyMemory.js`, `state/handlers/worldMemory.js` (card reducer paths) | 2026-08-30 |
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-08-30 |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-08-27 |
@@ -375,6 +375,10 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P2** (story-memory, 2026-08-30): UPDATE_NPC's card birth skips ADD_STORY_MEMORY_CARD's `firstSeenMessage` stamp and hand-rolls a divergent merge, all untested at the reducer level — fold through the ADD handler (reducer re-entry) or extract a shared birth helper, then pin birth/update/type-flip — `state/handlers/npcs.js:63-73` vs `state/handlers/worldMemory.js:85`. *Fixed 2026-08-30: birth stamps `firstSeenMessage` exactly like the ADD handler; the merge divergence is now DOCUMENTED in place and deliberately kept rather than folded through ADD — a promotion is a regenerated dossier snapshot that must also SHRINK when a stance/agenda narrows, which ADD's fragment guard and salience-max would refuse (pinned: a narrowed agenda's shorter snapshot wins). Reducer suite covers birth stamp, update-in-place, type-flip, and the wholesale replace.*
 - [x] **P2** (vector-memory-rag, 2026-08-30): extract one shared word-boundary name-presence helper for `subjectsPresent` + `findSubjectsInText` (raw substring `includes` counts "Ash" as present in "ashes", quietly re-admitting person-tied rows the presence gate means to rest) — `engine/vectorMemory.js:213-227,404-409`. *Fixed 2026-08-30: shared `textWordSet` (Unicode word boundaries) + `nameTokensPresent` (tri-state: null for unidentifiable names — tagging skips them, the gate treats them as present) serve both sites; "ashes ≠ Ash" / "Ashford ≠ Ash" pinned on the tagging AND gating side. Same sweep: `categoryBoost` hoisted to the exported module const `CATEGORY_BOOST` beside PRESENCE_ABSENT_PENALTY, and `clearMemories`' fate RULED — kept as an explicitly documented TEST/MAINTENANCE-only export (campaign-keyed rows made a global wipe needless in any product flow; wire into UI only as part of a reset-all-app-data flow).*
 - [x] **P2** (chronicler, 2026-08-29): no partial-progress salvage — a mid-run passage failure discards completed passages and re-pays them on retry, and the failure paths (mid-run throw, empty passage, 60k clamp) are exactly the untested ones — `llm/chronicler.js:82-106`. *Fixed 2026-08-29: a mid-run failure (throw OR empty passage) salvages the completed passages as a shorter chapter whose `toIndex` is the last retold message (chunks carry raw indexes), with `salvaged`/`warning` surfaced in the Journal status line; a first-chunk failure still throws. Tests: both salvage paths, first-chunk throw, empty-passage throw, 60k clamp.*
+- [ ] **P2** (prompt-building, 2026-08-31): the two dying instructions contradict — `buildCharacterBlock`'s STATUS: DYING line prescribes the `requested_rolls` `{ "type": "death_save" }` lane (out-of-combat only; rejected mid-combat) while `buildActiveConstraints`' reminder prescribes the `combat_exchange` `{ "action": "death_save" }` slot (combat only), and BOTH render unconditionally whenever `character.dying`. Combat-gate each (thread `combat` into buildActiveConstraints) + a test pinning exactly one channel per state — `llm/promptBuilder.js:635,956`.
+- [ ] **P2** (prompt-building, 2026-08-31): extract a shared `isLowLevelSolo(character, party)` for the duplicated predicate (`buildLowLevelSoloSafetyBlock` vs `buildActiveConstraints`), and move the stranded `/** Max world facts… */` jsdoc down to `MAX_PROMPT_WORLD_FACTS` — `llm/promptBuilder.js:845,875,892,959`.
+- [ ] **P2** (memory-journal, 2026-08-31): LOCATION TRANSITION HISTORY matches locations by private `normalizeLocationName` exact-equality while `currentLocation` and journal-entry stamps carry RAW alias strings — "Library landing, Clockwork Tower" vs "Clockwork Tower" never match, silently suppressing the block right after travel; route through `locationRegistry.isSameLocation` (or resolve both sides to a registry record id) + alias-drift test — `engine/worldJournal.js:368-383`, `engine/locationRegistry.js:98`.
+- [ ] **P2** (memory-journal, 2026-08-31): fold the journal's `npcs_encountered` upsert loop and the Scribe's `npc_updates` loop into one shared classify→dispatch helper (the journal hand-maps its 10 fields twice; a schema addition needs two edits or silently drops), and fix the stale "Gemini 2.5 Flash" header to point at MACHINERY_MODEL — `engine/worldJournal.js:7,256-287`, `llm/scribe.js:286-303`.
 
 ## Entry template
 
@@ -398,6 +402,32 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-08-31 — prompt-building + memory-journal (Lap 4: simplification & design — closes Lap 4)
+
+`npm test`: 1893 passing / 95 files
+
+### prompt-building
+- **Scope examined:** `llm/promptBuilder.js` (1001 lines, end to end — all block builders incl. the tail four past the old read horizon), the six `promptBuilder.*.test.js` suites (dying/DM-reminder pins at `promptBuilder.test.js:253,515`), cross-checked `rollResolver.js` death_save lanes and `handlers/npcs.js` SET_LOCATION.
+- **Findings:** structurally healthy — the stable-prefix discipline holds (all prefix blocks are true constants), every accretion block is capped since the 08-18 sweep, and the 08-04/08-05 caps re-verified. Residues:
+  - **P2**: the two dying instructions contradict each other and neither is combat-gated — `buildCharacterBlock`'s STATUS: DYING line says `Request { "type": "death_save" } as their roll each round` (the `requested_rolls` lane, valid ONLY out of combat; legacy requested_rolls are rejected during active combat), while `buildActiveConstraints`' dying reminder says the only player slot is `{ "action": "death_save" }` inside `combat_exchange` (valid ONLY in combat; an orphan exchange out of combat is dropped). Both render unconditionally whenever `character.dying`, so in either combat state the DM sees one correct and one wrong channel. Engine guards make the wrong pick degrade (visible rejection, no free enemy action), not corrupt — but the prompt argues with itself at the exact moment stakes are highest — `promptBuilder.js:635,956`. Both existing tests pin presence only, not channel consistency.
+  - **P2**: the low-level-solo predicate is duplicated — `buildLowLevelSoloSafetyBlock` gates on `(character.level ?? 1) > 2 || (party||[]).some(isCompanionActive)` and `buildActiveConstraints` re-derives `<= 2 && !some(isCompanionActive)`; a future threshold change edits two sites or drifts the safety block apart from its own reminder — `promptBuilder.js:875,959`.
+  - **P2**: doc drift — the jsdoc `/** Max world facts to inject… */` at `:845` is stranded above `buildRecentRulingsBlock`; the `MAX_PROMPT_WORLD_FACTS` it describes moved to `:892` uncommented. Cosmetic twin: empty `traits`/`features` leave blank template lines at the character block's tail (`:711-716`).
+- **Suggested improvements:** (1) combat-gate both dying lines — `buildCharacterBlock` already receives `combat`, thread it into `buildActiveConstraints`, and render the requested_rolls form out of combat / the slot form in combat, with one test pinning each state shows exactly one channel; (2) extract a shared `isLowLevelSolo(character, party)`; (3) move the stranded jsdoc down to its constant.
+
+### memory-journal
+- **Scope examined:** `engine/worldJournal.js` (459 lines, end to end), `worldJournal.test.js` + `worldJournal.summarize.test.js`, the twin NPC-upsert loop in `scribe.js:286-303`, `locationRegistry.js` canonical matching, SET_LOCATION's raw-name `currentLocation` (`handlers/npcs.js:195`).
+- **Findings:** the 08-18 P1 fixes (batch cap, failure escape hatch, transition-scan bounds) all held under re-reading and are well-pinned. Lap-4 residues:
+  - **P2**: the LOCATION TRANSITION HISTORY matcher uses its own primitive `normalizeLocationName` exact-equality while the living world folds aliases canonically — `currentLocation` stores the RAW arrival string and journal entries stamp the batch's raw location, so "Library landing, Clockwork Tower" vs "Clockwork Tower" never match and the block silently vanishes (or anchors on a stale same-alias run) exactly when alias drift is likeliest, right after travel. `locationRegistry.isSameLocation`/`findLocationRecord` already implement the folding this matcher re-approximates — `worldJournal.js:22-29,368-383`.
+  - **P2**: the `npcs_encountered` upsert loop is a hand-maintained twin of the Scribe's `npc_updates` loop with divergent styles — scribe passes the whole payload to `classifyNpcCandidate` and spreads it into UPDATE_NPC; the journal hand-maps 10 fields TWICE (once into classify, once into conditional dispatch spreads), so a field added to the journal's schema needs two edits and silently drops if either is missed — `worldJournal.js:256-287` vs `scribe.js:286-303`.
+  - **P2**: stale header — "Uses Gemini 2.5 Flash for cost-efficiency" (`worldJournal.js:7`); the machinery runs `MACHINERY_MODEL` (`gemini-3.1-flash-lite`). Same doc-drift class the scribe.js header got fixed for on 2026-08-26.
+  - Considered and left alone: splitting `maybeAutoSummarize` (~200 lines) — it reads as one coherent cadence pipeline, is heavily tested, and a split buys no clarity for the churn (the scribe two-seam precedent).
+- **Suggested improvements:** (1) route the transition matcher through `isSameLocation` (or match on the registry record id both sides resolve to) + an alias-drift test; (2) fold both roster upsert loops into one shared helper (classify → dispatch) parameterized by source fields; (3) fix the header to point at MACHINERY_MODEL.
+
+### Process notes
+- **Lap 4 is complete** — every pre-registered feature has now had the simplification/design pass (spellcasting + chronicler, registered mid-lap, got Lap-1-lens passes 08-29 instead). Next run cycles back to **Lap 1: correctness & test depth**.
+- Run hygiene: local master was 1 behind origin (`f63e58f` Journal Places tab, another machine); fast-forwarded before auditing.
+- Queue check: only one open item remains (npc-consistency 2026-08-09) — a playtest watch item ("watch whether the pronoun flip recurs"), not code-verifiable from here; stays open.
 
 ## 2026-08-30 — progression + providers-adapter (Lap 4: simplification & design) — second run
 
