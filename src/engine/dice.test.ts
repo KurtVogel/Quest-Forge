@@ -189,7 +189,16 @@ describe('check helpers', () => {
         expect(() => rollDice(0, 6)).toThrow(/Invalid dice count/);
         expect(() => rollDice(2.5, 6)).toThrow(/Invalid dice count/);
         expect(() => rollDice(NaN, 6)).toThrow(/Invalid dice count/);
-        expect(() => rollDice(1000001, 6)).toThrow(/Invalid dice count/);
+        // The engine backstop's REAL edge: 1000 valid, 1001 throws.
+        expect(rollDice(1000, 6)).toHaveLength(1000);
+        expect(() => rollDice(1001, 6)).toThrow(/Invalid dice count/);
+    });
+
+    it('accepts the largest allowed die at the engine level', () => {
+        const rolls = rollDice(2, MAX_DIE_SIDES);
+        expect(rolls).toHaveLength(2);
+        rolls.forEach(r => expect(r).toBeGreaterThanOrEqual(1));
+        rolls.forEach(r => expect(r).toBeLessThanOrEqual(MAX_DIE_SIDES));
     });
 
     it('leaves headroom above MAX_DICE_COUNT so crit doubling never throws', () => {
@@ -211,5 +220,31 @@ describe('check helpers', () => {
         for (const face of [1, 2, 3, 4, 5, 6]) {
             expect(counts.get(face)!).toBeGreaterThan(700);
         }
+    });
+});
+
+describe('rollWithModifier modifier validation (2026-09-01 dice-engine P2)', () => {
+    it('rejects NaN, string, and non-finite modifiers instead of poisoning the total', () => {
+        expect(() => rollWithModifier(1, 20, NaN)).toThrow(/Invalid roll modifier/);
+        expect(() => rollWithModifier(1, 20, '5' as unknown as number)).toThrow(/Invalid roll modifier/);
+        expect(() => rollWithModifier(1, 20, Infinity)).toThrow(/Invalid roll modifier/);
+        expect(() => rollWithModifier(1, 20, null as unknown as number)).toThrow(/Invalid roll modifier/);
+    });
+
+    it('still defaults an omitted modifier to 0 and accepts negative modifiers', () => {
+        const bare = rollWithModifier(1, 6);
+        expect(bare.modifier).toBe(0);
+        expect(bare.total).toBe(bare.subtotal);
+        const negative = rollWithModifier(1, 6, -2);
+        expect(negative.total).toBe(negative.subtotal - 2);
+    });
+});
+
+describe('parseNotation on non-string input', () => {
+    it('reports an invalid notation for null, undefined, numbers, and objects', () => {
+        expect(() => parseNotation(null as unknown as string)).toThrow(/Invalid dice notation/);
+        expect(() => parseNotation(undefined as unknown as string)).toThrow(/Invalid dice notation/);
+        expect(() => parseNotation(20 as unknown as string)).toThrow(/Invalid dice notation/);
+        expect(() => parseNotation({} as unknown as string)).toThrow(/Invalid dice notation/);
     });
 });

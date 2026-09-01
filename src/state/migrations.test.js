@@ -171,7 +171,8 @@ describe('version gating', () => {
         expect(future.character.level).toBe(3);
         expect(future.character.exp).toBe(20);
         expect(future.character.spellSlots).toBeTruthy();
-        expect(future.character.hitDice).toEqual({ total: '3', remaining: '3', die: 6 });
+        // Hit dice are healed to ints (catalog die) on every load — 2026-09-01.
+        expect(future.character.hitDice).toEqual({ total: 3, remaining: 3, die: 6 });
     });
 
     it('LOAD_GAME respects the gate end to end', () => {
@@ -184,5 +185,49 @@ describe('version gating', () => {
             payload: fighterSave({ saveVersion: CURRENT_SAVE_VERSION }),
         });
         expect(retirementNotice(modern)).toBe(false);
+    });
+});
+
+describe('hit dice heal on load (2026-09-01 dice-engine P2)', () => {
+    it('rebuilds a partial hitDice object: die from the class, ints clamped to level', () => {
+        const healed = migrateLoadedSave(fighterSave({
+            character: { ...fighterSave().character, level: 4, hitDice: { total: '7', remaining: '2' } },
+        }));
+        expect(healed.character.hitDice).toEqual({ total: 4, remaining: 2, die: 10 });
+    });
+
+    it('never trusts a saved die value — a string or zero die becomes the class die', () => {
+        const stringDie = migrateLoadedSave(fighterSave({
+            character: { ...fighterSave().character, hitDice: { total: 4, remaining: 4, die: '8' } },
+        }));
+        expect(stringDie.character.hitDice.die).toBe(10);
+        const zeroDie = migrateLoadedSave(fighterSave({
+            character: { ...fighterSave().character, hitDice: { total: 4, remaining: 4, die: 0 } },
+        }));
+        expect(zeroDie.character.hitDice.die).toBe(10);
+    });
+
+    it('clamps remaining into [0, total] and coerces junk to sane defaults', () => {
+        const junk = migrateLoadedSave(fighterSave({
+            character: { ...fighterSave().character, hitDice: { total: 'lots', remaining: 99, die: null } },
+        }));
+        expect(junk.character.hitDice).toEqual({ total: 4, remaining: 4, die: 10 });
+        const negative = migrateLoadedSave(fighterSave({
+            character: { ...fighterSave().character, hitDice: { total: 4, remaining: -3, die: 10 } },
+        }));
+        expect(negative.character.hitDice.remaining).toBe(0);
+    });
+
+    it('a short rest on a loaded partial-hit-dice save no longer throws', () => {
+        const loaded = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: fighterSave({
+                character: { ...fighterSave().character, currentHP: 10, hitDice: { total: 4, remaining: 4 } },
+            }),
+        });
+        expect(() => gameReducer(loaded, { type: 'TAKE_REST', payload: 'short' })).not.toThrow();
+        const rested = gameReducer(loaded, { type: 'TAKE_REST', payload: 'short' });
+        expect(rested.character.currentHP).toBeGreaterThan(10);
+        expect(rested.character.hitDice.remaining).toBeLessThan(4);
     });
 });

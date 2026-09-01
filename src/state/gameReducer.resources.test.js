@@ -489,3 +489,26 @@ describe('rest and resource mechanics', () => {
         expect(next.messages.at(-1).content).toContain('dead cannot recover');
     });
 });
+
+describe('short rest expected-heal divisor (2026-09-01 dice-engine P2)', () => {
+    it('still spends hit dice when die/2 + 1 + CON is negative', () => {
+        // d6 wizard with CON 1 (−5): the old `|| 1` guarded zero, not negative,
+        // so the quotient went negative and the rest spent nothing while dice
+        // remained. Each die heals max(1, roll − 5) = 1 — fully deterministic.
+        const start = {
+            ...initialGameState,
+            character: {
+                name: 'Frail', race: 'human', class: 'wizard', level: 3,
+                currentHP: 1, maxHP: 10,
+                abilityScores: { strength: 8, dexterity: 12, constitution: 1, intelligence: 16, wisdom: 10, charisma: 10 },
+                classResources: {},
+                hitDice: { total: 3, remaining: 3, die: 6 },
+                conditions: [],
+            },
+            messages: [],
+        };
+        const rested = gameReducer(start, { type: 'TAKE_REST', payload: 'short' });
+        expect(rested.character.hitDice.remaining).toBe(0);
+        expect(rested.character.currentHP).toBe(4);
+    });
+});

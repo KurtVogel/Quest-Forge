@@ -95,9 +95,16 @@ export function isCriticalNatural(character, natural) {
  * unstamped). Both attack paths now stamp through this single owner.
  */
 export function stampCriticalRoll(character, roll, natural) {
-    if (roll && !roll.isCritical && isCriticalNatural(character, natural)) {
-        roll.isCritical = true;
-        if (natural === 19) roll.criticalThreshold = 'Champion 19-20';
+    if (roll) {
+        // Both attack paths pass through here, so this is where a d20 roll is
+        // marked as an ATTACK: the prompt's RECENT ROLLS renders "CRITICAL
+        // HIT!" only for kind 'attack' — checks, saves, initiative, and death
+        // saves are plain natural 20s (2026-09-01 dice-engine P2).
+        roll.kind = 'attack';
+        if (!roll.isCritical && isCriticalNatural(character, natural)) {
+            roll.isCritical = true;
+            if (natural === 19) roll.criticalThreshold = 'Champion 19-20';
+        }
     }
     return !!roll?.isCritical;
 }

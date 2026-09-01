@@ -237,6 +237,20 @@ function healLoadedCharacter(character) {
         ? character.abilityScores
         : {};
     const abilityScores = Object.fromEntries(ABILITY_NAMES.map(name => [name, Math.max(1, toInt(rawScores[name], 10))]));
+    // Hit dice are catalog-rebuilt like sustainedSpell (2026-09-01 dice-engine
+    // P2): backfillCharacterShape defaults only a MISSING hitDice object, so a
+    // partial/hand-edited `{ total, remaining }` (no die, or die "8"/0) reached
+    // rollDie(undefined) and threw out of the reducer on the Short Rest button.
+    // The die is the class's own — a save can never carry a different one.
+    const rawHitDice = character.hitDice && typeof character.hitDice === 'object' && !Array.isArray(character.hitDice)
+        ? character.hitDice
+        : {};
+    const hitDiceTotal = Math.min(level, Math.max(1, toInt(rawHitDice.total, level)));
+    const hitDice = {
+        total: hitDiceTotal,
+        remaining: Math.min(hitDiceTotal, Math.max(0, toInt(rawHitDice.remaining, hitDiceTotal))),
+        die: CLASSES[character.class]?.hitDie || 8,
+    };
     const healed = {
         ...character,
         level,
@@ -244,6 +258,7 @@ function healLoadedCharacter(character) {
         maxHP,
         currentHP: Math.min(maxHP, Math.max(0, toInt(character.currentHP, maxHP))),
         abilityScores,
+        hitDice,
     };
     if (!isSpellcaster(healed.class)) return healed;
     return {

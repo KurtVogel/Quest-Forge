@@ -255,8 +255,12 @@ export const handlers = {
             const recover = Math.max(1, Math.floor(hitDice.total / 2));
             newHitDice.remaining = Math.min(hitDice.total, hitDice.remaining + recover);
         } else {
-            // Short rest: spend available hit dice to heal (auto-spend up to full)
-            const canSpend = Math.min(newHitDice.remaining, Math.ceil((state.character.maxHP - state.character.currentHP) / ((hitDice.die / 2) + 1 + conMod || 1)));
+            // Short rest: spend available hit dice to heal (auto-spend up to full).
+            // The expected-heal divisor is floored at 1: `|| 1` guarded zero but
+            // not NEGATIVE (d6 + CON ≤ -4 → a negative quotient spent nothing
+            // while dice remained — 2026-09-01 dice-engine P2).
+            const expectedHealPerDie = Math.max(1, (hitDice.die / 2) + 1 + conMod);
+            const canSpend = Math.min(newHitDice.remaining, Math.ceil((state.character.maxHP - state.character.currentHP) / expectedHealPerDie));
             let rolled = 0;
             for (let i = 0; i < canSpend; i++) {
                 rolled += Math.max(1, rollDie(hitDice.die) + conMod);

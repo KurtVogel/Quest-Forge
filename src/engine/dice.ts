@@ -15,6 +15,10 @@ export interface DiceRollResult {
   description: string;
   isCritical: boolean;
   isCritFail: boolean;
+  /** Stamped 'attack' by combatMath.stampCriticalRoll on both attack paths; absent on checks/saves. */
+  kind?: 'attack';
+  /** Set by stampCriticalRoll for a Champion's natural 19. */
+  criticalThreshold?: string;
 }
 
 let rollIdCounter = 0;
@@ -82,6 +86,11 @@ export function rollWithModifier(
   modifier: number = 0,
   description: string = ''
 ): DiceRollResult {
+  // The modifier axis gets the same loud failure as count/sides: NaN was a
+  // sticky-NaN total and a string modifier concatenated ("5" → "125").
+  if (typeof modifier !== 'number' || !Number.isFinite(modifier)) {
+    throw new Error(`Invalid roll modifier: ${String(modifier)}`);
+  }
   const rolls = rollDice(count, sides);
   const subtotal = rolls.reduce((sum, r) => sum + r, 0);
   const total = subtotal + modifier;
