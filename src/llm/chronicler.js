@@ -16,7 +16,7 @@
  * hit the reducer's 60k text clamp and silently lose the overflow.
  */
 import { sendMessage } from './adapter.js';
-import { isTableTalkMessage } from './tableTalk.js';
+import { collectNarrativeEntries } from './narrativeMessages.js';
 
 export const CHRONICLE_MIN_MESSAGES = 6;
 export const CHRONICLE_CHUNK_SIZE = 30; // exported so the UI can estimate passages/duration
@@ -54,29 +54,11 @@ function stripEventBlocks(text) {
  * (salvaged shorter-span chapters need the true toIndex): visible play only,
  * minus OOC table talk — a table-talk turn is excluded from RAG, the Scribe,
  * and the DM window by design, and its recap/rules exchange must not be retold
- * as story either (2026-08-29 audit). The player's table-talk message and its
- * immediately following assistant reply skip together.
+ * as story either (2026-08-29 audit). The predicate is THE shared
+ * narrative-eligibility rule in narrativeMessages.js (SceneArt and
+ * sessionPriming read through the same one — 2026-09-01 P1).
  */
-function collectChapterEntries(messages = [], fromIndex = 0, toIndex = Infinity) {
-    const entries = [];
-    let skipNextAssistant = false;
-    (messages || []).forEach((m, index) => {
-        if (index < fromIndex || index > toIndex) return;
-        if (!m || m.hidden || m.deleted || typeof m.content !== 'string' || !m.content.trim()) return;
-        if (m.role === 'user') {
-            skipNextAssistant = false;
-            if (isTableTalkMessage(m.content)) {
-                skipNextAssistant = true;
-                return;
-            }
-        } else if (m.role === 'assistant' && skipNextAssistant) {
-            skipNextAssistant = false;
-            return;
-        }
-        entries.push({ message: m, index });
-    });
-    return entries;
-}
+const collectChapterEntries = collectNarrativeEntries;
 
 /** The chronicle-eligible messages of a raw span: visible play only. */
 export function collectChapterMessages(messages = [], fromIndex = 0, toIndex = Infinity) {

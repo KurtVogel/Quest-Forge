@@ -3,7 +3,7 @@
  * Constructs dynamic system prompts that inject character state, rules, and context.
  */
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
-import { ABILITY_SHORT, getFightingStyleLabel, getMartialArchetypeLabel } from '../engine/characterUtils.js';
+import { ABILITY_SHORT, classDisplayName, getFightingStyleLabel, getMartialArchetypeLabel, raceDisplayName } from '../engine/characterUtils.js';
 import { formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifier, isProficientWithWeapon } from '../engine/rules.js';
 import { getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
@@ -704,8 +704,8 @@ function buildCharacterBlock(character, combat = null) {
 
     return `## PLAYER CHARACTER
 - **Name:** ${character.name}${deathStatus}${genderLine}${appearanceLine}${backgroundLine}
-- **Race:** ${character.race}
-- **Class:** ${character.class} (Level ${character.level})
+- **Race:** ${raceDisplayName(character)}
+- **Class:** ${classDisplayName(character)} (Level ${character.level})
 - **HP:** ${character.currentHP}/${character.maxHP}
 - **EXP:** ${expLine}
 - **AC:** ${character.armorClass}
@@ -843,9 +843,24 @@ function buildQuestBlock(quests) {
     return `## ACTIVE QUESTS\n${lines}${overflow}`;
 }
 
+/**
+ * 5e has no critical HITS on checks, saves, initiative, or death saves — the
+ * isCritical flag is minted at the RNG layer for ANY single d20, and rendering
+ * it kind-blind told the DM a Perception natural 20 was a critical HIT
+ * (2026-09-01 dice-engine P2). Only attack rolls (stamped `kind: 'attack'` by
+ * combatMath.stampCriticalRoll) get the hit label; everything else reads as a
+ * plain natural 20 / natural 1, matching rollResolver's own chat line.
+ */
+function rollNaturalLabel(r) {
+    if (r.kind === 'attack') {
+        return `${r.isCritical ? ' ★ CRITICAL HIT!' : ''}${r.isCritFail ? ' ✗ CRITICAL FAIL!' : ''}`;
+    }
+    return `${r.isCritical ? ' (natural 20)' : ''}${r.isCritFail ? ' (natural 1)' : ''}`;
+}
+
 function buildRecentRollsBlock(rolls) {
     return `## RECENT DICE ROLLS (client-rolled, TRUE random)\n${rolls.map(r =>
-        `- ${r.description || r.notation}: **${r.total}** (${r.rolls.join(', ')}${r.modifier ? ` ${r.modifier >= 0 ? '+' : ''}${r.modifier}` : ''})${r.isCritical ? ' ★ CRITICAL HIT!' : ''}${r.isCritFail ? ' ✗ CRITICAL FAIL!' : ''}`
+        `- ${r.description || r.notation}: **${r.total}** (${r.rolls.join(', ')}${r.modifier ? ` ${r.modifier >= 0 ? '+' : ''}${r.modifier}` : ''})${rollNaturalLabel(r)}`
     ).join('\n')}`;
 }
 

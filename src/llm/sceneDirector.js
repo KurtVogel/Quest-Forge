@@ -7,6 +7,26 @@
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { curateNpcsForPrompt } from '../engine/npcRoster.js';
+import { classDisplayName, raceDisplayName } from '../engine/characterUtils.js';
+
+/**
+ * One foe's state for the art director's cast list (2026-09-01 P2): combat
+ * stays active until the LAST foe is overcome, so a bare name list told the
+ * painter Kraul was still fighting beside a situation in which Kraul lies
+ * dead — and the director is instructed to preserve defeated foes.
+ */
+export function describeEnemyForScene(enemy) {
+    const name = String(enemy?.name || '').trim();
+    if (!name) return '';
+    const dead = enemy.combatStatus === 'defeated' || enemy.condition === 'dead' || (Number.isFinite(enemy.hp) && enemy.hp <= 0);
+    const tag = dead
+        ? 'dead'
+        : (['fled', 'surrendered'].includes(enemy.combatStatus)
+            ? enemy.combatStatus
+            : (['bloodied', 'critical'].includes(enemy.condition) ? enemy.condition : 'fighting'));
+    return `${name} (${tag})`;
+}
+
 const ART_DIRECTOR_PROMPT = `You are the art director for a gritty, mature, dark-fantasy RPG. Given the current scene and the known visual details of the characters and things present, write ONE vivid image-generation prompt that an image model will render.
 
 Rules:
@@ -50,7 +70,7 @@ export async function composeScenePrompt({ situation, character, party = [], npc
         const equipped = (character.equippedSummary || '').trim();
         const gender = character.gender?.trim() || '';
         const desc = character.appearance?.trim()
-            || `a ${gender ? `${gender} ` : ''}${character.race || ''} ${character.class || 'adventurer'}`.replace(/\s+/g, ' ').trim();
+            || `a ${gender ? `${gender} ` : ''}${raceDisplayName(character)} ${classDisplayName(character) || 'adventurer'}`.replace(/\s+/g, ' ').trim();
         lines.push(`Player character — ${character.name}${gender ? ` (${gender})` : ''}: ${desc}${equipped ? ` Wearing/wielding: ${equipped}.` : ''}`);
     }
 
@@ -79,7 +99,10 @@ export async function composeScenePrompt({ situation, character, party = [], npc
     }
 
     if (combat?.active && combat.enemies?.length > 0) {
-        lines.push(`In combat against: ${combat.enemies.map(e => e.name).filter(Boolean).join(', ')}.`);
+        const cast = combat.enemies.map(describeEnemyForScene).filter(Boolean);
+        if (cast.length > 0) {
+            lines.push(`In combat against: ${cast.join(', ')}. Foes marked dead, fled, or surrendered are no longer fighting — depict their state, not a fight.`);
+        }
     }
 
     try {

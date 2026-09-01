@@ -291,3 +291,21 @@
         width: 100%;
     }
 }
+
+.scene-art-cancel-btn {
+    margin: 0 0 0 0.5rem;
+    padding: 0.25rem 0.7rem;
+    background: transparent;
+    border: 1px solid var(--border-primary);
+    color: var(--text-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    font-style: normal;
+}
+
+.scene-art-cancel-btn:hover {
+    border-color: var(--gold);
+    color: var(--text-primary);
+}

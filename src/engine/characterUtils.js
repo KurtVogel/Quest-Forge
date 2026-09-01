@@ -10,6 +10,25 @@ import { buildSpellSlots, isSpellcaster } from './spellcasting.js';
 import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 
 /**
+ * Player-facing species/class names for PROMPT boundaries (2026-09-01
+ * scene-art P2): `character.race` stores the data KEY ('halfOrc'), which the
+ * sheet renders through RACES[...].name ("Half-Orc") but every image prompt
+ * and the DM's PLAYER CHARACTER block interpolated raw — the one non-human
+ * hero species was the one spelled as a camelCase token under an
+ * "inviolable species" art rule. Unknown keys fall back to the trimmed raw
+ * value so a hostile/legacy save still renders something.
+ */
+export function raceDisplayName(character) {
+    const key = String(character?.race || '').trim();
+    return RACES[key]?.name || key;
+}
+
+export function classDisplayName(character) {
+    const key = String(character?.class || '').trim();
+    return CLASSES[key]?.name || key;
+}
+
+/**
  * Standard array for ability score assignment.
  */
 export const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];

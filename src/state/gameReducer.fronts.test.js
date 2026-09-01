@@ -24,6 +24,19 @@ describe('creation-time front anchor', () => {
         expect(fronts[0].title).not.toContain('Kalden');
     });
 
+    it('prefers a locative verb over a possessive "of" — a faction is not a place (2026-09-01 P2)', () => {
+        const fronts = createInitialFronts({
+            premise: 'Kalden Vor, a fighter of the Iron Company, enters Brackwater seeking work.',
+            character: { name: 'Kalden Vor' },
+        });
+        expect(fronts[0].title).toBe('Trouble around Brackwater');
+        const ofOnly = createInitialFronts({
+            premise: 'A sellsword of the Iron Company looks for coin.',
+            character: { name: 'Astra' },
+        });
+        expect(ofOnly[0].title).toBe('Trouble around Iron Company');
+    });
+
     it('prefers a known location over the premise', () => {
         const fronts = createInitialFronts({
             premise: 'A drifter arrives in the port of Brackwater.',
@@ -671,5 +684,72 @@ describe('aftermath front install', () => {
         });
         expect(next.fronts).toHaveLength(4);
         expect(next.session.pendingFrontAftermath).toBeNull();
+    });
+});
+
+describe('resolved is terminal in the engine (DECISIONS.md 2026-09-01)', () => {
+    const baseState = () => ({
+        ...initialGameState,
+        character: { ...character, exp: 0 },
+        session: { id: 'campaign' },
+        messages: [
+            { role: 'assistant', content: 'The matriarch falls.' },
+            { role: 'user', content: 'We burn the brood.' },
+        ],
+        fronts: [
+            {
+                id: 'front-brood', title: 'The Mill Brood', goal: 'Claim the valley.', stakes: 'The valley starves.',
+                grimPortents: ['Raids begin.', 'The mill falls.', 'The valley empties.'],
+                clock: 5, maxClock: 6, stage: 2, status: 'active', publicHints: [],
+            },
+        ],
+        locations: [{ name: 'The Old Mill', theaterFrontIds: ['front-brood'] }],
+    });
+    const resolve = (notes = 'The hero burned the brood.') => ({
+        type: 'UPDATE_FRONT',
+        payload: { id: 'front-brood', status: 'resolved', notes },
+    });
+
+    it('ignores a DM resurrection (status active) and a clock/stage change on a resolved front, but keeps taking notes', () => {
+        const resolved = gameReducer(baseState(), resolve());
+        expect(resolved.fronts[0].status).toBe('resolved');
+        const resurrected = gameReducer(resolved, {
+            type: 'UPDATE_FRONT',
+            payload: { id: 'front-brood', status: 'active', clock: 2, stage: 1, notes: 'A survivor stirs.' },
+        });
+        expect(resurrected.fronts[0]).toMatchObject({ status: 'resolved', clock: 5, stage: 2, notes: 'A survivor stirs.' });
+        expect(resurrected.fronts[0].resolvedAtMessage).toBe(resolved.fronts[0].resolvedAtMessage);
+    });
+
+    it('pays the milestone XP, fact, line, and aftermath exactly once across resurrect → re-resolve', () => {
+        const resolved = gameReducer(baseState(), resolve());
+        const xpOnce = resolved.character.exp;
+        expect(xpOnce).toBeGreaterThan(0);
+        const cleared = { ...resolved, session: { ...resolved.session, pendingFrontAftermath: null } };
+        const resurrected = gameReducer(cleared, { type: 'UPDATE_FRONT', payload: { id: 'front-brood', status: 'active' } });
+        const again = gameReducer(resurrected, resolve('The brood is burned again.'));
+        expect(again.character.exp).toBe(xpOnce);
+        expect(again.worldFacts).toHaveLength(resolved.worldFacts.length);
+        expect(again.messages).toHaveLength(resolved.messages.length);
+        expect(again.session.pendingFrontAftermath).toBeNull();
+        expect(again.fronts[0].resolution).toBe(resolved.fronts[0].resolution);
+    });
+
+    it('a dormant front resolving runs the full ceremony', () => {
+        const dormant = baseState();
+        dormant.fronts[0].status = 'dormant';
+        const next = gameReducer(dormant, resolve());
+        expect(next.fronts[0]).toMatchObject({ status: 'resolved', resolvedAtMessage: 2 });
+        expect(next.character.exp).toBeGreaterThan(0);
+        expect(next.worldFacts.some(f => f.fact.includes('"The Mill Brood"'))).toBe(true);
+        expect(next.messages.some(m => m.role === 'system' && m.content.includes('The Mill Brood'))).toBe(true);
+        expect(next.locations[0].theaterFrontIds).toEqual([]);
+        expect(next.session.pendingFrontAftermath).toMatchObject({ frontId: 'front-brood' });
+    });
+
+    it('matches fronts by id only — a title-only update (a private title the DM cannot know) is ignored', () => {
+        const state = baseState();
+        expect(gameReducer(state, { type: 'UPDATE_FRONT', payload: { title: 'The Mill Brood', clock: 6 } })).toBe(state);
+        expect(gameReducer(state, { type: 'UPDATE_FRONT', payload: { title: 'The Mill Brood', status: 'resolved' } })).toBe(state);
     });
 });

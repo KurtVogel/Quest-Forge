@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearImageCache, generateSceneImageDetailed, generatePortraitImageDetailed, peekCachedImage } from './imageGen.js';
+import { clearImageCache, generateSceneImageDetailed, generatePortraitImageDetailed, IMAGE_FETCH_TIMEOUT_MS, peekCachedImage } from './imageGen.js';
 
 const xaiOk = (b64 = 'dGVzdA==') => ({
     ok: true,
@@ -351,5 +351,152 @@ describe('downscaleDataUrl portrait compaction (2026-07-06 queue P1)', () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
         const result = await generateSceneImageDetailed('A scene', 'xai-key');
         expect(result.url).toBe('data:image/jpeg;base64,dGVzdA==');
+    });
+});
+
+describe('stall guard + cancel on the provider chain (2026-09-01 scene-art P1)', () => {
+    // A fetch that never resolves on its own and rejects with the signal's
+    // reason when aborted — the shape of a stalled socket.
+    const hangingFetch = () => vi.fn((_url, init) => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+    }));
+
+    beforeEach(() => {
+        clearImageCache();
+        vi.restoreAllMocks();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('times out a stalled xAI POST and falls through the chain as an xai-network reason', async () => {
+        const fetchMock = hangingFetch();
+        vi.stubGlobal('fetch', fetchMock);
+        const pending = generateSceneImageDetailed('A scene', 'xai-key');
+        await vi.advanceTimersByTimeAsync(IMAGE_FETCH_TIMEOUT_MS - 1);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        const result = await pending;
+        expect(result).toMatchObject({
+            provider: 'pollinations',
+            fallbackReason: expect.stringContaining('xai-network: stalled — no response after 60s'),
+        });
+        expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('times out a stalled Gemini POST the same way', async () => {
+        const fetchMock = hangingFetch();
+        vi.stubGlobal('fetch', fetchMock);
+        const pending = generateSceneImageDetailed('A scene', '', { geminiApiKey: 'gem-key' });
+        await vi.advanceTimersByTimeAsync(IMAGE_FETCH_TIMEOUT_MS);
+        const result = await pending;
+        expect(result).toMatchObject({
+            provider: 'pollinations',
+            fallbackReason: expect.stringContaining('gemini-network: stalled'),
+        });
+        expect(fetchMock.mock.calls[0][0]).toContain('generativelanguage.googleapis.com');
+    });
+
+    it('a deliberate cancel rejects with AbortError and does NOT fall through to the next provider', async () => {
+        const fetchMock = hangingFetch();
+        vi.stubGlobal('fetch', fetchMock);
+        const controller = new AbortController();
+        const pending = generateSceneImageDetailed('A scene', 'xai-key', { geminiApiKey: 'gem-key', signal: controller.signal });
+        await vi.advanceTimersByTimeAsync(10);
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+        // Only the xAI attempt happened — cancel ≠ provider failure.
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(peekCachedImage('anything', { imageApiKey: 'xai-key' })).toBeNull();
+    });
+
+    it('a cancel during the Gemini leg rejects instead of returning pollinations', async () => {
+        const fetchMock = hangingFetch();
+        vi.stubGlobal('fetch', fetchMock);
+        const controller = new AbortController();
+        const pending = generateSceneImageDetailed('A scene', '', { geminiApiKey: 'gem-key', signal: controller.signal });
+        await vi.advanceTimersByTimeAsync(10);
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('a successful render clears its stall timer (no late abort, no leaked timer)', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
+        const result = await generateSceneImageDetailed('A scene', 'xai-key');
+        expect(result.provider).toBe('xai');
+        expect(vi.getTimerCount()).toBe(0);
+    });
+});
+
+describe('sessionScope isolation + provider mime branches (2026-09-01 test depth)', () => {
+    beforeEach(() => {
+        clearImageCache();
+        vi.restoreAllMocks();
+    });
+
+    it('the same cacheKey in two campaigns never shares a render, and peekCachedImage honors the scope', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(xaiOk('Y2FtcGFpZ25B'))
+            .mockResolvedValueOnce(xaiOk('Y2FtcGFpZ25C'));
+        vi.stubGlobal('fetch', fetchMock);
+        const a = await generateSceneImageDetailed('Prompt', 'xai-key', { cacheKey: 'scene|msg-1|Tavern', sessionScope: 'campaign-a' });
+        const b = await generateSceneImageDetailed('Prompt', 'xai-key', { cacheKey: 'scene|msg-1|Tavern', sessionScope: 'campaign-b' });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(a.url).not.toBe(b.url);
+        expect(peekCachedImage('scene|msg-1|Tavern', { imageApiKey: 'xai-key', sessionScope: 'campaign-a' })).toEqual(a);
+        expect(peekCachedImage('scene|msg-1|Tavern', { imageApiKey: 'xai-key', sessionScope: 'campaign-b' })).toEqual(b);
+        expect(peekCachedImage('scene|msg-1|Tavern', { imageApiKey: 'xai-key' })).toBeNull();
+        expect(peekCachedImage('scene|msg-1|Tavern', { imageApiKey: 'xai-key', sessionScope: 'campaign-c' })).toBeNull();
+    });
+
+    it('sniffs png, gif, and webp payloads from xAI by their leading bytes', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(xaiOk('iVBORw0KGgo='))
+            .mockResolvedValueOnce(xaiOk('R0lGODlhAQAB'))
+            .mockResolvedValueOnce(xaiOk('UklGRiQAAABXRUJQ'));
+        vi.stubGlobal('fetch', fetchMock);
+        expect((await generateSceneImageDetailed('png', 'xai-key')).url).toMatch(/^data:image\/png;base64,/);
+        expect((await generateSceneImageDetailed('gif', 'xai-key')).url).toMatch(/^data:image\/gif;base64,/);
+        expect((await generateSceneImageDetailed('webp', 'xai-key')).url).toMatch(/^data:image\/webp;base64,/);
+    });
+});
+
+describe('Gemini-path portrait downscale (2026-09-01 test depth)', () => {
+    let origImage;
+    let origDocument;
+
+    beforeEach(() => {
+        clearImageCache();
+        vi.restoreAllMocks();
+        origImage = globalThis.Image;
+        origDocument = globalThis.document;
+        globalThis.Image = class {
+            set src(_value) {
+                this.naturalWidth = 960;
+                this.naturalHeight = 1280;
+                queueMicrotask(() => this.onload?.());
+            }
+        };
+        globalThis.document = {
+            createElement: () => ({
+                getContext: () => ({ drawImage: vi.fn() }),
+                toDataURL: (mime) => `data:${mime};base64,c2NhbGVk`,
+            }),
+        };
+    });
+
+    afterEach(() => {
+        globalThis.Image = origImage;
+        globalThis.document = origDocument;
+    });
+
+    it('downscales an oversized Gemini portrait exactly like the xAI path', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(geminiOk()));
+        const result = await generatePortraitImageDetailed('A portrait', '', { geminiApiKey: 'gem-key' });
+        expect(result.provider).toBe('gemini');
+        expect(result.url).toBe('data:image/jpeg;base64,c2NhbGVk');
     });
 });

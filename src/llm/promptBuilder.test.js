@@ -470,16 +470,33 @@ describe('quest block', () => {
 });
 
 describe('recent rolls block', () => {
-    it('shows the most recent rolls with critical markers', () => {
+    it('shows the most recent rolls with critical markers on ATTACK rolls', () => {
         const text = prompt({
             rollHistory: [
-                { description: 'Attack roll', notation: '1d20', total: 20, rolls: [20], modifier: 0, isCritical: true },
-                { description: 'Save', notation: '1d20', total: 1, rolls: [1], modifier: 0, isCritFail: true },
+                { description: 'Attack roll', notation: '1d20', total: 20, rolls: [20], modifier: 0, isCritical: true, kind: 'attack' },
+                { description: 'Attack roll', notation: '1d20', total: 1, rolls: [1], modifier: 0, isCritFail: true, kind: 'attack' },
             ],
         });
         expect(text).toContain('## RECENT DICE ROLLS');
         expect(text).toContain('★ CRITICAL HIT!');
         expect(text).toContain('✗ CRITICAL FAIL!');
+    });
+
+    it('labels a natural 20 on a check, save, or initiative as a natural 20 — never a critical HIT (2026-09-01 P2)', () => {
+        // 5e has no crits on checks/saves; the RNG-layer flag is kind-blind
+        // and the old rendering told the DM a Perception 20 was a critical hit.
+        const text = prompt({
+            rollHistory: [
+                { description: 'Perception check', notation: '1d20', total: 22, rolls: [20], modifier: 2, isCritical: true },
+                { description: 'Initiative', notation: '1d20', total: 21, rolls: [20], modifier: 1, isCritical: true },
+                { description: 'Death Saving Throw', notation: '1d20', total: 1, rolls: [1], modifier: 0, isCritFail: true },
+            ],
+        });
+        expect(text).not.toContain('CRITICAL HIT');
+        expect(text).not.toContain('CRITICAL FAIL');
+        expect(text).toContain('Perception check: **22** (20 +2) (natural 20)');
+        expect(text).toContain('Initiative: **21** (20 +1) (natural 20)');
+        expect(text).toContain('Death Saving Throw: **1** (1) (natural 1)');
     });
 
     it('is omitted when there is no roll history', () => {

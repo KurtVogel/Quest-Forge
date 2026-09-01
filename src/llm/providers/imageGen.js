@@ -35,6 +35,51 @@ const POLLINATIONS_PROMPT_MAX = 1500;
 // bodies unbounded either.
 const PROVIDER_PROMPT_MAX = 4000;
 
+// Stall guard for the two provider POSTs (2026-09-01 scene-art P1): browser
+// fetch never times out on its own, so a stalled socket pinned SceneArt's
+// spinner forever with the whole control row hidden, and the fallback chain
+// never engaged because a hang is not a rejection. A timeout is just another
+// `xai-network:` / `gemini-network:` reason and falls through the chain.
+export const IMAGE_FETCH_TIMEOUT_MS = 60_000;
+
+function abortError(message) {
+    const error = new Error(message);
+    error.name = 'AbortError';
+    return error;
+}
+
+/**
+ * Per-request abort signal: the stall timer OR the caller's own cancel
+ * (options.signal). Own timer + controller (not AbortSignal.timeout) so the
+ * guard is fake-timer testable and the external cancel can be told apart
+ * from a stall by the caller's signal state.
+ */
+function requestSignal(externalSignal) {
+    const controller = new AbortController();
+    const timer = setTimeout(
+        () => controller.abort(new Error(`stalled — no response after ${Math.round(IMAGE_FETCH_TIMEOUT_MS / 1000)}s`)),
+        IMAGE_FETCH_TIMEOUT_MS,
+    );
+    const onExternalAbort = () => controller.abort(abortError('Image generation cancelled.'));
+    if (externalSignal?.aborted) onExternalAbort();
+    else externalSignal?.addEventListener?.('abort', onExternalAbort, { once: true });
+    return {
+        signal: controller.signal,
+        release() {
+            clearTimeout(timer);
+            externalSignal?.removeEventListener?.('abort', onExternalAbort);
+        },
+    };
+}
+
+/**
+ * A deliberate cancel is NOT a provider failure: it must never fall through
+ * to the next provider in the chain (cancel ≠ provider failure).
+ */
+function rethrowIfCancelled(options) {
+    if (options.signal?.aborted) throw abortError('Image generation cancelled.');
+}
+
 /**
  * Insert or update a cache entry with LRU eviction (max IMAGE_CACHE_MAX entries).
  */
@@ -122,6 +167,7 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
 
     let fallbackReason = normalizedImageApiKey ? 'xai-error' : 'missing-key';
     if (normalizedImageApiKey) {
+        const guard = requestSignal(options.signal);
         try {
             const response = await fetch(XAI_IMAGE_ENDPOINT, {
                 method: 'POST',
@@ -135,6 +181,7 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                     n: 1,
                     response_format: 'b64_json',
                 }),
+                signal: guard.signal,
             });
 
             if (response.ok) {
@@ -161,14 +208,18 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                 console.warn(`[ImageGen] xAI image request failed (Status ${response.status}). ${compactError}`);
             }
         } catch (e) {
+            rethrowIfCancelled(options);
             fallbackReason = `xai-network: ${String(e.message || e).slice(0, 200)}`;
             console.log('[ImageGen] xAI image generation failed, falling back:', e.message);
+        } finally {
+            guard.release();
         }
     }
 
     // Gemini image fallback on the mandatory machinery key — every player has
     // one, so the quality floor is a real image model, not Pollinations.
     if (geminiApiKey) {
+        const guard = requestSignal(options.signal);
         try {
             const response = await fetch(`${GEMINI_IMAGE_ENDPOINT}?key=${encodeURIComponent(geminiApiKey)}`, {
                 method: 'POST',
@@ -180,6 +231,7 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                         imageConfig: { aspectRatio },
                     },
                 }),
+                signal: guard.signal,
             });
             if (response.ok) {
                 const data = await response.json();
@@ -205,10 +257,14 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                 console.warn(`[ImageGen] Gemini image request failed (Status ${response.status}). ${errText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
             }
         } catch (e) {
+            rethrowIfCancelled(options);
             fallbackReason = `${fallbackReason}; gemini-network: ${String(e.message || e).slice(0, 200)}`;
             console.log('[ImageGen] Gemini image generation failed, falling back:', e.message);
+        } finally {
+            guard.release();
         }
     }
+    rethrowIfCancelled(options);
 
     // Free fallback (no key required). Lower quality — used only when both real
     // providers are unavailable.

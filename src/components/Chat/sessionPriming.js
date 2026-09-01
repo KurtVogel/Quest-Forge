@@ -1,11 +1,15 @@
+import { collectNarrativeMessages } from '../../llm/narrativeMessages.js';
+
 /**
  * Only brand-new campaigns explicitly marked by character creation may ask the DM
  * to open a scene automatically. Loaded campaigns must restore the transcript
  * without generating a new turn, even when older assistant messages were pruned.
+ * "Has the DM narrated yet?" reads through the shared narrative-eligibility
+ * predicate (hidden/deleted/table-talk-reply excluded — 2026-09-01 P1).
  */
 export function shouldPrimeCampaignOpening(state) {
-    const visibleAssistantMessages = (state.messages || [])
-        .filter(message => !message.hidden && !message.deleted && message.role === 'assistant');
+    const visibleAssistantMessages = collectNarrativeMessages(state.messages)
+        .filter(message => message.role === 'assistant');
 
     return Boolean(
         state.character

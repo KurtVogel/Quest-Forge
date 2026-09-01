@@ -3,97 +3,17 @@ import { useGame } from '../../state/GameContext.jsx';
 import { generatePortraitImageDetailed, generateSceneImageDetailed, peekCachedImage } from '../../llm/providers/imageGen.js';
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
 import { namesMatch } from '../../engine/npcRoster.js';
+import { isSameLocation } from '../../engine/locationRegistry.js';
 import { composeScenePrompt } from '../../llm/scribe.js';
-import { PORTRAIT_STYLE } from '../CharacterSheet/portraitPrompt.js';
+import {
+    buildCustomPrompt,
+    buildFallbackScenePrompt,
+    buildFocusedPrompt,
+    equippedSummary,
+    fallbackNotice,
+    pickSceneSituation,
+} from './sceneArtHelpers.js';
 import './SceneArt.css';
-
-function equippedSummary(inventory = []) {
-    return inventory
-        .filter(i => i.equipped)
-        .map(i => i.name)
-        .filter(Boolean)
-        .join(', ');
-}
-
-function describeEntity(target) {
-    if (!target) return '';
-    if (target.type === 'player') {
-        const c = target.entity;
-        return [
-            `${c.name}${c.gender ? ` (${c.gender})` : ''}, a ${c.race || ''} ${c.class || 'adventurer'}`.trim(),
-            c.appearance,
-            target.gear && `Wearing/wielding: ${target.gear}.`,
-        ].filter(Boolean).join('. ');
-    }
-    if (target.type === 'companion') {
-        const c = target.entity;
-        const identity = [c.species, c.gender].filter(Boolean).join(' ');
-        return [
-            `${c.name}${identity ? ` (${identity})` : ''}, ${c.role || 'companion'}`,
-            c.appearance || c.notes,
-            c.weapon && `Wielding ${c.weapon}.`,
-        ].filter(Boolean).join('. ');
-    }
-    if (target.type === 'npc') {
-        const n = target.entity;
-        const identity = [n.species, n.gender].filter(Boolean).join(' ');
-        return [
-            // The registered species + gender ride right beside the name — the art
-            // director's inviolable-identity rule keys on this "(goblin woman)" tag.
-            `${n.name}${identity ? ` (${identity})` : ''}, ${n.disposition || 'NPC'}`,
-            n.appearance || n.lastNotes || n.notes,
-            n.lastLocation && `Last seen at ${n.lastLocation}.`,
-        ].filter(Boolean).join('. ');
-    }
-    if (target.type === 'enemy') {
-        const e = target.entity;
-        return [
-            `${e.name}, hostile combatant`,
-            e.condition && `Condition: ${e.condition}.`,
-        ].filter(Boolean).join('. ');
-    }
-    return target.label || '';
-}
-
-function buildFocusedPrompt(target, location) {
-    const description = describeEntity(target);
-    return [
-        `Focused waist-up portrait of ${target.label}.`,
-        description,
-        location && `Current setting: ${location}.`,
-        PORTRAIT_STYLE,
-    ].filter(Boolean).join(' ');
-}
-
-function buildCustomPrompt(subject, location, character) {
-    return [
-        subject,
-        location && `Set in or near ${location}.`,
-        character?.appearance && `Keep ${character.name}'s established look consistent if present: ${character.appearance}.`,
-        'Dark fantasy tabletop RPG illustration, grounded details, cinematic lighting, painterly realism, no text, no UI, no watermark.',
-    ].filter(Boolean).join(' ');
-}
-
-function fallbackNotice(result) {
-    if (!result || result.provider === 'xai') return '';
-    if (result.provider === 'gemini') {
-        // Gemini is a full-quality provider — only explain WHY xAI didn't render.
-        if (result.fallbackReason === 'missing-key') {
-            return 'Rendered with Gemini (your machinery key). Add an xAI Image API Key in Settings for Grok Imagine art.';
-        }
-        if (result.fallbackReason === 'xai-empty') {
-            return 'xAI returned no image (possibly filtered) — rendered with Gemini instead.';
-        }
-        return 'xAI rendering failed — rendered with Gemini (your machinery key) instead.';
-    }
-    if (result.fallbackReason === 'missing-key') {
-        return 'Free fallback render — add an xAI Image API Key (or a Gemini machinery key) in Settings for the intended high-quality scene art.';
-    }
-    if (result.fallbackReason?.includes('xai-empty')) {
-        return 'No image provider produced an image, possibly because the prompt was filtered. This is a lower-quality free fallback.';
-    }
-    return 'Image rendering failed on the real providers, so this is a lower-quality free fallback. Check the image key or try again.';
-}
 
 export default function SceneArt() {
     const { state } = useGame();
@@ -106,6 +26,9 @@ export default function SceneArt() {
     const [error, setError] = useState('');
     const [generationNotice, setGenerationNotice] = useState('');
     const lastLocationRef = useRef(null);
+    // One in-flight render at a time; Cancel aborts it (a deliberate cancel
+    // never falls through to the next provider — imageGen rethrows AbortError).
+    const abortRef = useRef(null);
 
     const gear = useMemo(() => equippedSummary(state.inventory), [state.inventory]);
     const visualTargets = useMemo(() => [
@@ -159,10 +82,14 @@ export default function SceneArt() {
 
         // Reroll bypasses the image cache — an unchanged scene must be able to
         // produce a NEW image (generation is the point of the feature).
+        abortRef.current?.abort();
+        const controller = new AbortController();
+        abortRef.current = controller;
         const genOptions = {
             geminiApiKey: getMachineryGeminiKey(state.settings),
             bypassCache: reroll,
             sessionScope: state.session?.id || '',
+            signal: controller.signal,
         };
 
         setIsLoading(true);
@@ -189,18 +116,20 @@ export default function SceneArt() {
                 return;
             }
 
-            // The "current situation" is the DM's latest narrated moment — the richest
-            // visual text in the app. Fall back to the newest journal summary, then location.
-            const lastNarrationMsg = [...(state.messages || [])].reverse()
-                .find(m => m.role === 'assistant' && !m.hidden && m.content?.trim());
-            const lastNarration = lastNarrationMsg?.content;
-            const lastJournal = state.journal?.length ? state.journal[state.journal.length - 1].summary : '';
-            const situation = (lastNarration || lastJournal || `The scene at ${location}.`).trim();
+            // The "current situation" is the DM's latest genuine narration — the
+            // richest visual text in the app (shared narrative-eligibility
+            // predicate: never a scrubbed refusal or a table-talk reply). Falls
+            // back to the newest journal summary, then the location.
+            const { situation, narrationId } = pickSceneSituation({
+                messages: state.messages,
+                journal: state.journal,
+                location,
+            });
 
             // Scene prompts are LLM-composed and never byte-identical, so the
             // cache is keyed on the render's INPUTS: an unchanged scene must
             // short-circuit BEFORE paying the compose call (2026-08-01 audit P1).
-            const sceneCacheKey = `scene|${lastNarrationMsg?.id || 'no-narration'}|${location}`;
+            const sceneCacheKey = `scene|${narrationId || 'no-narration'}|${location}`;
             if (!reroll) {
                 const cached = peekCachedImage(sceneCacheKey, {
                     imageApiKey: state.settings.imageApiKey,
@@ -226,15 +155,11 @@ export default function SceneArt() {
                 currentLocation: location,
                 settings: state.settings,
             });
+            // The compose call is not abortable; honor a Cancel pressed during it.
+            if (controller.signal.aborted) return;
 
             // Fallback prompt if the composer is unavailable (no chat key / call failed).
-            const prompt = composed || [
-                `Dark fantasy RPG scene at ${location}.`,
-                state.character && `Featuring ${state.character.name}, a ${state.character.race} ${state.character.class}${state.character.appearance ? `: ${state.character.appearance}` : ''}.`,
-                situation,
-                'Render this exact latest tableau and every stated subject, species, count, action, body, and reaction. Do not invent generic party members or bystanders.',
-                'Grounded cinematic dark-fantasy realism, professional concept art, anatomically coherent figures, detailed materials, dramatic natural lighting, not cartoonish or childlike, no text, no watermark.',
-            ].filter(Boolean).join(' ');
+            const prompt = composed || buildFallbackScenePrompt({ location, character: state.character, situation });
 
             const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey, { ...genOptions, cacheKey: sceneCacheKey });
             if (result) {
@@ -242,19 +167,33 @@ export default function SceneArt() {
                 setGenerationNotice(fallbackNotice(result));
             }
         } catch (e) {
-            setError(e.message || 'Image failed.');
+            // A deliberate Cancel is not an error to report.
+            if (e?.name !== 'AbortError') setError(e.message || 'Image failed.');
         } finally {
+            if (abortRef.current === controller) abortRef.current = null;
             setIsLoading(false);
         }
     };
 
-    // Clear art if we move to a new vastly different area
+    const handleCancel = () => {
+        abortRef.current?.abort();
+    };
+
+    // Clear art when the hero moves to a DIFFERENT place. Alias re-statements
+    // the registry folds ("Library landing, Clockwork Tower" → "Clockwork
+    // Tower") are the same place and keep the art (2026-09-01 P2).
     useEffect(() => {
-        if (state.currentLocation !== lastLocationRef.current) {
+        const previous = lastLocationRef.current;
+        const current = state.currentLocation;
+        const samePlace = !!previous && !!current && isSameLocation(previous, current);
+        if (!samePlace) {
             setCurrentImage(null);
-            lastLocationRef.current = state.currentLocation;
+            lastLocationRef.current = current;
         }
     }, [state.currentLocation]);
+
+    // Abandon an in-flight render when the panel unmounts.
+    useEffect(() => () => abortRef.current?.abort(), []);
 
     useEffect(() => {
         if (!targetId && visualTargets.length > 0) {
@@ -271,6 +210,9 @@ export default function SceneArt() {
                     <div className="scene-art-loading">
                         <span className="scene-loading-icon" aria-hidden="true" />
                         <span>Painting the scene...</span>
+                        <button className="scene-art-cancel-btn" onClick={handleCancel} title="Abandon this render">
+                            Cancel
+                        </button>
                     </div>
                 )}
 

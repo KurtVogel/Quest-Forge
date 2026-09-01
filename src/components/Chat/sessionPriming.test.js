@@ -40,6 +40,18 @@ describe('shouldPrimeCampaignOpening', () => {
         }))).toBe(false);
     });
 
+    it('still opens when the only assistant messages are a scrubbed refusal or an OOC table-talk reply (2026-09-01 P1)', () => {
+        expect(shouldPrimeCampaignOpening(campaignState({
+            messages: [{ role: 'assistant', content: "I can't continue this.", deleted: true }],
+        }))).toBe(true);
+        expect(shouldPrimeCampaignOpening(campaignState({
+            messages: [
+                { role: 'user', content: 'OOC: what tone are we going for?' },
+                { role: 'assistant', content: 'At the table: grim and grounded.' },
+            ],
+        }))).toBe(true);
+    });
+
     it('does not reopen a scene after the DM has already answered', () => {
         expect(shouldPrimeCampaignOpening(campaignState({
             messages: [{ role: 'assistant', content: 'The road waits. What do you do?' }],

@@ -175,12 +175,24 @@ export const handlers = {
     },
 
     UPDATE_FRONT(state, action) {
-        const update = normalizeFrontUpdate(action.payload);
-        if (!update) return state;
+        const rawUpdate = normalizeFrontUpdate(action.payload);
+        if (!rawUpdate?.id) return state;
         const fronts = state.fronts || [];
-        const idx = fronts.findIndex(f => f.id === update.id || f.title?.toLowerCase() === update.title?.toLowerCase());
+        // By id only (2026-09-01 P2): titles are private — the DM cannot know
+        // one, so a title match was an untested phantom path.
+        const idx = fronts.findIndex(f => f.id === rawUpdate.id);
         if (idx === -1) return state;
         const existing = fronts[idx];
+        // RESOLVED IS TERMINAL in the engine (DECISIONS.md 2026-09-01): a
+        // resolved front never changes status, clock, or stage again — a DM
+        // "status: active" on a resolved front used to resurrect it, and a
+        // later "resolved" re-ran the whole ceremony (second milestone XP,
+        // second canon fact, second 🕰️ line, second aftermath). Notes and
+        // hints may still update; the mechanics are frozen.
+        const alreadyResolved = (existing.status || 'active') === 'resolved';
+        const update = alreadyResolved
+            ? Object.fromEntries(Object.entries(rawUpdate).filter(([key]) => !['status', 'clock', 'stage'].includes(key)))
+            : rawUpdate;
         // DM clock-GAIN throttle (2026-08-24 P2: front_updates was the last
         // DM-writable numeric channel with no replay guard — a re-emitted +1
         // walked a clock 0→max in maxClock turns around the cadence pacing).
@@ -214,8 +226,10 @@ export const handlers = {
         };
         // Resolution is a one-way, one-time transition with side effects; a DM
         // re-emitting "resolved" on later turns hits the already-resolved branch
-        // and changes nothing beyond the plain field update.
-        const resolvingNow = update.status === 'resolved' && (existing.status || 'active') === 'active';
+        // (status stripped above) and changes nothing beyond notes. A dormant
+        // front resolving goes through the full ceremony like an active one —
+        // dormancy is an engine pacing state, not a lesser kind of pressure.
+        const resolvingNow = update.status === 'resolved' && !alreadyResolved;
         let updatedFront = normalizeFront(boundedUpdate, existing);
         if (resolvingNow) {
             updatedFront = normalizeFront({

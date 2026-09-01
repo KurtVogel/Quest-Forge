@@ -55,18 +55,26 @@ function normalizeStatus(value, fallback = 'active') {
  * Brackwater" -> "Brackwater"). Never returns the hero's own name, and never
  * falls back to embedding a whole premise sentence in a front title.
  */
+// Locative verbs/prepositions first; the possessive-style "of" only when none
+// of them names anything (2026-09-01 hidden-fronts P2: "a fighter of the Iron
+// Company enters Brackwater" anchored the fallback front on the faction).
+const PLACE_LOCATIVE_RE = /\b(?:in|at|near|outside|beneath|within|beyond|reaches|enters)\s+(?:the\s+)?([A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2})/g;
+const PLACE_OF_RE = /\bof\s+(?:the\s+)?([A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2})/g;
+
 function extractPremisePlace(premise, characterName = '') {
     const text = cleanText(premise);
     if (!text) return '';
     const heroName = cleanText(characterName).toLowerCase();
-    const placeRe = /\b(?:in|at|near|outside|beneath|within|beyond|of|reaches|enters)\s+(?:the\s+)?([A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2})/g;
-    let match;
-    while ((match = placeRe.exec(text)) !== null) {
-        const candidate = cleanText(match[1]).slice(0, 60);
-        if (!candidate) continue;
-        const lower = candidate.toLowerCase();
-        if (heroName && (lower === heroName || heroName.includes(lower) || lower.includes(heroName))) continue;
-        return candidate;
+    for (const pattern of [PLACE_LOCATIVE_RE, PLACE_OF_RE]) {
+        const placeRe = new RegExp(pattern.source, 'g');
+        let match;
+        while ((match = placeRe.exec(text)) !== null) {
+            const candidate = cleanText(match[1]).slice(0, 60);
+            if (!candidate) continue;
+            const lower = candidate.toLowerCase();
+            if (heroName && (lower === heroName || heroName.includes(lower) || lower.includes(heroName))) continue;
+            return candidate;
+        }
     }
     return '';
 }

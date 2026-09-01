@@ -15,7 +15,9 @@ describe('buildPortraitPrompt (hero)', () => {
         );
         // "(woman)" beside the name — the art director's inviolable-gender tag
         // convention, unified across every portrait prompt 2026-08-26.
-        expect(prompt).toContain('Tuuli Rautio (woman), a dwarf cleric');
+        // Display names, never data keys ("Dwarf Cleric", not "dwarf cleric" —
+        // the halfOrc key was painted verbatim, 2026-09-01 P2).
+        expect(prompt).toContain('Tuuli Rautio (woman), a Dwarf Cleric');
         expect(prompt).toContain('Compact and wiry, pale grey eyes.');
         expect(prompt).toContain('Wearing/carrying: Scale Mail, Mace.');
     });
@@ -25,7 +27,13 @@ describe('buildPortraitPrompt (hero)', () => {
             { name: 'Borin', race: 'dwarf', class: 'fighter' },
             'Stocky and scarred.',
         );
-        expect(prompt).toContain('Borin, a dwarf fighter');
+        expect(prompt).toContain('Borin, a Dwarf Fighter');
+    });
+
+    it('renders the half-orc data key as its display name (2026-09-01 P2)', () => {
+        const prompt = buildPortraitPrompt({ name: 'Ghazra', gender: 'woman', race: 'halfOrc', class: 'fighter' }, 'Tusked, grey-green skin.');
+        expect(prompt).toContain('Ghazra (woman), a Half-Orc Fighter');
+        expect(prompt).not.toContain('halfOrc');
     });
 });
 
