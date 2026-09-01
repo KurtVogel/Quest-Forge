@@ -1260,6 +1260,22 @@ is the precedent. Pin with a fake-timer test on the timeout path and an abort te
 the chain does NOT fall through on a deliberate cancel (cancel ≠ provider failure). From the
 2026-09-01 strengthening audit (scene-art, Lap 1).
 
+### [strengthening] Make `resolved` a terminal front status in the engine — status: `idea` (2026-09-01)
+Front resolution is designed as a one-way, one-shot canonized transition (DECISIONS.md
+2026-08-03): milestone XP, a revealed canon fact, retired theaters, the victory echo, an
+aftermath director. But the reducer enforces the one-shot only as "status was active a moment
+ago" — `normalizeStatus` accepts `active`/`dormant`/`resolved` from the DM's `front_updates`
+and `UPDATE_FRONT` applies a status change to a resolved front like any other field. So a DM
+`"status": "active"` on a resolved front resurrects it (stale resolution stamp and echo intact,
+counted as a web member again), and a later `"resolved"` re-runs the entire ceremony including
+a second engine-computed milestone XP that bypasses the XP ledger by design. The prompt's
+"Resolved is final: never revive" is the only guard, on a channel where the DM never even sees
+status values — exactly the shape the 2026-07-21 one-shot-mechanics invariant exists to close.
+Proposal: resolved is terminal in the reducer (any status on a resolved front is dropped; notes
+may still update), `dormant` either leaves the DM channel or a dormant → resolved transition
+goes through the ceremony, and three tests pin resurrection-ignored, re-resolution-ignored, and
+dormant-resolve-ceremony. From the 2026-09-01 strengthening audit (hidden-fronts, Lap 1 r2).
+
 ### Low-level death-save lethality with a companion present — status: `observation` (playtest #11, 2026-07-22)
 The low-level solo 0-HP mercy (non-lethal setback) correctly does NOT apply when a
 battle-ready companion is present (`isCompanionActive`, DECISIONS.md 2026-07-17) — so a
