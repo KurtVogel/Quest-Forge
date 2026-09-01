@@ -1244,6 +1244,22 @@ A split into `llm/scribe/{extraction,audit,reflection,sceneDirector}.js` (re-exp
 diff surface, and makes the shared-preamble extraction in the same queue entry obvious rather
 than optional. From the 2026-08-24 strengthening audit (scribe, Lap 4).
 
+### [strengthening] Abortable image generation: stall guard + Cancel on the provider chain — status: `idea` (2026-09-01)
+The image provider chain (`llm/providers/imageGen.js`: xAI → Gemini → Pollinations) is the last
+network family with no timeout or abort — the 2026-08-09 sweep gave every adapter call a
+per-attempt stall guard and `embedText` 30s, but the two image POSTs still call bare `fetch`.
+Browser `fetch` never times out, so a stalled socket pins the spinner forever: SceneArt hides
+its whole control row while loading, so the player has no reroll, no cancel, no mode switch,
+only a page reload — and the fallback chain that exists for provider trouble never engages,
+because a hang is not a rejection. Two layers: (1) `AbortSignal.timeout(60_000)` on both
+provider fetches — a timeout is just another `xai-network:`/`gemini-network:` fallback reason,
+so it rides the existing chain and labeling with no new UI; (2) a real Cancel: thread one
+`AbortController` from SceneArt (and the three portrait sites) through `generateImageResult` so
+a player can abandon a slow render without waiting the full minute — the runner's Stop button
+is the precedent. Pin with a fake-timer test on the timeout path and an abort test asserting
+the chain does NOT fall through on a deliberate cancel (cancel ≠ provider failure). From the
+2026-09-01 strengthening audit (scene-art, Lap 1).
+
 ### Low-level death-save lethality with a companion present — status: `observation` (playtest #11, 2026-07-22)
 The low-level solo 0-HP mercy (non-lethal setback) correctly does NOT apply when a
 battle-ready companion is present (`isCompanionActive`, DECISIONS.md 2026-07-17) — so a
