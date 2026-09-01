@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildKnownAppearances, buildKnownStances, composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe } from './scribe.js';
+import { buildKnownAppearances, buildKnownLocations, buildKnownStances, composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe } from './scribe.js';
 import { sendMessage } from './adapter.js';
 
 vi.mock('./adapter.js', () => ({
@@ -1580,5 +1580,262 @@ describe('Scribe narrated-cast audit (queue P1, Codex 2026-08-09)', () => {
             lootAudit: castAudit(),
         });
         expect(dispatch.mock.calls.map(c => c[0]).find(a => a.type === 'CAST_SPELL')).toBeUndefined();
+    });
+});
+
+describe('authoritative-combat filter across every lane (2026-09-01 scribe P2)', () => {
+    beforeEach(() => sendMessage.mockReset());
+    const settings = { apiKey: 'test-key', llmProvider: 'gemini' };
+    const contextWith = (enemy) => ({ terminal: 'ongoing', postState: { enemies: [enemy] } });
+
+    async function runWith(extraction, enemy) {
+        sendMessage.mockResolvedValue(JSON.stringify({ world_facts: [], npc_updates: [], story_memory: [], location: null, ...extraction }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'Combat exchange',
+            dmNarrative: 'Steel and blood.',
+            settings, dispatch,
+            authoritativeContext: contextWith(enemy),
+        });
+        return dispatch.mock.calls.map(c => c[0]);
+    }
+
+    it('drops a roster update that kills a foe the engine marked fled, and keeps one that agrees', async () => {
+        const dropped = await runWith(
+            { npc_updates: [{ name: 'Chief Kraul', disposition: 'hostile', lastNotes: 'Killed by the hero in the cavern.' }] },
+            { name: 'Chief Kraul', hp: 5, maxHp: 30, status: 'fled' },
+        );
+        expect(dropped.some(a => a.type === 'UPDATE_NPC')).toBe(false);
+
+        const kept = await runWith(
+            { npc_updates: [{ name: 'Chief Kraul', disposition: 'hostile', lastNotes: 'Fled into the dark tunnels, alive and furious.' }] },
+            { name: 'Chief Kraul', hp: 5, maxHp: 30, status: 'fled' },
+        );
+        expect(kept.some(a => a.type === 'UPDATE_NPC' && a.payload.name === 'Chief Kraul')).toBe(true);
+    });
+
+    it('drops a death claim on a foe still ACTIVE and on a foe that surrendered — in facts, cards, and dossiers', async () => {
+        const onActive = await runWith(
+            {
+                world_facts: [{ fact: 'Chief Kraul was slain.', category: 'event' }],
+                story_memory: [{ type: 'callback', text: 'Chief Kraul died screaming.', subject: 'Kraul' }],
+                npc_updates: [{ name: 'Chief Kraul', secrets: 'Dead — finished off by the hero.' }],
+            },
+            { name: 'Chief Kraul', hp: 9, maxHp: 30, status: 'active' },
+        );
+        expect(onActive.some(a => ['ADD_WORLD_FACTS', 'ADD_STORY_MEMORY_CARDS', 'UPDATE_NPC'].includes(a.type))).toBe(false);
+
+        const onSurrendered = await runWith(
+            { npc_updates: [{ name: 'Chief Kraul', agenda: 'None — he lies dead in the mud.' }] },
+            { name: 'Chief Kraul', hp: 2, maxHp: 30, status: 'surrendered' },
+        );
+        expect(onSurrendered.some(a => a.type === 'UPDATE_NPC')).toBe(false);
+    });
+
+    it('drops a survival claim on a DEFEATED foe in the dossier lane too', async () => {
+        const actions = await runWith(
+            { npc_updates: [{ name: 'Chief Kraul', lastNotes: 'Survives the fight, still active in the hills.' }] },
+            { name: 'Chief Kraul', hp: 0, maxHp: 30, status: 'defeated' },
+        );
+        expect(actions.some(a => a.type === 'UPDATE_NPC')).toBe(false);
+    });
+
+    it('leaves roster updates about people who are not snapshot enemies alone', async () => {
+        const actions = await runWith(
+            { npc_updates: [{ name: 'Mira Tammi', disposition: 'grateful', lastNotes: 'Says the ambusher is dead and she can sleep.' }] },
+            { name: 'Chief Kraul', hp: 5, maxHp: 30, status: 'fled' },
+        );
+        expect(actions.some(a => a.type === 'UPDATE_NPC' && a.payload.name === 'Mira Tammi')).toBe(true);
+    });
+});
+
+describe('gear-handoff audit identity (2026-09-01 scribe P2)', () => {
+    beforeEach(() => sendMessage.mockReset());
+    const settings = { apiKey: 'test-key', llmProvider: 'gemini' };
+    const extraction = (handoffs) => JSON.stringify({
+        world_facts: [], npc_updates: [], story_memory: [], location: null, missing_gear_handoffs: handoffs,
+    });
+    const auditState = (inventory) => ({
+        party: [{ id: 'c1', name: 'Kaarina Tammi', status: 'healthy', ac: 12, weapon: 'Dagger' }],
+        inventory,
+        appliedLootSourceIds: [],
+    });
+
+    it('matches a narrated "longsword" to the owned "Longsword +1" and hands THAT off — never a stats-only copy', async () => {
+        sendMessage.mockResolvedValue(extraction([{ companion: 'Kaarina', item: 'longsword', kind: 'weapon' }]));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'Take my longsword.',
+            dmNarrative: 'Kaarina straps the longsword to her belt.',
+            settings, dispatch,
+            lootAudit: { sourceId: 'msg-20:scribe-loot', appliedEvents: null, getState: () => auditState([{ id: 'i1', name: 'Longsword +1', type: 'weapon' }]) },
+        });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: 'i1', companionId: 'c1' } });
+        expect(dispatch.mock.calls.some(([a]) => a.type === 'UPDATE_COMPANION' && a.payload.weapon)).toBe(false);
+    });
+
+    it('dedupes two narrated names that resolve to one owned item, and skips an ambiguous fuzzy match', async () => {
+        sendMessage.mockResolvedValue(extraction([
+            { companion: 'Kaarina', item: 'longsword', kind: 'weapon' },
+            { companion: 'Kaarina', item: 'Longsword +1', kind: 'weapon' },
+        ]));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'Take my longsword.',
+            dmNarrative: 'Kaarina takes the sword.',
+            settings, dispatch,
+            lootAudit: { sourceId: 'msg-21:scribe-loot', appliedEvents: null, getState: () => auditState([{ id: 'i1', name: 'Longsword +1', type: 'weapon' }]) },
+        });
+        expect(dispatch.mock.calls.filter(([a]) => a.type === 'GIVE_GEAR_TO_COMPANION')).toHaveLength(1);
+
+        sendMessage.mockResolvedValue(extraction([{ companion: 'Kaarina', item: 'longsword', kind: 'weapon' }]));
+        const ambiguous = vi.fn();
+        await runScribe({
+            playerMessage: 'Take a longsword.',
+            dmNarrative: 'Kaarina takes a sword.',
+            settings, dispatch: ambiguous,
+            lootAudit: {
+                sourceId: 'msg-22:scribe-loot', appliedEvents: null,
+                getState: () => auditState([{ id: 'i1', name: 'Longsword +1', type: 'weapon' }, { id: 'i2', name: 'Longsword +2', type: 'weapon' }]),
+            },
+        });
+        // Ambiguous: neither handed off, and no stats-only weapon copy minted either.
+        expect(ambiguous.mock.calls.some(([a]) => ['GIVE_GEAR_TO_COMPANION', 'UPDATE_COMPANION'].includes(a.type))).toBe(false);
+    });
+});
+
+describe('loss audit dedupe on the resolved stack (2026-09-01 scribe P2)', () => {
+    beforeEach(() => sendMessage.mockReset());
+
+    it('two narrated names resolving to one stack dispatch REMOVE_ITEM_BY_NAME once', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            narrated_losses: { items: [{ name: 'rusted keys' }, { name: 'Rusted iron keys' }] },
+        }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I hand over the keys.',
+            dmNarrative: 'The guard pockets your rusted keys.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+            lootAudit: {
+                sourceId: 'msg-30:scribe-loot', appliedEvents: null,
+                getState: () => ({
+                    appliedLootSourceIds: [], character: { name: 'Maren', class: 'rogue' }, combat: { active: false }, messages: [],
+                    inventory: [{ id: 'item-1', name: 'Rusted iron keys', quantity: 1 }],
+                }),
+            },
+        });
+        const removals = dispatch.mock.calls.filter(([a]) => a.type === 'REMOVE_ITEM_BY_NAME');
+        expect(removals).toHaveLength(1);
+        expect(removals[0][0].payload).toBe('Rusted iron keys');
+        const notice = dispatch.mock.calls.find(([a]) => a.type === 'ADD_MESSAGE')?.[0];
+        expect(notice.payload.content).toBe('**Losses recorded from narration:** Rusted iron keys removed from your possessions.');
+    });
+});
+
+describe('Scribe dispatcher shapes (2026-09-01 scribe test depth)', () => {
+    beforeEach(() => sendMessage.mockReset());
+    const settings = { apiKey: 'test-key', llmProvider: 'gemini' };
+
+    it('location_profile → UPDATE_LOCATION_PROFILE with the turn text as evidenceText (never stored)', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            location_profile: { name: 'Brackwater', type: 'settlement', danger: 'low', region: 'The Salt Coast' },
+        }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I walk into Brackwater.',
+            dmNarrative: 'Brackwater sprawls along the Salt Coast.',
+            settings, dispatch,
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: {
+                name: 'Brackwater',
+                profile: { type: 'settlement', danger: 'low', region: 'The Salt Coast' },
+                evidenceText: 'I walk into Brackwater.\nBrackwater sprawls along the Salt Coast.',
+            },
+        });
+    });
+
+    it('ignores a location_profile without a name', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            location_profile: { type: 'settlement' },
+        }));
+        const dispatch = vi.fn();
+        await runScribe({ playerMessage: 'x', dmNarrative: 'y', settings, dispatch });
+        expect(dispatch.mock.calls.some(([a]) => a.type === 'UPDATE_LOCATION_PROFILE')).toBe(false);
+    });
+
+    it('player_appearance → UPDATE_CHARACTER clamped to 600 chars; blank is ignored', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            player_appearance: `  ${'x'.repeat(700)}  `,
+        }));
+        const dispatch = vi.fn();
+        await runScribe({ playerMessage: 'x', dmNarrative: 'y', settings, dispatch });
+        const update = dispatch.mock.calls.find(([a]) => a.type === 'UPDATE_CHARACTER')?.[0];
+        expect(update.payload).toEqual({ appearance: 'x'.repeat(600) });
+
+        sendMessage.mockResolvedValue(JSON.stringify({ world_facts: [], npc_updates: [], story_memory: [], location: null, player_appearance: '   ' }));
+        const blank = vi.fn();
+        await runScribe({ playerMessage: 'x', dmNarrative: 'y', settings, dispatch: blank });
+        expect(blank.mock.calls.some(([a]) => a.type === 'UPDATE_CHARACTER')).toBe(false);
+    });
+
+    it('buildKnownLocations orders by recency (lastVisitedAt, then firstSeenAt) and caps at 12', () => {
+        const locations = Array.from({ length: 15 }, (_, i) => ({ name: `Place ${i}`, firstSeenAt: i }));
+        locations[3].lastVisitedAt = 500;
+        const known = buildKnownLocations({ locations });
+        const names = known.split('; ');
+        expect(names).toHaveLength(12);
+        expect(names[0]).toBe('Place 3');
+        expect(names[1]).toBe('Place 14');
+        expect(names).not.toContain('Place 0');
+        expect(buildKnownLocations({ locations: [{ name: '' }] })).toBeNull();
+        expect(buildKnownLocations()).toBeNull();
+    });
+
+    it('reflection: tempo_directive → APPLY_TEMPO_DIRECTIVE with an engine-rolled timingDelay in 0..4, front_proposals → ADD_EMERGENT_FRONT', async () => {
+        const directive = { frontId: 'front-road', location: 'Brackwater', maxIntensity: 'whispers' };
+        const proposal = { title: 'The Salt Cartel', goal: 'Own the docks.', stakes: 'Prices strangle.', grimPortents: ['a', 'b', 'c'], faction: { name: 'Cartel', goal: 'Profit' } };
+        sendMessage.mockResolvedValue(JSON.stringify({
+            npc_updates: [], front_advances: [], story_memory: [],
+            tempo_directive: directive,
+            front_proposals: [proposal, { title: 'ignored second' }],
+        }));
+        const dispatch = vi.fn();
+        await runNpcFrontReflection({
+            state: { settings, session: { id: 'campaign' }, fronts: [{ id: 'front-road', status: 'active' }], npcs: [], journal: [], worldFacts: [], party: [] },
+            dispatch,
+            cadence: { id: 'journal-campaign-30', journalEnd: 30, summary: 'Days pass.' },
+        });
+        const tempo = dispatch.mock.calls.find(([a]) => a.type === 'APPLY_TEMPO_DIRECTIVE')?.[0];
+        expect(tempo.payload).toMatchObject({ cadenceId: 'journal-campaign-30', directive });
+        expect(Number.isInteger(tempo.payload.timingDelay)).toBe(true);
+        expect(tempo.payload.timingDelay).toBeGreaterThanOrEqual(0);
+        expect(tempo.payload.timingDelay).toBeLessThanOrEqual(4);
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'ADD_EMERGENT_FRONT',
+            payload: { cadenceId: 'journal-campaign-30', proposal },
+        });
+        expect(dispatch.mock.calls.filter(([a]) => a.type === 'ADD_EMERGENT_FRONT')).toHaveLength(1);
+    });
+
+    it('reflection: withholds the tempo directive and emergent front without a cadence id', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            npc_updates: [], front_advances: [], story_memory: [],
+            tempo_directive: { frontId: 'front-road' },
+            front_proposals: [{ title: 'x' }],
+        }));
+        const dispatch = vi.fn();
+        await runNpcFrontReflection({
+            state: { settings, session: { id: 'campaign' }, fronts: [{ id: 'front-road', status: 'active' }], npcs: [], journal: [], worldFacts: [], party: [] },
+            dispatch,
+            cadence: null,
+        });
+        expect(dispatch.mock.calls.some(([a]) => ['APPLY_TEMPO_DIRECTIVE', 'ADD_EMERGENT_FRONT'].includes(a.type))).toBe(false);
     });
 });

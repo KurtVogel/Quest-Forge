@@ -210,6 +210,23 @@ function contradictsAuthoritativeCombat(value, authoritativeContext) {
     });
 }
 
+/**
+ * Roster-update twin of the fact/card filter: a dossier update whose NAME is
+ * a snapshot enemy is checked on its narrative fields (the claim is built as
+ * "name: fields" so the enemy-name presence test matches the same way).
+ */
+const NPC_UPDATE_CLAIM_FIELDS = ['lastNotes', 'disposition', 'secrets', 'agenda', 'notes', 'stanceToPlayer', 'relationshipTension', 'bondMoment'];
+function npcUpdateContradictsAuthoritativeCombat(npc, authoritativeContext) {
+    if (!npc || typeof npc !== 'object' || !npc.name) return false;
+    const enemies = authoritativeContext?.postState?.enemies || [];
+    if (enemies.length === 0) return false;
+    const fields = NPC_UPDATE_CLAIM_FIELDS
+        .map(key => (typeof npc[key] === 'string' ? npc[key] : ''))
+        .filter(Boolean);
+    if (fields.length === 0) return false;
+    return contradictsAuthoritativeCombat(`${npc.name}: ${fields.join(' ')}`, authoritativeContext);
+}
+
 export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownLocations = null, dmLocationEvent = null }) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
@@ -286,6 +303,14 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         const rosteredNames = [];
         if (Array.isArray(extracted.npc_updates) && extracted.npc_updates.length > 0) {
             for (const npc of extracted.npc_updates) {
+                // The authoritative-combat filter covers roster updates too
+                // (2026-09-01 scribe P2): a victory narration "killing" a foe
+                // the engine marked fled wrote the death into that NPC's
+                // dossier, which then rode KNOWN NPCs + RAG every turn.
+                if (npcUpdateContradictsAuthoritativeCombat(npc, authoritativeContext)) {
+                    console.warn(`[Scribe] Dropped roster update for "${npc?.name}" — contradicts authoritative combat state.`);
+                    continue;
+                }
                 // Shared classify→dispatch with the journal's npcs_encountered
                 // loop (2026-08-31 P2 — one helper owns the roster boundary).
                 if (dispatchClassifiedNpcUpdate(dispatch, npc)) {

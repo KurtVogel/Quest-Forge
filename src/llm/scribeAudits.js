@@ -177,6 +177,28 @@ function claimAuditSource(lootAudit, dispatch, suffix, label) {
 
 const GEAR_HANDOFF_KINDS = new Set(['weapon', 'armor', 'shield', 'keepsake']);
 
+/** Sentinel: a narrated name matched several owned stacks — never guess. */
+const AMBIGUOUS = Symbol('ambiguous-item');
+
+/**
+ * THE owned-item resolver for the audit family: exact name first; otherwise
+ * the shared fuzzy identity (engine/textMatch) is honored only when it is
+ * UNAMBIGUOUS — whole-stack removal/handoff must never guess which stack the
+ * fiction meant. Returns the item, null (nothing owned), or AMBIGUOUS.
+ */
+function resolveOwnedItem(inventory, name, label) {
+    const items = Array.isArray(inventory) ? inventory : [];
+    const exact = items.find(item => String(item?.name || '').trim().toLowerCase() === String(name || '').toLowerCase());
+    if (exact) return exact;
+    const fuzzy = items.filter(item => itemIdentityMatches(name, item?.name));
+    if (fuzzy.length === 1) return fuzzy[0];
+    if (fuzzy.length > 1) {
+        console.warn(`[Scribe] ${label} "${name}" matches ${fuzzy.length} owned stacks — ambiguous; skipping.`);
+        return AMBIGUOUS;
+    }
+    return null;
+}
+
 function companionNameMatches(companionName, reportedName) {
     const known = String(companionName || '').trim().toLowerCase();
     const reported = String(reportedName || '').trim().toLowerCase();
@@ -212,6 +234,7 @@ function applyMissingGearHandoffs(missing, lootAudit, dispatch) {
     const { state } = claimed;
 
     let applied = 0;
+    const handedOffItemIds = new Set();
     for (const entry of entries) {
         const companion = (state?.party || []).find(c => companionNameMatches(c.name, entry.companion));
         if (!companion || companion.status === 'dead') continue;
@@ -220,10 +243,16 @@ function applyMissingGearHandoffs(missing, lootAudit, dispatch) {
             applied += 1;
             continue;
         }
-        const owned = (state?.inventory || []).find(
-            i => String(i?.name || '').trim().toLowerCase() === entry.item.toLowerCase(),
-        );
+        // Shared fuzzy item identity, unambiguous-only (2026-09-01 scribe P2):
+        // exact-name matching missed "longsword" against the owned "Longsword
+        // +1", fell to the stats-only branch, and the hero kept the sword
+        // while the companion gained an unenchanted copy.
+        const owned = resolveOwnedItem(state?.inventory, entry.item, 'Narrated handoff');
+        if (owned === AMBIGUOUS) continue;
         if (owned) {
+            // Two narrated names resolving to one stack hand it off once.
+            if (handedOffItemIds.has(owned.id)) continue;
+            handedOffItemIds.add(owned.id);
             // The reducer announces, derives mechanics, and removes the item.
             dispatch({ type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: owned.id, companionId: companion.id } });
             applied += 1;
@@ -531,6 +560,7 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
         .map(String);
 
     const removed = [];
+    const removedItemIds = new Set();
     for (const name of items) {
         if (appliedLossIdentities.some(value => itemIdentityMatches(name, value))) {
             console.warn(`[Scribe] Narrated loss "${name}" already removed by the event path; skipping.`);
@@ -540,22 +570,18 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
         // UNAMBIGUOUS — REMOVE_ITEM_BY_NAME takes whole stacks, so "wax candles"
         // matching both a lowercase shadow row and "Wax Candles (x5)" must skip
         // rather than guess which stack the fiction destroyed.
-        const inventory = state?.inventory || [];
-        let owned = inventory.find(
-            item => String(item?.name || '').trim().toLowerCase() === name.toLowerCase(),
-        );
-        if (!owned) {
-            const fuzzy = inventory.filter(item => itemIdentityMatches(name, item?.name));
-            if (fuzzy.length === 1) owned = fuzzy[0];
-            else if (fuzzy.length > 1) {
-                console.warn(`[Scribe] Narrated loss "${name}" matches ${fuzzy.length} owned stacks — ambiguous; skipping.`);
-                continue;
-            }
-        }
+        const owned = resolveOwnedItem(state?.inventory, name, 'Narrated loss');
+        if (owned === AMBIGUOUS) continue;
         if (!owned) {
             console.warn(`[Scribe] Narrated loss "${name}" matches nothing the hero owns; skipping.`);
             continue;
         }
+        // Two narrated names resolving to one stack ("sword" + "longsword")
+        // remove it once — the second dispatch posted a visible "no such
+        // item" failure line (2026-09-01 scribe P2).
+        const identity = owned.id ?? owned.name;
+        if (removedItemIds.has(identity)) continue;
+        removedItemIds.add(identity);
         dispatch({ type: 'REMOVE_ITEM_BY_NAME', payload: owned.name });
         removed.push(owned.name);
     }
