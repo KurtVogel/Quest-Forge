@@ -1244,7 +1244,7 @@ A split into `llm/scribe/{extraction,audit,reflection,sceneDirector}.js` (re-exp
 diff surface, and makes the shared-preamble extraction in the same queue entry obvious rather
 than optional. From the 2026-08-24 strengthening audit (scribe, Lap 4).
 
-### [strengthening] Abortable image generation: stall guard + Cancel on the provider chain — status: `idea` (2026-09-01)
+### [strengthening] Abortable image generation: stall guard + Cancel on the provider chain — status: `shipped` (2026-09-01, same day: both layers — 60s stall guard on both provider POSTs falling through the chain, and a SceneArt Cancel button whose abort rethrows instead of falling through)
 The image provider chain (`llm/providers/imageGen.js`: xAI → Gemini → Pollinations) is the last
 network family with no timeout or abort — the 2026-08-09 sweep gave every adapter call a
 per-attempt stall guard and `embedText` 30s, but the two image POSTs still call bare `fetch`.

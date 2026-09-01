@@ -8,6 +8,51 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-01 · Resolved is TERMINAL in the engine; a front's dormancy is pacing, not a lesser
+pressure; scene-art renders are abortable and cancel is not a provider failure.** Rulings from
+the sweep of both 2026-09-01 audit rounds (every queue line ticked in
+SCHEDULED_STRENGTHENING.md):
+**(1) `resolved` is terminal in the reducer, not just in the prompt.** The 2026-08-03 front
+resolution ceremony (milestone XP, canon fact, 🕰️ line, aftermath director, RECENT VICTORY
+echo) was one-shot only while the DM obeyed "Resolved is final: never revive" — the engine
+accepted `status: "active"` on a resolved front and the one-shot guard read
+`existing.status === 'active'`, so resurrect → re-resolve paid everything twice (the
+milestone XP deliberately sits outside the XP ledger). The one-shot-mechanics invariant
+(2026-07-21) demands an engine guard: `UPDATE_FRONT` now strips `status`, `clock`, and
+`stage` from ANY update aimed at a resolved front — notes and public hints may still update,
+the mechanics are frozen for good — and the ceremony fires on `resolved AND not already
+resolved`, so a **dormant** front resolving runs the full ceremony too (before, it silently
+skipped XP, fact, and theater retirement). `dormant` stays an engine-level status (world
+tempo counts it as live pressure, cadence advances skip it) but is NOT documented as a DM
+channel value and the RESPONSE_FORMAT example carries only `resolved`; we did not drop it
+from `normalizeStatus` because saves and the front director may legitimately hold it.
+`UPDATE_FRONT` also matches by **id only** now: titles are private, so the by-title lookup
+was an untested phantom path the DM could never legitimately reach.
+**(2) Image renders get a stall guard AND a cancel, with different semantics.** A 60s
+timeout on each provider POST is just another `*-network:` failure and falls through the
+xAI → Gemini → Pollinations chain as designed (the player gets a labeled fallback instead of
+an eternal spinner). A deliberate Cancel (SceneArt's new button, an AbortController threaded
+through `options.signal`) rethrows `AbortError` and must NEVER fall through — the player
+asked for no image, not for a worse one. The guard uses its own timer + controller rather
+than `AbortSignal.timeout` so it is fake-timer testable and the two abort causes are
+distinguishable.
+**(3) One narrative-eligibility predicate.** Story-readers of the transcript (chronicler,
+sessionPriming, SceneArt's situation picker) share `llm/narrativeMessages.js` — hidden,
+soft-deleted, and OOC table-talk replies are never story. Any future consumer that reads
+messages as fiction goes through it; the DM window keeps its own `buildMessageWindow` rule
+(it needs roll/receipt system lines the story readers do not).
+**(4) Prompts speak display names.** `character.race`/`class` are data keys; every prompt
+boundary (portraits, scene art, the DM's PLAYER CHARACTER block) renders them through
+`raceDisplayName`/`classDisplayName`. A camelCase key under an "inviolable species" rule was
+the one non-human hero species spelled wrong to the painter.
+**(5) Critical hits are attack-only in RECENT ROLLS.** The RNG-layer `isCritical` flag stays
+kind-blind (dice know nothing about rules); `stampCriticalRoll`, the single crit-rule owner,
+stamps `kind: 'attack'`, and the prompt renders "CRITICAL HIT!" only for that kind — a
+natural 20 on a check/save/initiative/death save is "(natural 20)", matching rollResolver's
+own chat line.
+
+---
+
 **2026-08-31 · Queue sweep rulings: the DM gets RECEIPTS for engine coin/item movement,
 and the gain-guard asymmetry gets a bounded exception.** The whole open queue (4 P1s + 12
 actionable P2s, all ticked with fix notes in SCHEDULED_STRENGTHENING.md) cleared in one

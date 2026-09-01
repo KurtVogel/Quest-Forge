@@ -6,7 +6,33 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-08-31 (full queue sweep: 4 P1s + 12 P2s cleared, deployed)._
+_Last updated: 2026-09-01 (queue sweep of both 2026-09-01 audit rounds: 3 P1s + 13 P2s cleared)._
+
+## 2026-09-01 — queue sweep: scene-art P1 pair, resolved-is-terminal fronts, dice/scribe P2s
+
+Both 2026-09-01 audit rounds (dice-engine + scene-art; hidden-fronts + scribe) cleared in one
+session — every queue line ticked with a fix note. **P1s:** (1) Scene Art painted scrubbed
+refusals — the situation picker was the one assistant-message consumer the 2026-08-28
+soft-delete sweep missed; now ONE shared narrative-eligibility predicate
+(`llm/narrativeMessages.js`: not hidden, not deleted, not an OOC table-talk reply) serves
+SceneArt, the chronicler, and sessionPriming. (2) The two image POSTs had no timeout — a
+stalled socket pinned the spinner forever with the control row hidden; both now carry a 60s
+stall guard that falls through the provider chain like any network failure, and SceneArt
+gained a real Cancel (abort rethrows, never falls through — cancel ≠ provider failure).
+(3) `resolved` is now terminal in the engine (DECISIONS.md 2026-09-01): a DM "active" on a
+resolved front no longer resurrects it, re-resolution can never pay a second milestone XP /
+fact / 🕰️ line / aftermath, and dormant → resolved runs the full ceremony. **P2s:** hit dice
+catalog-rebuilt on load + short-rest divisor floored at 1; `rollWithModifier` validates the
+modifier; RECENT ROLLS says "critical hit" only for attack rolls (`kind: 'attack'` stamped
+in `stampCriticalRoll`); species/class reach every prompt as display names ("Half-Orc", not
+"halfOrc") via shared `raceDisplayName`/`classDisplayName`; the art director's cast list
+carries each foe's dead/fled/bloodied state; alias re-statements keep the scene art;
+`extractPremisePlace` prefers locative verbs over "of"; UPDATE_FRONT matches by id only;
+the gear-handoff audit uses the shared fuzzy item identity (no more "longsword" vs
+"Longsword +1" duplication) and both it and the loss audit dedupe on the resolved item;
+the authoritative-combat filter now covers roster (`npc_updates`) dossiers. SceneArt's pure
+helpers extracted to `sceneArtHelpers.js`; new sceneDirector/narrativeMessages/helper test
+files. 1,977 tests green (+60), lint clean.
 
 ## 2026-08-31 — full queue sweep: coin/item double-pay root-fixed, load-nonce remount, hearsay locality
 
