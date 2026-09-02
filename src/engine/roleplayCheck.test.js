@@ -43,6 +43,24 @@ describe('roleplay check proposals', () => {
         expect(sanitizePendingRoleplayCheck({ rolls: [] })).toBeNull();
     });
 
+    it('types and clamps every roll field through the parser contract (hostile save, 2026-09-02)', () => {
+        const restored = sanitizePendingRoleplayCheck({
+            id: 'rc-1',
+            supersedesId: 'rc-0',
+            rolls: [
+                { type: 'skill_check', skill: 'stealth', dc: -100, advantage: 'yes', target: ['orc'], notation: 7 },
+                { type: { nested: true }, skill: 'perception', dc: '12', disadvantage: 0, modifier: '40', damage: { evil: true }, dc_reason: 'x' },
+                { type: 'skill_check', skill: 'athletics', dc: 999 },
+            ],
+        });
+        expect(restored.supersedesId).toBe('rc-0');
+        const [sneak, spot, climb] = restored.rolls;
+        expect(sneak).toMatchObject({ dc: 0, advantage: true, disadvantage: false, target: null, notation: null });
+        expect(spot).toMatchObject({ type: 'skill_check', dc: 10, disadvantage: false, modifier: null, damage: null });
+        expect(climb.dc).toBe(30);
+        expect(sanitizePendingRoleplayCheck({ rolls: [roll] }).supersedesId).toBeNull();
+    });
+
     it('carries the withheld setup narration and message id, clamped and reload-safe', () => {
         const proposal = buildRoleplayCheckProposal([roll], 'I sprint for the archway.', {
             setupNarrative: 'The horde pours through the breach as the floor splinters beneath you.',
@@ -120,8 +138,24 @@ describe('recent-checks heat ledger', () => {
             [{ ...roll, dc: 10 }, { ...roll, skill: 'athletics', dc: 99 }],
             'I leap the gap while arguing.',
         );
-        expect(buildRecentCheckEntry(proposal, 12)).toEqual({ messageIndex: 12, dc: 30, skill: 'persuasion' });
+        expect(buildRecentCheckEntry(proposal, 12)).toEqual({ messageIndex: 12, dc: 30, skill: 'persuasion', proposalId: proposal.id });
         expect(buildRecentCheckEntry(null, 12)).toBeNull();
+    });
+
+    it('replaces the superseded proposal by lineage regardless of messageIndex (2026-09-02 audit)', () => {
+        const list = [
+            { messageIndex: 2, dc: 10, skill: 'stealth', proposalId: 'rc-a' },
+            { messageIndex: 6, dc: 12, skill: 'persuasion', proposalId: 'rc-b' },
+        ];
+        // REVISE of rc-b lands two messages later (challenge line + hidden ruling).
+        const revised = appendRecentCheck(list, { messageIndex: 8, dc: 8, skill: 'persuasion', proposalId: 'rc-c' }, 'rc-b');
+        expect(revised).toEqual([
+            { messageIndex: 2, dc: 10, skill: 'stealth', proposalId: 'rc-a' },
+            { messageIndex: 8, dc: 8, skill: 'persuasion', proposalId: 'rc-c' },
+        ]);
+        // Unknown lineage appends; a null lineage keeps the same-index belt.
+        expect(appendRecentCheck(list, { messageIndex: 9, dc: 10, skill: null, proposalId: 'rc-d' }, 'rc-zzz')).toHaveLength(3);
+        expect(appendRecentCheck(list, { messageIndex: 6, dc: 15, skill: null, proposalId: 'rc-e' }, null)).toHaveLength(2);
     });
 
     it('caps the ledger and replaces a same-message re-proposal instead of double-counting', () => {
@@ -145,8 +179,8 @@ describe('recent-checks heat ledger', () => {
             { messageIndex: -3, dc: 500, skill: 42 },
         ]);
         expect(cleaned).toEqual([
-            { messageIndex: 4, dc: 12, skill: 'insight' },
-            { messageIndex: 0, dc: 30, skill: '42' },
+            { messageIndex: 4, dc: 12, skill: 'insight', proposalId: null },
+            { messageIndex: 0, dc: 30, skill: '42', proposalId: null },
         ]);
         expect(sanitizeRecentChecks(null)).toEqual([]);
     });

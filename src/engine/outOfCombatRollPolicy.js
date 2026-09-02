@@ -124,15 +124,28 @@ Output ONLY the JSON, no prose outside the JSON.`;
             return reviewOutsideCombatRollsSync(rolls, playerMessage);
         }
 
+        // The deterministic rules are the FLOOR, not a fallback (2026-09-02
+        // audit): a Flash-Lite "approved" on "I attack the lookout" used to skip
+        // isAttackStagedAsCheckSync entirely, so the 2026-08-09 attack-as-check
+        // fix held only when the arbiter agreed. A sync rejection always wins; a
+        // roll the arbiter never evaluated takes the sync verdict.
+        const sync = reviewOutsideCombatRollsSync(rolls, playerMessage);
+        const syncRejected = new Set(sync.rejectedRolls);
         const acceptedRolls = [];
         const rejectedRolls = [];
-        let attackAsCheck = false;
+        let attackAsCheck = sync.attackAsCheck;
 
         for (let i = 0; i < rolls.length; i++) {
-            const evaluation = result.rolls_evaluation.find(e => e.index === i);
-            if (evaluation && evaluation.approved === false) {
+            // Coerced index: a string "0" or a missing entry must not read as approval.
+            const evaluation = result.rolls_evaluation.find(e => e && typeof e === 'object' && Number(e.index) === i);
+            const llmApproved = evaluation
+                ? (evaluation.approved === true || String(evaluation.approved).trim().toLowerCase() === 'true')
+                : true; // no verdict → the sync floor decides alone
+            if (evaluation && !llmApproved) {
                 console.log(`[RollPolicy] Scribe REJECTED proposed check: "${rolls[i].description || rolls[i].skill || 'Check'}". Reason: ${evaluation.reason}`);
                 if (String(evaluation.violation || '').toLowerCase() === 'attack') attackAsCheck = true;
+            }
+            if (!llmApproved || syncRejected.has(rolls[i])) {
                 rejectedRolls.push(rolls[i]);
             } else {
                 acceptedRolls.push(rolls[i]);

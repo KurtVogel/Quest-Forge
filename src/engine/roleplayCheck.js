@@ -1,22 +1,51 @@
+import { normalizeRequestedRoll } from '../llm/eventChannels.js';
+
 const text = (value, max = 500) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+/** DC band the resolver honors: 0 stays an explicit 0, anything past 30 is a hostile save. */
+const MAX_ROLL_DC = 30;
+
+/**
+ * One typed roll for the proposal store. The parser's `normalizeRequestedRoll`
+ * owns the field typing (dc numeric-or-default, advantage flags boolean,
+ * modifier numeric-or-null); this layer only adds the proposal-side clamps and
+ * the public adjudication text. Spreading the raw roll first (pre-2026-09-02)
+ * let a hostile save hand the resolver `dc: -100` (guaranteed success) or
+ * `dc: "12"` (string comparison) on LOAD_GAME.
+ */
+function sanitizeProposalRoll(roll) {
+    const typed = normalizeRequestedRoll(roll);
+    // String-or-null: the parser passes these through with `|| null`, so an
+    // object/array from a hostile save must not stringify to "[object Object]".
+    const str = (value, max) => (typeof value === 'string' ? text(value, max) || null : null);
+    const dc = Number.isFinite(typed.dc) ? Math.min(MAX_ROLL_DC, Math.max(0, typed.dc)) : 10;
+    return {
+        ...typed,
+        type: str(typed.type, 40) || 'skill_check',
+        skill: text(typed.skill || typed.ability, 80) || null,
+        ability: text(typed.ability, 80) || null,
+        dc,
+        description: str(typed.description, 300) || '',
+        reason: text(typed.reason, 500),
+        opposition: text(typed.opposition, 500),
+        failureStakes: text(typed.failureStakes, 500),
+        difficultyReason: text(typed.difficultyReason, 500),
+        advantageReason: text(typed.advantageReason, 500),
+        disadvantageReason: text(typed.disadvantageReason, 500),
+        attacker: str(typed.attacker, 120),
+        attackerId: str(typed.attackerId, 120),
+        notation: str(typed.notation, 40),
+        target: str(typed.target, 120),
+        damage: str(typed.damage, 40),
+    };
+}
 
 export function sanitizePendingRoleplayCheck(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const rolls = (Array.isArray(value.rolls) ? value.rolls : [])
         .filter(roll => roll && typeof roll === 'object')
         .slice(0, 6)
-        .map(roll => ({
-            ...roll,
-            type: text(roll.type || 'skill_check', 40),
-            skill: text(roll.skill || roll.ability, 80) || null,
-            description: text(roll.description, 300),
-            reason: text(roll.reason, 500),
-            opposition: text(roll.opposition, 500),
-            failureStakes: text(roll.failureStakes || roll.failure_stakes, 500),
-            difficultyReason: text(roll.difficultyReason || roll.difficulty_reason, 500),
-            advantageReason: text(roll.advantageReason || roll.advantage_reason, 500),
-            disadvantageReason: text(roll.disadvantageReason || roll.disadvantage_reason, 500),
-        }));
+        .map(sanitizeProposalRoll);
     if (rolls.length === 0) return null;
     return {
         id: text(value.id, 160) || `roleplay-check-${Date.now()}`,
@@ -24,6 +53,10 @@ export function sanitizePendingRoleplayCheck(value) {
         playerAction: text(value.playerAction, 4000),
         challengeUsed: value.challengeUsed === true,
         preNarrated: value.preNarrated === true,
+        // Proposal lineage: the id of the proposal this one re-stages (a challenge
+        // REVISE/UPHOLD, or a chained follow-up check). The heat ledger replaces
+        // the superseded entry instead of counting the same moment twice.
+        supersedesId: text(value.supersedesId, 160) || null,
         // The DM's withheld setup narration (never shown to the player). Carried on the
         // proposal so the post-roll outcome prompt can re-weave its fiction, and so
         // Change Approach can reveal it instead of erasing it. Reload-safe by design.
@@ -49,8 +82,8 @@ export function sanitizePendingRoleplayCheck(value) {
     };
 }
 
-export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null } = {}) {
-    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, proposedAt: Date.now() });
+export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null, supersedesId = null } = {}) {
+    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, supersedesId, proposedAt: Date.now() });
 }
 
 // --- Recent-checks ledger (heat input) ---------------------------------------
@@ -70,15 +103,31 @@ export function buildRecentCheckEntry(proposal, messageCount = 0) {
         messageIndex: Number.isFinite(messageCount) ? Math.max(0, messageCount) : 0,
         dc: dc > 0 ? Math.min(30, dc) : null,
         skill: text(rolls[0].skill, 80) || null,
+        proposalId: text(proposal.id, 160) || null,
     };
 }
 
-export function appendRecentCheck(list = [], entry) {
+/**
+ * Append a proposal to the heat ledger. A re-proposal of the SAME moment — a
+ * challenge REVISE/UPHOLD, or a chained follow-up check — replaces the entry it
+ * supersedes instead of double-counting. Replacement is keyed on proposal
+ * lineage (`supersedesId` → the ledger entry's `proposalId`): every production
+ * re-proposal lands after new messages (the "Roll challenge" line, the roll
+ * lines), so the old equal-`messageIndex` rule never fired outside tests
+ * (2026-09-02 audit). Same-index replacement stays as a belt for a direct
+ * re-dispatch with no lineage.
+ */
+export function appendRecentCheck(list = [], entry, supersedesId = null) {
     const entries = Array.isArray(list) ? list : [];
     if (!entry) return entries;
-    // A challenge REVISE re-proposes the same moment — replace, don't double-count.
-    const last = entries[entries.length - 1];
-    const base = last?.messageIndex === entry.messageIndex ? entries.slice(0, -1) : entries;
+    const lineageIdx = supersedesId ? entries.findIndex(e => e?.proposalId && e.proposalId === supersedesId) : -1;
+    let base;
+    if (lineageIdx !== -1) {
+        base = entries.filter((_, i) => i !== lineageIdx);
+    } else {
+        const last = entries[entries.length - 1];
+        base = last?.messageIndex === entry.messageIndex ? entries.slice(0, -1) : entries;
+    }
     return [...base, entry].slice(-RECENT_CHECK_LIMIT);
 }
 
@@ -89,6 +138,7 @@ export function sanitizeRecentChecks(list) {
             messageIndex: Math.max(0, entry.messageIndex),
             dc: Number.isFinite(entry.dc) ? Math.min(30, Math.max(0, entry.dc)) : null,
             skill: text(entry.skill, 80) || null,
+            proposalId: text(entry.proposalId, 160) || null,
         }))
         .slice(-RECENT_CHECK_LIMIT);
 }

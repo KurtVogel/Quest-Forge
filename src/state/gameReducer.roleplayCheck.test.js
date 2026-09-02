@@ -22,20 +22,56 @@ describe('pending roleplay check state', () => {
         expect(gameReducer(combatState, { type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal })).toBe(combatState);
     });
 
-    it('appends a heat-ledger entry per proposal, replacing a same-message re-proposal', () => {
+    it('appends a heat-ledger entry per proposal, replacing a re-proposal by lineage even after new messages', () => {
         const withMessages = {
             ...initialGameState,
             messages: Array.from({ length: 6 }, () => ({ role: 'user', content: 'x' })),
         };
-        const proposed = gameReducer(withMessages, { type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
-        expect(proposed.recentChecks).toEqual([{ messageIndex: 6, dc: 10, skill: 'insight' }]);
+        const proposed = gameReducer(withMessages, { type: 'PROPOSE_ROLEPLAY_CHECK', payload: { ...proposal, id: 'rc-1' } });
+        expect(proposed.recentChecks).toEqual([{ messageIndex: 6, dc: 10, skill: 'insight', proposalId: 'rc-1' }]);
 
-        // A challenge REVISE re-proposes at the same message count — no double-count.
-        const revised = gameReducer(proposed, {
+        // A challenge REVISE lands AFTER the "Roll challenge" line and the hidden
+        // ruling message — a different messageIndex — but supersedes rc-1, so the
+        // same moment is counted once (the old same-index rule never fired live).
+        const afterChallenge = {
+            ...proposed,
+            messages: [...proposed.messages, { role: 'user', content: 'challenge' }, { role: 'assistant', content: '', hidden: true }],
+        };
+        const revised = gameReducer(afterChallenge, {
             type: 'PROPOSE_ROLEPLAY_CHECK',
-            payload: { ...proposal, rolls: [{ type: 'skill_check', skill: 'insight', dc: 8 }] },
+            payload: { ...proposal, id: 'rc-2', supersedesId: 'rc-1', rolls: [{ type: 'skill_check', skill: 'insight', dc: 8 }] },
         });
-        expect(revised.recentChecks).toEqual([{ messageIndex: 6, dc: 8, skill: 'insight' }]);
+        expect(revised.recentChecks).toEqual([{ messageIndex: 8, dc: 8, skill: 'insight', proposalId: 'rc-2' }]);
+
+        // A genuinely new proposal (no lineage) at a later index appends.
+        const later = { ...revised, messages: [...revised.messages, { role: 'user', content: 'y' }] };
+        const fresh = gameReducer(later, { type: 'PROPOSE_ROLEPLAY_CHECK', payload: { ...proposal, id: 'rc-3' } });
+        expect(fresh.recentChecks.map(e => e.proposalId)).toEqual(['rc-2', 'rc-3']);
+    });
+
+    it('LOAD_GAME types and clamps hostile roll fields on a restored proposal (2026-09-02 audit)', () => {
+        const loaded = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: initialGameState.character,
+                inventory: [],
+                pendingRoleplayCheck: {
+                    id: 'rc-hostile',
+                    playerAction: 'I pick the lock.',
+                    rolls: [
+                        { type: 'skill_check', skill: 'sleight of hand', dc: -100, advantage: 'yes' },
+                        { type: 'skill_check', skill: 'perception', dc: '12', disadvantage: 0, modifier: '40', damage: { evil: true } },
+                    ],
+                },
+            },
+        });
+        const [lock, spot] = loaded.pendingRoleplayCheck.rolls;
+        expect(lock.dc).toBe(0);            // clamped — never a guaranteed-success negative DC
+        expect(lock.advantage).toBe(true);  // boolean, not the string "yes"
+        expect(spot.dc).toBe(10);           // a string DC is not a number: the parser default
+        expect(spot.disadvantage).toBe(false);
+        expect(spot.modifier).toBeNull();
+        expect(spot.damage).toBeNull();
     });
 
     it('records no-dice rulings, capping the ledger and rejecting malformed entries', () => {

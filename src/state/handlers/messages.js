@@ -58,9 +58,12 @@ export const handlers = {
             pendingRoleplayCheck,
             // Heat ledger: a proposed check is engine evidence the scene has
             // opposition and stakes, whatever the player or dice do with it.
+            // A re-proposal (challenge ruling, chained follow-up) carries the
+            // superseded proposal's id so the same moment is counted once.
             recentChecks: appendRecentCheck(
                 state.recentChecks,
                 buildRecentCheckEntry(pendingRoleplayCheck, (state.messages || []).length),
+                pendingRoleplayCheck.supersedesId,
             ),
         };
     },

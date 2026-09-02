@@ -106,7 +106,7 @@ export function validateCombatStart(combatStart) {
     };
 }
 
-function normalizeRequestedRoll(r) {
+export function normalizeRequestedRoll(r) {
     return {
         type: r.type || 'skill_check',
         // Type-guarded like dc/modifier: a truthy non-string (array/number)

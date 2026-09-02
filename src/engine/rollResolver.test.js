@@ -181,7 +181,10 @@ describe('player attack uses live enemy AC, not the DM dc', () => {
 });
 
 describe('death saves', () => {
-    const dyingChar = { currentHP: 0, dying: true, deathSaves: { successes: 0, failures: 0 }, conditions: ['Unconscious'] };
+    // Level 5: a dying L1-2 hero with no standing companion is low-level solo and
+    // never rolls (the reducer converts the save into a setback — see the
+    // low-level-solo describe below); real death saves need a hero past that band.
+    const dyingChar = { level: 5, currentHP: 0, dying: true, deathSaves: { successes: 0, failures: 0 }, conditions: ['Unconscious'] };
 
     it('10+ is a success and dispatches DEATH_SAVE_RESULT', () => {
         rollQueue.push(15);
@@ -608,6 +611,161 @@ describe('post-roll outcome carries player-action context', () => {
 
         const [, , opts] = sendToLLM.mock.calls[0];
         expect(opts.playerActionContext).toBe('I buy another dagger.');
+    });
+
+    it('sends the outcome call as a FIRST-CLASS turn: the player action rides as the second argument (2026-09-02 P1)', async () => {
+        // The runner's second argument gates memory retrieval, semantic text-roll
+        // detection, the roll arbiter, and pre-narration detection. The follow-up
+        // used to pass `undefined` and got none of them.
+        rollQueue.push(10);
+        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [] });
+
+        await handleRequestedRolls(
+            [{ type: 'skill_check', skill: 'perception', dc: 10, description: 'Search the tomb' }],
+            {
+                getState: () => ({ character: makeCharacter(), inventory: [], combat: { active: false, enemies: [] }, party: [] }),
+                dispatch: vi.fn(),
+                sendToLLM,
+                playerAction: 'I search the tomb',
+            }
+        );
+
+        expect(sendToLLM).toHaveBeenCalledTimes(1);
+        expect(sendToLLM).toHaveBeenCalledWith(
+            expect.stringContaining('Dice rolled'),
+            'I search the tomb',
+            expect.objectContaining({ playerActionContext: 'I search the tomb', suppressHpEvents: false }),
+        );
+    });
+});
+
+describe('follow-up check rejected by the roll arbiter (2026-09-02 P1)', () => {
+    const state = () => ({ character: makeCharacter(), inventory: [], combat: { active: false, enemies: [] }, party: [] });
+    const climb = [{ type: 'skill_check', skill: 'athletics', dc: 10, description: 'Climb the wall' }];
+
+    it('hands an agency rejection to onFollowUpRejected instead of staging or silently dropping it', async () => {
+        rollQueue.push(15);
+        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [], _playerAuthorityRollRejected: true });
+        const onFollowUpRolls = vi.fn();
+        const onFollowUpRejected = vi.fn().mockResolvedValue(undefined);
+
+        await handleRequestedRolls(climb, { getState: state, dispatch: vi.fn(), sendToLLM, playerAction: 'I climb.', onFollowUpRolls, onFollowUpRejected });
+
+        expect(onFollowUpRolls).not.toHaveBeenCalled();
+        expect(onFollowUpRejected).toHaveBeenCalledWith({ attackAsCheck: false });
+    });
+
+    it('flags an attack-as-check rejection so the caller takes the combat_start correction route', async () => {
+        rollQueue.push(15);
+        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [], _attackAsCheckRejected: true });
+        const onFollowUpRejected = vi.fn().mockResolvedValue(undefined);
+
+        await handleRequestedRolls(climb, { getState: state, dispatch: vi.fn(), sendToLLM, playerAction: 'I climb.', onFollowUpRejected });
+
+        expect(onFollowUpRejected).toHaveBeenCalledWith({ attackAsCheck: true });
+    });
+});
+
+describe('low-level solo death save mirrors the reducer (2026-09-02 audit)', () => {
+    const dyingL1 = { level: 1, currentHP: 0, dying: true, deathSaves: { successes: 0, failures: 2 }, conditions: ['Unconscious'] };
+
+    it('rolls no die and posts no death line when the only companion is down', () => {
+        // Two failures banked: a real die below 10 would have narrated a DEATH the
+        // reducer never recorded. No die is queued — a draw would throw.
+        const { results, dispatch } = runWithContext([{ type: 'death_save' }], {
+            character: dyingL1,
+            party: [{ id: 'c1', name: 'Bo', hp: 0, maxHp: 10, ac: 10, status: 'downed' }],
+        });
+
+        expect(results[0]).toMatchObject({ type: 'note', text: expect.stringContaining('No death saving throw is rolled') });
+        expect(results[0].text).not.toMatch(/character dies|is dead/i);
+        // The reducer applies the setback (and posts its own "Death save skipped" line).
+        expect(dispatch).toHaveBeenCalledWith({ type: 'DEATH_SAVE_RESULT', payload: { die: null } });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ROLL' }));
+        const deathLine = dispatch.mock.calls.map(([a]) => a).find(a => a.type === 'ADD_MESSAGE' && a.payload?.isDeathEvent);
+        expect(deathLine).toBeUndefined();
+        expect(formatRollSummary(results)).not.toContain('DEAD');
+    });
+
+    it('control: a standing companion means a real death save', () => {
+        rollQueue.push(4);
+        const { results, dispatch } = runWithContext([{ type: 'death_save' }], {
+            character: dyingL1,
+            party: [{ id: 'c1', name: 'Bo', hp: 6, maxHp: 10, ac: 10 }],
+        });
+        expect(results[0]).toMatchObject({ type: 'death_save', rolled: 4, outcome: 'dead' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'DEATH_SAVE_RESULT', payload: { die: 4 } });
+    });
+});
+
+describe('Sneak Attack ally condition reads the working party copies (2026-09-02 audit)', () => {
+    const rogue = {
+        name: 'Nix',
+        class: 'rogue',
+        level: 3, // 2d6 Sneak Attack
+        currentHP: 20,
+        maxHP: 20,
+        abilityScores: { strength: 10, dexterity: 16, constitution: 12, intelligence: 10, wisdom: 10, charisma: 10 },
+        conditions: [],
+    };
+    const inventory = [{ id: 'rapier', type: 'weapon', finesse: true, damage: '1d8', equipped: true }];
+    const combat = () => ({ enemies: [{ id: 'orc-1', name: 'Orc', hp: 30, maxHp: 30, ac: 10 }] });
+    const party = () => [{ id: 'c1', name: 'Bo', hp: 5, maxHp: 10, ac: 8 }];
+
+    it('control: a standing ally grants Sneak Attack without advantage', () => {
+        rollQueue.push(15); // to-hit
+        rollQueue.push(5);  // 1d8 weapon
+        rollQueue.push(3, 4); // 2d6 sneak
+        const { results } = runWithContext(
+            [{ type: 'attack_roll', skill: 'attack', target: 'orc-1' }],
+            { character: rogue, inventory, combat: combat(), party: party() },
+        );
+        expect(results[0]).toMatchObject({ success: true, damage: 5 + 3 + 7 });
+    });
+
+    it('a companion downed earlier in the same batch no longer grants the ally condition', () => {
+        rollQueue.push(18); // Orc attacks Bo: hits AC 8
+        rollQueue.push(6);  // 1d6 damage → Bo drops to 0
+        rollQueue.push(15); // rogue to-hit
+        rollQueue.push(5);  // 1d8 weapon — NO sneak dice queued; a draw would throw
+        const { results, dispatch } = runWithContext(
+            [
+                { type: 'npc_attack', attacker: 'Orc', target: 'c1', modifier: 2, damage: '1d6' },
+                { type: 'attack_roll', skill: 'attack', target: 'orc-1' },
+            ],
+            { character: rogue, inventory, combat: combat(), party: party() },
+        );
+        expect(results[0]).toMatchObject({ type: 'npc_attack', success: true, targetHp: 0 });
+        expect(results[1]).toMatchObject({ success: true, damage: 5 + 3 });
+        expect(messagesFrom(dispatch)).not.toContain('Sneak Attack');
+    });
+});
+
+describe('a proposal whose every roll resolves to nothing (2026-09-02 audit)', () => {
+    const state = () => ({ character: makeCharacter(), inventory: [], combat: { active: false, enemies: [] }, party: [] });
+    const initiativeOnly = [{ type: 'skill_check', skill: 'initiative', dc: 10 }];
+
+    it('reveals the withheld setup, posts a set-aside line, and makes no outcome call', async () => {
+        const dispatch = vi.fn();
+        const sendToLLM = vi.fn();
+
+        const outcome = await handleRequestedRolls(initiativeOnly, {
+            getState: state, dispatch, sendToLLM, playerAction: 'I draw steel.', setupMessageId: 'msg-setup-9',
+        });
+
+        expect(outcome).toEqual({ resolved: false, nothingToRoll: true });
+        expect(sendToLLM).not.toHaveBeenCalled();
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REVEAL_MESSAGE', payload: { id: 'msg-setup-9' } });
+        expect(messagesFrom(dispatch)).toContain('no dice were rolled and the check is set aside');
+    });
+
+    it('never reveals a setup that pre-narrated an outcome', async () => {
+        const dispatch = vi.fn();
+        await handleRequestedRolls(initiativeOnly, {
+            getState: state, dispatch, sendToLLM: vi.fn(), playerAction: 'I draw steel.', setupMessageId: 'msg-setup-9', preNarrated: true,
+        });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'REVEAL_MESSAGE' }));
+        expect(messagesFrom(dispatch)).toContain('the check is set aside');
     });
 });
 

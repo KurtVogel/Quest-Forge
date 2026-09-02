@@ -348,6 +348,11 @@ describe('turn runner — challenge ruling (both branches)', () => {
         expect(staged.setupMessageId).toBe('msg-setup-1');
         // The challenge itself entered the visible transcript.
         expect(getState().messages.some(m => m.role === 'user' && /Roll challenge/.test(m.content || ''))).toBe(true);
+        // Heat ledger: the re-adjudicated moment counts ONCE — the revised proposal
+        // supersedes the original by lineage even though the challenge line and the
+        // hidden ruling message moved the messageIndex (2026-09-02 audit).
+        expect(getState().recentChecks).toHaveLength(1);
+        expect(getState().recentChecks[0]).toMatchObject({ dc: 12, proposalId: staged.id });
     });
 
     it('records a durable withdrawn ruling when the DM narrates on without dice', async () => {
@@ -429,6 +434,61 @@ describe('turn runner — change approach (reveal + set-aside ruling)', () => {
         expect(getState().recentRulings).toHaveLength(1);
         expect(getState().messages.some(m => m.role === 'system'
             && m.content === 'The proposed check is set aside. Describe a different approach; no dice were rolled.')).toBe(true);
+    });
+});
+
+describe('turn runner — the post-roll outcome is a first-class turn (2026-09-02 P1)', () => {
+    it('runs the roll arbiter on a chained check: a belief/innocence check after a truthful answer is rejected and corrected', async () => {
+        // Outcome narration chains a persuasion check whose only purpose is whether
+        // Galdric BELIEVES the hero — the sync arbiter rejects it (no machinery key
+        // in this harness), the rejected narration is withheld, and the runner
+        // sends the no-dice correction exactly as the first hop's routing does.
+        const outcome = 'Galdric studies the ring, then you.\n'
+            + '```json\n{"requested_rolls": [{"type": "skill_check", "skill": "persuasion", "dc": 12,'
+            + ' "description": "Convince Galdric of your innocent intentions"}]}\n```';
+        const streamMessage = scriptedStream([outcome, 'Galdric grunts, unconvinced but unwilling to press it.']);
+        const { runner, getState } = createHarness({ streamMessage, sendMessage: vi.fn(async () => '') });
+        runner.stageRoleplayCheck(
+            [{ type: 'skill_check', skill: 'perception', dc: 10, description: 'Read the room' }],
+            'Honestly, it was my mother\'s ring — I am telling the truth.',
+        );
+
+        await runner.acceptRoleplayCheck();
+
+        expect(streamMessage).toHaveBeenCalledTimes(2);
+        // The outcome call carried the player action as the runner's second argument.
+        expect(streamMessage.mock.calls[0][0].userMessage).toContain('Dice rolled');
+        expect(streamMessage.mock.calls[1][0].userMessage).toContain('incorrectly requested a check');
+        expect(getState().pendingRoleplayCheck).toBeNull();
+        const assistants = getState().messages.filter(m => m.role === 'assistant');
+        expect(assistants.at(-2).hidden).toBe(true);  // the rejected chained setup
+        expect(assistants.at(-1).hidden).toBe(false); // the correction narration stands
+    });
+
+    it('re-stages a pre-narrated chained check with preNarrated: true and lineage to the resolved proposal', async () => {
+        const outcome = 'You slip past the sergeant and you notice a second guard at the inner door.\n'
+            + '```json\n{"requested_rolls": [{"type": "skill_check", "skill": "stealth", "dc": 12,'
+            + ' "description": "Slip past the inner guard"}]}\n```';
+        const { runner, getState } = createHarness({
+            streamMessage: scriptedStream([outcome]),
+            sendMessage: vi.fn(async () => ''),
+        });
+        runner.stageRoleplayCheck(
+            [{ type: 'skill_check', skill: 'stealth', dc: 12, description: 'Slip past the sergeant' }],
+            'I sneak past the sergeant.',
+        );
+        const firstId = getState().pendingRoleplayCheck.id;
+
+        await runner.acceptRoleplayCheck();
+
+        const staged = getState().pendingRoleplayCheck;
+        expect(staged).toBeTruthy();
+        expect(staged.preNarrated).toBe(true); // "you notice" — the correction note reaches the next roll
+        expect(staged.supersedesId).toBe(firstId);
+        expect(staged.id).not.toBe(firstId);
+        // One heat entry for the moment, not two.
+        expect(getState().recentChecks).toHaveLength(1);
+        expect(getState().recentChecks[0].proposalId).toBe(staged.id);
     });
 });
 

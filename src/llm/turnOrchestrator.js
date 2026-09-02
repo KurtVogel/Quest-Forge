@@ -28,7 +28,7 @@ import { buildSystemPrompt } from './promptBuilder.js';
 import { parseResponse, detectPreNarratedOutcome, normalizeEvents, detectSemanticTextRolls } from './responseParser.js';
 import { applyEvents } from '../state/applyEvents.js';
 import { handleRequestedRolls } from '../engine/rollResolver.js';
-import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../engine/outOfCombatRollPolicy.js';
+import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../engine/outOfCombatRollPolicy.js';
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownLocations, buildKnownStances, runScribe } from './scribe.js';
 import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
@@ -168,7 +168,14 @@ export function createTurnRunner({
      * Send a message to the LLM and process the response.
      * Returns the parsed events (or null).
      * @param {string} userMessage
-     * @param {string} [originalPlayerMessage] - The player's actual input (for Scribe)
+     * @param {string} [originalPlayerMessage] - The player's actual input. Gates the
+     *   narrative-turn stages: memory/dramatic-callback retrieval, semantic text-roll
+     *   detection, the roll arbiter, and pre-narration detection. Post-roll outcome
+     *   calls pass the proposal's playerAction here too (2026-09-02 P1) — the
+     *   outcome is the consequence beat and gets the full pipeline.
+     * @param {object} [opts]
+     * @param {boolean} [opts.skipMemories] - skip ONLY the retrieval stage (the
+     *   blocking query-embed round-trip) while keeping the arbiter and detectors.
      */
     const sendToLLM = async (userMessage, originalPlayerMessage, opts = {}) => {
         // Per-call semantics: a call that commits nothing (combat intent,
@@ -186,7 +193,7 @@ export function createTurnRunner({
         // round-trip delays every combat turn, and the captureInjection would
         // clobber the Memory Inspector's last real (narrative-turn) capture.
         const machineryKey = getMachineryGeminiKey(s.settings);
-        const wantsMemories = !!originalPlayerMessage && !opts.combatIntentOnly;
+        const wantsMemories = !!originalPlayerMessage && !opts.combatIntentOnly && !opts.skipMemories;
         let retrievedMemories = [];
         let dramaticMemories = [];
         if (wantsMemories && machineryKey) {
@@ -448,8 +455,8 @@ Translate the player's committed action into the single bounded combat_exchange 
         }
     };
 
-    const stageRoleplayCheck = (rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null } = {}) => {
-        const proposal = buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed, preNarrated, loot, setupNarrative, setupMessageId });
+    const stageRoleplayCheck = (rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null, supersedesId = null } = {}) => {
+        const proposal = buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, supersedesId });
         if (!proposal) return false;
         dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
         resetRoleplayChallengeUi();
@@ -541,17 +548,30 @@ Translate the player's committed action into the single bounded combat_exchange 
                 playerAction: proposal.playerAction,
                 preNarrated: proposal.preNarrated,
                 setupNarrative: proposal.setupNarrative,
+                setupMessageId: proposal.setupMessageId,
                 onFollowUpRolls: (rolls, meta) => {
                     // Carry declared-but-unapplied loot into the re-staged proposal so the
                     // eventual roll-free outcome still gets the grant-or-deny reminder.
                     // A follow-up response is itself a withheld setup — carry its narration
-                    // the same way so chained checks don't erase fiction either.
+                    // the same way so chained checks don't erase fiction either. The
+                    // lineage id keeps the heat ledger from counting the moment twice.
                     stagedFollowUp = stageRoleplayCheck(rolls, meta.playerAction || proposal.playerAction, {
                         preNarrated: meta.preNarrated,
                         loot: meta.pendingLoot || null,
                         setupNarrative: meta.setupNarrative || '',
                         setupMessageId: meta.setupMessageId || null,
+                        supersedesId: proposal.id,
                     });
+                },
+                // The outcome call now runs the roll arbiter (2026-09-02 P1); a
+                // chained check it rejects takes the same correction routes the
+                // first hop gets in ChatPanel — the rejected narration was withheld.
+                onFollowUpRejected: async ({ attackAsCheck }) => {
+                    if (attackAsCheck) {
+                        await sendToLLM(attackAsCheckCorrectionPrompt(proposal.playerAction), null, { playerActionContext: proposal.playerAction });
+                    } else {
+                        await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
+                    }
                 },
                 pendingLoot: proposal.loot,
             });
@@ -603,6 +623,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                     loot: proposal.loot,
                     setupNarrative: proposal.setupNarrative,
                     setupMessageId: proposal.setupMessageId,
+                    supersedesId: proposal.id, // same moment re-adjudicated: one heat entry
                 });
             } else {
                 // The DM withdrew (or its re-proposal was policy-rejected): this

@@ -137,10 +137,61 @@ describe('reviewOutsideCombatRolls LLM-arbiter path', () => {
         expect(review.rejectedRolls).toEqual([roll]);
     });
 
-    it('accepts a roll with no matching evaluation entry (defaults to approved)', async () => {
+    it('accepts a roll with no matching evaluation entry when the sync floor has no objection', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({ rolls_evaluation: [], pre_narrated_outcome_detected: false }));
         const review = await reviewOutsideCombatRolls([roll], 'I haggle with the merchant.', 'narrative', SETTINGS);
         expect(review.acceptedRolls).toEqual([roll]);
+    });
+
+    describe('fail-closed per roll: the sync rules are the floor (2026-09-02 audit)', () => {
+        const belief = { type: 'skill_check', skill: 'persuasion', dc: 12, description: 'Convince Galdric of your innocent intentions' };
+        const truthful = 'It was my mother\'s. I tell the truth here.';
+
+        it('coerces a string index instead of reading it as a missing (approved) entry', async () => {
+            sendMessage.mockResolvedValue(JSON.stringify({
+                rolls_evaluation: [{ index: '0', approved: false, violation: 'agency', reason: 'Belief-only.' }],
+            }));
+            const review = await reviewOutsideCombatRolls([roll], 'I haggle with the merchant.', 'narrative', SETTINGS);
+            expect(review.rejectedRolls).toEqual([roll]);
+            expect(review.acceptedRolls).toEqual([]);
+        });
+
+        it('treats approved: "false" (string) as a rejection', async () => {
+            sendMessage.mockResolvedValue(JSON.stringify({
+                rolls_evaluation: [{ index: 0, approved: 'false', reason: 'Belief-only.' }],
+            }));
+            const review = await reviewOutsideCombatRolls([roll], 'I haggle with the merchant.', 'narrative', SETTINGS);
+            expect(review.rejectedRolls).toEqual([roll]);
+        });
+
+        it('a missing entry falls back to the sync verdict for that roll', async () => {
+            sendMessage.mockResolvedValue(JSON.stringify({ rolls_evaluation: [] }));
+            const review = await reviewOutsideCombatRolls([belief], truthful, 'narrative', SETTINGS);
+            expect(review.rejectedRolls).toEqual([belief]);
+            expect(review.acceptedRolls).toEqual([]);
+        });
+
+        it('a sync attack-as-check rejection survives an arbiter approve and still flags attackAsCheck', async () => {
+            const attackCheck = { type: 'skill_check', skill: 'strength', dc: 12, description: 'Strike the lookout down before he shouts' };
+            sendMessage.mockResolvedValue(JSON.stringify({
+                rolls_evaluation: [{ index: 0, approved: true, reason: 'Looks fine to me.' }],
+            }));
+            const review = await reviewOutsideCombatRolls([attackCheck], 'I attack the lookout with my longsword.', 'narrative', SETTINGS);
+            expect(review.rejectedRolls).toEqual([attackCheck]);
+            expect(review.acceptedRolls).toEqual([]);
+            expect(review.attackAsCheck).toBe(true);
+        });
+
+        it('an arbiter agency rejection still lands when the sync rules see nothing', async () => {
+            sendMessage.mockResolvedValue(JSON.stringify({
+                rolls_evaluation: [{ index: 0, approved: false, violation: 'agency', reason: 'Demeanor check.' }, { index: 1, approved: true }],
+            }));
+            const other = { type: 'skill_check', skill: 'athletics', dc: 10, description: 'Vault the fence' };
+            const review = await reviewOutsideCombatRolls([roll, other], 'I haggle, then vault the fence.', 'narrative', SETTINGS);
+            expect(review.rejectedRolls).toEqual([roll]);
+            expect(review.acceptedRolls).toEqual([other]);
+            expect(review.attackAsCheck).toBe(false);
+        });
     });
 
     it('falls back to sync rules when the response has no extractable JSON', async () => {

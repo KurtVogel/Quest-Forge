@@ -17,6 +17,7 @@ import { rollWithModifier } from './dice.ts';
 import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES } from './rules.js';
 import { validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
 import { applyUncannyDodge, conditionAwareAttackModifiers, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
+import { isCompanionActive, isLowLevelSolo } from './combatExchange.js';
 
 const ABILITY_NAMES = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 
@@ -171,7 +172,10 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
             const result = resolveDamageRoll(roll, character, dispatch, inventory);
             if (result) results.push(result);
         } else if (roll.type === 'death_save' && character) {
-            const result = resolveDeathSave(character, dispatch);
+            // The pre-batch party, deliberately: DEATH_SAVE_RESULT reads the LIVE
+            // state.party at dispatch time, and working-copy HP only flushes after
+            // this loop — the mirror must see exactly what the reducer will see.
+            const result = resolveDeathSave(character, dispatch, companions);
             if (result) results.push(result);
         } else if (roll.skill && character) {
             const isAttack = roll.type === 'attack_roll' || String(roll.skill).toLowerCase() === 'attack';
@@ -207,7 +211,10 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
                 if (one.success && isAttack && damageNotation && roll.target) {
                     const enemy = findEnemy(roll.target);
                     if (enemy) {
-                        const hasAlly = companions.some(c => (c.hp ?? 0) > 0 && c.status !== 'downed' && c.status !== 'dead');
+                        // Working copies, not the pre-batch party: a companion downed
+                        // earlier in this same batch no longer grants Sneak Attack's
+                        // ally condition (2026-09-02 audit).
+                        const hasAlly = [...companionWork.values()].some(isCompanionActive);
                         const dmg = rollAndShowDamage(damageNotation, `Damage to ${enemy.name}`, dispatch, {
                             crit: one.critical,
                             character,
@@ -294,9 +301,8 @@ export function formatRollSummary(rollResults) {
             }[r.outcome] || `${r.successes}/3 successes, ${r.failures}/3 failures`;
             return `[ROLL RESULT: Death saving throw, rolled ${r.rolled} — ${status}]`;
         }
-        if (r.type === 'initiative') {
-            return `[ROLL RESULT: ${r.description || 'Initiative'}, rolled ${r.rolled}]`;
-        }
+        // (No `initiative` branch: the lane was retired 2026-08-27 — resolvePlayerRoll
+        // skips it with a note before any result exists.)
         // Player attack_roll with inline damage already resolved.
         if (r.type === 'attack_roll' && r.success && r.damage != null) {
             const downed = r.targetHp <= 0 ? ` — ${r.targetName} is DOWNED` : '';
@@ -346,7 +352,13 @@ function formatPendingLootNote(pendingLoot) {
  * @param {function} options.getState - Returns current game state
  * @param {function} options.dispatch - Game state dispatch
  * @param {function} options.sendToLLM - Function to send follow-up to LLM
- * @returns {Promise<{resolved: boolean, requiresCombatExchange?: boolean}>}
+ * @param {string} [options.setupMessageId] - id of the withheld setup message, so a
+ *   proposal whose every roll resolves to nothing can reveal it (never re-established
+ *   otherwise — 2026-09-02 audit).
+ * @param {function} [options.onFollowUpRejected] - called when the roll arbiter
+ *   rejected every check the outcome chained (`{ attackAsCheck }`); the caller owns
+ *   the correction response, exactly like the first hop's routing.
+ * @returns {Promise<{resolved: boolean, requiresCombatExchange?: boolean, nothingToRoll?: boolean}>}
  */
 export async function handleRequestedRolls(requestedRolls, {
     getState,
@@ -355,8 +367,10 @@ export async function handleRequestedRolls(requestedRolls, {
     preNarrated = false,
     playerAction = '',
     onFollowUpRolls = null,
+    onFollowUpRejected = null,
     pendingLoot = null,
     setupNarrative = '',
+    setupMessageId = null,
 }) {
     const state = getState();
     const character = state.character;
@@ -377,87 +391,119 @@ export async function handleRequestedRolls(requestedRolls, {
         dispatch,
     });
 
+    // Every proposed roll resolved to nothing (an initiative-only request, a
+    // malformed damage-only batch): no dice, so no outcome call. Leave the table
+    // sane instead of silently stranding it — the withheld setup would otherwise
+    // never be revealed or re-established (the Change-approach REVEAL pattern;
+    // a pre-narrated setup stays hidden for the same reason it does there).
+    if (rollResults.length === 0) {
+        if (setupMessageId && !preNarrated) {
+            dispatch({ type: 'REVEAL_MESSAGE', payload: { id: setupMessageId } });
+        }
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+                role: 'system',
+                content: 'None of the proposed rolls could be resolved — no dice were rolled and the check is set aside. Describe what you do next.',
+            },
+        });
+        return { resolved: false, nothingToRoll: true };
+    }
+
     // Auto follow-up: send roll results back to DM and get outcome narration.
     // The summary rides ONLY the follow-up user message below — the old extra
     // hidden system dispatch was write-only ballast: excluded by every consumer
     // (window, journal, chronicler, priming, fronts) and never rendered, pure
     // per-check save growth (2026-08-03 audit).
-    if (rollResults.length > 0) {
-        const summary = formatRollSummary(rollResults);
+    const summary = formatRollSummary(rollResults);
 
-        // Auto-trigger follow-up: DM narrates the outcome
-        console.log('[RollResolver] 🔄 Auto-triggering follow-up LLM call with roll results');
+    // Auto-trigger follow-up: DM narrates the outcome
+    console.log('[RollResolver] 🔄 Auto-triggering follow-up LLM call with roll results');
 
-        try {
-            const correctionNote = preNarrated
-                ? `\n\n[IMPORTANT: Your previous response pre-narrated an outcome before seeing these dice results. The roll result above is the authoritative truth. Narrate the TRUE outcome based solely on these dice — completely discard any outcome you wrote before seeing the roll.]`
-                : '';
+    try {
+        const correctionNote = preNarrated
+            ? `\n\n[IMPORTANT: Your previous response pre-narrated an outcome before seeing these dice results. The roll result above is the authoritative truth. Narrate the TRUE outcome based solely on these dice — completely discard any outcome you wrote before seeing the roll.]`
+            : '';
 
-            // The withheld setup was stripped from both the player's view and your own
-            // history window, so any fresh fiction it introduced exists nowhere else —
-            // hand it back so the outcome narration can re-establish it.
-            const setupText = String(setupNarrative || '').trim().slice(0, 4000);
-            const setupNote = setupText
-                ? `\n\n[CONTEXT — your own setup narration for this beat, which the player NEVER saw (it was withheld pending these dice): """${setupText}""" Re-establish the scene elements and any new fiction it introduced (arrivals, terrain, discoveries, dialogue) in your outcome narration so nothing is lost — but the ROLL RESULT lines are the sole authority on success or failure.]`
-                : '';
+        // The withheld setup was stripped from both the player's view and your own
+        // history window, so any fresh fiction it introduced exists nowhere else —
+        // hand it back so the outcome narration can re-establish it.
+        const setupText = String(setupNarrative || '').trim().slice(0, 4000);
+        const setupNote = setupText
+            ? `\n\n[CONTEXT — your own setup narration for this beat, which the player NEVER saw (it was withheld pending these dice): """${setupText}""" Re-establish the scene elements and any new fiction it introduced (arrivals, terrain, discoveries, dialogue) in your outcome narration so nothing is lost — but the ROLL RESULT lines are the sole authority on success or failure.]`
+            : '';
 
-            const hpNote = appliedHp
-                ? ` Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken or enemy_updates for them.`
-                : '';
+        const hpNote = appliedHp
+            ? ` Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken or enemy_updates for them.`
+            : '';
 
-            const lootNote = formatPendingLootNote(pendingLoot);
-            let followUpNarrative = '';
-            const followUpEvents = await sendToLLM(
-                `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) Never narrate a result that is not supported by the rolls below. (5) If the result starts combat, declare combat_start; active combat actions use combat_exchange rather than requested_rolls. (6) Do NOT re-emit coin, loot, XP, purchase, or rest events that were already applied on this or earlier turns — recapping money or rewards already handled is narration only, never an event.${lootNote}]${correctionNote}${setupNote}\n\n${summary}`,
-                undefined,
-                {
-                    suppressHpEvents: appliedHp,
-                    playerActionContext: playerAction,
-                    onNarrative: text => { followUpNarrative = text; },
-                }
-            );
-
-            // Handle any genuinely new outside-combat follow-up roll (e.g. a triggered save).
-            // A follow-up response is itself a withheld setup, so any declared loot is still
-            // unapplied — carry the pending-loot reminder until a roll-free outcome lands.
-            if (followUpEvents?.requestedRolls?.length > 0) {
-                // The follow-up response is itself a withheld setup when hidden — carry
-                // its narration forward so chained checks can't erase fiction either.
-                const followUpSetup = followUpEvents._setupHidden ? followUpNarrative : '';
-                if (onFollowUpRolls) {
-                    onFollowUpRolls(followUpEvents.requestedRolls, {
-                        playerAction,
-                        preNarrated: followUpEvents._preNarratedOutcome || false,
-                        pendingLoot,
-                        setupNarrative: followUpSetup,
-                        setupMessageId: followUpEvents._setupHidden ? followUpEvents._setupMessageId : null,
-                    });
-                } else {
-                    // Follow-up rolls always re-stage as a fresh proposal via the
-                    // caller's handler; there is no recursive resolution path anymore.
-                    console.warn('[RollResolver] Follow-up rolls dropped — no onFollowUpRolls handler was provided.');
-                }
+        const lootNote = formatPendingLootNote(pendingLoot);
+        let followUpNarrative = '';
+        // The player's action rides as the runner's second argument (2026-09-02
+        // P1): the outcome narration is the consequence beat, and that argument
+        // gates memory/dramatic-callback retrieval, semantic text-roll detection,
+        // the roll arbiter, and pre-narration detection — the follow-up used to
+        // pass `undefined` and was the one narrative call built with none of
+        // them. playerActionContext stays for the transaction replay guard.
+        const followUpEvents = await sendToLLM(
+            `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) Never narrate a result that is not supported by the rolls below. (5) If the result starts combat, declare combat_start; active combat actions use combat_exchange rather than requested_rolls. (6) Do NOT re-emit coin, loot, XP, purchase, or rest events that were already applied on this or earlier turns — recapping money or rewards already handled is narration only, never an event.${lootNote}]${correctionNote}${setupNote}\n\n${summary}`,
+            playerAction || undefined,
+            {
+                suppressHpEvents: appliedHp,
+                playerActionContext: playerAction,
+                onNarrative: text => { followUpNarrative = text; },
             }
-        } catch (e) {
-            // A deliberate Stop is not a failure (2026-08-31 P2): the player
-            // chose the silence, the roll line above stands, and their next
-            // message resumes the scene — an error banner here was pure noise.
-            if (e?.name === 'AbortError') {
-                console.log('[RollResolver] Follow-up narration stopped by the player; the roll stands.');
-                return { resolved: rollResults.length > 0 };
+        );
+
+        // Handle any genuinely new outside-combat follow-up roll (e.g. a triggered save).
+        // A follow-up response is itself a withheld setup, so any declared loot is still
+        // unapplied — carry the pending-loot reminder until a roll-free outcome lands.
+        if (followUpEvents?.requestedRolls?.length > 0) {
+            // The follow-up response is itself a withheld setup when hidden — carry
+            // its narration forward so chained checks can't erase fiction either.
+            const followUpSetup = followUpEvents._setupHidden ? followUpNarrative : '';
+            if (onFollowUpRolls) {
+                onFollowUpRolls(followUpEvents.requestedRolls, {
+                    playerAction,
+                    preNarrated: followUpEvents._preNarratedOutcome || false,
+                    pendingLoot,
+                    setupNarrative: followUpSetup,
+                    setupMessageId: followUpEvents._setupHidden ? followUpEvents._setupMessageId : null,
+                });
+            } else {
+                // Follow-up rolls always re-stage as a fresh proposal via the
+                // caller's handler; there is no recursive resolution path anymore.
+                console.warn('[RollResolver] Follow-up rolls dropped — no onFollowUpRolls handler was provided.');
             }
-            // The dice landed but the outcome narration didn't. Say so visibly — the
-            // exception never escapes to ChatPanel's own error surfacing, so without
-            // this line the player just sees a roll followed by silence.
-            console.warn('[RollResolver] Follow-up narration failed:', e);
-            dispatch({
-                type: 'ADD_MESSAGE',
-                payload: {
-                    role: 'system',
-                    content: `**Outcome narration failed:** ${e?.message || 'the DM call did not complete'}. Your roll above stands — send any message (even "continue") and the DM will narrate the outcome from it.`,
-                },
-            });
+        } else if (followUpEvents?._attackAsCheckRejected || followUpEvents?._playerAuthorityRollRejected) {
+            // The arbiter rejected every check the outcome chained. That rejected
+            // narration was withheld (setup policy), so without a correction the
+            // player sees dice and then silence — same routing as the first hop.
+            if (onFollowUpRejected) {
+                await onFollowUpRejected({ attackAsCheck: !!followUpEvents._attackAsCheckRejected });
+            } else {
+                console.warn('[RollResolver] Follow-up check rejected by the roll arbiter — no onFollowUpRejected handler was provided.');
+            }
         }
+    } catch (e) {
+        // A deliberate Stop is not a failure (2026-08-31 P2): the player
+        // chose the silence, the roll line above stands, and their next
+        // message resumes the scene — an error banner here was pure noise.
+        if (e?.name === 'AbortError') {
+            console.log('[RollResolver] Follow-up narration stopped by the player; the roll stands.');
+            return { resolved: rollResults.length > 0 };
+        }
+        // The dice landed but the outcome narration didn't. Say so visibly — the
+        // exception never escapes to ChatPanel's own error surfacing, so without
+        // this line the player just sees a roll followed by silence.
+        console.warn('[RollResolver] Follow-up narration failed:', e);
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: {
+                role: 'system',
+                content: `**Outcome narration failed:** ${e?.message || 'the DM call did not complete'}. Your roll above stands — send any message (even "continue") and the DM will narrate the outcome from it.`,
+            },
+        });
     }
 
     return { resolved: rollResults.length > 0 };
@@ -640,14 +686,30 @@ function resolveDamageRoll(roll, character, dispatch, inventory = []) {
  * 10+ = success (3 = stable), 9- = failure (nat 1 = two failures, 3 = dead),
  * nat 20 = back on your feet at 1 HP. State transitions live in the reducer
  * (DEATH_SAVE_RESULT); this mirrors them for the chat line and DM summary.
+ *
+ * The low-level solo guard is asked LIVE (`isLowLevelSolo`, the one shared
+ * predicate) before any die exists, exactly where the reducer asks it: a dying
+ * L1-2 hero whose only companion dropped afterwards used to get a real die and
+ * a "your character dies" line stamped isDeathEvent while the reducer recorded
+ * a non-lethal setback (2026-09-02 audit).
  */
-function resolveDeathSave(character, dispatch) {
+function resolveDeathSave(character, dispatch, party = []) {
     if (!character.dying || character.lowLevelDefeat) {
         return {
             type: 'note',
             text: character.lowLevelDefeat
                 ? 'No death saving throw is rolled: early low-level defeat protection converted this into a non-lethal setback.'
                 : 'No death saving throw is rolled because the player is not dying.',
+        };
+    }
+
+    if (isLowLevelSolo(character, party)) {
+        // No die, no death line: the reducer converts the save into the early
+        // defeat setback and posts its own "Death save skipped" system line.
+        dispatch({ type: 'DEATH_SAVE_RESULT', payload: { die: null } });
+        return {
+            type: 'note',
+            text: 'No death saving throw is rolled: low-level solo protection converted this into a non-lethal defeat setback (the player is down, not dead).',
         };
     }
 
