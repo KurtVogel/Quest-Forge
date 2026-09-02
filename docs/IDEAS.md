@@ -1295,6 +1295,24 @@ tests on the follow-up call shape, a rejected chained belief check, and a pre-na
 follow-up staging `preNarrated: true`. From the 2026-09-02 strengthening audit
 (roll-resolution, Lap 1).
 
+### [strengthening] One engine decision for "defeat or death?" at every 0-HP transition — status: `idea` (2026-09-02)
+DECISIONS.md 2026-07-17 unified the low-level-solo PREDICATE (`isLowLevelSolo` via
+`isCompanionActive`) but left the DECISION POINT in four places, and one day's audits found
+three of them disagreeing: `rollResolver.resolveDeathSave` mirrors the reducer's death-save
+state machine but guards on the stale `lowLevelDefeat` flag; `combatExchange.terminalState`
+re-checks solo only on the not-yet-dying branch, so a dying hero whose companion drops later
+gets `terminal: 'dying'` from the engine and `lowLevelDefeat` from the reducer — a combat that
+can never end on its own (every later action is rejected as "defeated"); and `applyEvents`'
+`player_death` branch still uses the pre-07-17 `party.length === 0` definition, so a DM
+`player_death` permanently kills a downed-companion hero the safety block told the DM was
+protected. Proposal: one engine function — say `resolveZeroHpOutcome(character, party, {
+die, damage })` in `handlers/shared.js` or `engine/progression.js` — that returns
+`'defeat' | 'dying' | 'dead' | 'stable' | 'revived'` and is the ONLY place that consults
+`isLowLevelSolo`; `TAKE_DAMAGE`, `DEATH_SAVE_RESULT`, `PLAYER_DEFEAT`, `terminalState`,
+`resolveDeathSave` and the `player_death` route all read it. Then a single test table pins
+every (level, companion state, die) cell once, instead of four suites each pinning a slice.
+From the 2026-09-02 strengthening audit (combat-exchange r2 + roll-resolution, Lap 1).
+
 ### Low-level death-save lethality with a companion present — status: `observation` (playtest #11, 2026-07-22)
 The low-level solo 0-HP mercy (non-lethal setback) correctly does NOT apply when a
 battle-ready companion is present (`isCompanionActive`, DECISIONS.md 2026-07-17) — so a
