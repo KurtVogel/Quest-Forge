@@ -1295,6 +1295,36 @@ tests on the follow-up call shape, a rejected chained belief check, and a pre-na
 follow-up staging `preNarrated: true`. From the 2026-09-02 strengthening audit
 (roll-resolution, Lap 1).
 
+### Premise-fixed prices vs the DM's realism prior — status: `observation` (money-traffic playtest, 2026-09-03)
+The playtest premise made "healing potions for exactly 3 gold" canon at Marla's stall; Gemini
+3.1 Pro refused the sale in character ("three gold wouldn't buy a thimble of the real
+stuff") — its price sense (and the 50 gp catalog price the ECONOMY block carries) beat DM
+rule 8's "never contradict the premise". Open question, not a bug: should a premise-stated
+price bind the DM over catalog prices? If yes, one line in the ECONOMY block ("a price the
+CAMPAIGN PREMISE fixes is canon and overrides the catalog") would do it; if no, document
+that the catalog is the price authority and premise prices are flavor. The engine was
+correct either way — a refused sale charges nothing.
+
+### Loss audit misses a RESTATED confiscation; DM reaches for `unequip` where `items_lost` fits — status: `observation` (money-traffic playtest run 1, 2026-09-03)
+When the hero was caged, the DM emitted `equipment_changes: unequip` for the shield and the
+narration said "your confiscated longsword and shield sit out of reach". The loss audit
+removed the longsword on the turn that first narrated it confiscated, but the shield stayed
+in inventory (unequipped) and the next turn's restatement ("your confiscated ... shield")
+did not trigger the loss audit. Two candidate fixes: (a) the ECONOMY prompt's inverse rule
+could say confiscation/robbery = `items_lost`, not `unequip`; (b) the loss audit could treat
+"confiscated/taken/seized <owned item>" as a loss even when phrased as standing state. Low
+priority — a rare fiction, and the sword (the mechanically important piece) WAS caught.
+
+### Playtest-script hygiene: premises as in-world canon, never "I am a developer testing" — status: `lesson` (2026-09-03)
+Run 1 of the money-traffic playtest opened its premise with "I am a developer play-testing
+this game's money handling" (the 2026-07-31 economy script's framing). Gemini 3.1 Pro
+treated every premise element as the hero's delusion, had the vendor scream for guards the
+premise said did not exist, and caged the hero for 9 turns. Run 2 rewrote the same facts as
+third-person town canon and 17/20 turns landed. Also: a scripted action that pre-narrates an
+external outcome ("when Dodd lunges at me, I cut him down") makes the DM withhold the foe
+(player-authority rule) — script fights as approaches ("I walk to the crossroads, sword
+drawn"), not outcomes. `scripts/playtest_money_traffic_20.cjs` carries both lessons.
+
 ### Dispute a narrated death — the roleplay-check "Challenge ruling" pattern for `player_death` — status: `idea` (2026-09-02)
 Out-of-combat `player_death` is the one DM channel that ends a campaign irreversibly
 (resurrection is cut by design) and it has no mechanical precondition on purpose

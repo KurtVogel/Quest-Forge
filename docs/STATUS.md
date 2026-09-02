@@ -6,7 +6,42 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-02 (queue sweep of both 2026-09-02 audit rounds: 4 P1s + 14 P2s cleared)._
+_Last updated: 2026-09-03 (20-round money-traffic playtest x2 on top of the 2026-09-02 queue sweep; deployed)._
+
+## 2026-09-03 — 20-round money-traffic playtest (vendor, corpses, bounty, toll, alms): the purse is exact
+
+Vesa asked for a 20-round game test of money traffic. New harness
+`scripts/playtest_money_traffic_20.cjs` (puppeteer + dev server + real Gemini DM): every
+turn carries the coin delta the premise's fixed prices imply, the purse is watched 16s after
+each DM reply for late Scribe-audit deltas, inventory rows are read each turn, and the verdict
+flags double charges/grants, between-turn drift, duplicate rows, and premise mismatches.
+Two runs, artifacts in `test-results/playtest_money_20*/` (report.json, console.log,
+per-turn screenshots).
+**Engine verdict — clean on both runs:** zero late deltas, zero between-turn drift, zero
+duplicate inventory rows, zero double charges or grants. Every applied movement posted its
+receipt line and the Scribe audits stood down every time the event path had already moved
+the coin (7 stand-downs logged: nest loot, bounty, room, toll, alms, ...). Run 2: 17/20
+turns matched the premise-implied delta EXACTLY (rope, torches, torch resale, nest coins +7
+cp with correct 9 sp 16 cp → 1 gp 6 cp consolidation, bounty, ring in then sold for 5 sp,
+room, toll, alms, 2 rations); the final purse reconciles to the copper. The 3 misses and
+run 1's 8 misses are ALL fiction-void turns — the DM refused or never staged the beat, and
+the engine correctly moved nothing. Combat: the rat fight ran cleanly (initiative, one hit,
++50 XP); run 1's "weak bandit" came out as a Bridge-Warden with two attacks a round, dropped
+the L1 hero with a crit, and the low-level solo defeat setback fired exactly as designed
+(1/12 HP, no death). Recap turns that restated a bounty, a ring sale, or a purse "taken from
+his body" never re-granted anything.
+**DM-adherence observations (logged in IDEAS, not engine bugs):** (1) run 1's premise opened
+with "I am a developer play-testing this game's money handling" and Gemini 3.1 Pro read the
+premise items as the hero's delusions ("screaming about imaginary rats and rings"), then
+arrested and caged him despite the premise's "no guard or watch" — write playtest premises
+as in-world canon; (2) even so, the DM overrode a premise-fixed price when its realism prior
+disagreed (Marla refused the 3 gp healing potion the premise made canon — premise price vs
+catalog/realism is an open prompt question); (3) a pre-narrated ambush ("when Dodd lunges,
+I cut him down") made the DM withhold the foe — the player-authority rule working, but a trap
+for scripted actions; (4) the DM used `equipment_changes: unequip` for a confiscated shield
+where `items_lost` was right, and the loss audit did not catch the later restatement — the
+sword WAS removed by the loss audit. All 2026-09-02 fixes deployed to Firebase Hosting.
+
 
 ## 2026-09-02 — queue sweep: the death seam unified, first-class outcome calls, loud storage
 
