@@ -8,6 +8,82 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-02 · Opening Initiative is engine-owned (no DM intents apply to it); out-of-combat
+`player_death` keeps no mechanical precondition; the low-level-solo predicate has ONE home.**
+Rulings from the sweep of both 2026-09-02 audit rounds (queue lines ticked in
+SCHEDULED_STRENGTHENING.md):
+**(1) Opening Initiative resolves every initiative winner with the engine default** (enemies
+`attack → player`, companions auto-attack) and deliberately ignores any `enemy_intents` /
+`companion_intents` the fight-starting response carried. The 2026-07-17 guard entry already
+accepted this as a scope edge ("no intents exist yet — same as defend"); the audit asked for
+either bounded opening intents or a written rule. The rule: intents the DM declares in the
+same response as `combat_start` were written BEFORE the DM saw who won initiative, and they
+belong to the queued exchange that resolves right after the opening — applying them to the
+opening too would double-use them (a companion `guard` would screen twice, an enemy
+`defend` would cover two rounds). The 2026-08-29 fix's "conditions yes, intents never" stands.
+The fiction-grounded-targeting principle the prompt enforces still applies from the first
+declared exchange on; the opening is the one engine-owned burst.
+**(2) `player_death` outside combat keeps no HP/dying precondition.** The audit flagged that a
+DM `player_death` on a level ≥3 hero at full HP is permanent with only the prompt's
+"unavoidable narrative deaths" rule as guard. Inside combat the channel is already dead: the
+whole-events combat lockout in `applyEvents` drops it, and combat deaths are exchange-owned
+death saves. Outside combat the channel's legitimate cases — an execution, a fall, a
+disintegration — happen at full HP by definition, so an HP gate would only block the honest
+uses and a mechanical rule cannot tell an execution from a hallucination. What DID change:
+the branch now asks the shared `isLowLevelSolo`, so a level ≤2 hero with a DOWNED companion
+gets the defeat setback the safety block promised the DM. A player-side "dispute the death"
+affordance (the roleplay-check challenge pattern) is logged in IDEAS as the right guard if
+hallucinated deaths ever show up in play.
+**(3) One predicate, consulted live at every decision point.** `isLowLevelSolo` now lives in
+`engine/combatExchange.js` beside `isCompanionActive` (re-exported by `handlers/shared.js`);
+the prompt safety block, `terminalState` on BOTH its branches, `DEATH_SAVE_RESULT`, the
+out-of-combat death-save resolver, and `applyEvents`' `player_death` route all call it at the
+moment they decide, never a cached flag or a local party check. The 2026-07-17 entry unified
+the predicate's definition; this one unifies WHERE it is asked — three consumers had drifted
+in one day of audits (a dying hero whose only companion dropped afterwards was "dying" to the
+exchange and "defeated" to the reducer, which soft-locked the fight).
+**(4) The party at the decision point.** A dying hero's death save is judged against the party
+AS IT STOOD AT THE SAVE (the pre-exchange party the engine's `death_save` slot saw); a
+conscious hero dropping to 0 is judged against the POST-exchange party. `APPLY_COMBAT_EXCHANGE`
+therefore commits the party BETWEEN `DEATH_SAVE_RESULT` and `TAKE_DAMAGE` — the exchange's own
+order (player phase → companions → foes) — so the reducer's live check reads the same party
+`terminalState` did. Side effect worth naming: hero + only companion both dropping in one
+exchange is now a defeat setback on BOTH sides (it used to be engine 'defeat' beside reducer
+'dying', which stranded a dying hero out of combat).
+**(5) A natural-20 death save revives BEFORE the enemy phase.** The planner used to run every
+enemy attack against `playerHp = 0` (skipped as "already defeated") and clamp to 1 HP
+afterwards, so a 20 was a free round. 5e: the revived creature is a valid target for everyone
+after it in initiative, and the reducer's own commit order is save → damage. The revived
+projection now feeds the enemy phase and a re-drop is a fresh dying (or solo defeat).
+**(6) The post-roll outcome call is a first-class turn.** The runner's second argument gates
+memory retrieval, semantic text-roll detection, the arbiter, and pre-narration detection; the
+follow-up passed `undefined`, so the consequence beat — the one the north star says to spend
+the LLM on — was the only narrative call built with none of them. It now carries the player's
+action; a chained check the arbiter rejects routes through the same two correction prompts the
+first hop uses. `skipMemories` exists as an explicit retrieval-only knob (dropping the arbiter
+with it would be the wrong trade).
+**(7) The roll arbiter's sync rules are the floor, never replaced.** The LLM verdict used to
+REPLACE the deterministic rules, so a Flash-Lite "approved" on "I attack the lookout" skipped
+the 2026-08-09 attack-as-check guard; index/approved are coerced, a missing entry falls back to
+the sync verdict, and a sync rejection always wins.
+**(8) Heat-ledger replacement keys on proposal lineage.** Every production re-proposal
+(challenge REVISE/UPHOLD, follow-up staging) adds messages first, so the old equal-`messageIndex`
+replace never fired and re-proposals double-counted heat; `supersedesId` carries the lineage.
+**(9) Cloud saves have a 9 MiB pre-flight** (`CLOUD_SAVE_BYTE_LIMIT`, UTF-8 bytes as Firestore
+meters them, 1 MiB headroom under the 10 MiB request ceiling) and `saveGameToCloud` returns
+`{ ok, reason, message }` so `permission-denied` (deploy the chunked `firestore.rules`) and
+`too-large` (play on locally; a larger-save format is a separate feature) are told apart in
+the modal. The too-large message deliberately does NOT say "close a chronicle chapter":
+chapter closes never delete messages, so the save would not shrink.
+**(10) The flush-path second write is gone.** `flush({ action })` records what it replayed and
+the persisted keys it changed; the action's own re-render is recognised and not re-dirtied.
+Accepted edge: a non-deterministic reducer field (a fresh chapter id, an NPC `lastSeen`
+timestamp) can differ trivially between the flushed snapshot and the live state until the next
+autosave — self-consistent on reload, and the second write used to paper over it 2s later.
+**(11) Boot-time storage failure is loud.** `loadAutoSave` is `loadGame(AUTOSAVE_SLOT)`: null only
+for a genuinely missing autosave, any IndexedDB failure rejects, and the start screen shows a
+"store could not be opened, your data is most likely intact" error instead of "no saves".
+
 **2026-09-01 · Resolved is TERMINAL in the engine; a front's dormancy is pacing, not a lesser
 pressure; scene-art renders are abortable and cancel is not a provider failure.** Rulings from
 the sweep of both 2026-09-01 audit rounds (every queue line ticked in

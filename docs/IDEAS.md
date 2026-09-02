@@ -1295,7 +1295,20 @@ tests on the follow-up call shape, a rejected chained belief check, and a pre-na
 follow-up staging `preNarrated: true`. From the 2026-09-02 strengthening audit
 (roll-resolution, Lap 1).
 
-### [strengthening] One engine decision for "defeat or death?" at every 0-HP transition — status: `idea` (2026-09-02)
+### Dispute a narrated death — the roleplay-check "Challenge ruling" pattern for `player_death` — status: `idea` (2026-09-02)
+Out-of-combat `player_death` is the one DM channel that ends a campaign irreversibly
+(resurrection is cut by design) and it has no mechanical precondition on purpose
+(DECISIONS.md 2026-09-02: an execution at full HP is exactly the channel's contract, and the
+engine cannot tell an execution from a hallucination). If hallucinated deaths ever show up in
+play, the right guard is player-side, not an HP gate: stage the death like a roleplay-check
+proposal — the narration renders, the sheet does not flip to dead yet, and the player gets
+**Accept** / **Dispute** once; a dispute sends the DM a one-shot "withdraw or uphold with
+public justification" call exactly like the check challenge, and an upheld ruling is final.
+Not built now: no playtest has reported a hallucinated death, and the staging adds a pending
+state that every death-adjacent consumer (safety block, combat lockout, chronicle) would need
+to honor.
+
+### [strengthening] One engine decision for "defeat or death?" at every 0-HP transition — status: `shipped (predicate half, 2026-09-02)` — the single test table is still open
 DECISIONS.md 2026-07-17 unified the low-level-solo PREDICATE (`isLowLevelSolo` via
 `isCompanionActive`) but left the DECISION POINT in four places, and one day's audits found
 three of them disagreeing: `rollResolver.resolveDeathSave` mirrors the reducer's death-save

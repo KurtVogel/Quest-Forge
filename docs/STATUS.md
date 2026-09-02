@@ -6,7 +6,34 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-01 (queue sweep of both 2026-09-01 audit rounds: 3 P1s + 13 P2s cleared)._
+_Last updated: 2026-09-02 (queue sweep of both 2026-09-02 audit rounds: 4 P1s + 14 P2s cleared)._
+
+## 2026-09-02 — queue sweep: the death seam unified, first-class outcome calls, loud storage
+
+Both 2026-09-02 audit rounds (roll-resolution + persistence; combat-exchange + cloud-sync)
+cleared in one session — every queue line ticked with a fix note; the only open line left is
+the 2026-08-09 pronoun-flip watch item. **The headline (DECISIONS.md 2026-09-02):** three
+consumers of the low-level-solo semantic had drifted in one day of audits, so `isLowLevelSolo`
+is now ONE engine-owned function (`combatExchange.js`, re-exported by `handlers/shared.js`)
+asked live at every decision point — `terminalState` on both branches, the exchange's
+`death_save` slot, `DEATH_SAVE_RESULT`, the out-of-combat death-save resolver, `applyEvents`'
+`player_death`, the prompt safety block. That closes the P1 soft-lock (a dying L1 hero whose
+only companion dropped afterwards was "dying" to the engine and "defeated" to the reducer, so
+every later action was rejected) and the P1 permanent death of a downed-companion hero via DM
+`player_death`. `APPLY_COMBAT_EXCHANGE` commits the party between the death save and damage so
+both sides judge the same party. **Other P1s:** the post-roll outcome call now carries the
+player's action, so it gets memories, the arbiter, and pre-narration detection like every
+other narrative turn (a rejected chained check routes to the first hop's correction prompts);
+boot-time IndexedDB failures set `loadError` instead of rendering "no saves". **P2s:** nat-20
+revives before the enemy phase; in-combat check DC defaults to 10; arbiter sync rules are the
+floor; heat ledger replaces by proposal lineage; hostile-save proposal rolls typed; Sneak
+Attack ally reads the working companions; all-nothing batches reveal the setup; `withDb`
+closes on every path + `onversionchange`; the v2→v3 migration survives a failing put; the
+flush-path second write is gone; `saveGameToCloud` returns `{ ok, reason, message }` with a
+9 MiB pre-flight; Settings save/overwrite catch local failures; the upload loop is per-slot.
+Rulings: Opening Initiative stays engine-owned (no DM intents), out-of-combat `player_death`
+keeps no mechanical precondition (dispute affordance logged in IDEAS). 2,025 tests green
+(+48), lint clean. Not deployed this session.
 
 ## 2026-09-01 — queue sweep: scene-art P1 pair, resolved-is-terminal fronts, dice/scribe P2s
 
