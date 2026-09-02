@@ -19,7 +19,7 @@ import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js
 import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
-import { isCompanionActive } from '../engine/combatExchange.js';
+import { isLowLevelSolo } from '../engine/combatExchange.js';
 import { namesMatch } from '../engine/npcRoster.js';
 
 /**
@@ -891,15 +891,7 @@ function buildPremiseBlock(premise) {
     return `## CAMPAIGN PREMISE (the player's authored foundation — permanent canon, never contradict)\n${premise}`;
 }
 
-/**
- * "Solo" = no battle-ready companion; a party whose companions are all downed
- * leaves the hero just as exposed. Matches the reducer and combat engine
- * (isCompanionActive is the one shared semantic — DECISIONS.md 2026-07-17).
- */
-function isLowLevelSolo(character, party) {
-    return !!character && (character.level ?? 1) <= 2 && !(party || []).some(isCompanionActive);
-}
-
+// "Solo" = no battle-ready companion (engine-owned isLowLevelSolo — DECISIONS.md 2026-07-17).
 function buildLowLevelSoloSafetyBlock(character, party) {
     if (!isLowLevelSolo(character, party)) return '';
 

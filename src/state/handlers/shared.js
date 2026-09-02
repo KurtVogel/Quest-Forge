@@ -10,7 +10,7 @@ import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
 import { NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
-import { COMBAT_PHASES, isCompanionActive } from '../../engine/combatExchange.js';
+import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatExchange.js';
 import {
     appendBondMoments,
     appendCallbackHooks,
@@ -48,13 +48,9 @@ export function applyDeath(character) {
     return { ...character, isDead: true, dying: false, deathSaves: { successes: 0, failures: 0 } };
 }
 
-export function isLowLevelSolo(character, party = []) {
-    // "Solo" means no companion who can actually fight — a party whose only
-    // companion is downed leaves the hero exactly as exposed as having none.
-    // Must match terminalState's semantic in combatExchange.js, or the exchange
-    // can close combat as a defeat-setback while this reducer starts death saves.
-    return !!character && (character.level ?? 1) <= 2 && !(party || []).some(isCompanionActive);
-}
+// The low-level-solo predicate is engine-owned (combatExchange.js) so the exchange
+// engine, the reducer, applyEvents, and the prompt all ask the SAME function live.
+export { isLowLevelSolo };
 
 export function withCondition(character, condition) {
     const conditions = character.conditions || [];
