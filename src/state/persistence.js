@@ -77,25 +77,98 @@ function openDB() {
             }
             if (!db.objectStoreNames.contains(PAYLOAD_STORE)) {
                 db.createObjectStore(PAYLOAD_STORE, { keyPath: 'slotId' });
-                // v2 → v3: move each save's full state payload out of its
-                // metadata record, one-time, inside the versionchange
-                // transaction (the open blocks until the cursor finishes).
-                const saves = event.target.transaction.objectStore(STORE_NAME);
-                const payloads = event.target.transaction.objectStore(PAYLOAD_STORE);
-                saves.openCursor().onsuccess = (cursorEvent) => {
-                    const cursor = cursorEvent.target.result;
-                    if (!cursor) return;
-                    const record = cursor.value;
-                    if (record?.state) {
-                        payloads.put({ slotId: record.slotId, state: record.state });
-                        const { state: _state, ...metadata } = record;
-                        cursor.update(metadata);
-                    }
-                    cursor.continue();
-                };
+                migrateEmbeddedPayloads(event.target.transaction);
             }
         };
     });
+}
+
+/**
+ * v2 → v3: move each save's full state payload out of its metadata record,
+ * one-time, inside the versionchange transaction (the open blocks until the
+ * cursor finishes).
+ *
+ * Every step is per-record and NON-FATAL (2026-09-02 audit): a failed payload
+ * put (quota — peak is ~2× every save inside this one transaction) used to
+ * bubble up and abort the whole upgrade, which failed the open, re-ran the
+ * upgrade on EVERY later open, and so failed every save/load/autosave forever.
+ * Now a failing record simply stays legacy (state still embedded in its
+ * metadata record — `loadGame`'s embedded-state fallback reads it, `listSaves`
+ * strips it) and the metadata is only stripped AFTER its payload landed, so a
+ * record can never lose its state to a put that never happened.
+ */
+function migrateEmbeddedPayloads(transaction) {
+    const saves = transaction.objectStore(STORE_NAME);
+    const payloads = transaction.objectStore(PAYLOAD_STORE);
+    // Cancel the error's default action (aborting the transaction) and keep it
+    // from bubbling to the transaction/database handlers.
+    const keepGoing = (label) => (errorEvent) => {
+        errorEvent.preventDefault?.();
+        errorEvent.stopPropagation?.();
+        console.warn(`[Persistence] Save migration: ${label} — the record stays in its legacy layout.`, errorEvent.target?.error);
+    };
+    const cursorRequest = saves.openCursor();
+    cursorRequest.onerror = keepGoing('cursor failed');
+    cursorRequest.onsuccess = (cursorEvent) => {
+        const cursor = cursorEvent.target.result;
+        if (!cursor) return;
+        const record = cursor.value;
+        if (!record?.state) {
+            cursor.continue();
+            return;
+        }
+        let putRequest = null;
+        try {
+            putRequest = payloads.put({ slotId: record.slotId, state: record.state });
+        } catch (e) {
+            // A synchronous throw (non-cloneable value) is the same outcome: legacy.
+            console.warn('[Persistence] Save migration: payload copy threw — the record stays in its legacy layout.', e);
+            cursor.continue();
+            return;
+        }
+        putRequest.onerror = (errorEvent) => {
+            keepGoing(`payload copy for "${record.slotId}" failed`)(errorEvent);
+            cursor.continue();
+        };
+        putRequest.onsuccess = () => {
+            // Strip the embedded state only now that its copy is in place; the
+            // cursor is still positioned on this record (continue() not yet called).
+            const { state: _state, ...metadata } = record;
+            try {
+                const updateRequest = cursor.update(metadata);
+                // Both copies exist if this fails — loadGame prefers the payload.
+                updateRequest.onerror = keepGoing(`metadata strip for "${record.slotId}" failed`);
+            } catch (e) {
+                console.warn('[Persistence] Save migration: metadata strip threw — both copies remain.', e);
+            }
+            cursor.continue();
+        };
+    };
+}
+
+/**
+ * Open the database, run `execute(db, resolve, reject)` as a Promise
+ * executor, and guarantee the connection is closed however it ends:
+ * commit, abort, a request error, OR a synchronous throw inside the executor
+ * (`DataCloneError` on a non-cloneable snapshot, `InvalidStateError` while the
+ * connection is closing under a cross-tab versionchange, a plain `TypeError`
+ * on a bad snapshot). The per-function `db.close()` calls used to live on the
+ * complete/abort handlers only, so a sync throw rejected the promise and
+ * leaked the connection — and a leaked connection is exactly what blocks
+ * another tab's versioned open until the 8s `onblocked` timeout (2026-09-02
+ * audit). Closing here is the ONE close site; `close()` on an already-closed
+ * connection is a spec no-op, and closing with a transaction still running
+ * merely flags close-pending — the transaction finishes first.
+ */
+async function withDb(execute) {
+    const db = await openDB();
+    // Another tab bumping DB_VERSION must not be held up by this connection.
+    db.onversionchange = () => db.close();
+    try {
+        return await new Promise((resolve, reject) => execute(db, resolve, reject));
+    } finally {
+        db.close();
+    }
 }
 
 /** Max roll history entries to persist. Only last 5 are ever shown in prompt. */
@@ -165,9 +238,8 @@ export function buildSaveMetadata(gameState) {
  * must never see a slot whose payload write failed). Keeps the FULL message
  * history (IndexedDB has no practical size cap) and caps rollHistory.
  */
-export async function saveGame(slotId, gameState) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
+export function saveGame(slotId, gameState) {
+    return withDb((db, resolve, reject) => {
         const tx = db.transaction([STORE_NAME, PAYLOAD_STORE], 'readwrite');
 
         const savedMessages = gameState.messages || [];
@@ -194,19 +266,19 @@ export async function saveGame(slotId, gameState) {
         // fired right after (e.g. the saves dialog refreshing itself) can race the
         // not-yet-committed write and miss it — the list looks unchanged, so you click
         // Save again... and again. (See SettingsModal handleSave.)
+        // withDb closes the connection once this settles, whichever way.
         metadataRequest.onerror = () => reject(metadataRequest.error);
         payloadRequest.onerror = () => reject(payloadRequest.error);
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onabort = () => { db.close(); reject(tx.error || metadataRequest.error || payloadRequest.error); };
+        tx.oncomplete = () => resolve();
+        tx.onabort = () => reject(tx.error || metadataRequest.error || payloadRequest.error);
     });
 }
 
 /**
  * Load game state from a slot.
  */
-export async function loadGame(slotId) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
+export function loadGame(slotId) {
+    return withDb((db, resolve, reject) => {
         const tx = db.transaction([STORE_NAME, PAYLOAD_STORE], 'readonly');
         const request = tx.objectStore(PAYLOAD_STORE).get(slotId);
         request.onsuccess = () => {
@@ -221,19 +293,17 @@ export async function loadGame(slotId) {
             legacyRequest.onerror = () => reject(legacyRequest.error);
         };
         request.onerror = () => reject(request.error);
-        tx.oncomplete = () => db.close();
-        // Close on abort too — a read error otherwise leaks the connection open,
-        // and leaked connections are what make a future versioned open hang blocked.
-        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+        // Reject on abort too — withDb closes the connection on settle either
+        // way (leaked connections are what make a future versioned open hang blocked).
+        tx.onabort = () => reject(tx.error || request.error);
     });
 }
 
 /**
  * List all save slots with metadata.
  */
-export async function listSaves() {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
+export function listSaves() {
+    return withDb((db, resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readonly');
         const store = tx.objectStore(STORE_NAME);
         const request = store.getAll();
@@ -253,8 +323,7 @@ export async function listSaves() {
             resolve(saves);
         };
         request.onerror = () => reject(request.error);
-        tx.oncomplete = () => db.close();
-        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+        tx.onabort = () => reject(tx.error || request.error);
     });
 }
 
@@ -264,32 +333,29 @@ export async function listSaves() {
  * missing slot. Used by the delete flow to check whether the AUTOSAVE slot
  * (excluded from listSaves) still holds a campaign being deleted.
  */
-export async function getSaveSessionId(slotId) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
+export function getSaveSessionId(slotId) {
+    return withDb((db, resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readonly');
         const request = tx.objectStore(STORE_NAME).get(slotId);
         request.onsuccess = () => resolve(request.result?.sessionId || null);
         request.onerror = () => reject(request.error);
-        tx.oncomplete = () => db.close();
-        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+        tx.onabort = () => reject(tx.error || request.error);
     });
 }
 
 /**
  * Delete a save slot.
  */
-export async function deleteSave(slotId) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
+export function deleteSave(slotId) {
+    return withDb((db, resolve, reject) => {
         const tx = db.transaction([STORE_NAME, PAYLOAD_STORE], 'readwrite');
         const request = tx.objectStore(STORE_NAME).delete(slotId);
         const payloadRequest = tx.objectStore(PAYLOAD_STORE).delete(slotId);
         // Resolve on COMMIT (see saveGame) so a refresh read after a delete sees it gone.
         request.onerror = () => reject(request.error);
         payloadRequest.onerror = () => reject(payloadRequest.error);
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+        tx.oncomplete = () => resolve();
+        tx.onabort = () => reject(tx.error || request.error);
     });
 }
 
@@ -300,9 +366,8 @@ export async function deleteSave(slotId) {
  * Keyed by character.id, so re-saving the same hero updates its entry;
  * imports get a fresh id and create a new entry.
  */
-export async function saveRosterCharacter(character, inventory) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
+export function saveRosterCharacter(character, inventory) {
+    return withDb((db, resolve, reject) => {
         const tx = db.transaction(ROSTER_STORE, 'readwrite');
         const store = tx.objectStore(ROSTER_STORE);
         // A legacy pre-id-era hero gets an id minted here; the caller must write it
@@ -322,8 +387,8 @@ export async function saveRosterCharacter(character, inventory) {
         const request = store.put(entry);
         // Resolve on COMMIT (see saveGame) so a list refresh right after sees the entry.
         request.onerror = () => reject(request.error);
-        tx.oncomplete = () => { db.close(); resolve(entry); };
-        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+        tx.oncomplete = () => resolve(entry);
+        tx.onabort = () => reject(tx.error || request.error);
     });
 }
 
@@ -331,9 +396,8 @@ export async function saveRosterCharacter(character, inventory) {
  * List all roster heroes, newest first. Entries are small (no messages),
  * so this returns them whole — character and inventory included.
  */
-export async function listRosterCharacters() {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
+export function listRosterCharacters() {
+    return withDb((db, resolve, reject) => {
         const tx = db.transaction(ROSTER_STORE, 'readonly');
         const store = tx.objectStore(ROSTER_STORE);
         const request = store.getAll();
@@ -341,23 +405,21 @@ export async function listRosterCharacters() {
             resolve(request.result.sort((a, b) => b.savedAt - a.savedAt));
         };
         request.onerror = () => reject(request.error);
-        tx.oncomplete = () => db.close();
-        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+        tx.onabort = () => reject(tx.error || request.error);
     });
 }
 
 /**
  * Delete a roster hero.
  */
-export async function deleteRosterCharacter(id) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
+export function deleteRosterCharacter(id) {
+    return withDb((db, resolve, reject) => {
         const tx = db.transaction(ROSTER_STORE, 'readwrite');
         const store = tx.objectStore(ROSTER_STORE);
         const request = store.delete(id);
         request.onerror = () => reject(request.error);
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onabort = () => { db.close(); reject(tx.error || request.error); };
+        tx.oncomplete = () => resolve();
+        tx.onabort = () => reject(tx.error || request.error);
     });
 }
 
@@ -376,13 +438,13 @@ export async function autoSave(gameState) {
 }
 
 /**
- * Load auto-save.
+ * Load the auto-save. Resolves `null` ONLY when no autosave exists; a storage
+ * failure (blocked open, quota/corruption, evicted DB) REJECTS so the caller
+ * can tell "nothing to continue" from "could not look" — the boot screen used
+ * to render a swallowed failure as "no autosave, no saves" while the campaign
+ * sat intact on disk (2026-09-02 audit). Its one caller (App.jsx checkSaves)
+ * catches and surfaces it.
  */
-export async function loadAutoSave() {
-    try {
-        return await loadGame(AUTOSAVE_SLOT);
-    } catch (e) {
-        console.warn('Failed to load auto-save:', e);
-        return null;
-    }
+export function loadAutoSave() {
+    return loadGame(AUTOSAVE_SLOT);
 }

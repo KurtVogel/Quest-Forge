@@ -6,6 +6,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { AUTOSAVE_DEBOUNCE_MS, createAutosaveRuntime } from './autosaveRuntime.js';
+import { gameReducer } from './gameReducer.js';
 
 function liveState(overrides = {}) {
     return {
@@ -140,6 +141,122 @@ describe('flush (explicit)', () => {
         await runtime.flush();
         expect(runtime.isDirty()).toBe(true);
         expect(showSaveToast).toHaveBeenCalledWith('save-error');
+    });
+});
+
+describe('flush coverage — the flushed action\'s own re-render (2026-09-02 write amplification)', () => {
+    const action = { type: 'ADD_MESSAGE', payload: { role: 'user', content: 'I open the door.' } };
+
+    it('produces exactly one write when the re-render lands while the flush is in flight', async () => {
+        const { ctx, autoSave, showSaveToast, runtime } = makeHarness();
+        runtime.noteStateChange(null, ctx.state); // dirty + a pending debounce
+        const base = ctx.state;
+        const flushed = runtime.flush({ action }); // write in flight
+        // React's re-render for the same dispatch: a fresh object from the same
+        // reducer, arriving before the write settles.
+        const rendered = gameReducer(base, action);
+        ctx.state = rendered;
+        runtime.noteStateChange(base, rendered);
+        expect(runtime.hasPendingDebounce()).toBe(false); // no second timer
+        await flushed;
+        expect(autoSave).toHaveBeenCalledTimes(1);
+        expect(autoSave.mock.calls[0][0].messages).toHaveLength(1);
+        expect(runtime.isDirty()).toBe(false); // the landed write covers the live state
+        expect(showSaveToast).toHaveBeenCalledWith('local');
+        await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS * 2);
+        expect(autoSave).toHaveBeenCalledTimes(1);
+    });
+
+    it('produces exactly one write when the re-render lands after the flush already settled', async () => {
+        const { ctx, autoSave, runtime } = makeHarness();
+        runtime.noteStateChange(null, ctx.state);
+        const base = ctx.state;
+        await runtime.flush({ action });
+        expect(runtime.isDirty()).toBe(true); // pre-render: only the re-render can prove it clean
+        const rendered = gameReducer(base, action);
+        ctx.state = rendered;
+        runtime.noteStateChange(base, rendered);
+        expect(runtime.isDirty()).toBe(false);
+        expect(runtime.hasPendingDebounce()).toBe(false);
+        await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS * 2);
+        expect(autoSave).toHaveBeenCalledTimes(1);
+    });
+
+    it('a failed flush still gives the skipped re-render its ordinary debounce', async () => {
+        const { ctx, autoSave, runtime } = makeHarness({ saveResult: false });
+        const base = ctx.state;
+        const flushed = runtime.flush({ action });
+        const rendered = gameReducer(base, action);
+        ctx.state = rendered;
+        runtime.noteStateChange(base, rendered);
+        await flushed;
+        expect(runtime.isDirty()).toBe(true);
+        expect(runtime.hasPendingDebounce()).toBe(true);
+        await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+        expect(autoSave).toHaveBeenCalledTimes(2);
+    });
+
+    it('a failed flush that settled before the re-render marks it dirty and schedules the debounce', async () => {
+        const { ctx, autoSave, runtime } = makeHarness({ saveResult: false });
+        const base = ctx.state;
+        await runtime.flush({ action });
+        const rendered = gameReducer(base, action);
+        ctx.state = rendered;
+        runtime.noteStateChange(base, rendered);
+        expect(runtime.isDirty()).toBe(true);
+        expect(runtime.hasPendingDebounce()).toBe(true);
+        await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+        expect(autoSave).toHaveBeenCalledTimes(2);
+    });
+
+    it('a change touching fields the replay did not is NOT treated as covered', async () => {
+        const { ctx, autoSave, runtime } = makeHarness();
+        const base = ctx.state;
+        const flushed = runtime.flush({ action });
+        // Another dispatch batched into the same render: messages AND a location change.
+        const rendered = { ...gameReducer(base, action), currentLocation: 'The Old Mill' };
+        ctx.state = rendered;
+        runtime.noteStateChange(base, rendered);
+        await flushed;
+        expect(runtime.isDirty()).toBe(true);
+        expect(runtime.hasPendingDebounce()).toBe(true);
+        await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+        expect(autoSave).toHaveBeenCalledTimes(2);
+        expect(autoSave.mock.calls[1][0].currentLocation).toBe('The Old Mill');
+    });
+
+    it('a state that moved past the covered re-render before the write landed stays dirty', async () => {
+        const { ctx, autoSave, runtime } = makeHarness();
+        const base = ctx.state;
+        let settle;
+        autoSave.mockImplementation(() => new Promise(resolve => { settle = resolve; }));
+        const flushed = runtime.flush({ action });
+        const rendered = gameReducer(base, action);
+        ctx.state = rendered;
+        runtime.noteStateChange(base, rendered);
+        // A later, unrelated change while the flush write is still in flight.
+        const later = { ...rendered, currentLocation: 'Riverbank' };
+        ctx.state = later;
+        runtime.noteStateChange(rendered, later);
+        settle(true);
+        await flushed;
+        expect(runtime.isDirty()).toBe(true);
+        expect(runtime.hasPendingDebounce()).toBe(true);
+    });
+
+    it('a settings-only change between the flush and its re-render does not break the lineage', async () => {
+        const { ctx, autoSave, runtime } = makeHarness();
+        const base = ctx.state;
+        const flushed = runtime.flush({ action });
+        const settingsOnly = { ...base, settings: { paceDial: 'slow-burn' } };
+        runtime.noteStateChange(base, settingsOnly);
+        const rendered = { ...gameReducer(base, action), settings: settingsOnly.settings };
+        ctx.state = rendered;
+        runtime.noteStateChange(settingsOnly, rendered);
+        await flushed;
+        expect(runtime.isDirty()).toBe(false);
+        await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+        expect(autoSave).toHaveBeenCalledTimes(1);
     });
 });
 

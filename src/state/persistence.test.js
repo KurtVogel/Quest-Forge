@@ -4,7 +4,7 @@
  * localStorage stub since the vitest environment here is plain Node.
  */
 import { describe, expect, it, beforeEach } from 'vitest';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 
 function makeLocalStorageStub() {
     const store = new Map();
@@ -301,6 +301,67 @@ describe('metadata/payload split (DB v3, 2026-08-04)', () => {
         expect(metadata.characterName).toBe('Legacy Hero');
         expect((await listSaves()).map(s => s.slotId)).toEqual(['legacy-slot']);
     });
+
+    it('a failing payload copy leaves that one record legacy-but-loadable and still opens the DB (2026-09-02 P2)', async () => {
+        // A quota abort inside the versionchange transaction used to fail the
+        // open, re-run the upgrade on EVERY open, and fail every save/load/
+        // autosave forever. Now the error is cancelled per record: the record
+        // keeps its embedded state, loadGame's legacy fallback reads it, and
+        // every other record migrates normally.
+        const { vi } = await import('vitest');
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await new Promise((resolve, reject) => {
+            const req = globalThis.indexedDB.open('rpg-client-saves', 2);
+            req.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                db.createObjectStore('saves', { keyPath: 'slotId' });
+                db.createObjectStore('characters', { keyPath: 'id' });
+            };
+            req.onsuccess = () => {
+                const db = req.result;
+                const tx = db.transaction('saves', 'readwrite');
+                tx.objectStore('saves').put({
+                    slotId: 'bad-slot', name: 'Doomed Save', characterName: 'Cursed Hero', savedAt: 1,
+                    state: { character: { name: 'Cursed Hero' }, currentLocation: 'Quota Cliffs' },
+                });
+                tx.objectStore('saves').put({
+                    slotId: 'good-slot', name: 'Fine Save', characterName: 'Lucky Hero', savedAt: 2,
+                    state: { character: { name: 'Lucky Hero' }, currentLocation: 'Green Vale' },
+                });
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onabort = () => { db.close(); reject(tx.error); };
+            };
+            req.onerror = () => reject(req.error);
+        });
+
+        // Force a REAL asynchronous request error on one record's payload copy:
+        // a duplicate `add` raises ConstraintError as an error event, which —
+        // unless cancelled — aborts the whole versionchange transaction.
+        const originalPut = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = function patchedPut(value, key) {
+            if (this.name === 'savePayloads' && value?.slotId === 'bad-slot') {
+                this.add({ slotId: 'bad-slot' }); // stateless placeholder row
+                return this.add(value, key);      // → ConstraintError (async)
+            }
+            return originalPut.call(this, value, key);
+        };
+        try {
+            // The DB opens (the migration did not abort) and the failed record
+            // loads through the legacy fallback.
+            const bad = await loadGame('bad-slot');
+            expect(bad.currentLocation).toBe('Quota Cliffs');
+            const badMeta = await readRawRecord('saves', 'bad-slot');
+            expect(badMeta.state).toBeDefined(); // never stripped: its copy never landed
+            // The other record migrated normally.
+            expect((await loadGame('good-slot')).currentLocation).toBe('Green Vale');
+            expect((await readRawRecord('saves', 'good-slot')).state).toBeUndefined();
+            expect((await listSaves()).map(s => s.slotId)).toEqual(['good-slot', 'bad-slot']);
+            expect(warn).toHaveBeenCalledWith(expect.stringMatching(/payload copy for "bad-slot" failed/), expect.anything());
+        } finally {
+            IDBObjectStore.prototype.put = originalPut;
+            warn.mockRestore();
+        }
+    });
 });
 
 describe('character roster', () => {
@@ -358,6 +419,40 @@ describe('autoSave / loadAutoSave', () => {
 
     it('autoSave reports failure instead of throwing, so the UI can warn the player', async () => {
         await expect(autoSave(null)).resolves.toBe(false);
+    });
+
+    it('autoSave(null) closes the connection it opened even though the snapshot build throws synchronously (2026-09-02 P2)', async () => {
+        // `null.messages` throws INSIDE the executor before any request exists:
+        // the old per-function close-on-complete/abort handlers never ran, so
+        // the connection leaked (and a leaked connection blocks every other
+        // tab's versioned open).
+        const closed = { value: false };
+        const db = {
+            close: () => { closed.value = true; },
+            transaction: () => ({ objectStore: () => ({ put: () => ({}) }) }),
+        };
+        globalThis.indexedDB = {
+            open: () => {
+                const req = {};
+                queueMicrotask(() => { req.result = db; req.onsuccess?.(); });
+                return req;
+            },
+        };
+        await expect(autoSave(null)).resolves.toBe(false);
+        expect(closed.value).toBe(true);
+    });
+
+    it('loadAutoSave REJECTS on a storage failure instead of resolving null like a missing autosave (2026-09-02 P1)', async () => {
+        // The boot screen must be able to tell "nothing to continue" from
+        // "could not look" — a swallowed failure rendered as no-autosave/no-saves.
+        globalThis.indexedDB = {
+            open: () => {
+                const req = {};
+                queueMicrotask(() => { req.error = new Error('storage evicted'); req.onerror?.(); });
+                return req;
+            },
+        };
+        await expect(loadAutoSave()).rejects.toThrow('storage evicted');
     });
 });
 
@@ -435,6 +530,29 @@ describe('failure surfacing', () => {
         };
 
         await expect(listSaves()).rejects.toThrow('read failed');
+        expect(closed.value).toBe(true);
+    });
+
+    it('a versionchange event from another tab closes the connection (2026-09-02 P2)', async () => {
+        const closed = { value: false };
+        const db = {
+            close: () => { closed.value = true; },
+            // A transaction that never settles — the connection is mid-read
+            // when the other tab's versioned open fires versionchange at it.
+            transaction: () => ({ objectStore: () => ({ get: () => ({}) }) }),
+        };
+        globalThis.indexedDB = {
+            open: () => {
+                const req = {};
+                queueMicrotask(() => { req.result = db; req.onsuccess?.(); });
+                return req;
+            },
+        };
+        loadGame('slot-1'); // stays pending by construction
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(typeof db.onversionchange).toBe('function');
+        expect(closed.value).toBe(false);
+        db.onversionchange();
         expect(closed.value).toBe(true);
     });
 

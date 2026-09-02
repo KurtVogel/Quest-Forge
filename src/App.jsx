@@ -29,7 +29,15 @@ function StartScreen() {
         setAutoSaveData(autoSave);
         setSaves(saveList);
       } catch (e) {
-        console.warn('Failed to check config saves:', e);
+        // A blocked/quota/corrupt IndexedDB used to render as "no autosave, no
+        // saves" — the player saw their campaign gone while the data sat intact
+        // (2026-09-02 audit). Fail loudly here like the in-game load path does.
+        console.error('Failed to read local saves at boot:', e);
+        setLoadError(
+          'Your local save store could not be opened, so Continue and Load Game are unavailable right now. '
+          + 'Your campaign data is most likely intact — close any other Quest Forge tabs and reload the page.'
+          + (e?.message ? ` (${e.message})` : '')
+        );
       } finally {
         setLoading(false);
       }
