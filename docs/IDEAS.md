@@ -1276,6 +1276,25 @@ may still update), `dormant` either leaves the DM channel or a dormant → resol
 goes through the ceremony, and three tests pin resurrection-ignored, re-resolution-ignored, and
 dormant-resolve-ceremony. From the 2026-09-01 strengthening audit (hidden-fronts, Lap 1 r2).
 
+### [strengthening] Make the post-roll outcome call a first-class narrative turn — status: `idea` (2026-09-02)
+The out-of-combat check flow splits one beat into two DM calls: the setup (withheld) and the
+outcome narrated after the dice. The outcome is the consequence beat — the part the north
+star says to spend the LLM on — yet it is the ONE narrative call the turn runner builds with
+no retrieved memories and no dramatic-callback cards, because `handleRequestedRolls` sends it
+with `originalPlayerMessage` undefined and that single argument gates memory retrieval in
+`sendToLLM`. The same gate also skips the roll arbiter, pre-narration detection, and semantic
+text-roll detection, so a check the outcome chains on is never audited for player-agency
+violations and never flagged as pre-narrated (Change Approach then reveals an outcome that
+never happened — the case the first hop explicitly guards). The challenge path passes
+`proposal.playerAction` and gets all of it; the follow-up simply doesn't. Proposal: thread the
+player action as the follow-up's second argument (it already rides `playerActionContext` for
+the transaction guard), and if the blocking query-embed round-trip is the concern, add an
+explicit `skipMemories` option rather than losing the arbiter along with it — or better, reuse
+the setup call's retrieved rows (same query, seconds apart) at zero extra latency. Pin with
+tests on the follow-up call shape, a rejected chained belief check, and a pre-narrated
+follow-up staging `preNarrated: true`. From the 2026-09-02 strengthening audit
+(roll-resolution, Lap 1).
+
 ### Low-level death-save lethality with a companion present — status: `observation` (playtest #11, 2026-07-22)
 The low-level solo 0-HP mercy (non-lethal setback) correctly does NOT apply when a
 battle-ready companion is present (`isCompanionActive`, DECISIONS.md 2026-07-17) — so a
