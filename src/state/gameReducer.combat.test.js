@@ -34,6 +34,7 @@ vi.mock('../engine/dice.ts', () => {
 });
 
 const { gameReducer, initialGameState } = await import('./gameReducer.js');
+const combatEngine = await import('../engine/combatExchange.js');
 
 function makeState() {
     return {
@@ -723,5 +724,125 @@ describe('END_COMBAT client-side XP fallback', () => {
 
         expect(next.character.exp).toBe(0);
         expect(next.combat.active).toBe(false);
+    });
+});
+
+describe('death seam through the reducer: engine plan → APPLY_COMBAT_EXCHANGE agree (2026-09-02 audit P1/P2)', () => {
+    const { planCombatExchange, normalizeCombatExchange } = combatEngine;
+
+    function dyingState({ level = 1, party, enemies } = {}) {
+        return {
+            ...makeState(),
+            character: {
+                ...makeState().character,
+                level,
+                currentHP: 0,
+                maxHP: 12,
+                dying: true,
+                isDead: false,
+                deathSaves: { successes: 0, failures: 0 },
+                conditions: ['Unconscious'],
+            },
+            party: party ?? [{ id: 'c1', name: 'Brann', hp: 0, maxHp: 8, ac: 12, status: 'downed' }],
+            combat: {
+                ...initialGameState.combat,
+                active: true,
+                phase: 'awaiting_player',
+                round: 3,
+                enemies: enemies ?? [{ id: 'e1', name: 'Goblin', hp: 7, maxHp: 7, ac: 12, attackBonus: 4, damage: '1d6+2', condition: 'healthy', combatStatus: 'active' }],
+                turnOrder: [{ type: 'player', name: 'Astra', initiative: 12 }],
+                currentTurn: 0,
+            },
+        };
+    }
+
+    it('level-1 hero dying, only companion downed: the death save converts to a defeat setback and combat ends on its own', () => {
+        const before = dyingState();
+        const plan = planCombatExchange(before, normalizeCombatExchange({
+            player_slots: [{ action: 'death_save' }],
+            enemy_intents: [{ enemy_id: 'e1', action: 'defend' }],
+        }));
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.result.terminal).toBe('defeat');
+
+        const committed = gameReducer(before, { type: 'APPLY_COMBAT_EXCHANGE', payload: plan.payload });
+        expect(committed.character).toMatchObject({ lowLevelDefeat: true, dying: false, isDead: false, currentHP: 0 });
+        expect(committed.character.deathSaves).toEqual({ successes: 0, failures: 0 });
+        expect(committed.messages.some(m => m.content.includes('Death save skipped'))).toBe(true);
+        expect(committed.combat.phase).toBe('awaiting_narration');
+
+        const ended = gameReducer(committed, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: plan.payload.exchangeId } });
+        expect(ended.combat.active).toBe(false);
+        expect(ended.character).toMatchObject({ lowLevelDefeat: true, dying: false, isDead: false });
+    });
+
+    it('a manual End Combat from a lowLevelDefeat hero mid-fight closes the fight without touching the setback', () => {
+        const stuck = {
+            ...dyingState(),
+            character: { ...dyingState().character, dying: false, lowLevelDefeat: true },
+        };
+        const ended = gameReducer(stuck, { type: 'END_COMBAT', payload: {} });
+        expect(ended.combat.active).toBe(false);
+        expect(ended.character).toMatchObject({ lowLevelDefeat: true, dying: false, isDead: false, currentHP: 0 });
+    });
+
+    it('DEATH_SAVE_RESULT with no die is a no-op outside the low-level-solo conversion (never a phantom failure)', () => {
+        const leveled = dyingState({ level: 3 });
+        const next = gameReducer(leveled, { type: 'DEATH_SAVE_RESULT', payload: { die: null } });
+        expect(next).toBe(leveled);
+    });
+
+    it('natural 20 then a hitting foe: the reducer revives at 1 HP and the same-exchange hit drops the hero back to dying', () => {
+        const before = dyingState({ level: 3 });
+        // This file's dice mock exports no parseNotation, so the damage kernel
+        // falls back to a flat 1d4: damage = the drawn value.
+        rollQueue.push(
+            20, // death save
+            19, // goblin attack: 19 + 4 vs AC 12
+            3,  // damage
+        );
+        const plan = planCombatExchange(before, normalizeCombatExchange({
+            player_slots: [{ action: 'death_save' }],
+            enemy_intents: [{ enemy_id: 'e1', action: 'attack', target: 'player' }],
+        }));
+        expect(plan.payload).toMatchObject({ deathSaveNatural: 20, playerDamage: 3 });
+        expect(plan.payload.result.terminal).toBe('dying');
+
+        const committed = gameReducer(before, { type: 'APPLY_COMBAT_EXCHANGE', payload: plan.payload });
+        expect(committed.character).toMatchObject({ currentHP: 0, dying: true, isDead: false, lowLevelDefeat: false });
+        expect(committed.character.deathSaves).toEqual({ successes: 0, failures: 0 });
+        expect(committed.messages.some(m => m.content.includes('falls!'))).toBe(true);
+    });
+
+    it('hero and only companion both dropping in one exchange: engine terminal and reducer state both say defeat setback', () => {
+        const before = {
+            ...dyingState({
+                party: [{ id: 'c1', name: 'Brann', hp: 4, maxHp: 8, ac: 12, status: 'healthy' }],
+                enemies: [
+                    { id: 'e1', name: 'Goblin', hp: 7, maxHp: 7, ac: 12, attackBonus: 4, damage: '1d6+2', condition: 'healthy', combatStatus: 'active' },
+                    { id: 'e2', name: 'Wolf', hp: 9, maxHp: 9, ac: 12, attackBonus: 4, damage: '1d6+2', condition: 'healthy', combatStatus: 'active' },
+                ],
+            }),
+        };
+        before.character = { ...before.character, currentHP: 3, dying: false, conditions: [] };
+        rollQueue.push(
+            19, 4, // goblin hits Astra for 4 (flat 1d4 fallback, see above): 3 → 0
+            19, 4, // wolf hits Brann for 4: 4 → 0 (downed)
+        );
+        const plan = planCombatExchange(before, normalizeCombatExchange({
+            player_slots: [{ action: 'pass' }],
+            companion_intents: [{ companion_id: 'c1', action: 'pass' }],
+            enemy_intents: [
+                { enemy_id: 'e1', action: 'attack', target: 'player' },
+                { enemy_id: 'e2', action: 'attack', target: 'c1' },
+            ],
+        }));
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.party[0].status).toBe('downed');
+        expect(plan.payload.result.terminal).toBe('defeat');
+
+        const committed = gameReducer(before, { type: 'APPLY_COMBAT_EXCHANGE', payload: plan.payload });
+        expect(committed.character).toMatchObject({ currentHP: 0, lowLevelDefeat: true, dying: false, isDead: false });
+        expect(committed.party[0].status).toBe('downed');
     });
 });

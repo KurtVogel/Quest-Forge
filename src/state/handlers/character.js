@@ -224,7 +224,12 @@ export const handlers = {
                 ],
             };
         }
-        const die = action.payload.die;
+        const die = action.payload?.die;
+        // A die-less dispatch is the exchange engine's "death save skipped"
+        // (it judged the hero low-level solo). If the live check above
+        // disagreed, nothing was rolled, so nothing is tallied — never let a
+        // null die count as a failure.
+        if (!Number.isInteger(die)) return state;
         const prev = character.deathSaves || { successes: 0, failures: 0 };
 
         if (die === 20) {

@@ -135,7 +135,10 @@ export function normalizeCombatExchange(raw) {
                 }),
                 ...((action === 'check' || action === 'save') && {
                     skill: normalizeSkillRef(slot.skill || slot.ability),
-                    dc: Number.isFinite(slot.dc) ? Math.max(5, Math.min(30, Math.round(slot.dc))) : 15,
+                    // Missing DC defaults to 10 — the out-of-combat channel's
+                    // default (eventChannels.js): the solo-play ladder is 8/10/12/15/18+
+                    // and "never default DC 15" (2026-09-02 audit P2).
+                    dc: Number.isFinite(slot.dc) ? Math.max(5, Math.min(30, Math.round(slot.dc))) : 10,
                 }),
                 ...(action === 'check' && normalizeConditionDelta(slot.on_success || slot.onSuccess) && {
                     onSuccess: normalizeConditionDelta(slot.on_success || slot.onSuccess),
@@ -950,6 +953,7 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
     let dodging = false;
     let fled = false;
     let deathSaveNatural = null;
+    let deathSaveSkipped = false;
     const strikeLimit = expectedStrikes(character);
     const support = { playerHealing: 0, characterUpdates: {} };
     let workingSlots = character.spellSlots || null;
@@ -966,6 +970,18 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
             continue;
         }
         if (slot.action === 'death_save') {
+            // The save is the dying hero's decision point. Low-level solo at
+            // this moment (a downed companion counts as solo) means the reducer's
+            // DEATH_SAVE_RESULT converts the save into the defeat setback and
+            // rolls nothing — so the engine rolls nothing, posts no death-save
+            // line, and advances no tally either. Diverging here soft-locked the
+            // fight (2026-09-02 audit P1: terminal 'dying' beside a reducer-side
+            // lowLevelDefeat hero who could never commit another action).
+            if (isLowLevelSolo(character, companions)) {
+                deathSaveSkipped = true;
+                events.push({ type: 'note', text: `**Death save skipped** — no battle-ready ally stands with ${character.name || 'the player'}; low-level solo protection ends this as a defeat setback, not a death.` });
+                continue;
+            }
             const save = rollWithModifier(1, 20, 0, 'Death Saving Throw');
             rolls.push(save);
             deathSaveNatural = save.rolls[0];
@@ -1144,6 +1160,7 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
         dodging,
         fled,
         deathSaveNatural,
+        deathSaveSkipped,
         playerHealing: support.playerHealing,
         characterUpdates: hasCharacterUpdates ? support.characterUpdates : null,
     };
@@ -1382,6 +1399,18 @@ function resolveEnemies({ state, exchange, enemies, companions, playerHp, player
     return { playerHp, playerDamage };
 }
 
+/** Same-exchange projection of a natural-20 revive (the reducer's reviveCharacter shape). */
+function projectRevivedCharacter(character) {
+    return {
+        ...character,
+        currentHP: 1,
+        dying: false,
+        lowLevelDefeat: false,
+        deathSaves: { successes: 0, failures: 0 },
+        conditions: (character.conditions || []).filter(condition => String(condition).toLowerCase() !== 'unconscious'),
+    };
+}
+
 function projectedDeathSaveState(character, natural) {
     if (!Number.isInteger(natural)) return 'dying';
     if (natural === 20) return 'revived';
@@ -1391,11 +1420,22 @@ function projectedDeathSaveState(character, natural) {
     return failures >= 3 ? 'dead' : 'dying';
 }
 
+/**
+ * `party` must be the party as it stood at the hero's decision point: for a
+ * dying hero that is the death save (the pre-exchange party — the same one the
+ * reducer's DEATH_SAVE_RESULT consults, since it runs before the exchange's
+ * party commit); for a conscious hero dropping to 0 it is the post-exchange
+ * party (the reducer commits the party before TAKE_DAMAGE). Callers pick.
+ */
 function terminalState(enemies, playerHp, character, deathSaveNatural = null, party = []) {
     if (activeEnemies(enemies).length === 0) return 'victory';
     if (character.isDead || character.lowLevelDefeat) return 'defeat';
     if (playerHp > 0) return null;
     if (character.dying) {
+        // Same predicate the not-yet-dying branch and DEATH_SAVE_RESULT ask:
+        // a low-level hero with no battle-ready ally never rolls death saves —
+        // the save converts into the defeat setback (2026-09-02 audit P1).
+        if (isLowLevelSolo(character, party)) return 'defeat';
         const projected = projectedDeathSaveState(character, deathSaveNatural);
         if (projected === 'revived') return null;
         if (projected === 'stable' || projected === 'dead') return 'defeat';
@@ -1493,6 +1533,7 @@ export function planCombatExchange(state, exchange) {
                 playerHealing: player.playerHealing,
                 characterUpdates: player.characterUpdates,
                 deathSaveNatural: player.deathSaveNatural,
+                deathSaveSkipped: player.deathSaveSkipped,
                 rolls,
                 result,
                 flankedEnemyIds: [],
@@ -1527,15 +1568,31 @@ export function planCombatExchange(state, exchange) {
     // A defense declared last exchange protects against this exchange's player and companion
     // attacks, then expires before foes choose their new actions.
     for (const enemy of enemies) enemy.defending = false;
+    // A natural-20 death save revives the hero BEFORE the enemy phase: in 5e a
+    // revived creature is a valid target for everyone acting after it, and the
+    // reducer's own commit order is death save → damage. Foes this exchange
+    // see a conscious 1-HP hero and can drop them back to 0 (2026-09-02 audit
+    // P2 — the revive used to land after every foe had skipped the
+    // "already-defeated player").
+    const revived = player.deathSaveNatural === 20;
+    const enemyPhaseCharacter = revived ? projectRevivedCharacter(castCharacter) : castCharacter;
+    const enemyPhaseHp = revived ? Math.max(1, healedBaseHp) : healedBaseHp;
     const enemyResult = resolveEnemies({
-        state: castCharacter === state.character ? state : { ...state, character: castCharacter },
+        state: enemyPhaseCharacter === state.character ? state : { ...state, character: enemyPhaseCharacter },
         exchange, enemies, companions,
-        playerHp: healedBaseHp,
+        playerHp: enemyPhaseHp,
         playerDodging: player.dodging,
         events, rolls,
     });
-    const terminal = terminalState(enemies, enemyResult.playerHp, castCharacter, player.deathSaveNatural, companions);
-    const playerHp = player.deathSaveNatural === 20 ? Math.max(1, enemyResult.playerHp) : enemyResult.playerHp;
+    // A still-dying hero is judged against the party as it stood at the death
+    // save (pre-exchange); a conscious or just-revived hero dropping to 0 is
+    // judged against the post-exchange party — see terminalState.
+    const terminal = terminalState(
+        enemies, enemyResult.playerHp, enemyPhaseCharacter,
+        revived ? null : player.deathSaveNatural,
+        enemyPhaseCharacter.dying ? state.party || [] : companions,
+    );
+    const playerHp = enemyResult.playerHp;
     const result = makeResult('exchange', exchangeId, state.combat.round, events, terminal, {
         enemies,
         companions,
@@ -1564,6 +1621,7 @@ export function planCombatExchange(state, exchange) {
             playerHealing: player.playerHealing,
             characterUpdates: player.characterUpdates,
             deathSaveNatural: player.deathSaveNatural,
+            deathSaveSkipped: player.deathSaveSkipped,
             rolls,
             result,
             flankedEnemyIds,
@@ -1627,7 +1685,10 @@ export function planOpeningExchange(state) {
             playerDamage += resolved.playerDamage;
         }
     }
-    const terminal = terminalState(enemies, playerHp, state.character, null, companions);
+    const terminal = terminalState(
+        enemies, playerHp, state.character, null,
+        state.character.dying ? state.party || [] : companions,
+    );
     const result = makeResult('opening', exchangeId, state.combat.round, events, terminal, {
         enemies,
         companions,

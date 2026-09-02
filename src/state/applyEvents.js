@@ -13,6 +13,7 @@
 
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
+import { isLowLevelSolo } from '../engine/combatExchange.js';
 
 /**
  * Apply parsed events to dispatch game state changes.
@@ -414,9 +415,10 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     }
 
     if (events.playerDeath) {
-        const character = state?.character;
-        const lowLevelSolo = character && (character.level ?? 1) <= 2 && (!state?.party || state.party.length === 0);
-        if (lowLevelSolo) {
+        // THE engine predicate (a downed companion counts as solo), never a
+        // local party-length check: this branch is the one irreversible
+        // outcome in the game (2026-09-02 audit P1).
+        if (isLowLevelSolo(state?.character, state?.party)) {
             dispatch({
                 type: 'PLAYER_DEFEAT',
                 payload: { description: events.playerDeath.description },

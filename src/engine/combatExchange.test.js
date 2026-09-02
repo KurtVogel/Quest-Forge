@@ -1695,3 +1695,134 @@ describe('planOpeningExchange null-character guard (2026-08-27 audit)', () => {
         expect(plan).toMatchObject({ ok: false, error: expect.stringContaining('No active character') });
     });
 });
+
+describe('death seam: one live isLowLevelSolo at the death save (2026-09-02 audit P1)', () => {
+    const dyingLowLevel = party => state({
+        character: { level: 1, currentHP: 0, maxHP: 10, dying: true, deathSaves: { successes: 0, failures: 0 }, conditions: ['Unconscious'] },
+        party,
+    });
+    const deathSaveIntent = (enemyAction = 'defend') => normalizeCombatExchange({
+        player_slots: [{ action: 'death_save' }],
+        // A standing companion passes so the only dice in play are the ones under test.
+        companion_intents: [{ companion_id: 'c1', action: 'pass' }],
+        enemy_intents: [{ enemy_id: 'Goblin', action: enemyAction, target: 'Brann' }],
+    });
+
+    it('a level-1 hero whose only companion is DOWNED skips the die and ends as a defeat setback', () => {
+        const downedOnly = [{ id: 'c1', name: 'Brann', hp: 0, maxHp: 8, ac: 12, status: 'downed' }];
+        // Nothing queued: any die drawn here throws (the mock's exhausted-queue guard).
+        const plan = planCombatExchange(dyingLowLevel(downedOnly), deathSaveIntent());
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.result.terminal).toBe('defeat');
+        expect(plan.payload.deathSaveNatural).toBeNull();
+        expect(plan.payload.deathSaveSkipped).toBe(true);
+        expect(plan.payload.rolls).toHaveLength(0);
+        expect(plan.payload.result.events.some(event => event.type === 'death_save')).toBe(false);
+        expect(plan.payload.result.events.some(event => event.type === 'note' && event.text.includes('Death save skipped'))).toBe(true);
+        expect(combatNarrationPrompt(plan.payload.result)).toContain('mechanically defeated');
+    });
+
+    it('a level-1 hero with a STANDING companion rolls the real death save', () => {
+        const standing = [{ id: 'c1', name: 'Brann', hp: 8, maxHp: 8, ac: 12, status: 'healthy' }];
+        rollQueue.push(12);
+        const plan = planCombatExchange(dyingLowLevel(standing), deathSaveIntent());
+        expect(plan.payload.result.terminal).toBe('dying');
+        expect(plan.payload.deathSaveNatural).toBe(12);
+        expect(plan.payload.deathSaveSkipped).toBe(false);
+        expect(plan.payload.result.events.some(event => event.type === 'death_save')).toBe(true);
+    });
+
+    it('a companion dropping AFTER the save keeps this exchange dying; the next save is the one that converts', () => {
+        const standing = [{ id: 'c1', name: 'Brann', hp: 5, maxHp: 8, ac: 12, status: 'healthy' }];
+        const first = dyingLowLevel(standing);
+        rollQueue.push(
+            12, // death save (companion still standing at the moment of the save)
+            19, // goblin attacks Brann: 19 + 4 vs AC 12 — hit
+            6,  // 1d6+2 = 8 damage, Brann drops
+        );
+        const plan = planCombatExchange(first, deathSaveIntent('attack'));
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.party[0].status).toBe('downed');
+        // The reducer's DEATH_SAVE_RESULT ran against the pre-exchange party and
+        // tallied the die; the engine agrees — no 'defeat' beside a dying hero.
+        expect(plan.payload.deathSaveNatural).toBe(12);
+        expect(plan.payload.result.terminal).toBe('dying');
+
+        const next = {
+            ...first,
+            character: { ...first.character, deathSaves: { successes: 1, failures: 0 } },
+            party: plan.payload.party,
+            combat: { ...first.combat, enemies: plan.payload.enemies },
+        };
+        const converted = planCombatExchange(next, deathSaveIntent());
+        expect(converted.payload.deathSaveSkipped).toBe(true);
+        expect(converted.payload.result.terminal).toBe('defeat');
+    });
+
+    it('a level-3 hero with a downed companion still rolls real death saves (protection is level-gated)', () => {
+        const downedOnly = [{ id: 'c1', name: 'Brann', hp: 0, maxHp: 8, ac: 12, status: 'downed' }];
+        const leveled = dyingLowLevel(downedOnly);
+        leveled.character.level = 3;
+        rollQueue.push(1); // natural 1: two failures
+        const plan = planCombatExchange(leveled, deathSaveIntent());
+        expect(plan.payload.deathSaveSkipped).toBe(false);
+        expect(plan.payload.deathSaveNatural).toBe(1);
+        expect(plan.payload.result.terminal).toBe('dying');
+    });
+});
+
+describe('natural-20 death save revives BEFORE the enemy phase (2026-09-02 audit P2)', () => {
+    const dyingHero = () => state({
+        character: { level: 3, currentHP: 0, maxHP: 20, dying: true, deathSaves: { successes: 0, failures: 0 }, conditions: ['Unconscious'] },
+    });
+    const intent = normalizeCombatExchange({
+        player_slots: [{ action: 'death_save' }],
+        enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'player' }],
+    });
+
+    it('a hitting enemy attack in the same exchange lands on the revived 1-HP hero and drops them again', () => {
+        rollQueue.push(
+            20, // natural 20 — back on their feet at 1 HP
+            19, // goblin attack 19 + 4: hits any AC the hero can have here
+            1,  // 1d6+2 = 3 damage
+        );
+        const plan = planCombatExchange(dyingHero(), intent);
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.deathSaveNatural).toBe(20);
+        const attack = plan.payload.result.events.find(event => event.type === 'attack' && event.actor === 'Goblin');
+        expect(attack).toMatchObject({ hit: true, damage: 3, remainingHp: 0 });
+        expect(plan.payload.result.events.some(event => event.type === 'note' && event.text.includes('already-defeated'))).toBe(false);
+        expect(plan.payload.playerDamage).toBe(3);
+        expect(plan.payload.result.postState.player.hp).toBe(0);
+        // Dropped again from a conscious state: a fresh dying spell (level 3, not solo-protected).
+        expect(plan.payload.result.terminal).toBe('dying');
+    });
+
+    it('a missing enemy attack leaves the revived hero standing at 1 HP', () => {
+        rollQueue.push(
+            20, // natural 20
+            1,  // goblin attack: natural 1 — miss
+        );
+        const plan = planCombatExchange(dyingHero(), intent);
+        const attack = plan.payload.result.events.find(event => event.type === 'attack' && event.actor === 'Goblin');
+        expect(attack).toMatchObject({ hit: false });
+        expect(plan.payload.playerDamage).toBe(0);
+        expect(plan.payload.result.postState.player.hp).toBe(1);
+        expect(plan.payload.result.terminal).toBeNull();
+    });
+});
+
+describe('in-combat check/save DC default (2026-09-02 audit P2)', () => {
+    it('defaults a missing DC to 10, never 15 — the out-of-combat channel default', () => {
+        const parsed = normalizeCombatExchange({
+            player_slots: [
+                { action: 'check', skill: 'athletics' },
+                { action: 'save', ability: 'dexterity' },
+            ],
+        });
+        expect(parsed.playerSlots[0].dc).toBe(10);
+        expect(parsed.playerSlots[1].dc).toBe(10);
+        const explicit = normalizeCombatExchange({ player_slots: [{ action: 'check', skill: 'athletics', dc: 15 }] });
+        expect(explicit.playerSlots[0].dc).toBe(15);
+    });
+});

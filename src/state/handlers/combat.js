@@ -241,8 +241,22 @@ export const handlers = {
 
         let next = state;
         const preExchangeMessageCount = state.messages.length;
-        if (Number.isInteger(payload.deathSaveNatural)) {
-            next = gameReducer(next, { type: 'DEATH_SAVE_RESULT', payload: { die: payload.deathSaveNatural } });
+        // The death save runs against the PRE-exchange party — the same party
+        // the engine's death_save slot judged (a low-level hero with no
+        // battle-ready ally skips the die: `deathSaveSkipped` rides the payload
+        // with no natural, and DEATH_SAVE_RESULT's own live isLowLevelSolo check
+        // converts the save into the defeat setback — 2026-09-02 audit P1).
+        if (Number.isInteger(payload.deathSaveNatural) || payload.deathSaveSkipped) {
+            next = gameReducer(next, { type: 'DEATH_SAVE_RESULT', payload: { die: payload.deathSaveNatural ?? null } });
+        }
+        // Commit the party BETWEEN the death save and the enemy damage — the
+        // exchange's own order (player phase → companions → foes) — so the
+        // TAKE_DAMAGE below asks isLowLevelSolo against the post-exchange party,
+        // exactly as the engine's terminalState did. A hero and their only
+        // companion both dropping in one exchange is a defeat setback on BOTH
+        // sides, never engine 'defeat' beside a reducer 'dying'.
+        if (Array.isArray(payload.party)) {
+            next = { ...next, party: payload.party };
         }
         // Spell healing lands before enemy damage — that is the order the
         // exchange resolved in (player casts, then foes act on the new HP).
@@ -280,7 +294,7 @@ export const handlers = {
         return {
             ...next,
             character,
-            party: Array.isArray(payload.party) ? payload.party : next.party,
+            party: next.party,
             rollHistory: appendRollHistory(next.rollHistory, Array.isArray(payload.rolls) ? payload.rolls : []),
             messages: [...next.messages.slice(0, preExchangeMessageCount), ...resultMessages, ...statusMessages],
             combat: {
