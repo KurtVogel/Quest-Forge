@@ -11,7 +11,8 @@ const { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud 
 
 describe('cloud sync without a configured Firebase', () => {
     it('every function returns its safe empty value', async () => {
-        expect(await saveGameToCloud('u1', 'slot-1', { session: {}, character: {} })).toBe(false);
+        expect(await saveGameToCloud('u1', 'slot-1', { session: {}, character: {} }))
+            .toMatchObject({ ok: false, reason: 'unavailable' });
         expect(await loadGameFromCloud('u1', 'slot-1')).toBeNull();
         expect(await listCloudSaves('u1')).toEqual([]);
         expect(await deleteGameFromCloud('u1', 'slot-1')).toBe(false);

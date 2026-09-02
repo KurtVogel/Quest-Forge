@@ -68,7 +68,7 @@ vi.mock('firebase/firestore', () => {
 });
 
 const firestore = await import('firebase/firestore');
-const { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud } = await import('./cloudSync.js');
+const { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud, CLOUD_SAVE_BYTE_LIMIT } = await import('./cloudSync.js');
 const { SAVE_VERSION } = await import('./persistence.js');
 
 function makeGameState(overrides = {}) {
@@ -111,7 +111,7 @@ beforeEach(() => {
 
 describe('saveGameToCloud / loadGameFromCloud', () => {
     it('round-trips a small save as one chunk, keeping fronts and full messages, stripping secrets', async () => {
-        expect(await saveGameToCloud('u1', 'slot-1', makeGameState())).toBe(true);
+        expect((await saveGameToCloud('u1', 'slot-1', makeGameState())).ok).toBe(true);
         const main = firestore.__store.get('users/u1/saves/slot-1');
         expect(main.payloadChunks).toBe(1);
         expect(chunkPaths()).toHaveLength(1);
@@ -139,7 +139,7 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
     });
 
     it('splits an oversized save into chunks and reassembles it on load', async () => {
-        expect(await saveGameToCloud('u1', 'slot-big', makeHugeGameState())).toBe(true);
+        expect((await saveGameToCloud('u1', 'slot-big', makeHugeGameState())).ok).toBe(true);
         const main = firestore.__store.get('users/u1/saves/slot-big');
         expect(main.payload).toBeNull();
         expect(main.payloadChunks).toBeGreaterThanOrEqual(2);
@@ -214,7 +214,7 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         const before = new Map(firestore.__store);
 
         firestore.__fail.commit = new Error('contention');
-        expect(await saveGameToCloud('u1', 'slot-1', makeGameState())).toBe(false);
+        expect((await saveGameToCloud('u1', 'slot-1', makeGameState())).ok).toBe(false);
 
         expect(firestore.__store.size).toBe(before.size);
         for (const [path, data] of before) {
@@ -251,7 +251,7 @@ describe('listCloudSaves / deleteGameFromCloud', () => {
 
 describe('guards and failure surfacing', () => {
     it('all four functions refuse a missing uid without touching Firestore', async () => {
-        expect(await saveGameToCloud('', 'slot-1', makeGameState())).toBe(false);
+        expect(await saveGameToCloud('', 'slot-1', makeGameState())).toMatchObject({ ok: false, reason: 'signed-out' });
         expect(await loadGameFromCloud('', 'slot-1')).toBeNull();
         expect(await listCloudSaves('')).toEqual([]);
         expect(await deleteGameFromCloud('', 'slot-1')).toBe(false);
@@ -262,17 +262,54 @@ describe('guards and failure surfacing', () => {
         expect(await deleteGameFromCloud('u1', '')).toBe(false);
     });
 
-    it('saveGameToCloud swallows a Firestore failure to false', async () => {
+    // 2026-09-02 audit: every failure used to collapse to `false`, so the UI could
+    // only say "cloud upload failed". The result now carries a reason + a
+    // player-readable message, and the two classes that need DIFFERENT player
+    // actions (redeploy rules vs. the campaign outgrew one request) are distinct.
+    it('saveGameToCloud reports a generic Firestore failure as reason "error" with the cause', async () => {
         firestore.__fail.getDoc = new Error('unavailable');
-        expect(await saveGameToCloud('u1', 'slot-1', makeGameState())).toBe(false);
+        const result = await saveGameToCloud('u1', 'slot-1', makeGameState());
+        expect(result).toMatchObject({ ok: false, reason: 'error' });
+        expect(result.message).toContain('unavailable');
         expect(firestore.__store.size).toBe(0);
     });
 
-    it('saveGameToCloud returns false on a permission-denied write (rules hint path)', async () => {
+    it('saveGameToCloud maps permission-denied to its reason and the rules-deploy hint', async () => {
         const denied = new Error('Missing or insufficient permissions.');
         denied.code = 'permission-denied';
         firestore.__fail.setDoc = denied;
-        expect(await saveGameToCloud('u1', 'slot-1', makeGameState())).toBe(false);
+        const result = await saveGameToCloud('u1', 'slot-1', makeGameState());
+        expect(result).toMatchObject({ ok: false, reason: 'permission-denied' });
+        expect(result.message).toContain('firestore.rules');
+        expect(result.message).toContain('chunks/{chunkId}');
+    });
+
+    it('saveGameToCloud refuses a payload over CLOUD_SAVE_BYTE_LIMIT before touching Firestore', async () => {
+        // A full-history mature campaign crossing Firestore's ~10 MiB request
+        // ceiling used to fail opaquely on every save, forever. The pre-flight
+        // measures UTF-8 bytes (what Firestore meters), not JS chars.
+        const overLimit = makeGameState({
+            messages: Array.from({ length: 10 }, (_, i) => ({
+                id: `m${i}`, role: 'assistant', content: 'x'.repeat(CLOUD_SAVE_BYTE_LIMIT / 10),
+            })),
+        });
+        const result = await saveGameToCloud('u1', 'slot-huge', overLimit);
+        expect(result).toMatchObject({ ok: false, reason: 'too-large' });
+        expect(result.message).toMatch(/\d+\.\d MB, above the cloud limit of 9\.0 MB/);
+        expect(result.message).toContain('saved locally only');
+        expect(firestore.__store.size).toBe(0);
+        // Exactly at the ceiling is fine — 9 MiB is already headroom under 10 MiB.
+        expect(CLOUD_SAVE_BYTE_LIMIT).toBe(9 * 1024 * 1024);
+    });
+
+    it('the size pre-flight counts UTF-8 bytes, so multi-byte prose is measured honestly', async () => {
+        // 3.2M chars of a 3-byte CJK glyph ≈ 9.6 MiB of UTF-8 — under the limit
+        // by char count, over it by bytes.
+        const cjk = makeGameState({
+            messages: [{ id: 'm1', role: 'assistant', content: '龍'.repeat(3200000) }],
+        });
+        expect(await saveGameToCloud('u1', 'slot-cjk', cjk)).toMatchObject({ ok: false, reason: 'too-large' });
+        expect(firestore.__store.size).toBe(0);
     });
 
     it('loadGameFromCloud swallows a Firestore failure to null', async () => {

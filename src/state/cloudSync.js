@@ -38,6 +38,28 @@ function cloudDocId(slotId) {
  */
 const CHUNK_CHAR_LIMIT = 300000;
 
+/**
+ * Pre-flight ceiling for one cloud save. Firestore caps a single transaction /
+ * batched-write REQUEST at 10 MiB, and a whole campaign's payload rides one
+ * transaction; a mature full-history campaign that crosses it would otherwise
+ * fail on every save with an opaque error forever (2026-09-02 audit). 9 MiB
+ * leaves headroom for the metadata doc and per-chunk envelope. Multi-batch
+ * generations (several transactions + a generation stamp) would lift this.
+ */
+export const CLOUD_SAVE_BYTE_LIMIT = 9 * 1024 * 1024;
+
+const CLOUD_RULES_HINT =
+    "Every save's payload is stored in a `chunks` subcollection. If your Firebase " +
+    "project's firestore.rules predate that, redeploy the repo's firestore.rules " +
+    "(match /users/{userId}/saves/{saveId}/chunks/{chunkId}).";
+
+const formatMiB = (bytes) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+/** UTF-8 byte length — what Firestore actually meters, not JS char count. */
+function payloadByteLength(payload) {
+    return new TextEncoder().encode(payload).length;
+}
+
 /** Split without ever cutting a surrogate pair in half (Firestore requires valid UTF-8). */
 function splitPayload(payload) {
     const chunks = [];
@@ -58,9 +80,18 @@ function chunksCollection(uid, slotId) {
     return collection(db, `users/${uid}/saves/${cloudDocId(slotId)}/chunks`);
 }
 
+/**
+ * Result shape: `{ ok: true }` or `{ ok: false, reason, message }`, where
+ * `message` is player-readable and `reason` is one of
+ * `unavailable` (no Firebase configured) · `signed-out` · `too-large`
+ * (pre-flight, Firestore never called) · `permission-denied` · `error`.
+ * Every failure was a bare `false` until 2026-09-02; the two classes that need
+ * DIFFERENT player actions (redeploy rules vs. the campaign outgrew one cloud
+ * request) were indistinguishable in the UI.
+ */
 export async function saveGameToCloud(uid, slotId, gameState) {
-    if (!db) return false;
-    if (!uid) return false;
+    if (!db) return { ok: false, reason: 'unavailable', message: 'Cloud sync is not configured — connect your Firebase project in Settings → Cloud Sync.' };
+    if (!uid) return { ok: false, reason: 'signed-out', message: 'Sign in with Google before saving to the cloud.' };
 
     try {
         const userSavesRef = collection(db, `users/${uid}/saves`);
@@ -91,6 +122,19 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // old inline/chunked dual write path). Legacy inline docs still load
         // via the payload fallback in loadGameFromCloud until re-saved.
         const payload = JSON.stringify(trimmedState);
+
+        // Pre-flight: refuse before touching Firestore when the campaign has
+        // outgrown one transaction request, with a message that says what to do.
+        const byteLength = payloadByteLength(payload);
+        if (byteLength > CLOUD_SAVE_BYTE_LIMIT) {
+            const message =
+                `This campaign's save is ${formatMiB(byteLength)}, above the cloud limit of ` +
+                `${formatMiB(CLOUD_SAVE_BYTE_LIMIT)} — it was saved locally only. Local saves have no ` +
+                'such limit, so keep playing locally; cloud sync for this campaign needs a larger-save format.';
+            console.warn(`Cloud save skipped: ${slotId} (${byteLength} bytes > ${CLOUD_SAVE_BYTE_LIMIT})`);
+            return { ok: false, reason: 'too-large', message };
+        }
+
         const chunks = splitPayload(payload);
 
         // The previous save's chunk count is read INSIDE the transaction: two
@@ -113,17 +157,22 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         });
 
         console.log(`Cloud save successful: ${slotId} (${payload.length} chars, ${chunks.length} chunk${chunks.length === 1 ? '' : 's'})`);
-        return true;
+        return { ok: true };
     } catch (e) {
         console.error("Cloud save failed:", e);
         if (e?.code === 'permission-denied') {
-            console.error(
-                "Cloud save hint: every save's payload is stored in a `chunks` subcollection. " +
-                "If your Firebase project's firestore.rules predate that, redeploy the repo's " +
-                "firestore.rules (match /users/{userId}/saves/{saveId}/chunks/{chunkId})."
-            );
+            console.error(`Cloud save hint: ${CLOUD_RULES_HINT}`);
+            return {
+                ok: false,
+                reason: 'permission-denied',
+                message: `Firestore refused the write (permission denied). ${CLOUD_RULES_HINT}`,
+            };
         }
-        return false;
+        return {
+            ok: false,
+            reason: 'error',
+            message: `Cloud upload failed${e?.message ? ` — ${e.message}` : ''} (details in the browser console).`,
+        };
     }
 }
 

@@ -110,15 +110,21 @@ export default function SettingsModal() {
             await saveGame(slotId, updatedState);
             await loadSavesList(); // Local save is committed now — refresh immediately
             if (state.user?.uid) {
-                const cloudOk = await saveGameToCloud(state.user.uid, slotId, updatedState);
+                const cloud = await saveGameToCloud(state.user.uid, slotId, updatedState);
                 await loadSavesList(); // Reflect the cloud copy once it lands
-                setSyncStatus(cloudOk
+                setSyncStatus(cloud.ok
                     ? '✓ Saved locally and to cloud'
-                    : 'Saved locally, but the cloud upload failed — this save will not appear on other devices (details in browser console)');
+                    : `Saved locally, but not to the cloud — this save will not appear on other devices. ${cloud.message}`);
             } else {
                 setSyncStatus('Saved locally only — sign in with Google for cloud sync');
             }
             setSaveName('');
+        } catch (e) {
+            // The local saveGame can reject (IDB error, quota, a leaked
+            // connection); without this it escaped as an unhandled rejection
+            // with zero UI feedback (2026-09-02 audit, mirrors handleLoad).
+            console.error('Failed to save game', e);
+            setSyncStatus(`Save failed — ${e?.message || 'details in the browser console'}`);
         } finally {
             setIsSaving(false);
         }
@@ -210,14 +216,17 @@ export default function SettingsModal() {
             };
             await saveGame(slotId, updatedState);
             if (state.user?.uid) {
-                const cloudOk = await saveGameToCloud(state.user.uid, slotId, updatedState);
-                setSyncStatus(cloudOk
+                const cloud = await saveGameToCloud(state.user.uid, slotId, updatedState);
+                setSyncStatus(cloud.ok
                     ? `✓ Overwrote "${name}" locally and in the cloud`
-                    : `Overwrote "${name}" locally, but the cloud upload failed`);
+                    : `Overwrote "${name}" locally, but not in the cloud. ${cloud.message}`);
             } else {
                 setSyncStatus(`Overwrote "${name}" locally (sign in for cloud sync)`);
             }
             await loadSavesList();
+        } catch (e) {
+            console.error('Failed to overwrite save', e);
+            setSyncStatus(`Overwrite of "${name}" failed — ${e?.message || 'details in the browser console'}`);
         } finally {
             setIsSaving(false);
         }
@@ -313,17 +322,32 @@ export default function SettingsModal() {
                 return;
             }
 
+            // Per-slot isolation: one unreadable local slot used to abort the
+            // whole loop and lose the partial count (2026-09-02 audit).
             let uploaded = 0;
+            const failures = [];
             for (const save of localSaves) {
-                const savedState = await loadGame(save.slotId);
-                if (savedState) {
-                    const ok = await saveGameToCloud(state.user.uid, save.slotId, savedState);
-                    if (ok) uploaded++;
+                try {
+                    const savedState = await loadGame(save.slotId);
+                    if (!savedState) {
+                        failures.push(`"${save.name || save.slotId}": could not be read locally`);
+                        continue;
+                    }
+                    const cloud = await saveGameToCloud(state.user.uid, save.slotId, savedState);
+                    if (cloud.ok) uploaded++;
+                    else failures.push(`"${save.name || save.slotId}": ${cloud.message}`);
+                } catch (e) {
+                    console.error(`Failed to upload local save ${save.slotId}`, e);
+                    failures.push(`"${save.name || save.slotId}": ${e?.message || 'details in the browser console'}`);
                 }
             }
 
             await loadSavesList();
-            setSyncStatus(`Uploaded ${uploaded} of ${localSaves.length} local save${localSaves.length === 1 ? '' : 's'} to cloud`);
+            const total = localSaves.length;
+            const summary = `Uploaded ${uploaded} of ${total} local save${total === 1 ? '' : 's'} to cloud`;
+            setSyncStatus(failures.length === 0
+                ? summary
+                : `${summary}, ${failures.length} failed — ${failures.join('; ')}`);
         } catch (e) {
             setSyncStatus('');
             setAuthError('Cloud upload failed: ' + e.message);
