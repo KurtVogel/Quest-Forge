@@ -58,8 +58,8 @@ it under Process notes.
 | vector-memory-rag | `engine/vectorMemory.js` | 2026-08-30 |
 | persistence | `state/persistence.js` (localStorage + IndexedDB, serializeGameState) | 2026-09-02 |
 | cloud-sync | `state/cloudSync.js`, `state/auth.js`, chunked Firestore saves | 2026-09-02 |
-| character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-08-28 |
-| inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-08-28 |
+| character-vault | `engine/characterVault.js`, `engine/characterUtils.js`, roster flows | 2026-09-03 |
+| inventory-economy | `data/items.js`, `engine/equipment.js`, `engine/currency.js`, purchase/sell ledgers | 2026-09-03 |
 | quests | `quest_updates` flow, `FAIL_QUEST`, Quests panel round-trip | 2026-08-28 |
 | scene-art | `llm/providers/imageGen.js`, `composeScenePrompt`, portraits | 2026-09-01 |
 | providers-adapter | `llm/adapter.js`, `llm/providers/gemini.js`, `llm/providers/openai.js`, `llm/providers/xai.js` | 2026-08-30 |
@@ -73,36 +73,38 @@ Refreshed by the audit **at most weekly** (when older than 7 days), via:
 `npm.cmd install --no-save @vitest/coverage-v8 && npx.cmd vitest run --coverage --coverage.all --coverage.include='src/**/*.{js,jsx,ts}'`
 Used only to bias feature picking toward weak spots; per-file statement % for registry files.
 
-**2026-08-27** (1754 tests / 92 files passing). % Statements per registry file. "Absent" = the
+**2026-09-03** (2025 tests / 101 files passing). % Statements per registry file. "Absent" = the
 recurring v8-report quirk where a file with its own passing suite drops out of `--coverage.all`;
-this run it hit more files than usual (dice.ts, responseParser/jsonExtractor, combatExchange,
-outOfCombatRollPolicy, turnOrchestrator, characterVault/-Utils, currency, openaiCompatible, xai,
-regionalHearsay, frontAftermath, regionalFronts, autosavePolicy — all verified to have suites):
+same set as last time (dice.ts, responseParser/jsonExtractor, combatExchange, outOfCombatRollPolicy,
+turnOrchestrator, characterVault/-Utils, currency, openaiCompatible, xai, regionalHearsay,
+frontAftermath, regionalFronts, autosaveRuntime/-Policy — all verified to have suites):
 
 | Feature ID | File | % Stmts |
 |---|---|---|
 | dice-engine | `engine/dice.ts` | absent (quirk; own suite passes) |
-| rules-math | `engine/rules.js` | 93.83 |
+| rules-math | `engine/rules.js` | 93.95 |
 | progression | `engine/progression.js` | 100 |
-| response-parsing | `responseParser.js` / `jsonExtractor.js` | absent / absent (quirk; both suites pass) |
-| prompt-building | `promptBuilder.js` | 97.67 |
-| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 81.37 / absent (quirk) |
-| combat-exchange | `combatExchange.js` / `combatMath.js` | absent (quirk) / 91.37 |
-| enemy-stats-conditions | `enemyStats.js` | 97.36 |
-| hidden-fronts | `engine/fronts.js` / `frontDirector.js` / `frontUpgrade.js` / `worldTempo.js` | 93.38 / 87.50 / 97.77 / 98.13 |
-| living-world | `regionalHearsay.js` / `absenceDrift.js` / `frontAftermath.js` / `regionalFronts.js` | absent / 89.83 / absent / absent (aftermath + regional gained suites 2026-08-18; the 0%s are gone) |
-| scribe | `scribe.js` | 86.98 (audit family now in `scribeAudits.js`, art director in `sceneDirector.js`) |
+| response-parsing | `responseParser.js` / `jsonExtractor.js` / `eventChannels.js` | absent / absent (quirk) / 96.94 |
+| prompt-building | `promptBuilder.js` | 97.70 |
+| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` | 86.79 / absent (quirk) |
+| combat-exchange | `combatExchange.js` / `combatMath.js` / `handlers/combat.js` | absent (quirk) / 95.89 / 92.12 |
+| enemy-stats-conditions | `enemyStats.js` | 96.42 |
+| hidden-fronts | `engine/fronts.js` / `frontDirector.js` / `frontUpgrade.js` / `worldTempo.js` / `handlers/fronts.js` | 93.65 / 87.50 / 97.77 / 98.15 / 97.85 |
+| living-world | `regionalHearsay.js` / `absenceDrift.js` / `frontAftermath.js` / `regionalFronts.js` | absent / 89.83 / absent / absent (quirk) |
+| scribe | `scribe.js` / `scribeAudits.js` | 93.54 / 91.30 |
 | memory-journal | `worldJournal.js` | 100 |
-| story-memory | `storyMemory.js` | 96.95 |
-| vector-memory-rag | `vectorMemory.js` | 94.59 |
-| persistence | `persistence.js` | 86.06 (`GameContext.jsx` 0; `autosavePolicy.js` absent — quirk) |
-| cloud-sync | `cloudSync.js` / `auth.js` | 96.22 / 0 (auth.js untested — thin Firebase wrapper) |
+| story-memory | `storyMemory.js` | 97.56 |
+| vector-memory-rag | `vectorMemory.js` | 94.56 |
+| persistence | `persistence.js` | 87.93 (`GameContext.jsx` 0; `autosaveRuntime.js`/`autosavePolicy.js` absent — quirk) |
+| cloud-sync | `cloudSync.js` / `auth.js` | 96.58 / 78.94 (auth.js gained a suite since 08-27) |
 | character-vault | `characterVault.js` / `characterUtils.js` | absent / absent (quirk; both suites pass) |
-| inventory-economy | `items.js` / `equipment.js` / `handlers/inventory.js` | 99.03 / 100 / 92.10 (currency.js absent — quirk) |
+| inventory-economy | `items.js` / `equipment.js` / `companionGear.js` / `handlers/inventory.js` / `handlers/economy.js` | 99.03 / 100 / 100 / 94.30 / 96.10 (currency.js absent — quirk) |
 | quests | `state/handlers/quests.js` | 100 |
-| scene-art | `imageGen.js` | 90.35 |
-| providers-adapter | `adapter.js` / `gemini.js` / `openai.js` | 98.18 / 91.66 / 100 (openaiCompatible.js / xai.js absent — quirk) |
-| chat-orchestration | `ChatPanel.jsx` / `turnOrchestrator.js` | 0 / absent (quirk; 4 orchestrator suites pass) |
+| scene-art | `imageGen.js` | 94.92 |
+| providers-adapter | `adapter.js` / `gemini.js` / `openai.js` | 98.18 / 90.65 / 100 (openaiCompatible.js / xai.js absent — quirk) |
+| chat-orchestration | `ChatPanel.jsx` / `turnOrchestrator.js` | 0 / absent (quirk; orchestrator suites pass) |
+| spellcasting | `engine/spellcasting.js` / `data/spells.js` / `handlers/spellcasting.js` | 93.12 / 100 / 85.60 |
+| chronicler | `chronicler.js` | 96.25 |
 
 ## Open Findings Queue
 
@@ -425,6 +427,18 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 - [x] **P2** (combat-exchange, 2026-09-02 r2, test depth): nothing pins a dying hero with a downed companion at death-save time (the P1), a 20 followed by enemy attacks in the same exchange, `applyEvents` `player_death` routing with a downed companion, or the manual End Combat exit from a `lowLevelDefeat` hero mid-fight — `engine/combatExchange.test.js:658`, `state/gameReducer.combat.test.js`, `state/applyEvents*.test.js`. — **Fixed 2026-09-02:** all four pins landed with the items above (dying + downed companion at save time, 20-then-hit, `player_death` with a downed companion, manual End Combat from `lowLevelDefeat`).
 - [x] **P2** (cloud-sync, 2026-09-02 r2): `SettingsModal.handleSave` and `handleOverwrite` are `try { … } finally { … }` with no catch — a rejecting local `saveGame` (IDB error, quota, the leaked-connection class) escapes as an unhandled rejection with zero UI feedback while `isSaving` resets, the exact asymmetry the 08-27 fix closed for `handleLoad`/`handleDelete` — `components/Settings/SettingsModal.jsx:96-125,205-224`. — **Fixed 2026-09-02:** both are `try/catch/finally`: a rejecting local `saveGame` logs and renders `Save failed - ...` / `Overwrite of "..." failed - ...` via `setSyncStatus`; `isSaving` still resets in `finally`. `handleUploadLocalSaves` is per-slot isolated and reports "uploaded N of M, K failed - name: reason". (No rendered-modal test: no jsdom in the test env.)
 - [x] **P2** (cloud-sync, 2026-09-02 r2): `saveGameToCloud` collapses every failure to `false` and the UI renders one generic "cloud upload failed (details in browser console)" — the two real-world classes need different player actions: `permission-denied` (pre-chunk `firestore.rules`, hint is console-only) and the ~10 MiB transaction ceiling a full-history mature campaign will hit (no pre-flight size check, no hint, fails silently forever for that campaign; the comment defers multi-batch generations). Return `{ ok, reason }` (or throw a typed error), add a payload-size pre-flight with an actionable message, and pin both — `state/cloudSync.js:103-127`, `components/Settings/SettingsModal.jsx:113-118`. — **Fixed 2026-09-02:** returns `{ ok, reason, message }` (`unavailable` / `signed-out` / `too-large` / `permission-denied` / `error`); exported `CLOUD_SAVE_BYTE_LIMIT` = 9 MiB with a UTF-8 byte pre-flight (`TextEncoder`) before any Firestore call, `permission-denied` carries the rules-deploy hint in the player-facing message, and the modal renders the specific message. Tests: permission-denied, oversized (store untouched), CJK over-by-bytes, generic error, signed-out, no-db. The message deliberately does NOT suggest closing a chronicle chapter: closes never delete messages, so the save would not shrink.
+- [ ] **P1** (character-vault, 2026-09-03): a non-catalog weapon's `damage` notation is the one mechanical field `normalizeItem` never bounds (magicBonus/attack/damage bonus/acBonus/baseAC/shieldAC/valueCp/quantity all clamp), so it crosses BOTH trust boundaries — a hand-edited hero file or a DM `items_found` weapon carrying `damage: "99d12"` imports, equips, and reaches `getWeaponDamageNotation` as `"99d12+3"` (reproduced; dice.ts's MAX_DICE_COUNT 100 is the only ceiling left, ≈643 average damage per hit). Parse the notation in `normalizeItem` and cap count ≤2 / sides ≤12 (the best catalog die), else fall back to a plain 1d6 — `data/items.js:208-283`, `engine/characterVault.js:193-208`.
+- [ ] **P2** (character-vault, 2026-09-03, ruling needed): the roster resurrects the dead — Save to Roster / Export File are not gated on `isDead`, and `sanitizeCharacter` rebuilds `currentHP: maxHP` while dropping `isDead`/`deathSaves` (reproduced: a 3-failure corpse comes back 12/12). DECISIONS' "resurrection is cut permanently" governs heals; decide whether the roster is the sanctioned afterlife (hero = template) and document it, or gate the two buttons — `components/CharacterSheet/CharacterSheet.jsx:96-118,558-572`, `engine/characterVault.js:158-159`.
+- [ ] **P2** (character-vault, 2026-09-03): skill proficiencies are filtered to KNOWN names but never to the class allowance — an 18-skill fighter imports intact (reproduced); rogue expertise is likewise uncounted. Clamp to racial + `CLASSES[x]` pick count (first N kept) and expertise to the level's allowance — `engine/characterVault.js:135-145`.
+- [ ] **P2** (character-vault, 2026-09-03): roster flows fail quiet (the 09-02 boot-screen class): `listRosterCharacters().catch(() => setRoster([]))` renders a blocked/failed IndexedDB as "0 in roster", `handleSaveToRoster` swallows a rejected save to `console.warn` with no toast (the player believes the hero was saved), and `handleDeleteHero` has no catch at all — `components/CharacterSheet/CharacterCreation.jsx:71,286-291`, `components/CharacterSheet/CharacterSheet.jsx:111-113`.
+- [ ] **P2** (character-vault, 2026-09-03, test depth): no test covers the begin-from-roster id retention, the import → roster → begin round trip, or delete; `sanitizeInventory`'s 200-item slice and string entries, `exp` at MAX level, and junk `portraitUpdatedAt` are unpinned — `engine/characterVault.test.js`.
+- [ ] **P1** (inventory-economy, 2026-09-03): `items_lost` removes the WHOLE stack — `isLootEntry` admits `{name, quantity}` objects but applyEvents forwards only the name and `REMOVE_ITEM_BY_NAME` filters the row out (reproduced: "Torch" against a 5-stack empties it). The ECONOMY prompt tells the DM to emit items_lost when "an owned item is consumed", so one torch burned, one ration eaten, or one javelin thrown loses all of them; the Scribe loss audit dispatches the same action. Make removal quantity-aware (`{ name, quantity }` through `consumeItem`; default one unit for a multi-unit stack of gear/consumables, whole row otherwise) and carry the DM's quantity through applyEvents and the loss audit — `state/applyEvents.js:261-265`, `state/handlers/inventory.js:309-337`.
+- [ ] **P1** (inventory-economy, 2026-09-03): the descriptor-suffix catalog rule accepts ANY prefix ending in a space, so genitive story objects become catalog gear — reproduced: "Scroll of Shield" → catalog Shield (type shield, auto-equipped into an empty slot for +2 AC, original name gone), "Ring of the Dagger" → a Dagger. Every path shares it (items_found, purchase, premise starting_items, vault import). Reject prefixes containing a preposition (of/for/with/from) or require ≤2 adjective tokens, with negative tests — `data/items.js:129-133`.
+- [ ] **P2** (inventory-economy, 2026-09-03): inventory never stacks — `ADD_ITEM` and `PURCHASE_ITEM` append unconditionally, so buy 2 → buy 3 → find 1 yields three "Torch" rows (reproduced), and `items_lost "torches"` then removes only the first row; `healShadowInventoryRows` merges keyless shadows but never same-key rows. Merge same-identity non-equipment (same itemKey/name + magicBonus) into the existing row on add/purchase and fold duplicates once on load — `state/handlers/inventory.js:148`, `state/handlers/economy.js:812`, `state/migrations.js:130-186`.
+- [ ] **P2** (inventory-economy, 2026-09-03): `SELL_ITEM` accepts a fractional/string quantity — `Math.max(1, Math.min(item.quantity, payload.quantity))` never truncates (reproduced: selling 1.5 of 4 rations leaves "Rations ×2.5" and pays 1.5×). Mirror `buildPurchaseTransaction`'s finite + trunc — `state/handlers/economy.js:833`.
+- [ ] **P2** (inventory-economy, 2026-09-03): the loss-covered purchase double-represents one spend — the lossCover path ledgers the purchase as `applied` at full price though no coin moved in that action (against 08-28's "ledgers record only coin that MOVED"); `spendLedgerView` then holds the payment twice and `stripBundledReplay` strips both (reproduced: pay 5 gp loose, covered purchase, then a genuine 10 gp room charge two messages later is refused entirely). Player-favorable direction, wrong magnitude: record it `ignored` (`findRecentTransactionDuplicate` is status-blind, so the purchase replay guard survives) or with priceCp 0 — `state/handlers/economy.js:774-788`.
+- [ ] **P2** (inventory-economy, 2026-09-03): `GIVE_GEAR_TO_COMPANION` stacks shields — companion gear is abstract with no shield memory, so a second shield adds +2 again (reproduced 14 → 16 → 18; three +1 shields reach the 21 cap). Refuse a second shield like the duplicate-weapon rule, or record a `shieldBonus` on the companion — `state/handlers/companions.js:115-136`, `engine/companionGear.js:21-30`.
+- [ ] **P2** (inventory-economy, 2026-09-03, test depth + small): `parseCountedItemName` reads "3 days rations" → "days rations ×3" (the days/nights branch requires "of") and "2 Handed Sword" → "Handed Sword ×2"; `equipment.test.js` has 4 cases and no `preferredItemId` armor swap; no `items.test` negative for a genitive prefix; SELL quantity coercion, the covered-purchase ledger status, a second shield gift, and `REMOVE_ITEM_BY_NAME` against a multi-unit stack are unpinned — `data/items.js:160-186`, `engine/equipment.test.js`.
 
 ## Entry template
 
@@ -448,6 +462,42 @@ Format: `- [ ] **P1** (feature-id, YYYY-MM-DD): description — file:line`
 ---
 
 <!-- Entries below, newest first. -->
+
+## 2026-09-03 — character-vault + inventory-economy (Lap 1: correctness & test depth)
+
+`npm test`: 2025 passing / 101 files.
+
+Rotation excluded (last 6, local ∪ origin — origin == HEAD): combat-exchange, cloud-sync, roll-resolution, persistence (09-02), hidden-fronts, scribe (09-01 r2), dice-engine, scene-art (09-01), living-world, chat-orchestration (08-31 ×2). Oldest eligible were the four 08-28 features (rules-math, character-vault, inventory-economy, quests); coverage tie-break → **inventory-economy** (`handlers/inventory.js` 92.10, the lowest concrete number) + **character-vault** (absent-quirk, and the earliest Lap-1 visit of the four: 07-12). Snapshot was 7 days old — refreshed. Every finding below was **reproduced empirically** against the live modules (scratch script outside the repo, Node type-stripping; zero repo changes).
+
+### character-vault (`engine/characterVault.js`, `engine/characterUtils.js`, roster flows in `CharacterCreation.jsx` / `CharacterSheet.jsx`, the `persistence.js` roster store, `START_CHARACTER`) — Lap 1: correctness & test depth
+- **Scope examined:** `characterVault.js` end to end (clamps, the fixed-average-HP boundary, expertise gate, portrait allowlist, inventory sanitizer, parser); `characterUtils.js` (`buildDerivedCharacterFields`, `createCharacter`, the ASI/style/archetype normalizers); begin-from-roster, import, export, delete flows; `saveRosterCharacter`/`listRosterCharacters`/`deleteRosterCharacter`; `START_CHARACTER`; `normalizeItem` as the inventory sanitizer's core; `characterVault.test.js` (31) + the roster cases in `persistence.test.js`.
+- **Verified fixed since 08-28:** both queue items — casters get authoritative `spellSlots` through the shared `buildDerivedCharacterFields` core (the builder fold), pinned by the 08-28 P0 test. Verified sound: the post-decision maxHP recompute, the exp clamp against the per-level threshold (level 20 included), class-gated expertise, the portrait allowlist + ceiling, roster-id retention on begin-from-roster, `START_CHARACTER`'s AC recompute.
+- **Findings:**
+  - **P1 (weapon damage is unbounded across both trust boundaries):** `normalizeItem` clamps magicBonus, attack/damage bonus, acBonus, baseAC, shieldAC, valueCp and quantity — but never `damage` on a non-catalog weapon, and `sanitizeInventory` inherits it. Reproduced: `{ name: 'Doom Blade', type: 'weapon', damage: '99d12' }` imports with the notation intact, equips, and `getWeaponDamageNotation` emits `"99d12+3"`; the only ceiling left is `MAX_DICE_COUNT` (100) in dice.ts, ≈643 average damage per hit. The DM's `items_found` weapon takes the identical path. The file's own header promise ("engine owns the math") stops one field short — `data/items.js:208-283`, `characterVault.js:193-208`.
+  - **P2 (the roster resurrects the dead — ruling needed):** Save to Roster / Export File are not gated on `isDead`, and `sanitizeCharacter` rebuilds `currentHP: maxHP` while dropping `isDead`/`deathSaves` (reproduced: a three-failure corpse comes back 12/12 with no flag). DECISIONS' "resurrection is cut permanently" governs HEALS; whether the roster is the sanctioned afterlife (a hero is a template, campaigns own deaths) or a bypass is undecided. Not proposing a reversal — asking for the ruling, then either a gate or a sentence in DECISIONS — `CharacterSheet.jsx:96-118, 558-572`, `characterVault.js:158-159`.
+  - **P2 (skill count uncapped):** skills are filtered to KNOWN names but never to the class allowance — an 18-skill fighter imports intact (reproduced); rogue expertise is likewise uncounted. Clamp to racial + the class pick count (first N kept) — `characterVault.js:135-145`.
+  - **P2 (roster flows fail quiet — the 09-02 boot-screen class):** `listRosterCharacters().catch(() => setRoster([]))` renders a blocked/failed IndexedDB as "0 in roster"; `handleSaveToRoster` swallows a rejected save to `console.warn` with no toast (the player believes the hero was saved); `handleDeleteHero` has no catch at all — `CharacterCreation.jsx:71, 286-291`, `CharacterSheet.jsx:111-113`.
+  - **P2 (test depth):** no test covers begin-from-roster id retention, the import → roster → begin round trip, or delete; `sanitizeInventory`'s 200-item slice and string entries, `exp` at MAX level, and junk `portraitUpdatedAt` are unpinned (fightingStyle/archetype and notes/portraitPrompt ARE covered).
+- **Suggested improvements:** (1) parse and bound non-catalog weapon `damage` in `normalizeItem` where magicBonus is clamped (count ≤2, sides ≤12 — the best catalog die — else fall back to 1d6), with vault AND DM-path tests; (2) a DECISIONS ruling on dead heroes in the roster; (3) allowance clamps for skills/expertise; (4) `rosterError` on a failed list, a toast on a failed save, a catch on delete.
+
+### inventory-economy (`data/items.js`, `engine/equipment.js`, `engine/currency.js`, `engine/companionGear.js`, `handlers/inventory.js`, `handlers/economy.js`, the ref/ledger helpers in `handlers/shared.js`, applyEvents item routing) — Lap 1: correctness & test depth
+- **Scope examined:** `items.js` (catalog, `normalizeItemKey`, `parseCountedItemName`, `normalizeItem`); `equipment.js`; `currency.js`; `companionGear.js` + `GIVE_GEAR_TO_COMPANION`; `handlers/inventory.js` and `handlers/economy.js` end to end; `findInventoryItemByRef`, `mintOwnedItem`, `consumeItem`, the ledger helpers; the items_found aggregation, items_lost dispatch and starting_items reconciliation in `applyEvents.js`; `items.test.js` (13), `equipment.test.js` (4), `currency.test.js` (24), `companionGear.test.js` (10), `gameReducer.inventory.test.js` (45), `gameReducer.economy.test.js` (91), the gear-gift cases in `gameReducer.companions.test.js`.
+- **Verified fixed since 08-28:** all three queue items — unpayable charges are not ledgered and a partial audit ledgers the deducted value (`economy.js:550-560, 733-741`), `REMOVE_ITEM_BY_NAME` and `SELL_ITEM` ride `findInventoryItemByRef` plus the unambiguous fuzzy tier, all pinned. Verified sound against the 2026-09-03 money-traffic playtest's clean purse: covers, strips, direction echoes, receipts.
+- **Findings:**
+  - **P1 (`items_lost` takes the whole stack):** `isLootEntry` admits `{ name, quantity }` objects, applyEvents forwards only the name (`applyEvents.js:261-265`), and `REMOVE_ITEM_BY_NAME` filters the row out (`inventory.js:336`). Reproduced: "Torch" against a 5-stack → empty pack. The ECONOMY prompt tells the DM to emit items_lost when "an owned item is consumed, destroyed, or leaves their possession" — one torch burned, one ration eaten, one javelin thrown loses all of them; the Scribe loss audit dispatches the same action.
+  - **P1 (genitive loot becomes catalog gear):** the descriptor-suffix rule (`items.js:132`) accepts ANY prefix that ends in a space. Reproduced: "Scroll of Shield" → catalog Shield (type shield, auto-equipped into an empty slot for +2 AC, the original name gone), "Ring of the Dagger" → a Dagger. Every path shares it — items_found, purchase, premise starting_items, vault import — so a story object named "X of <catalog word>" is silently rewritten into mechanics. Reject prefixes containing a preposition (of/for/with/from) or require ≤2 adjective tokens.
+  - **P2 (inventory never stacks):** `ADD_ITEM` and `PURCHASE_ITEM` append unconditionally (`inventory.js:148`, `economy.js:812`). Reproduced: buy 2 → buy 3 → find 1 = three "Torch" rows, and `items_lost "torches"` then removes only the first row. `healShadowInventoryRows` merges keyless shadows on load but never same-key rows. Three rows in the panel, three lines in the prompt's INVENTORY block, and USE_ITEM decrements whichever row was clicked.
+  - **P2 (SELL_ITEM fractional/string quantity):** `Math.max(1, Math.min(item.quantity, payload.quantity))` never truncates (`economy.js:833`). Reproduced: selling 1.5 of 4 rations leaves "Rations (1 day) ×2.5" and pays 1.5×. `buildPurchaseTransaction` truncs; mirror it.
+  - **P2 (a loss-covered purchase double-represents one spend):** the lossCover path ledgers the purchase as `applied` at full price although no coin moved in that action (`economy.js:774-788`) — against 08-28's own rule that the spend ledgers record only coin that MOVED. `spendLedgerView` then holds the payment twice and `stripBundledReplay` strips both. Reproduced: pay 5 gp loose, covered purchase, then a genuine 10 gp room charge two messages later is refused entirely ("repeats payments already taken"). Player-favorable direction (the documented asymmetry), wrong magnitude. Record it `ignored` — `findRecentTransactionDuplicate` is status-blind, so the purchase replay guard survives — or with priceCp 0.
+  - **P2 (`GIVE_GEAR_TO_COMPANION` stacks shields):** companion gear is abstract with no shield memory, so a second shield adds +2 again (reproduced 14 → 16 → 18; three +1 shields reach the 21 cap). Refuse a second shield like the duplicate-weapon rule, or record a `shieldBonus` on the companion — `companions.js:115-136`, `companionGear.js:21-30`.
+  - **P2 (small):** `parseCountedItemName` reads "3 days rations" → "days rations ×3" (the days/nights branch requires "of") and "2 Handed Sword" → "Handed Sword ×2" — `items.js:160-186`.
+  - **P2 (test depth):** `equipment.test.js` has 4 cases and no `preferredItemId` armor swap; `items.test.js` has no genitive-prefix negative; SELL quantity coercion, the covered-purchase ledger status, a second shield gift, and `REMOVE_ITEM_BY_NAME` against a multi-unit stack are all unpinned.
+- **Suggested improvements:** (1) quantity-aware removal — `REMOVE_ITEM_BY_NAME { name, quantity }` through `consumeItem`, default one unit for a multi-unit stack of gear/consumables and the whole row otherwise, with the DM's quantity carried through applyEvents and the loss audit; (2) the preposition guard on the suffix rule; (3) stack same-identity non-equipment on add/purchase plus a one-time load fold; (4) finite + trunc sale quantity; (5) `ignored` status on covered purchases; (6) the shield-gift guard.
+
+### Process notes
+- Coverage Snapshot refreshed (2025 tests / 101 files); the absent-file quirk hit the same set as 08-27, and `auth.js` now has a suite (78.94, was 0).
+- Two findings share one shape again — a numeric field validated on every path but one (`damage` at the item boundary; `quantity` on sale). The grep-the-family habit from 09-01 found both; worth keeping as a standing Lap 1 step: list every clamp in the boundary function and ask which sibling field has none.
+- Lap 1 of cycle two has now covered 10 of 24 features (12 counting the user-directed 08-31 passes).
 
 ## 2026-09-02 — combat-exchange + cloud-sync (Lap 1: correctness & test depth — second run, user-directed)
 

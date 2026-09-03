@@ -1367,6 +1367,25 @@ REMOVES a safety net the true solo hero has. Worth an rpg-balance-master look on
 real campaigns feel unfairly lethal at level 1-2 with a party; do not change reflexively,
 the near-death drama is a feature.
 
+### [strengthening] One stacking rule for the pack: quantity-aware `items_lost` + same-identity merge on add — status: `idea` (2026-09-03)
+The inventory has quantities but no stacking rule, and the two halves disagree. Adding never
+merges: `ADD_ITEM` and `PURCHASE_ITEM` append unconditionally, so buy two torches, buy three
+more, find one = three "Torch" rows in the panel and three lines in the DM's INVENTORY block
+(`healShadowInventoryRows` folds keyless shadows on load but never same-key rows). Removing
+always takes a whole row: `isLootEntry` accepts `{ name, quantity }` objects, but applyEvents
+forwards only the name and `REMOVE_ITEM_BY_NAME` filters the row out — and the ECONOMY prompt
+tells the DM to emit `items_lost` when "an owned item is consumed", so one torch burned or one
+ration eaten empties the stack (the Scribe loss audit dispatches the same action). Proposal:
+(a) `REMOVE_ITEM_BY_NAME { name, quantity }` decrementing through `consumeItem`, defaulting to
+ONE unit when the resolved row holds several units of gear/consumables and to the whole row
+otherwise (weapons/armor are single rows anyway), with the DM's quantity carried through
+applyEvents and the loss audit; (b) merge same-identity non-equipment (same itemKey or
+normalized name, same magicBonus, not an equipped row) into the existing row on add/purchase,
+and fold duplicates once on load beside the shadow heal. Pin both with the reproduced cases
+(five-torch stack loses one; three grants become one row of six; a drifted "torches" loss
+decrements instead of deleting). From the 2026-09-03 strengthening audit (inventory-economy,
+Lap 1).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
