@@ -1180,3 +1180,26 @@ describe('requested_rolls hostile-field guards (2026-07-23 audit)', () => {
         expect(events.requestedRolls[2].skill).toBe('perception'); // trimmed
     });
 });
+
+describe('applyEvents carries an items_lost quantity (2026-09-03 P1)', () => {
+    function run(payload) {
+        const { events } = parseResponse(fence(payload));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({ character: {}, party: [] }));
+        return dispatch;
+    }
+
+    it('forwards a count and "all" as { name, quantity }, and a bare name as a string', () => {
+        const dispatch = run({ items_lost: [{ name: 'Torch', quantity: 2 }, { name: 'Rations (1 day)', quantity: 'ALL' }, 'Rope', { name: 'Arrow', quantity: 1 }] });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Torch', quantity: 2 } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Rations (1 day)', quantity: 'all' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: 'Rope' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Arrow', quantity: 1 } });
+    });
+
+    it('drops junk quantities back to the bare-name default', () => {
+        const dispatch = run({ items_lost: [{ name: 'Torch', quantity: 'some' }, { name: 'Dart', quantity: -3 }] });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: 'Torch' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: 'Dart' });
+    });
+});

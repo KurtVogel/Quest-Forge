@@ -469,3 +469,49 @@ describe('companion roster relationship records (one system owns all bonds, 2026
         expect(next.npcs).toHaveLength(2);
     });
 });
+
+describe('GIVE_GEAR_TO_COMPANION shield memory (2026-09-03 P2: shields stacked to the cap)', () => {
+    function shieldState(overrides = {}) {
+        return makeState({
+            party: [{ id: 'c1', name: 'Kaarina Tammi', level: 2, hp: 18, maxHp: 18, ac: 14, weapon: 'Dagger', damage: '1d4+2', status: 'healthy' }],
+            inventory: [
+                { id: 's1', itemKey: 'shield', name: 'Shield', type: 'shield', isShield: true, shieldAC: 2, quantity: 1 },
+                { id: 's2', itemKey: 'shield', name: 'Shield', type: 'shield', isShield: true, shieldAC: 2, quantity: 1 },
+                { id: 's3', name: 'Shield +1', type: 'shield', isShield: true, shieldAC: 2, acBonus: 1, magicBonus: 1, quantity: 1 },
+                { id: 'a1', itemKey: 'chainShirt', name: 'Chain Shirt', type: 'armor', armorType: 'medium', baseAC: 13, quantity: 1 },
+            ],
+            ...overrides,
+        });
+    }
+
+    it('a second identical shield is refused; a better one replaces the first instead of stacking', () => {
+        const first = gameReducer(shieldState(), { type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: 's1', companionId: 'c1' } });
+        expect(first.party[0]).toMatchObject({ ac: 16, shieldBonus: 2 });
+        expect(first.inventory.find(i => i.id === 's1')).toBeUndefined();
+
+        const second = gameReducer(first, { type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: 's2', companionId: 'c1' } });
+        expect(second.party[0].ac).toBe(16); // not 18
+        expect(second.inventory.find(i => i.id === 's2')).toBeDefined();
+        expect(second.messages.at(-1).content).toContain('already carries a shield');
+
+        const magic = gameReducer(second, { type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: 's3', companionId: 'c1' } });
+        expect(magic.party[0]).toMatchObject({ ac: 17, shieldBonus: 3 }); // 14 + 3: the +1 shield replaces the plain one
+        expect(magic.inventory.find(i => i.id === 's3')).toBeUndefined();
+    });
+
+    it('gifted armor is priced on top of the shield the companion keeps carrying', () => {
+        const shielded = gameReducer(shieldState(), { type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: 's1', companionId: 'c1' } });
+        const armored = gameReducer(shielded, { type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: 'a1', companionId: 'c1' } });
+        // chain shirt 13 + 2 competence + the shield 2 = 17 (a 16-AC companion used to refuse this as a downgrade).
+        expect(armored.party[0]).toMatchObject({ ac: 17, shieldBonus: 2 });
+        expect(armored.inventory.find(i => i.id === 'a1')).toBeUndefined();
+    });
+
+    it('shieldBonus survives ordinary companion updates and reads 0 on pre-memory companions', () => {
+        const shielded = gameReducer(shieldState(), { type: 'GIVE_GEAR_TO_COMPANION', payload: { itemId: 's1', companionId: 'c1' } });
+        const healed = gameReducer(shielded, { type: 'UPDATE_COMPANION', payload: { id: 'c1', hp: 10 } });
+        expect(healed.party[0].shieldBonus).toBe(2);
+        const legacy = gameReducer(shieldState(), { type: 'UPDATE_COMPANION', payload: { id: 'c1', hp: 12 } });
+        expect(legacy.party[0].shieldBonus).toBe(0);
+    });
+});

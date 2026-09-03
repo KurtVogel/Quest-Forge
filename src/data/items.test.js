@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeItem, normalizeItemKey, parseCountedItemName } from './items.js';
+import { boundWeaponDamage, normalizeItem, normalizeItemKey, parseCountedItemName } from './items.js';
 
 describe('item catalog normalization', () => {
     it('recognizes a catalog item with a descriptive prefix', () => {
@@ -110,5 +110,72 @@ describe('item catalog normalization', () => {
         const blade = normalizeItem({ name: 'Kingslayer Edge', type: 'weapon', damage: '1d8', attackBonus: 20, damageBonus: -5 });
         expect(blade.attackBonus).toBe(3);
         expect(blade.damageBonus).toBe(0); // negative junk zeroed
+    });
+});
+
+describe('genitive prefixes never become catalog gear (2026-09-03 P1)', () => {
+    it('rejects "X of <catalog name>" story objects', () => {
+        expect(normalizeItemKey('Scroll of Shield')).toBeNull();
+        expect(normalizeItemKey('Ring of the Dagger')).toBeNull();
+        expect(normalizeItemKey('Scrolls of Shield')).toBeNull();
+        expect(normalizeItemKey('Amulet for the Longsword')).toBeNull();
+        expect(normalizeItemKey('Letter from the Warhammer')).toBeNull();
+    });
+
+    it('still accepts unit/container heads and plain descriptors', () => {
+        expect(normalizeItemKey('suit of chain mail')).toBe('chainMail');
+        expect(normalizeItemKey('a battered suit of Chain Mail')).toBe('chainMail');
+        expect(normalizeItemKey('pair of daggers')).toBe('dagger');
+        expect(normalizeItemKey('coil of hempen rope (50 ft)')).toBe('ropeHempen');
+        expect(normalizeItemKey('vial of antitoxin')).toBe('antitoxin');
+        expect(normalizeItemKey('massive warhammer')).toBe('warhammer');
+        expect(normalizeItemKey('Potion of Healing')).toBe('potionHealing');
+    });
+
+    it('normalizeItem keeps a genitive story object as its own custom row', () => {
+        const scroll = normalizeItem({ name: 'Scroll of Shield', type: 'consumable' });
+        expect(scroll.itemKey).toBeNull();
+        expect(scroll.name).toBe('Scroll of Shield');
+        expect(scroll.type).toBe('consumable');
+        expect(scroll.isShield).toBeUndefined();
+    });
+});
+
+describe('non-catalog weapon damage is bounded (2026-09-03 P1)', () => {
+    it('caps dice at the best catalog die and falls back to 1d6 beyond it', () => {
+        expect(boundWeaponDamage('99d12')).toBe('1d6');
+        expect(boundWeaponDamage('1d999')).toBe('1d6');
+        expect(boundWeaponDamage('3d6')).toBe('1d6');
+        expect(boundWeaponDamage('0d6')).toBe('1d6');
+        expect(boundWeaponDamage('lots')).toBe('1d6');
+        expect(boundWeaponDamage('')).toBe('1d6');
+        expect(boundWeaponDamage('2d6')).toBe('2d6');
+        expect(boundWeaponDamage('1d12')).toBe('1d12');
+        expect(boundWeaponDamage('1d8 slashing')).toBe('1d8');
+        expect(boundWeaponDamage('1d6+2')).toBe('1d6+2');
+        expect(boundWeaponDamage('1d6+9')).toBe('1d6+3');
+    });
+
+    it('normalizeItem bounds a DM/import weapon but leaves catalog dice alone', () => {
+        const doom = normalizeItem({ name: 'Doom Blade', type: 'weapon', damage: '99d12', damageVersatile: '99d20' });
+        expect(doom.damage).toBe('1d6');
+        expect(doom.damageVersatile).toBe('1d6');
+        const bespoke = normalizeItem({ name: 'Whalebone Harpoon', type: 'weapon', damage: '1d8 piercing' });
+        expect(bespoke.damage).toBe('1d8');
+        expect(normalizeItem({ name: 'Greatsword', damage: '99d12' }).damage).toBe('2d6');
+        // No damage field stays absent (fists fallback lives in getWeaponDamageNotation).
+        expect(normalizeItem({ name: 'Odd Cudgel', type: 'weapon' }).damage).toBeUndefined();
+    });
+});
+
+describe('parseCountedItemName corner cases (2026-09-03 P2)', () => {
+    it('reads "3 days rations" without the "of"', () => {
+        expect(parseCountedItemName('3 days rations')).toEqual({ name: 'rations', quantity: 3 });
+        expect(parseCountedItemName('2 nights worth of firewood')).toEqual({ name: 'firewood', quantity: 2 });
+    });
+
+    it('does not read "2 Handed Sword" as two swords', () => {
+        expect(parseCountedItemName('2 Handed Sword')).toBeNull();
+        expect(normalizeItem({ name: '2 Handed Sword', type: 'weapon', damage: '2d6' })).toMatchObject({ name: '2 Handed Sword', quantity: 1 });
     });
 });

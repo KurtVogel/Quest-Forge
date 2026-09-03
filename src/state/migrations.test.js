@@ -72,7 +72,8 @@ describe('healDuplicateInventoryRows (queue P2, live playtests #7-#8 stale-twin 
                 // One copy equipped: both rows stay (a worn blade is not a ghost).
                 { id: 'w-1', name: 'Shortsword', type: 'weapon', damage: '1d6', equipped: true, quantity: 1 },
                 { id: 'w-2', name: 'Shortsword', type: 'weapon', damage: '1d6', quantity: 1 },
-                // A real stack beside a single: quantities differ, leave alone.
+                // A real stack beside a single: this heal leaves them alone —
+                // healStackedInventoryRows (2026-09-03) folds them instead.
                 { id: 'p-1', name: 'Healing Potion', type: 'consumable', quantity: 3 },
                 { id: 'p-2', name: 'Healing Potion', type: 'consumable', quantity: 1 },
                 // Near-name variants are different rows by design.
@@ -81,7 +82,9 @@ describe('healDuplicateInventoryRows (queue P2, live playtests #7-#8 stale-twin 
             ],
         }));
         expect(save.inventory.filter(i => i.name === 'Shortsword')).toHaveLength(2);
-        expect(save.inventory.filter(i => i.name === 'Healing Potion')).toHaveLength(2);
+        const potions = save.inventory.filter(i => i.name === 'Healing Potion');
+        expect(potions).toHaveLength(1);
+        expect(potions[0]).toMatchObject({ id: 'p-1', quantity: 4 });
         expect(save.inventory.filter(i => /bog-wax/i.test(i.name))).toHaveLength(2);
     });
 
@@ -229,5 +232,41 @@ describe('hit dice heal on load (2026-09-01 dice-engine P2)', () => {
         const rested = gameReducer(loaded, { type: 'TAKE_REST', payload: 'short' });
         expect(rested.character.currentHP).toBeGreaterThan(10);
         expect(rested.character.hitDice.remaining).toBeLessThan(4);
+    });
+});
+
+describe('healStackedInventoryRows (2026-09-03 P2: pre-stacking saves hold three Torch rows)', () => {
+    it('folds same-key rows and same-name keyless rows into the first row, summing quantities', () => {
+        const save = migrateLoadedSave(fighterSave({
+            inventory: [
+                { id: 't-1', itemKey: 'torch', name: 'Torch', type: 'gear', quantity: 2 },
+                { id: 'k-1', name: 'Rusted iron keys', quantity: 1 },
+                { id: 't-2', itemKey: 'torch', name: 'Torch', type: 'gear', quantity: 3 },
+                { id: 't-3', itemKey: 'torch', name: 'Torch', type: 'gear', quantity: 1 },
+                { id: 'k-2', name: 'rusted iron keys', quantity: 2 },
+            ],
+        }));
+        const torches = save.inventory.filter(i => i.itemKey === 'torch');
+        expect(torches).toHaveLength(1);
+        expect(torches[0]).toMatchObject({ id: 't-1', quantity: 6 });
+        const keys = save.inventory.filter(i => /rusted iron keys/i.test(i.name));
+        expect(keys).toHaveLength(1);
+        expect(keys[0]).toMatchObject({ id: 'k-1', quantity: 3 });
+    });
+
+    it('never folds weapons, armor, shields, equipped rows, or differing magic bonuses', () => {
+        const save = migrateLoadedSave(fighterSave({
+            inventory: [
+                { id: 'd-1', itemKey: 'dagger', name: 'Dagger', type: 'weapon', damage: '1d4', quantity: 1, equipped: true },
+                { id: 'd-2', itemKey: 'dagger', name: 'Dagger', type: 'weapon', damage: '1d4', quantity: 2 },
+                { id: 's-1', itemKey: 'shield', name: 'Shield', type: 'shield', isShield: true, quantity: 1 },
+                { id: 's-2', itemKey: 'shield', name: 'Shield', type: 'shield', isShield: true, quantity: 2 },
+                { id: 'c-1', name: 'Lucky Charm +1', type: 'gear', magicBonus: 1, quantity: 1 },
+                { id: 'c-2', name: 'Lucky Charm +2', type: 'gear', magicBonus: 2, quantity: 1 },
+            ],
+        }));
+        expect(save.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(2);
+        expect(save.inventory.filter(i => i.itemKey === 'shield')).toHaveLength(2);
+        expect(save.inventory.filter(i => /Lucky Charm/.test(i.name))).toHaveLength(2);
     });
 });

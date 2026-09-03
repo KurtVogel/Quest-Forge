@@ -1598,3 +1598,84 @@ describe('2026-08-25 player report: "money removed multiple turns after I paid, 
         expect(purseCp(second)).toBe(afterFirst - 200);
     });
 });
+
+describe('2026-09-03 audit: sale quantity coercion, covered-purchase ledger status, purchase stacking', () => {
+    function addMessages(state, count, prefix = 'audit-msg') {
+        let next = state;
+        for (let i = 0; i < count; i++) {
+            next = gameReducer(next, {
+                type: 'ADD_MESSAGE',
+                payload: { id: `${prefix}-${i}`, role: 'assistant', content: `Filler line ${i}.` },
+            });
+        }
+        return next;
+    }
+
+    it('SELL_ITEM truncates a fractional quantity and ignores a junk string (P2)', () => {
+        const rations = [{ id: 'r1', itemKey: 'rations', name: 'Rations (1 day)', type: 'gear', valueCp: 50, quantity: 4 }];
+        const fractional = gameReducer(makeState({ inventory: rations }), {
+            type: 'SELL_ITEM',
+            payload: { itemKey: 'rations', quantity: 1.5, _meta: { sourceId: 'msg-sell-frac' } },
+        });
+        expect(fractional.inventory.find(i => i.id === 'r1').quantity).toBe(3);
+        expect(fractional.character.silver * 10 + fractional.character.copper).toBe(25); // one unit at half value (2 sp 5 cp), not 1.5×
+        const junk = gameReducer(makeState({ inventory: rations }), {
+            type: 'SELL_ITEM',
+            payload: { itemKey: 'rations', quantity: 'many', _meta: { sourceId: 'msg-sell-junk' } },
+        });
+        expect(junk.inventory.find(i => i.id === 'r1').quantity).toBe(3);
+        const string = gameReducer(makeState({ inventory: rations }), {
+            type: 'SELL_ITEM',
+            payload: { itemKey: 'rations', quantity: '2', _meta: { sourceId: 'msg-sell-str' } },
+        });
+        expect(string.inventory.find(i => i.id === 'r1').quantity).toBe(2);
+    });
+
+    it('a loss-covered purchase is ledgered `ignored`, so a later genuine charge is not doubly stripped (P2)', () => {
+        const state = makeState({ character: { gold: 20, silver: 0, copper: 0 } });
+        const paid = gameReducer(state, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 5, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I hand over the coins.' } },
+        });
+        expect(paid.character.gold).toBe(15);
+        const covered = gameReducer(addMessages(paid, 1), {
+            type: 'PURCHASE_ITEM',
+            payload: { name: 'Brass Lantern', priceCp: 500, _meta: { sourceId: 'msg-buy-2', playerMessage: 'I take the lantern.' } },
+        });
+        // Delivered without charging again — the earlier loose loss covers it.
+        expect(covered.character.gold).toBe(15);
+        expect(covered.inventory.some(i => i.name === 'Brass Lantern')).toBe(true);
+        expect(covered.recentPurchases.at(-1).status).toBe('ignored');
+        // The purchase replay guard still holds (the duplicate check is status-blind).
+        const replayed = gameReducer(addMessages(covered, 1), {
+            type: 'PURCHASE_ITEM',
+            payload: { name: 'Brass Lantern', priceCp: 500, _meta: { sourceId: 'msg-buy-3', playerMessage: 'I move on.' } },
+        });
+        expect(replayed.inventory.filter(i => i.name === 'Brass Lantern')).toHaveLength(1);
+        expect(replayed.character.gold).toBe(15);
+        // A genuine 10 gp charge two messages later: only the ONE real 5 gp spend is
+        // strippable now, so 5 gp is charged — before the fix the twin `applied`
+        // entries stripped the whole charge as "payments already taken".
+        const room = gameReducer(addMessages(covered, 2), {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 10, _meta: { sourceId: 'msg-room', playerMessage: 'I pay for the room.' } },
+        });
+        expect(room.character.gold).toBe(10);
+    });
+
+    it('PURCHASE_ITEM stacks into an existing same-identity row (P2)', () => {
+        const state = makeState({ character: { gold: 5, silver: 0, copper: 20 } });
+        const first = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'torch', quantity: 2, priceCp: 2, _meta: { sourceId: 'msg-t1', playerMessage: 'I buy two torches.' } },
+        });
+        const second = gameReducer(addMessages(first, 1), {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'torch', quantity: 3, priceCp: 3, _meta: { sourceId: 'msg-t2', playerMessage: 'I buy three more torches.' } },
+        });
+        const torches = second.inventory.filter(i => i.itemKey === 'torch');
+        expect(torches).toHaveLength(1);
+        expect(torches[0].quantity).toBe(5);
+        expect(second.character.silver * 10 + second.character.copper).toBe(15); // 20 cp − 2 − 3, consolidated
+    });
+});

@@ -6,7 +6,34 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-03 (20-round money-traffic playtest x2 on top of the 2026-09-02 queue sweep; deployed)._
+_Last updated: 2026-09-03 (queue sweep of the 2026-09-03 audit: stacking rule, items_lost quantity, bounded weapon dice, roster-as-template; deployed)._
+
+## 2026-09-03 — queue sweep: one stacking rule, bounded weapon dice, roster-as-template
+
+All 12 lines of the 2026-09-03 audit (character-vault + inventory-economy) cleared in one
+session — every queue line ticked with a fix note; the only open line is still the
+2026-08-09 pronoun-flip watch item. **P1s:** (1) `items_lost` no longer empties a stack —
+`REMOVE_ITEM_BY_NAME` takes `{ name, quantity }` through `consumeItem` (bare name = ONE
+unit of a multi-unit stack, whole row otherwise; a count or `"all"` for more), applyEvents
+carries the DM's quantity, the Scribe loss audit reports `quantity`, the ECONOMY prompt
+documents the shape; (2) genitive story objects ("Scroll of Shield", "Ring of the Dagger")
+no longer resolve to catalog gear — the descriptor-suffix rule rejects prepositional
+prefixes unless a unit/container head precedes "of" ("suit of chain mail" still works);
+(3) non-catalog weapon `damage` is bounded in `normalizeItem` (count ≤2, sides ≤12, bonus
+≤+3, junk → 1d6) on both trust boundaries — "99d12" used to reach the roll kernel intact.
+**P2s:** ONE stacking rule (`stackIdentity`/`addOrStackItem` in handlers/shared.js) shared
+by ADD_ITEM, PURCHASE_ITEM, and a new `healStackedInventoryRows` load fold; SELL_ITEM
+quantity finite + trunc; a loss-covered purchase is ledgered `ignored` (the reproduced
+5 gp → covered → 10 gp room charge now charges the genuine remainder instead of refusing);
+`companion.shieldBonus` shield memory (a second shield replaces or is refused, armor is
+priced on top of the kept shield); vault clamps skills to racial + class pick count and
+rogue expertise to 2; roster storage failures are loud (list/delete/save); "3 days
+rations" and "2 Handed Sword" parse right; preferredItemId swaps pinned. **Ruling
+(DECISIONS.md 2026-09-03):** the roster is a TEMPLATE — a dead hero exports/saves and
+begins a new campaign rested, the campaign death stands. Also fixed in passing: roleplay
+proposal ids get a random tail (same-millisecond collisions made a re-staged chained check
+supersede itself — the orchestrator test was failing deterministically on this machine).
+2,059 tests green (+34), lint clean, deployed to Firebase Hosting.
 
 ## 2026-09-03 — 20-round money-traffic playtest (vendor, corpses, bounty, toll, alms): the purse is exact
 

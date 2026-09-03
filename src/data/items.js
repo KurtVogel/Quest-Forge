@@ -129,7 +129,9 @@ export function normalizeItemKey(value = '') {
     // LLMs commonly add a bounded descriptive prefix to ordinary equipment
     // ("massive warhammer", "weathered leather armor"). Match only a complete
     // catalog-name suffix so unrelated story objects do not become mechanical gear.
-    const descriptorMatch = CATALOG_NAMES_BY_LENGTH.find(([, name]) => withoutBonus.endsWith(` ${name}`));
+    const descriptorMatch = CATALOG_NAMES_BY_LENGTH.find(([, name]) =>
+        withoutBonus.endsWith(` ${name}`)
+        && isDescriptorPrefix(withoutBonus.slice(0, -(name.length + 1))));
     if (descriptorMatch) return descriptorMatch[0];
 
     // Plural grants ("Torches", "Healing Potions") resolve to their singular
@@ -145,8 +147,23 @@ export function normalizeItemKey(value = '') {
     return null;
 }
 
-// Remainders that are measurements, not item counts: "10 foot pole" is one pole.
-const COUNT_UNIT_HEAD_RE = /^(?:foot|feet|ft|inch|inches|in|pound|pounds|lb|lbs|yard|yards|meter|meters|metre|metres|gallon|gallons|pint|pints|sided)\b/i;
+// A genitive/prepositional prefix names a DIFFERENT object that merely mentions
+// catalog gear (2026-09-03 P1: "Scroll of Shield" resolved to a catalog Shield and
+// auto-equipped for +2 AC; "Ring of the Dagger" became a Dagger). Only a
+// unit/container head right before "of" still describes the gear itself ("suit
+// of chain mail", "pair of daggers", "coil of hempen rope").
+const PREFIX_PREPOSITION_RE = /\b(?:of|for|with|from|to|against)\b/;
+const UNIT_HEAD_OF_RE = /(?:^|\s)(?:suit|suits|set|sets|pair|pairs|coil|coils|length|lengths|vial|vials|flask|flasks|bottle|bottles|bundle|bundles|stack|stacks|brace|quiver|quivers|sheaf|sheaves|sack|sacks|bag|bags|pouch|pouches|case|cases|box|boxes|crate|crates|piece|pieces)\s+of$/;
+
+function isDescriptorPrefix(prefix) {
+    const trimmed = String(prefix || '').trim();
+    if (!trimmed || !PREFIX_PREPOSITION_RE.test(trimmed)) return true;
+    return UNIT_HEAD_OF_RE.test(trimmed);
+}
+
+// Remainders that are measurements, not item counts: "10 foot pole" is one pole,
+// "2 handed sword" is one sword (2026-09-03).
+const COUNT_UNIT_HEAD_RE = /^(?:foot|feet|ft|inch|inches|in|pound|pounds|lb|lbs|yard|yards|meter|meters|metre|metres|gallon|gallons|pint|pints|sided|handed)\b/i;
 
 /**
  * Parse a count the LLM embedded in an item NAME ("3 Torches", "7 days of
@@ -167,7 +184,8 @@ export function parseCountedItemName(name = '') {
     let count;
     let rest;
     let match = raw.match(/^(\d{1,3})\s*[x×]\s*(.+)$/i)
-        || raw.match(/^(\d{1,3})\s+(?:days?|nights?)\s+(?:worth\s+)?of\s+(.+)$/i)
+        // "3 days of rations" and the of-less "3 days rations" both mean three.
+        || raw.match(/^(\d{1,3})\s+(?:days?|nights?)\s+(?:worth\s+)?(?:of\s+)?(.+)$/i)
         || raw.match(/^(\d{1,3})\s+(.+)$/);
     if (match) {
         count = Number(match[1]);
@@ -204,6 +222,30 @@ const MAX_ITEM_VALUE_CP = 1000000;
 const MAX_ARMOR_BASE_AC = 18;
 const MAX_SHIELD_AC = 3;
 const ARMOR_TYPES = ['light', 'medium', 'heavy'];
+// Non-catalog weapon damage was the one mechanical field with no bound (2026-09-03
+// P1): "99d12" imported, equipped, and reached the roll kernel intact — dice.ts's
+// MAX_DICE_COUNT (100) was the only ceiling. Ceilings mirror the best catalog dice
+// (greatsword 2d6 / greataxe 1d12); an embedded flat bonus shares the magic cap.
+const MAX_WEAPON_DICE_COUNT = 2;
+const MAX_WEAPON_DIE_SIDES = 12;
+const FALLBACK_WEAPON_DAMAGE = '1d6';
+
+/**
+ * Bound a non-catalog weapon's damage notation. Trailing damage-type words
+ * ("1d8 slashing") are tolerated — the dice are what matter; anything the engine
+ * could not roll, or dice beyond the catalog's best, becomes a plain 1d6.
+ */
+export function boundWeaponDamage(value) {
+    const match = String(value ?? '').trim().match(/^(\d{1,3})\s*d\s*(\d{1,4})\s*(?:\+\s*(\d{1,3}))?(?:\s+[a-z ,/-]+)?$/i);
+    if (!match) return FALLBACK_WEAPON_DAMAGE;
+    const count = Number(match[1]);
+    const sides = Number(match[2]);
+    if (count < 1 || sides < 1 || count > MAX_WEAPON_DICE_COUNT || sides > MAX_WEAPON_DIE_SIDES) {
+        return FALLBACK_WEAPON_DAMAGE;
+    }
+    const bonus = clampMagicBonus(Number(match[3] || 0));
+    return `${count}d${sides}${bonus ? `+${bonus}` : ''}`;
+}
 
 export function normalizeItem(raw = {}) {
     const source = typeof raw === 'string' ? { name: raw } : { ...raw };
@@ -270,6 +312,13 @@ export function normalizeItem(raw = {}) {
         } else {
             delete normalized.baseAC;
         }
+    }
+
+    // Catalog weapons carry catalog dice (the spread above restored them); a
+    // non-catalog weapon's notation is LLM- or import-authored and gets bounded.
+    if (normalized.type === 'weapon' && !itemKey) {
+        if (normalized.damage !== undefined) normalized.damage = boundWeaponDamage(normalized.damage);
+        if (normalized.damageVersatile !== undefined) normalized.damageVersatile = boundWeaponDamage(normalized.damageVersatile);
     }
 
     if (normalized.type === 'shield') {

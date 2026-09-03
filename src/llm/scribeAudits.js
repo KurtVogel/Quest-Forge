@@ -57,12 +57,13 @@ Gear handoff rules:
 - When in doubt, omit — an invented handoff is worse than a missed one. Omit "missing_gear_handoffs" entirely when nothing is missing.
 
 Also report the ITEMS the narrative shows LEAVING the hero's possession, as another top-level field:
-"narrated_losses": { "items": [{ "name": "exact item name as the hero's inventory would know it" }] }
+"narrated_losses": { "items": [{ "name": "exact item name as the hero's inventory would know it", "quantity": 1 }] }
 
 Loss rules:
 - Report ONLY losses the DM NARRATIVE completes in this scene: confiscated, seized, stolen, taken, dropped and left behind, destroyed, handed over and kept by the other party. Threats, demands, attempts, and items merely set down within reach report nothing.
 - The HERO'S CURRENT INVENTORY line lists what the hero owns — report a loss only for an item on that list, under its listed name (the narrative's "your blade" is the inventory's actual weapon name).
 - A pack, purse, or bag "emptied" or "taken" loses its narrated CONTENTS: report each named item individually; coins seized with it report under narrated_payment, never here.
+- "quantity" is how many units of a stack left: one torch burned or one ration eaten is 1 (the default when omitted); "all" when the narrative takes the whole stack ("your torches are confiscated"). Copy a stated count exactly; never estimate.
 - Gear handed to a party COMPANION is a handoff (missing_gear_handoffs), never a loss. An item merely used, shown, worn, or lent for a moment and returned reports nothing.
 - Never re-report a loss the narrative merely recalls, confirms, or laments from an EARLIER scene — only losses completed for the first time in THIS narrative. "Your sword is still gone" reports nothing.
 - When in doubt, omit — a wrongly removed item is worse than a missed loss. Omit "narrated_losses" entirely when the hero loses nothing.`;
@@ -541,9 +542,22 @@ function reconcileNarratedPayment(narrated, lootAudit, dispatch) {
  * per narration via a claimed `:losses` sourceId; announced visibly.
  */
 function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
+    // Each entry: the narrated name plus the units that left (2026-09-03 P1 —
+    // a bare name takes ONE unit of a stack in the reducer; "all" or a count
+    // takes more). Quantities are untrusted Scribe output: bounded like the
+    // reducer bounds them.
+    const readQuantity = entry => {
+        const raw = typeof entry === 'string' ? undefined : entry?.quantity;
+        if (typeof raw === 'string' && /^all$/i.test(raw.trim())) return 'all';
+        const n = Number(raw);
+        return Number.isFinite(n) && n > 1 ? Math.min(999, Math.trunc(n)) : null;
+    };
     const items = (Array.isArray(narrated?.items) ? narrated.items : [])
-        .map(entry => String((typeof entry === 'string' ? entry : entry?.name) || '').trim().slice(0, 80))
-        .filter(Boolean)
+        .map(entry => ({
+            name: String((typeof entry === 'string' ? entry : entry?.name) || '').trim().slice(0, 80),
+            quantity: readQuantity(entry),
+        }))
+        .filter(entry => entry.name)
         .slice(0, 4);
     if (items.length === 0) return;
 
@@ -561,7 +575,7 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
 
     const removed = [];
     const removedItemIds = new Set();
-    for (const name of items) {
+    for (const { name, quantity } of items) {
         if (appliedLossIdentities.some(value => itemIdentityMatches(name, value))) {
             console.warn(`[Scribe] Narrated loss "${name}" already removed by the event path; skipping.`);
             continue;
@@ -582,7 +596,10 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
         const identity = owned.id ?? owned.name;
         if (removedItemIds.has(identity)) continue;
         removedItemIds.add(identity);
-        dispatch({ type: 'REMOVE_ITEM_BY_NAME', payload: owned.name });
+        dispatch({
+            type: 'REMOVE_ITEM_BY_NAME',
+            payload: quantity === null ? owned.name : { name: owned.name, quantity },
+        });
         removed.push(owned.name);
     }
 

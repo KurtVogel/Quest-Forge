@@ -8,6 +8,50 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-03 · One stacking rule for the pack; the roster is a template, not an afterlife;
+non-catalog weapon dice are bounded like every other item stat.**
+Rulings from the sweep of the 2026-09-03 audit (character-vault + inventory-economy; every
+queue line ticked in SCHEDULED_STRENGTHENING.md):
+**(1) The pack has ONE stacking rule, and it lives in the handlers.** `stackIdentity` /
+`addOrStackItem` (`handlers/shared.js`): non-equipment with the same catalog key — or the
+same case-folded name when keyless — and the same magic bonus is one stack; weapons, armor,
+and shields stay one row each (equip flags and slot logic are per row), and an equipped row
+is never a merge target. `ADD_ITEM` and `PURCHASE_ITEM` fold into the existing row, and
+`healStackedInventoryRows` folds pre-fix saves once on load beside the older narrow heals
+(which keep their documented scope). The removal side agrees: `REMOVE_ITEM_BY_NAME` is
+quantity-aware — a bare name takes ONE unit of a multi-unit stack and the whole row
+otherwise; a count or `"all"` takes more — with the DM's `items_lost` quantity carried through
+applyEvents and the Scribe loss audit reporting `quantity` itself. Why one-unit default: the
+ECONOMY prompt asks for `items_lost` when an owned item is CONSUMED, so the commonest loss is
+one torch, one ration, one javelin; a confiscation names its count or says "all". The
+trade-off is explicit: a DM that forgets `"all"` on a seized stack under-removes, which the
+loss audit's own quantity can correct — the old behaviour over-removed silently and nothing
+could put a torch back.
+**(2) The roster is a TEMPLATE; campaigns own deaths.** Save to Roster / Export File stay
+ungated on `isDead`, and `sanitizeCharacter` deliberately drops `isDead`/`deathSaves` and
+rests the hero. A hero file records who the character IS (name, race, class, level, scores,
+looks, background, gear); whether they died is the campaign's fact, and beginning a NEW
+campaign with the same sheet is a new table, not a resurrection. In-campaign resurrection
+stays cut (heals never revive `isDead`, the level-up full heal never writes `currentHP` on a
+corpse — 2026-08-27). The buttons' tooltips say so on a dead hero.
+**(3) Non-catalog weapon `damage` is bounded at `normalizeItem`** like magicBonus, attack/
+damage bonus, acBonus, baseAC, shieldAC, valueCp, and quantity before it: count ≤2, sides
+≤12 (the catalog's best dice), an embedded flat bonus shares the +3 magic cap, trailing
+damage-type words are tolerated ("1d8 slashing" → 1d8), anything else becomes a plain 1d6.
+Catalog weapons keep catalog dice. Both trust boundaries (DM events, hero-file import)
+share the one clamp — the audit's "list every clamp in the boundary function and ask which
+sibling has none" habit found this one.
+**(4) Smaller rulings.** A genitive/prepositional prefix never resolves to catalog gear
+("Scroll of Shield" is a scroll) unless a unit/container head sits right before "of" ("suit
+of chain mail", "pair of daggers", "vial of antitoxin"). A loss-covered purchase is ledgered
+`ignored`, honouring 2026-08-28's "ledgers record only coin that MOVED" while the status-blind
+replay guard keeps suppressing re-emissions. Companions remember their shield
+(`companion.shieldBonus`): a gifted shield replaces, never stacks, and gifted armor is priced
+on top of the kept shield. Import clamps skills to racial grants + the class pick count and
+rogue expertise to the creation allowance of two. Roster storage failures are loud (list,
+delete, save). Roleplay-check proposal ids carry a random tail — two proposals minted in the
+same millisecond shared one id, so a re-staged chained check superseded itself.
+
 **2026-09-02 · Opening Initiative is engine-owned (no DM intents apply to it); out-of-combat
 `player_death` keeps no mechanical precondition; the low-level-solo predicate has ONE home.**
 Rulings from the sweep of both 2026-09-02 audit rounds (queue lines ticked in

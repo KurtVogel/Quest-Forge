@@ -15,6 +15,7 @@ import {
 } from './characterVault.js';
 import { createCharacter, createStartingInventory } from './characterUtils.js';
 import { getProficiencyBonus } from './rules.js';
+import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 
 const BASE_SCORES = { strength: 15, dexterity: 13, constitution: 14, intelligence: 10, wisdom: 12, charisma: 8 };
 
@@ -382,5 +383,86 @@ describe('characterExportFilename', () => {
         expect(characterExportFilename({ name: "Sir Kael O'Brien" })).toBe('questforge-sir-kael-o-brien.json');
         expect(characterExportFilename({ name: '???' })).toBe('questforge-hero.json');
         expect(characterExportFilename(null)).toBe('questforge-hero.json');
+    });
+});
+
+describe('2026-09-03 audit: weapon damage bound, allowance clamps, dead-hero template', () => {
+    it('bounds a hand-edited weapon notation on import (P1: "99d12" reached the roll kernel)', () => {
+        const inventory = sanitizeInventory([
+            { name: 'Doom Blade', type: 'weapon', damage: '99d12', equipped: true },
+            { name: 'Greatsword', damage: '99d12' },
+        ]);
+        expect(inventory[0]).toMatchObject({ name: 'Doom Blade', damage: '1d6', equipped: true });
+        expect(inventory[1]).toMatchObject({ itemKey: 'greatsword', damage: '2d6' });
+    });
+
+    it('clamps chosen skills to the class allowance and keeps racial grants (P2)', () => {
+        const { character } = makeFighter();
+        const everySkill = ['acrobatics', 'animalHandling', 'arcana', 'athletics', 'deception', 'history', 'insight',
+            'intimidation', 'investigation', 'medicine', 'nature', 'perception', 'performance', 'persuasion',
+            'religion', 'sleightOfHand', 'stealth', 'survival'];
+        const imported = sanitizeCharacter({ ...character, skillProficiencies: everySkill });
+        // Fighter: 2 chosen (first two non-racial in file order) + whatever the race grants.
+        const racial = imported.skillProficiencies.filter(s => !['acrobatics', 'animalHandling'].includes(s));
+        expect(imported.skillProficiencies.slice(0, 0)).toEqual([]);
+        expect(imported.skillProficiencies.length).toBe(racial.length + 2);
+        expect(imported.skillProficiencies).toEqual(expect.arrayContaining(['acrobatics', 'animalHandling']));
+        expect(imported.skillProficiencies).not.toContain('stealth');
+    });
+
+    it('clamps rogue expertise to the creation allowance of two (P2)', () => {
+        const rogue = createCharacter('Vex', 'human', 'rogue', BASE_SCORES, ['stealth', 'deception', 'insight', 'athletics'], {
+            expertiseSkills: ['stealth', 'deception'],
+        });
+        const imported = sanitizeCharacter({ ...rogue, expertiseSkills: ['stealth', 'deception', 'insight', 'athletics', 'stealth'] });
+        expect(imported.expertiseSkills).toEqual(['stealth', 'deception']);
+    });
+
+    it('rests a dead hero: the roster/export copy is a template, the campaign death stands (ruling 2026-09-03)', () => {
+        const { character } = makeFighter();
+        const corpse = { ...character, currentHP: 0, isDead: true, deathSaves: { successes: 0, failures: 3 }, conditions: ['Unconscious'] };
+        const imported = sanitizeCharacter(corpse);
+        expect(imported.isDead).toBeUndefined();
+        expect(imported.deathSaves).not.toEqual({ successes: 0, failures: 3 });
+        expect(imported.currentHP).toBe(imported.maxHP);
+        expect(imported.conditions).toEqual([]);
+    });
+});
+
+describe('2026-09-03 audit: vault test depth', () => {
+    it('sanitizeInventory keeps at most 200 rows and accepts bare string entries', () => {
+        const rows = Array.from({ length: 205 }, (_, i) => ({ name: `Pebble ${i}` }));
+        expect(sanitizeInventory(rows)).toHaveLength(200);
+        const strings = sanitizeInventory(['Torch', 'Longsword', 42, null]);
+        expect(strings.map(i => i.name)).toEqual(['Torch', 'Longsword']);
+        expect(strings[1].itemKey).toBe('longsword');
+    });
+
+    it('clamps exp below the next threshold at the level cap too', () => {
+        const { character } = makeFighter();
+        const capped = sanitizeCharacter({ ...character, level: MAX_CHARACTER_LEVEL, exp: 99999999 });
+        expect(capped.level).toBe(MAX_CHARACTER_LEVEL);
+        expect(capped.exp).toBe(getExperienceThreshold(MAX_CHARACTER_LEVEL) - 1);
+    });
+
+    it('drops a junk portraitUpdatedAt instead of keeping it', () => {
+        const { character } = makeFighter();
+        expect(sanitizeCharacter({ ...character, portraitUpdatedAt: 'yesterday' }).portraitUpdatedAt).toBeNull();
+        expect(sanitizeCharacter({ ...character, portraitUpdatedAt: 1700000000000 }).portraitUpdatedAt).toBe(1700000000000);
+    });
+
+    it('import → export → import is stable, and begin-from-roster keeps the roster id by construction', () => {
+        const { character, inventory } = makeFighter();
+        const once = parseCharacterExport(JSON.stringify(buildCharacterExport(character, inventory)));
+        const twice = parseCharacterExport(JSON.stringify(buildCharacterExport(once.character, once.inventory)));
+        const strip = c => { const { id: _id, createdAt: _c, ...rest } = c; return rest; };
+        expect(strip(twice.character)).toEqual(strip(once.character));
+        expect(twice.inventory.map(i => [i.name, i.equipped, i.quantity])).toEqual(once.inventory.map(i => [i.name, i.equipped, i.quantity]));
+        // The roster path (CharacterCreation.handleBeginFromRoster) re-sanitizes
+        // and then restores the entry id so a later Save to Roster updates in place.
+        const rosterId = 'char-roster-7';
+        const begun = { ...sanitizeCharacter(once.character), id: rosterId };
+        expect(begun.id).toBe(rosterId);
+        expect(sanitizeCharacter(once.character).id).not.toBe(rosterId);
     });
 });

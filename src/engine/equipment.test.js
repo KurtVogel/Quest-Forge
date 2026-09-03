@@ -46,3 +46,40 @@ describe('normalizeEquippedSlots', () => {
         expect(items.find(i => i.id === 'sword').equipped).toBe(true);
     });
 });
+
+describe('normalizeEquippedSlots preferredItemId swaps (2026-09-03 test depth)', () => {
+    it('a newly equipped armor displaces the worn armor, leaving weapon and shield alone', () => {
+        const items = normalizeEquippedSlots([
+            { id: 'chain', name: 'Chain Mail', type: 'armor', equipped: true },
+            { id: 'sword', name: 'Longsword', type: 'weapon', equipped: true },
+            { id: 'shield', name: 'Shield', type: 'shield', isShield: true, equipped: true },
+            { id: 'plate', name: 'Plate Armor', type: 'armor', equipped: false },
+        ], 'plate');
+
+        expect(items.find(i => i.id === 'plate').equipped).toBe(true);
+        expect(items.find(i => i.id === 'chain').equipped).toBe(false);
+        expect(items.find(i => i.id === 'sword').equipped).toBe(true);
+        expect(items.find(i => i.id === 'shield').equipped).toBe(true);
+        // Order is preserved: the preferred item does not jump to the front.
+        expect(items.map(i => i.id)).toEqual(['chain', 'sword', 'shield', 'plate']);
+    });
+
+    it('a newly equipped one-handed weapon displaces the active weapon and keeps the shield', () => {
+        const items = normalizeEquippedSlots([
+            { id: 'sword', name: 'Longsword', type: 'weapon', equipped: true },
+            { id: 'shield', name: 'Shield', type: 'shield', isShield: true, equipped: true },
+            { id: 'mace', name: 'Mace', type: 'weapon', equipped: false },
+        ], 'mace');
+
+        expect(items.find(i => i.id === 'mace').equipped).toBe(true);
+        expect(items.find(i => i.id === 'sword').equipped).toBe(false);
+        expect(items.find(i => i.id === 'shield').equipped).toBe(true);
+    });
+
+    it('an unknown preferredItemId changes nothing', () => {
+        const items = normalizeEquippedSlots([
+            { id: 'sword', name: 'Longsword', type: 'weapon', equipped: true },
+        ], 'ghost');
+        expect(items.find(i => i.id === 'sword').equipped).toBe(true);
+    });
+});

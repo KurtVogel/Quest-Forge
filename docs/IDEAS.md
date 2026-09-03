@@ -1367,7 +1367,7 @@ REMOVES a safety net the true solo hero has. Worth an rpg-balance-master look on
 real campaigns feel unfairly lethal at level 1-2 with a party; do not change reflexively,
 the near-death drama is a feature.
 
-### [strengthening] One stacking rule for the pack: quantity-aware `items_lost` + same-identity merge on add — status: `idea` (2026-09-03)
+### [strengthening] One stacking rule for the pack: quantity-aware `items_lost` + same-identity merge on add — status: `shipped` (2026-09-03, same-day queue sweep: `stackIdentity`/`addOrStackItem` + quantity-aware `REMOVE_ITEM_BY_NAME` + `healStackedInventoryRows`)
 The inventory has quantities but no stacking rule, and the two halves disagree. Adding never
 merges: `ADD_ITEM` and `PURCHASE_ITEM` append unconditionally, so buy two torches, buy three
 more, find one = three "Torch" rows in the panel and three lines in the DM's INVENTORY block

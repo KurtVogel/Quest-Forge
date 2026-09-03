@@ -24,6 +24,7 @@ export default function CharacterSheet() {
     const [portraitDraft, setPortraitDraft] = useState('');
     const [isGeneratingPortrait, setIsGeneratingPortrait] = useState(false);
     const [portraitError, setPortraitError] = useState('');
+    const [rosterError, setRosterError] = useState('');
     const [asiDraft, setAsiDraft] = useState({});
     const characterId = character?.id;
     const characterAppearance = character?.appearance || '';
@@ -94,6 +95,7 @@ export default function CharacterSheet() {
     const asiRemaining = Math.max(0, 2 - asiUsed);
 
     const handleSaveToRoster = async () => {
+        setRosterError('');
         try {
             const entry = await saveRosterCharacter(character, state.inventory);
             // A legacy hero without an id gets one minted by the roster store —
@@ -109,7 +111,19 @@ export default function CharacterSheet() {
                 },
             });
         } catch (e) {
+            // Fail LOUD (2026-09-03 P2): a swallowed rejection left the player
+            // believing the hero was saved. Inline under the buttons AND in the
+            // chat log, so it survives closing the sheet.
             console.warn('Failed to save hero to roster:', e);
+            const reason = e?.message || e?.name || 'unknown error';
+            setRosterError(`Could not save ${character.name} to the roster — browser storage failed (${reason}). Export File still works.`);
+            dispatch({
+                type: 'ADD_MESSAGE',
+                payload: {
+                    role: 'system',
+                    content: `⚠️ **${character.name}** was NOT saved to the character roster — browser storage failed (${reason}). Use Export File to keep a copy.`,
+                },
+            });
         }
     };
 
@@ -559,17 +573,22 @@ export default function CharacterSheet() {
                         <button
                             className="btn btn-secondary btn-sm"
                             onClick={handleSaveToRoster}
-                            title="Snapshot this hero (with gear) to the local roster for reuse in future adventures"
+                            title={character.isDead
+                                ? 'Keep this hero as a template: the roster copy starts a future adventure alive and rested — this campaign\'s death stands'
+                                : 'Snapshot this hero (with gear) to the local roster for reuse in future adventures'}
                         >
                             Save to Roster
                         </button>
                         <button
                             className="btn btn-secondary btn-sm"
                             onClick={handleExportHero}
-                            title="Download this hero as a JSON file — share it or move it to another device"
+                            title={character.isDead
+                                ? 'Download this hero as a JSON file — imported into a new adventure they begin alive and rested'
+                                : 'Download this hero as a JSON file — share it or move it to another device'}
                         >
                             Export File
                         </button>
+                        {rosterError && <div className="cs-portrait-error">{rosterError}</div>}
                     </div>
                 </div>
             )}

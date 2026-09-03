@@ -8,6 +8,7 @@ import { itemIdentityMatches } from '../../engine/textMatch.js';
 import { rollNotation } from '../../engine/dice.ts';
 import { gameReducer } from '../gameReducer.js';
 import {
+    addOrStackItem,
     companionStatus,
     consumeItem,
     appendRollHistory,
@@ -145,7 +146,10 @@ export const handlers = {
             }
         }
         const guarded = recentItemGrants === state.recentItemGrants ? state : { ...state, recentItemGrants };
-        return withInventoryAndAC(guarded, normalizeEquippedSlots([...state.inventory, newItem], newItem.equipped ? newItem.id : null));
+        // Same-identity non-equipment joins its existing stack (2026-09-03 P2:
+        // buy 2 → buy 3 → find 1 minted three "Torch" rows, and a later loss
+        // decremented whichever row resolved first).
+        return withInventoryAndAC(guarded, normalizeEquippedSlots(addOrStackItem(state.inventory, newItem), newItem.equipped ? newItem.id : null));
     },
 
     USE_ITEM(state, action) {
@@ -307,8 +311,20 @@ export const handlers = {
     },
 
     REMOVE_ITEM_BY_NAME(state, action) {
-        const ref = String(action.payload || '').trim();
+        // Payload: a name string, or { name, quantity } — quantity a positive
+        // count or "all". Quantity-aware since 2026-09-03 (P1): the ECONOMY
+        // prompt asks for items_lost when an owned item is CONSUMED, so a bare
+        // "Torch" against a five-torch stack used to empty the whole stack. A
+        // bare name now takes ONE unit of a multi-unit stack and the whole row
+        // otherwise; the DM (and the loss audit) pass a count for more.
+        const payload = action.payload && typeof action.payload === 'object' ? action.payload : { name: action.payload };
+        const ref = String(payload.name || '').trim();
         if (!ref) return state;
+        const rawQuantity = payload.quantity;
+        const removeAll = typeof rawQuantity === 'string' && /^all$/i.test(rawQuantity.trim());
+        const requestedQuantity = Number.isFinite(Number(rawQuantity)) && Number(rawQuantity) > 0
+            ? Math.trunc(Number(rawQuantity))
+            : null;
         // Drifted DM names must still land (2026-08-28 P1: "hempen rope" left
         // "Hempen Rope (50 ft)" untouched with only a console warn, and the loss
         // audit stood down because the items_lost event HAD been emitted). Exact
@@ -333,7 +349,13 @@ export const handlers = {
                 messages: [...state.messages, systemMessage(failureNote)],
             };
         }
-        return withInventoryAndAC(state, state.inventory.filter(i => i.id !== matchToRemove.id));
+        const owned = Math.max(1, Math.trunc(matchToRemove.quantity || 1));
+        const units = removeAll
+            ? owned
+            : requestedQuantity !== null
+                ? Math.min(owned, requestedQuantity)
+                : 1;
+        return withInventoryAndAC(state, consumeItem(state.inventory, matchToRemove.id, units));
     },
 
     EQUIP_ITEM(state, action) {

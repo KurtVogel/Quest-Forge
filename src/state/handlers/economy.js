@@ -7,6 +7,7 @@ import { addCurrency, characterCurrencyToCopper, formatCurrency, spendCurrency }
 import { MAX_COIN_EVENT } from '../../config/contentLimits.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
 import {
+    addOrStackItem,
     consumeItem,
     currentMessageIndex,
     findInventoryItemByRef,
@@ -776,15 +777,21 @@ export const handlers = {
             sourceId, currentMessageIndex(state), RECENT_COIN_LOSS_MESSAGE_WINDOW, state.messages
         );
         if (lossCover && !playerMessageSupportsRepeatTransaction(item, meta.playerMessage, PURCHASE_VERB_RE)) {
+            // Ledgered as `ignored`, not `applied` (2026-09-03 P2): no coin moved
+            // in THIS action — the covering loss entry already holds the spend.
+            // An `applied` twin put the same payment in spendLedgerView twice,
+            // and stripBundledReplay then stripped both out of a genuine later
+            // charge. The replay guard survives: findRecentTransactionDuplicate
+            // is status-blind, so a re-emitted purchase is still suppressed.
             const coveredState = {
                 ...state,
-                recentPurchases: rememberTransaction(state.recentPurchases, transaction, sourceId, currentMessageIndex(state)),
+                recentPurchases: rememberTransaction(state.recentPurchases, transaction, sourceId, currentMessageIndex(state), 'ignored'),
                 messages: [
                     ...state.messages,
                     coinLine(`${quantity > 1 ? `${quantity}x ` : ''}${item.name} added — its ${formatCurrency(priceCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`),
                 ],
             };
-            return withInventoryAndAC(coveredState, [...state.inventory, mintOwnedItem(item, { quantity })]);
+            return withInventoryAndAC(coveredState, addOrStackItem(state.inventory, mintOwnedItem(item, { quantity })));
         }
 
         const payment = spendCurrency(state.character, priceCp);
@@ -809,7 +816,7 @@ export const handlers = {
                 coinLine(`Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)}.`),
             ],
         };
-        return withInventoryAndAC(nextState, [...state.inventory, newItem]);
+        return withInventoryAndAC(nextState, addOrStackItem(state.inventory, newItem));
     },
 
     SELL_ITEM(state, action) {
@@ -830,7 +837,13 @@ export const handlers = {
             };
         }
 
-        const quantity = Math.max(1, Math.min(item.quantity || 1, payload.quantity || 1));
+        // Finite + trunc like buildPurchaseTransaction (2026-09-03 P2): a
+        // fractional/string DM quantity left "Rations ×2.5" and paid 1.5×.
+        const requestedQuantity = Number(payload.quantity);
+        const quantity = Math.max(1, Math.min(
+            Math.max(1, Math.trunc(item.quantity || 1)),
+            Number.isFinite(requestedQuantity) ? Math.trunc(requestedQuantity) : 1
+        ));
         // Proceeds share the coin-grant ceiling whichever path priced them: the DM's
         // override is unbounded LLM input, and legacy save items may carry an
         // unclamped valueCp.

@@ -68,7 +68,13 @@ export default function CharacterCreation() {
     }, [name, gender, appearance, race, charClass]);
 
     useEffect(() => {
-        listRosterCharacters().then(setRoster).catch(() => setRoster([]));
+        // A blocked/failed IndexedDB must not render as "0 in roster" (2026-09-03
+        // P2, the boot-screen "no saves" class): say so, loudly.
+        listRosterCharacters().then(setRoster).catch(err => {
+            console.warn('Failed to read the character roster:', err);
+            setRoster([]);
+            setRosterError(`Could not read the character roster — browser storage failed (${err?.message || err?.name || 'unknown error'}). Import a character file, or reload and try again.`);
+        });
     }, []);
 
     const currentStep = STEPS[step];
@@ -285,9 +291,15 @@ export default function CharacterCreation() {
 
     const handleDeleteHero = async (entry) => {
         if (!confirm(`Remove ${entry.name} from the roster? An exported file is the only way to get them back.`)) return;
-        await deleteRosterCharacter(entry.id);
-        if (selectedHeroId === entry.id) setSelectedHeroId(null);
-        setRoster(await listRosterCharacters());
+        setRosterError(null);
+        try {
+            await deleteRosterCharacter(entry.id);
+            if (selectedHeroId === entry.id) setSelectedHeroId(null);
+            setRoster(await listRosterCharacters());
+        } catch (err) {
+            console.warn('Failed to delete roster hero:', err);
+            setRosterError(`Could not remove ${entry.name} from the roster — browser storage failed (${err?.message || err?.name || 'unknown error'}).`);
+        }
     };
 
     // Combine racial + chosen skills for the confirm screen

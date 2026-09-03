@@ -16,6 +16,9 @@ const KEEPSAKE_MAX_LENGTH = 100;
  * gifted armor in play: Chain Shirt 13 → companion AC 15); heavy armor is its
  * own number. Magic `acBonus` rides on top. Returns null when the item carries
  * no derivable protection value (not armor/shield, or a catalog-less curio).
+ * A shield is priced onto the AC the caller passes — GIVE_GEAR_TO_COMPANION
+ * passes the companion's AC MINUS the shield they already carry
+ * (`companion.shieldBonus`, 2026-09-03), so shields replace instead of stack.
  */
 export function deriveGiftAC(item, currentAc = 12) {
     if (!item || typeof item !== 'object') return null;

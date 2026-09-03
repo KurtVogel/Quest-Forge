@@ -281,6 +281,38 @@ export function consumeItem(inventory, itemId, qty = 1) {
     });
 }
 
+const STACK_EXEMPT_TYPES = new Set(['weapon', 'armor', 'shield']);
+
+/**
+ * ONE stacking rule for the pack (2026-09-03): non-equipment with the same
+ * identity — catalog key, or the case-folded name when keyless — and the same
+ * magic bonus is one stack. Weapons/armor/shields stay one row each (equip
+ * flags and slot logic are per row), and an equipped row is never a merge
+ * target. Returns null for anything that must stay its own row.
+ */
+export function stackIdentity(item) {
+    if (!item || typeof item !== 'object' || item.equipped) return null;
+    if (STACK_EXEMPT_TYPES.has(item.type) || item.isShield) return null;
+    const key = item.itemKey || String(item.name || '').trim().toLowerCase();
+    if (!key) return null;
+    return `${key}|${Number(item.magicBonus) || 0}`;
+}
+
+/**
+ * Append `newItem` to the inventory, folding it into an existing same-identity
+ * stack when one exists (buy 2 torches, buy 3, find 1 → one row of 6). The
+ * existing row keeps its id and fields; only its quantity grows.
+ */
+export function addOrStackItem(inventory, newItem) {
+    const identity = stackIdentity(newItem);
+    const target = identity ? inventory.find(row => stackIdentity(row) === identity) : null;
+    if (!target) return [...inventory, newItem];
+    const added = Math.max(1, Math.trunc(newItem.quantity || 1));
+    return inventory.map(row => (row === target
+        ? { ...row, quantity: Math.max(1, Math.trunc(row.quantity || 1)) + added }
+        : row));
+}
+
 /**
  * End the caster's sustained spell (combat over, rest taken): drop the buff,
  * strip its condition from whoever carried it, and recompute AC without it.
@@ -451,6 +483,10 @@ export function normalizeCompanion(payload = {}, existing = {}) {
         // so a generously geared companion stays at-or-below that ceiling. No per-update
         // delta clamp — "unarmored → plate" is a legitimate +6 jump.
         ac: clampNumber(merged.ac, 1, 21, existing.ac || 12),
+        // Shield memory for the engine-owned gift path (2026-09-03 P2): companion
+        // gear is abstract, so without it a second gifted shield stacked +2 again.
+        // The value the current shield contributes to `ac`; 0 = no shield.
+        shieldBonus: clampNumber(merged.shieldBonus, 0, 6, existing.shieldBonus || 0),
         weapon,
         attackBonus,
         damage,

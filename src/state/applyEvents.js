@@ -261,7 +261,16 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     for (const itemName of itemsLost) {
         const lostName = typeof itemName === 'string' ? itemName : itemName.name || '';
         if (!lostName) continue;
-        dispatch({ type: 'REMOVE_ITEM_BY_NAME', payload: lostName });
+        // A DM quantity (a count, or "all") rides along (2026-09-03 P1); a bare
+        // name lets the reducer take ONE unit of a stack, the whole row otherwise.
+        const rawQuantity = typeof itemName === 'string' ? undefined : itemName.quantity;
+        const lostQuantity = typeof rawQuantity === 'string' && /^all$/i.test(rawQuantity.trim())
+            ? 'all'
+            : (Number.isFinite(Number(rawQuantity)) && Number(rawQuantity) > 0 ? Math.trunc(Number(rawQuantity)) : null);
+        dispatch({
+            type: 'REMOVE_ITEM_BY_NAME',
+            payload: lostQuantity === null ? lostName : { name: lostName, quantity: lostQuantity },
+        });
     }
 
     for (const change of events.equipmentChanges) {

@@ -50,7 +50,7 @@ import { createInitialFronts } from '../engine/fronts.js';
 import { isSpellcaster, sanitizeSpellSlots, sanitizeSustainedSpell } from '../engine/spellcasting.js';
 import { initialGameState } from './initialState.js';
 import { coverage, tokenSet } from '../engine/textMatch.js';
-import { applyEarlyDefeat, isLowLevelSolo, systemMessage } from './handlers/shared.js';
+import { applyEarlyDefeat, isLowLevelSolo, stackIdentity, systemMessage } from './handlers/shared.js';
 
 /**
  * Save-format version stamped into every persisted payload (persistence.js
@@ -156,6 +156,42 @@ function healShadowInventoryRows(save) {
             ? { ...row, quantity: (row.quantity ?? 1) + gained.get(row.id) }
             : row));
     console.log(`[Migrations] Merged ${absorbed.size} narrated shadow inventory row(s) into their catalog twins.`);
+    return { ...save, inventory: healed };
+}
+
+/**
+ * Fold same-identity NON-EQUIPMENT rows into one stack (2026-09-03 P2): before
+ * ADD_ITEM/PURCHASE_ITEM stacked on add, "buy 2 → buy 3 → find 1" left three
+ * Torch rows that the two heals above never touch (they demand quantity 1 or a
+ * keyless shadow). Uses the handlers' one `stackIdentity` rule — catalog key
+ * or case-folded name, same magic bonus, never weapons/armor/shields, never an
+ * equipped row — so load and add agree on what "the same item" is.
+ */
+function healStackedInventoryRows(save) {
+    const inventory = save.inventory || [];
+    if (inventory.length < 2) return save;
+    const firstByIdentity = new Map();
+    const gained = new Map();
+    for (const row of inventory) {
+        if (!row?.id) continue;
+        const identity = stackIdentity(row);
+        if (!identity) continue;
+        const first = firstByIdentity.get(identity);
+        if (!first) {
+            firstByIdentity.set(identity, row);
+            continue;
+        }
+        gained.set(first.id, (gained.get(first.id) || 0) + Math.max(1, Math.trunc(row.quantity || 1)));
+        gained.set(row.id, null); // marks an absorbed row
+    }
+    if (gained.size === 0) return save;
+    let folded = 0;
+    const healed = inventory
+        .filter(row => !(row?.id && gained.get(row.id) === null && (folded += 1)))
+        .map(row => (row?.id && gained.get(row.id)
+            ? { ...row, quantity: Math.max(1, Math.trunc(row.quantity || 1)) + gained.get(row.id) }
+            : row));
+    console.log(`[Migrations] Folded ${folded} same-identity inventory row(s) into their stacks.`);
     return { ...save, inventory: healed };
 }
 
@@ -356,6 +392,7 @@ function reseedMissingFronts(save) {
 const UNCONDITIONAL_HEALS = [
     healDuplicateInventoryRows,
     healShadowInventoryRows,
+    healStackedInventoryRows,
     healEquippedSlots,
     backfillCharacterShape,
     healCharacterCoreFields,

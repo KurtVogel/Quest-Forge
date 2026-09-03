@@ -48,7 +48,10 @@ export function sanitizePendingRoleplayCheck(value) {
         .map(sanitizeProposalRoll);
     if (rolls.length === 0) return null;
     return {
-        id: text(value.id, 160) || `roleplay-check-${Date.now()}`,
+        // Timestamp + random tail: two proposals minted in the same millisecond
+        // (a rejected chained check re-staged straight after its parent) used to
+        // share one id, so `supersedesId` pointed at itself (2026-09-03).
+        id: text(value.id, 160) || `roleplay-check-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         rolls,
         playerAction: text(value.playerAction, 4000),
         challengeUsed: value.challengeUsed === true,

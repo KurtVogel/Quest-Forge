@@ -27,6 +27,9 @@ const MAX_COIN = 1_000_000;
 // hand-edit exploit (e.g. +16 free max HP on an L5 fighter).
 const FIXED_AVERAGE_HP_SINCE = Date.UTC(2026, 5, 15);
 const MAX_INVENTORY_ITEMS = 200;
+// Creation grants a rogue exactly two Expertise skills and nothing later adds
+// more (CharacterCreation.jsx) — the import allowance mirrors that.
+const ROGUE_EXPERTISE_ALLOWANCE = 2;
 // Appearance shares the 600-char Scribe-merge clamp (contentLimits): the old
 // local 2000 cap silently truncated a long imported appearance on its FIRST
 // Scribe merge in play — the vault must not accept what the game cannot keep.
@@ -132,16 +135,24 @@ export function sanitizeCharacter(raw) {
         maxHP = clampInt(raw.maxHP, minPossibleHP, maxPossibleHP, minPossibleHP);
     }
 
+    // Skills: racial grants always, then the class allowance of chosen skills —
+    // the first N the file lists, in its order (2026-09-03 P2: an 18-skill
+    // fighter imported intact; known-name filtering is not a count).
     const knownSkills = new Set(Object.keys(SKILL_LABELS));
-    const skillProficiencies = [...new Set([
-        ...(race.skillProficiencies || []),
-        ...(Array.isArray(raw.skillProficiencies) ? raw.skillProficiencies : []),
-    ])].filter(s => knownSkills.has(s));
-    // Expertise is class-gated like createCharacter: only rogues have it. Without
-    // the gate a hand-edited fighter/wizard export imports with doubled proficiency.
+    const racialSkills = (race.skillProficiencies || []).filter(s => knownSkills.has(s));
+    const chosenAllowance = Math.max(0, Number(charClass.numSkillChoices) || 2);
+    const chosenSkills = [...new Set(
+        (Array.isArray(raw.skillProficiencies) ? raw.skillProficiencies : [])
+            .filter(s => knownSkills.has(s) && !racialSkills.includes(s))
+    )].slice(0, chosenAllowance);
+    const skillProficiencies = [...new Set([...racialSkills, ...chosenSkills])];
+    // Expertise is class-gated like createCharacter: only rogues have it, and
+    // only the creation allowance of two (the game grants no more at any level).
+    // Without the gate a hand-edited fighter/wizard export imports with doubled
+    // proficiency; without the count a rogue doubles every skill it has.
     const expertiseSkills = raw.class === 'rogue'
-        ? (Array.isArray(raw.expertiseSkills) ? raw.expertiseSkills : [])
-            .filter(s => skillProficiencies.includes(s))
+        ? [...new Set((Array.isArray(raw.expertiseSkills) ? raw.expertiseSkills : [])
+            .filter(s => skillProficiencies.includes(s)))].slice(0, ROGUE_EXPERTISE_ALLOWANCE)
         : [];
 
     const rebuilt = {
@@ -156,6 +167,11 @@ export function sanitizeCharacter(raw) {
         copper: clampInt(raw.copper, 0, MAX_COIN, 0),
         abilityScores,
         maxHP,
+        // The roster is a TEMPLATE, not an afterlife (DECISIONS.md 2026-09-03):
+        // a hero file records who the character IS; campaigns own their fates.
+        // A dead hero exports and re-enters a NEW campaign rested — `isDead` and
+        // `deathSaves` are campaign state and deliberately not carried — while
+        // in-campaign resurrection stays cut (heals never revive `isDead`).
         currentHP: maxHP,
         tempHP: 0,
         // Shared derived core (also mints caster spellSlots/sustainedSpell — the

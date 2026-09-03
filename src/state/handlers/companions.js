@@ -113,7 +113,19 @@ export const handlers = {
         if (!item || !companion || companion.status === 'dead' || companion.status === 'downed') return state;
 
         const isWeapon = item.type === 'weapon';
-        const giftAC = isWeapon ? null : deriveGiftAC(item, companion.ac || 12);
+        const isShield = !isWeapon && (item.type === 'shield' || item.isShield);
+        // Shield memory (2026-09-03 P2): `shieldBonus` is what the companion's
+        // current shield contributes to `ac`. A gifted shield REPLACES it (never
+        // stacks — three +1 shields used to walk a companion to the 21 cap), and
+        // gifted armor is priced on top of the shield they keep carrying.
+        const currentAc = companion.ac || 12;
+        const currentShield = Math.max(0, Math.trunc(companion.shieldBonus || 0));
+        const armorGift = isWeapon || isShield ? null : deriveGiftAC(item, currentAc);
+        const giftAC = isWeapon
+            ? null
+            : isShield
+                ? deriveGiftAC(item, currentAc - currentShield)
+                : (armorGift === null ? null : armorGift + currentShield);
         if (!isWeapon && giftAC === null) return state;
 
         let gearPayload;
@@ -127,13 +139,20 @@ export const handlers = {
             gearPayload = { id: companion.id, weapon: item.name };
         } else {
             const newAc = Math.min(21, giftAC);
-            if (newAc <= (companion.ac || 12)) {
+            const shieldValue = isShield ? (item.shieldAC || 2) + (item.acBonus || 0) : null;
+            if (isShield && currentShield > 0 && shieldValue <= currentShield) {
+                return {
+                    ...state,
+                    messages: [...state.messages, systemMessage(`${companion.name} already carries a shield at least as good — the ${item.name} stays with you.`)],
+                };
+            }
+            if (newAc <= currentAc) {
                 return {
                     ...state,
                     messages: [...state.messages, systemMessage(`${companion.name}'s current protection is at least as good — the ${item.name} stays with you.`)],
                 };
             }
-            gearPayload = { id: companion.id, ac: newAc };
+            gearPayload = { id: companion.id, ac: newAc, ...(isShield ? { shieldBonus: shieldValue } : {}) };
         }
 
         const updated = gameReducer(state, { type: 'UPDATE_COMPANION', payload: gearPayload });

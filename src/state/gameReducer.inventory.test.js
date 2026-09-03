@@ -614,7 +614,9 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
             type: 'ADD_ITEM',
             payload: potionPayload('msg-second', 'I take another potion of healing from the shelf.'),
         });
-        expect(second.inventory).toHaveLength(2);
+        // Same-identity consumables stack (2026-09-03): one row, two potions.
+        expect(second.inventory).toHaveLength(1);
+        expect(second.inventory[0].quantity).toBe(2);
     });
 
     it('applies freely outside the conversational window', () => {
@@ -624,14 +626,16 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
             type: 'ADD_ITEM',
             payload: potionPayload('msg-later', 'I open the second chest.'),
         });
-        expect(second.inventory).toHaveLength(2);
+        expect(second.inventory).toHaveLength(1);
+        expect(second.inventory[0].quantity).toBe(2);
     });
 
     it('never guards manual adds without a sourceId (UI + internal paths)', () => {
         const state = { ...makeState(), inventory: [] };
         const first = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'Torch' } });
         const second = gameReducer(first, { type: 'ADD_ITEM', payload: { name: 'Torch' } });
-        expect(second.inventory).toHaveLength(2);
+        expect(second.inventory).toHaveLength(1);
+        expect(second.inventory[0].quantity).toBe(2); // stacked, not suppressed
         expect(second.recentItemGrants).toHaveLength(0);
     });
 
@@ -709,7 +713,8 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
             type: 'ADD_ITEM',
             payload: potionPayload('msg-later'),
         });
-        expect(second.inventory).toHaveLength(2);
+        expect(second.inventory).toHaveLength(1);
+        expect(second.inventory[0].quantity).toBe(2);
     });
 });
 
@@ -751,6 +756,72 @@ describe('items_found quantity drift (playtest #8: the item twin of coin denomin
             type: 'ADD_ITEM',
             payload: { name: 'Arrow', quantity: 5, _meta: { sourceId: 'msg-buy', playerMessage: 'I take the rest of the arrows too.' } },
         });
-        expect(second.inventory).toHaveLength(2);
+        expect(second.inventory).toHaveLength(1);
+        expect(second.inventory[0].quantity).toBe(8); // 3 + 5, one stack
+    });
+});
+
+describe('REMOVE_ITEM_BY_NAME is quantity-aware (2026-09-03 P1: one torch burned emptied the stack)', () => {
+    const torchState = () => {
+        const state = { ...makeState(), inventory: [] };
+        state.inventory.push({ id: 'torch-1', itemKey: 'torch', name: 'Torch', type: 'gear', quantity: 5 });
+        return state;
+    };
+
+    it('a bare name takes ONE unit of a multi-unit stack', () => {
+        const next = gameReducer(torchState(), { type: 'REMOVE_ITEM_BY_NAME', payload: 'Torch' });
+        expect(next.inventory.find(i => i.id === 'torch-1').quantity).toBe(4);
+    });
+
+    it('a count takes that many, clamped to what is owned', () => {
+        const three = gameReducer(torchState(), { type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'torches', quantity: 3 } });
+        expect(three.inventory.find(i => i.id === 'torch-1').quantity).toBe(2);
+        const nine = gameReducer(torchState(), { type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Torch', quantity: 9 } });
+        expect(nine.inventory.find(i => i.id === 'torch-1')).toBeUndefined();
+        const junk = gameReducer(torchState(), { type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Torch', quantity: 'lots' } });
+        expect(junk.inventory.find(i => i.id === 'torch-1').quantity).toBe(4); // junk count = the bare-name default
+    });
+
+    it('"all" takes the whole stack; a single-unit row still goes entirely', () => {
+        const all = gameReducer(torchState(), { type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Torch', quantity: 'all' } });
+        expect(all.inventory.find(i => i.id === 'torch-1')).toBeUndefined();
+        const single = gameReducer(makeState(), { type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'chain mail' } });
+        expect(single.inventory.find(i => i.id === 'armor-1')).toBeUndefined();
+        expect(single.character.armorClass).toBe(13);
+    });
+});
+
+describe('ADD_ITEM stacks same-identity non-equipment (2026-09-03 P2)', () => {
+    it('buy-style repeated grants become one row, and a keyless name stacks by case-folded name', () => {
+        let state = { ...makeState(), inventory: [] };
+        state = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'Torch', quantity: 2 } });
+        state = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'torches', quantity: 3 } });
+        state = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'Torch' } });
+        const torches = state.inventory.filter(i => i.itemKey === 'torch');
+        expect(torches).toHaveLength(1);
+        expect(torches[0].quantity).toBe(6);
+
+        state = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'Rusted iron keys' } });
+        state = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'rusted iron keys' } });
+        const keys = state.inventory.filter(i => /rusted iron keys/i.test(i.name));
+        expect(keys).toHaveLength(1);
+        expect(keys[0].quantity).toBe(2);
+    });
+
+    it('never stacks weapons, armor, shields, differing magic bonuses, or into an equipped row', () => {
+        let state = { ...makeState(), inventory: [] };
+        state = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'Dagger' } });
+        state = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'Dagger' } });
+        expect(state.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(2);
+
+        state = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'Lucky Charm', magicBonus: 1 } });
+        state = gameReducer(state, { type: 'ADD_ITEM', payload: { name: 'Lucky Charm', magicBonus: 2 } });
+        expect(state.inventory.filter(i => /Lucky Charm/.test(i.name))).toHaveLength(2);
+
+        // An equipped non-equipment row cannot exist after normalizeEquippedSlots,
+        // but the stacking rule refuses equipped targets on principle.
+        const worn = { ...makeState(), inventory: [{ id: 'amulet-1', name: 'Amulet', type: 'gear', quantity: 1, equipped: true }] };
+        const next = gameReducer(worn, { type: 'ADD_ITEM', payload: { name: 'Amulet' } });
+        expect(next.inventory.filter(i => i.name === 'Amulet')).toHaveLength(2);
     });
 });

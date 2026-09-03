@@ -1839,3 +1839,38 @@ describe('Scribe dispatcher shapes (2026-09-01 scribe test depth)', () => {
         expect(dispatch.mock.calls.some(([a]) => ['APPLY_TEMPO_DIRECTIVE', 'ADD_EMERGENT_FRONT'].includes(a.type))).toBe(false);
     });
 });
+
+describe('loss audit carries the narrated quantity (2026-09-03 P1: one torch burned emptied the stack)', () => {
+    beforeEach(() => sendMessage.mockReset());
+
+    it('forwards a count / "all" as { name, quantity } and a bare item as the plain name', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            narrated_losses: { items: [{ name: 'Torch', quantity: 2 }, { name: 'Rations (1 day)', quantity: 'all' }, { name: 'Rope' }] },
+        }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I toss two torches into the pit and abandon the food.',
+            dmNarrative: 'Two torches tumble into the dark; the rations and the rope go over the edge after them.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+            lootAudit: {
+                sourceId: 'msg-40:scribe-loot', appliedEvents: null,
+                getState: () => ({
+                    appliedLootSourceIds: [], character: { name: 'Maren', class: 'rogue' }, combat: { active: false }, messages: [],
+                    inventory: [
+                        { id: 'i-1', itemKey: 'torch', name: 'Torch', quantity: 5 },
+                        { id: 'i-2', itemKey: 'rations', name: 'Rations (1 day)', quantity: 4 },
+                        { id: 'i-3', itemKey: 'ropeHempen', name: 'Hempen Rope (50 ft)', quantity: 1 },
+                    ],
+                }),
+            },
+        });
+        const removals = dispatch.mock.calls.filter(([a]) => a.type === 'REMOVE_ITEM_BY_NAME').map(([a]) => a.payload);
+        expect(removals).toEqual([
+            { name: 'Torch', quantity: 2 },
+            { name: 'Rations (1 day)', quantity: 'all' },
+            'Hempen Rope (50 ft)',
+        ]);
+    });
+});
