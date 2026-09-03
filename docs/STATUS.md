@@ -35,40 +35,41 @@ proposal ids get a random tail (same-millisecond collisions made a re-staged cha
 supersede itself — the orchestrator test was failing deterministically on this machine).
 2,059 tests green (+34), lint clean, deployed to Firebase Hosting.
 
-## 2026-09-03 — 20-round money-traffic playtest (vendor, corpses, bounty, toll, alms): the purse is exact
+## 2026-09-03 — money-traffic playtests, Gemini + OpenAI DMs: purse exact on both, two engine fixes, one prompt fix
 
-Vesa asked for a 20-round game test of money traffic. New harness
-`scripts/playtest_money_traffic_20.cjs` (puppeteer + dev server + real Gemini DM): every
-turn carries the coin delta the premise's fixed prices imply, the purse is watched 16s after
-each DM reply for late Scribe-audit deltas, inventory rows are read each turn, and the verdict
-flags double charges/grants, between-turn drift, duplicate rows, and premise mismatches.
-Two runs, artifacts in `test-results/playtest_money_20*/` (report.json, console.log,
-per-turn screenshots).
-**Engine verdict — clean on both runs:** zero late deltas, zero between-turn drift, zero
-duplicate inventory rows, zero double charges or grants. Every applied movement posted its
-receipt line and the Scribe audits stood down every time the event path had already moved
-the coin (7 stand-downs logged: nest loot, bounty, room, toll, alms, ...). Run 2: 17/20
-turns matched the premise-implied delta EXACTLY (rope, torches, torch resale, nest coins +7
-cp with correct 9 sp 16 cp → 1 gp 6 cp consolidation, bounty, ring in then sold for 5 sp,
-room, toll, alms, 2 rations); the final purse reconciles to the copper. The 3 misses and
-run 1's 8 misses are ALL fiction-void turns — the DM refused or never staged the beat, and
-the engine correctly moved nothing. Combat: the rat fight ran cleanly (initiative, one hit,
-+50 XP); run 1's "weak bandit" came out as a Bridge-Warden with two attacks a round, dropped
-the L1 hero with a crit, and the low-level solo defeat setback fired exactly as designed
-(1/12 HP, no death). Recap turns that restated a bounty, a ring sale, or a purse "taken from
-his body" never re-granted anything.
-**DM-adherence observations (logged in IDEAS, not engine bugs):** (1) run 1's premise opened
-with "I am a developer play-testing this game's money handling" and Gemini 3.1 Pro read the
-premise items as the hero's delusions ("screaming about imaginary rats and rings"), then
-arrested and caged him despite the premise's "no guard or watch" — write playtest premises
-as in-world canon; (2) even so, the DM overrode a premise-fixed price when its realism prior
-disagreed (Marla refused the 3 gp healing potion the premise made canon — premise price vs
-catalog/realism is an open prompt question); (3) a pre-narrated ambush ("when Dodd lunges,
-I cut him down") made the DM withhold the foe — the player-authority rule working, but a trap
-for scripted actions; (4) the DM used `equipment_changes: unequip` for a confiscated shield
-where `items_lost` was right, and the loss audit did not catch the later restatement — the
-sword WAS removed by the loss audit. All 2026-09-02 fixes deployed to Firebase Hosting.
-
+Vesa asked for a 20-round game test of money traffic (vendor, corpses, bounty, toll, alms,
+delivery), first on Gemini, then a similar one on OpenAI, with findings fixed and pushed.
+Harness: `scripts/playtest_money_traffic_20.cjs` (`PLAYTEST_PROVIDER=gemini|openai`, real
+dev server + headless Chrome + real DM; the Gemini machinery key is always required). Every
+turn carries the coin delta the premise's fixed prices imply; the purse is watched 16s after
+each reply; inventory rows are read each turn; the verdict flags double charges/grants,
+between-turn drift, duplicate rows, and premise mismatches. Five runs total (two scenario
+drafts, then Gemini, OpenAI, OpenAI rerun); artifacts under `test-results/playtest_money_20*/`.
+**Engine verdict, all runs:** zero late audit deltas, zero between-turn drift, zero duplicate
+inventory rows, zero double charges or grants; every applied movement receipted; the Scribe
+audits stood down every time the event path had already moved the coin. Final purses
+reconcile to the copper. OpenAI rerun: 18/20 exact incl. the humanoid corpse loot (+2 gp 5 sp,
+dagger + potion as catalog rows) that no earlier run reached; Gemini: 15/20 exact with every
+miss explained by fiction (a dropped stream, a bounty caught up one turn late, no corpse,
+a fee renegotiated). Recaps restating a bounty, a ring sale, a looted purse, or a fee never
+re-granted anything on either provider.
+**Fixed (DECISIONS.md 2026-09-03):** (1) an in-band `{"error": …}` stream event was skipped by
+both providers' handlers, so the stream ended with no finish reason and the player saw
+"connection dropped" — the first OpenAI run failed nine streams in a row that way with the
+real cause invisible; the shared `readSseStream` now throws the provider's message (+`.status`).
+(2) `applyEvents` blanket-dropped ANY loose coin gain in the same reply as a `sell`; Gemini
+paid a 5 sp ring sale AND the 3 sp rat bounty in one reply and the bounty vanished. The gain
+side is now value-aware in `ADD_COIN_GRANT` (equal to the reply's sale proceeds = duplicate,
+ignored; different = separate payment, paid); the purchase side keeps its blanket rule.
+(3) Prompt: both providers refused a premise-priced potion by quoting the catalog's 50 gp and
+both renegotiated a premise-fixed delivery fee (8 sp / 3 sp for "exactly 1 gold"); the
+ECONOMY block now says a price the CAMPAIGN PREMISE fixes is canon over the catalog.
+**Observations (IDEAS):** playtest premises must be in-world canon (the "I am a developer
+testing" framing made Gemini treat the scenario as the hero's delusions and cage him); a
+pre-narrated ambush makes the DM withhold the foe; Gemini stages an approach and waits, so a
+scripted fight must be a declared attack on a visible foe; a confiscated shield went through
+`unequip` and the loss audit missed its restatement; one transient embedding failure on the
+first OpenAI turn (none on the rerun). 2,066 tests green, lint clean, deployed.
 
 ## 2026-09-02 — queue sweep: the death seam unified, first-class outcome calls, loud storage
 

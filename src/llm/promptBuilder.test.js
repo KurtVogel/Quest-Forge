@@ -326,6 +326,14 @@ describe('party block', () => {
         expect(text).not.toContain('## COMPANIONS');
     });
 
+    it('tells the DM that a premise-fixed price is canon over the catalog (2026-09-03 money playtests)', () => {
+        // Both Gemini and OpenAI refused a premise-priced potion by quoting the
+        // catalog's 50 gp, and both renegotiated a premise-fixed delivery fee.
+        const text = prompt({});
+        expect(text).toContain('A price the CAMPAIGN PREMISE fixes is canon.');
+        expect(text).toContain('overrides the catalog\'s list price');
+    });
+
     it('renders creation identity fields (gender + background) in the character block', () => {
         const text = prompt({
             character: makeCharacter({

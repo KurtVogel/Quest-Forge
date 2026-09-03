@@ -1295,7 +1295,7 @@ tests on the follow-up call shape, a rejected chained belief check, and a pre-na
 follow-up staging `preNarrated: true`. From the 2026-09-02 strengthening audit
 (roll-resolution, Lap 1).
 
-### Premise-fixed prices vs the DM's realism prior — status: `observation` (money-traffic playtest, 2026-09-03)
+### Premise-fixed prices vs the DM's realism prior — status: `shipped as a prompt rule` (money-traffic playtests, 2026-09-03)
 The playtest premise made "healing potions for exactly 3 gold" canon at Marla's stall; Gemini
 3.1 Pro refused the sale in character ("three gold wouldn't buy a thimble of the real
 stuff") — its price sense (and the 50 gp catalog price the ECONOMY block carries) beat DM
@@ -1304,6 +1304,12 @@ price bind the DM over catalog prices? If yes, one line in the ECONOMY block ("a
 CAMPAIGN PREMISE fixes is canon and overrides the catalog") would do it; if no, document
 that the catalog is the price authority and premise prices are flavor. The engine was
 correct either way — a refused sale charges nothing.
+**Update, same day:** the OpenAI DM refused a 10 gp premise potion the same way (quoting the
+catalog's 50 gp) and both providers renegotiated a premise-fixed 1 gp delivery fee (8 sp and
+3 sp), so this is cross-provider. Shipped: an ECONOMY bullet — a price the CAMPAIGN PREMISE
+fixes is canon over the catalog and the DM's market sense; set `priceCp` to match, never refuse
+as too cheap/dear, never quietly renegotiate. Pinned in promptBuilder.test.js. Watch the next
+playtest for adherence.
 
 ### Loss audit misses a RESTATED confiscation; DM reaches for `unequip` where `items_lost` fits — status: `observation` (money-traffic playtest run 1, 2026-09-03)
 When the hero was caged, the DM emitted `equipment_changes: unequip` for the shield and the
@@ -1314,6 +1320,24 @@ did not trigger the loss audit. Two candidate fixes: (a) the ECONOMY prompt's in
 could say confiscation/robbery = `items_lost`, not `unequip`; (b) the loss audit could treat
 "confiscated/taken/seized <owned item>" as a loss even when phrased as standing state. Low
 priority — a rare fiction, and the sword (the mechanically important piece) WAS caught.
+
+### Scripted fights must be a declared attack on a VISIBLE foe — status: `lesson` (2026-09-03)
+Across four runs the crossroads ambush never fired from an approach: "I walk out to the
+crossroads, sword drawn, ready" made Gemini narrate the walk and end the reply waiting for the
+player (twice), and a pre-narrated "when Dodd lunges I cut him down" made it withhold the foe.
+What worked on both providers: put the foe in plain view in the premise ("sits on the
+milestone") and script the turn as a declared attack ("I stride at him and attack with my
+longsword") — the attack-is-combat rule then starts the exchange machine every time. The rat
+fight worked from the first run for exactly this reason (a foe at a known spot, attacked).
+
+### In-band stream errors should retry like HTTP errors — status: `idea` (2026-09-03)
+`readSseStream` now surfaces a `{"error": …}` event with the provider's message and stamps
+`.status` from a numeric code, but the streaming path deliberately never retries in the
+adapter ("the player has UI-level retry paths"). A 429 delivered in-band is exactly the
+transient class the non-streaming path retries with backoff; one bounded retry on an in-band
+429/5xx BEFORE any text has been streamed (so no partial output is duplicated) would have
+saved the first OpenAI playtest's turns 7-9 without player intervention. Not built: needs the
+"no text yet" guard and a test; the surfaced message already tells the player what to do.
 
 ### Playtest-script hygiene: premises as in-world canon, never "I am a developer testing" — status: `lesson` (2026-09-03)
 Run 1 of the money-traffic playtest opened its premise with "I am a developer play-testing

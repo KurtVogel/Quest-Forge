@@ -19,24 +19,33 @@ const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
 
-let localApiKey = '';
-try {
-    const envPath = path.resolve('.env');
-    if (fs.existsSync(envPath)) {
-        const envContent = fs.readFileSync(envPath, 'utf8');
-        const match = envContent.match(/GEMINI_API_KEY\s*=\s*["']?([^"'\r\n]+)/);
-        if (match) localApiKey = match[1];
+function readEnvKey(name) {
+    if (process.env[name]) return process.env[name];
+    try {
+        const envPath = path.resolve('.env');
+        if (fs.existsSync(envPath)) {
+            const envContent = fs.readFileSync(envPath, 'utf8');
+            const match = envContent.match(new RegExp(`${name}\\s*=\\s*["']?([^"'\\r\\n]+)`));
+            if (match) return match[1];
+        }
+    } catch (e) {
+        console.warn('Could not read .env file:', e.message);
     }
-} catch (e) {
-    console.warn('Could not read .env file:', e.message);
+    return '';
 }
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || localApiKey;
+// PLAYTEST_PROVIDER=gemini|openai picks the DM; the Gemini key is ALWAYS required
+// because the memory machinery (RAG/Scribe/audits) is Gemini-only.
+const PROVIDER = (process.env.PLAYTEST_PROVIDER || 'gemini').toLowerCase();
+const DEFAULT_MODELS = { gemini: 'gemini-3.1-pro-preview', openai: 'gpt-5.6-terra' };
+const MODEL = process.env.PLAYTEST_MODEL || DEFAULT_MODELS[PROVIDER];
+const GEMINI_API_KEY = readEnvKey('GEMINI_API_KEY');
+const DM_API_KEY = PROVIDER === 'openai' ? readEnvKey('OPENAI_API_KEY') : GEMINI_API_KEY;
 const APP_URL = process.env.QUEST_FORGE_TEST_URL || 'http://localhost:5173';
 const CHROME_PATH = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const OUT_DIR = path.resolve(process.env.PLAYTEST_OUT_DIR || 'test-results/playtest_money_20');
+const OUT_DIR = path.resolve(process.env.PLAYTEST_OUT_DIR || `test-results/playtest_money_20_${PROVIDER}`);
 
-if (!GEMINI_API_KEY) {
-    console.error('No GEMINI_API_KEY in env or .env — aborting.');
+if (!GEMINI_API_KEY || !DM_API_KEY || !MODEL) {
+    console.error(`Missing key or model for provider ${PROVIDER} (GEMINI_API_KEY is always required) — aborting.`);
     process.exit(1);
 }
 if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -182,9 +191,9 @@ async function resolveCombatIfActive(page, log) {
 const PREMISE = 'Brannock is a half-orc fighter who has just walked into Wexbridge, a sleepy little river town, on a quiet afternoon with coin in his pouch and nothing pressing to do. '
     + 'Wexbridge is entirely peaceful and lawless in the gentlest way: it has NO guards, NO watch, NO magistrate, NO jail, and NO toll-guard of any kind; nobody in town is ever arrested or detained, and the townsfolk never interfere with anything Brannock does. '
     + 'These facts about Wexbridge are established canon, known to everyone in town: '
-    + '(1) Marla runs the general-goods stall on the square. Her fixed prices, which she never changes: 50 feet of hempen rope for exactly 1 gold, torches for exactly 1 copper each, healing potions for exactly 3 gold each, and rations for exactly 5 silver per day. Marla also BUYS goods back at whatever price she names and always pays on the spot, and she will buy a tarnished silver ring for exactly 5 silver. '
+    + '(1) Marla runs the general-goods stall on the square. Her fixed prices, which she never changes: 50 feet of hempen rope for exactly 1 gold, torches for exactly 1 copper each, a watered-down local healing potion (a real potion, just a cheap one) for exactly 10 gold each, and rations for exactly 5 silver per day. Marla also BUYS goods back at whatever price she names and always pays on the spot, and she will buy a tarnished silver ring for exactly 5 silver. '
     + '(2) Hesper, the innkeeper of The Blackened Pike, is plagued by a single giant rat nesting in her cellar. She has publicly offered a bounty of exactly 3 silver to whoever kills it. The rat is weak (a few hit points) and its nest contains exactly 7 copper coins and one tarnished silver ring. A room at The Blackened Pike costs exactly 5 copper a night. '
-    + '(3) At the crossroads just outside town, a starving, sickly cutpurse named Dodd waylays lone travellers. He is pitifully weak: about 4 hit points, armed only with a rusty knife, attacking once per round, and he dies to a single solid blow. He carries a purse of exactly 2 gold and 5 silver, a dagger, and one healing potion. '
+    + '(3) At the crossroads just outside town, a starving, sickly cutpurse named Dodd sits in plain view on the old milestone, waylaying lone travellers. He ALWAYS attacks anyone who walks up to the crossroads, without exception. He is pitifully weak: about 4 hit points, armed only with a rusty knife, attacking once per round, and he dies to a single solid blow. He carries a purse of exactly 2 gold and 5 silver, a dagger, and one healing potion. '
     + '(4) Old Tamsin collects the bridge toll: exactly 2 silver to cross. She is a frail toll collector, not a guard. (5) A blind beggar sits by the bridge. '
     + '(6) Across the bridge lives the miller, Rook. Marla has a small wrapped parcel waiting on her stall that needs delivering to Rook, and Rook pays exactly 1 gold to whoever brings it. '
     + 'Keep every price exactly as stated and keep the two fights trivial. Open with Brannock arriving on the square with Marla\'s stall in view.';
@@ -200,11 +209,11 @@ const TURN_SCRIPT = [
     { label: '06-loot-rat-nest', action: 'I search the rat\'s nest and take the 7 copper coins and the tarnished silver ring.', expectCp: 7, gain: ['ring'] },
     { label: '07-claim-bounty', action: 'I climb back up and tell Hesper the rat is dead, and collect the 3 silver bounty from her.', expectCp: 30 },
     { label: '08-sell-ring', action: 'I sell the tarnished silver ring to Marla for 5 silver.', expectCp: 50, lose: ['ring'] },
-    { label: '09-recap-marla', action: 'I chat with Marla about the rat bounty Hesper paid me and the ring Marla bought from me — I thank her for the coin.', expectCp: 0 },
-    { label: '10-bandit-fight', action: 'I walk out to the crossroads. When Dodd the cutpurse lunges at me, I cut him down with my longsword!', expectCp: 0, combat: true },
+    { label: '09-recap-marla', action: 'I chat with Marla about the rat bounty Hesper paid me and the ring Marla bought from me, thank her for the coin, and ask for the parcel she needs carried to Rook the miller. I tuck it into my pack.', expectCp: 0 },
+    { label: '10-bandit-fight', action: 'I walk out to the crossroads. Dodd the cutpurse is sitting on the milestone. I stride straight at him and attack him with my longsword before he can draw his knife!', expectCp: 0, combat: true },
     { label: '11-loot-bandit', action: 'I search the corpse of Dodd the cutpurse and take his purse of 2 gold and 5 silver, his dagger, and his healing potion.', expectCp: 250, gain: ['dagger', 'potion'] },
     { label: '12-recap-innkeeper', action: 'I walk back into town and tell Hesper about the cutpurse I killed and the purse of 2 gold and 5 silver I took from his body.', expectCp: 0 },
-    { label: '13-buy-potion', action: 'I go back to Marla and buy one healing potion for 3 gold.', expectCp: -300, gain: ['potion'] },
+    { label: '13-buy-potion', action: 'I go back to Marla and buy one of her cheap healing potions for 10 gold.', expectCp: -1000, gain: ['potion'] },
     { label: '14-inn-room-rest', action: 'I pay Hesper 5 copper for a room and take a long rest for the night.', expectCp: -5 },
     { label: '15-morning-count', action: 'In the morning I carefully count out all my coins on the table.', expectCp: 0 },
     { label: '16-pay-toll', action: 'I walk to the bridge and pay Old Tamsin the 2 silver toll.', expectCp: -20 },
@@ -239,14 +248,16 @@ async function run() {
     await delay(3000);
 
     log('Setting API key in localStorage...');
-    await page.evaluate(({ apiKey }) => {
+    log(`DM provider: ${PROVIDER} / ${MODEL}`);
+    await page.evaluate(({ provider, apiKey, geminiApiKey, model }) => {
         localStorage.setItem('rpg-client-settings', JSON.stringify({
-            llmProvider: 'gemini',
+            llmProvider: provider,
             apiKey,
+            geminiApiKey,
             imageApiKey: 'xai-dummy',
-            model: 'gemini-3.1-pro-preview',
+            model,
         }));
-    }, { apiKey: GEMINI_API_KEY });
+    }, { provider: PROVIDER, apiKey: DM_API_KEY, geminiApiKey: GEMINI_API_KEY, model: MODEL });
     await page.reload();
     await delay(3000);
 
@@ -328,6 +339,20 @@ async function run() {
             await waitForCombatToSettle(page);
         } else {
             await waitForLLM(page);
+        }
+        // A dropped stream leaves an error line and a Retry button; one retry
+        // keeps a transient provider hiccup from voiding the whole beat.
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const dropped = await page.evaluate(() => {
+                const last = Array.from(document.querySelectorAll('.chat-message')).pop();
+                const text = last?.textContent || '';
+                return /connection dropped|Please retry|reply is incomplete/i.test(text) && !document.querySelector('.combat-panel');
+            });
+            if (!dropped) break;
+            log('  [retry] Stream dropped — re-sending the action.');
+            await typeIntoInput(page, turn.action);
+            await page.click('button.chat-send-btn');
+            if (turn.combat) await waitForCombatToSettle(page); else await waitForLLM(page);
         }
         await resolveCombatIfActive(page, log);
         if (await handleProposedCheck(page, log)) {

@@ -8,6 +8,36 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-03 · In-band stream errors surface their real cause; a same-message loose coin
+gain beside a sale is judged by VALUE, never blanket-dropped.** Two rulings from the
+money-traffic playtests (Gemini + OpenAI DMs, `scripts/playtest_money_traffic_20.cjs`):
+**(1) `readSseStream` throws on a `data: {"error": …}` event.** Both OpenAI-compatible and
+Gemini streams can deliver a failure in-band (rate limit, context length, bad request) and
+then close cleanly; the event carries no `choices`/`candidates`, so the per-provider handler
+skipped it, the stream ended with no finish reason, and the player saw "The connection
+dropped mid-response" — the OpenAI playtest failed nine streams in a row with that message
+and the real cause was invisible. The shared reader now turns the payload into an Error
+naming the provider's message (`.status` stamped from a numeric code so the adapter's retry
+classifier can treat 429/5xx like their HTTP twins). The fix lives in the ONE reader
+(2026-08-30: streamGeminiMessage was the third hand-copied SSE skeleton) so it cannot drift
+per provider again.
+**(2) Gain side of the atomic-sale contract moves to the reducer and becomes value-aware.**
+`applyEvents` used to drop ANY loose coin gain emitted in the same response as a `sell`,
+on the theory that the DM double-reports sale proceeds. Gemini legitimately paid a 5 sp
+ring sale AND the 3 sp rat bounty in one reply and the bounty vanished; the Scribe loot
+audit stands down by design when coin was evented (2026-08-20), so nothing recovered it
+until the player's recap made the DM re-emit — a self-heal that only exists because
+receipts ride the DM window (2026-08-31). Now `ADD_COIN_GRANT` ignores a same-message gain
+whose copper value equals this reply's sale proceeds (one sale, or all of them summed —
+the duplicate report) and pays a different-valued one; the cross-channel cover still
+skips same-base entries, so this is the one same-message rule. The LOSS side keeps the
+blanket suppression in applyEvents: a purchase plus a loose loss in one reply never
+charges twice, because the engine may refuse to take money on suspicion, never to give
+it (2026-08-25). Belt for the value-aware rule: the 4-message gain ledger still catches
+an exact re-emission on the next turn.
+
+---
+
 **2026-09-03 · One stacking rule for the pack; the roster is a template, not an afterlife;
 non-catalog weapon dice are bounded like every other item stat.**
 Rulings from the sweep of the 2026-09-03 audit (character-vault + inventory-economy; every
