@@ -393,6 +393,31 @@ export const handlers = {
                 };
             }
         }
+        // Same-message sale duplicate: the DM emitted an atomic `sell` AND a loose
+        // coin gain for the one transaction in the same response. Only a gain whose
+        // value matches this response's sale proceeds (one sale, or all of them
+        // together) is that duplicate; a different value is a genuinely separate
+        // payment riding the same reply (a bounty paid beside a sale — the
+        // 2026-09-03 money playtest lost one to the old blanket suppression).
+        // The cross-channel cover below deliberately skips same-base entries.
+        const grantBase = sourceBaseOf(sourceId);
+        if (grantBase && !isAudit) {
+            const sameMessageSales = normalizeRecentTransactions(state.recentSales)
+                .filter(entry => entry.status === 'applied' && entry.priceCp > 0 && sourceBaseOf(entry.sourceId) === grantBase);
+            const soldTotalCp = sameMessageSales.reduce((sum, entry) => sum + entry.priceCp, 0);
+            const duplicateOf = sameMessageSales.find(entry => entry.priceCp === transaction.priceCp)
+                || (sameMessageSales.length > 1 && soldTotalCp === transaction.priceCp ? sameMessageSales[0] : null);
+            if (duplicateOf) {
+                return {
+                    ...state,
+                    recentCoinGrants: rememberTransaction(state.recentCoinGrants, transaction, sourceId, messageIndex, 'ignored'),
+                    messages: [
+                        ...state.messages,
+                        coinLine(`Duplicate coin grant ignored — ${transaction.item.name} is the payout of the sale in this same turn (${duplicateOf.name || 'sold goods'}).`),
+                    ],
+                };
+            }
+        }
         // Cross-channel cover, gain side: the twin of the purchase cover. A sale
         // already credited these exact proceeds through the other inbound channel
         // and the DM is re-narrating the payout as loose found coin. Exact value,

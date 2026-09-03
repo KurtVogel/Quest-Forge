@@ -786,9 +786,13 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'APPLY_COIN_LOSS' }));
     });
 
-    it('suppresses a loose coin gain emitted alongside an atomic sale', () => {
+    it('passes a loose coin gain emitted alongside an atomic sale through to the reducer (value-judged there)', () => {
+        // Since 2026-09-03 the gain side is value-aware in ADD_COIN_GRANT: a gain equal
+        // to this reply's sale proceeds is the duplicate report, a different value is a
+        // separate payment riding the same response (a bounty beside a sale).
         const dispatch = run({ sell: { itemKey: 'torch' }, gold_found: 5 });
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'SELL_ITEM' }));
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
     });
 
     it('dispatches loose gold/silver/copper found and lost independently of trades', () => {

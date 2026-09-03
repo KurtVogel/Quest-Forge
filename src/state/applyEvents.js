@@ -280,21 +280,20 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         });
     }
 
-    // An atomic `purchase` already validates funds and deducts payment; a `sell` already
-    // credits the proceeds. The DM is told not to ALSO emit loose coin deltas for the same
-    // transaction, but it sometimes does — double-charging (or double-paying) the player.
-    // Enforce the contract: a purchase suppresses loose coin LOSSES this turn, a sale
-    // suppresses loose coin GAINS. This is the root of "the system reduced my coins after
-    // I already paid." (A genuinely separate gain/loss is far rarer than this LLM slip,
-    // and the prompt already forbids mixing the two.)
-    let { goldFound, goldLost, silverFound, silverLost, copperFound, copperLost } = events;
+    // An atomic `purchase` already validates funds and deducts payment. The DM is told
+    // not to ALSO emit loose coin deltas for the same transaction, but it sometimes
+    // does — double-charging the player. Enforce the contract on the LOSS side: a
+    // purchase suppresses loose coin losses this turn (the engine may refuse to take
+    // money on suspicion — DECISIONS.md 2026-08-25). The GAIN side is value-aware in
+    // the reducer instead: ADD_COIN_GRANT drops a loose gain that equals this same
+    // response's sale proceeds and pays a different-valued one — a bounty paid beside
+    // a sale is a real second payment, and the old blanket suppression here ate one
+    // (2026-09-03 money-traffic playtest).
+    let { goldLost, silverLost, copperLost } = events;
+    const { goldFound, silverFound, copperFound } = events;
     if (events.purchases.length > 0 && (goldLost > 0 || silverLost > 0 || copperLost > 0)) {
         console.warn('[applyEvents] Ignored loose coin loss emitted alongside an atomic purchase — the purchase already paid.');
         goldLost = silverLost = copperLost = 0;
-    }
-    if (events.sells.length > 0 && (goldFound > 0 || silverFound > 0 || copperFound > 0)) {
-        console.warn('[applyEvents] Ignored loose coin gain emitted alongside an atomic sale — the sale already paid out.');
-        goldFound = silverFound = copperFound = 0;
     }
 
     // Coin gains travel as ONE replay-guarded grant: the recentCoinGrants ledger in the

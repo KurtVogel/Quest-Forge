@@ -166,6 +166,22 @@ describe('streamOpenAIMessage', () => {
         await expect(streamOpenAIMessage({ ...SEND_ARGS, onChunk: vi.fn() })).rejects.toThrow(/truncated/);
     });
 
+    it('surfaces an in-band error event with its real message instead of "connection dropped"', async () => {
+        // OpenAI delivers rate-limit / context errors as a `data: {"error": …}`
+        // event and then closes the stream cleanly — no choices, no finish_reason.
+        const chunks = [
+            sseEvent({ choices: [{ delta: { content: 'You step ' } }] }),
+            sseEvent({ error: { message: 'Rate limit reached for gpt-5.6-terra: tokens per min', type: 'tokens', code: 429 } }),
+            'data: [DONE]\n',
+        ];
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse(chunks)));
+
+        const failure = streamOpenAIMessage({ ...SEND_ARGS, onChunk: vi.fn() });
+        await expect(failure).rejects.toThrow(/Rate limit reached/);
+        await expect(failure).rejects.not.toThrow(/connection dropped/);
+        await failure.catch(err => expect(err.status).toBe(429));
+    });
+
     it('throws when the stream closes cleanly without ever delivering a finish_reason', async () => {
         const chunks = [sseEvent({ choices: [{ delta: { content: 'You step into' } }] })];
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse(chunks)));

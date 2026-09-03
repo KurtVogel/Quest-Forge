@@ -1474,6 +1474,40 @@ describe('2026-08-25 player report: "money removed multiple turns after I paid, 
         expect(purseCp(recap)).toBe(afterSale);
     });
 
+    it('a loose gain equal to a SAME-message sale is the duplicate report and is ignored', () => {
+        const sold = gameReducer(makeState({
+            character: { gold: 5 },
+            inventory: [{ id: 'i1', name: 'Longsword', itemKey: 'longsword', quantity: 1, valueCp: 1500 }],
+        }), { type: 'SELL_ITEM', payload: { itemKey: 'longsword', _meta: { sourceId: 'msg-sell' } } });
+        const afterSale = purseCp(sold);
+
+        // Same response (same sourceId base): the DM re-reported the 7 gp 5 sp proceeds as loose coin.
+        const duplicate = gameReducer(sold, {
+            type: 'ADD_COIN_GRANT',
+            payload: { gold: 7, silver: 5, _meta: { sourceId: 'msg-sell', playerMessage: 'I sell the sword.' } },
+        });
+
+        expect(purseCp(duplicate)).toBe(afterSale);
+        expect(duplicate.messages.at(-1).content).toMatch(/Duplicate coin grant ignored/);
+    });
+
+    it('a loose gain of a DIFFERENT value beside a same-message sale is a separate payment and is paid', () => {
+        // 2026-09-03 money playtest: Gemini paid a 5 sp ring sale and the 3 sp rat
+        // bounty in one reply; the old applyEvents blanket rule dropped the bounty.
+        const sold = gameReducer(makeState({
+            character: { gold: 5 },
+            inventory: [{ id: 'i1', name: 'Tarnished silver ring', itemKey: 'tarnishedsilverring', quantity: 1, valueCp: 100 }],
+        }), { type: 'SELL_ITEM', payload: { name: 'Tarnished silver ring', priceCp: 50, _meta: { sourceId: 'msg-sell' } } });
+        const afterSale = purseCp(sold);
+
+        const bounty = gameReducer(sold, {
+            type: 'ADD_COIN_GRANT',
+            payload: { silver: 3, _meta: { sourceId: 'msg-sell', playerMessage: 'I sell the ring and collect the bounty.' } },
+        });
+
+        expect(purseCp(bounty)).toBe(afterSale + 30);
+    });
+
     it('a payment re-emitted three turns later is still suppressed', () => {
         // The old 4-message window covered ~2 turns; the DM recapping a payment
         // later escaped it entirely and the money vanished with no system line.

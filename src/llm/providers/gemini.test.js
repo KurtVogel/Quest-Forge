@@ -335,6 +335,18 @@ describe('streamGeminiMessage', () => {
         await expect(streamGeminiMessage({ ...SEND_ARGS, onChunk: vi.fn() })).rejects.toThrow(/MAX_TOKENS/);
     });
 
+    it('surfaces an in-band error event with its real message instead of "connection dropped"', async () => {
+        const chunks = [
+            sseEvent({ candidates: [{ content: { parts: [{ text: 'You step ' }] } }] }),
+            sseEvent({ error: { code: 429, message: 'Resource has been exhausted (e.g. check quota).', status: 'RESOURCE_EXHAUSTED' } }),
+        ];
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse(chunks)));
+
+        const failure = streamGeminiMessage({ ...SEND_ARGS, onChunk: vi.fn() });
+        await expect(failure).rejects.toThrow(/Resource has been exhausted/);
+        await failure.catch(err => expect(err.status).toBe(429));
+    });
+
     it('throws when the stream closes cleanly without ever delivering a finish reason', async () => {
         // A dropped connection / proxy close ends the SSE body early with done=true;
         // the partial text must not be returned as a complete DM turn.

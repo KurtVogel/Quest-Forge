@@ -27,13 +27,42 @@ export async function readSseStream(response, onEvent) {
             if (!line.startsWith('data: ')) continue;
             const data = line.slice(6).trim();
             if (data === '[DONE]') continue;
+            let parsed;
             try {
-                onEvent(JSON.parse(data));
+                parsed = JSON.parse(data);
             } catch {
-                // Ignore malformed JSON lines
+                continue; // Ignore malformed JSON lines
             }
+            // Both OpenAI-compatible and Gemini streams can deliver a failure as
+            // an in-band `{"error": …}` event and then close cleanly. It carries
+            // no choices/candidates, so a handler that only reads those sees an
+            // empty stream and the player gets "connection dropped" instead of
+            // the real cause (rate limit, context length, bad request) — the
+            // 2026-09-03 OpenAI playtest failed nine streams in a row that way.
+            const streamError = parsed && typeof parsed === 'object' ? parsed.error : null;
+            if (streamError) {
+                throw makeStreamError(streamError);
+            }
+            onEvent(parsed);
         }
     }
+}
+
+/**
+ * Turn an in-band stream error payload into a thrown Error that names the
+ * cause. OpenAI-compatible: `{ error: { message, type, code } }`; Gemini:
+ * `{ error: { code, message, status } }`; some proxies send a bare string.
+ * `.status` is stamped from a numeric code so the adapter's retry classifier
+ * can treat 429/5xx like their HTTP twins.
+ */
+export function makeStreamError(streamError) {
+    const detail = typeof streamError === 'string'
+        ? streamError
+        : (streamError?.message || streamError?.status || streamError?.type || 'unknown error');
+    const err = new Error(`The provider reported an error mid-stream: ${String(detail).slice(0, 300)}. Please retry.`);
+    const code = Number(streamError?.code ?? streamError?.status);
+    if (Number.isInteger(code) && code >= 100 && code <= 599) err.status = code;
+    return err;
 }
 
 /**
