@@ -1425,6 +1425,23 @@ roster/import clamps (2026-09-03 "template, not afterlife" ruling) already estab
 self-cheating surfaces are worth closing; this generalizes it. From the 2026-09-04
 strengthening audit (quests, Lap 1).
 
+### [strengthening] Stamp system messages with a declared `kind` instead of letting every reader re-derive what they are — status: `idea` (2026-09-04)
+Four readers treat the transcript as something other than the DM window — the chronicler,
+SceneArt's situation picker, sessionPriming (all through `narrativeMessages.js`), and the DM
+window's own `dmVisible` receipts rule — and each decides what a system line IS by inference:
+role plus `hidden`/`deleted` flags, a table-talk regex on the preceding user message, a
+`dmVisible` stamp on coin receipts. The 2026-09-04 chronicler finding is the cost: "Error
+resolving check: Failed to fetch" and "The DM's mechanical events could not be read this
+turn…" are role-`system` lines with no other marker, so the chronicler labels them TABLE RECORD
+and its prompt tells the model to transmute them into fiction. Proposal: every `ADD_MESSAGE`
+of a system line carries `kind` — `receipt` (coin/item/XP lines the DM should see), `result`
+(dice, rests, combat outcomes — chronicle-eligible), `error` (infrastructure; never narrative,
+never DM-visible), `ooc` (table-talk replies, stamped at dispatch instead of derived from the
+prior user message) — and every reader filters by the declared kind. The narrative predicate
+becomes `kind !== 'error' && kind !== 'ooc'`, the DM-window rule becomes `kind === 'receipt'`,
+and the table-talk pairing heuristic retires. Legacy messages without `kind` keep today's
+inference as the fallback. From the 2026-09-04 strengthening audit (chronicler, Lap 1).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
