@@ -143,11 +143,14 @@ export const SPELLS = {
         summary: 'A whisper of divine aid on a task at hand; the DM weighs it.',
     },
     spareTheDying: {
+        // Narrative-gated by ruling (DECISIONS.md 2026-09-04): the hero cannot
+        // cast while dying and companions never bleed out, so the only creature
+        // it can save is an NPC in the fiction — out of combat only, any target.
         key: 'spareTheDying', name: 'Spare the Dying', level: 0, classes: ['cleric'], castTime: 'action',
-        targeting: { side: 'ally', mode: 'single' }, resolution: 'auto',
+        targeting: { side: 'any', mode: 'single' }, resolution: 'auto',
         stabilizes: true,
-        combatAvailable: true, outOfCombatAvailable: true,
-        summary: 'Stabilize a dying ally at 0 HP — restores no hit points.',
+        combatAvailable: false, outOfCombatAvailable: true,
+        summary: 'Keep a dying NPC at 0 HP alive — restores no hit points. Narrative effect only: companions never bleed out and the hero cannot cast while dying, so it matters for others in the scene.',
     },
     cureWounds: {
         key: 'cureWounds', name: 'Cure Wounds', level: 1, classes: ['cleric'], castTime: 'action',

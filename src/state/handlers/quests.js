@@ -5,6 +5,11 @@
  * quest's own prior status is the one-shot guard, so a DM re-emitting the same
  * completion on a later turn re-writes a terminal status harmlessly and never
  * pays twice.
+ *
+ * Only the DM channel pays (2026-09-04 audit P1): applyEvents always sends an
+ * OBJECT ref, while the Quests panel's ✓ button sends the bare row id. A
+ * bare-string completion is bookkeeping only — the panel's + then ✓ was an
+ * unbounded self-service XP mine (8 click-cycles = a level at any level).
  */
 import { awardExperience, getQuestCompletionXp, QUEST_INSTANT_XP } from '../../engine/progression.js';
 import { containment, tokenSet } from '../../engine/textMatch.js';
@@ -36,9 +41,21 @@ function questNamesFuzzyMatch(a, b) {
     return Math.min(setA.size, setB.size) / Math.max(setA.size, setB.size) > 0.5;
 }
 
+// Same caps as the parser boundary (normalizeQuestUpdate): the Quests panel's
+// add form used to dispatch raw input, and a pasted multi-KB name persisted
+// into the save and rode the system prompt every turn (2026-09-04 audit).
+export const QUEST_NAME_MAX_LENGTH = 160;
+export const QUEST_DESCRIPTION_MAX_LENGTH = 800;
+const clampQuestText = (value, max) => String(value ?? '').trim().slice(0, max);
+
 export const handlers = {
     ADD_QUEST(state, action) {
-        const payload = action.payload || {};
+        const raw = action.payload || {};
+        const payload = {
+            ...raw,
+            name: clampQuestText(raw.name, QUEST_NAME_MAX_LENGTH),
+            description: clampQuestText(raw.description, QUEST_DESCRIPTION_MAX_LENGTH),
+        };
         const nameToken = normalizeRefToken(payload.name);
         // Dedupe matches ACTIVE quests only — deliberate (documented 2026-07-23):
         // a completed/failed quest is table history and stays closed; a new quest
@@ -126,10 +143,12 @@ export const handlers = {
             };
             // Engine-owned completion XP. Only genuine completions pay (FAIL_QUEST
             // aliases this handler — failure pays 0, always, killing the
-            // "fail cheap quests fast" exploit), and only on the transition from a
-            // non-terminal status: a row already completed/failed is the one-shot
-            // guard against the DM re-emitting the same completion later.
-            const paying = action.type === 'COMPLETE_QUEST'
+            // "fail cheap quests fast" exploit), only on the transition from a
+            // non-terminal status (a row already completed/failed is the one-shot
+            // guard against the DM re-emitting the same completion later), and
+            // only for object refs — the DM channel. A bare id string is the
+            // Quests panel's ✓ button: bookkeeping, never XP (see header).
+            const paying = action.type === 'COMPLETE_QUEST' && typeof ref === 'object'
                 ? state.quests.find(q => isMatch(q) && q.status !== 'completed' && q.status !== 'failed')
                 : null;
             if (paying && state.character) {
@@ -155,32 +174,27 @@ export const handlers = {
         // (playtest #14: the premise's letter delivery vanished without a trace).
         // Only named object refs qualify; a bare id string that matches nothing
         // (panel buttons, stale ids) stays a no-op.
-        const newName = typeof ref === 'object' ? String(ref.name || '').trim() : '';
+        const newName = typeof ref === 'object' ? clampQuestText(ref.name, QUEST_NAME_MAX_LENGTH) : '';
         if (!newName) return state;
-        let next = {
+        // Never-tracked terminal inserts pay NOTHING (DECISIONS.md 2026-09-04,
+        // revisiting the 2026-08-26 flat instant tier here): this path exists to
+        // record table history (playtest #14 was about the record), and the
+        // terminal row IS the DM-replay guard — a player ✕-ing a finished row and
+        // the DM re-emitting that completion later resurrected it through this
+        // insert and paid again (2026-09-04 audit P2). A DM that opens and closes
+        // an arc in one response still earns the instant tier via ADD_QUEST +
+        // the same-turn gate above.
+        return {
             ...state,
             quests: [...state.quests, {
                 id: ref.id || `quest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                 name: newName,
-                description: String(ref.description || '').trim(),
+                description: clampQuestText(ref.description, QUEST_DESCRIPTION_MAX_LENGTH),
                 status: terminalStatus,
                 addedAt: Date.now(),
                 openedAtMessage: (state.messages || []).length,
             }],
         };
-        // Never-tracked completions pay the flat instant tier only — same
-        // anti-farming reasoning as the same-turn gate above.
-        if (action.type === 'COMPLETE_QUEST' && state.character) {
-            const result = awardExperience(next.character, QUEST_INSTANT_XP, {
-                reason: `quest completed: ${newName}`,
-            });
-            next = {
-                ...next,
-                character: result.character,
-                messages: [...next.messages, ...result.messages],
-            };
-        }
-        return next;
     },
 
     REMOVE_QUEST(state, action) {

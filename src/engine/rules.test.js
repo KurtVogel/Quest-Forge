@@ -11,6 +11,8 @@ import {
     getIncapacitatingCondition,
     combineRollModifiers,
     getSkillModifier,
+    getAllSkills,
+    getWeaponAbilityModifier,
     getArmorClass,
     computeACFromInventory,
     getEquippedWeapon,
@@ -121,6 +123,42 @@ describe('getSkillModifier', () => {
     it('doubles proficiency for expertise', () => {
         const rogue = { ...fighter, class: 'rogue', expertiseSkills: ['stealth'], skillProficiencies: ['stealth'] };
         expect(getSkillModifier(rogue, 'stealth')).toBe(1 + 2 * getProficiencyBonus(rogue.level));
+    });
+});
+
+describe('getAllSkills (character-sheet list)', () => {
+    it('lists every skill with the SAME total actual rolls use (getSkillModifier) plus proficiency flags', () => {
+        const rogue = { ...fighter, class: 'rogue', expertiseSkills: ['stealth'], skillProficiencies: ['stealth', 'athletics'] };
+        const skills = getAllSkills(rogue);
+        expect(skills).toHaveLength(18);
+        for (const entry of skills) {
+            expect(entry.total).toBe(getSkillModifier(rogue, entry.skill));
+        }
+        const byName = Object.fromEntries(skills.map(s => [s.skill, s]));
+        expect(byName.stealth).toMatchObject({ ability: 'dexterity', isProficient: true, hasExpertise: true });
+        expect(byName.athletics).toMatchObject({ ability: 'strength', isProficient: true, hasExpertise: false });
+        expect(byName.arcana).toMatchObject({ ability: 'intelligence', isProficient: false, hasExpertise: false, total: 0 });
+    });
+
+    it('tolerates a character without proficiency arrays', () => {
+        const bare = { ...fighter, skillProficiencies: undefined, expertiseSkills: undefined };
+        expect(getAllSkills(bare).every(s => !s.isProficient && !s.hasExpertise)).toBe(true);
+    });
+});
+
+describe('getWeaponAbilityModifier', () => {
+    const dexHero = { ...fighter, abilityScores: { ...fighter.abilityScores, strength: 8, dexterity: 18 } };
+
+    it('uses DEX for ranged weapons, the better of STR/DEX for finesse, STR otherwise', () => {
+        expect(getWeaponAbilityModifier(dexHero, { ranged: true })).toBe(4);
+        expect(getWeaponAbilityModifier(dexHero, { finesse: true })).toBe(4);
+        expect(getWeaponAbilityModifier(dexHero, { name: 'Mace' })).toBe(-1);
+        expect(getWeaponAbilityModifier(dexHero, null)).toBe(-1);
+    });
+
+    it('a THROWN ranged weapon (javelin, handaxe) uses STR — thrown is a melee weapon in flight', () => {
+        expect(getWeaponAbilityModifier(dexHero, { ranged: true, thrown: true })).toBe(-1);
+        expect(getWeaponAbilityModifier(dexHero, { ranged: true, thrown: true, finesse: true })).toBe(4); // dagger
     });
 });
 
@@ -235,6 +273,24 @@ describe('weapon stat bounds', () => {
     it('clamps a runaway item attackBonus from a stale save to +3', () => {
         const cheat = [{ type: 'weapon', category: 'martialMelee', damage: '1d8', attackBonus: 20, equipped: true }];
         expect(getWeaponAttackBonus(fighter, cheat)).toBe(8); // STR 3 + prof 2 + clamp 3
+    });
+
+    it('junk attackBonus/damageBonus read as 0, never NaN or a 1d4 fallback (2026-09-04 read-site coercion)', () => {
+        const junk = [{ type: 'weapon', category: 'martialMelee', damage: '1d8', attackBonus: 'lots', damageBonus: 'lots', equipped: true }];
+        expect(getWeaponAttackBonus(fighter, junk)).toBe(5); // STR 3 + prof 2
+        expect(getWeaponDamageNotation(fighter, junk)).toBe('1d8+3');
+        const stringy = [{ type: 'weapon', category: 'martialMelee', damage: '1d8', attackBonus: '2', damageBonus: '1', equipped: true }];
+        expect(getWeaponAttackBonus(fighter, stringy)).toBe(7);
+        expect(getWeaponDamageNotation(fighter, stringy)).toBe('1d8+4');
+    });
+
+    it('floors negative item bonuses at 0 — the clamps are no longer ceilings-only', () => {
+        const cursed = [{ type: 'weapon', category: 'martialMelee', damage: '1d8', attackBonus: -20, damageBonus: -20, equipped: true }];
+        expect(getWeaponAttackBonus(fighter, cursed)).toBe(5);
+        expect(getWeaponDamageNotation(fighter, cursed)).toBe('1d8+3');
+        // Armor: a negative baseAC / acBonus can no longer drive AC below the floor.
+        expect(getArmorClass(1, { type: 'armor', armorType: 'heavy', baseAC: -50, acBonus: -5 })).toBe(0);
+        expect(getArmorClass(1, { type: 'armor', armorType: 'light', baseAC: 12, acBonus: 'x' }, { shieldAC: 'x', acBonus: -3 })).toBe(15);
     });
 });
 

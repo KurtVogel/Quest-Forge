@@ -871,14 +871,9 @@ function resolveSupportSpell({ spell, slotLevel, slot, character, companions, ev
             continue;
         }
 
-        if (spell.stabilizes) {
-            if (ally.type === 'companion' && (ally.companion.hp ?? 0) <= 0) {
-                events.push({ type: 'note', text: `**${spell.name}** — ${allyName} is stabilized at death's door (no HP restored).` });
-            } else {
-                events.push({ type: 'note', text: `**${spell.name}** — ${allyName} is not dying; the spell has no effect.` });
-            }
-            continue;
-        }
+        // No `stabilizes` lane here: Spare the Dying is out-of-combat only
+        // (DECISIONS.md 2026-09-04) — companions never bleed out, so the old
+        // in-combat note was decorative.
 
         if (spell.removeConditions) {
             if (ally.type === 'player') {

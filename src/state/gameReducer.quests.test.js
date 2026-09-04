@@ -151,6 +151,23 @@ describe('REMOVE_QUEST and bare-id completion (2026-08-04 queue P2)', () => {
         expect(gameReducer(next, { type: 'REMOVE_QUEST', payload: 'q-gone' }).quests).toHaveLength(1);
     });
 
+    it('clamps quest name/description on every write path, panel input included (2026-09-04 P2)', () => {
+        const longName = 'x'.repeat(5000);
+        const added = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { name: longName, description: 'y'.repeat(5000), source: 'player' },
+        });
+        expect(added.quests[0].name).toHaveLength(160);
+        expect(added.quests[0].description).toHaveLength(800);
+
+        const inserted = gameReducer(initialGameState, {
+            type: 'COMPLETE_QUEST',
+            payload: { name: longName, description: 'y'.repeat(5000) },
+        });
+        expect(inserted.quests[0].name).toHaveLength(160);
+        expect(inserted.quests[0].description).toHaveLength(800);
+    });
+
     it('completes a quest by MATCHED bare id string (the panel button path)', () => {
         const added = gameReducer(initialGameState, {
             type: 'ADD_QUEST',
@@ -199,13 +216,42 @@ describe('engine-owned quest completion XP (rpg-balance-master ruling 2026-08-22
         expect(next.character.exp).toBe(25);
     });
 
-    it('pays the never-tracked fallback insert the flat instant tier only', () => {
+    it('records a never-tracked fallback insert as table history with NO XP (2026-09-04 revisit of the instant tier)', () => {
         const next = gameReducer(withHero(), {
             type: 'COMPLETE_QUEST',
             payload: { name: "The Ferrywoman's Letter", description: 'Delivered off-screen.' },
         });
         expect(next.quests[0].status).toBe('completed');
-        expect(next.character.exp).toBe(25);
+        expect(next.character.exp).toBe(0);
+        expect(next.messages).toHaveLength(0);
+    });
+
+    it('panel ✓ (bare id ref) completes as bookkeeping only — the + then ✓ XP mine is closed (2026-09-04 P1)', () => {
+        let state = gameReducer(withHero(), { type: 'ADD_QUEST', payload: { name: 'My own note', source: 'player' } });
+        state = passTurns(state, 4);
+        const clicked = gameReducer(state, { type: 'COMPLETE_QUEST', payload: state.quests[0].id });
+        expect(clicked.quests[0].status).toBe('completed');
+        expect(clicked.character.exp).toBe(0);
+        expect(clicked.messages).toHaveLength(state.messages.length);
+
+        // Same-turn add + ✓ double-click: not even the instant tier.
+        const fresh = gameReducer(withHero(), { type: 'ADD_QUEST', payload: { name: 'Quick note', source: 'player' } });
+        expect(gameReducer(fresh, { type: 'COMPLETE_QUEST', payload: fresh.quests[0].id }).character.exp).toBe(0);
+    });
+
+    it('a panel ✕ on a finished row followed by the DM re-emitting that completion pays nothing (2026-09-04 P2)', () => {
+        let state = gameReducer(withHero(), { type: 'ADD_QUEST', payload: { id: 'q-rats', name: 'Clear the Cellar Rats' } });
+        state = passTurns(state, 4);
+        state = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-rats', name: 'Clear the Cellar Rats' } });
+        expect(state.character.exp).toBe(75);
+        state = gameReducer(state, { type: 'REMOVE_QUEST', payload: 'q-rats' });
+        expect(state.quests).toHaveLength(0);
+
+        state = passTurns(state, 3);
+        const replay = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-rats', name: 'Clear the Cellar Rats' } });
+        expect(replay.quests).toHaveLength(1);
+        expect(replay.quests[0].status).toBe('completed');
+        expect(replay.character.exp).toBe(75); // resurrected as history, never re-paid
     });
 
     it('pays NOTHING for a failed quest — matched or never-tracked', () => {

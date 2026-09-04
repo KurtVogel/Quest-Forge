@@ -91,6 +91,26 @@ describe('CAST_SPELL (out of combat)', () => {
         expect(strayWords).toBe(withChatter);
     });
 
+    it('the recast bypass needs the spell as an ordered phrase or a cast-clause repeat — two proven false positives stay suppressed (2026-09-04 P2)', () => {
+        const once = gameReducer(clericState(), {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-1', playerMessage: 'I cast Cure Wounds on myself' } },
+        });
+        const withChatter = { ...once, messages: [...once.messages, { role: 'user' }, { role: 'assistant' }] };
+        const replay = (playerMessage) => gameReducer(withChatter, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage } },
+        });
+        // Scattered name words: not the spell.
+        expect(replay('These wounds will not cure themselves; I bind them with cloth')).toBe(withChatter);
+        // Bare pronoun + again with no cast in the clause: not a recast.
+        expect(replay('I try that again, the lock is stubborn')).toBe(withChatter);
+        // Genuine recasts still spend the second slot.
+        expect(replay('I cast it again, louder this time').character.spellSlots[1].used).toBe(2);
+        expect(replay('Cure-Wounds on myself once more').character.spellSlots[1].used).toBe(2);
+        expect(replay('Another casting, then.').character.spellSlots[1].used).toBe(2);
+    });
+
     it('measures the spell replay window in conversational distance — a dice turn cannot age out the guard (2026-07-30)', () => {
         const state = clericState();
         const once = gameReducer(state, {
@@ -188,6 +208,93 @@ describe('CAST_SPELL (out of combat)', () => {
         expect(next.messages.at(-1).content).toMatch(/cleansed of: Poisoned/);
     });
 
+    it('cleanses a COMPANION and reports when nothing lifts', () => {
+        const state = clericState({
+            party: [{ id: 'mara', name: 'Mara', hp: 8, maxHp: 12, status: 'wounded', conditions: ['Blinded', 'Exhausted'] }],
+        });
+        const next = gameReducer(state, { type: 'CAST_SPELL', payload: { spell: 'lesser restoration', target: 'Mara' } });
+        expect(next.party[0].conditions).toEqual(['Exhausted']);
+        expect(next.character.conditions).toEqual([]);
+        expect(next.messages.at(-1).content).toMatch(/Mara is cleansed of: Blinded/);
+        const nothing = gameReducer(next, { type: 'CAST_SPELL', payload: { spell: 'lesser restoration', target: 'Mara' } });
+        expect(nothing.messages.at(-1).content).toMatch(/Mara has no affliction the spell can lift/);
+    });
+
+    it('Spare the Dying is a narrative cantrip: names the NPC it spares, spends nothing, changes no mechanics (2026-09-04 ruling)', () => {
+        const state = clericState();
+        const next = gameReducer(state, { type: 'CAST_SPELL', payload: { spell: 'spare the dying', target: 'the wounded ferryman' } });
+        expect(next.character.currentHP).toBe(10);
+        expect(next.character.spellSlots).toEqual(state.character.spellSlots);
+        expect(next.messages.at(-1).content).toMatch(/the wounded ferryman is kept from death's door — no HP restored/);
+    });
+
+    it('utility spells (Guidance) take hold narratively with no mechanical change', () => {
+        const state = clericState();
+        const next = gameReducer(state, { type: 'CAST_SPELL', payload: { spell: 'guidance' } });
+        expect(next.character.currentHP).toBe(10);
+        expect(next.character.spellSlots).toEqual(state.character.spellSlots);
+        expect(next.messages.at(-1).content).toMatch(/The magic takes hold — the DM narrates/);
+    });
+
+    it('rejects an ally spell whose every recipient is invalid BEFORE spending the slot', () => {
+        const state = clericState({ party: [{ id: 'mara', name: 'Mara', hp: 8, maxHp: 12, status: 'dead', conditions: [] }] });
+        const stranger = gameReducer(state, { type: 'CAST_SPELL', payload: { spell: 'cure wounds', target: 'Nobody' } });
+        expect(stranger.character.spellSlots[1].used).toBe(0);
+        expect(stranger.messages.at(-1).content).toMatch(/no valid recipient "Nobody" — nothing was spent/);
+        const dead = gameReducer(state, { type: 'CAST_SPELL', payload: { spell: 'cure wounds', target: 'Mara' } });
+        expect(dead.character.spellSlots[1].used).toBe(0);
+        expect(dead.messages.at(-1).content).toMatch(/no valid recipient "Mara"/);
+    });
+
+    it('a group heal with one bad name heals the rest and reports the lost share', () => {
+        const state = clericState({
+            party: [{ id: 'mara', name: 'Mara', hp: 2, maxHp: 12, status: 'wounded', conditions: [] }],
+        });
+        const next = gameReducer(state, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'mass healing word', targets: ['Mara', 'Nobody'] },
+        });
+        expect(next.party[0].hp).toBeGreaterThan(2);
+        expect(next.character.spellSlots[3].used).toBe(1);
+        expect(next.messages.at(-1).content).toMatch(/No valid recipient "Nobody" — that share of the spell is lost/);
+    });
+
+    it('honors a DM-requested slotLevel upcast: the higher slot is spent and announced', () => {
+        const state = clericState();
+        const next = gameReducer(state, { type: 'CAST_SPELL', payload: { spell: 'cure wounds', slotLevel: 3 } });
+        expect(next.character.spellSlots[1].used).toBe(0);
+        expect(next.character.spellSlots[3].used).toBe(1);
+        expect(next.messages.at(-1).content).toMatch(/casts Cure Wounds\*\* using a level 3 slot/);
+    });
+
+    it('an unconscious caster cannot act: a dying, 0-HP, incapacitated, or dead hero casts nothing (2026-09-04 P1)', () => {
+        const dying = clericState({
+            character: { currentHP: 0, dying: true, deathSaves: { successes: 0, failures: 2 }, conditions: ['Unconscious'] },
+        });
+        const prayer = gameReducer(dying, { type: 'CAST_SPELL', payload: { spell: 'cure wounds', target: 'self', _meta: { sourceId: 'msg-1' } } });
+        expect(prayer.character.currentHP).toBe(0);
+        expect(prayer.character.dying).toBe(true);
+        expect(prayer.character.deathSaves).toEqual({ successes: 0, failures: 2 });
+        expect(prayer.character.spellSlots[1].used).toBe(0);
+        expect(prayer.recentSpellCasts ?? []).toEqual([]);
+        expect(prayer.messages.at(-1).content).toMatch(/Maren is at 0 HP and dying and cannot cast Cure Wounds/);
+
+        const shield = gameReducer(dying, { type: 'CAST_SPELL', payload: { spell: 'shield of faith' } });
+        expect(shield.character.sustainedSpell).toBeNull();
+        expect(shield.character.spellSlots[1].used).toBe(0);
+
+        const zeroHp = clericState({ character: { currentHP: 0, dying: false, conditions: [] } });
+        expect(gameReducer(zeroHp, { type: 'CAST_SPELL', payload: { spell: 'cure wounds' } }).character.currentHP).toBe(0);
+
+        const stunned = clericState({ character: { conditions: ['Stunned'] } });
+        const stunnedCast = gameReducer(stunned, { type: 'CAST_SPELL', payload: { spell: 'cure wounds' } });
+        expect(stunnedCast.character.currentHP).toBe(10);
+        expect(stunnedCast.messages.at(-1).content).toMatch(/is stunned and cannot cast/);
+
+        const dead = clericState({ character: { currentHP: 0, isDead: true } });
+        expect(gameReducer(dead, { type: 'CAST_SPELL', payload: { spell: 'guidance' } }).messages.at(-1).content).toMatch(/is dead and cannot cast/);
+    });
+
     it('Mass Healing Word heals up to 3 named allies out of combat (2026-08-29 audit)', () => {
         // The promised group heal was mechanically impossible outside a fight:
         // no targets channel existed and CAST_SPELL read one target.
@@ -223,34 +330,29 @@ describe('CAST_SPELL (out of combat)', () => {
         expect(next.character.currentHP).toBe(10); // the hero was NOT healed
     });
 
-    it('a heal aimed only at the dead hero rejects without spending the slot (2026-08-29 audit)', () => {
-        // USE_ITEM's guard twin: healing revives `dying` but never the dead —
-        // a DM-emitted cure used to mint a currentHP>0 corpse state.
-        const state = clericState({ character: { isDead: true, currentHP: 0 } });
-        const next = gameReducer(state, {
-            type: 'CAST_SPELL',
-            payload: { spell: 'cure wounds', target: 'self', _meta: { sourceId: 'msg-1' } },
-        });
-        expect(next.character.currentHP).toBe(0);
-        expect(next.character.isDead).toBe(true);
-        expect(next.character.spellSlots[1].used).toBe(0);
-        expect(next.messages.at(-1).content).toMatch(/cannot help the dead/);
-    });
-
-    it('a mixed multi-target heal reaches the living and skips the dead hero', () => {
+    it('a dead hero never casts — the 2026-08-29 corpse-heal guard is subsumed by the caster gate (2026-09-04)', () => {
+        // The old guard let a dead cleric cast and merely skipped the corpse as
+        // a recipient; a dead caster now casts nothing at all, so no self-heal
+        // can mint a currentHP>0 corpse and no group heal fires from a corpse.
         const state = clericState({
             character: { isDead: true, currentHP: 0 },
             party: [{ id: 'mara', name: 'Mara', hp: 2, maxHp: 12, status: 'wounded', conditions: [] }],
         });
-        const next = gameReducer(state, {
+        const self = gameReducer(state, {
+            type: 'CAST_SPELL',
+            payload: { spell: 'cure wounds', target: 'self', _meta: { sourceId: 'msg-1' } },
+        });
+        expect(self.character.currentHP).toBe(0);
+        expect(self.character.isDead).toBe(true);
+        expect(self.character.spellSlots[1].used).toBe(0);
+        expect(self.messages.at(-1).content).toMatch(/is dead and cannot cast Cure Wounds/);
+
+        const group = gameReducer(state, {
             type: 'CAST_SPELL',
             payload: { spell: 'mass healing word', targets: ['self', 'Mara'] },
         });
-        expect(next.character.currentHP).toBe(0);
-        expect(next.character.isDead).toBe(true);
-        expect(next.party[0].hp).toBeGreaterThan(2);
-        expect(next.character.spellSlots[3].used).toBe(1);
-        expect(next.messages.at(-1).content).toMatch(/cannot help the dead/);
+        expect(group.party[0].hp).toBe(2);
+        expect(group.character.spellSlots[3].used).toBe(0);
     });
 });
 

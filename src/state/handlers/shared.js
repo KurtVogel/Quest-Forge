@@ -70,6 +70,35 @@ export function applyEarlyDefeat(character) {
 }
 
 /** Bring a dying/stable character back to consciousness (healing or a nat-20 death save). */
+/**
+ * Load-side heal for one persisted chronicle chapter (2026-09-04 audit): the
+ * chronicle was the one persisted collection validateSaveState never
+ * shape-guarded, while both readers index its last element unguarded —
+ * ChronicleTab and writeChronicleChapters — so a null entry crashed the whole
+ * Journal panel on open and a string toIndex ("12") string-concatenated the
+ * next chapter's fromIndex into "121" (every close said "Not enough new play").
+ * Plain objects with text survive; from/toIndex are coerced to finite
+ * integers; junk drops.
+ */
+export function healChronicleChapter(entry) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    const text = typeof entry.text === 'string' ? entry.text.trim().slice(0, 60000) : '';
+    if (!text) return null;
+    const index = (value) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+    };
+    return {
+        ...entry,
+        id: typeof entry.id === 'string' && entry.id ? entry.id : `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        title: String(entry.title ?? '').trim().slice(0, 80),
+        text,
+        fromIndex: index(entry.fromIndex),
+        toIndex: index(entry.toIndex),
+        createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
+    };
+}
+
 export function reviveCharacter(character) {
     return {
         ...character,

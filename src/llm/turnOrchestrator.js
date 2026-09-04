@@ -282,7 +282,9 @@ Translate the player's committed action into the single bounded combat_exchange 
         if (parsed.eventsDropped && !opts.narrationOnly && !opts.tableTalk) {
             dispatch({
                 type: 'ADD_MESSAGE',
-                payload: { role: 'system', content: 'The DM\'s mechanical events could not be read this turn (malformed data) — the story above stands, but no game state changed. If something seemed granted or started here, ask the DM to restate it.' },
+                // kind: 'error' keeps infrastructure lines out of every
+                // story reader (chronicler, scene art, priming) — 2026-09-04.
+                payload: { role: 'system', kind: 'error', content: 'The DM\'s mechanical events could not be read this turn (malformed data) — the story above stands, but no game state changed. If something seemed granted or started here, ask the DM to restate it.' },
             });
         }
         // Table talk pauses the world: whatever a disobedient DM appends, no events
@@ -589,9 +591,9 @@ Translate the player's committed action into the single bounded combat_exchange 
             } else if (diceRolled) {
                 // The dice are final; only the outcome narration failed. Point the
                 // player at the retry path instead of stranding them in silence.
-                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `The dice landed (see the roll above) but the DM's outcome response failed: ${error.message}. Say "continue" to have the DM narrate the result.` } });
+                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', kind: 'error', content: `The dice landed (see the roll above) but the DM's outcome response failed: ${error.message}. Say "continue" to have the DM narrate the result.` } });
             } else {
-                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error resolving check: ${error.message}` } });
+                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', kind: 'error', content: `Error resolving check: ${error.message}` } });
                 dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
             }
         } finally {
@@ -649,7 +651,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 // staged check (2026-08-31 P2). Silent by design.
                 dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
             } else {
-                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `Error challenging check: ${error.message}` } });
+                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', kind: 'error', content: `Error challenging check: ${error.message}` } });
                 dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
             }
         } finally {

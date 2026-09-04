@@ -10,9 +10,16 @@ const messages = [
     { id: 'f', role: 'assistant', content: 'You rummage…', hidden: true },
     { id: 'g', role: 'assistant', content: 'I cannot continue.', deleted: true },
     { id: 'h', role: 'assistant', content: '   ' },
+    { id: 'i', role: 'system', kind: 'error', content: 'Error resolving check: Failed to fetch' },
 ];
 
 describe('THE narrative-eligibility predicate (2026-09-01 P1)', () => {
+    it('drops infrastructure error lines (kind: "error") — "Failed to fetch" is not play (2026-09-04 audit)', () => {
+        expect(collectNarrativeMessages(messages).some(m => m.kind === 'error')).toBe(false);
+        // An ordinary table record (a dice line) without the stamp still counts.
+        expect(collectNarrativeMessages([{ role: 'system', content: 'Astra rolled **17**.' }])).toHaveLength(1);
+    });
+
     it('keeps visible play with raw indexes and drops hidden, deleted, blank, and table-talk pairs', () => {
         expect(collectNarrativeEntries(messages).map(e => [e.message.id, e.index]))
             .toEqual([['a', 0], ['b', 1], ['c', 2]]);

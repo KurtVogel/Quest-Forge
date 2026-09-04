@@ -227,6 +227,7 @@ export function describeSpellcastingForPrompt(character) {
     const targetingTag = targeting => {
         if (!targeting) return '';
         if (targeting.side === 'self') return ', self';
+        if (targeting.side === 'any') return ', ONE creature (named in "target")';
         const noun = targeting.side === 'ally' ? 'ally' : 'foe';
         if (targeting.mode === 'upTo3') return `, up to 3 ${noun === 'ally' ? 'allies' : 'foes'} via "targets"`;
         if (targeting.mode === 'darts') return ', 3 darts (+1 per upcast level) — splittable among foes via "targets"';

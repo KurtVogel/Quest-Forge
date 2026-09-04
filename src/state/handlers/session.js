@@ -20,6 +20,7 @@ import {
     RECENT_SPELL_CAST_LIMIT,
     ROLL_HISTORY_CAP,
     sanitizeWorldFactPayload,
+    healChronicleChapter,
 } from './shared.js';
 
 function sanitizeStoredExchangeResult(result) {
@@ -141,6 +142,11 @@ function validateSaveState(payload) {
             npcs
         ),
         fronts: Array.isArray(payload.fronts) ? payload.fronts.map(f => normalizeFront(f)) : [],
+        // Player-facing saga chapters: entry heal (see healChronicleChapter) —
+        // a poisoned entry crashed the Journal panel on open (2026-09-04 audit).
+        chronicle: Array.isArray(payload.chronicle)
+            ? payload.chronicle.map(healChronicleChapter).filter(Boolean)
+            : [],
         party: Array.isArray(payload.party)
             ? payload.party.filter(c => c && typeof c === 'object')
             : [],

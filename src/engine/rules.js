@@ -31,19 +31,33 @@ export function getProficiencyBonus(level) {
  * @param {object|boolean|null} shield - Equipped shield object, or true for a plain shield
  * @returns {number} Armor Class
  */
+/**
+ * Read-site clamp for an item bonus (attack/damage/AC/magic): Number()-coerced,
+ * floored at 0 and capped at +3 — the same bounds normalizeItem applies at
+ * the parser AND load boundaries (healEquippedSlots maps normalizeItem over
+ * the whole inventory on every LOAD_GAME), kept here as the last belt for any
+ * future write path that skips it. Junk (a string, NaN, undefined) reads as 0,
+ * never as NaN: a NaN to-hit silently misses every attack and a "1d8NaN"
+ * notation throws its way down to the flat 1d4 fallback (2026-09-04 audit).
+ */
+function clampItemBonus(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(0, Math.min(3, Math.trunc(n))) : 0;
+}
+
 export function getArmorClass(dexMod, armor = null, shield = false) {
     let ac = 10 + dexMod; // Unarmored
 
     if (armor) {
-        // normalizeItem clamps these at the trust boundary, but saves predating
-        // the clamps (LOAD_GAME does not re-normalize inventory) can still carry
-        // unbounded non-catalog stats — re-clamp so hero AC has a ceiling on
-        // every path. Ceilings mirror plate (18) and +3 magic. Number() first:
+        // normalizeItem clamps these at both trust boundaries (parser + load —
+        // see clampItemBonus), so this is belt-and-braces: hero AC keeps a
+        // floor and a ceiling on every path even if a future write skips the
+        // normalizer. Ceilings mirror plate (18) and +3 magic. Number() first:
         // a string "12" from a hand-edited save string-concatenated straight
         // through the old clamp into AC "122000" (2026-08-28 audit).
         const rawBase = Number(armor.baseAC);
-        const baseAC = Number.isFinite(rawBase) ? Math.min(18, rawBase) : null;
-        const armorBonus = Math.min(3, Number(armor.acBonus) || Number(armor.magicBonus) || 0);
+        const baseAC = Number.isFinite(rawBase) ? Math.max(0, Math.min(18, Math.trunc(rawBase))) : null;
+        const armorBonus = clampItemBonus(armor.acBonus) || clampItemBonus(armor.magicBonus);
         switch (baseAC === null ? 'unarmored' : armor.armorType) {
             case 'light':
                 ac = baseAC + dexMod + armorBonus;
@@ -69,7 +83,9 @@ export function getArmorClass(dexMod, armor = null, shield = false) {
         if (typeof shield === 'object') {
             // Number() for the same reason as baseAC above — junk degrades to
             // the plain +2 shield instead of NaN-poisoning the AC.
-            ac += Math.min(3, Number(shield.shieldAC) || 2) + Math.min(3, Number(shield.acBonus) || Number(shield.magicBonus) || 0);
+            const rawShield = Number(shield.shieldAC);
+            const shieldAC = Number.isFinite(rawShield) && rawShield > 0 ? Math.min(3, Math.trunc(rawShield)) : 2;
+            ac += shieldAC + (clampItemBonus(shield.acBonus) || clampItemBonus(shield.magicBonus));
         } else {
             ac += 2;
         }
@@ -176,14 +192,14 @@ export function getWeaponAttackBonus(character, inventory = []) {
         : 0;
     return abilityMod
         + (proficient ? getProficiencyBonus(character.level) : 0)
-        + Math.min(3, weapon?.attackBonus || weapon?.magicBonus || 0)
+        + (clampItemBonus(weapon?.attackBonus) || clampItemBonus(weapon?.magicBonus))
         + styleBonus;
 }
 
 export function getWeaponDamageNotation(character, inventory = [], fallback = '1d4') {
     const weapon = getEquippedWeapon(inventory);
     const abilityMod = getWeaponAbilityModifier(character, weapon);
-    const itemBonus = Math.min(3, weapon?.damageBonus || weapon?.magicBonus || 0);
+    const itemBonus = clampItemBonus(weapon?.damageBonus) || clampItemBonus(weapon?.magicBonus);
     const styleBonus = character?.class === 'fighter'
         && character.fightingStyle === 'dueling'
         && weapon
@@ -251,25 +267,19 @@ export function getSkillModifier(character, skill) {
 }
 
 /**
- * Get full skill data for display: modifier, proficiency, expertise.
+ * Get full skill data for display: modifier, proficiency, expertise. The total
+ * is getSkillModifier — the one number actual rolls use — never a second
+ * inline formula that could drift from it (2026-08-28 Lap 4 fold, landed
+ * 2026-09-04).
  */
 export function getAllSkills(character) {
-    return Object.entries(SKILL_ABILITIES).map(([skill, ability]) => {
-        const abilityMod = getModifier(character.abilityScores[ability]);
-        const profBonus = getProficiencyBonus(character.level);
-        const isProficient = character.skillProficiencies?.includes(skill) || false;
-        const hasExpertise = character.expertiseSkills?.includes(skill) || false;
-        const profMultiplier = hasExpertise ? 2 : (isProficient ? 1 : 0);
-        const total = abilityMod + (profBonus * profMultiplier);
-
-        return {
-            skill,
-            ability,
-            total,
-            isProficient,
-            hasExpertise,
-        };
-    });
+    return Object.entries(SKILL_ABILITIES).map(([skill, ability]) => ({
+        skill,
+        ability,
+        total: getSkillModifier(character, skill),
+        isProficient: character.skillProficiencies?.includes(skill) || false,
+        hasExpertise: character.expertiseSkills?.includes(skill) || false,
+    }));
 }
 
 /**

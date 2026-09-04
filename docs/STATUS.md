@@ -6,7 +6,30 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-03 (queue sweep of the 2026-09-03 audit: stacking rule, items_lost quantity, bounded weapon dice, roster-as-template; deployed)._
+_Last updated: 2026-09-04 (queue sweep of both 2026-09-04 audits: panel XP mine, dying-caster gate, Spare the Dying ruling, chronicle heal, error lines out of the saga; deployed)._
+
+## 2026-09-04 — queue sweep: panel XP mine, dying-caster gate, chronicle heal
+
+All 11 lines of the two 2026-09-04 audits (rules-math + quests, spellcasting + chronicler)
+cleared — every queue line ticked with a fix note; the only open line remains the
+2026-08-09 pronoun-flip WATCH item (left open by design: no recurrence, needs live
+evidence). **P1s:** (1) the Quests panel's ✓ was a self-service XP mine — `COMPLETE_QUEST`
+now pays only for the DM's object refs, the panel's bare id completes as bookkeeping;
+(2) an unconscious caster acted — `CAST_SPELL` gates the caster (dead / dying / 0 HP /
+incapacitated → visible rejection, nothing spent), subsuming the 08-29 dead-hero heal
+guards. **Rulings (DECISIONS.md 2026-09-04):** never-tracked terminal quest inserts pay 0
+(revisits the 08-26 instant tier there — the terminal row is the replay guard, and ✕ +
+DM re-emission paid again); Spare the Dying is a narrative cantrip (out-of-combat only,
+any named target, combat lane removed). **P2s:** quest name/description clamps on every
+write path + panel `maxLength`; `clampItemBonus` read-site coercion + floors in rules.js
+(junk bonus → 0, never NaN; stale `:39` comment corrected); `getAllSkills` folded onto
+`getSkillModifier`; recast bypass tightened (ordered phrase; `it`/`that` only inside a
+cast-clause — both reproduced false positives pinned); six unpinned CAST_SPELL branches
+tested; `healChronicleChapter` in validateSaveState (null entry crashed the Journal on
+open, string toIndex string-concatenated the next span); all eight turn-failure system
+lines stamped `kind: 'error'` and skipped by the shared narrative predicate. 2,085 tests
+green (+19), lint clean, deployed.
+
 
 ## 2026-09-03 — queue sweep: one stacking rule, bounded weapon dice, roster-as-template
 

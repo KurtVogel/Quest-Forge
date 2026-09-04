@@ -8,6 +8,37 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-04 · Quest XP pays only through the DM channel; never-tracked terminal inserts
+pay nothing; a dying caster casts nothing; Spare the Dying is a narrative cantrip.** Four
+rulings from the 2026-09-04 queue sweep (rules-math + quests, spellcasting + chronicler).
+(1) `COMPLETE_QUEST` awards engine XP only for OBJECT refs — applyEvents always sends one;
+the Quests panel's ✓ sends the bare row id and now completes as bookkeeping. Every
+anti-farming lever (same-turn gate, terminal one-shot guard, `openedAtMessage`) guarded the
+DM channel while the panel's + then ✓ walked in the front door: 8 click-cycles = a level at
+any level. Self-cheating in a solo game, but XP integrity is an invariant here (vault
+clamps, "XP is engine-owned"). (2) The never-tracked fallback insert (a completion whose
+quest was never in state) records table history and pays 0 — this explicitly revisits the
+2026-08-26 ruling's flat `QUEST_INSTANT_XP` on that path. Why: the terminal row IS the
+DM-replay guard, and ✕-ing a finished row followed by the DM re-emitting the completion
+(the proven recurring failure mode) resurrected it through this insert and paid again. A
+DM that opens and closes an arc in one response still earns the instant tier via
+`quest_updates` new + completed (ADD_QUEST + the same-turn gate). Playtest #14, which
+motivated the insert, was about the record, not the XP. (3) `CAST_SPELL` gates the CASTER:
+dead, dying, 0 HP, or stunned/paralyzed/unconscious heroes cast nothing, with a visible
+line and no slot or ledger touch. The combat lane was already structurally safe (a dying
+hero's slot is `death_save` only) but a DM "gasped prayer" `spell_cast` out of combat
+self-revived a cleric at 2/3 failures and erased the clock. Companion-administered potions
+(USE_ITEM) remain the out-of-combat rescue. The 2026-08-29 dead-hero heal guards are
+subsumed (a dead caster never reaches the recipient loop). (4) Spare the Dying stays in the
+catalog as a NARRATIVE cantrip: out-of-combat only, `targeting.side: 'any'`, the line names
+the NPC it spares, no mechanics change. Structurally there is no engine clock for it to
+stop — the hero cannot cast while dying (3) and companions never bleed out ("down but
+stable") — so its only honest target is an NPC in the DM's fiction; the decorative
+in-combat stabilize lane was removed rather than cutting the spell (a saved cleric's known
+list keeps resolving). Also settled: infrastructure error lines (`kind: 'error'` on every
+turn-failure system message) are never story — the shared narrative predicate skips them
+for the chronicler, scene art, and priming, the same shape as the 2026-08-29 table-talk fix.
+
 **2026-09-03 · In-band stream errors surface their real cause; a same-message loose coin
 gain beside a sale is judged by VALUE, never blanket-dropped.** Two rulings from the
 money-traffic playtests (Gemini + OpenAI DMs, `scripts/playtest_money_traffic_20.cjs`):

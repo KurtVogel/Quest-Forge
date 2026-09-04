@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
+import { QUEST_NAME_MAX_LENGTH } from '../../state/handlers/quests.js';
 import './Quests.css';
 
 export default function QuestPanel() {
@@ -15,13 +16,15 @@ export default function QuestPanel() {
         if (!newQuestName.trim()) return;
         dispatch({
             type: 'ADD_QUEST',
-            payload: { name: newQuestName.trim(), description: '', source: 'player' },
+            payload: { name: newQuestName.trim().slice(0, QUEST_NAME_MAX_LENGTH), description: '', source: 'player' },
         });
         setNewQuestName('');
         setShowAddQuest(false);
     };
 
     const handleComplete = (questId) => {
+        // Bare id on purpose: the handler pays engine XP only for the DM's
+        // object refs — a panel completion is bookkeeping (2026-09-04 audit).
         dispatch({ type: 'COMPLETE_QUEST', payload: questId });
     };
 
@@ -50,6 +53,7 @@ export default function QuestPanel() {
                         value={newQuestName}
                         onChange={(e) => setNewQuestName(e.target.value)}
                         placeholder="Quest objective..."
+                        maxLength={QUEST_NAME_MAX_LENGTH}
                         autoFocus
                         onKeyDown={(e) => e.key === 'Enter' && handleAddQuest()}
                     />

@@ -2,7 +2,7 @@
  * Out-of-combat spellcasting (DM-emitted spell_cast): validation, slot
  * spending, engine-rolled effects, and the spell replay guard.
  */
-import { computeACFromInventory } from '../../engine/rules.js';
+import { computeACFromInventory, getIncapacitatingCondition } from '../../engine/rules.js';
 import { rollNotation } from '../../engine/dice.ts';
 import {
     chooseSlotLevel,
@@ -32,15 +32,38 @@ const RECENT_SPELL_CAST_MESSAGE_WINDOW = 4;
 function playerMessageRecastsSpell(spell, playerMessage) {
     const text = String(playerMessage || '').toLowerCase();
     if (!text.trim()) return false;
+    // The spell must be named as an ORDERED phrase ("cure wounds", "Cure-Wounds"):
+    // the compacted-text containment below is ordered and adjacent by
+    // construction. The old every-word rung fired on "These wounds will not
+    // cure themselves; I bind them with cloth" and spent a second slot
+    // (2026-09-04 audit).
     const compact = normalizeRefToken(text);
     const tokens = [spell.key, spell.name].map(normalizeRefToken).filter(Boolean);
     if (tokens.some(token => compact.includes(token))) return true;
-    const nameWords = String(spell.name || '').toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2);
-    if (nameWords.length > 0 && nameWords.every(word => text.includes(word))) return true;
     // "I cast it again", "another casting" — explicit repeat intent without
     // naming the spell. Proximity required: a stray repeat word plus a stray
     // pronoun anywhere in the message is not recast intent (2026-08-22).
-    return repeatIntentNearNoun(text, /(?:cast|casting|spell|it|that)/);
+    if (repeatIntentNearNoun(text, /(?:cast|casting|spell)/)) return true;
+    // A bare pronoun ("that again") counts only inside a clause that also
+    // casts: "I try that again, the lock is stubborn" is not a recast
+    // (2026-09-04 — the quantifier-attaches-to-noun rule reaching this ledger).
+    return text.split(/[.!?;]+/).some(clause =>
+        /\bcast(?:ing|s)?\b/.test(clause) && repeatIntentNearNoun(clause, /(?:it|that)/));
+}
+
+/**
+ * Why the CASTER cannot act right now, or null. The combat lane structurally
+ * cannot cast from a dying hero (the exchange slot is death_save only), but a
+ * DM narrating a "gasped prayer" and emitting spell_cast out of combat used to
+ * be accepted whole: a hero at 0 HP with 2/3 death-save failures self-cast
+ * Cure Wounds, revived, and erased the clock (2026-09-04 audit P1). The
+ * out-of-combat rescue is a companion-administered potion (USE_ITEM).
+ */
+function casterIncapacity(character) {
+    if (character.isDead) return 'is dead';
+    if (character.dying || (Number(character.currentHP) || 0) <= 0) return 'is at 0 HP and dying';
+    const condition = getIncapacitatingCondition(character.conditions);
+    return condition ? `is ${condition}` : null;
 }
 
 export const handlers = {
@@ -60,6 +83,10 @@ export const handlers = {
         }
         if (!spell.outOfCombatAvailable) {
             return { ...state, messages: [...state.messages, systemMessage(`${spell.name} only has a combat effect; outside battle no slot was spent.`)] };
+        }
+        const incapacity = casterIncapacity(character);
+        if (incapacity) {
+            return { ...state, messages: [...state.messages, systemMessage(`${character.name || 'The hero'} ${incapacity} and cannot cast ${spell.name} — an unconscious caster has no voice for it. Nothing was spent; a companion's healing potion is the rescue outside combat.`)] };
         }
         const meta = payload._meta || {};
         const sourceId = String(meta.sourceId || '').slice(0, 160);
@@ -126,13 +153,9 @@ export const handlers = {
         if (recipients.length === 0) {
             return { ...state, messages: [...state.messages, systemMessage(`${spell.name} has no valid recipient "${invalidRefs.join('", "')}" — nothing was spent or applied.`)] };
         }
-        // USE_ITEM's dead-hero guard twin (2026-08-29 audit): healing revives
-        // `dying` but never the dead. A heal aimed only at the dead hero rejects
-        // before the slot is spent; a mixed multi-target cast still reaches the
-        // living and skips the corpse inside the healing loop below.
-        if (spell.healing && character.isDead && recipients.every(r => r.type === 'self')) {
-            return { ...state, messages: [...state.messages, systemMessage(`${spell.name} cannot help the dead — nothing was spent or applied.`)] };
-        }
+        // The dead-hero heal guard that lived here (2026-08-29) is subsumed by
+        // casterIncapacity above: a dead or dying hero never reaches this point,
+        // so a self-heal can never mint a currentHP>0 corpse state.
         // Single-target branches below (cleanse/sustain/stabilize) keep their
         // one-recipient semantics; only the healing branch loops recipients.
         const companion = recipients[0].type === 'companion' ? recipients[0].companion : null;
@@ -154,11 +177,6 @@ export const handlers = {
                         ? normalizeCompanion({ hp, status: companionStatus(hp, maxHp) }, c)
                         : c);
                     lines.push(`${target.name} recovers **${roll.total}** HP (now ${hp}/${maxHp}). Rolled: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}.`);
-                } else if (character.isDead) {
-                    // USE_ITEM's guard twin: healing revives `dying` but never the
-                    // dead — a DM-emitted cure on an isDead hero used to mint a
-                    // currentHP>0 corpse state (2026-08-29 audit).
-                    lines.push(`${spell.name} cannot help the dead — ${character.name || 'the hero'} is beyond its reach.`);
                 } else {
                     const priorHp = nextCharacter.currentHP;
                     const healed = Math.min(character.maxHP, priorHp + roll.total);
@@ -213,7 +231,12 @@ export const handlers = {
             nextCharacter = { ...nextCharacter, armorClass: computeACFromInventory(state.inventory || [], nextCharacter) };
             lines.push(`It settles over ${companion ? companion.name : (character.name || 'the hero')}${spell.acBonus ? ` (+${spell.acBonus} AC)` : ''} and holds until another sustained spell, a rest, or the end of a fight.`);
         } else if (spell.stabilizes) {
-            lines.push(`${companion ? companion.name : 'The recipient'} is stabilized if dying — no HP restored.`);
+            // Narrative cantrip (DECISIONS.md 2026-09-04): the hero cannot cast
+            // while dying (gate above) and companions never bleed out ("down but
+            // stable"), so the creature it keeps alive is always an NPC in the
+            // DM's fiction — no engine clock exists to stop.
+            const spared = companion ? companion.name : (String(payload.target || '').trim().slice(0, 60) || 'the dying creature');
+            lines.push(`${spared} is kept from death's door — no HP restored; the DM narrates who was spared.`);
         } else {
             lines.push('The magic takes hold — the DM narrates what it reveals, opens, or aids.');
         }

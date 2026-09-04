@@ -286,6 +286,7 @@ export default function ChatPanel() {
                         type: 'ADD_MESSAGE',
                         payload: {
                             role: 'system',
+                            kind: 'error',
                             content: '**The opening scene could not be generated.** Check your AI provider settings, then reload to retry — or simply describe your first action to begin.',
                         },
                     });
@@ -430,6 +431,7 @@ export default function ChatPanel() {
                         type: 'ADD_MESSAGE',
                         payload: {
                             role: 'system',
+                            kind: 'error',
                             content: `Error: ${error.message}`,
                         },
                     });
@@ -531,6 +533,7 @@ export default function ChatPanel() {
                         type: 'ADD_MESSAGE',
                         payload: {
                             role: 'system',
+                            kind: 'error',
                             content: `Combat mechanics are safely resolved, but narration failed: ${error.message}. Retry narration; the dice and HP will not be applied again.`,
                         },
                     });
@@ -702,6 +705,7 @@ export default function ChatPanel() {
                     type: 'ADD_MESSAGE',
                     payload: {
                         role: 'system',
+                        kind: 'error',
                         content: `Error: ${error.message}`,
                     },
                 });

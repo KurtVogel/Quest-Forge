@@ -10,7 +10,11 @@
  * rendered, cached under that message's id.
  *
  * One rule, shared: a message is narrative when it is visible (not `hidden`,
- * not soft-`deleted`), has text, and is not an OOC table-talk exchange — the
+ * not soft-`deleted`), has text, is not an infrastructure error line (`kind:
+ * 'error'` — "Error resolving check: Failed to fetch" is not play, and the
+ * chronicler prompt told the model to fictionalize every TABLE RECORD; the
+ * 2026-09-04 audit's twin of the table-talk leak), and is not an OOC
+ * table-talk exchange — the
  * player's table-talk message AND its immediately following assistant reply
  * skip together, because the reply is a DM-at-the-table answer, never fiction
  * (the table-talk turn is already excluded from RAG, the Scribe, and the DM
@@ -29,7 +33,7 @@ export function collectNarrativeEntries(messages = [], fromIndex = 0, toIndex = 
     let skipNextAssistant = false;
     (messages || []).forEach((m, index) => {
         if (index < fromIndex || index > toIndex) return;
-        if (!m || m.hidden || m.deleted || typeof m.content !== 'string' || !m.content.trim()) return;
+        if (!m || m.hidden || m.deleted || m.kind === 'error' || typeof m.content !== 'string' || !m.content.trim()) return;
         if (m.role === 'user') {
             skipNextAssistant = false;
             if (isTableTalkMessage(m.content)) {

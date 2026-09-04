@@ -51,7 +51,9 @@ describe('spell catalog integrity', () => {
             expect(spell.level).toBeLessThanOrEqual(5);
             expect(['action', 'bonus']).toContain(spell.castTime);
             expect(['attack', 'save', 'auto']).toContain(spell.resolution);
-            expect(['enemy', 'ally', 'self']).toContain(spell.targeting.side);
+            expect(['enemy', 'ally', 'self', 'any']).toContain(spell.targeting.side);
+            // 'any' is the narrative-only target side (Spare the Dying): never a combat spell.
+            if (spell.targeting.side === 'any') expect(spell.combatAvailable).toBe(false);
             if (spell.condition) expect(SUPPORTED_CONDITIONS.has(spell.condition)).toBe(true);
             if (spell.resolution === 'save') expect(['half', 'negate']).toContain(spell.saveEffect);
             if (spell.damage) expect(spell.damage.dice).toMatch(/^\d+d\d+([+-]\d+)?$/);
