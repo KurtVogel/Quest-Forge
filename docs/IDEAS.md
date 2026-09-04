@@ -1410,6 +1410,21 @@ and fold duplicates once on load beside the shadow heal. Pin both with the repro
 decrements instead of deleting). From the 2026-09-03 strengthening audit (inventory-economy,
 Lap 1).
 
+### [strengthening] Sweep every player-reachable UI surface that dispatches engine rewards — status: `idea` (2026-09-04)
+The engine owns XP/coin so the LLM can't cheat — but the UI can hand the PLAYER the same pen.
+Proven instance (2026-09-04 audit): the Quests panel's ✓ button pays full engine quest XP for
+quests the player added via the panel's own + button — add a note, wait a turn, click ✓, +12.5%
+of the level threshold, 8 clicks per level, forever; the panel ✕ on a finished quest also
+deletes the one-shot guard so a DM re-emission pays again. The same class could hide behind any
+button that dispatches a reward-bearing action outside the DM/engine channel. Proposal: one
+deliberate pass over every UI dispatch site that can reach `awardExperience`, coin mutation, or
+item minting (Quests panel, Character Profile ASI spend, rest buttons, Inventory give/use,
+DiceRoller), classifying each as adjudicated (DM/engine-initiated → rewards OK) or bookkeeping
+(player-initiated → record state, never pay), and pin the classification with tests. The
+roster/import clamps (2026-09-03 "template, not afterlife" ruling) already established that
+self-cheating surfaces are worth closing; this generalizes it. From the 2026-09-04
+strengthening audit (quests, Lap 1).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
