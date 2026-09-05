@@ -70,9 +70,22 @@ export function parseJsonObjectLoose(text, keywords = []) {
  * @returns {{ json: string, startIndex: number } | null}
  */
 export function extractBalancedJson(text, keyword) {
-    const keyIdx = text.indexOf(keyword);
-    if (keyIdx === -1) return null;
+    // Anchor candidates: every occurrence of the QUOTED key first (a JSON key
+    // proper), then every bare occurrence (repair-path unquoted keys). The old
+    // first-bare-occurrence anchor stopped at a prose mention before the block
+    // ("I'll log this under quest_updates") and returned null, so the raw JSON
+    // shipped as narrative (2026-09-05 audit).
+    const quoted = keyword.startsWith('"') ? keyword : `"${keyword}"`;
+    for (const needle of quoted === keyword ? [keyword] : [quoted, keyword]) {
+        for (let keyIdx = text.indexOf(needle); keyIdx !== -1; keyIdx = text.indexOf(needle, keyIdx + 1)) {
+            const match = extractEnclosingObject(text, keyIdx);
+            if (match) return match;
+        }
+    }
+    return null;
+}
 
+function extractEnclosingObject(text, keyIdx) {
     // Walk backwards to the innermost brace that actually ENCLOSES the keyword,
     // tracking a running close-count so an already-closed earlier object is
     // skipped over. The old nearest-'{' walk anchored on unrelated nested

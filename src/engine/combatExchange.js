@@ -343,6 +343,20 @@ function isSharedFlankingRuling(ruling) {
         || /\bhemmed in\b/.test(reason);
 }
 
+/**
+ * An enemy's saving throw against a hero spell, honoring the foe's own
+ * conditions the way the hero's saves do: a restrained foe saves at
+ * disadvantage (CONDITION_EFFECTS.restrained.save). Before 2026-09-05 both
+ * save lanes rolled flat, so the condition's save effect never reached an enemy.
+ */
+function rollEnemySave(enemy, description) {
+    const bonus = validateEnemySaveBonus(enemy.saveBonus) ?? DEFAULT_ENEMY_SAVE_BONUS;
+    const conditionEffects = getConditionRollEffects(enemy.conditions, 'save');
+    const modifiers = combineRollModifiers(false, false, conditionEffects);
+    const save = rollD20(bonus, description, modifiers.advantage, modifiers.disadvantage);
+    return { ...save, mode: rollModeLabel(save, modifiers, null) || undefined };
+}
+
 function rollModeLabel(roll, modifiers, ruling) {
     const parts = [];
     if (roll.detail) parts.push(roll.detail);
@@ -756,12 +770,12 @@ function resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events,
             rolls.push(damageRoll.roll);
         }
         for (const enemy of targets) {
-            const save = rollD20(validateEnemySaveBonus(enemy.saveBonus) ?? DEFAULT_ENEMY_SAVE_BONUS, `${enemy.name} saves vs ${spell.name}`);
+            const save = rollEnemySave(enemy, `${enemy.name} saves vs ${spell.name}`);
             rolls.push(save.roll);
             const success = save.roll.total >= dc;
             events.push({
                 type: 'save', actor: enemy.name, description: `save vs ${spell.name}`,
-                rolled: save.roll.total, natural: save.natural, dc, success,
+                rolled: save.roll.total, natural: save.natural, dc, success, mode: save.mode,
             });
             if (damageRoll) {
                 const damage = success
@@ -1041,12 +1055,12 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
             events.push({ type: 'note', text: `**${character.name || 'Player'} presents their holy symbol — Turn Undead** (save DC ${dc}).` });
             for (const enemy of enemies) {
                 if (!isEnemyActive(enemy) || !enemy.isUndead) continue;
-                const save = rollD20(validateEnemySaveBonus(enemy.saveBonus) ?? DEFAULT_ENEMY_SAVE_BONUS, `${enemy.name} saves vs Turn Undead`);
+                const save = rollEnemySave(enemy, `${enemy.name} saves vs Turn Undead`);
                 rolls.push(save.roll);
                 const success = save.roll.total >= dc;
                 events.push({
                     type: 'save', actor: enemy.name, description: 'save vs Turn Undead',
-                    rolled: save.roll.total, natural: save.natural, dc, success,
+                    rolled: save.roll.total, natural: save.natural, dc, success, mode: save.mode,
                 });
                 if (success) continue;
                 if ((character.level || 1) >= 5 && (enemy.maxHp || 0) <= 20) {

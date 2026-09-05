@@ -615,13 +615,24 @@ describe('parseResponse JSON repair paths', () => {
         expect(events.goldFound).toBe(5);
     });
 
-    it('gives up on an irreparable fenced JSON block and returns null events', () => {
-        const raw = 'You find a chest.\n```json\n{ gold_found: 5 }\n```';
-        const { narrative, events } = parseResponse(raw);
+    it('gives up on an irreparable fenced JSON block: null events, flagged, prose-only narrative', () => {
+        const raw = 'You find a chest.\n```json\n{ "gold_found": 5, "items_found": [ { "name": "Gem" ] ] } } }\n```';
+        const { narrative, events, eventsDropped } = parseResponse(raw);
         expect(events).toBeNull();
-        // On total repair failure the raw response (including the broken fence) is
-        // returned verbatim rather than just the pre-JSON narrative.
-        expect(narrative).toBe(raw);
+        expect(eventsDropped).toBe(true);
+        // The narrative is the PROSE only. Until 2026-09-05 the full response
+        // (broken fence included) came back and turnOrchestrator committed it as
+        // the assistant message — raw JSON in the chat, the save, the DM's own
+        // window, the journal, and RAG.
+        expect(narrative).toBe('You find a chest.');
+        expect(narrative).not.toContain('```');
+    });
+
+    it('an empty fenced block drops nothing into the narrative either', () => {
+        const { narrative, events, eventsDropped } = parseResponse('The road is quiet.\n```json\n```');
+        expect(events).toBeNull();
+        expect(eventsDropped).toBe(true);
+        expect(narrative).toBe('The road is quiet.');
     });
 
     it('repairs an unfenced JSON block with a trailing comma', () => {
@@ -1205,5 +1216,63 @@ describe('applyEvents carries an items_lost quantity (2026-09-03 P1)', () => {
         const dispatch = run({ items_lost: [{ name: 'Torch', quantity: 'some' }, { name: 'Dart', quantity: -3 }] });
         expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: 'Torch' });
         expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: 'Dart' });
+    });
+});
+
+describe('parseResponse fence shapes (2026-09-05 audit)', () => {
+    it('appends prose that follows the JSON block instead of dropping it', () => {
+        const raw = 'The gate creaks.\n```json\n{ "gold_found": 3 }\n```\nA guard waves you through.';
+        const { narrative, events } = parseResponse(raw);
+        expect(events.goldFound).toBe(3);
+        expect(narrative).toBe('The gate creaks.\n\nA guard waves you through.');
+    });
+
+    it('a JSON-first response keeps its trailing prose as the narrative (never an empty message)', () => {
+        const raw = '```json\n{ "gold_found": 3 }\n```\nYou pocket the coins and move on.';
+        const { narrative, events } = parseResponse(raw);
+        expect(events.goldFound).toBe(3);
+        expect(narrative).toBe('You pocket the coins and move on.');
+    });
+
+    it('a second fenced block is still discarded, but prose around it survives', () => {
+        const raw = 'One.\n```json\n{ "gold_found": 1 }\n```\nTwo.\n```json\n{ "gold_found": 99 }\n```\nThree.';
+        const { narrative, events } = parseResponse(raw);
+        expect(events.goldFound).toBe(1);
+        expect(narrative).toBe('One.\n\nTwo.\n\nThree.');
+        expect(narrative).not.toContain('99');
+    });
+
+    it('recognizes an upper-case ```JSON tag', () => {
+        const { narrative, events } = parseResponse('Quiet street.\n```JSON\n{ "gold_found": 2 }\n```');
+        expect(events.goldFound).toBe(2);
+        expect(narrative).toBe('Quiet street.');
+    });
+
+    it('recognizes a bare ``` fence whose body is an object', () => {
+        const { narrative, events } = parseResponse('Quiet street.\n```\n{ "gold_found": 2 }\n```');
+        expect(events.goldFound).toBe(2);
+        expect(narrative).toBe('Quiet street.');
+        expect(narrative).not.toContain('```');
+    });
+
+    it('leaves a bare fence around non-JSON prose alone (a sign, a letter) — pure narrative', () => {
+        const raw = 'The sign reads:\n```\nKEEP OUT\n```\nYou shrug.';
+        const { narrative, events } = parseResponse(raw);
+        expect(events).toBeNull();
+        expect(narrative).toBe(raw);
+    });
+
+    it('strips a dangling fence opener when an unclosed block falls to the anchor path', () => {
+        const raw = 'You listen.\n```json\n{ "requested_rolls": [ { "type": "skill_check", "skill": "perception", "dc": 12 } ] }';
+        const { narrative, events } = parseResponse(raw);
+        expect(events?.requestedRolls).toHaveLength(1);
+        expect(narrative).toBe('You listen.');
+    });
+
+    it('a prose mention of a wire key before an unfenced block no longer swallows the block as narrative', () => {
+        const raw = "I'll log this under quest_updates so we remember.\n{ \"quest_updates\": [ { \"id\": \"q-1\", \"name\": \"Find the well\", \"status\": \"new\" } ] }";
+        const { narrative, events } = parseResponse(raw);
+        expect(events?.questUpdates).toHaveLength(1);
+        expect(narrative).toBe("I'll log this under quest_updates so we remember.");
     });
 });

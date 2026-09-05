@@ -250,7 +250,7 @@ describe('consumable use', () => {
         expect(next.character.currentHP).toBeGreaterThan(0);
         expect(next.character.dying).toBe(false);
         expect(next.character.deathSaves).toEqual({ successes: 0, failures: 0 });
-        expect(next.character.conditions).not.toContain('Unconscious');
+        expect(next.character.conditions).not.toContain('unconscious');
         expect(next.inventory.some(i => i.id === 'potion-1')).toBe(false);
         expect(next.rollHistory).toHaveLength(1);
     });

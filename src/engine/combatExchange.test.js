@@ -1107,6 +1107,27 @@ describe('spellcasting v1 combat exchanges', () => {
         expect(exchangeSummary(plan.payload.result)).toContain(`save vs Fireball`);
     });
 
+    it('a restrained foe saves at disadvantage — its condition reaches the save lane (2026-09-05 audit)', () => {
+        // Damage 6d6 (queue 6x3=18), then the save rolls TWO d20s and keeps the
+        // lower: 18 / 4 → 4 (+2 = 6 vs DC 14, fail → full 18). The restrained foe
+        // then attacks at disadvantage too: 2 / 2 misses AC 11.
+        rollQueue.push(3, 3, 3, 3, 3, 3, 18, 4, 2, 2);
+        const plan = planCombatExchange(
+            wizardState({ enemies: [enemy(`A`, { hp: 30, maxHp: 30, conditions: [`restrained`] })] }),
+            normalizeCombatExchange({
+                player_slots: [{ action: `cast`, spell: `fireball`, targets: [`A`] }],
+                enemy_intents: [],
+            })
+        );
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.enemies[0].hp).toBe(12); // the kept 4 failed; a flat 18 would have saved for half
+        const saveEvent = plan.payload.result.events.find(e => e.type === `save`);
+        expect(saveEvent.rolled).toBe(6);
+        expect(saveEvent.mode).toMatch(/18, 4 → 4/); // both dice shown, lower kept
+        expect(saveEvent.mode).toMatch(/restrained/i);
+        expect(rollQueue).toHaveLength(0);
+    });
+
     it('applies a control condition on a failed save and rejects casts with no slots left', () => {
         rollQueue.push(2); // save 2 + 2 = 4 vs DC 14 — fail
         const drained = { 1: { used: 4, max: 4 }, 2: { used: 3, max: 3 }, 3: { used: 2, max: 2 } };

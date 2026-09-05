@@ -1,9 +1,6 @@
-import { normalizeRequestedRoll } from '../llm/eventChannels.js';
+import { normalizeRequestedRoll, MAX_ROLL_DC } from '../llm/eventChannels.js';
 
 const text = (value, max = 500) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
-
-/** DC band the resolver honors: 0 stays an explicit 0, anything past 30 is a hostile save. */
-const MAX_ROLL_DC = 30;
 
 /**
  * One typed roll for the proposal store. The parser's `normalizeRequestedRoll`

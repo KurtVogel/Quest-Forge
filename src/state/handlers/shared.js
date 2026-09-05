@@ -2,7 +2,7 @@
  * Helpers shared by multiple reducer domains and the save-migration pipeline
  * (migrations.js). Single-domain helpers live in their domain module instead.
  */
-import { computeACFromInventory } from '../../engine/rules.js';
+import { computeACFromInventory, normalizeConditionName } from '../../engine/rules.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
 import { itemIdentityMatches } from '../../engine/textMatch.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName } from '../../data/items.js';
@@ -53,9 +53,11 @@ export function applyDeath(character) {
 export { isLowLevelSolo };
 
 export function withCondition(character, condition) {
+    const name = normalizeConditionName(condition);
+    if (!name) return character;
     const conditions = character.conditions || [];
-    if (conditions.some(c => c.toLowerCase() === condition.toLowerCase())) return character;
-    return { ...character, conditions: [...conditions, condition] };
+    if (conditions.some(c => normalizeConditionName(c) === name)) return character;
+    return { ...character, conditions: [...conditions, name] };
 }
 
 /** Convert an early low-level knockout into a setback instead of campaign-ending death. */
@@ -105,7 +107,7 @@ export function reviveCharacter(character) {
         dying: false,
         lowLevelDefeat: false,
         deathSaves: { successes: 0, failures: 0 },
-        conditions: (character.conditions || []).filter(c => c.toLowerCase() !== 'unconscious'),
+        conditions: (character.conditions || []).filter(c => normalizeConditionName(c) !== 'unconscious'),
     };
 }
 

@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+    canonicalEnemyId,
     clampEnemyAC,
     clampEnemyCurrentHP,
     clampEnemyHP,
@@ -32,9 +33,15 @@ describe('validateEnemyAttackBonus (offensive: reject, never clamp)', () => {
         expect(validateEnemyAttackBonus(99)).toBeUndefined();
     });
 
-    it('rounds in-band floats and rejects non-numbers', () => {
+    it('rounds in-band floats, coerces leading-number strings, rejects junk', () => {
         expect(validateEnemyAttackBonus(4.6)).toBe(5);
-        expect(validateEnemyAttackBonus('4')).toBeUndefined();
+        // String-typed stats coerce like the coin/XP clamp (2026-09-05 audit):
+        // "+4" is the DM writing a bonus the way the prompt example shows it.
+        expect(validateEnemyAttackBonus('4')).toBe(4);
+        expect(validateEnemyAttackBonus('+4')).toBe(4);
+        expect(validateEnemyAttackBonus('+99')).toBeUndefined(); // still rejected, not clamped
+        expect(validateEnemyAttackBonus('strong')).toBeUndefined();
+        expect(validateEnemyAttackBonus('')).toBeUndefined();
         expect(validateEnemyAttackBonus(NaN)).toBeUndefined();
         expect(validateEnemyAttackBonus(Infinity)).toBeUndefined();
         expect(validateEnemyAttackBonus(undefined)).toBeUndefined();
@@ -53,9 +60,10 @@ describe('validateEnemySaveBonus (offensive: reject, never clamp — 2026-07-27 
         expect(validateEnemySaveBonus(99)).toBeUndefined();
     });
 
-    it('rounds in-band floats and rejects non-numbers', () => {
+    it('rounds in-band floats, coerces leading-number strings, rejects junk', () => {
         expect(validateEnemySaveBonus(4.6)).toBe(5);
-        expect(validateEnemySaveBonus('4')).toBeUndefined();
+        expect(validateEnemySaveBonus('3')).toBe(3);
+        expect(validateEnemySaveBonus('junk')).toBeUndefined();
         expect(validateEnemySaveBonus(NaN)).toBeUndefined();
         expect(validateEnemySaveBonus(Infinity)).toBeUndefined();
         expect(validateEnemySaveBonus(undefined)).toBeUndefined();
@@ -109,7 +117,12 @@ describe('clampEnemyAC / clampEnemyHP / clampEnemyCurrentHP (defensive: clamp)',
         expect(clampEnemyAC(25)).toBe(25);
         expect(clampEnemyAC(0)).toBe(12);
         expect(clampEnemyAC(26)).toBe(12);
-        expect(clampEnemyAC('16')).toBe(12);
+        expect(clampEnemyAC('16')).toBe(16);      // string-typed AC coerces (2026-09-05)
+        expect(clampEnemyAC('15 AC')).toBe(15);   // leading-number parse, like clamp()
+        expect(clampEnemyAC('heavy')).toBe(12);
+        expect(clampEnemyHP('22')).toBe(22);
+        expect(clampEnemyHP('lots')).toBe(20);
+        expect(clampEnemyCurrentHP('9', 30)).toBe(9);
         expect(clampEnemyAC(17.4, 10)).toBe(17);
         expect(clampEnemyAC(undefined, 14)).toBe(14);
     });
@@ -138,13 +151,14 @@ describe('normalizeEnemyConditions', () => {
             .toEqual(['prone', 'stunned']);
     });
 
-    it('caps the list at 10 after deduplication', () => {
+    it('bounds a flood by the supported set itself — there is no separate count cap', () => {
         const supported = ['poisoned', 'blinded', 'frightened', 'restrained', 'prone',
             'invisible', 'stunned', 'paralyzed', 'unconscious'];
-        // 9 supported conditions duplicated many times still yields the 9 unique ones.
-        const flood = [...supported, ...supported, ...supported];
+        // 9 supported conditions duplicated many times still yields the 9 unique ones:
+        // the supported-set filter + dedupe IS the bound (the old "caps at 10" pin
+        // asserted a cap the code never had — 2026-09-05 audit).
+        const flood = [...supported, ...supported, ...supported, 'charmed', 'cursed'];
         expect(normalizeEnemyConditions(flood)).toEqual(supported);
-        expect(normalizeEnemyConditions(flood).length).toBeLessThanOrEqual(10);
     });
 
     it('returns an empty list for non-arrays', () => {
@@ -239,5 +253,38 @@ describe('enemyHealthCondition thresholds', () => {
         expect(enemyHealthCondition(11, 40)).toBe('bloodied');
         expect(enemyHealthCondition(20, 40)).toBe('bloodied'); // exactly 50%
         expect(enemyHealthCondition(21, 40)).toBe('healthy');
+    });
+});
+
+describe('canonicalEnemyId (direct — 2026-09-05 audit test-depth item)', () => {
+    it('slugs the name under an enemy- prefix', () => {
+        expect(canonicalEnemyId({ name: 'Cave Worg!' }, 0, new Set())).toBe('enemy-cave-worg');
+    });
+
+    it('is idempotent for an id that already carries the prefix', () => {
+        expect(canonicalEnemyId({ id: 'enemy-worg' }, 0, new Set())).toBe('enemy-worg');
+        expect(canonicalEnemyId({ id: 'Enemy-Worg' }, 0, new Set())).toBe('enemy-worg');
+    });
+
+    it('prefers id over name, and the index over a missing identity', () => {
+        expect(canonicalEnemyId({ id: 'worg-alpha', name: 'Cave Worg' }, 0, new Set())).toBe('enemy-worg-alpha');
+        expect(canonicalEnemyId({}, 2, new Set())).toBe('enemy-3');
+    });
+
+    it('falls back to the index when the name slugs to nothing', () => {
+        expect(canonicalEnemyId({ name: '!!! ???' }, 4, new Set())).toBe('enemy-5');
+    });
+
+    it('suffixes collisions -2, -3 within one fight and records every id', () => {
+        const used = new Set();
+        expect(canonicalEnemyId({ name: 'Goblin' }, 0, used)).toBe('enemy-goblin');
+        expect(canonicalEnemyId({ name: 'goblin' }, 1, used)).toBe('enemy-goblin-2');
+        expect(canonicalEnemyId({ name: 'GOBLIN' }, 2, used)).toBe('enemy-goblin-3');
+        expect([...used]).toEqual(['enemy-goblin', 'enemy-goblin-2', 'enemy-goblin-3']);
+    });
+
+    it('slices an absurd name to 80 characters before prefixing', () => {
+        const id = canonicalEnemyId({ name: 'x'.repeat(500) }, 0, new Set());
+        expect(id).toBe(`enemy-${'x'.repeat(80)}`);
     });
 });

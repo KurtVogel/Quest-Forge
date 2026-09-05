@@ -329,6 +329,42 @@ export const CONDITION_EFFECTS = {
  */
 export const INCAPACITATING_CONDITIONS = ['stunned', 'paralyzed', 'unconscious'];
 
+/** Longest condition name the hero's list stores; the DM channel is free-form prose otherwise. */
+export const CONDITION_NAME_MAX = 40;
+/** Most conditions the hero can carry at once — DM accretion over a long campaign is bounded. */
+export const CONDITION_LIST_CAP = 10;
+
+/**
+ * ONE canonical form for a hero condition name: strings only, trimmed,
+ * whitespace-collapsed, lowercased, bounded — or null when unusable. Shared by
+ * the parser boundary (`conditions_gained`/`conditions_removed`), the reducer
+ * (`ADD_CONDITION`/`REMOVE_CONDITION`/`withCondition`), and the load heal.
+ * Before 2026-09-05 the channel stored whatever it received verbatim: "Poisoned"
+ * gained then "poisoned" removed stayed Poisoned (disadvantage on every attack
+ * and check), casing variants stacked, and an object element made every heal
+ * path throw on `c.toLowerCase()`.
+ */
+export function normalizeConditionName(value) {
+    if (typeof value !== 'string') return null;
+    const name = value.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, CONDITION_NAME_MAX).trim();
+    return name || null;
+}
+
+/** A hero condition list in canonical form: strings only, deduped, capped. */
+export function normalizeConditionList(list) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const raw of list) {
+        const name = normalizeConditionName(raw);
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        out.push(name);
+        if (out.length >= CONDITION_LIST_CAP) break;
+    }
+    return out;
+}
+
 /** First incapacitating condition on the list, or null when the creature can act. */
 export function getIncapacitatingCondition(conditions) {
     for (const raw of conditions || []) {

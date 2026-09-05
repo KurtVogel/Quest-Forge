@@ -20,6 +20,7 @@
 import { canonicalEnemyId, validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 import { MAX_COIN_EVENT } from '../config/contentLimits.js';
+import { normalizeConditionName, CONDITION_LIST_CAP } from '../engine/rules.js';
 
 /**
  * Clamp a numeric LLM value to a sane range; unusable values become the fallback.
@@ -68,13 +69,11 @@ export function validateCombatStart(combatStart) {
             // Enemy turns are engine-owned, so capture the foe's stats once here, validated at
             // this boundary via the shared sanitizer. Out-of-range offensive stats are dropped
             // (→ engine default), HP/AC are clamped into a safe band.
-            const attackBonus = validateEnemyAttackBonus(
-                typeof e.attack_bonus === 'number' ? e.attack_bonus : e.attackBonus
-            );
+            // The validators coerce leading-number strings ("+4") themselves;
+            // a typeof-number pre-filter here used to discard them (2026-09-05).
+            const attackBonus = validateEnemyAttackBonus(e.attack_bonus ?? e.attackBonus);
             const damage = sanitizeEnemyDamage(e.damage);
-            const saveBonus = validateEnemySaveBonus(
-                typeof e.save_bonus === 'number' ? e.save_bonus : e.saveBonus
-            );
+            const saveBonus = validateEnemySaveBonus(e.save_bonus ?? e.saveBonus);
             return {
                 id: canonicalEnemyId(e, index, usedIds),
                 name: e.name.trim().slice(0, 100),
@@ -106,9 +105,15 @@ export function validateCombatStart(combatStart) {
     };
 }
 
+/** DC band the resolvers honor (roleplayCheck + combat slots clamp the same way). */
+export const MAX_ROLL_DC = 30;
+
 export function normalizeRequestedRoll(r) {
+    // String-or-null: `|| null` used to pass objects/arrays straight through,
+    // and `description` renders as a React child (2026-09-05 audit).
+    const str = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
     return {
-        type: r.type || 'skill_check',
+        type: str(r.type) || 'skill_check',
         // Type-guarded like dc/modifier: a truthy non-string (array/number)
         // throws deep in rollResolver AFTER dice are shown (2026-07-23 audit).
         skill: typeof r.skill === 'string' && r.skill.trim() ? r.skill.trim() : null,
@@ -116,8 +121,10 @@ export function normalizeRequestedRoll(r) {
         // DC default 10, the solo-play standard obstacle — NOT 15: the prompt's
         // own ladder says "never default DC 15", and the text-roll detector
         // already used 10 for exactly that reason. One default, both paths.
-        dc: typeof r.dc === 'number' ? r.dc : 10,
-        description: r.description || '',
+        // Coerced ("15" → 15) and clamped 0..30 like sanitizeProposalRoll —
+        // an unclamped `-40` auto-succeeded and `1e9` auto-failed (2026-09-05).
+        dc: Math.round(clamp(r.dc, 0, MAX_ROLL_DC, 10)),
+        description: str(r.description) || '',
         reason: String(r.reason || r.roll_reason || '').slice(0, 500),
         opposition: String(r.opposition || '').slice(0, 500),
         failureStakes: String(r.failure_stakes || r.failureStakes || '').slice(0, 500),
@@ -125,14 +132,14 @@ export function normalizeRequestedRoll(r) {
         advantageReason: String(r.advantage_reason || r.advantageReason || '').slice(0, 500),
         disadvantageReason: String(r.disadvantage_reason || r.disadvantageReason || '').slice(0, 500),
         // NPC attack fields
-        attacker: r.attacker || null,
-        attackerId: r.attackerId || r.companionId || r.companion_id || null,
-        modifier: typeof r.modifier === 'number' ? r.modifier : null,
+        attacker: str(r.attacker),
+        attackerId: str(r.attackerId) || str(r.companionId) || str(r.companion_id),
+        modifier: typeof r.modifier === 'number' && Number.isFinite(r.modifier) ? r.modifier : null,
         // Damage roll field
-        notation: r.notation || null,
+        notation: str(r.notation),
         // Combat (batched-round) fields: who takes the hit + inline weapon damage
-        target: r.target || null,
-        damage: r.damage || null,
+        target: str(r.target),
+        damage: str(r.damage),
         // Advantage / Disadvantage
         advantage: !!r.advantage,
         disadvantage: !!r.disadvantage,
@@ -322,8 +329,10 @@ export const EVENT_CHANNELS = [
     { wire: 'rest_taken', key: 'restTaken', read: raw => (typeof raw.rest_taken === 'string' ? raw.rest_taken : null) },
     // Out-of-combat casting: the engine validates the spell and spends the slot.
     { wire: 'spell_cast', aliases: ['spells_cast', 'spell_casts'], key: 'spellCasts', read: raw => normalizeSpellCasts(raw.spell_cast ?? raw.spells_cast ?? raw.spell_casts) },
-    { wire: 'conditions_gained', key: 'conditionsGained', read: raw => guardedList(raw.conditions_gained, { allowStrings: true, cap: 10 }) },
-    { wire: 'conditions_removed', key: 'conditionsRemoved', read: raw => guardedList(raw.conditions_removed, { allowStrings: true, cap: 10 }) },
+    // Hero conditions in canonical form (strings only, lowercase, bounded) —
+    // the enemy channel's normalizeEnemyConditions twin (2026-09-05 audit P1).
+    { wire: 'conditions_gained', key: 'conditionsGained', read: raw => guardedList(raw.conditions_gained, { allowStrings: true, cap: CONDITION_LIST_CAP, map: normalizeConditionName }) },
+    { wire: 'conditions_removed', key: 'conditionsRemoved', read: raw => guardedList(raw.conditions_removed, { allowStrings: true, cap: CONDITION_LIST_CAP, map: normalizeConditionName }) },
     // Limited class abilities the player spent this turn (e.g. ["secondWind"]).
     { wire: 'resources_used', key: 'resourcesUsed', read: raw => guardedList(raw.resources_used, { allowStrings: true, cap: 10 }) },
     { wire: 'quest_updates', key: 'questUpdates', read: raw => guardedList(raw.quest_updates, { cap: 8, map: normalizeQuestUpdate }) },

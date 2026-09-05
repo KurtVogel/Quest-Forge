@@ -75,7 +75,7 @@ describe('ASI CON heal while the hero is down (2026-08-30 audit)', () => {
             currentHP: 0,
             dying: true,
             deathSaves: { successes: 1, failures: 1 },
-            conditions: ['Unconscious'],
+            conditions: ['unconscious'],
         }), {
             type: 'APPLY_ABILITY_SCORE_IMPROVEMENT',
             payload: { increases: { strength: 1, constitution: 1 } },
@@ -84,7 +84,7 @@ describe('ASI CON heal while the hero is down (2026-08-30 audit)', () => {
         expect(next.character.maxHP).toBe(32);
         expect(next.character.currentHP).toBe(0);
         expect(next.character.dying).toBe(true);
-        expect(next.character.conditions).toContain('Unconscious');
+        expect(next.character.conditions).toContain('unconscious');
     });
 
     it('never writes currentHP on a dead hero', () => {

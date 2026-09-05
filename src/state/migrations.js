@@ -34,7 +34,7 @@
  * Later steps always win over earlier ones; validateSaveState never touches
  * the character.
  */
-import { computeACFromInventory } from '../engine/rules.js';
+import { computeACFromInventory, normalizeConditionList } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
 import {
@@ -295,6 +295,9 @@ function healLoadedCharacter(character) {
         currentHP: Math.min(maxHP, Math.max(0, toInt(character.currentHP, maxHP))),
         abilityScores,
         hitDice,
+        // Canonical strings only: a hostile/hand-edited object element used to
+        // crash every heal path and the sheet render (2026-09-05 audit P1).
+        conditions: normalizeConditionList(character.conditions),
     };
     if (!isSpellcaster(healed.class)) return healed;
     return {

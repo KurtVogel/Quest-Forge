@@ -56,7 +56,8 @@ describe('roleplay check proposals', () => {
         expect(restored.supersedesId).toBe('rc-0');
         const [sneak, spot, climb] = restored.rolls;
         expect(sneak).toMatchObject({ dc: 0, advantage: true, disadvantage: false, target: null, notation: null });
-        expect(spot).toMatchObject({ type: 'skill_check', dc: 10, disadvantage: false, modifier: null, damage: null });
+        // A string DC coerces ("12" → 12) since 2026-09-05 — it used to silently become the default 10.
+        expect(spot).toMatchObject({ type: 'skill_check', dc: 12, disadvantage: false, modifier: null, damage: null });
         expect(climb.dc).toBe(30);
         expect(sanitizePendingRoleplayCheck({ rolls: [roll] }).supersedesId).toBeNull();
     });

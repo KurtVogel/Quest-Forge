@@ -37,7 +37,7 @@ const dying = (overrides = {}) => makeState({
     currentHP: 0,
     dying: true,
     deathSaves: { successes: 0, failures: 0 },
-    conditions: ['Unconscious'],
+    conditions: ['unconscious'],
     ...overrides,
 });
 
@@ -47,7 +47,7 @@ describe('dropping to 0 HP', () => {
         expect(next.character.currentHP).toBe(0);
         expect(next.character.dying).toBe(true);
         expect(next.character.deathSaves).toEqual({ successes: 0, failures: 0 });
-        expect(next.character.conditions).toContain('Unconscious');
+        expect(next.character.conditions).toContain('unconscious');
         expect(next.character.isDead).toBe(false);
         expect(next.messages.some(m => m.content.includes('DYING'))).toBe(true);
     });
@@ -59,7 +59,7 @@ describe('dropping to 0 HP', () => {
         expect(next.character.lowLevelDefeat).toBe(true);
         expect(next.character.isDead).toBe(false);
         expect(next.character.deathSaves).toEqual({ successes: 0, failures: 0 });
-        expect(next.character.conditions).toContain('Unconscious');
+        expect(next.character.conditions).toContain('unconscious');
         expect(next.messages.some(m => m.content.includes('severe setback'))).toBe(true);
     });
 
@@ -98,7 +98,7 @@ describe('LOAD_GAME dying-outside-combat heal', () => {
                 name: 'Aune', race: 'elf', class: 'wizard', level: 1,
                 currentHP: 0, maxHP: 8, armorClass: 12,
                 abilityScores: { strength: 8, dexterity: 13, constitution: 14, intelligence: 15, wisdom: 12, charisma: 10 },
-                dying: true, deathSaves: { successes: 0, failures: 0 }, conditions: ['Unconscious'],
+                dying: true, deathSaves: { successes: 0, failures: 0 }, conditions: ['unconscious'],
             },
             inventory: [],
             messages: [],
@@ -118,7 +118,7 @@ describe('LOAD_GAME dying-outside-combat heal', () => {
                 name: 'Veteran', race: 'human', class: 'fighter', level: 5,
                 currentHP: 0, maxHP: 40, armorClass: 16,
                 abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 },
-                dying: true, deathSaves: { successes: 1, failures: 1 }, conditions: ['Unconscious'],
+                dying: true, deathSaves: { successes: 1, failures: 1 }, conditions: ['unconscious'],
             },
             inventory: [],
             messages: [],
@@ -202,7 +202,7 @@ describe('DEATH_SAVE_RESULT', () => {
         expect(next.character.currentHP).toBe(1);
         expect(next.character.dying).toBe(false);
         expect(next.character.isDead).toBe(false);
-        expect(next.character.conditions).not.toContain('Unconscious');
+        expect(next.character.conditions).not.toContain('unconscious');
         expect(next.character.deathSaves).toEqual({ successes: 0, failures: 0 });
     });
 
@@ -219,7 +219,7 @@ describe('healing while dying', () => {
         const next = gameReducer(dying(), { type: 'HEAL', payload: 6 });
         expect(next.character.currentHP).toBe(6);
         expect(next.character.dying).toBe(false);
-        expect(next.character.conditions).not.toContain('Unconscious');
+        expect(next.character.conditions).not.toContain('unconscious');
     });
 
     it('does nothing for a dead character', () => {
@@ -236,26 +236,26 @@ describe('healing while dying', () => {
         const start = levelOneSolo({
             currentHP: 0,
             lowLevelDefeat: true,
-            conditions: ['Unconscious'],
+            conditions: ['unconscious'],
         });
         const next = gameReducer(start, { type: 'HEAL', payload: 5 });
         expect(next.character.currentHP).toBe(5);
         expect(next.character.lowLevelDefeat).toBe(false);
-        expect(next.character.conditions).not.toContain('Unconscious');
+        expect(next.character.conditions).not.toContain('unconscious');
     });
 
     it('clears low-level defeat after a rest restores HP', () => {
         const start = levelOneSolo({
             currentHP: 0,
             lowLevelDefeat: true,
-            conditions: ['Unconscious'],
+            conditions: ['unconscious'],
             hitDice: { total: 1, remaining: 1, die: 10 },
             classResources: {},
         });
         const next = gameReducer(start, { type: 'TAKE_REST', payload: 'long' });
         expect(next.character.currentHP).toBe(next.character.maxHP);
         expect(next.character.lowLevelDefeat).toBe(false);
-        expect(next.character.conditions).not.toContain('Unconscious');
+        expect(next.character.conditions).not.toContain('unconscious');
     });
 });
 
@@ -278,7 +278,7 @@ describe('post-defeat stabilization (playtest #8: the capture arc ran at 0 HP)',
         currentHP: 0,
         lowLevelDefeat: true,
         dying: false,
-        conditions: ['Unconscious', 'Restrained'],
+        conditions: ['unconscious', 'Restrained'],
         ...overrides,
     });
 
@@ -289,7 +289,7 @@ describe('post-defeat stabilization (playtest #8: the capture arc ran at 0 HP)',
         });
         expect(next.character.currentHP).toBe(1);
         expect(next.character.lowLevelDefeat).toBe(false);
-        expect(next.character.conditions).not.toContain('Unconscious');
+        expect(next.character.conditions).not.toContain('unconscious');
         expect(next.character.conditions).toContain('Restrained');
         expect(next.messages.some(m => m.role === 'system' && m.content.includes('You come to'))).toBe(true);
     });
@@ -305,7 +305,7 @@ describe('post-defeat stabilization (playtest #8: the capture arc ran at 0 HP)',
         });
         expect(next.character.currentHP).toBe(0);
         expect(next.character.lowLevelDefeat).toBe(true);
-        expect(next.character.conditions).toContain('Unconscious');
+        expect(next.character.conditions).toContain('unconscious');
     });
 
     it('does not revive while a fight is somehow still active', () => {

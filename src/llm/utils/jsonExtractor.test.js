@@ -110,3 +110,27 @@ describe('stripMarkdownFences / repairJson', () => {
         expect(JSON.parse(repairJson('{"note":"cut mid-sent'))).toEqual({ note: 'cut mid-sent' });
     });
 });
+
+describe('extractBalancedJson anchor selection (2026-09-05 audit)', () => {
+    it('prefers the quoted key over an earlier bare prose mention', () => {
+        const text = 'Filed under quest_updates. {"quest_updates":[{"id":"q1"}]}';
+        const match = extractBalancedJson(text, 'quest_updates');
+        expect(match?.json).toBe('{"quest_updates":[{"id":"q1"}]}');
+        expect(match?.startIndex).toBe(text.indexOf('{'));
+    });
+
+    it('still anchors on a bare (repair-path) key when no quoted key exists', () => {
+        const text = 'Prose. { quest_updates: [ { id: "q1" } ] }';
+        expect(extractBalancedJson(text, 'quest_updates')?.json).toBe('{ quest_updates: [ { id: "q1" } ] }');
+    });
+
+    it('skips a bare mention that sits inside an already-closed earlier object', () => {
+        const text = '{"note":"see quest_updates"} then {"quest_updates":[]}';
+        expect(extractBalancedJson(text, 'quest_updates')?.json).toBe('{"quest_updates":[]}');
+    });
+
+    it('accepts a caller-pre-quoted keyword without double-quoting it', () => {
+        const text = 'x {"summary":"s"}';
+        expect(extractBalancedJson(text, '"summary"')?.json).toBe('{"summary":"s"}');
+    });
+});

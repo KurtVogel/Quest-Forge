@@ -6,7 +6,7 @@
  * ignored every value it emitted. These tests make that class of drift fail CI.
  */
 import { describe, expect, it } from 'vitest';
-import { EVENT_CHANNELS, KNOWN_WIRE_KEYS, normalizeEvents } from './eventChannels.js';
+import { EVENT_CHANNELS, KNOWN_WIRE_KEYS, normalizeEvents, validateCombatStart } from './eventChannels.js';
 import { RESPONSE_FORMAT } from './promptBuilder.js';
 
 function exampleJson() {
@@ -155,5 +155,75 @@ describe('event-channel registry agreement', () => {
         expect(KNOWN_WIRE_KEYS.has('damage_dealt')).toBe(false);
         const events = normalizeEvents({ damage_dealt: 12 });
         expect('damageDealt' in events).toBe(false);
+    });
+});
+
+describe('requested_rolls field hardening (2026-09-05 audit)', () => {
+    it('coerces and clamps dc: string "15" → 15, -40 → 0, 1e9 → 30, junk → 10', () => {
+        const events = normalizeEvents({ requested_rolls: [
+            { type: 'skill_check', skill: 'stealth', dc: '15' },
+            { type: 'skill_check', skill: 'stealth', dc: -40 },
+            { type: 'skill_check', skill: 'stealth', dc: 1e9 },
+            { type: 'skill_check', skill: 'stealth', dc: 'hard' },
+            { type: 'skill_check', skill: 'stealth', dc: 12.6 },
+        ] });
+        expect(events.requestedRolls.map(r => r.dc)).toEqual([15, 0, 30, 10, 13]);
+    });
+
+    it('string-guards type/description/attacker/target/notation/damage — objects never reach the UI', () => {
+        const [roll] = normalizeEvents({ requested_rolls: [{
+            type: { nested: true }, description: ['a'], attacker: 7, target: { id: 'x' },
+            notation: { dice: '1d6' }, damage: 4, attackerId: {}, modifier: NaN,
+        }] }).requestedRolls;
+        expect(roll).toMatchObject({
+            type: 'skill_check', description: '', attacker: null, target: null,
+            notation: null, damage: null, attackerId: null, modifier: null,
+        });
+    });
+
+    it('keeps honest string fields, trimmed', () => {
+        const [roll] = normalizeEvents({ requested_rolls: [{
+            type: ' attack ', description: ' Goblin swings ', attacker: 'Goblin', target: 'player',
+            notation: '1d6+2', damage: '1d6', dc: 14, modifier: 3,
+        }] }).requestedRolls;
+        expect(roll).toMatchObject({
+            type: 'attack', description: 'Goblin swings', attacker: 'Goblin', target: 'player',
+            notation: '1d6+2', damage: '1d6', dc: 14, modifier: 3,
+        });
+    });
+});
+
+describe('hero condition channels (2026-09-05 audit P1)', () => {
+    it('normalizes conditions_gained/removed to canonical strings and drops junk', () => {
+        const events = normalizeEvents({
+            conditions_gained: [' Poisoned ', 'POISONED', { name: 'blinded' }, 42, '', 'Badly   Frightened'],
+            conditions_removed: ['Prone', null, ['x']],
+        });
+        expect(events.conditionsGained).toEqual(['poisoned', 'poisoned', 'badly frightened']);
+        expect(events.conditionsRemoved).toEqual(['prone']);
+    });
+
+    it('bounds a condition name to 40 characters', () => {
+        const events = normalizeEvents({ conditions_gained: ['x'.repeat(200)] });
+        expect(events.conditionsGained[0]).toHaveLength(40);
+    });
+});
+
+describe('combat_start string-typed enemy stats (2026-09-05 audit)', () => {
+    it('coerces "22"/"15"/"+4"/"3" instead of silently defaulting', () => {
+        const start = validateCombatStart({ enemies: [{
+            name: 'Orc', hp: '22', ac: '15', attack_bonus: '+4', save_bonus: '3',
+        }] });
+        expect(start.enemies[0]).toMatchObject({ hp: 22, ac: 15, attackBonus: 4, saveBonus: 3 });
+    });
+
+    it('junk strings still fall to the engine defaults', () => {
+        const start = validateCombatStart({ enemies: [{
+            name: 'Orc', hp: 'many', ac: 'thick', attack_bonus: 'strong', save_bonus: 'tough',
+        }] });
+        const [orc] = start.enemies;
+        expect(orc).toMatchObject({ hp: 20, ac: 12 });
+        expect(orc.attackBonus).toBeUndefined();
+        expect(orc.saveBonus).toBeUndefined();
     });
 });

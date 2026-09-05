@@ -2,7 +2,7 @@
  * Character domain: creation/update, ability score improvements, damage &
  * healing, the death-save state machine, XP/levels, and conditions.
  */
-import { computeACFromInventory, getModifier } from '../../engine/rules.js';
+import { computeACFromInventory, getModifier, normalizeConditionName, CONDITION_LIST_CAP } from '../../engine/rules.js';
 import { ABILITY_NAMES, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../../engine/characterUtils.js';
 import { awardExperience } from '../../engine/progression.js';
 import {
@@ -303,20 +303,29 @@ export const handlers = {
         };
     },
 
+    // Both take the canonical form (normalizeConditionName) and match
+    // case-insensitively against whatever a legacy save still carries, so
+    // "Poisoned" gained then "poisoned" removed cannot strand the condition
+    // (2026-09-05 audit P1). Junk payloads are no-ops.
     ADD_CONDITION(state, action) {
+        const condition = normalizeConditionName(action.payload);
+        if (!condition) return state;
         const existing = state.character.conditions || [];
-        if (existing.includes(action.payload)) return state;
+        if (existing.some(c => normalizeConditionName(c) === condition)) return state;
+        if (existing.length >= CONDITION_LIST_CAP) return state;
         return {
             ...state,
-            character: { ...state.character, conditions: [...existing, action.payload] },
+            character: { ...state.character, conditions: [...existing, condition] },
         };
     },
 
     REMOVE_CONDITION(state, action) {
+        const condition = normalizeConditionName(action.payload);
+        if (!condition) return state;
         const existing = state.character.conditions || [];
         return {
             ...state,
-            character: { ...state.character, conditions: existing.filter(c => c !== action.payload) },
+            character: { ...state.character, conditions: existing.filter(c => normalizeConditionName(c) !== condition) },
         };
     },
 

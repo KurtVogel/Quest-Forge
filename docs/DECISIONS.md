@@ -8,6 +8,31 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-05 · Hero conditions have ONE canonical form; a broken event block never becomes
+story; string-typed enemy stats coerce.** Three rulings from the 2026-09-05 queue sweep
+(response-parsing + enemy-stats-conditions). (1) `character.conditions` stores canonical
+lowercase strings (`normalizeConditionName` in `engine/rules.js`: strings only, trimmed,
+≤40 chars, list cap 10), applied at the parser boundary, in `ADD_CONDITION`/
+`REMOVE_CONDITION`/`withCondition` (matching case-insensitively against whatever a legacy
+save still carries), and in the load heal — the enemy channel had this
+(`normalizeEnemyConditions`) since 07-13 and the hero channel was its verbatim twin: casing
+variants stacked, "Poisoned" gained then "poisoned" removed stayed Poisoned (disadvantage
+on every attack and check), and an object element threw out of every heal path. The hero
+list stays FREE-FORM (no supported set — "cursed", "exhausted" are narrative canon the DM
+may track) unlike the enemy list, because only `CONDITION_EFFECTS` names carry mechanics
+and the rest are prose state worth showing. Display capitalizes; the store never does.
+(2) On total repair failure `parseResponse` returns the pre-fence PROSE, not the full
+response: the raw broken JSON was committed as the assistant message and rode the chat,
+the save, the DM's own 20-message window (priming the next malformed block), the journal
+summarizer, and RAG. `eventsDropped` still raises the visible notice. Prose AFTER the
+fence is appended rather than dropped — a JSON-first DM reply used to commit an empty
+message. (3) Enemy stat validators coerce leading-number strings (`"22"`, `"+4"`,
+`"15 AC"`) before the reject/clamp policy, mirroring the coin/XP `clamp()` — the policy
+itself is unchanged (`"+99"` is still rejected to the default, never clamped). Also
+settled in passing: enemy saves run through one `rollEnemySave` that honors the foe's own
+conditions, so `CONDITION_EFFECTS.restrained.save` finally applies to enemies the way it
+always did to the hero.
+
 **2026-09-04 · Quest XP pays only through the DM channel; never-tracked terminal inserts
 pay nothing; a dying caster casts nothing; Spare the Dying is a narrative cantrip.** Four
 rulings from the 2026-09-04 queue sweep (rules-math + quests, spellcasting + chronicler).

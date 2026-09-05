@@ -128,8 +128,12 @@ export function detectPreNarratedOutcome(narrative) {
 export function parseResponse(response) {
     if (!response) return { narrative: '', events: null };
 
-    // Try to find a fenced JSON block in the response
-    const jsonMatch = response.match(/```json\s*\n?([\s\S]*?)\n?\s*```/);
+    // Try to find a fenced JSON block in the response. Tag case-insensitive
+    // (```JSON), and a bare ``` fence counts when its body is an object — both
+    // used to fall to the anchor path and leave a dangling opener on the
+    // narrative (2026-09-05 audit).
+    const jsonMatch = response.match(/```json\s*\n?([\s\S]*?)\n?\s*```/i)
+        || response.match(/```\s*\n?(\{[\s\S]*?\})\s*\n?\s*```/);
 
     debugLog('[ResponseParser] Raw response length:', response.length);
     debugLog('[ResponseParser] JSON block found:', !!jsonMatch);
@@ -143,7 +147,8 @@ export function parseResponse(response) {
             const parsed = parseBalancedJsonAt(response, anchor);
             if (!parsed) continue; // try the next anchor
             console.warn(`[ResponseParser] Parsed unfenced JSON (anchor: ${anchor}).`);
-            const narrative = response.slice(0, parsed.startIndex).trim();
+            // A truncated/unclosed fence leaves its opener dangling on the narrative.
+            const narrative = response.slice(0, parsed.startIndex).replace(/```\w*\s*$/, '').trim();
             return { narrative, events: normalizeEvents(parsed.value) };
         }
 
@@ -170,9 +175,19 @@ export function parseResponse(response) {
         console.warn('[ResponseParser] Response contains a second ```json block — only the first is parsed; the rest is discarded.');
     }
 
-    // Extract narrative (everything before the JSON block)
+    // Extract narrative (everything before the JSON block). Prose AFTER the
+    // fence used to vanish silently — and a JSON-first response committed an
+    // EMPTY assistant message — so non-empty trailing text (minus any further
+    // fenced block, which is discarded with the warning above) is appended.
     const jsonStart = response.indexOf(jsonMatch[0]);
-    const narrative = response.slice(0, jsonStart).trim();
+    let narrative = response.slice(0, jsonStart).trim();
+    const trailing = response.slice(jsonStart + jsonMatch[0].length)
+        .replace(/```json[\s\S]*?```/gi, '')
+        .trim();
+    if (trailing) {
+        console.warn('[ResponseParser] Prose after the JSON block — appended to the narrative.');
+        narrative = narrative ? `${narrative}\n\n${trailing}` : trailing;
+    }
 
     // Parse the JSON, attempting repair on failure
     let events = null;
@@ -187,8 +202,11 @@ export function parseResponse(response) {
             console.warn('[ResponseParser] JSON repair failed too:', e2.message);
             debugLog('[ResponseParser] Raw JSON string:', jsonMatch[1]);
             // Unrepairable events are DROPPED — flag it so the caller can surface
-            // a visible notice instead of the events vanishing in silence.
-            return { narrative: response.trim(), events: null, eventsDropped: true };
+            // a visible notice instead of the events vanishing in silence. The
+            // narrative is the PROSE only: returning the full response leaked the
+            // raw broken JSON into the story, the save, the DM's own window
+            // (self-priming), the journal, and RAG (2026-09-05 audit P1).
+            return { narrative, events: null, eventsDropped: true };
         }
     }
 

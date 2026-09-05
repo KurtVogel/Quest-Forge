@@ -68,7 +68,7 @@ describe('pending roleplay check state', () => {
         const [lock, spot] = loaded.pendingRoleplayCheck.rolls;
         expect(lock.dc).toBe(0);            // clamped — never a guaranteed-success negative DC
         expect(lock.advantage).toBe(true);  // boolean, not the string "yes"
-        expect(spot.dc).toBe(10);           // a string DC is not a number: the parser default
+        expect(spot.dc).toBe(12);           // a numeric string DC coerces (2026-09-05); junk still defaults to 10
         expect(spot.disadvantage).toBe(false);
         expect(spot.modifier).toBeNull();
         expect(spot.damage).toBeNull();

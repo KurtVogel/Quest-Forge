@@ -62,9 +62,24 @@ export function normalizeEnemyConditions(value) {
         .filter(condition => SUPPORTED_ENEMY_CONDITIONS.has(condition)))];
 }
 
+/**
+ * Leading-number coercion shared by every validator below: LLMs regularly emit
+ * numeric stats as strings ("22", "+4", "15 AC"). Before 2026-09-05 those
+ * silently fell to the defaults (a "22" hp orc became a 20-hp one) while the
+ * coin/XP `clamp()` in eventChannels coerced the identical quirk. Non-numeric
+ * input stays NaN so the reject/clamp policy below is unchanged.
+ */
+function toNumber(value) {
+    if (typeof value === 'number') return value;
+    if (typeof value !== 'string' || value.trim() === '') return NaN;
+    const direct = Number(value);
+    return Number.isFinite(direct) ? direct : parseFloat(value);
+}
+
 /** A to-hit bonus within the allowed band, or undefined (→ engine default) if absurd/out-of-range. */
-export function validateEnemyAttackBonus(n) {
-    if (typeof n !== 'number' || !Number.isFinite(n)) return undefined;
+export function validateEnemyAttackBonus(value) {
+    const n = toNumber(value);
+    if (!Number.isFinite(n)) return undefined;
     const r = Math.round(n);
     return (r >= ATTACK_BONUS_MIN && r <= ATTACK_BONUS_MAX) ? r : undefined;
 }
@@ -74,8 +89,9 @@ export function validateEnemyAttackBonus(n) {
  * (→ engine default +2) when absurd. One flat number per enemy — spell saves
  * deliberately do not model six per-ability scores (spellcasting v1 spec).
  */
-export function validateEnemySaveBonus(n) {
-    if (typeof n !== 'number' || !Number.isFinite(n)) return undefined;
+export function validateEnemySaveBonus(value) {
+    const n = toNumber(value);
+    if (!Number.isFinite(n)) return undefined;
     const r = Math.round(n);
     return (r >= ATTACK_BONUS_MIN && r <= ATTACK_BONUS_MAX) ? r : undefined;
 }
@@ -95,22 +111,25 @@ export function sanitizeEnemyDamage(notation) {
 }
 
 /** AC clamped into a sane band (the bound is mechanically safe), defaulting when missing/absurd. */
-export function clampEnemyAC(n, fallback = 12) {
-    return (typeof n === 'number' && Number.isFinite(n) && n >= AC_MIN && n <= AC_MAX)
+export function clampEnemyAC(value, fallback = 12) {
+    const n = toNumber(value);
+    return (Number.isFinite(n) && n >= AC_MIN && n <= AC_MAX)
         ? Math.round(n)
         : fallback;
 }
 
 /** HP clamped to a positive, bounded value, defaulting when missing/absurd. */
-export function clampEnemyHP(n, fallback = 20) {
-    return (typeof n === 'number' && Number.isFinite(n) && n >= 1)
+export function clampEnemyHP(value, fallback = 20) {
+    const n = toNumber(value);
+    return (Number.isFinite(n) && n >= 1)
         ? Math.min(HP_MAX, Math.round(n))
         : fallback;
 }
 
 /** Current HP may legitimately be zero; keep it separate from maximum-HP validation. */
-export function clampEnemyCurrentHP(n, maxHp, fallback = maxHp) {
-    if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
+export function clampEnemyCurrentHP(value, maxHp, fallback = maxHp) {
+    const n = toNumber(value);
+    if (!Number.isFinite(n)) return fallback;
     return Math.max(0, Math.min(maxHp, Math.round(n)));
 }
 

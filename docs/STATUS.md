@@ -6,7 +6,31 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-04 (queue sweep of both 2026-09-04 audits: panel XP mine, dying-caster gate, Spare the Dying ruling, chronicle heal, error lines out of the saga; deployed)._
+_Last updated: 2026-09-05 (queue sweep of the 2026-09-05 audit: raw-JSON leak on repair failure, hero condition channel hardened, enemy saves honor conditions, string enemy stats coerce; deployed)._
+
+## 2026-09-05 — queue sweep: raw-JSON leak sealed, hero conditions canonical, enemy saves honor conditions
+
+All 9 lines of the 2026-09-05 audit (response-parsing + enemy-stats-conditions) cleared —
+every queue line ticked with a fix note; the only open line remains the 2026-08-09
+pronoun-flip WATCH item. **P1s:** (1) an irreparable fenced block used to hand the FULL
+response back as the narrative — raw broken JSON in the chat, the save, the DM's own
+20-message window (self-priming), the journal, and RAG; `parseResponse` now returns the
+pre-fence prose only (the old verbatim pin flipped deliberately). (2) the hero's
+`conditions_gained/removed` channel stored whatever it received verbatim — "Poisoned"
+gained then "poisoned" removed stayed Poisoned, casing variants stacked, an object element
+crashed every heal path; ONE canonical form (`normalizeConditionName` in `engine/rules.js`:
+strings only, lowercase, ≤40, cap 10) at the boundary, in the reducer (case-insensitive
+against legacy rows), and in the load heal. **P2s:** trailing prose after the fence is
+appended (a JSON-first response never commits an empty message); ```JSON / bare ```
+object fences recognized, dangling opener stripped on the anchor path; `extractBalancedJson`
+anchors on the quoted key first, scanning every occurrence (a prose mention no longer
+swallows the block); `requested_rolls.dc` coerced + clamped 0..30 and its six free-text
+fields string-guarded; enemy saves (spell + Turn Undead) run through one `rollEnemySave`
+that honors `CONDITION_EFFECTS` (a restrained foe saves at disadvantage); string-typed
+enemy stats coerce like the coin clamp (`"22"` hp is 22, not the 20 default; junk still
+rejects); direct `canonicalEnemyId` tests, the misleading "caps at 10" pin corrected,
+reducer condition tests, exchange-result junk-key pin. 2,120 tests green (+35), lint
+clean, deployed.
 
 ## 2026-09-04 — queue sweep: panel XP mine, dying-caster gate, chronicle heal
 
