@@ -1442,6 +1442,25 @@ becomes `kind !== 'error' && kind !== 'ooc'`, the DM-window rule becomes `kind =
 and the table-talk pairing heuristic retires. Legacy messages without `kind` keep today's
 inference as the fallback. From the 2026-09-04 strengthening audit (chronicler, Lap 1).
 
+### [strengthening] One condition normalizer for every creature — status: `idea` (2026-09-05)
+Three creatures carry `conditions` and one table (`CONDITION_EFFECTS`) reads all of them, but
+each has its own storage discipline: enemies pass through `normalizeEnemyConditions` at every
+boundary (lowercase, trim, supported-set, dedupe — parser, START_COMBAT, LOAD_GAME, pre-roll),
+companions get a `String(c).toLowerCase()` here and a bare `c.toLowerCase()` there, and the hero
+gets nothing — `conditions_gained` keeps whatever the DM sent (objects, 5 KB strings, four
+casings of "poisoned") and `ADD_CONDITION`/`REMOVE_CONDITION` match verbatim. The 2026-09-05
+audit's P1 is the cost: a casing drift between gain and removal leaves a mechanically enforced
+disadvantage stuck for the rest of the campaign, and one object element makes every heal path
+throw on every reload. Proposal: one `normalizeCreatureConditions(list, { supportedOnly })` in
+`engine/rules.js` beside `CONDITION_EFFECTS` — enemies keep the supported-set filter, hero and
+companions keep free-form names but get the same lowercase/trim/≤40/dedupe/cap — used at the
+parser boundary (`conditions_gained/removed`, `add_companions`/`update_companions`), in the
+hero and companion handlers (case-insensitive add/remove through `withCondition`), and in the
+LOAD_GAME character/party heal; then every `c.toLowerCase()` consumer becomes a plain equality.
+While there: the enemy save lane should consult `getConditionRollEffects(…, 'save')` like the
+hero's does, so `restrained` means the same thing on both sides of the table. From the
+2026-09-05 strengthening audit (enemy-stats-conditions, Lap 1).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
