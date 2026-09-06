@@ -55,7 +55,7 @@ export const handlers = {
     // brand-new NPC the instant it appears, instead of being silently dropped
     // until the next journal pass.
     UPDATE_NPC(state, action) {
-        const nextNpcs = upsertNpc(state.npcs, action.payload);
+        const nextNpcs = upsertNpc(state.npcs, action.payload, { messageCount: (state.messages || []).length });
         if (nextNpcs === state.npcs) return state;
         const touched = findTouchedNpc(nextNpcs, action.payload);
         let storyMemory = state.storyMemory || [];
@@ -306,10 +306,13 @@ export const handlers = {
 
         let npcs = state.npcs || [];
         for (const dev of developments) {
+            // Off-screen developments are not sightings: the hero has not seen
+            // these people, so the recency stamps stay untouched (2026-09-06).
             npcs = upsertNpc(npcs, {
                 name: dev.name,
                 ...(dev.agenda && { agenda: dev.agenda }),
                 ...(dev.lastNotes && { lastNotes: dev.lastNotes }),
+                _seen: false,
             });
         }
 

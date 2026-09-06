@@ -280,6 +280,9 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
                     rosterEligible: npc.rosterEligible ?? npc.roster_eligible,
                     disposition: npc.disposition,
                     lastNotes: npc.notes,
+                    // A cadence re-mention of past events is not a sighting:
+                    // the recency stamps belong to the per-turn lanes (2026-09-06).
+                    _seen: false,
                     ...(npc.personality && { personality: npc.personality }),
                     ...(npc.goals && { goals: npc.goals }),
                     ...(npc.secrets && { secrets: npc.secrets }),
@@ -337,7 +340,15 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
  * Build a journal context string for injection into the system prompt.
  * Returns the last few journal entries and NPC list formatted for the DM.
  */
-export function buildJournalContext(journal, npcs, currentLocation) {
+/**
+ * @param {object[]} journal
+ * @param {object[]} npcs
+ * @param {string} currentLocation
+ * @param {object} [scene] - KNOWN NPCs curation inputs (2026-09-06 P1):
+ *   `presentNames` (roster names found in the scene text) reserve slots ahead
+ *   of the score ranking; `messages` feeds the conversational recency term.
+ */
+export function buildJournalContext(journal, npcs, currentLocation, { presentNames = null, messages = null } = {}) {
     const parts = [];
 
     if (currentLocation) {
@@ -412,7 +423,7 @@ export function buildJournalContext(journal, npcs, currentLocation) {
     const rosterNpcs = (npcs || []).filter(n => n.rosterTier === 'character' || !n.rosterTier);
     if (rosterNpcs.length > 0) {
         const MAX_PROMPT_NPCS = 8;
-        const shown = curateNpcsForPrompt(rosterNpcs, { location: currentLocation, limit: MAX_PROMPT_NPCS });
+        const shown = curateNpcsForPrompt(rosterNpcs, { location: currentLocation, limit: MAX_PROMPT_NPCS, presentNames, messages });
         const hiddenCount = Math.max(0, rosterNpcs.length - shown.length);
 
         const npcList = shown.map(n => {

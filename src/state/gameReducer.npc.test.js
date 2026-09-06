@@ -596,3 +596,65 @@ describe('UPDATE_NPC story-memory promotion (reducer-level pins, 2026-08-30)', (
         expect(cards[0].id).toBe('npc-bond-npc-77');
     });
 });
+
+describe('UPDATE_NPC payload-trust boundary (2026-09-06 scribe P2 + appearance belt P1)', () => {
+    const messages = n => Array.from({ length: n }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: `line ${i}` }));
+    const withSaima = () => gameReducer({ ...initialGameState, messages: messages(4) }, {
+        type: 'UPDATE_NPC',
+        payload: {
+            name: 'Saima Aallotar',
+            kind: 'character',
+            disposition: 'friendly',
+            appearance: 'A tall woman with white hair to her waist, grey eyes, a broken nose, and a heavy build; wears a green wool cloak.',
+            trust: 40,
+        },
+    });
+
+    it('never lets a name-matched update overwrite the engine-minted id, and never lets a payload id seed a new record', () => {
+        const state = withSaima();
+        const originalId = state.npcs[0].id;
+        const next = gameReducer(state, { type: 'UPDATE_NPC', payload: { id: 'npc-dm-guess-1', name: 'Saima', lastNotes: 'Waves from the pier.' } });
+        expect(next.npcs).toHaveLength(1);
+        expect(next.npcs[0].id).toBe(originalId);
+        expect(next.npcs[0].lastNotes).toBe('Waves from the pier.');
+        const born = gameReducer(initialGameState, { type: 'UPDATE_NPC', payload: { id: 'npc-dm-guess-2', name: 'Odo Ferrin', kind: 'character' } });
+        expect(born.npcs[0].id).not.toBe('npc-dm-guess-2');
+    });
+
+    it('clamps trust to 0..100, drops junk trust, and ignores pinned/importance from the update lane', () => {
+        const state = withSaima();
+        const hot = gameReducer(state, { type: 'UPDATE_NPC', payload: { name: 'Saima', trust: 999, pinned: true, importance: 5 } });
+        expect(hot.npcs[0].trust).toBe(100);
+        expect(hot.npcs[0].pinned).toBe(false);
+        expect(hot.npcs[0].importance).toBeLessThan(5);
+        const junk = gameReducer(state, { type: 'UPDATE_NPC', payload: { name: 'Saima', trust: 'lots' } });
+        expect(junk.npcs[0].trust).toBe(40);
+        // The player's own pin still works through PIN_NPC.
+        const pinned = gameReducer(state, { type: 'PIN_NPC', payload: { id: state.npcs[0].id, pinned: true } });
+        expect(pinned.npcs[0].pinned).toBe(true);
+        expect(pinned.npcs[0].importance).toBe(5);
+    });
+
+    it('a short-name appearance fragment merges into the recorded look instead of wiping it (the Saima case)', () => {
+        const state = withSaima();
+        const next = gameReducer(state, { type: 'UPDATE_NPC', payload: { name: 'Saima', appearance: 'a fresh scar on her cheek' } });
+        expect(next.npcs[0].appearance).toContain('white hair');
+        expect(next.npcs[0].appearance).toContain('broken nose');
+        expect(next.npcs[0].appearance).toContain('fresh scar');
+        const rewrite = 'Her white hair is now cropped short; grey eyes, broken nose, heavy build, green wool cloak.';
+        expect(gameReducer(state, { type: 'UPDATE_NPC', payload: { name: 'Saima', appearance: rewrite } }).npcs[0].appearance).toBe(rewrite);
+    });
+
+    it('stamps lastSeenMessage on a per-turn sighting and leaves both stamps alone for _seen: false lanes', () => {
+        const state = withSaima();
+        expect(state.npcs[0].lastSeenMessage).toBe(4);
+        const later = { ...state, messages: messages(9) };
+        const drift = gameReducer(later, { type: 'UPDATE_NPC', payload: { name: 'Saima', agenda: 'Left for the capital.', _seen: false } });
+        expect(drift.npcs[0].lastSeenMessage).toBe(4);
+        expect(drift.npcs[0].lastSeen).toBe(state.npcs[0].lastSeen);
+        expect(drift.npcs[0].agenda).toBe('Left for the capital.');
+        expect('_seen' in drift.npcs[0]).toBe(false);
+        const seen = gameReducer(later, { type: 'UPDATE_NPC', payload: { name: 'Saima', lastNotes: 'Back at the pier.' } });
+        expect(seen.npcs[0].lastSeenMessage).toBe(9);
+    });
+});

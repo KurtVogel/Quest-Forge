@@ -6,7 +6,28 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-06 (second queue sweep of the day — memory-journal + story-memory: resolved cards terminal + KNOWN STORY CARDS for the Scribe, scene-driven callback curation, journal batch/cadence through the narrative predicate, fallback entries never embedded, conversational cooldown/recency; deployed)._
+_Last updated: 2026-09-06 (third queue sweep of the day — scribe + prompt-building: token-matched Scribe merge context + appearance fragment belt, presence-first KNOWN NPCs, hardened UPDATE_NPC boundary, dossier-only importance, conversational NPC recency; deployed)._
+
+## 2026-09-06 (evening) — queue sweep: NPC dossier tier — token-matched merge context, presence-first KNOWN NPCs, roster boundary hardened
+
+All 6 lines of the third 2026-09-06 audit (scribe + prompt-building) cleared — every queue line
+ticked with a fix note. **The Open Findings Queue is EMPTY.** **P1s:** (1) the Scribe's merge
+context was looked up by full-name SUBSTRING, so the DM's normal short-name usage ("Saima" for
+"Saima Aallotar") handed the Scribe no known look or stance, it emitted the turn's fragment,
+and the plain-replace `appearance` lost the whole look — all three `buildKnown*` builders now
+match on whole-word name tokens (`namePresenceIn` over `findSubjectsInText`; substring only for
+unjudgeable names), and `mergeNpcAppearance` in `upsertNpc` merges a FRAGMENT into the record
+while rewrites still replace, covering the DM lane too; (2) KNOWN NPCs could omit the person
+the hero is talking to (a pure score ranking, 44 vs 51 against eight rich rivals) —
+`curateNpcsForPrompt` reserves slots pinned → scene-present → location-matched → score, with
+`promptBuilder` deriving the present names from `buildPresenceText` (moved to
+narrativeMessages.js). **Ruling (DECISIONS.md 2026-09-06, presence-first NPC context).**
+**P2s:** `upsertNpc` never writes a payload `id`/`pinned`/`importance` and clamps `trust` 0..100
+(a DM `pinned: true` buys no admission either); `computeNpcImportance` is dossier-only (bare
+name 1 … pinned 5, stored value never an input); NPC recency is conversational via
+`lastSeenMessage` stamped only by the per-turn lanes (journal re-mentions and absence-drift
+installs pass `_seen: false`); five pins incl. an end-to-end prompt test. 2,193 tests green
+(+16), lint clean, deployed.
 
 ## 2026-09-06 (afternoon) — queue sweep: memory tiers — resolved cards terminal, scene-driven callbacks, journal reads the narrative transcript
 

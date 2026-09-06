@@ -1544,7 +1544,7 @@ story cards out 2–3× faster), and skip `fallback: true` entries at both RAG e
 the 2026-09-06 strengthening audit (memory-journal).
 Shipped the same day in the queue sweep, all three parts — see DECISIONS.md 2026-09-06 (memory tiers).
 
-### [strengthening] Whoever is in the scene is always at the table: presence-first NPC context on BOTH sides of the turn — status: `idea` (2026-09-06)
+### [strengthening] Whoever is in the scene is always at the table: presence-first NPC context on BOTH sides of the turn — status: `shipped` (2026-09-06)
 Two lookups decide whether the engine's NPC memory actually reaches the moment it was recorded
 for, and both use the wrong key. On the way IN (the DM prompt), KNOWN NPCs is a pure score
 ranking into 8 slots, and a rich dossier anywhere in the world (tension, stance, hooks, history,

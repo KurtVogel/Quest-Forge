@@ -336,4 +336,21 @@ describe('KNOWN NPCs extras rendering (queue 2026-07-18)', () => {
         expect((context.match(/- \*\*Villager /g) || []).length).toBe(8);
         expect(context).toContain('*(2 other NPCs available via RETRIEVED MEMORIES when relevant)*');
     });
+
+    it('keeps the NPC in front of the hero in KNOWN NPCs even when eight richer dossiers exist elsewhere (2026-09-06 P1)', () => {
+        const rivals = Array.from({ length: 8 }, (_, i) => ({
+            id: `rival-${i}`, name: `Rival ${i} of the Capital`, rosterTier: 'character', disposition: 'hostile',
+            lastLocation: 'The Capital', lastSeen: Date.now(),
+            relationshipTension: 'Wants the hero humiliated.', stanceToPlayer: 'Contempt.',
+            callbackHooks: ['the duel'], agenda: 'Rule the capital.', lastNotes: 'Rich dossier.',
+        }));
+        const ferrywoman = {
+            id: 'ferry', name: 'Ilsa the ferrywoman', rosterTier: 'character', disposition: 'neutral',
+            lastLocation: 'Crossing', lastNotes: 'Poles the ferry.', appearance: 'Weathered, grey-haired.', gender: 'woman',
+        };
+        const context = buildJournalContext([], [...rivals, ferrywoman], 'Crossing', { presentNames: ['Ilsa'] });
+        expect(context).toContain('**Ilsa the ferrywoman**');
+        expect(context).toContain('looks: Weathered, grey-haired.');
+        expect(context).toContain('*(1 other NPCs available via RETRIEVED MEMORIES when relevant)*');
+    });
 });

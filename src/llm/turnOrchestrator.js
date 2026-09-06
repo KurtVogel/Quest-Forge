@@ -33,7 +33,7 @@ import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe } from './scribe.js';
 import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { addMemory, findSubjectsInText, retrieveRelevant } from '../engine/vectorMemory.js';
-import { collectNarrativeMessages } from './narrativeMessages.js';
+import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
 import { getMachineryGeminiKey } from './machinery.js';
 import { curateStoryMemory, formatSecrecyTag } from '../engine/storyMemory.js';
 import { captureInjection } from '../debug/memoryInspectorStore.js';
@@ -44,28 +44,10 @@ import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheck
 /** How many recent (un-summarized) messages to send as LLM history. */
 export const MESSAGE_WINDOW = 20;
 
-/**
- * How many recent narrative messages feed the RAG presence gate. The DM's
- * last narration is what establishes who is in the scene; the player's own
- * follow-up lines rarely repeat the name of the person they are talking to.
- * Three = the player's current line (already committed), the DM's last
- * narration, and the player's previous line — one full exchange of context,
- * short enough that someone who left the scene fades within a turn or two.
- */
-export const PRESENCE_MESSAGE_COUNT = 3;
-
-/**
- * Scene text consulted ONLY for who is present in RAG retrieval (2026-09-06
- * P1) — never embedded, so the search query itself is unchanged. Reads the
- * narrative-eligible transcript: hidden setups, soft-deleted refusals,
- * infrastructure error lines, and OOC table talk never count as presence.
- */
-export function buildPresenceText(messages) {
-    return collectNarrativeMessages(messages)
-        .slice(-PRESENCE_MESSAGE_COUNT)
-        .map(m => m.content)
-        .join(' ');
-}
+// The presence text and its window live in narrativeMessages.js since
+// 2026-09-06 (promptBuilder needs them for KNOWN NPCs without a cycle);
+// re-exported here for the existing import sites and tests.
+export { buildPresenceText, PRESENCE_MESSAGE_COUNT };
 
 /** Roster NPCs judged present in the scene, at most this many by name hit. */
 export const PRESENT_NPC_CAP = 8;

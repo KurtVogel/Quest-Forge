@@ -25,6 +25,9 @@ import {
     scoreNpcForPrompt,
     getCoreNpcName,
     namesMatch,
+    computeNpcImportance,
+    isAppearanceFragment,
+    mergeNpcAppearance,
 } from './npcRoster.js';
 import { mergeNpcUpdate } from '../state/gameReducer.js';
 
@@ -179,7 +182,9 @@ describe('npcRoster classification', () => {
             lastNotes: 'The annoying fighter captain from the starting town.',
         });
         expect(migrated.rosterTier).toBe('character');
-        expect(migrated.importance).toBeGreaterThanOrEqual(3);
+        // Dossier-only scale (2026-09-06): notes alone are a 1 — importance now
+        // measures what is on record, not the fact of being named.
+        expect(migrated.importance).toBe(1);
     });
 
     it('curates pinned rivals above recent fodder', () => {
@@ -592,5 +597,97 @@ describe('story-memory promotion identity (2026-08-30 P1: type-flip stranded twi
             { id: 'mem-a', type: 'npcAgenda', subject: 'Vanished One', text: 'Agenda: unknown.', source: 'npc_roster', lastSeenAt: 10 },
         ];
         expect(healPromotedStoryMemoryTwins(orphan, [])[0].id).toBe('mem-a');
+    });
+});
+
+describe('importance is computed from the dossier only (2026-09-06 P2)', () => {
+    it('a bare named character is 1, a rich dossier climbs, pinned is 5 — and the stored value is never an input', () => {
+        expect(computeNpcImportance({ name: 'Lantern-seller', rosterTier: 'character', lastNotes: 'Sold the hero a lantern.' })).toBe(1);
+        expect(computeNpcImportance({ name: 'Lantern-seller', rosterTier: 'character', importance: 5 })).toBe(1);
+        expect(computeNpcImportance({ name: 'Maren', rosterTier: 'character', stanceToPlayer: 'Fond of the hero.', relationshipTension: 'Owes a debt.' })).toBe(3);
+        expect(computeNpcImportance({
+            name: 'Maren', rosterTier: 'character',
+            stanceToPlayer: 'Fond of the hero.', relationshipTension: 'Owes a debt.',
+            bondMoments: [{ text: 'Shared a rooftop sunrise.', at: 1 }], agenda: 'Find the ledger.',
+            personality: 'Dry.', trust: 40,
+        })).toBe(5);
+        expect(computeNpcImportance({ name: 'Nobody', rosterTier: 'character', pinned: true })).toBe(5);
+    });
+});
+
+describe('KNOWN NPCs curation reserves slots for the scene (2026-09-06 P1)', () => {
+    const rivals = Array.from({ length: 8 }, (_, i) => ({
+        id: `rival-${i}`, name: `Rival ${i} of the Capital`, rosterTier: 'character', disposition: 'hostile',
+        lastLocation: 'The Capital', basedIn: 'The Capital', lastSeen: Date.now(),
+        relationshipTension: 'Wants the hero humiliated.', stanceToPlayer: 'Contempt.',
+        callbackHooks: ['the duel'], relationshipHistory: [{ from: 'neutral', to: 'hostile', at: 1 }],
+        agenda: 'Rule the capital.', lastNotes: 'Rich dossier.',
+    }));
+    const ferrywoman = {
+        id: 'ferry', name: 'Ilsa the ferrywoman', rosterTier: 'character', disposition: 'neutral',
+        lastLocation: 'Crossing', lastNotes: 'Poles the ferry.', appearance: 'Weathered, grey-haired.',
+    };
+
+    it('a thin NPC the hero is talking to is never ranked out by richer dossiers elsewhere', () => {
+        // Pure ranking (the old behaviour) drops her even with her location matching.
+        const ranked = curateNpcsForPrompt([...rivals, ferrywoman], { location: 'Crossing', limit: 8, presentNames: null })
+            .map(n => n.id);
+        expect(ranked).toContain('ferry'); // location reservation alone already keeps her
+        const present = curateNpcsForPrompt([...rivals, ferrywoman], { location: 'Somewhere else', limit: 8, presentNames: ['Ilsa'] })
+            .map(n => n.id);
+        expect(present).toContain('ferry'); // presence reservation, matched by short name
+        expect(present).toHaveLength(8);
+        const absent = curateNpcsForPrompt([...rivals, ferrywoman], { location: 'Somewhere else', limit: 8 })
+            .map(n => n.id);
+        expect(absent).not.toContain('ferry'); // nothing reserves her: she is genuinely elsewhere
+    });
+
+    it('pinned NPCs still lead and the cast never exceeds the limit', () => {
+        const pinned = { ...ferrywoman, id: 'pin', name: 'Pinned One', pinned: true, lastLocation: 'Nowhere' };
+        const cast = curateNpcsForPrompt([...rivals, ferrywoman, pinned], { location: 'Crossing', limit: 8, presentNames: ['Ilsa'] });
+        expect(cast[0].id).toBe('pin');
+        expect(cast.map(n => n.id)).toContain('ferry');
+        expect(cast).toHaveLength(8);
+    });
+
+    it('recency is conversational when the record carries lastSeenMessage, wall-clock only as the legacy fallback', () => {
+        const transcript = n => Array.from({ length: n }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `line ${i}` }));
+        const base = { name: 'Odo', rosterTier: 'character', lastSeenMessage: 10 };
+        const fresh = scoreNpcForPrompt(base, { messages: transcript(10) });
+        const stale = scoreNpcForPrompt(base, { messages: transcript(60) });
+        expect(fresh - stale).toBeCloseTo(8, 5);
+        // System lines never age the window.
+        const padded = [...transcript(10), ...Array.from({ length: 30 }, () => ({ role: 'system', content: 'Rolled 12.' }))];
+        expect(scoreNpcForPrompt(base, { messages: padded })).toBeCloseTo(fresh, 5);
+        // Legacy record: wall-clock stamp still counts.
+        const legacyFresh = scoreNpcForPrompt({ name: 'Odo', rosterTier: 'character', lastSeen: Date.now() });
+        const legacyStale = scoreNpcForPrompt({ name: 'Odo', rosterTier: 'character', lastSeen: Date.now() - 1000 * 60 * 60 * 24 * 30 });
+        expect(legacyFresh).toBeGreaterThan(legacyStale);
+    });
+});
+
+describe('appearance merge belt (2026-09-06 P1 — a fragment never wipes the look)', () => {
+    const known = 'A tall woman with white hair to her waist, grey eyes, a broken nose, and a heavy build; wears a green wool cloak.';
+
+    it('a short fragment covering few known tokens merges into the record', () => {
+        expect(isAppearanceFragment(known, 'a fresh scar on her cheek')).toBe(true);
+        const merged = mergeNpcAppearance(known, 'a fresh scar on her cheek');
+        expect(merged).toContain('white hair');
+        expect(merged).toContain('broken nose');
+        expect(merged).toContain('green wool cloak');
+        expect(merged).toContain('fresh scar');
+    });
+
+    it('a rewrite (haircut, disguise) still replaces — the prompt contract', () => {
+        const disguise = 'Disguised as a beggar: white hair hidden under a filthy hood, face smeared with soot, the heavy build wrapped in rags instead of the green cloak.';
+        expect(isAppearanceFragment(known, disguise)).toBe(false);
+        expect(mergeNpcAppearance(known, disguise)).toBe(disguise);
+        const cropped = 'Her white hair is now cropped short; grey eyes, broken nose, heavy build, green wool cloak.';
+        expect(mergeNpcAppearance(known, cropped)).toBe(cropped);
+    });
+
+    it('with no record the incoming look is taken as-is', () => {
+        expect(mergeNpcAppearance('', 'a fresh scar on her cheek')).toBe('a fresh scar on her cheek');
+        expect(mergeNpcAppearance(known, '')).toBe(known);
     });
 });

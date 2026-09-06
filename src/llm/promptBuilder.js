@@ -7,7 +7,8 @@ import { ABILITY_SHORT, classDisplayName, getFightingStyleLabel, getMartialArche
 import { formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifier, isProficientWithWeapon } from '../engine/rules.js';
 import { getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
-import { buildRetrievedMemoriesBlock } from '../engine/vectorMemory.js';
+import { buildRetrievedMemoriesBlock, findSubjectsInText } from '../engine/vectorMemory.js';
+import { buildPresenceText } from './narrativeMessages.js';
 import { buildStoryMemoryPromptBlock, formatSecrecyTag } from '../engine/storyMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
 import { formatCurrency } from '../engine/currency.js';
@@ -186,7 +187,18 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Session memory — journal entries and NPC tracker
-    const journalContext = buildJournalContext(journal || [], npcs || [], currentLocation);
+    // KNOWN NPCs reserves slots for the people IN the scene (2026-09-06 P1):
+    // the same presence judgement RAG retrieval and callback curation make,
+    // from the last narrative messages, so the person the hero is talking to
+    // can never be ranked out of the block by richer dossiers elsewhere.
+    const rosterNames = (npcs || []).map(n => n?.name).filter(Boolean);
+    const presentNames = rosterNames.length > 0 && Array.isArray(messages) && messages.length > 0
+        ? findSubjectsInText(buildPresenceText(messages), rosterNames, 8)
+        : null;
+    const journalContext = buildJournalContext(journal || [], npcs || [], currentLocation, {
+        presentNames,
+        messages: Array.isArray(messages) ? messages : null,
+    });
     if (journalContext) {
         parts.push(journalContext, 'journalAndNpcs');
     }

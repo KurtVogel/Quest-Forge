@@ -5,6 +5,7 @@
  */
 
 import { NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
+import { conversationalDistance } from './replayLedger.js';
 import { coverage, tokenSet } from './textMatch.js';
 
 export const NPC_ROSTER_TIERS = new Set(['character', 'archived_creature']);
@@ -492,23 +493,27 @@ export function dispatchClassifiedNpcUpdate(dispatch, candidate) {
     return true;
 }
 
+/**
+ * Importance (1..5) computed from the DOSSIER ONLY (2026-09-06 audit): the old
+ * version seeded from the STORED value and re-added every structural bonus on
+ * each update, so any named character was 5/5 at birth — the curation's
+ * importance term was a constant and "importance: 5/5" printed on every KNOWN
+ * NPCs line. A bare name is 1; a stance, a tension, a bond history, and an
+ * agenda/hooks each add one; personality/goals/secrets and a trust reading add
+ * half. Pinned is always 5 (the player's own call). The stored value is never
+ * an input, so the scale means what it says and the DM lane cannot inflate it.
+ */
 export function computeNpcImportance(npc = {}) {
-    let score = clampImportance(npc.importance, 3);
-
-    if (npc.pinned) score = 5;
-    if (npc.rosterTier === 'character') score += 1;
-    if (cleanText(npc.agenda)) score += 1;
-    if (cleanText(npc.relationshipTension)) score += 2;
-    // A personal bond with the hero is exactly what should keep an NPC in memory.
-    if (cleanText(npc.stanceToPlayer)) score += 2;
-    if (Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0) score += 1;
-    if (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0) score += 1;
-    if (Array.isArray(npc.relationshipHistory) && npc.relationshipHistory.length > 0) score += 1;
-    if (Number.isFinite(npc.trust)) score += 0.5;
-    if (!isGenericCreatureName(npc.name)) score += 1;
+    if (npc.pinned) return 5;
+    let score = 1;
+    if (cleanText(npc.stanceToPlayer)) score += 1;
+    if (cleanText(npc.relationshipTension)) score += 1;
+    if ((Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0)
+        || (Array.isArray(npc.relationshipHistory) && npc.relationshipHistory.length > 0)) score += 1;
+    if (cleanText(npc.agenda) || (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0)) score += 1;
     if (cleanText(npc.personality) || cleanText(npc.goals) || cleanText(npc.secrets)) score += 0.5;
-
-    return clampImportance(score, 3);
+    if (Number.isFinite(npc.trust)) score += 0.5;
+    return clampImportance(score, 1);
 }
 
 function clampImportance(value, fallback = 3) {
@@ -609,12 +614,35 @@ export function isPromptRosterNpc(npc = {}) {
     return npc.rosterTier !== 'archived_creature';
 }
 
-export function scoreNpcForPrompt(npc = {}, { location = '', now = Date.now() } = {}) {
+/**
+ * Recency window for prompt curation, in CONVERSATIONAL messages (2026-09-06
+ * audit — the term was wall-clock hours, and `lastSeen` was stamped by every
+ * upsert including absence-drift installs for NPCs the hero never met). The
+ * bonus decays from 8 to 0 over 8 × NPC_RECENCY_DECAY_MESSAGES (~4 journal
+ * cadences). `lastSeenMessage` is stamped only by the per-turn Scribe/DM
+ * lanes; records without it fall back to the wall-clock stamp.
+ */
+const NPC_RECENCY_DECAY_MESSAGES = 5;
+
+function npcConversationalAge(npc, messages, messageCount) {
+    if (!Number.isFinite(npc?.lastSeenMessage)) return null;
+    const end = Number.isFinite(messageCount)
+        ? messageCount
+        : (Array.isArray(messages) ? messages.length : NaN);
+    if (!Number.isFinite(end)) return null;
+    if (Array.isArray(messages)) return conversationalDistance(messages, npc.lastSeenMessage - 1, end - 1);
+    return Math.max(0, end - npc.lastSeenMessage);
+}
+
+export function scoreNpcForPrompt(npc = {}, { location = '', now = Date.now(), messages = null, messageCount } = {}) {
     if (!isPromptRosterNpc(npc)) return 0;
 
     let score = computeNpcImportance(npc) * 4;
     if (npc.pinned) score += 100;
-    if (npc.lastSeen) {
+    const age = npcConversationalAge(npc, messages, messageCount);
+    if (age !== null) {
+        score += Math.max(0, 8 - age / NPC_RECENCY_DECAY_MESSAGES);
+    } else if (npc.lastSeen) {
         const ageHours = Math.max(0, (now - npc.lastSeen) / (1000 * 60 * 60));
         score += Math.max(0, 8 - ageHours / 12);
     }
@@ -634,27 +662,76 @@ export function scoreNpcForPrompt(npc = {}, { location = '', now = Date.now() } 
     return score;
 }
 
-export function curateNpcsForPrompt(npcs = [], { location = '', limit = 8, now = Date.now() } = {}) {
+/**
+ * The KNOWN NPCs cast. Slots are RESERVED before the score ranking (2026-09-06
+ * P1): pinned first, then NPCs present in the scene (`presentNames` — the
+ * presence text's name hits), then NPCs whose last-seen place is the hero's
+ * location, and only then the rest by score. A pure ranking dropped the thin
+ * ferrywoman the hero was talking to in favour of eight dossier-rich rivals
+ * in the capital (44 vs 51) — and the DM narrated the dialogue without her
+ * looks, gender, or stance, the fields the block exists to keep consistent.
+ */
+export function curateNpcsForPrompt(npcs = [], { location = '', limit = 8, now = Date.now(), presentNames = null, messages = null, messageCount } = {}) {
     const roster = (npcs || []).filter(isPromptRosterNpc);
-    const pinned = roster.filter(n => n.pinned);
     const ranked = roster
-        .map(npc => ({ npc, score: scoreNpcForPrompt(npc, { location, now }) }))
-        .sort((a, b) => b.score - a.score);
+        .map(npc => ({ npc, score: scoreNpcForPrompt(npc, { location, now, messages, messageCount }) }))
+        .sort((a, b) => b.score - a.score)
+        .map(entry => entry.npc);
+    const present = Array.isArray(presentNames) && presentNames.length > 0
+        ? ranked.filter(npc => presentNames.some(name => namesMatch(npc.name, name)))
+        : [];
+    const located = location
+        ? ranked.filter(npc => locationMatchesPlace(location, npc.lastLocation))
+        : [];
 
     const chosen = [];
     const seen = new Set();
-    for (const npc of pinned) {
-        if (seen.has(npc.id)) continue;
-        chosen.push(npc);
-        seen.add(npc.id);
-    }
-    for (const { npc } of ranked) {
-        if (chosen.length >= limit) break;
-        if (seen.has(npc.id)) continue;
-        chosen.push(npc);
-        seen.add(npc.id);
-    }
+    const take = (list, unbounded = false) => {
+        for (const npc of list) {
+            if (!unbounded && chosen.length >= limit) break;
+            const key = npc.id ?? npc;
+            if (seen.has(key)) continue;
+            chosen.push(npc);
+            seen.add(key);
+        }
+    };
+    take(ranked.filter(n => n.pinned), true);
+    take(present);
+    take(located);
+    take(ranked);
     return chosen;
+}
+
+/**
+ * Appearance merge belt (2026-09-06 P1). `appearance` is a plain replace by
+ * design — a haircut or disguise must be able to drop details — but a
+ * FRAGMENT ("a fresh scar on her cheek") arriving without merge context used
+ * to wipe the whole recorded look (white hair, grey eyes, broken nose, build,
+ * cloak → one scar). An incoming look that is much shorter than the record AND
+ * covers few of its tokens is a fragment: it joins the record through the
+ * dossier merge (novel clauses appended). Anything else is a rewrite and
+ * replaces, exactly as before.
+ */
+const APPEARANCE_FRAGMENT_LENGTH_RATIO = 0.5;
+const APPEARANCE_FRAGMENT_COVERAGE = 0.5;
+
+export function isAppearanceFragment(existingText, incomingText) {
+    const prev = cleanText(existingText);
+    const next = cleanText(incomingText);
+    if (!prev || !next) return false;
+    if (next.length >= prev.length * APPEARANCE_FRAGMENT_LENGTH_RATIO) return false;
+    const prevTokens = meaningfulTokens(prev);
+    const nextTokens = meaningfulTokens(next);
+    if (prevTokens.size === 0 || nextTokens.size === 0) return false;
+    return coverage(prevTokens, nextTokens) < APPEARANCE_FRAGMENT_COVERAGE;
+}
+
+export function mergeNpcAppearance(existingText, incomingText, max = NPC_DOSSIER_FIELD_MAX) {
+    const next = cleanText(incomingText).slice(0, max);
+    if (!next) return cleanText(existingText).slice(0, max);
+    return isAppearanceFragment(existingText, next)
+        ? mergeNpcDossierText(existingText, next, max)
+        : next;
 }
 
 export function formatNpcEmbeddingText(npc = {}) {
@@ -861,6 +938,7 @@ export function dedupeNpcRoster(npcs = []) {
                 ? undefined
                 : Math.min(base.firstMet || Infinity, newer.firstMet || Infinity),
             lastSeen: Math.max(base.lastSeen || 0, newer.lastSeen || 0) || undefined,
+            lastSeenMessage: Math.max(base.lastSeenMessage || 0, newer.lastSeenMessage || 0) || undefined,
             pinned: !!(base.pinned || newer.pinned),
             trust: Number.isFinite(newer.trust) ? newer.trust : base.trust,
             kind: base.kind === 'character' || newer.kind === 'character' ? 'character' : (newer.kind || base.kind),

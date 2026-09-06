@@ -322,6 +322,38 @@ describe('buildKnownStances', () => {
     });
 });
 
+describe('buildKnown* match on name tokens, not full-name substrings (2026-09-06 scribe P1)', () => {
+    const saima = {
+        name: 'Saima Aallotar',
+        appearance: 'A tall woman with white hair to her waist, grey eyes, a broken nose, and a heavy build; wears a green wool cloak.',
+        stanceToPlayer: 'Warmly amused by the hero, and quietly protective.',
+        bondMoments: [{ text: 'Saima pulled the hero from the river.', at: 1 }],
+    };
+    const roster = { npcs: [saima, { name: 'Odo Ferrin', appearance: 'Bald, ink-stained fingers.', stanceToPlayer: 'Resentful.' }] };
+    const turn = 'Saima laughs and touches the fresh scar on her cheek. "You should see the other one."';
+
+    it('the DM calling "Saima Aallotar" just "Saima" still hands the Scribe her known look and stance', () => {
+        const looks = buildKnownAppearances(roster, turn);
+        expect(looks).toContain('Saima Aallotar');
+        expect(looks).toContain('white hair');
+        expect(looks).not.toContain('Odo Ferrin');
+        const stances = buildKnownStances(roster, turn);
+        expect(stances).toContain('Saima Aallotar: Warmly amused');
+        expect(stances).toContain('pulled the hero from the river');
+        expect(stances).not.toContain('Odo Ferrin');
+    });
+
+    it('the KNOWN STORY CARDS builder honors the short name on linked NPCs too', () => {
+        const cards = { storyMemory: [{ id: 'mem-river', type: 'callback', status: 'active', subject: 'the river rescue', text: 'Saima pulled the hero from the river.', linkedNpcNames: ['Saima Aallotar'] }] };
+        expect(buildKnownStoryCards(cards, 'Saima grins across the table.')).toContain('id: mem-river');
+    });
+
+    it('a substring inside another word is not a mention, but an unjudgeable name still falls back to the substring test', () => {
+        expect(buildKnownAppearances({ npcs: [{ name: 'Ann', appearance: 'Freckled.' }] }, 'The annals of the keep lie open.')).toBeNull();
+        expect(buildKnownAppearances({ npcs: [{ name: 'The Lady', appearance: 'Veiled.' }] }, 'The Lady enters.')).toContain('Veiled');
+    });
+});
+
 describe('buildKnownStoryCards (2026-09-06 P1 — the Scribe sees the card pool)', () => {
     const state = {
         storyMemory: [

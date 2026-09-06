@@ -50,8 +50,35 @@ function prompt(overrides = {}) {
         retrievedMemories: overrides.retrievedMemories ?? [],
         premise: overrides.premise ?? '',
         recentRulings: overrides.recentRulings ?? [],
+        messages: overrides.messages ?? [],
     });
 }
+
+describe('KNOWN NPCs is presence-first (2026-09-06 prompt-building P1)', () => {
+    it('the person named in the last narration rides the block even when eight richer dossiers outrank her', () => {
+        const rivals = Array.from({ length: 8 }, (_, i) => ({
+            id: `rival-${i}`, name: `Rival ${i} of the Capital`, rosterTier: 'character', disposition: 'hostile',
+            lastLocation: 'The Capital', lastSeen: Date.now(),
+            relationshipTension: 'Wants the hero humiliated.', stanceToPlayer: 'Contempt.',
+            callbackHooks: ['the duel'], agenda: 'Rule the capital.', lastNotes: 'Rich dossier.',
+        }));
+        const ferrywoman = {
+            id: 'ferry', name: 'Ilsa the ferrywoman', rosterTier: 'character', disposition: 'neutral',
+            lastLocation: 'Somewhere upriver', lastNotes: 'Poles the ferry.', appearance: 'Weathered, grey-haired.',
+        };
+        const messages = [
+            { id: 'u1', role: 'user', content: 'I walk down to the water.' },
+            { id: 'a1', role: 'assistant', content: 'Ilsa leans on her pole and squints at you. "Crossing, or just looking?"' },
+            { id: 'u2', role: 'user', content: 'How much for the crossing?' },
+        ];
+        const withScene = prompt({ npcs: [...rivals, ferrywoman], currentLocation: 'Crossing', messages });
+        expect(withScene).toContain('**Ilsa the ferrywoman**');
+        expect(withScene).toContain('looks: Weathered, grey-haired.');
+        // Without the scene text (and no location match) the ranking alone drops her — the case the audit reproduced.
+        const withoutScene = prompt({ npcs: [...rivals, ferrywoman], currentLocation: 'Crossing', messages: [] });
+        expect(withoutScene).not.toContain('**Ilsa the ferrywoman**');
+    });
+});
 
 describe('stable cache prefix (DECISIONS.md 2026-07-18)', () => {
     it('keeps every byte up through the premise identical across turns with different dynamic state', () => {

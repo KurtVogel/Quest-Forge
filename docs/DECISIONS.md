@@ -8,6 +8,40 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-06 · Whoever is in the scene is at the table: NPC context is presence-first on both
+sides of the turn, appearance fragments merge, and the roster boundary trusts nothing.** Four
+rulings from the third 2026-09-06 queue sweep (scribe + prompt-building — the NPC dossier tier
+and where memory lands in the prompt). (1) Presence is judged by NAME TOKENS everywhere, never
+by full-name substring. The Scribe's merge context (`buildKnownAppearances`/`buildKnownStances`/
+`buildKnownStoryCards`) gated on `haystack.includes(fullName)`, so the DM's normal short-name
+usage ("Saima" for "Saima Aallotar" — the alternation `namesMatch` fixed on the ROSTER side on
+2026-07-23) starved the Scribe of the known look and stance; it emitted the turn's fragment,
+`namesMatch` routed it into the right record, and the plain-replace `appearance` field lost the
+whole look (reproduced: white hair, grey eyes, broken nose, build, cloak → "a fresh scar on her
+cheek"). All three builders now match through the RAG presence helper (whole-word identifying
+tokens); the substring test survives only for names the tokenizer cannot judge ("The Lady").
+(2) Appearance gets an engine belt and keeps its contract. `appearance` stays a
+rewrite-replaces field — a haircut or disguise must be able to drop details — but a FRAGMENT
+(under half the record's length AND covering under half its tokens) joins the record through
+the dossier merge instead of replacing it. `mergeNpcAppearance` runs inside `upsertNpc`, so the
+DM's raw `npc_updates` lane, which has no merge context at all, is covered too. (3) KNOWN NPCs
+reserves slots before it ranks: pinned, then scene-present (the presence text's name hits —
+the same judgement RAG retrieval and callback curation make since this morning), then
+location-matched, then by score. A pure ranking dropped a thin ferrywoman the hero was talking
+to in favour of eight dossier-rich rivals in the capital (44 vs 51), and the DM narrated the
+dialogue without her looks, gender, or stance — the exact fields the block exists to keep
+consistent. Every mature campaign has eight rich NPCs somewhere; that was the steady state.
+`buildPresenceText` moved to narrativeMessages.js so promptBuilder can use it without a cycle.
+(4) The roster boundary trusts nothing it should not: `upsertNpc` never writes a payload `id`
+(it still matches by one; a DM entry carrying `npc-dm-guess-1` re-keyed the record and orphaned
+companion links and portraits-by-id), `pinned` is PIN_NPC's alone, `importance` is always
+recomputed, and `trust` is clamped 0..100. Two scale rulings ride along: importance is computed
+from the DOSSIER ONLY (bare name 1 … pinned 5 — the old version seeded from the stored value
+and re-added every bonus, so every named character was 5/5 at birth and the term meant
+nothing), and NPC recency is conversational (`lastSeenMessage`, stamped only by the per-turn
+Scribe/DM lanes — the journal cadence's re-mentions of past events and absence-drift installs
+for people the hero never met pass `_seen: false`; wall-clock only for legacy records).
+
 **2026-09-06 · Resolved story cards are terminal, callback curation is scene-driven, the
 journal reads the narrative transcript, and the memory layer has no wall-clock windows left.**
 Four rulings from the second 2026-09-06 queue sweep (memory-journal + story-memory — the audit

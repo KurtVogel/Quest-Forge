@@ -19,6 +19,7 @@ import { captureReflection, captureScribePass } from '../debug/memoryInspectorSt
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
 import { getKnownSpells, isSpellcaster } from '../engine/spellcasting.js';
 import { containment, tokenSet } from '../engine/textMatch.js';
+import { findSubjectsInText } from '../engine/vectorMemory.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import {
@@ -124,8 +125,36 @@ Rules:
  * so appearance updates MERGE with the established look instead of replacing it
  * with this turn's fragment ("a fresh scar" must never erase the white hair).
  */
+/**
+ * "Is this name in the turn's text?" for the buildKnown* context builders
+ * (2026-09-06 P1). The old full-name SUBSTRING test missed the DM's normal
+ * short-name usage — a turn that calls "Saima Aallotar" just "Saima" handed
+ * the Scribe NO known look and NO known stance, so it emitted the turn's
+ * fragment and the record was replaced by it. Whole-word matching on any
+ * identifying name token (the RAG presence helper), with the substring test
+ * kept for names the tokenizer cannot judge ("The Lady").
+ * @returns {(name: string) => boolean}
+ */
+function namePresenceIn(names, ...texts) {
+    const haystack = texts.filter(Boolean).join('\n');
+    const lower = haystack.toLowerCase();
+    const clean = [...new Set(names.map(n => String(n || '').trim()).filter(Boolean))];
+    const hits = new Set((findSubjectsInText(haystack, clean, clean.length || 1) || [])
+        .map(n => n.toLowerCase()));
+    return name => {
+        const key = String(name || '').trim().toLowerCase();
+        if (!key) return false;
+        if (hits.has(key)) return true;
+        // A name with no identifying token ("The Lady") cannot be judged by
+        // tokens — only THOSE keep the substring test, so "Ann" never matches
+        // "annals" while "The Lady" still matches "The Lady enters".
+        const judgeable = !!findSubjectsInText(key, [key], 1);
+        return !judgeable && lower.includes(key);
+    };
+}
+
 export function buildKnownAppearances({ character, npcs = [] } = {}, ...texts) {
-    const haystack = texts.filter(Boolean).join('\n').toLowerCase();
+    const isPresent = namePresenceIn(npcs.map(n => n?.name), ...texts);
     const entries = [];
     if (character?.appearance?.trim()) {
         entries.push(`${character.name || 'The player character'} (PLAYER CHARACTER): ${character.appearance.trim().slice(0, 240)}`);
@@ -134,7 +163,7 @@ export function buildKnownAppearances({ character, npcs = [] } = {}, ...texts) {
         if (entries.length >= 8) break;
         const name = String(npc?.name || '').trim();
         if (!name || !npc.appearance?.trim()) continue;
-        if (!haystack.includes(name.toLowerCase())) continue;
+        if (!isPresent(name)) continue;
         const identity = [npc.species, npc.gender].map(v => String(v || '').trim()).filter(Boolean).join(' ');
         entries.push(`${name}${identity ? ` (${identity})` : ''}: ${npc.appearance.trim().slice(0, 240)}`);
     }
@@ -166,7 +195,7 @@ export function buildKnownLocations({ locations = [] } = {}) {
  * beat in new words — the reducer's token dedupe can't catch paraphrases.
  */
 export function buildKnownStances({ npcs = [] } = {}, ...texts) {
-    const haystack = texts.filter(Boolean).join('\n').toLowerCase();
+    const isPresent = namePresenceIn(npcs.map(n => n?.name), ...texts);
     const entries = [];
     for (const npc of npcs) {
         if (entries.length >= 8) break;
@@ -176,7 +205,7 @@ export function buildKnownStances({ npcs = [] } = {}, ...texts) {
             .map(moment => String(moment?.text || '').trim())
             .filter(Boolean);
         if (!name || (!stance && moments.length === 0)) continue;
-        if (!haystack.includes(name.toLowerCase())) continue;
+        if (!isPresent(name)) continue;
         const lines = [];
         if (stance) lines.push(`${name}: ${stance.slice(0, 240)}`);
         if (moments.length > 0) {
@@ -199,14 +228,15 @@ export function buildKnownStances({ npcs = [] } = {}, ...texts) {
 const KNOWN_STORY_CARD_CAP = 10;
 export function buildKnownStoryCards({ storyMemory = [] } = {}, ...texts) {
     const haystack = texts.filter(Boolean).join('\n');
-    const haystackLower = haystack.toLowerCase();
     const haystackTokens = tokenSet(haystack, { minLength: 4 });
     if (haystackTokens.size === 0) return null;
-    const entries = [...(Array.isArray(storyMemory) ? storyMemory : [])]
-        .filter(card => card && typeof card.id === 'string' && card.id && typeof card.text === 'string' && card.text.trim())
+    const cards = (Array.isArray(storyMemory) ? storyMemory : [])
+        .filter(card => card && typeof card.id === 'string' && card.id && typeof card.text === 'string' && card.text.trim());
+    const isPresent = namePresenceIn(cards.flatMap(card => (Array.isArray(card.linkedNpcNames) ? card.linkedNpcNames : [])), haystack);
+    const entries = [...cards]
         .filter(card => {
             const names = Array.isArray(card.linkedNpcNames) ? card.linkedNpcNames : [];
-            if (names.some(name => name && haystackLower.includes(String(name).toLowerCase()))) return true;
+            if (names.some(name => isPresent(name))) return true;
             const subjectTokens = tokenSet(card.subject || '', { minLength: 4 });
             return subjectTokens.size > 0 && containment(subjectTokens, haystackTokens) >= 0.5;
         })

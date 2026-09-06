@@ -16,6 +16,7 @@ import {
     appendCallbackHooks,
     clampNpcDossierField,
     classifyNpcCandidate,
+    mergeNpcAppearance,
     mergeNpcDossierText,
     namesMatch,
     normalizeNpcRecord,
@@ -590,9 +591,38 @@ export function mergeNpcUpdate(npcs, payload) {
     return upsertNpc(npcs, payload);
 }
 
-export function upsertNpc(npcs, payload) {
+/**
+ * @param {object[]} npcs
+ * @param {object} payload - the update; `_seen: false` marks a lane that is
+ *   NOT a sighting (the journal cadence re-mentioning past events, an
+ *   absence-drift install for someone the hero never met) so neither
+ *   `lastSeen` nor `lastSeenMessage` is stamped (2026-09-06 audit).
+ * @param {{ messageCount?: number }} [options] - transcript length for the
+ *   conversational `lastSeenMessage` stamp the prompt curation's recency reads.
+ */
+export function upsertNpc(npcs, payload, { messageCount } = {}) {
     if (!payload || (!payload.id && !payload.name)) return npcs;
-    const update = pruneBlankFields({ ...payload, lastSeen: Date.now() });
+    const seen = payload._seen !== false;
+    const update = pruneBlankFields({
+        ...payload,
+        ...(seen && { lastSeen: Date.now() }),
+        ...(seen && Number.isFinite(messageCount) && { lastSeenMessage: messageCount }),
+    });
+    delete update._seen;
+    // Payload-trust boundary (2026-09-06 P2): the record id is engine-minted
+    // and never overwritten — a DM `npc_updates` entry carrying its own id
+    // re-keyed the record, orphaning companion links and portraits-by-id (the
+    // id still MATCHES below; it just never writes). `pinned` is the player's
+    // write alone (PIN_NPC); `importance` is always recomputed from the
+    // dossier; `trust` is clamped 0..100 (999 rendered as "trust: 999/100").
+    delete update.id;
+    delete update.pinned;
+    delete update.importance;
+    if ('trust' in update) {
+        const trust = Number(update.trust);
+        if (Number.isFinite(trust)) update.trust = Math.max(0, Math.min(100, Math.round(trust)));
+        else delete update.trust;
+    }
     if (update.appearance) {
         update.appearance = String(update.appearance).trim().slice(0, NPC_DOSSIER_FIELD_MAX);
     }
@@ -626,7 +656,9 @@ export function upsertNpc(npcs, payload) {
     );
 
     const existing = idx !== -1 ? npcs[idx] : null;
-    const classified = classifyNpcCandidate(payload, existing);
+    // Classified from the sanitized update: a DM-lane `pinned: true` must not
+    // buy roster admission or importance the way it did through the raw payload.
+    const classified = classifyNpcCandidate(update, existing);
 
     if (idx !== -1) {
         if (!classified.allowRoster && existing.rosterTier !== 'character' && !existing.pinned) {
@@ -652,6 +684,12 @@ export function upsertNpc(npcs, payload) {
         if (update.callbackHooks) {
             update.callbackHooks = appendCallbackHooks(existing.callbackHooks, update.callbackHooks);
         }
+        // Appearance stays a rewrite-replaces field, but a FRAGMENT arriving
+        // without merge context (the DM lane, or a Scribe turn that only saw a
+        // short name) joins the record instead of wiping it (2026-09-06 P1).
+        if (update.appearance) {
+            update.appearance = mergeNpcAppearance(existing.appearance, update.appearance);
+        }
         const nameToKeep = (update.name && update.name.length > (existing.name || '').length) ? update.name : existing.name;
         const merged = normalizeNpcRecord({
             ...existing,
@@ -660,7 +698,7 @@ export function upsertNpc(npcs, payload) {
             rosterTier: classified.rosterTier || existing.rosterTier || 'character',
             kind: classified.kind || existing.kind || 'character',
             importance: classified.importance,
-            pinned: update.pinned ?? existing.pinned,
+            pinned: !!existing.pinned,
         });
         return npcs.map((npc, i) => (i === idx ? merged : npc));
     }

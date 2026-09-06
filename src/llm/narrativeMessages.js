@@ -60,6 +60,31 @@ export function collectNarrativeMessages(messages = [], fromIndex = 0, toIndex =
 }
 
 /**
+ * How many recent narrative messages feed the presence gates (RAG retrieval,
+ * callback curation, KNOWN NPCs). The DM's last narration is what establishes
+ * who is in the scene; the player's own follow-up lines rarely repeat the name
+ * of the person they are talking to. Three = the player's current line
+ * (already committed), the DM's last narration, and the player's previous
+ * line — one full exchange of context, short enough that someone who left the
+ * scene fades within a turn or two.
+ */
+export const PRESENCE_MESSAGE_COUNT = 3;
+
+/**
+ * Scene text consulted ONLY for who is present (2026-09-06 P1) — never
+ * embedded, so a search query stays unchanged. Reads the narrative-eligible
+ * transcript: hidden setups, soft-deleted refusals, infrastructure error
+ * lines, and OOC table talk never count as presence. Lives here (not in the
+ * orchestrator) so promptBuilder can use it for KNOWN NPCs without a cycle.
+ */
+export function buildPresenceText(messages) {
+    return collectNarrativeMessages(messages)
+        .slice(-PRESENCE_MESSAGE_COUNT)
+        .map(m => m.content)
+        .join(' ');
+}
+
+/**
  * The newest assistant message that is genuine narration — the DM's latest
  * narrated moment. Null when no narration has been played yet.
  */
