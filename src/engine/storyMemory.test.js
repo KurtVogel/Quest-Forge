@@ -295,3 +295,81 @@ describe('normalizeStoryMemoryCard two-arg merge (existing-preserve branches)', 
         expect(merged.location).toBe('Kuusisaari');
     });
 });
+
+describe('scene-driven curation and conversational windows (2026-09-06 audit)', () => {
+    const celeste = normalizeStoryMemoryCard({
+        type: 'relationship',
+        subject: 'Celeste floorboard letter',
+        text: 'Celeste hid a letter under the parlour floorboard for the hero.',
+        salience: 3,
+        emotionalCharge: 2,
+        linkedNpcNames: ['Celeste'],
+        location: 'Parlour',
+    });
+    const smuggler = normalizeStoryMemoryCard({
+        type: 'npcAgenda',
+        subject: 'Vasko smuggling run',
+        text: 'Vasko plans to run contraband past the toll gate at the new moon.',
+        salience: 3,
+        emotionalCharge: 2,
+        linkedNpcNames: ['Vasko'],
+        location: 'Toll gate',
+    });
+    const scene = { query: 'I ask Celeste about the ledger.', location: 'Parlour' };
+    const transcript = (n) => Array.from({ length: n }, (_, i) => ({
+        role: i % 2 ? 'assistant' : 'user', content: `line ${i}`,
+    }));
+
+    it('the linked-NPC bonus fires only for NPCs PRESENT in the scene — an absent person earns nothing', () => {
+        const absent = scoreStoryMemory(smuggler, { ...scene, npcs: [] });
+        // Celeste is present; Vasko is two towns away: no bonus for his card.
+        expect(scoreStoryMemory(smuggler, { ...scene, npcs: [{ name: 'Celeste' }] })).toBe(absent);
+        // Present: +5 for the linked person, and his name joins the query tokens (+3 overlap).
+        expect(scoreStoryMemory(smuggler, { ...scene, npcs: [{ name: 'Vasko' }] })).toBeCloseTo(absent + 8, 5);
+        // And the person the hero is talking to outscores the absent smuggler.
+        const curated = curateStoryMemory({ memories: [smuggler, celeste], ...scene, npcs: [{ name: 'Celeste' }] });
+        expect(curated[0].subject).toBe('Celeste floorboard letter');
+    });
+
+    it('roster dispositions and notes no longer feed the query tokens', () => {
+        const plain = scoreStoryMemory(smuggler, { ...scene, npcs: [{ name: 'Celeste' }] });
+        const noisy = scoreStoryMemory(smuggler, {
+            ...scene,
+            npcs: [{ name: 'Celeste', disposition: 'wary', lastNotes: 'Mentioned contraband, the toll gate, and the new moon smuggling run.' }],
+        });
+        expect(noisy).toBe(plain);
+    });
+
+    it('the callback cooldown is measured in conversational messages when the card carries a use stamp', () => {
+        const card = { ...celeste, lastUsedMessage: 10, lastSeenMessage: 10 };
+        // Four conversational messages since the DM paid it off: still cooling.
+        expect(scoreStoryMemory(card, { query: 'x', messages: transcript(14) })).toBe(0);
+        // System lines and hidden rows never age the window (the ledger rule).
+        const padded = [
+            ...transcript(14),
+            ...Array.from({ length: 10 }, () => ({ role: 'system', content: 'Rolled 12.' })),
+            { role: 'user', content: 'withheld setup', hidden: true },
+        ];
+        expect(scoreStoryMemory(card, { query: 'x', messages: padded })).toBe(0);
+        // Eight conversational messages later the card is eligible again.
+        expect(scoreStoryMemory(card, { query: 'x', messages: transcript(18) })).toBeGreaterThan(0);
+        // Without the transcript the raw index gap is the fallback measure.
+        expect(scoreStoryMemory(card, { query: 'x', messageCount: 14 })).toBe(0);
+        expect(scoreStoryMemory(card, { query: 'x', messageCount: 18 })).toBeGreaterThan(0);
+    });
+
+    it('the recency bonus decays with conversational age (3 points fresh, gone after ~60 messages)', () => {
+        const stamped = { ...celeste, lastSeenMessage: 18 };
+        const fresh = scoreStoryMemory(stamped, { query: 'x', messages: transcript(18) });
+        const stale = scoreStoryMemory(stamped, { query: 'x', messages: transcript(90) });
+        expect(fresh - stale).toBeCloseTo(3, 5);
+    });
+
+    it('legacy cards without message stamps fall back to their wall-clock stamps', () => {
+        const now = Date.now();
+        const justUsed = { ...celeste, lastUsedAt: now - 60_000 };
+        expect(scoreStoryMemory(justUsed, { query: 'x', now, messages: transcript(40) })).toBe(0);
+        const longAgo = { ...celeste, lastUsedAt: now - 1000 * 60 * 60 };
+        expect(scoreStoryMemory(longAgo, { query: 'x', now, messages: transcript(40) })).toBeGreaterThan(0);
+    });
+});

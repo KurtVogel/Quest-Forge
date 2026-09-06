@@ -1,4 +1,5 @@
 import { containment, overlapCount, tokenSet as sharedTokenSet } from './textMatch.js';
+import { conversationalDistance } from './replayLedger.js';
 
 const ALLOWED_TYPES = new Set([
     'callback',
@@ -17,7 +18,19 @@ const MAX_SUBJECT_LENGTH = 80;
 const MAX_TAGS = 8;
 const MAX_LINKED_NPCS = 6;
 const DEFAULT_CARD_LIMIT = 5;
-const CALLBACK_COOLDOWN_MS = 1000 * 60 * 8;
+/**
+ * Callback cooldown and recency are measured in CONVERSATIONAL distance
+ * (2026-09-06 audit — the last wall-clock windows in the memory layer: eight
+ * minutes was one turn in a slow session and three in a fast one). A card the
+ * DM just paid off stays out of curation for CALLBACK_COOLDOWN_MESSAGES
+ * conversational messages (~4 turns); the recency bonus decays from 3 to 0
+ * over 3 × RECENCY_DECAY_MESSAGES (~6 journal cadences). Cards born before
+ * the message stamps existed fall back to their wall-clock stamps.
+ */
+export const CALLBACK_COOLDOWN_MESSAGES = 8;
+const RECENCY_DECAY_MESSAGES = 20;
+const LEGACY_CALLBACK_COOLDOWN_MS = 1000 * 60 * 8;
+const LEGACY_RECENCY_DECAY_HOURS = 24;
 const TYPE_ALIASES = {
     player_canon: 'playerCanon',
     playercanon: 'playerCanon',
@@ -140,11 +153,22 @@ export function normalizeStoryMemoryCard(card = {}, existing = null) {
     const firstSeenMessage = Number.isFinite(card.firstSeenMessage)
         ? card.firstSeenMessage
         : (Number.isFinite(existing?.firstSeenMessage) ? existing.firstSeenMessage : undefined);
+    // Conversational stamps for the curation windows (reducer-owned like
+    // firstSeenMessage): the message count when the card was last merged and
+    // when the DM last paid it off.
+    const lastSeenMessage = Number.isFinite(card.lastSeenMessage)
+        ? card.lastSeenMessage
+        : (Number.isFinite(existing?.lastSeenMessage) ? existing.lastSeenMessage : undefined);
+    const lastUsedMessage = Number.isFinite(card.lastUsedMessage)
+        ? card.lastUsedMessage
+        : (Number.isFinite(existing?.lastUsedMessage) ? existing.lastUsedMessage : undefined);
 
     return {
         ...(knownBy.length > 0 && { knownBy }),
         ...(witnessed && { witnessed: true }),
         ...(Number.isFinite(firstSeenMessage) && { firstSeenMessage }),
+        ...(Number.isFinite(lastSeenMessage) && { lastSeenMessage }),
+        ...(Number.isFinite(lastUsedMessage) && { lastUsedMessage }),
         id: cleanText(card.id, existing?.id || `mem-${now}-${Math.random().toString(36).slice(2, 7)}`),
         type,
         text,
@@ -202,14 +226,50 @@ export function findStoryMemoryMatch(memories = [], card = {}) {
     });
 }
 
-export function scoreStoryMemory(card, { query = '', location = '', npcs = [], now = Date.now() } = {}) {
+/**
+ * Conversational messages since a card stamp, or null when the card carries
+ * no stamp (legacy) or the caller supplied no transcript position. With the
+ * live transcript the count skips system lines and hidden/deleted rows like
+ * every replay ledger; without it the raw index gap is the best available.
+ */
+function conversationalAge(stamp, messages, messageCount) {
+    if (!Number.isFinite(stamp)) return null;
+    const end = Number.isFinite(messageCount)
+        ? messageCount
+        : (Array.isArray(messages) ? messages.length : NaN);
+    if (!Number.isFinite(end)) return null;
+    if (Array.isArray(messages)) return conversationalDistance(messages, stamp - 1, end - 1);
+    return Math.max(0, end - stamp);
+}
+
+/**
+ * @param {object} card - a stored (normalized) story card
+ * @param {object} [scene]
+ * @param {string} [scene.query] - the player's line + scene context
+ * @param {string} [scene.location] - the hero's current location
+ * @param {object[]} [scene.npcs] - the NPCs PRESENT IN THE SCENE (2026-09-06
+ *   audit) — never the whole roster: the linked-NPC bonus asks "is this
+ *   card's person here?", and only their NAMES join the query tokens.
+ *   Roster-wide dispositions/notes used to make an absent smuggler's card
+ *   outscore the person the hero is talking to.
+ * @param {object[]} [scene.messages] - the live transcript, for conversational
+ *   cooldown/recency (falls back to raw index distance, then to wall-clock).
+ * @param {number} [scene.messageCount] - transcript length when omitted.
+ * @param {number} [scene.now] - wall-clock, legacy-card fallback only.
+ */
+export function scoreStoryMemory(card, { query = '', location = '', npcs = [], messages = null, messageCount, now = Date.now() } = {}) {
     if (!card || (card.status || 'active') !== 'active') return 0;
-    if (card.lastUsedAt && now - card.lastUsedAt < CALLBACK_COOLDOWN_MS) return 0;
+    const usedAge = conversationalAge(card.lastUsedMessage, messages, messageCount);
+    if (usedAge !== null) {
+        if (usedAge < CALLBACK_COOLDOWN_MESSAGES) return 0;
+    } else if (card.lastUsedAt && now - card.lastUsedAt < LEGACY_CALLBACK_COOLDOWN_MS) {
+        return 0;
+    }
 
     const queryTokens = tokenSet([
         query,
         location,
-        ...(npcs || []).map(n => `${n.name || ''} ${n.disposition || ''} ${n.lastNotes || n.notes || ''}`),
+        ...(npcs || []).map(n => String(n?.name || '')),
     ].filter(Boolean).join(' '));
     // Exported entry point: guard field types rather than trust every caller
     // to pass a normalized card (all stored cards are, but the function isn't).
@@ -235,9 +295,12 @@ export function scoreStoryMemory(card, { query = '', location = '', npcs = [], n
         if (npcNames.has(String(name).toLowerCase())) score += 5;
     }
 
-    if (card.lastSeenAt) {
+    const seenAge = conversationalAge(card.lastSeenMessage, messages, messageCount);
+    if (seenAge !== null) {
+        score += Math.max(0, 3 - seenAge / RECENCY_DECAY_MESSAGES);
+    } else if (card.lastSeenAt) {
         const ageHours = Math.max(0, (now - card.lastSeenAt) / (1000 * 60 * 60));
-        score += Math.max(0, 3 - ageHours / 24);
+        score += Math.max(0, 3 - ageHours / LEGACY_RECENCY_DECAY_HOURS);
     }
 
     if (card.type === 'promise' || card.type === 'mystery' || card.type === 'foreshadow') score += 2;
@@ -257,7 +320,8 @@ const DORMANCY_EXEMPT_TYPES = new Set(['promise', 'playerCanon']);
  * DORMANCY_JOURNAL_CYCLES journal entries decay to `dormant` — still in saves,
  * skipped by curation and the RAG seed, and revived automatically if the
  * Scribe re-reports the beat (the ADD_STORY_MEMORY_CARD merge restores
- * `active`). "Untouched" compares the card's last merge/use stamp against the
+ * `active` — for DORMANT cards only; `resolved` is terminal there, 2026-09-06).
+ * "Untouched" compares the card's last merge/use stamp against the
  * timestamp of the journal entry N cycles back, so the measure is
  * conversational (a cadence ≈ 10 messages) while using existing stamps.
  */
@@ -280,9 +344,9 @@ export function applyStoryMemoryDormancy(cards = [], journal = []) {
     return changed ? next : list;
 }
 
-export function curateStoryMemory({ memories = [], query = '', location = '', npcs = [], now = Date.now(), limit = DEFAULT_CARD_LIMIT } = {}) {
+export function curateStoryMemory({ memories = [], query = '', location = '', npcs = [], messages = null, messageCount, now = Date.now(), limit = DEFAULT_CARD_LIMIT } = {}) {
     return (memories || [])
-        .map(card => ({ card, score: scoreStoryMemory(card, { query, location, npcs, now }) }))
+        .map(card => ({ card, score: scoreStoryMemory(card, { query, location, npcs, messages, messageCount, now }) }))
         .filter(item => item.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)

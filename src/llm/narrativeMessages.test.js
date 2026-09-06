@@ -45,4 +45,14 @@ describe('THE narrative-eligibility predicate (2026-09-01 P1)', () => {
         expect(findLatestNarration([{ role: 'user', content: 'hello' }])).toBeNull();
         expect(findLatestNarration(undefined)).toBeNull();
     });
+
+    it('tracks the table-talk pairing from the transcript start, so a span opening on the DM reply still skips it (2026-09-06 journal batch)', () => {
+        const span = [
+            { id: 'ooc', role: 'user', content: 'OOC: recap please' },
+            { id: 'reply', role: 'assistant', content: 'At the table: you were at the gate.' },
+            { id: 'act', role: 'user', content: 'I push the gate open.' },
+        ];
+        expect(collectNarrativeMessages(span, 1).map(m => m.id)).toEqual(['act']);
+        expect(collectNarrativeEntries(span, 1, 2).map(e => e.index)).toEqual([2]);
+    });
 });

@@ -18,6 +18,7 @@ import {
     dispatchClassifiedNpcUpdate,
 } from './npcRoster.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
+import { collectNarrativeMessages } from '../llm/narrativeMessages.js';
 import { isSameLocation, sanitizeExtractedLocation } from './locationRegistry.js';
 
 export function normalizeLocationName(loc) {
@@ -29,7 +30,11 @@ export function normalizeLocationName(loc) {
         .replace(/[^\w\s]/g, '');
 }
 
-const SUMMARIZE_EVERY = 10; // Summarize every N new messages
+// Summarize every N new NARRATIVE-ELIGIBLE messages (2026-09-06 P2 — the last
+// raw-index window in the memory layer: a dice turn burns ~5 raw rows, so
+// counting raw rows journaled roll-heavy play every ~2 turns and aged
+// low-salience cards out in ~6 turns through DORMANCY_JOURNAL_CYCLES).
+export const SUMMARIZE_EVERY = 10;
 
 // A stalled cadence must not grow its payload without bound: one summarize call
 // covers at most MAX_BATCH_MESSAGES (a backlog drains cap-by-cap across turns),
@@ -131,9 +136,13 @@ Rules:
  */
 export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
     const messageCount = state.messages.length;
-    const newMessages = messageCount - lastSummarizedIndex;
+    const newRawMessages = messageCount - lastSummarizedIndex;
+    const newNarrativeMessages = collectNarrativeMessages(state.messages, lastSummarizedIndex).length;
 
-    if (newMessages < SUMMARIZE_EVERY) {
+    // Narrative cadence, with the raw backlog cap as the escape: a stretch of
+    // MAX_BATCH_MESSAGES rows with nothing narrative in it (hidden setups,
+    // error lines) still has to be archived or the boundary never advances.
+    if (newNarrativeMessages < SUMMARIZE_EVERY && newRawMessages < MAX_BATCH_MESSAGES) {
         return { index: lastSummarizedIndex, journalEntry: null };
     }
 
@@ -185,10 +194,15 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
     };
 
     try {
-        // Get the unsummarized messages (bounded batch, per-message clamp)
-        const messagesToSummarize = state.messages.slice(lastSummarizedIndex, batchEnd);
-        const recentMessages = messagesToSummarize
-            .filter(m => !m.hidden && !m.deleted)
+        // The unsummarized stretch (bounded batch, per-message clamp) through
+        // THE narrative-eligibility predicate (2026-09-06 P1): `kind: 'error'`
+        // infrastructure lines and OOC table-talk exchanges (the player's line
+        // AND the DM's at-the-table reply) used to reach the summarizer as
+        // play — into the permanent tier that feeds SESSION HISTORY, the
+        // journal RAG row, and the cadence reflection, while the table-talk
+        // contract says the exchange is kept out of memory. Engine roll-result
+        // system lines pass the predicate and still ride the transcript.
+        const recentMessages = collectNarrativeMessages(state.messages, lastSummarizedIndex, batchEnd - 1)
             .map(m => `[${m.role.toUpperCase()}]: ${clampText(m.content, MAX_MESSAGE_CHARS)}`)
             .join('\n\n');
 

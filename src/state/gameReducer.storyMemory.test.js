@@ -230,3 +230,71 @@ describe('story-memory dormancy on the journal cadence (2026-08-06 audit)', () =
         expect(revived.storyMemory[0].status).toBe('active');
     });
 });
+
+describe('resolved is terminal on the Scribe re-report path (2026-09-06 P1)', () => {
+    const messages = (n) => Array.from({ length: n }, (_, i) => ({
+        id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: `line ${i}`,
+    }));
+    const base = {
+        ...initialGameState,
+        messages: messages(6),
+        storyMemory: [{
+            id: 'mem-vow', type: 'promise', subject: 'ferry vow',
+            text: 'Aune promised the hero safe passage across the ferry line.',
+            salience: 4, emotionalCharge: 3, status: 'resolved',
+            firstSeenAt: 1, lastSeenAt: 1, lastUsedAt: 1,
+            tags: [], linkedNpcNames: ['Aune'], location: '', source: 'scribe',
+        }],
+    };
+
+    it('a Scribe re-report of a paid-off beat stays resolved (was: the merge spread flipped it active)', () => {
+        const next = gameReducer(base, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { type: 'promise', subject: 'ferry vow', text: 'Aune promised the hero safe passage across the ferry line.' },
+        });
+        expect(next.storyMemory).toHaveLength(1);
+        expect(next.storyMemory[0].status).toBe('resolved');
+    });
+
+    it('a re-report addressed by id (the KNOWN STORY CARDS contract) stays resolved too', () => {
+        const next = gameReducer(base, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { id: 'mem-vow', type: 'promise', subject: 'ferry vow', text: 'Aune kept her promise: the hero crossed the ferry line safely.' },
+        });
+        expect(next.storyMemory).toHaveLength(1);
+        expect(next.storyMemory[0].status).toBe('resolved');
+    });
+
+    it('only an explicit status from the DM memory_updates channel reopens a resolved card', () => {
+        const next = gameReducer(base, { type: 'UPDATE_STORY_MEMORY', payload: { id: 'mem-vow', status: 'active' } });
+        expect(next.storyMemory[0].status).toBe('active');
+    });
+
+    it('stamps lastSeenMessage at birth and on merge, lastUsedMessage when the DM marks a card used', () => {
+        const born = gameReducer(base, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { type: 'callback', subject: 'gate favor', text: 'The gatekeeper still owes the hero a favor for the smuggled letter.' },
+        });
+        expect(born.storyMemory).toHaveLength(2);
+        expect(born.storyMemory[1].firstSeenMessage).toBe(6);
+        expect(born.storyMemory[1].lastSeenMessage).toBe(6);
+        expect(born.storyMemory[1].lastUsedMessage).toBeUndefined();
+
+        const later = { ...born, messages: messages(8) };
+        const used = gameReducer(later, {
+            type: 'UPDATE_STORY_MEMORY',
+            payload: { id: born.storyMemory[1].id, used: true },
+        });
+        expect(used.storyMemory[1].lastUsedMessage).toBe(8);
+        expect(used.storyMemory[1].lastSeenMessage).toBe(8);
+
+        const merged = gameReducer({ ...used, messages: messages(11) }, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { type: 'callback', subject: 'gate favor', text: 'The gatekeeper still owes the hero a favor for the smuggled letter.' },
+        });
+        expect(merged.storyMemory).toHaveLength(2);
+        expect(merged.storyMemory[1].lastSeenMessage).toBe(11);
+        expect(merged.storyMemory[1].lastUsedMessage).toBe(8);
+        expect(merged.storyMemory[1].firstSeenMessage).toBe(6);
+    });
+});

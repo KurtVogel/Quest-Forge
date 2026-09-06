@@ -8,6 +8,43 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-06 · Resolved story cards are terminal, callback curation is scene-driven, the
+journal reads the narrative transcript, and the memory layer has no wall-clock windows left.**
+Four rulings from the second 2026-09-06 queue sweep (memory-journal + story-memory — the audit
+Vesa directed at the memory tiers: "memory is the leading light of this project"). (1) `resolved`
+is TERMINAL for story cards, the 2026-09-01 fronts ruling applied one tier down. The ADD merge
+spread the incoming card over the existing one and a normalized incoming card always says
+`active`, while the Scribe — which never saw the card pool — re-reported every paid-off beat
+from the next recap line, so a promise the DM had just paid off was back in DRAMATIC CALLBACK
+OPPORTUNITIES a turn later (reproduced). The reducer now pins `resolved` on merge: only a
+`dormant` card revives on a Scribe re-report (the pinned intent), and only an explicit
+`status: 'active'` through the DM's `memory_updates` reopens a resolved card — the DM decides
+the fiction reopened it, never the extractor's recap. The Scribe also gets the pool: a compact
+KNOWN STORY CARDS block (id/type/status/subject/stub for the cards whose person or subject is in
+the turn's text) with an update-by-`id` contract, so beats are updated in place instead of
+re-minted — the same KNOWN APPEARANCES pattern, applied to the last record the Scribe was
+blind to. (2) Curation asks who is HERE. Both call sites handed `curateStoryMemory` the whole
+roster, so the +5 "linked NPC present" bonus fired for every card whose person existed
+anywhere and the query tokens were a roster-wide soup of dispositions and notes — a smuggler
+two towns away scored within a point of the person the hero was talking to, 17 of its 25 points
+from the roster. Presence is now the same judgement RAG makes (`findPresentNpcs`: the player's
+line plus `buildPresenceText`, matched by name; party companions are always present), and only
+NPC names join the query tokens. A callback is intentional when it is about the scene, not
+about the campaign. (3) The journal summarizer reads the same narrative-eligible transcript as
+the chronicler (`collectNarrativeMessages`), and its cadence counts narrative-eligible messages.
+The permanent tier was the one consumer still filtering on `hidden`/`deleted` alone, so
+infrastructure error lines and the whole OOC exchange were summarized as play into SESSION
+HISTORY, the journal RAG row, and the cadence reflection — "kept out of memory" held everywhere
+except the tier that lasts longest. Engine roll-result system lines pass the predicate and
+still ride the batch; the raw `MAX_BATCH_MESSAGES` backlog stays as the escape so a
+narrative-empty stretch still archives; a `fallback` entry is bookkeeping, never memory — it
+is not embedded, live or on mount. (4) The last wall-clock windows in the memory layer are
+gone: cards carry reducer-stamped `lastSeenMessage`/`lastUsedMessage`, and the callback
+cooldown (8 conversational messages) and recency bonus (3 → 0 over 60) are measured with the
+same `conversationalDistance` every ledger uses — eight minutes was one turn in a slow session
+and three in a fast one. Wall-clock stamps remain only as the fallback for cards born before
+the message stamps existed.
+
 **2026-09-06 · RAG presence is judged from the SCENE, durable canon is never evicted, and a
 provider refusal is an error — never a blank turn.** Three rulings from the 2026-09-06 queue
 sweep (vector-memory-rag + providers-adapter). (1) The presence gate (2026-08-28, "dormant,

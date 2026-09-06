@@ -18,6 +18,7 @@ import { tryParseDirectorJson } from './directorUtils.js';
 import { captureReflection, captureScribePass } from '../debug/memoryInspectorStore.js';
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
 import { getKnownSpells, isSpellcaster } from '../engine/spellcasting.js';
+import { containment, tokenSet } from '../engine/textMatch.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import {
@@ -67,6 +68,7 @@ Output ONLY valid JSON:
   ],
   "story_memory": [
     {
+      "id": "ONLY when this beat continues a card listed under KNOWN STORY CARDS — that card's exact id; omit for a genuinely new beat",
       "type": "callback|promise|wound|relationship|mystery|playerCanon|foreshadow|npcAgenda",
       "text": "compact memory card, written as something the DM can naturally use later",
       "subject": "person, place, object, promise, wound, rumor, or unresolved thread",
@@ -96,6 +98,7 @@ Rules:
 - A player message is not authoritative evidence about external reality. Do not turn player-asserted creatures, objects, exits, relationships, events, enemy behavior, or outcomes into world_facts, NPC updates, or playerCanon unless the DM narrative explicitly accepts or establishes them.
 - When AUTHORITATIVE ENGINE STATE is provided, it overrides the prose. Never record a combatant dead, alive, fled, surrendered, victorious, or defeated contrary to that state.
 - Keep story_memory compact; do not duplicate ordinary world_facts unless the memory has callback value.
+- When KNOWN STORY CARDS lists a beat and this turn continues, deepens, or restates it, emit it with that card's exact "id" and the COMPLETE updated text so the record is updated in place — never mint a second card for a beat already on record. A card listed as resolved is PAID OFF: never re-report it under any wording (the engine keeps it resolved regardless).
 - Only include npc_updates for NPCs that appeared in this specific exchange
 - The hero's PARTY COMPANIONS are NPCs for record-keeping: emit npc_updates for them (stanceToPlayer, bondMoment, appearance, personality, goals) exactly like any other character — never skip someone because they travel with the hero. The party is the game's most sustained relationship, so companion stance shifts and bond moments matter MORE than a stranger's, not less.
 - basedIn is the NPC's current anchor in the world (not permanent): update it when they are reassigned, relocate, or fiction establishes a new base. lastLocation is ephemeral — where they were this turn
@@ -185,6 +188,38 @@ export function buildKnownStances({ npcs = [] } = {}, ...texts) {
 }
 
 /**
+ * Story cards already on record for the people and threads in this exchange
+ * (2026-09-06 P1 — the KNOWN APPEARANCES pattern for the card pool). The
+ * Scribe never saw the pool, so every recap of a paid-off promise was
+ * re-minted as a fresh card — and, until the reducer pinned `resolved`,
+ * revived. Cards join when a linked NPC's name or the subject's meaningful
+ * tokens appear in the turn's text; compact by design (id/type/status/
+ * subject + a short text stub), most recently seen first, capped.
+ */
+const KNOWN_STORY_CARD_CAP = 10;
+export function buildKnownStoryCards({ storyMemory = [] } = {}, ...texts) {
+    const haystack = texts.filter(Boolean).join('\n');
+    const haystackLower = haystack.toLowerCase();
+    const haystackTokens = tokenSet(haystack, { minLength: 4 });
+    if (haystackTokens.size === 0) return null;
+    const entries = [...(Array.isArray(storyMemory) ? storyMemory : [])]
+        .filter(card => card && typeof card.id === 'string' && card.id && typeof card.text === 'string' && card.text.trim())
+        .filter(card => {
+            const names = Array.isArray(card.linkedNpcNames) ? card.linkedNpcNames : [];
+            if (names.some(name => name && haystackLower.includes(String(name).toLowerCase()))) return true;
+            const subjectTokens = tokenSet(card.subject || '', { minLength: 4 });
+            return subjectTokens.size > 0 && containment(subjectTokens, haystackTokens) >= 0.5;
+        })
+        .sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0))
+        .slice(0, KNOWN_STORY_CARD_CAP)
+        .map(card => {
+            const subject = String(card.subject || '').trim();
+            return `- id: ${card.id} | type: ${card.type || 'callback'} | status: ${card.status || 'active'}${subject ? ` | subject: ${subject.slice(0, 80)}` : ''} | "${card.text.trim().slice(0, 100)}"`;
+        });
+    return entries.length > 0 ? entries.join('\n') : null;
+}
+
+/**
  * Run the Scribe after a DM response to extract world-state updates.
  * Dispatches updates silently — the player never sees this.
  *
@@ -227,7 +262,7 @@ function npcUpdateContradictsAuthoritativeCombat(npc, authoritativeContext) {
     return contradictsAuthoritativeCombat(`${npc.name}: ${fields.join(' ')}`, authoritativeContext);
 }
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownLocations = null, dmLocationEvent = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownLocations = null, dmLocationEvent = null }) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
 
@@ -265,6 +300,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     : null,
                 knownStances
                     ? `KNOWN PLAYER-RELATIONSHIP STANCES (each NPC's established personal stance toward the hero — stanceToPlayer updates must merge with these, never shrink them to this turn's fragment):\n${knownStances}`
+                    : null,
+                knownStoryCards
+                    ? `KNOWN STORY CARDS (beats already on record for the people and threads in this exchange — update one by its exact "id" instead of minting a duplicate; a resolved card is paid off and must NOT be re-reported):\n${knownStoryCards}`
                     : null,
                 knownLocations
                     ? `KNOWN PLACES (canonical place names the game already tracks): ${knownLocations}\nWhen this turn's location is one of these places under ANY phrasing — "the back room of the chandlery" IS the chandlery — report "location" as the canonical name verbatim. A distinct named place not on this list (a particular shop, street, or site, even inside a known town) keeps its own proper name.`

@@ -79,22 +79,34 @@ export const handlers = {
         const card = normalizeStoryMemoryCard(action.payload);
         if (!card) return state;
         const idx = findStoryMemoryMatch(state.storyMemory || [], card);
+        const messageCount = (state.messages || []).length;
         if (idx === -1) {
             // Message-index birth stamp: regional hearsay measures a witnessed
             // deed's age in conversational messages, which wall-clock can't do.
-            const born = { ...card, firstSeenMessage: (state.messages || []).length };
+            // lastSeenMessage feeds the curation recency window the same way.
+            const born = { ...card, firstSeenMessage: messageCount, lastSeenMessage: messageCount };
             return { ...state, storyMemory: [...(state.storyMemory || []), born] };
         }
         const existing = state.storyMemory[idx];
+        // `resolved` is TERMINAL here (2026-09-06 P1, the fronts' 2026-09-01
+        // ruling): a normalized incoming card always carries status 'active',
+        // and the Scribe — which never sees the card pool — re-reports a
+        // paid-off beat from every recap line, so the spread used to flip a
+        // resolved promise back into DRAMATIC CALLBACKS a turn after the DM
+        // paid it off. Only a DORMANT card revives on re-report; reopening a
+        // resolved one takes an explicit status from the DM's memory_updates.
+        const status = existing.status === 'resolved' ? 'resolved' : card.status;
         return {
             ...state,
             storyMemory: state.storyMemory.map((memory, i) => i === idx
                 ? normalizeStoryMemoryCard({
                     ...existing,
                     ...card,
+                    status,
                     text: pickMergedCardText(existing.text, card.text),
                     firstSeenAt: existing.firstSeenAt,
                     lastSeenAt: Date.now(),
+                    lastSeenMessage: messageCount,
                     salience: Math.max(existing.salience || 1, card.salience || 1),
                     emotionalCharge: Math.max(existing.emotionalCharge || 0, card.emotionalCharge || 0),
                     tags: [...new Set([...(existing.tags || []), ...(card.tags || [])])],
@@ -133,10 +145,18 @@ export const handlers = {
             idx = cards.findIndex(memory => memory.text?.toLowerCase() === update.text.toLowerCase());
         }
         if (idx === -1) return state;
+        // Conversational twins of the wall-clock stamps: the curation cooldown
+        // and recency windows read these (2026-09-06).
+        const messageCount = (state.messages || []).length;
+        const stamps = {
+            lastSeenAt: Date.now(),
+            lastSeenMessage: messageCount,
+            ...(update.lastUsedAt && { lastUsedMessage: messageCount }),
+        };
         return {
             ...state,
             storyMemory: state.storyMemory.map((memory, i) => i === idx
-                ? normalizeStoryMemoryCard({ ...memory, ...update, lastSeenAt: Date.now() }, memory)
+                ? normalizeStoryMemoryCard({ ...memory, ...update, ...stamps }, memory)
                 : memory),
         };
     },

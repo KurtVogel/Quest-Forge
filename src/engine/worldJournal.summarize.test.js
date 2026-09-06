@@ -307,3 +307,45 @@ describe('npcs_encountered upsert loop (queue 2026-07-18)', () => {
         expect('secrets' in updates[0][0].payload).toBe(false);
     });
 });
+
+describe('the journal batch is narrative-eligible play only (2026-09-06 memory-journal audit)', () => {
+    it('excludes infrastructure error lines and OOC table-talk pairs from the transcript, keeps roll-result lines', async () => {
+        sendMessageMock.mockResolvedValue(validSummary());
+        const messages = [
+            ...makeMessages(10),
+            { id: 'err', role: 'system', kind: 'error', content: 'Error resolving check: Failed to fetch' },
+            { id: 'roll', role: 'system', content: 'Astra rolled **17** on Stealth.' },
+            { id: 'ooc', role: 'user', content: 'OOC: can we slow the pacing down?' },
+            { id: 'ooc-reply', role: 'assistant', content: 'At the table: sure, slower from here.' },
+        ];
+        const dispatch = vi.fn();
+
+        await maybeAutoSummarize(makeState(messages), dispatch, 0);
+
+        const payload = sendMessageMock.mock.calls[0][0].userMessage;
+        expect(payload).not.toContain('Failed to fetch');
+        expect(payload).not.toContain('slow the pacing');
+        expect(payload).not.toContain('slower from here');
+        expect(payload).toContain('rolled **17**');
+        expect(payload).toContain('Message 9');
+        // The excluded rows are still archived behind the boundary like any summarized stretch.
+        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 14 });
+    });
+
+    it('counts the cadence in narrative-eligible messages, not raw rows (a dice turn burns ~5 raw rows)', async () => {
+        // 10 raw rows, 6 narrative: the audit's reproduced "fired at 10 raw / 6 visible".
+        const messages = makeMessages(10).map((m, i) => (i % 5 >= 3 ? { ...m, hidden: true } : m));
+        const dispatch = vi.fn();
+
+        const result = await maybeAutoSummarize(makeState(messages), dispatch, 0);
+        expect(result).toEqual({ index: 0, journalEntry: null });
+        expect(sendMessageMock).not.toHaveBeenCalled();
+
+        // The same stretch fires once ten narrative messages exist.
+        sendMessageMock.mockResolvedValue(validSummary());
+        const more = [...messages, ...makeMessages(4).map((m, i) => ({ ...m, id: `x-${i}` }))];
+        const fired = await maybeAutoSummarize(makeState(more), dispatch, 0);
+        expect(fired.index).toBe(14);
+        expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    });
+});

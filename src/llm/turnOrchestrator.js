@@ -30,7 +30,7 @@ import { applyEvents } from '../state/applyEvents.js';
 import { handleRequestedRolls } from '../engine/rollResolver.js';
 import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../engine/outOfCombatRollPolicy.js';
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
-import { buildKnownAppearances, buildKnownLocations, buildKnownStances, runScribe } from './scribe.js';
+import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe } from './scribe.js';
 import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { addMemory, findSubjectsInText, retrieveRelevant } from '../engine/vectorMemory.js';
 import { collectNarrativeMessages } from './narrativeMessages.js';
@@ -65,6 +65,33 @@ export function buildPresenceText(messages) {
         .slice(-PRESENCE_MESSAGE_COUNT)
         .map(m => m.content)
         .join(' ');
+}
+
+/** Roster NPCs judged present in the scene, at most this many by name hit. */
+export const PRESENT_NPC_CAP = 8;
+
+/**
+ * The roster records PRESENT in the scene, for dramatic-callback curation
+ * (2026-09-06 P1). Both curation call sites used to hand `scoreStoryMemory`
+ * the WHOLE roster, so the "+5 linked NPC present" bonus fired for every card
+ * whose person existed anywhere in the campaign and the query tokens were a
+ * roster-wide soup of dispositions and notes — a smuggler two towns away
+ * scored within a point of the person the hero was talking to. Presence is
+ * the same judgement RAG makes: the player's line plus the last narrative
+ * messages (`buildPresenceText`), matched by name through `findSubjectsInText`.
+ * Party companions travel with the hero and are always present.
+ */
+export function findPresentNpcs(state, playerMessage = '') {
+    const roster = Array.isArray(state?.npcs) ? state.npcs : [];
+    if (roster.length === 0) return [];
+    const names = roster.map(n => n?.name).filter(Boolean);
+    const sceneText = `${playerMessage || ''} ${buildPresenceText(state?.messages || [])}`;
+    const present = new Set((findSubjectsInText(sceneText, names, PRESENT_NPC_CAP) || [])
+        .map(name => String(name).toLowerCase()));
+    for (const companion of (Array.isArray(state?.party) ? state.party : [])) {
+        if (companion?.name) present.add(String(companion.name).toLowerCase());
+    }
+    return roster.filter(n => present.has(String(n?.name || '').toLowerCase()));
 }
 
 const noop = () => {};
@@ -106,7 +133,10 @@ export function createTurnRunner({
         try {
             const result = await maybeAutoSummarize(getState(), dispatch, summarizedBoundary());
             const machineryKey = getMachineryGeminiKey(getState().settings);
-            if (result.journalEntry && machineryKey) {
+            // A `fallback` entry ("Auto-summary was unavailable…") is honest
+            // bookkeeping, not memory: never embed it (2026-09-06 P2 — the
+            // mount seed skips it the same way).
+            if (result.journalEntry && !result.journalEntry.fallback && machineryKey) {
                 // Bare summary, location as metadata — the EXACT text the mount
                 // seed builds. The old "[Location: X] summary" prefix never
                 // matched the seed's bare text, so every journal entry was
@@ -220,6 +250,15 @@ export function createTurnRunner({
         const wantsMemories = !!originalPlayerMessage && !opts.combatIntentOnly && !opts.skipMemories;
         let retrievedMemories = [];
         let dramaticMemories = [];
+        // Scene-driven curation: present NPCs only, and the live transcript
+        // for the conversational cooldown/recency windows (2026-09-06).
+        const curateDramaticMemories = (query) => curateStoryMemory({
+            memories: s.storyMemory || [],
+            query,
+            location: s.currentLocation || '',
+            npcs: findPresentNpcs(s, originalPlayerMessage),
+            messages: s.messages || [],
+        });
         if (wantsMemories && machineryKey) {
             const sceneContext = [
                 originalPlayerMessage,
@@ -229,19 +268,9 @@ export function createTurnRunner({
             retrievedMemories = await retrieveRelevant(machineryKey, sceneContext, 8, 0.55, {
                 presenceText: buildPresenceText(s.messages),
             }).catch(() => []);
-            dramaticMemories = curateStoryMemory({
-                memories: s.storyMemory || [],
-                query: sceneContext,
-                location: s.currentLocation || '',
-                npcs: s.npcs || [],
-            });
+            dramaticMemories = curateDramaticMemories(sceneContext);
         } else if (wantsMemories) {
-            dramaticMemories = curateStoryMemory({
-                memories: s.storyMemory || [],
-                query: originalPlayerMessage,
-                location: s.currentLocation || '',
-                npcs: s.npcs || [],
-            });
+            dramaticMemories = curateDramaticMemories(originalPlayerMessage);
         }
         if (wantsMemories) {
             // Scores/similarities are dropped once the prompt string is built —
@@ -531,6 +560,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             dispatch,
             knownAppearances: buildKnownAppearances(latest, playerMessage, finalNarration.content),
             knownStances: buildKnownStances(latest, playerMessage, finalNarration.content),
+            knownStoryCards: buildKnownStoryCards(latest, playerMessage, finalNarration.content),
             knownLocations: buildKnownLocations(latest),
             // The DM's own location event (already applied) outranks the async
             // Scribe for this turn: the Scribe's location downgrades to

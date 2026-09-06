@@ -1495,7 +1495,7 @@ guard generalized: an empty stream is a failure line, not a message. A refusal t
 SEE is one they can delete; a blank turn primes the next refusal invisibly. From the 2026-09-06
 strengthening audit (providers-adapter, Lap 1).
 
-### [strengthening] Resolved story cards stay resolved, and the Scribe sees the card pool — status: `idea` (2026-09-06)
+### [strengthening] Resolved story cards stay resolved, and the Scribe sees the card pool — status: `shipped` (2026-09-06)
 The fronts got the ruling on 2026-09-01: `resolved` is terminal in the engine. Story cards never
 did. The ADD merge spreads the incoming card over the existing one, and a normalized incoming
 card always says `status: 'active'`, so the moment the Scribe re-reports a beat the DM already
@@ -1510,8 +1510,9 @@ compact KNOWN STORY CARDS block in the Scribe prompt (id, type, subject, status;
 APPEARANCES pattern) with the rule "update an existing card by id, never re-mint it; never
 re-report a resolved one", which also shrinks the near-duplicate merge load the 2026-07-14
 containment rules exist to absorb. From the 2026-09-06 strengthening audit (story-memory).
+Shipped the same day in the queue sweep, both halves — see DECISIONS.md 2026-09-06 (memory tiers).
 
-### [strengthening] Scene-aware callback curation: score cards against who is HERE, not the whole roster — status: `idea` (2026-09-06)
+### [strengthening] Scene-aware callback curation: score cards against who is HERE, not the whole roster — status: `shipped` (2026-09-06)
 `curateStoryMemory` is the curator behind DRAMATIC CALLBACK OPPORTUNITIES, and it is handed the
 entire roster as `npcs`. Two consequences: the +5 "linked NPC present" bonus fires for every card
 whose person exists anywhere in the campaign, and the query token set is the union of every NPC's
@@ -1525,8 +1526,10 @@ of the query tokens; give the location match and the presence bonus the weight t
 currently has. While there, move the 8-minute callback cooldown and the wall-clock recency
 bonus to conversational distance — the last wall-clock windows in the memory layer. From the
 2026-09-06 strengthening audit (story-memory).
+Shipped the same day in the queue sweep (`findPresentNpcs` + names-only query tokens + conversational
+cooldown/recency) — see DECISIONS.md 2026-09-06 (memory tiers).
 
-### [strengthening] The journal reads the same transcript the chronicler does — status: `idea` (2026-09-06)
+### [strengthening] The journal reads the same transcript the chronicler does — status: `shipped` (2026-09-06)
 `collectNarrativeEntries` (2026-09-01/09-04) is THE narrative-eligible predicate — chronicler,
 scene art, priming, and now the RAG presence text all use it — but the journal summarizer,
 the one consumer that writes the PERMANENT tier, still filters on `hidden`/`deleted` alone.
@@ -1539,6 +1542,7 @@ lines the summarizer needs, count the cadence in narrative-eligible messages ins
 rows (a dice turn burns ~5 raw rows, so roll-heavy play journals every ~2 turns and ages
 story cards out 2–3× faster), and skip `fallback: true` entries at both RAG embed sites. From
 the 2026-09-06 strengthening audit (memory-journal).
+Shipped the same day in the queue sweep, all three parts — see DECISIONS.md 2026-09-06 (memory tiers).
 
 ---
 

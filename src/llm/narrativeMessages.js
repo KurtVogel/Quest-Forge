@@ -32,8 +32,12 @@ export function collectNarrativeEntries(messages = [], fromIndex = 0, toIndex = 
     const entries = [];
     let skipNextAssistant = false;
     (messages || []).forEach((m, index) => {
-        if (index < fromIndex || index > toIndex) return;
+        if (index > toIndex) return;
         if (!m || m.hidden || m.deleted || m.kind === 'error' || typeof m.content !== 'string' || !m.content.trim()) return;
+        // The table-talk pairing is tracked from the start of the transcript,
+        // not from the span: a journal batch or chapter that opens on the DM's
+        // at-the-table reply must still know the OOC line just before it
+        // (2026-09-06 — the journal batch adopted this predicate).
         if (m.role === 'user') {
             skipNextAssistant = false;
             if (isTableTalkMessage(m.content)) {
@@ -44,6 +48,7 @@ export function collectNarrativeEntries(messages = [], fromIndex = 0, toIndex = 
             skipNextAssistant = false;
             return;
         }
+        if (index < fromIndex) return;
         entries.push({ message: m, index });
     });
     return entries;

@@ -6,7 +6,33 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-06 (queue sweep of the 2026-09-06 audit: RAG presence judged from the scene, seed-wins subject tags, durable canon never evicted, provider refusals/prompt blocks surfaced instead of blank turns, Retry-After honored; deployed)._
+_Last updated: 2026-09-06 (second queue sweep of the day — memory-journal + story-memory: resolved cards terminal + KNOWN STORY CARDS for the Scribe, scene-driven callback curation, journal batch/cadence through the narrative predicate, fallback entries never embedded, conversational cooldown/recency; deployed)._
+
+## 2026-09-06 (afternoon) — queue sweep: memory tiers — resolved cards terminal, scene-driven callbacks, journal reads the narrative transcript
+
+All 7 lines of the second 2026-09-06 audit (memory-journal + story-memory, the run Vesa
+directed at the memory tiers) cleared — every queue line ticked with a fix note. **The Open
+Findings Queue is EMPTY again.** **P1s:** (1) `resolved` was not terminal for story cards — the
+ADD merge spread a normalized (always `active`) Scribe re-report over a resolved card, so a
+promise the DM had just paid off was back in DRAMATIC CALLBACKS a turn later; the reducer pins
+`resolved` on merge (only `dormant` revives; an explicit `status: 'active'` via `memory_updates`
+reopens), and the Scribe now receives a KNOWN STORY CARDS block (`buildKnownStoryCards`, both
+call sites) with an update-by-`id` contract so beats are updated in place instead of re-minted;
+(2) callback curation was roster-driven — both call sites handed the WHOLE roster to
+`scoreStoryMemory`, so the +5 presence bonus fired for every card whose person existed anywhere
+and the query tokens were a roster-wide soup; `findPresentNpcs` (player line + presence text
+through `findSubjectsInText`, party always present) feeds curation and only names join the
+query tokens; (3) the journal batch filtered on `hidden`/`deleted` alone — error lines and OOC
+table-talk pairs reached the permanent tier; the batch and the cadence both go through
+`collectNarrativeMessages` (the OOC pairing is now tracked from the transcript start so a span
+opening on the DM's reply still skips it). **Ruling (DECISIONS.md 2026-09-06, memory tiers):**
+resolved cards are terminal, curation is scene-driven, the journal reads the narrative
+transcript, no wall-clock windows remain in the memory layer. **P2s:** cadence counts
+narrative-eligible messages (raw `MAX_BATCH_MESSAGES` backlog as the escape); `fallback`
+journal entries are never embedded (live add + mount seed); callback cooldown (8 conversational
+messages) and recency (3 → 0 over 60) measured via `conversationalDistance` on reducer-stamped
+`lastSeenMessage`/`lastUsedMessage`, wall-clock only as the legacy fallback; four pins + a new
+`turnOrchestrator.memoryCuration.test.js`. 2,177 tests green (+20), lint clean, deployed.
 
 ## 2026-09-06 — queue sweep: RAG presence from the scene, refusals surfaced, durable canon kept whole
 

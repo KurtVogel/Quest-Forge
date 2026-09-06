@@ -5,7 +5,7 @@ import { createTurnRunner } from '../../llm/turnOrchestrator.js';
 import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
-import { buildKnownAppearances, buildKnownLocations, buildKnownStances, runScribe } from '../../llm/scribe.js';
+import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe } from '../../llm/scribe.js';
 import { isTableTalkMessage } from '../../llm/tableTalk.js';
 import { addMemory, findSubjectsInText, seedMemories } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
@@ -360,7 +360,10 @@ export default function ChatPanel() {
             // `subjects` = who a memory is ABOUT (presence-aware retrieval,
             // 2026-08-28): person-tied rows go dormant in scenes their person
             // is nowhere near, instead of semantically shadowing the hero.
-            ...(s.journal || []).map(j => ({
+            // A `fallback` entry ("Auto-summary was unavailable…") is honest
+            // bookkeeping, not memory — a content-free row would compete for
+            // retrieval slots on every reload (2026-09-06 P2).
+            ...(s.journal || []).filter(j => !j.fallback).map(j => ({
                 text: j.summary,
                 category: 'journal',
                 location: j.location,
@@ -498,6 +501,7 @@ export default function ChatPanel() {
                         dispatch,
                         knownAppearances: buildKnownAppearances(latest, narrative),
                         knownStances: buildKnownStances(latest, narrative),
+                        knownStoryCards: buildKnownStoryCards(latest, narrative),
                         knownLocations: buildKnownLocations(latest),
                         authoritativeContext: {
                             terminal: result.terminal || 'ongoing',

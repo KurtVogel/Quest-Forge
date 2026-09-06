@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildKnownAppearances, buildKnownLocations, buildKnownStances, composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe } from './scribe.js';
+import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe } from './scribe.js';
 import { sendMessage } from './adapter.js';
 
 vi.mock('./adapter.js', () => ({
@@ -319,6 +319,51 @@ describe('buildKnownStances', () => {
 
     it('returns null when nobody in the exchange has a recorded stance', () => {
         expect(buildKnownStances(state, 'A quiet road with strangers.')).toBeNull();
+    });
+});
+
+describe('buildKnownStoryCards (2026-09-06 P1 — the Scribe sees the card pool)', () => {
+    const state = {
+        storyMemory: [
+            { id: 'mem-vow', type: 'promise', status: 'resolved', subject: 'ferry vow', text: 'Aune promised the hero safe passage across the ferry line.', linkedNpcNames: ['Aune'], lastSeenAt: 5 },
+            { id: 'mem-letter', type: 'relationship', status: 'active', subject: 'Celeste floorboard letter', text: 'Celeste hid a letter under the parlour floorboard.', linkedNpcNames: ['Celeste'], lastSeenAt: 9 },
+            { id: 'mem-far', type: 'npcAgenda', status: 'active', subject: 'Vasko smuggling run', text: 'Vasko plans to run contraband at the new moon.', linkedNpcNames: ['Vasko'], lastSeenAt: 7 },
+        ],
+    };
+
+    it('lists cards whose linked NPC or subject appears in the turn text, newest first, with id/type/status', () => {
+        const block = buildKnownStoryCards(state, 'I ask Celeste whether Aune kept her ferry vow.');
+        expect(block).toContain('id: mem-letter | type: relationship | status: active');
+        expect(block).toContain('id: mem-vow | type: promise | status: resolved');
+        expect(block).not.toContain('mem-far');
+        expect(block.indexOf('mem-letter')).toBeLessThan(block.indexOf('mem-vow'));
+    });
+
+    it('returns null when no recorded beat touches the exchange', () => {
+        expect(buildKnownStoryCards(state, 'A quiet road with strangers.')).toBeNull();
+        expect(buildKnownStoryCards({ storyMemory: [] }, 'Celeste waves.')).toBeNull();
+        expect(buildKnownStoryCards(state)).toBeNull();
+    });
+
+    it('feeds known story cards so the Scribe updates by id instead of re-minting', async () => {
+        sendMessage.mockReset();
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+        }));
+
+        await runScribe({
+            playerMessage: 'I ask Aune about the ferry.',
+            dmNarrative: 'Aune shrugs; the promise was kept.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch: vi.fn(),
+            knownStoryCards: buildKnownStoryCards(state, 'I ask Aune about the ferry.'),
+        });
+
+        const request = sendMessage.mock.calls[0][0];
+        expect(request.userMessage).toContain('KNOWN STORY CARDS');
+        expect(request.userMessage).toContain('id: mem-vow | type: promise | status: resolved');
+        expect(request.systemPrompt).toContain('never mint a second card');
+        expect(request.systemPrompt).toContain('"id": "ONLY when this beat continues a card listed under KNOWN STORY CARDS');
     });
 });
 
