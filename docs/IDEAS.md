@@ -1495,6 +1495,51 @@ guard generalized: an empty stream is a failure line, not a message. A refusal t
 SEE is one they can delete; a blank turn primes the next refusal invisibly. From the 2026-09-06
 strengthening audit (providers-adapter, Lap 1).
 
+### [strengthening] Resolved story cards stay resolved, and the Scribe sees the card pool — status: `idea` (2026-09-06)
+The fronts got the ruling on 2026-09-01: `resolved` is terminal in the engine. Story cards never
+did. The ADD merge spreads the incoming card over the existing one, and a normalized incoming
+card always says `status: 'active'`, so the moment the Scribe re-reports a beat the DM already
+paid off — and it does, because the Scribe prompt carries KNOWN APPEARANCES, STANCES and PLACES
+but never the existing cards, so any recap line ("Oren thanked Jack for keeping his promise") is
+re-minted from scratch — the resolved promise is active again and back in DRAMATIC CALLBACK
+OPPORTUNITIES, inviting the DM to pay it off a second time (reproduced by the 2026-09-06 audit).
+Proposal, two halves: (1) engine — on merge, `resolved` wins over an incoming default status;
+only `dormant` revives on a re-report (the pinned intent), and only an explicit
+`status: 'active'` through the DM's `memory_updates` reopens a resolved card; (2) context — a
+compact KNOWN STORY CARDS block in the Scribe prompt (id, type, subject, status; the KNOWN
+APPEARANCES pattern) with the rule "update an existing card by id, never re-mint it; never
+re-report a resolved one", which also shrinks the near-duplicate merge load the 2026-07-14
+containment rules exist to absorb. From the 2026-09-06 strengthening audit (story-memory).
+
+### [strengthening] Scene-aware callback curation: score cards against who is HERE, not the whole roster — status: `idea` (2026-09-06)
+`curateStoryMemory` is the curator behind DRAMATIC CALLBACK OPPORTUNITIES, and it is handed the
+entire roster as `npcs`. Two consequences: the +5 "linked NPC present" bonus fires for every card
+whose person exists anywhere in the campaign, and the query token set is the union of every NPC's
+name, disposition and notes — so a card about a smuggler two towns away scores within one point
+of the card about the person the hero is talking to, and 17 of its 25 points come from the
+roster rather than the scene (reproduced by the 2026-09-06 audit). The morning's RAG fix built
+the missing input: `buildPresenceText` (last three narrative messages) and `findSubjectsInText`
+already say who is in the scene. Proposal: curate against scene-present NPCs (presence-text
+hits, or `curateNpcsForPrompt`'s location-curated set as a fallback) and keep roster notes out
+of the query tokens; give the location match and the presence bonus the weight the roster soup
+currently has. While there, move the 8-minute callback cooldown and the wall-clock recency
+bonus to conversational distance — the last wall-clock windows in the memory layer. From the
+2026-09-06 strengthening audit (story-memory).
+
+### [strengthening] The journal reads the same transcript the chronicler does — status: `idea` (2026-09-06)
+`collectNarrativeEntries` (2026-09-01/09-04) is THE narrative-eligible predicate — chronicler,
+scene art, priming, and now the RAG presence text all use it — but the journal summarizer,
+the one consumer that writes the PERMANENT tier, still filters on `hidden`/`deleted` alone.
+So "Error resolving check: Failed to fetch" and the whole OOC exchange ("OOC: slow the pacing
+down" + the DM's table reply) are summarized as play into SESSION HISTORY, the journal RAG row,
+and the cadence reflection (reproduced by the 2026-09-06 audit) — the table-talk contract says
+that exchange is kept out of memory, and it is, everywhere except the tier that lasts longest.
+Proposal: source the batch from `collectNarrativeEntries` plus the engine roll-result system
+lines the summarizer needs, count the cadence in narrative-eligible messages instead of raw
+rows (a dice turn burns ~5 raw rows, so roll-heavy play journals every ~2 turns and ages
+story cards out 2–3× faster), and skip `fallback: true` entries at both RAG embed sites. From
+the 2026-09-06 strengthening audit (memory-journal).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
