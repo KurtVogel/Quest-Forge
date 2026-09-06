@@ -230,3 +230,26 @@ describe('PROVIDERS / PROVIDER_LIST', () => {
         }
     });
 });
+
+describe('sendMessage honors Retry-After (2026-09-06 audit)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('waits out a provider-sent Retry-After instead of the ~1s default backoff', async () => {
+        vi.useFakeTimers();
+        const quota = Object.assign(new Error('Gemini API error (429): quota'), { status: 429, retryAfterMs: 5000 });
+        sendGeminiMessage.mockRejectedValueOnce(quota).mockResolvedValueOnce('recovered');
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini' });
+        let settled = false;
+        promise.then(() => { settled = true; });
+
+        await vi.advanceTimersByTimeAsync(2500);
+        expect(settled).toBe(false); // the old 1s/2s backoff would have retried by now
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(3000);
+        await expect(promise).resolves.toBe('recovered');
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(2);
+    });
+});

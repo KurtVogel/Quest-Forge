@@ -6,7 +6,33 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-05 (queue sweep of the 2026-09-05 audit: raw-JSON leak on repair failure, hero condition channel hardened, enemy saves honor conditions, string enemy stats coerce; deployed)._
+_Last updated: 2026-09-06 (queue sweep of the 2026-09-06 audit: RAG presence judged from the scene, seed-wins subject tags, durable canon never evicted, provider refusals/prompt blocks surfaced instead of blank turns, Retry-After honored; deployed)._
+
+## 2026-09-06 — queue sweep: RAG presence from the scene, refusals surfaced, durable canon kept whole
+
+All 11 lines of the 2026-09-06 audit (vector-memory-rag + providers-adapter) cleared —
+every queue line ticked with a fix note — and the 2026-08-09 pronoun-flip WATCH item
+closed on Vesa's call (four weeks, no recurrence, nobody acting on it; re-open on live
+evidence). **The Open Findings Queue is EMPTY.** **P1s:** (1) the RAG presence gate judged
+"who is in the scene" from the player's line alone, so a conversation went dormant on its
+second line ("What do you know about the ledger?" never names Celeste) — `retrieveRelevant`
+takes a presence-only `presenceText` (never embedded) that `buildPresenceText` in the
+orchestrator fills from the last 3 narrative-eligible messages; (2) an OpenAI refusal
+(`message.refusal`/`delta.refusal`, content null, finish `stop`) resolved to "" and the
+orchestrator committed a BLANK assistant turn into the chat, the save, and the DM window —
+the factory now throws the refusal text on both lanes, and the orchestrator throws on any
+empty non-intent reply; (3) a Gemini prompt-level block (`promptFeedback.blockReason`, the
+one classifier BLOCK_NONE cannot switch off) read as "connection dropped … retry" — named
+on both lanes with the edit/remove remedy. **Ruling (DECISIONS.md 2026-09-06):** durable
+canon is never evicted from the embedding cache — the cap evicts transient rows only and a
+durable overflow warns once. **P2s:** seed subjects replace a differing cached tag (Ketta
+joins Celeste); IndexedDB connections close on failed put / failed read / versionchange;
+retrieval awaits an in-flight cold seed; `session.id` minted on load for id-less campaigns
+(their RAG cache could never key); `Retry-After` parsed (cap 10 s) into the adapter delay;
+OpenAI reasoning models get a 32k output cap; `data:` without a space + unterminated final
+SSE line; symbolic stream-error statuses; stray `system` history role → user side on both
+providers; catalog copy and the CLAUDE/AGENTS machinery-model line; new
+`providers/sse.test.js`. 2,157 tests green (+37), lint clean, deployed.
 
 ## 2026-09-05 — queue sweep: raw-JSON leak sealed, hero conditions canonical, enemy saves honor conditions
 

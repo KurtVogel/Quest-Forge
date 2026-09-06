@@ -37,7 +37,13 @@ function openEmbedDB() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(EMBED_DB_NAME, EMBED_DB_VERSION);
         request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
+        request.onsuccess = () => {
+            const db = request.result;
+            // A later version bump from another tab must not be blocked by this
+            // connection forever (persistence.js's withDb does the same).
+            db.onversionchange = () => db.close();
+            resolve(db);
+        };
         // A version bump while another tab holds a connection would otherwise hang
         // every embed/persist/load call silently (same gap fixed in persistence.js).
         request.onblocked = () => reject(new Error('Embedding cache blocked by another open tab'));
@@ -55,7 +61,13 @@ function persistEmbedding(entry) {
     openEmbedDB().then(db => {
         const tx = db.transaction(EMBED_STORE, 'readwrite');
         tx.objectStore(EMBED_STORE).put(entry);
+        // A failed put (quota) aborts the transaction and used to leave the
+        // connection open forever — one leaked handle per failed write, which
+        // then blocks every later version upgrade (2026-09-06 audit; the
+        // 2026-07-12 persistence.js class, one store over).
         tx.oncomplete = () => db.close();
+        tx.onabort = () => db.close();
+        tx.onerror = () => db.close();
     }).catch(() => {}); // Non-critical — in-memory still works
 }
 
@@ -107,7 +119,8 @@ async function loadPersistedEmbeddings(sessionId) {
                 ));
                 resolve(compatible);
             };
-            request.onerror = () => reject(request.error);
+            request.onerror = () => { db.close(); reject(request.error); };
+            tx.onabort = () => db.close();
             tx.oncomplete = () => db.close();
         });
     } catch {
@@ -153,18 +166,35 @@ const isMutableSeedCategory = (category) =>
 // prunes the legacy "[Location: X]"-prefixed live rows which never matched the
 // seed's bare text and were duplicated + re-embedded on every reload.
 
-/** Enforce the campaign cap on the in-memory store, mirroring evictions to disk. */
+/** Campaigns whose durable corpus alone overflowed the cap — warned once each. */
+const durableOverflowWarned = new Set();
+
+/**
+ * Enforce the campaign cap on the in-memory store, mirroring evictions to disk.
+ * ONLY transient rows (per-turn player/narrative color) are evicted — durable
+ * canon (facts, journal, NPCs, story cards) is never touched. Evicting durable
+ * rows was churn, not a cap (2026-09-06 audit): the mount seed re-embeds
+ * whatever the cache is missing with a fresh timestamp, so every Continue
+ * evicted a DIFFERENT oldest slice, paid the overflow in embeds again, and
+ * silently rotated a window of canon out of retrieval. A durable corpus past
+ * the cap is logged once per campaign and kept whole.
+ */
 function enforceCampaignCap() {
     const overflow = memoryStore.length - MAX_CAMPAIGN_MEMORIES;
     if (overflow <= 0) return;
-    const ranked = [...memoryStore].sort((a, b) => {
-        const classA = EVICT_FIRST_CATEGORIES.has(a.category) ? 0 : 1;
-        const classB = EVICT_FIRST_CATEGORIES.has(b.category) ? 0 : 1;
-        return (classA - classB) || ((a.timestamp || 0) - (b.timestamp || 0));
-    });
-    const toEvict = new Set(ranked.slice(0, overflow));
-    memoryStore = memoryStore.filter(m => !toEvict.has(m));
-    deletePersistedEmbeddings([...toEvict]);
+    const transient = memoryStore
+        .filter(m => EVICT_FIRST_CATEGORIES.has(m.category))
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    const toEvict = new Set(transient.slice(0, overflow));
+    if (toEvict.size > 0) {
+        memoryStore = memoryStore.filter(m => !toEvict.has(m));
+        deletePersistedEmbeddings([...toEvict]);
+    }
+    const durableOverflow = overflow - toEvict.size;
+    if (durableOverflow > 0 && !durableOverflowWarned.has(activeSessionId)) {
+        durableOverflowWarned.add(activeSessionId);
+        console.warn(`[VectorMemory] Durable memory corpus exceeds the ${MAX_CAMPAIGN_MEMORIES}-row cap by ${durableOverflow}; canon is never evicted, so the store is kept whole.`);
+    }
 }
 
 /** Simple cosine similarity between two numeric arrays. */
@@ -178,6 +208,13 @@ function cosineSimilarity(a, b) {
     }
     const denom = Math.sqrt(magA) * Math.sqrt(magB);
     return denom === 0 ? 0 : dot / denom;
+}
+
+/** Same people, same order — the seed-vs-cache tag comparison. */
+function sameSubjects(a, b) {
+    const listA = normalizeSubjects(a) || [];
+    const listB = normalizeSubjects(b) || [];
+    return listA.length === listB.length && listA.every((name, i) => name === listB[i]);
 }
 
 /** Clamp an untrusted subjects list to a small array of clean name strings. */
@@ -311,7 +348,22 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
  * @param {Array<{text: string, category: string}>} items
  * @param {string|null} sessionId - the campaign these memories belong to
  */
-export async function seedMemories(apiKey, items, sessionId = null) {
+export function seedMemories(apiKey, items, sessionId = null) {
+    const run = seedMemoriesInner(apiKey, items, sessionId);
+    // Retrieval awaits an in-flight seed (2026-09-06 audit): the first turn
+    // after Continue on an uncached campaign used to query a partial store
+    // while the cold seed was still embedding — silently, with the DM's first
+    // narration of the session missing exactly the memories it needed most.
+    seedInFlight = run;
+    const settle = () => { if (seedInFlight === run) seedInFlight = null; };
+    run.then(settle, settle);
+    return run;
+}
+
+/** The seed currently loading/embedding, or null — awaited by retrieveRelevant. */
+let seedInFlight = null;
+
+async function seedMemoriesInner(apiKey, items, sessionId) {
     if (!apiKey) return;
     activeSessionId = sessionId;
     memoryStore = [];
@@ -343,16 +395,21 @@ export async function seedMemories(apiKey, items, sessionId = null) {
     // cold device ~300 sequential trips before RAG was warm); a failed vector
     // skips its item exactly like the per-item path, and the next mount's seed
     // retries whatever the cache is still missing.
-    // Cached rows predate the `subjects` tag — when the current seed knows a
-    // row's subjects and the cached row doesn't, patch the metadata in place
-    // (same [sessionId, text] key, so persist is an upsert; no re-embed).
+    // The seed's `subjects` win over the cached row's: a journal row tagged
+    // when only Celeste was on the roster stayed [Celeste] forever, invisible
+    // to Ketta's scenes once she was registered (2026-09-06 audit — the old
+    // patch fired only on rows with NO tag). Compared as normalized lists; a
+    // changed list is rewritten in place (same [sessionId, text] key, so
+    // persist is an upsert; no re-embed). A seed item carrying no subjects
+    // leaves the cached tag alone — the live-add tagger may know more than a
+    // seed built from a since-trimmed roster.
     const seedByText = new Map((items || [])
         .filter(item => typeof item?.text === 'string' && item.text.trim())
         .map(item => [item.text, item]));
     for (const entry of memoryStore) {
         const seedItem = seedByText.get(entry.text);
         const cleanSubjects = seedItem ? normalizeSubjects(seedItem.subjects) : null;
-        if (cleanSubjects && !entry.subjects) {
+        if (cleanSubjects && !sameSubjects(cleanSubjects, entry.subjects)) {
             entry.subjects = cleanSubjects;
             if (entry.sessionId != null) persistEmbedding(entry);
         }
@@ -407,8 +464,20 @@ export const CATEGORY_BOOST = {
     npc: 0.02,
 };
 
-export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55) {
-    if (!apiKey || !query || memoryStore.length === 0) return [];
+/**
+ * @param {string} apiKey
+ * @param {string} query - embedded as the search query (unchanged by presenceText)
+ * @param {number} [topN]
+ * @param {number} [minScore]
+ * @param {{ presenceText?: string }} [options] - extra scene text (the last
+ *   narrative turns) consulted ONLY for who is present; never embedded.
+ */
+export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55, { presenceText = '' } = {}) {
+    if (!apiKey || !query) return [];
+    // A cold seed still embedding: wait for the store to be whole rather than
+    // answer from the slice that happens to have landed.
+    if (seedInFlight) await seedInFlight.catch(() => {});
+    if (memoryStore.length === 0) return [];
 
     const queryVector = await embedText(apiKey, query, { inputType: 'query' });
     if (!queryVector) return [];
@@ -422,7 +491,13 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55)
     // weight. Unlike the category boost (order-only by the 2026-08-06 rule),
     // this penalty deliberately affects the GATE too: keeping a row out is the
     // safe direction; it can never let a sub-threshold row in.
-    const queryWords = textWordSet(query);
+    // Presence is judged from the player's message PLUS the last narrative
+    // turns (2026-09-06 P1): the DM's narration is what establishes who is in
+    // the scene, and a conversation's second line ("What do you know about
+    // the ledger?") rarely repeats the name of the person being spoken to —
+    // judged from the query alone, every dialogue went dormant on exactly the
+    // person it was about. The embed query itself is untouched.
+    const queryWords = textWordSet(`${query} ${presenceText || ''}`);
     // null (no identifying tokens, "The Lady") can't be judged absent — treat
     // as present so the row is never permanently penalized.
     const subjectsPresent = (subjects) => subjects.some(name => nameTokensPresent(queryWords, name) !== false);

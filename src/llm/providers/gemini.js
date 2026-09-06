@@ -42,6 +42,25 @@ const assertCompleteResponse = makeCompletionGuard({
 const httpError = makeHttpError('Gemini');
 
 /**
+ * A PROMPT-level block: `{ promptFeedback: { blockReason } }` with no
+ * candidates. This is the one classifier `safetySettings: BLOCK_NONE` cannot
+ * switch off (PROHIBITED_CONTENT), i.e. the residual refusal class after
+ * 2026-08-28. It used to read as "No response generated" non-streaming and
+ * "connection dropped … please retry" streaming (2026-09-06 P1) — and a
+ * retry of a deterministic block loops. Name it, with the edit/remove remedy.
+ */
+function promptBlockReason(data) {
+    const reason = data?.promptFeedback?.blockReason;
+    return typeof reason === 'string' && reason ? reason : null;
+}
+
+function promptBlockedError(reason, data) {
+    const message = data?.promptFeedback?.blockReasonMessage;
+    const detail = typeof message === 'string' && message.trim() ? `: ${message.trim().slice(0, 300)}` : '';
+    return new Error(`Gemini blocked the prompt (${reason}${detail}) — the input itself was refused, so retrying the same message will fail again. Edit or remove (✕) the offending message, then continue.`);
+}
+
+/**
  * Thinking-capable models may return several parts per candidate (and flag
  * reasoning summaries with `thought: true`). Reading only parts[0] silently
  * drops the rest — which for a DM turn is the trailing JSON event block.
@@ -82,11 +101,14 @@ const GEMINI_SAFETY_SETTINGS = [
 function formatMessages(systemPrompt, messageHistory, userMessage, temperature, { thinkingBudget, maxOutputTokens } = {}) {
     const contents = [];
 
-    // Convert history
+    // Convert history. Only genuine assistant turns are the model's own;
+    // anything else (user, and a `system` line a caller forgot to fold) is
+    // user-side context, matching buildMessageWindow's own mapping. `text`
+    // must be a string — a null part is a 400 at Gemini.
     for (const msg of messageHistory) {
         contents.push({
-            role: msg.role === 'user' ? 'user' : 'model',
-            parts: [{ text: msg.content }],
+            role: msg.role === 'assistant' || msg.role === 'model' ? 'model' : 'user',
+            parts: [{ text: typeof msg.content === 'string' ? msg.content : String(msg.content ?? '') }],
         });
     }
 
@@ -136,6 +158,10 @@ export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHi
 
     const data = await response.json();
     const candidate = data.candidates?.[0];
+    const blockReason = promptBlockReason(data);
+    if (blockReason && !candidate) {
+        throw promptBlockedError(blockReason, data);
+    }
     assertCompleteResponse(candidate?.finishReason);
     const text = extractCandidateText(candidate);
     if (!text) {
@@ -274,8 +300,15 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
 
     let fullText = '';
     let finishReason = null;
+    let blockReason = null;
+    let blockedPayload = null;
 
     await readSseStream(response, (data) => {
+        const reason = promptBlockReason(data);
+        if (reason) {
+            blockReason = reason;
+            blockedPayload = data;
+        }
         const candidate = data.candidates?.[0];
         if (candidate?.finishReason) finishReason = candidate.finishReason;
         const text = extractCandidateText(candidate);
@@ -285,6 +318,9 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
         }
     });
 
+    if (blockReason && !finishReason) {
+        throw promptBlockedError(blockReason, blockedPayload);
+    }
     assertStreamComplete(finishReason, assertCompleteResponse);
     return fullText;
 }

@@ -201,3 +201,52 @@ describe('streamOpenAIMessage', () => {
         expect(error.message).toContain('Server overloaded.');
     });
 });
+
+describe('refusals, reasoning output cap, history shape (2026-09-06 audit)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    it('P1: a non-streaming refusal throws the refusal text instead of "No response generated"', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            choices: [{ finish_reason: 'stop', message: { content: null, refusal: "I can't continue this scene." } }],
+        })));
+        await expect(sendOpenAIMessage(SEND_ARGS)).rejects.toThrow(/declined to respond: I can't continue this scene\./);
+    });
+
+    it('P1: a streamed refusal (delta.refusal, content null, stop) throws instead of resolving to ""', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
+            'data: {"choices":[{"delta":{"content":null,"refusal":"I can\'t "}}]}\n\n',
+            'data: {"choices":[{"delta":{"refusal":"help with that."},"finish_reason":"stop"}]}\n\n',
+            'data: [DONE]\n\n',
+        ])));
+        const onChunk = vi.fn();
+        await expect(streamOpenAIMessage({ ...SEND_ARGS, onChunk })).rejects.toThrow(/declined to respond: I can't help with that\./);
+        expect(onChunk).not.toHaveBeenCalled();
+    });
+
+    it('P2: reasoning models get the 32k output cap, gpt-4o keeps 16k, on both lanes', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(jsonResponse({ choices: [{ finish_reason: 'stop', message: { content: 'ok' } }] }))
+            .mockResolvedValueOnce(jsonResponse({ choices: [{ finish_reason: 'stop', message: { content: 'ok' } }] }))
+            .mockResolvedValueOnce(streamResponse(['data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n']));
+        vi.stubGlobal('fetch', fetchMock);
+        await sendOpenAIMessage({ ...SEND_ARGS, model: 'gpt-5.6-terra' });
+        await sendOpenAIMessage({ ...SEND_ARGS, model: 'gpt-4o' });
+        await streamOpenAIMessage({ ...SEND_ARGS, model: 'gpt-5.6-sol', onChunk: () => {} });
+        const caps = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).max_completion_tokens);
+        expect(caps).toEqual([32768, 16384, 32768]);
+    });
+
+    it('a stray system-role history line rides as user context and null content becomes ""', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ choices: [{ finish_reason: 'stop', message: { content: 'ok' } }] }));
+        vi.stubGlobal('fetch', fetchMock);
+        await sendOpenAIMessage({ ...SEND_ARGS, messageHistory: [{ role: 'system', content: 'You rolled **12**.' }, { role: 'assistant', content: null }] });
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.messages.slice(1, 3)).toEqual([
+            { role: 'user', content: 'You rolled **12**.' },
+            { role: 'assistant', content: '' },
+        ]);
+    });
+});

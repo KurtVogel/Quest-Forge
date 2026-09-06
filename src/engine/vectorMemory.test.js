@@ -810,3 +810,285 @@ describe('presence-aware + diversity-aware retrieval (2026-08-28, "dormant, not 
         expect(away).toHaveLength(0); // the patched tag gates it
     });
 });
+
+describe('2026-09-06 audit: presence from the scene, seed-wins tags, durable cap, connection hygiene', () => {
+    beforeEach(() => {
+        clearMemories();
+        globalThis.indexedDB = new IDBFactory();
+        embedTextMock.mockReset();
+    });
+
+    function putEmbeddings(entries) {
+        return new Promise((resolve, reject) => {
+            const request = globalThis.indexedDB.open('rpg-vector-memory', 4);
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains('embeddings')) {
+                    db.createObjectStore('embeddings', { keyPath: ['sessionId', 'text'] });
+                }
+            };
+            request.onsuccess = () => {
+                const db = request.result;
+                const tx = db.transaction('embeddings', 'readwrite');
+                const store = tx.objectStore('embeddings');
+                for (const e of entries) store.put(e);
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onerror = () => reject(tx.error);
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async function flushAsync(rounds = 25) {
+        for (let i = 0; i < rounds; i++) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    function row(text, category, timestamp, extra = {}) {
+        return { sessionId: 's1', text, category, timestamp, vector: unitVector(0), schema: SCHEMA, ...extra };
+    }
+
+    it('P1: the second line of a conversation keeps its person present via presenceText (the DM narration), not the player line alone', async () => {
+        // Celeste's journal beat AND her own dossier row, both at raw 0.62 —
+        // the audit's reproduction. "I approach Celeste" retrieves them; the
+        // follow-up "What do you know about the ledger?" never names her.
+        embedTextMock.mockResolvedValueOnce(alignedVector(1, 0.62));
+        await addMemory('key', 'Celeste hid the ledger under the parlour floor.', 'journal', null, ['Lady Celeste Jewelglade']);
+        embedTextMock.mockResolvedValueOnce(alignedVector(2, 0.62));
+        await addMemory('key', 'Lady Celeste Jewelglade (wary): keeps the family accounts.', 'npc', null, ['Lady Celeste Jewelglade']);
+
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const opening = await retrieveRelevant('key', 'I approach Celeste at the parlour', 8, 0.55);
+        expect(opening).toHaveLength(2);
+
+        // Query alone: both rows pay the 0.12 penalty (0.62 - 0.12 < 0.55) — dormant mid-conversation.
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const bare = await retrieveRelevant('key', 'What do you know about the ledger?', 8, 0.55);
+        expect(bare).toHaveLength(0);
+
+        // With the last narrative turns as presence text, she is still in the scene.
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const inScene = await retrieveRelevant('key', 'What do you know about the ledger?', 8, 0.55, {
+            presenceText: 'Celeste sets down her cup and studies you. "You have questions," she says.',
+        });
+        expect(inScene.map(m => m.text).sort()).toEqual([
+            'Celeste hid the ledger under the parlour floor.',
+            'Lady Celeste Jewelglade (wary): keeps the family accounts.',
+        ]);
+        // The embed query is untouched: presenceText is never embedded.
+        expect(embedTextMock).toHaveBeenLastCalledWith('key', 'What do you know about the ledger?', { inputType: 'query' });
+    });
+
+    it('presenceText is presence-only: it cannot admit a row the query does not semantically reach', async () => {
+        embedTextMock.mockResolvedValueOnce(alignedVector(1, 0.5)); // below the gate even untagged
+        await addMemory('key', 'Celeste hid the ledger.', 'journal', null, ['Lady Celeste Jewelglade']);
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const matches = await retrieveRelevant('key', 'the weather', 8, 0.55, { presenceText: 'Celeste is here.' });
+        expect(matches).toHaveLength(0);
+    });
+
+    it('P2: the seed\'s subjects replace a cached row\'s stale tag (no re-embed) — Ketta joins Celeste', async () => {
+        await putEmbedding(row('Celeste and Ketta argued over the ledger.', 'journal', 1, {
+            vector: alignedVector(1, 0.6),
+            subjects: ['Lady Celeste Jewelglade'], // tagged when only Celeste was on the roster
+        }));
+        await seedMemories('key', [
+            { text: 'Celeste and Ketta argued over the ledger.', category: 'journal', subjects: ['Lady Celeste Jewelglade', 'Ketta Mor'] },
+        ], 's1');
+        await flushAsync();
+        expect(embedTextMock).not.toHaveBeenCalled(); // metadata patch, no re-embed
+
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const matches = await retrieveRelevant('key', 'I ask Ketta about the argument', 8, 0.55);
+        expect(matches.map(m => m.text)).toEqual(['Celeste and Ketta argued over the ledger.']);
+
+        // The patch reached disk: a fresh seed whose item carries NO subjects
+        // (leaves the cached tag alone) still knows both names.
+        await seedMemories('key', [{ text: 'Celeste and Ketta argued over the ledger.', category: 'journal' }], 's1');
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const again = await retrieveRelevant('key', 'I ask Ketta about the argument', 8, 0.55);
+        expect(again).toHaveLength(1);
+    });
+
+    it('a seed item without subjects leaves the cached tag alone', async () => {
+        await putEmbedding(row('Celeste hid the ledger.', 'journal', 1, {
+            vector: alignedVector(1, 0.6),
+            subjects: ['Lady Celeste Jewelglade'],
+        }));
+        await seedMemories('key', [{ text: 'Celeste hid the ledger.', category: 'journal' }], 's1');
+        embedTextMock.mockResolvedValueOnce(unitVector(0));
+        const away = await retrieveRelevant('key', 'a scene far from her', 8, 0.55);
+        expect(away).toHaveLength(0); // still gated by the surviving tag
+    });
+
+    it('P2: a durable corpus past the cap is kept whole — no rotating eviction, no re-embed churn, one warning', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const rows = [];
+        for (let i = 0; i < MAX_CAMPAIGN_MEMORIES + 20; i++) {
+            rows.push(row(`Durable fact #${i}`, 'world_fact', 10 + i));
+        }
+        await putEmbeddings(rows);
+        const seed = rows.map(r => ({ text: r.text, category: 'world_fact' }));
+
+        await seedMemories('key', seed, 's1');
+        await flushAsync();
+        expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES + 20);
+        expect(embedTextsMock).not.toHaveBeenCalled(); // everything cached, nothing evicted
+
+        // Second mount: still nothing missing, still nothing embedded — the old
+        // cap evicted a fresh oldest-20 slice here and re-embedded the last one.
+        await seedMemories('key', seed, 's1');
+        await flushAsync();
+        expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES + 20);
+        expect(embedTextsMock).not.toHaveBeenCalled();
+        expect(getMemoryTexts()).toContain('Durable fact #0');
+
+        expect(warn.mock.calls.filter(([msg]) => /Durable memory corpus exceeds/.test(msg))).toHaveLength(1);
+        warn.mockRestore();
+    });
+
+    it('transient rows still evict at the cap even when durable rows alone fill it', async () => {
+        const rows = [row('old player chatter', 'player', 1)];
+        for (let i = 0; i < MAX_CAMPAIGN_MEMORIES; i++) rows.push(row(`Durable fact #${i}`, 'world_fact', 10 + i));
+        await putEmbeddings(rows);
+        await seedMemories('key', [], 's1');
+        await flushAsync();
+        expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
+        expect(getMemoryTexts()).not.toContain('old player chatter');
+    });
+
+    it('P2: a failed put closes the connection; a failed cache read closes it; onversionchange closes it', async () => {
+        let closes = 0;
+        let failNextPut = false;
+        let failLoad = false;
+        let versionChange = null;
+        const db = {
+            close() { closes += 1; },
+            set onversionchange(fn) { versionChange = fn; },
+            get onversionchange() { return versionChange; },
+            transaction() {
+                const tx = {};
+                tx.objectStore = () => ({
+                    getAll() {
+                        const request = {};
+                        queueMicrotask(() => {
+                            if (failLoad) {
+                                request.error = new Error('read failed');
+                                request.onerror?.();
+                                tx.onabort?.();
+                            } else {
+                                request.result = [];
+                                request.onsuccess?.();
+                                tx.oncomplete?.();
+                            }
+                        });
+                        return request;
+                    },
+                    put() {
+                        queueMicrotask(() => (failNextPut ? tx.onabort?.() : tx.oncomplete?.()));
+                    },
+                    delete() { queueMicrotask(() => tx.oncomplete?.()); },
+                });
+                return tx;
+            },
+        };
+        globalThis.indexedDB = {
+            open() {
+                const request = { result: db };
+                queueMicrotask(() => request.onsuccess?.());
+                return request;
+            },
+        };
+
+        await seedMemories('key', [], 's1'); // cache load → one close
+        expect(closes).toBe(1);
+        expect(typeof versionChange).toBe('function');
+
+        failNextPut = true; // quota-style failure on persist
+        embedTextMock.mockResolvedValueOnce(unitVector(1));
+        await addMemory('key', 'A fact that fails to persist.', 'journal');
+        await flushAsync(5);
+        expect(closes).toBe(2); // the aborted write still closed its connection
+        expect(getMemoryCount()).toBe(1); // in-memory unaffected
+
+        failLoad = true;
+        embedTextMock.mockResolvedValue(unitVector(1));
+        await seedMemories('key', [{ text: 'Fresh fact.', category: 'world_fact' }], 's1');
+        expect(closes).toBeGreaterThanOrEqual(3); // read error path closed too
+        expect(getMemoryTexts()).toContain('Fresh fact.'); // degraded to fresh embedding
+
+        const before = closes;
+        versionChange();
+        expect(closes).toBe(before + 1);
+    });
+
+    it('P2: an aborted stale-row prune (deletePersistedEmbeddings onabort) still closes the connection', async () => {
+        let closes = 0;
+        const db = {
+            close() { closes += 1; },
+            transaction() {
+                const tx = {};
+                tx.objectStore = () => ({
+                    getAll() {
+                        const request = {};
+                        queueMicrotask(() => {
+                            request.result = [row('Marn (friendly): old note.', 'npc', 1)];
+                            request.onsuccess?.();
+                            tx.oncomplete?.();
+                        });
+                        return request;
+                    },
+                    delete() { queueMicrotask(() => tx.onabort?.()); },
+                    put() { queueMicrotask(() => tx.oncomplete?.()); },
+                });
+                return tx;
+            },
+        };
+        globalThis.indexedDB = {
+            open() {
+                const request = { result: db };
+                queueMicrotask(() => request.onsuccess?.());
+                return request;
+            },
+        };
+        await seedMemories('key', [], 's1'); // the npc row is stale → pruned → delete aborts
+        await flushAsync(5);
+        expect(getMemoryCount()).toBe(0);
+        expect(closes).toBe(2); // load + aborted prune
+    });
+
+    it('a campaign without a session id seeds in-memory only and never caches (the load heal mints the id)', async () => {
+        embedTextMock.mockResolvedValue(unitVector(1));
+        await seedMemories('key', [{ text: 'Unkeyed fact.', category: 'world_fact' }], null);
+        expect(getMemoryCount()).toBe(1);
+        expect(embedTextMock).toHaveBeenCalledTimes(1);
+        // Nothing reached disk under any key.
+        await seedMemories('key', [{ text: 'Unkeyed fact.', category: 'world_fact' }], null);
+        expect(embedTextMock).toHaveBeenCalledTimes(2); // re-embedded: no cache without an id
+    });
+
+    it('retrieval during an in-flight cold seed waits for the whole store instead of querying a partial one', async () => {
+        let release;
+        embedTextsMock.mockImplementation(() => new Promise(resolve => {
+            release = () => resolve([alignedVector(1, 0.9)]);
+        }));
+        embedTextMock.mockResolvedValue(unitVector(0));
+
+        const seed = seedMemories('key', [{ text: 'The bridge fell last spring.', category: 'world_fact' }], 's1');
+        let settled = false;
+        const retrieval = retrieveRelevant('key', 'What happened to the bridge?', 8, 0.55);
+        retrieval.then(() => { settled = true; });
+        await flushAsync(5);
+        expect(settled).toBe(false); // waiting on the seed, not answering from the empty store
+
+        release();
+        await seed;
+        expect((await retrieval).map(m => m.text)).toEqual(['The bridge fell last spring.']);
+    });
+
+    it('a failed seed releases retrieval instead of wedging every later turn', async () => {
+        embedTextsMock.mockRejectedValue(new Error('embed down'));
+        embedTextMock.mockResolvedValue(unitVector(0));
+        await expect(seedMemories('key', [{ text: 'x', category: 'world_fact' }], 's1')).rejects.toThrow('embed down');
+        expect(await retrieveRelevant('key', 'anything', 8, 0.55)).toEqual([]);
+    });
+});

@@ -8,6 +8,39 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-06 · RAG presence is judged from the SCENE, durable canon is never evicted, and a
+provider refusal is an error — never a blank turn.** Three rulings from the 2026-09-06 queue
+sweep (vector-memory-rag + providers-adapter). (1) The presence gate (2026-08-28, "dormant,
+not deleted") asks whether a memory's people are in the scene — and the scene is the
+player's line PLUS the DM's last narration, not the player's line alone. A conversation's
+second line rarely repeats the name of the person being spoken to, so judged from the query
+the gate rested exactly the person the scene was about (reproduced: Celeste's journal beat
+and her own dossier row vanished on "What do you know about the ledger?"). `retrieveRelevant`
+takes `{ presenceText }` — consulted ONLY for presence, never embedded, so the search query,
+cosine, and cost are unchanged — and the orchestrator's `buildPresenceText` feeds the last
+3 narrative-eligible messages (hidden setups, scrubbed refusals, error lines, and OOC table
+talk never count as presence). Someone who leaves the scene fades within a turn or two by
+construction; that lag is the design, not a gap. (2) `enforceCampaignCap` evicts TRANSIENT
+rows only (player/narrative color). Evicting durable rows was churn, not a cap: the mount
+seed re-embedded whatever the cache was missing with a fresh timestamp, so every Continue
+evicted a different oldest slice, paid the overflow in embeds again, and silently rotated a
+window of canon out of retrieval. A durable corpus past the 1,500-row cap is warned once
+per campaign and kept whole — canon is the campaign's memory and is never a cache
+eviction candidate; if the durable corpus itself ever needs bounding, that is a
+dormancy/pruning decision in the STORE (the IDEAS.md story-memory dormancy sketch), not in
+the cache. Seed `subjects` also win over a cached row's tag (a journal row tagged when only
+Celeste was on the roster stayed [Celeste] forever); a seed item carrying no subjects leaves
+the cached tag alone. (3) A refusal or a prompt-level block is a thrown error on every
+provider lane — OpenAI's `message.refusal`/`delta.refusal` ("The model declined to respond:
+…"), Gemini's `promptFeedback.blockReason` ("Gemini blocked the prompt (REASON) — … edit or
+remove (✕) the offending message") — and the orchestrator throws on an empty non-intent
+reply (no prose, no events, nothing dropped) rather than committing it. A blank assistant
+turn was the worst outcome under the 2026-08-28 refusal-cascade lens: it rode the chat, the
+save, and the DM's 20-message window with no system line and no refusal text to scrub,
+while the block's "please retry" advice looped on a deterministic refusal. The error line
+names the remedy the app already has (DELETE_MESSAGE). Combat-intent replies keep their own
+JSON-only guard; an events-only reply (JSON, no prose) still commits — events are a turn.
+
 **2026-09-05 · Hero conditions have ONE canonical form; a broken event block never becomes
 story; string-typed enemy stats coerce.** Three rulings from the 2026-09-05 queue sweep
 (response-parsing + enemy-stats-conditions). (1) `character.conditions` stores canonical

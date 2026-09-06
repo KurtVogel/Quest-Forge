@@ -33,6 +33,7 @@ import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownLocations, buildKnownStances, runScribe } from './scribe.js';
 import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { addMemory, findSubjectsInText, retrieveRelevant } from '../engine/vectorMemory.js';
+import { collectNarrativeMessages } from './narrativeMessages.js';
 import { getMachineryGeminiKey } from './machinery.js';
 import { curateStoryMemory, formatSecrecyTag } from '../engine/storyMemory.js';
 import { captureInjection } from '../debug/memoryInspectorStore.js';
@@ -42,6 +43,29 @@ import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheck
 
 /** How many recent (un-summarized) messages to send as LLM history. */
 export const MESSAGE_WINDOW = 20;
+
+/**
+ * How many recent narrative messages feed the RAG presence gate. The DM's
+ * last narration is what establishes who is in the scene; the player's own
+ * follow-up lines rarely repeat the name of the person they are talking to.
+ * Three = the player's current line (already committed), the DM's last
+ * narration, and the player's previous line — one full exchange of context,
+ * short enough that someone who left the scene fades within a turn or two.
+ */
+export const PRESENCE_MESSAGE_COUNT = 3;
+
+/**
+ * Scene text consulted ONLY for who is present in RAG retrieval (2026-09-06
+ * P1) — never embedded, so the search query itself is unchanged. Reads the
+ * narrative-eligible transcript: hidden setups, soft-deleted refusals,
+ * infrastructure error lines, and OOC table talk never count as presence.
+ */
+export function buildPresenceText(messages) {
+    return collectNarrativeMessages(messages)
+        .slice(-PRESENCE_MESSAGE_COUNT)
+        .map(m => m.content)
+        .join(' ');
+}
 
 const noop = () => {};
 
@@ -202,7 +226,9 @@ export function createTurnRunner({
                 s.currentLocation && `Location: ${s.currentLocation}`,
                 s.combat?.active && `In combat with: ${s.combat.enemies.map(e => e.name).join(', ')}`,
             ].filter(Boolean).join('. ');
-            retrievedMemories = await retrieveRelevant(machineryKey, sceneContext).catch(() => []);
+            retrievedMemories = await retrieveRelevant(machineryKey, sceneContext, 8, 0.55, {
+                presenceText: buildPresenceText(s.messages),
+            }).catch(() => []);
             dramaticMemories = curateStoryMemory({
                 memories: s.storyMemory || [],
                 query: sceneContext,
@@ -286,6 +312,15 @@ Translate the player's committed action into the single bounded combat_exchange 
                 // story reader (chronicler, scene art, priming) — 2026-09-04.
                 payload: { role: 'system', kind: 'error', content: 'The DM\'s mechanical events could not be read this turn (malformed data) — the story above stands, but no game state changed. If something seemed granted or started here, ask the DM to restate it.' },
             });
+        }
+        // An empty reply — no prose, no events, nothing dropped — is a failed
+        // turn, not a turn (2026-09-06 P1): a provider refusal that resolved to
+        // "" used to commit a blank assistant bubble into the chat, the save,
+        // and the DM's own 20-message window with no system line. Throwing
+        // routes it to the caller's error line like any other failure; the
+        // combat-intent mode is JSON-only by contract and keeps its own guard.
+        if (!opts.combatIntentOnly && !narrative.trim() && !parsed.events && !parsed.eventsDropped) {
+            throw new Error('The DM returned an empty response — nothing was narrated and no game state changed. Retry, or if the model is declining, edit or remove (✕) the message it objected to.');
         }
         // Table talk pauses the world: whatever a disobedient DM appends, no events
         // exist on an OOC turn — no rolls, loot, quests, or NPC/state mutations.

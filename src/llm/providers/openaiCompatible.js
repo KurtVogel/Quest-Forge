@@ -11,9 +11,11 @@ import { assertStreamComplete, makeCompletionGuard, makeHttpError, readSseStream
  * Output cap is a glitch-loop guard, not a budget — 4096 silently truncated
  * long turns and ate the trailing JSON event block. 16384 is the gpt-4o family
  * completion ceiling (Grok accepts far larger outputs, so it matches this
- * proven ceiling); raise if newer models with larger outputs are added.
+ * proven ceiling). Providers whose models count REASONING tokens against the
+ * cap (OpenAI's gpt-5 family) pass a per-model `maxOutputTokensFor` — the
+ * exact reason gemini.js runs at 32,768 (2026-09-06 audit).
  */
-const MAX_TOKENS = 16384;
+export const DEFAULT_MAX_TOKENS = 16384;
 
 /** "length" means the reply was truncated mid-response. */
 const assertCompleteResponse = makeCompletionGuard({
@@ -31,8 +33,11 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
 
     for (const msg of messageHistory) {
         messages.push({
-            role: msg.role === 'user' ? 'user' : 'assistant',
-            content: msg.content,
+            // Only genuine assistant turns are the model's own; anything else
+            // (user, and a `system` line a caller forgot to fold) is user-side
+            // context, matching buildMessageWindow's own mapping.
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: typeof msg.content === 'string' ? msg.content : String(msg.content ?? ''),
         });
     }
 
@@ -57,10 +62,23 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
  *   models (gpt-5 family, o-series) 400 on any non-default temperature, while
  *   xAI's grok models accept it — the second request-shape divergence
  *   (2026-08-22 OpenAI playtest).
+ * @param {function} [options.maxOutputTokensFor] - Output cap by model id
+ *   (defaults to DEFAULT_MAX_TOKENS for every model).
  * @returns {{ send: function, stream: function }}
  */
-export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens', temperatureUnsupported = () => false }) {
+export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens', temperatureUnsupported = () => false, maxOutputTokensFor = () => DEFAULT_MAX_TOKENS }) {
     const httpError = makeHttpError(label);
+
+    /**
+     * A refusal is a first-class reply shape on this API (`message.refusal` /
+     * `delta.refusal` with `content: null`, `finish_reason: 'stop'`). Read
+     * only `content`, and a refusal RESOLVES to "" — which the orchestrator
+     * used to commit as a blank DM turn with no error and the refusal text
+     * never shown (2026-09-06 P1). Thrown instead: visible, and DELETE_MESSAGE
+     * exists to scrub exactly this.
+     */
+    const refusalError = (refusal) =>
+        new Error(`The model declined to respond: ${String(refusal).trim().slice(0, 500)} — edit or remove (✕) the message it objected to, or rephrase, then continue.`);
 
     /** Send a non-streaming message. (thinkingBudget is Gemini-only; ignored here.) */
     async function send({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, maxOutputTokens, signal }) {
@@ -74,7 +92,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
                 model,
                 messages: formatMessages(systemPrompt, messageHistory, userMessage),
                 ...(temperatureUnsupported(model) ? {} : { temperature: temperature ?? 0.9 }),
-                [maxTokensParam]: Number.isFinite(maxOutputTokens) ? maxOutputTokens : MAX_TOKENS,
+                [maxTokensParam]: Number.isFinite(maxOutputTokens) ? maxOutputTokens : maxOutputTokensFor(model),
             }),
             signal,
         });
@@ -84,8 +102,12 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
         }
 
         const data = await response.json();
+        const message = data.choices?.[0]?.message;
+        if (message?.refusal) {
+            throw refusalError(message.refusal);
+        }
         assertCompleteResponse(data.choices?.[0]?.finish_reason);
-        const content = data.choices?.[0]?.message?.content;
+        const content = message?.content;
         if (!content) {
             throw new Error('No response generated. The model may have been blocked or returned empty.');
         }
@@ -104,7 +126,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
                 model,
                 messages: formatMessages(systemPrompt, messageHistory, userMessage),
                 ...(temperatureUnsupported(model) ? {} : { temperature: temperature ?? 0.9 }),
-                [maxTokensParam]: MAX_TOKENS,
+                [maxTokensParam]: maxOutputTokensFor(model),
                 stream: true,
             }),
             signal,
@@ -115,11 +137,14 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
         }
 
         let fullText = '';
+        let refusalText = '';
         let finishReason = null;
 
         await readSseStream(response, (parsed) => {
             const choice = parsed.choices?.[0];
             if (choice?.finish_reason) finishReason = choice.finish_reason;
+            const refusal = choice?.delta?.refusal;
+            if (typeof refusal === 'string' && refusal) refusalText += refusal;
             const text = choice?.delta?.content || '';
             if (text) {
                 fullText += text;
@@ -127,6 +152,9 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             }
         });
 
+        if (refusalText.trim()) {
+            throw refusalError(refusalText);
+        }
         assertStreamComplete(finishReason, assertCompleteResponse);
         return fullText;
     }

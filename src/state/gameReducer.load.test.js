@@ -718,3 +718,26 @@ describe('LOAD_GAME live-session invariants (user + settings)', () => {
         expect(next.settings.legacyOnlyKey).toBeUndefined();
     });
 });
+
+describe('LOAD_GAME session id heal (2026-09-06 audit)', () => {
+    const base = {
+        character: { name: 'Survivor', race: 'human', class: 'fighter', level: 1, exp: 0, currentHP: 12, maxHP: 12, conditions: [] },
+        inventory: [],
+        messages: [],
+    };
+
+    it('mints a session id for an established campaign that has none, so its RAG cache can key', () => {
+        const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: { ...base, session: { id: null, name: 'Old' } } });
+        expect(next.session.id).toMatch(/^session-\d+$/);
+        expect(next.session.name).toBe('Old');
+        const missing = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: base });
+        expect(missing.session.id).toMatch(/^session-\d+$/);
+    });
+
+    it('keeps an existing id and never mints one for a character-less save', () => {
+        const kept = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: { ...base, session: { id: 'session-123' } } });
+        expect(kept.session.id).toBe('session-123');
+        const empty = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: { inventory: [], messages: [], session: { id: null } } });
+        expect(empty.session.id).toBeNull();
+    });
+});

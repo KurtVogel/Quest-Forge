@@ -519,3 +519,30 @@ describe('turn runner — pre-fight spell_cast alongside combat_start (Codex 202
         expect(after.messages.some(m => m.role === 'system' && /casts Mage Armor/.test(m.content || ''))).toBe(true);
     });
 });
+
+describe('turn runner — an empty reply never commits a blank turn (2026-09-06 P1)', () => {
+    it('throws on an empty stream and dispatches no assistant message', async () => {
+        // A provider refusal that resolves to "" (OpenAI `refusal` shape before
+        // the provider fix) used to land as a blank bubble in the chat, the save,
+        // and the DM's own window.
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream(['   ']) });
+        await expect(runner.sendToLLM('I look around.', 'I look around.')).rejects.toThrow(/empty response/);
+        expect(getState().messages.filter(m => m.role === 'assistant')).toHaveLength(0);
+    });
+
+    it('a narration-only empty reply throws too (the caller retries the narration)', async () => {
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream(['']) });
+        await expect(runner.sendToLLM('Narrate the result.', null, { narrationOnly: true })).rejects.toThrow(/empty response/);
+        expect(getState().messages.filter(m => m.role === 'assistant')).toHaveLength(0);
+    });
+
+    it('an events-only reply still commits and applies its events', async () => {
+        const { runner, getState } = createHarness({
+            streamMessage: scriptedStream(['```json\n{"gold_found": 5}\n```']),
+        });
+        const goldBefore = getState().character.gold;
+        const events = await runner.sendToLLM('I search the chest.', 'I search the chest.');
+        expect(events.goldFound).toBe(5);
+        expect(getState().character.gold).toBe(goldBefore + 5);
+    });
+});

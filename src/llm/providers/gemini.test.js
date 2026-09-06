@@ -370,3 +370,50 @@ describe('streamGeminiMessage', () => {
         expect(error.message).toContain('Quota exceeded.');
     });
 });
+
+describe('prompt-level blocks and history shape (2026-09-06 audit)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    it('P1: a non-streaming promptFeedback block names the reason and the edit/remove remedy', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            promptFeedback: { blockReason: 'PROHIBITED_CONTENT' },
+        })));
+        const err = await sendGeminiMessage(SEND_ARGS).catch(e => e);
+        expect(err.message).toMatch(/blocked the prompt \(PROHIBITED_CONTENT\)/);
+        expect(err.message).toMatch(/Edit or remove/);
+        expect(err.message).not.toMatch(/No response generated/);
+    });
+
+    it('P1: a streamed promptFeedback block is named, never "connection dropped"', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse([
+            'data: {"promptFeedback":{"blockReason":"PROHIBITED_CONTENT","blockReasonMessage":"Content violates policy."}}\n\n',
+        ])));
+        const err = await streamGeminiMessage({ ...SEND_ARGS, onChunk: () => {} }).catch(e => e);
+        expect(err.message).toMatch(/blocked the prompt \(PROHIBITED_CONTENT: Content violates policy\.\)/);
+        expect(err.message).not.toMatch(/connection dropped/);
+    });
+
+    it('a candidate beside promptFeedback still wins (block only applies when nothing was generated)', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            promptFeedback: { safetyRatings: [] },
+            candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'Fine.' }] } }],
+        })));
+        await expect(sendGeminiMessage(SEND_ARGS)).resolves.toBe('Fine.');
+    });
+
+    it('a stray system-role history line rides as a user part and null content becomes ""', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+            candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'ok' }] } }],
+        }));
+        vi.stubGlobal('fetch', fetchMock);
+        await sendGeminiMessage({ ...SEND_ARGS, messageHistory: [{ role: 'system', content: 'You rolled **12**.' }, { role: 'assistant', content: null }] });
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body.contents.slice(0, 2)).toEqual([
+            { role: 'user', parts: [{ text: 'You rolled **12**.' }] },
+            { role: 'model', parts: [{ text: '' }] },
+        ]);
+    });
+});

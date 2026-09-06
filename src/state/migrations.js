@@ -356,14 +356,20 @@ function healStrandedDyingSolo(save) {
  * defaults for old saves.
  */
 function deriveSessionBoundaries(save) {
-    return {
-        ...save,
-        session: {
-            ...initialGameState.session,
-            ...save.session,
-            prunedMessageCount: (save.messages || []).filter(m => m?.summarized).length,
-        },
+    const session = {
+        ...initialGameState.session,
+        ...save.session,
+        prunedMessageCount: (save.messages || []).filter(m => m?.summarized).length,
     };
+    // A campaign without a session id (pre-id saves, hand-edited cloud saves)
+    // could never cache its embeddings — the RAG store is keyed by campaign,
+    // so every Continue re-embedded the whole corpus (2026-09-06 audit). The
+    // id is otherwise minted only at character creation; mint it here for an
+    // established campaign so the next autosave makes it permanent.
+    if (save.character && (typeof session.id !== 'string' || !session.id)) {
+        session.id = `session-${Date.now()}`;
+    }
+    return { ...save, session };
 }
 
 /**

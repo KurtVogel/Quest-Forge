@@ -84,7 +84,11 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
                 throw new Error(`${provider} request stalled — no response after ${Math.round(timeoutMs / 1000)}s (${MAX_RETRIES + 1} attempts).`);
             }
             const reason = stalled ? `stalled after ${Math.round(timeoutMs / 1000)}s` : error.message;
-            const delay = 1000 * 2 ** attempt + Math.random() * 250;
+            // A `Retry-After` the provider sent wins over the default backoff —
+            // a per-minute quota 429 burned all three attempts in ~3 s and lost
+            // the Scribe/journal extraction (2026-09-06). Capped in sse.js.
+            const backoff = 1000 * 2 ** attempt + Math.random() * 250;
+            const delay = Math.max(backoff, Number.isFinite(error?.retryAfterMs) ? error.retryAfterMs : 0);
             console.warn(`[LLM Adapter] Transient ${provider} failure (${reason}); retry ${attempt + 1}/${MAX_RETRIES} in ~${Math.round(delay)}ms.`);
             await sleep(delay);
         } finally {
@@ -124,7 +128,7 @@ export const PROVIDERS = {
     gemini: {
         name: 'Google Gemini',
         models: [
-            { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Latest!)', description: 'Most capable model, released Feb 2026' },
+            { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Recommended)', description: 'Most capable Gemini model' },
             { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', description: 'Fast frontier-class, great value' },
             { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', description: 'Cheapest current-gen' },
             { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Previous gen, fast and affordable' },
