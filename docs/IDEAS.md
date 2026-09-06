@@ -1461,6 +1461,40 @@ While there: the enemy save lane should consult `getConditionRollEffects(…, 's
 hero's does, so `restrained` means the same thing on both sides of the table. From the
 2026-09-05 strengthening audit (enemy-stats-conditions, Lap 1).
 
+### [strengthening] Scene presence from the whole table, not the player's last line — status: `idea` (2026-09-06)
+Presence-aware retrieval (2026-08-28) rests person-tied memories when that person is "nowhere
+near" — but "near" is judged from the player's message plus the location string, because that is
+the retrieval query. The DM's narration is what actually establishes who is in the scene, and a
+conversation's natural shape is that the player stops repeating the NPC's name after the first
+line: "I approach Celeste" → "What do you know about the ledger?" → "And the letters?" — from the
+second line on, every memory ABOUT Celeste (her journal beats and her own dossier row) pays the
+0.12 penalty in the one scene it was curated for (reproduced by the 2026-09-06 audit). Proposal:
+separate the two jobs the query currently does. The EMBED query stays exactly as it is (semantic
+relevance, cost-sensitive); the PRESENCE word set additionally takes the last one or two visible
+narrative/user messages — or, cheaper and more precise, the roster names `findSubjectsInText`
+finds in them — through an optional `presenceText` argument on `retrieveRelevant`. Same idea for
+the tagging side: the seed's subjects patch should be seed-wins (compare, replace when different),
+not first-tag-wins, so a row about two people is not permanently tied to whichever one was on the
+roster first. Neither change touches cosine scores or embed calls. From the 2026-09-06
+strengthening audit (vector-memory-rag, Lap 1).
+
+### [strengthening] Provider refusals and prompt blocks are named outcomes, never blank turns or "connection dropped" — status: `idea` (2026-09-06)
+The 2026-08-28 refusal-cascade work made model refusals a first-class problem (DELETE_MESSAGE
+exists to scrub them from the window), but two refusal shapes still arrive as something else.
+OpenAI-compatible reasoning models return refusals in `message.refusal` / `delta.refusal` with
+`content: null` and a clean `stop`; the factory reads only `content`, so a streamed refusal
+resolves to an empty string and the orchestrator commits a BLANK assistant turn — no bubble text,
+no system line, a blank row in the save and the DM window — while the non-streaming lane throws a
+generic "No response generated". Gemini's prompt-level block (`promptFeedback.blockReason`, the
+one classifier `BLOCK_NONE` cannot disable) arrives with no candidates and is reported as "the
+connection dropped … please retry", which loops on a deterministic block. Proposal: (1) both
+factory lanes surface `refusal` as the thrown message; (2) both Gemini lanes read
+`promptFeedback.blockReason` and name it with an edit-or-remove-the-message remedy instead of a
+retry hint; (3) the orchestrator never commits an empty non-intent narrative — the combat-intent
+guard generalized: an empty stream is a failure line, not a message. A refusal the player can
+SEE is one they can delete; a blank turn primes the next refusal invisibly. From the 2026-09-06
+strengthening audit (providers-adapter, Lap 1).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
