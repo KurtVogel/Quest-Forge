@@ -1544,6 +1544,29 @@ story cards out 2–3× faster), and skip `fallback: true` entries at both RAG e
 the 2026-09-06 strengthening audit (memory-journal).
 Shipped the same day in the queue sweep, all three parts — see DECISIONS.md 2026-09-06 (memory tiers).
 
+### [strengthening] Whoever is in the scene is always at the table: presence-first NPC context on BOTH sides of the turn — status: `idea` (2026-09-06)
+Two lookups decide whether the engine's NPC memory actually reaches the moment it was recorded
+for, and both use the wrong key. On the way IN (the DM prompt), KNOWN NPCs is a pure score
+ranking into 8 slots, and a rich dossier anywhere in the world (tension, stance, hooks, history,
+agenda) outscores the thin ferrywoman the hero is talking to even when her location matches —
+so the DM narrates her without her looks, gender, or stance, the fields the block exists to keep
+consistent. On the way OUT (the Scribe after the turn), KNOWN APPEARANCES / KNOWN STANCES are
+gathered by full-name substring, so a turn that says "Saima" instead of "Saima Aallotar" gives
+the Scribe no known look; it emits this turn's fragment, the roster fork-guard routes it into the
+right record, and the plain-replace appearance write erases white hair, eyes, build, and cloak
+behind "a fresh scar on her cheek" (both reproduced by the 2026-09-06 audit). The morning's RAG
+fix built the one primitive both need: `buildPresenceText` (last three narrative messages) +
+`findSubjectsInText` (word-boundary name tokens against the roster). Proposal: (1) KNOWN NPCs
+reserves slots first for scene-present NPCs (presence hits) and location-matched NPCs, then
+fills by score; (2) every `buildKnown*` builder matches by name tokens (`namesMatch` or the
+shared helper), never `includes(fullName)`; (3) `appearance` gets an engine belt on both the
+Scribe and DM lanes — an incoming look that covers few of the known tokens and is much shorter
+is a fragment and merges, only a description that carries the known record may replace (the
+`mergeNpcDossierText` policy, minus the append-forever part haircuts and disguises need to
+avoid). While there: `computeNpcImportance` should be computed from dossier fields, not seeded
+from its own stored value — today every named NPC is 5/5 at birth and the label means nothing.
+From the 2026-09-06 strengthening audit (scribe + prompt-building).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
