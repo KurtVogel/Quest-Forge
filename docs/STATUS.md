@@ -8,6 +8,20 @@ lives in git history and the settled outcomes in DECISIONS.md).
 
 _Last updated: 2026-09-06 (third queue sweep of the day — scribe + prompt-building: token-matched Scribe merge context + appearance fragment belt, presence-first KNOWN NPCs, hardened UPDATE_NPC boundary, dossier-only importance, conversational NPC recency; deployed)._
 
+## 2026-09-06 (scheduled) — PRODUCTIZATION.md created (docs only, no code)
+
+The scheduled productization task created repo-root `PRODUCTIZATION.md`: 2026 competitor
+pricing research (OGT rounds, LoreKeeper 20 free turns/day + €7.99, F&F unlimited-standard +
+premium credits at $19.95–39.95, AI Dungeon credit tiers), pricing-model options with a
+recommended **two-door shape** (BYOK free/unmetered + hosted metered on our Gemini key), an
+honest margin sketch showing the current Pro-only stack does NOT clear OGT price points
+without a verified cache hit or a Flash-class standard narrator (so focus track A —
+`usageMetadata` instrumentation — is the top business task too), proxy options (Firebase AI
+Logic vs own Cloud Function), a fixed-narrator stance for the hosted door, the hosted
+content-policy blocker with a launch recommendation (compliant hosted door; unfiltered play
+BYOK-only), acquisition patterns, 12 open questions, and 4-phase plan. `docs/PRODUCT.md`
+points at it. Nothing decided — Vesa reviews; settled calls go to DECISIONS.md.
+
 ## 2026-09-06 (evening) — queue sweep: NPC dossier tier — token-matched merge context, presence-first KNOWN NPCs, roster boundary hardened
 
 All 6 lines of the third 2026-09-06 audit (scribe + prompt-building) cleared — every queue line

@@ -55,6 +55,12 @@ Adult low-fantasy tone with strict player agency. Intimacy and mature themes are
 
 Research reports live in `cowork/research/` (local, not committed); settled outcomes get promoted to `DECISIONS.md` and this file.
 
+**2026-09-06:** the working answers to these questions now live in the repo-root
+[`PRODUCTIZATION.md`](../PRODUCTIZATION.md) (competitor pricing research, pricing-model options
+with a margin sketch, hosting/proxy options, model-selection stance, the hosted content-policy
+blocker, acquisition patterns, open questions, phasing). A scheduled task keeps it updated;
+settled calls still get promoted to `DECISIONS.md`.
+
 ## Success, in order
 
 1. Vesa keeps *wanting* to play his own game.
