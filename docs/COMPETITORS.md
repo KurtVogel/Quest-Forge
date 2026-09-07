@@ -106,6 +106,10 @@ free tier." If true, it's the **most architecturally similar** competitor and th
 for our engine-rigor + persistence story (more than Old Greg's, which is the casual-mobile play).
 **TODO:** dedicated pass on LoreKeeper — pricing, whether the "5e combat" is engine-owned or
 prompt-driven, how persistence actually holds up, and whether they're BYO-key or hosted/metered.
+**Partial answer (2026-09-07, PRODUCTIZATION.md §1.1):** hosted, "proprietary engine,
+multi-provider", no BYOK. Pricing is contradictory across sources (€7.99 + 20 free turns/day vs
+$9/$19/$39 + 500 one-time credits, 1 credit = 3 rounds) — verify the live page by hand; if the
+daily free grant is gone, the "generous free funnel" story in this file needs revising.
 
 ## Note: Friends & Fables
 Tactical VTT angle (grid maps, tokens, worldbuilding suite). Broader/heavier than us by design —

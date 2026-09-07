@@ -8,19 +8,27 @@ lives in git history and the settled outcomes in DECISIONS.md).
 
 _Last updated: 2026-09-06 (third queue sweep of the day — scribe + prompt-building: token-matched Scribe merge context + appearance fragment belt, presence-first KNOWN NPCs, hardened UPDATE_NPC boundary, dossier-only importance, conversational NPC recency; deployed)._
 
-## 2026-09-06 (scheduled) — PRODUCTIZATION.md created (docs only, no code)
+## 2026-09-06 → 09-07 (scheduled) — PRODUCTIZATION.md created, then second research pass (docs only, no code)
 
-The scheduled productization task created repo-root `PRODUCTIZATION.md`: 2026 competitor
-pricing research (OGT rounds, LoreKeeper 20 free turns/day + €7.99, F&F unlimited-standard +
-premium credits at $19.95–39.95, AI Dungeon credit tiers), pricing-model options with a
-recommended **two-door shape** (BYOK free/unmetered + hosted metered on our Gemini key), an
-honest margin sketch showing the current Pro-only stack does NOT clear OGT price points
-without a verified cache hit or a Flash-class standard narrator (so focus track A —
-`usageMetadata` instrumentation — is the top business task too), proxy options (Firebase AI
-Logic vs own Cloud Function), a fixed-narrator stance for the hosted door, the hosted
-content-policy blocker with a launch recommendation (compliant hosted door; unfiltered play
-BYOK-only), acquisition patterns, 12 open questions, and 4-phase plan. `docs/PRODUCT.md`
-points at it. Nothing decided — Vesa reviews; settled calls go to DECISIONS.md.
+Repo-root `PRODUCTIZATION.md` is the working monetization file (created 09-06: competitor
+pricing, a recommended **two-door shape** — BYOK free/unmetered + hosted metered on our Gemini
+key — margin sketch, proxy options, hosted content-policy blocker, acquisition, open questions,
+4-phase plan; `docs/PRODUCT.md` points at it). **09-07 pass, read its "What changed" box:**
+(1) the cost model was corrected — machinery is `gemini-3.7-flash` (the IDEAS.md Flash-Lite
+entry is stale history) and every 3.6–3.8 Flash model's intro price **doubles 2027-01-01**, so
+the "cheap Flash narrator" plan saves ~15–20% after January, not ~50%; thinking tokens on the
+DM lane are the unmeasured unknown; plan sketch re-priced at ~€0.065/turn with smaller
+allowances. (2) Firebase AI Logic confirmed feature-complete from docs (streaming, safety,
+thinking, cached-token usageMetadata, per-user rate limits) but it is a rate limiter, not a
+meter — spike "AI Logic + Firestore entitlements" first, own streaming proxy when token-exact
+metering matters. (3) Paddle/Polar/Lemon Squeezy all prohibit adult/age-restricted content
+(Polar names "AI relationship services"); action = written pre-clearance for the compliant
+hosted posture. (4) Provider scan: Google no, OpenAI adult mode paused, xAI tolerated with
+moderation → **BYOK is the explicit tier.** (5) RevenueCat 2026: AI apps churn ~30% faster,
+hard paywalls convert 5× freemium, day zero decides — onboarding is the monetization feature.
+Open questions 12 → 15. **Track A (`usageMetadata`) is still unstarted — re-confirmed by grep;
+it remains the top business task.** Nothing decided — Vesa reviews; settled calls go to
+DECISIONS.md.
 
 ## 2026-09-06 (evening) — queue sweep: NPC dossier tier — token-matched merge context, presence-first KNOWN NPCs, roster boundary hardened
 
