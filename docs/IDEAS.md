@@ -1567,6 +1567,53 @@ avoid). While there: `computeNpcImportance` should be computed from dossier fiel
 from its own stored value — today every named NPC is 5/5 at birth and the label means nothing.
 From the 2026-09-06 strengthening audit (scribe + prompt-building).
 
+### [strengthening] Bound the last two DM-writable XP levers the way boss XP is bounded — status: `idea` (2026-09-07, needs an rpg-balance-master ruling)
+The 2026-08-26 ruling made XP engine-owned on three verifiable tiers because models award
+inconsistently, and demoted `exp_awarded` to "small freeform bonuses" — but the demotion is
+prompt-only: the wire clamp is 10000 (one event took a hero L1→L5 in the audit's reproduction),
+and `level_up: true` still hands out a WHOLE level on the DM's say-so, guarded only by the
+4-message echo ledger (four emissions five messages apart: L1→L5, zero suppression lines). A level
+outsizes a front resolution, the biggest engine-computed reward there is, and the live 08-26
+report showed the model reaching for exactly this flag when it "felt" a level was owed. Boss XP is
+the precedent: an untrusted flag honored only inside an engine-verifiable band. Proposal: `level_up`
+pays the FRONT tier (50% of the current threshold — a "milestone" stays a real, felt reward and two
+milestones make a level, matching the front-resolution invariant), `exp_awarded` clamps to the
+QUEST tier (`getQuestCompletionXp(level)`, i.e. ≤ 12.5% of a level per award — "tens to low
+hundreds" made engine-real at every level), and the prompt text follows the engine. This also
+collapses the `level_up` + large-bonus double-level (L1→L3 from one response) the applyEvents
+comment believes it prevents. From the 2026-09-07 strengthening audit (progression).
+
+### [strengthening] A defeat is a defeat: level-ups earned at a lost fight keep the hero down — status: `idea` (2026-09-07)
+END_COMBAT's `slainXpOnly` award can cross a threshold at the DEFEAT terminal, and the level-up
+heal's revive semantics (the 2026-08-30 fix, correct for every other award path) then contradict
+the beat the engine just declared: a low-level-solo hero reads "**Astra is defeated** … capture,
+rob, spare" and, one line later, "Fully healed — back on your feet" (full HP, setback cleared)
+while the narration prompt tells the DM to narrate a collapse; a hero who STABILIZED at 0 HP gets
+full HP written with the Unconscious condition still on (`revived` only fires for `dying`/
+`lowLevelDefeat`) — the limbo the 08-30 fix targeted, via the stable state. Proposal: a level-up
+whose trigger is a defeat/escape terminal grows maxHP and features but leaves currentHP and the
+downed state alone (the DM narrates the loss; the level shows up when the hero next stands), and
+`revived` widens to "0 HP or Unconscious" so a full heal can never leave a condition behind.
+While there: a DM `level_up` at level 20 should say so instead of vanishing silently. From the
+2026-09-07 strengthening audit (progression).
+
+### [strengthening] Every DM lane that discards events must treat "no prose" as a failed turn, and the opening lane must never hide itself — status: `idea` (2026-09-07)
+Two cross-lane holes in the orchestrator's visibility/commit policy, both reproduced. (1) The
+2026-09-06 empty-reply guard checks `!parsed.events`, but `narrationOnly`/`tableTalk` null the
+events two lines later — a JSON-only reply on those lanes commits a blank assistant bubble into
+the chat, the save, and the DM window, and on combat narration the round advances with its story
+lost and no Retry. Rule: on an event-discarding lane, no prose IS empty — throw. (2) The premise
+opening is sent with no player action, so a `requested_rolls` in the opening (an in-medias-res
+chase — the opening prompt's own sanctioned exception) hides the narration as a "withheld setup",
+defers the opening's `starting_items`/`quest_updates` into nothing, stages no proposal, and the
+priming ladder retries the opening three times into three hidden rows before giving up (and a
+reload repeats it). Rule: the opening lane strips `requestedRolls` before visibility derivation
+and a committed-but-hidden opening is revealed, never retried. Companion cleanup:
+`runPostTurnExtraction` should read location/combat-start from the committed turn record instead
+of a same-task `getState()` (travel turns embed the arrival narration under the departure place),
+and the post-stream helpers (nudge, roll review) should carry the turn's abort `signal` so Stop
+is never inert. From the 2026-09-07 strengthening audit (chat-orchestration).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
