@@ -8,6 +8,42 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-07 · The last two DM-writable XP levers are bounded engine-side (`level_up` pays the front tier, `exp_awarded` is capped at the quest tier), and a level crossed at a defeat keeps the hero down.**
+Completes the 2026-08-26 pair, which ledgered the ECHO of these lanes but left their SIZE to the
+prompt. The 2026-09-07 strengthening audit reproduced what that leaves open: four `level_up: true`
+emissions five messages apart took a hero L1→L5 with zero suppression lines (the constant `levelup`
+marker only catches a re-emission inside 4 messages); one `exp_awarded` at the 10000 parse clamp did
+the same while the prompt promised "tens to low hundreds"; and `level_up` beside a bonus ≥ the next
+threshold double-levelled (L1→L3) against applyEvents' own comment. A level outsizes a front
+resolution — the largest engine-computed reward — and the live 08-26 report showed the model
+reaching for exactly this flag. **Ruling (rpg-balance-master, the boss-XP precedent: an untrusted
+flag is honored only inside an engine-verifiable band):** a DM milestone is worth
+`getStoryMilestoneXp(level)` = the FRONT tier (50% of the current threshold — "milestone" stays a
+real, felt reward and two milestones make exactly one level, the same weight as decisively ending a
+campaign pressure); a DM freeform bonus is capped at `getDmBonusXpCap(level)` = the QUEST tier
+(12.5% — a flourish can never outrank a completed quest). `LEVEL_UP` with `_meta` pays milestone +
+capped bonus in ONE `awardExperience` call, so a single emission banks at most 62.5% of a level and
+can never cross two; `ADD_EXP` with `_meta` clamps BEFORE the ledger so an oversized award re-emitted
+still matches its own echo signature; both post a visible cap note; at level 20 the milestone posts
+"max level reached, no level gained" instead of vanishing. Engine/legacy meta-less dispatches keep
+their whole-level and unbounded semantics (`replayPendingLevelUps`, engine XP). The prompt text
+follows the engine — it never governed. **Defeat-terminal level-ups (same audit):** END_COMBAT's
+`slainXpOnly` award could cross a threshold at the DEFEAT terminal and the level-up heal's revive
+semantics (2026-08-30, correct for every other award path) contradicted the beat the engine had just
+declared — "**Astra is defeated** … capture, rob, spare" then "Fully healed — back on your feet"
+while the narration prompt told the DM to narrate the collapse; a STABILIZED hero (3 successes → not
+dying, 0 HP, Unconscious) got full HP with the condition still on because `revived` only fired for
+`dying`/`lowLevelDefeat`. Now `awardExperience(…, { keepDowned })` (passed by END_COMBAT on
+defeat/escape) grows maxHP, features, resources, and hit dice but leaves currentHP and the downed
+state exactly as the fight left them ("the new vigor waits — it returns when you recover"); a hero
+on their feet still takes the ordinary full heal. And `revived` is judged on the DOWNED state
+(`isHeroDown`: dying, defeated, HP ≤ 0, or Unconscious), so no full heal can ever leave Unconscious
+behind. Deliberately NOT changed: victory and out-of-combat level-ups keep revive semantics (the
+level was owed and the scene allows standing up); the defeat's XP is still paid at the terminal (the
+sheet is right when the hero next stands) rather than deferred past the narration.
+
+---
+
 **2026-09-06 · Whoever is in the scene is at the table: NPC context is presence-first on both
 sides of the turn, appearance fragments merge, and the roster boundary trusts nothing.** Four
 rulings from the third 2026-09-06 queue sweep (scribe + prompt-building — the NPC dossier tier

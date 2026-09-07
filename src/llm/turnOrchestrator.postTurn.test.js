@@ -1,121 +1,120 @@
 /**
- * runPostTurnExtraction — the shared post-turn Scribe/embed/audit pass
- * (2026-08-19 P1: handleSend and finalizeRoleplayTurn maintained near-duplicate
- * blocks by hand and the post-roll copy silently lost the narrated-cast audit,
- * so an eventless cast the DM narrated in a post-roll outcome escaped the
- * 2026-08-09 backstop). One orchestrator-owned helper now serves both paths;
- * these tests pin the auditCasts flag — the post-roll outcome path FIRST,
- * since that is the one that drifted.
+ * runPostTurnExtraction reads the COMMITTED turn, not same-task state
+ * (2026-09-07 audit P2). The harness here deliberately defers state visibility
+ * by one macrotask — the React shape the module header documents — because a
+ * synchronous getState structurally hides the whole staleness class: a travel
+ * turn embedded the ARRIVAL prose under the departure place, and a post-roll
+ * outcome that started combat ran the Scribe, loot audit, embed, and
+ * auto-summarize on the fight-start narration (everything handleSend skips).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { runScribeMock } = vi.hoisted(() => ({ runScribeMock: vi.fn(async () => {}) }));
+const mocks = vi.hoisted(() => ({
+    runScribe: vi.fn(async () => {}),
+    addMemory: vi.fn(async () => {}),
+    maybeAutoSummarize: vi.fn(async () => ({})),
+}));
 
 vi.mock('./scribe.js', async (importOriginal) => ({
     ...(await importOriginal()),
-    runScribe: runScribeMock,
+    runScribe: mocks.runScribe,
+}));
+vi.mock('../engine/vectorMemory.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    addMemory: mocks.addMemory,
+    retrieveRelevant: async () => [],
+}));
+vi.mock('../engine/worldJournal.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    maybeAutoSummarize: mocks.maybeAutoSummarize,
 }));
 
-import { gameReducer, initialGameState } from '../state/gameReducer.js';
-import { createCharacter } from '../engine/characterUtils.js';
-import { createTurnRunner } from './turnOrchestrator.js';
+const { gameReducer, initialGameState } = await import('../state/gameReducer.js');
+const { createCharacter } = await import('../engine/characterUtils.js');
+const { createTurnRunner } = await import('./turnOrchestrator.js');
 
-const ABILITY_SCORES = {
-    strength: 15, dexterity: 13, constitution: 14,
-    intelligence: 10, wisdom: 12, charisma: 8,
-};
+const ABILITY_SCORES = { strength: 15, dexterity: 13, constitution: 14, intelligence: 10, wisdom: 12, charisma: 8 };
 
 function scriptedStream(responses) {
     return vi.fn(async ({ onChunk }) => {
-        const next = responses.shift();
-        if (next instanceof Error) throw next;
-        const text = typeof next === 'string' ? next : '';
+        const text = responses.shift() || '';
         onChunk?.(text);
         return text;
     });
 }
 
-function createHarness({ streamMessage } = {}) {
+/** getState lags dispatch by one macrotask — the React render-flush shape. */
+function createLaggingHarness({ streamMessage }) {
     let state = {
         ...initialGameState,
         character: createCharacter('Testa', 'human', 'fighter', ABILITY_SCORES, ['athletics']),
-        settings: { ...initialGameState.settings, llmProvider: 'openai', apiKey: 'test-key', model: 'test-model' },
+        currentLocation: 'Greyfell',
+        settings: { ...initialGameState.settings, llmProvider: 'openai', apiKey: 'test-key', model: 'test-model', geminiApiKey: 'machinery-key' },
         session: { ...initialGameState.session, id: 'session-test' },
     };
-    const dispatch = (action) => { state = gameReducer(state, action); };
+    let visible = state;
+    const dispatch = (action) => {
+        state = gameReducer(state, action);
+        setTimeout(() => { visible = state; }, 0);
+    };
     const runner = createTurnRunner({
-        getState: () => state,
+        getState: () => visible,
         dispatch,
-        streamMessage: streamMessage || vi.fn(async () => ''),
+        streamMessage,
         sendMessage: vi.fn(async () => ''),
     });
-    return { runner, getState: () => state };
+    return { runner, getLiveState: () => state };
 }
 
 beforeEach(() => {
-    runScribeMock.mockClear();
+    mocks.runScribe.mockClear();
+    mocks.addMemory.mockClear();
+    mocks.maybeAutoSummarize.mockClear();
 });
 
-describe('turn runner — post-roll outcome extraction (2026-08-19 P1)', () => {
-    it('the accepted-check outcome runs the Scribe with the narrated-cast audit armed', async () => {
-        const { runner, getState } = createHarness({
-            streamMessage: scriptedStream([
-                'The lock clicks open — you whisper a soft Light cantrip and slip inside the dark archive.',
-            ]),
-        });
-        runner.stageRoleplayCheck(
-            [{ type: 'skill_check', skill: 'stealth', dc: 12, description: 'Slip inside unheard' }],
-            'I pick the lock and slip inside.'
-        );
+describe('runPostTurnExtraction — committed-record reads (2026-09-07 P2)', () => {
+    it('a travel turn embeds and extracts under the ARRIVAL location, not the departure', async () => {
+        const response = 'The road bends and Ashford rises from the marsh mist, its gate lamps already lit.\n'
+            + '```json\n{"location": "Ashford"}\n```';
+        const { runner, getLiveState } = createLaggingHarness({ streamMessage: scriptedStream([response]) });
 
-        await runner.acceptRoleplayCheck();
+        await runner.sendToLLM('I walk on to Ashford.', 'I walk on to Ashford.');
+        expect(getLiveState().currentLocation).toBe('Ashford');
+        // Same task: the visible state still says Greyfell — the trap.
+        expect(runner.runPostTurnExtraction('I walk on to Ashford.')).toBe(true);
 
-        expect(getState().rollHistory.length).toBeGreaterThan(0);
-        expect(runScribeMock).toHaveBeenCalledTimes(1);
-        const args = runScribeMock.mock.calls[0][0];
-        expect(args.playerMessage).toBe('I pick the lock and slip inside.');
-        expect(args.dmNarrative).toContain('Light cantrip');
-        expect(args.lootAudit).toBeTruthy();
-        expect(args.lootAudit.auditCasts).toBe(true); // the flag the post-roll path had silently lost
-        expect(args.lootAudit.sourceId).toMatch(/:scribe-loot$/);
-    });
-});
-
-describe('turn runner — runPostTurnExtraction (shared handleSend/post-roll pass)', () => {
-    it('extracts from the committed narration with the audit keyed to its message id', async () => {
-        const { runner, getState } = createHarness({
-            streamMessage: scriptedStream(['You pocket the strange coin.\n```json\n{"gold_found": 3}\n```']),
-        });
-        await runner.sendToLLM('I take the coin.', 'I take the coin.');
-
-        expect(runner.runPostTurnExtraction('I take the coin.', { auditCasts: true })).toBe(true);
-
-        expect(runScribeMock).toHaveBeenCalledTimes(1);
-        const args = runScribeMock.mock.calls[0][0];
-        const committed = getState().messages.findLast(m => m.role === 'assistant');
-        expect(args.lootAudit.sourceId).toBe(`${committed.id}:scribe-loot`);
-        // The applied events ride along so the audit only recovers the shortfall.
-        expect(args.lootAudit.appliedEvents).toBe(committed.events);
-        expect(args.lootAudit.auditCasts).toBe(true);
+        expect(mocks.runScribe).toHaveBeenCalledTimes(1);
+        expect(mocks.runScribe.mock.calls[0][0].dmLocationEvent).toBe('Ashford');
+        const narrativeEmbeds = mocks.addMemory.mock.calls.filter(call => call[2] === 'narrative');
+        expect(narrativeEmbeds).toHaveLength(1);
+        expect(narrativeEmbeds[0][1]).toMatch(/^\[Location: Ashford\]/);
+        expect(narrativeEmbeds[0][3]).toBe('Ashford');
     });
 
-    it('extracts nothing when no turn committed', () => {
-        const { runner } = createHarness({});
-        expect(runner.runPostTurnExtraction('I wait.', { auditCasts: true })).toBe(false);
-        expect(runScribeMock).not.toHaveBeenCalled();
+    it('a fight-starting narration is never extracted, embedded, or summarized', async () => {
+        const response = 'Steel rasps from the hedgerow — two bandits step onto the road, blades bare.\n'
+            + '```json\n{"combat_start": {"enemies": [{"id": "bandit-1", "name": "Bandit", "hp": 9, "ac": 12, "attack_bonus": 3, "damage": "1d6"}]}}\n```';
+        const { runner, getLiveState } = createLaggingHarness({ streamMessage: scriptedStream([response]) });
+
+        await runner.sendToLLM('I keep walking.', 'I keep walking.');
+        expect(getLiveState().combat.active).toBe(true);
+        expect(runner.getLastCommittedTurn().hidden).toBe(false);
+
+        runner.finalizeRoleplayTurn('I keep walking.');
+
+        expect(mocks.runScribe).not.toHaveBeenCalled();
+        expect(mocks.addMemory.mock.calls.filter(call => call[2] === 'narrative')).toHaveLength(0);
+        expect(mocks.maybeAutoSummarize).not.toHaveBeenCalled();
     });
 
-    it('extracts nothing from a withheld roll-setup commit (hidden narration)', async () => {
-        const { runner } = createHarness({
-            streamMessage: scriptedStream([
-                'You edge toward the gate as the sergeant turns.\n'
-                + '```json\n{"requested_rolls": [{"type": "skill_check", "skill": "stealth", "dc": 12, "description": "Slip past the sergeant"}]}\n```',
-            ]),
-        });
-        await runner.sendToLLM('I sneak past.', 'I sneak past.');
-        expect(runner.getLastCommittedTurn().hidden).toBe(true);
+    it('an ordinary outcome still extracts and summarizes through finalizeRoleplayTurn', async () => {
+        const response = 'The lock gives with a soft click and the strongroom breathes cold air at you.';
+        const { runner } = createLaggingHarness({ streamMessage: scriptedStream([response]) });
 
-        expect(runner.runPostTurnExtraction('I sneak past.', { auditCasts: true })).toBe(false);
-        expect(runScribeMock).not.toHaveBeenCalled();
+        await runner.sendToLLM('I pick the lock.', 'I pick the lock.');
+        runner.finalizeRoleplayTurn('I pick the lock.');
+
+        expect(mocks.runScribe).toHaveBeenCalledTimes(1);
+        expect(mocks.maybeAutoSummarize).toHaveBeenCalledTimes(1);
     });
 });

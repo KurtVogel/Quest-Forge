@@ -208,6 +208,11 @@ export const handlers = {
                     reason: slainXpOnly
                         ? `foes slain before the fight ended: ${enemyNames || 'enemies'}`
                         : `battle complete: ${enemyNames || 'enemies'}`,
+                    // A level crossed at a DEFEAT/escape terminal must not stand
+                    // the downed hero back up mid-collapse (2026-09-07 audit P1):
+                    // the sheet grows, the defeat stands, the DM narrates the
+                    // setback it was told to.
+                    keepDowned: slainXpOnly,
                 });
                 newState = {
                     ...newState,

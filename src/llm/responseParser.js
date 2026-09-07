@@ -221,7 +221,7 @@ export function parseResponse(response) {
     return { narrative, events };
 }
 
-export async function detectSemanticTextRolls(narrative, settings) {
+export async function detectSemanticTextRolls(narrative, settings, { signal } = {}) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !narrative) return null;
 
@@ -271,6 +271,7 @@ Output ONLY the JSON, no prose outside the JSON.`;
             messageHistory: [],
             userMessage: `DM narrative: ${narrative}`,
             temperature: 0.2, // roll detection — determinism over flair
+            signal, // the turn's Stop cancels the detector too (2026-09-07 P2)
         });
 
         // The shared loose parser gives this machinery consumer the same fence-strip
@@ -279,6 +280,9 @@ Output ONLY the JSON, no prose outside the JSON.`;
         const parsed = parseJsonObjectLoose(response, ['requested_rolls']);
         return Array.isArray(parsed?.requested_rolls) ? parsed.requested_rolls : null;
     } catch (e) {
+        // A deliberate Stop is the caller's to handle — never swallowed into
+        // "no rolls found" (the turn would commit as if nothing happened).
+        if (e?.name === 'AbortError' && signal?.aborted) throw e;
         console.warn('[ResponseParser] Semantic roll detection failed:', e.message || e);
         return null;
     }

@@ -107,24 +107,28 @@ describe('recentExpAwards guards the LEVEL_UP lane', () => {
         payload: { bonusExp, reason: 'milestone', _meta: meta },
     });
 
+    // Since 2026-09-07 a DM milestone pays the front tier of XP (half the
+    // current threshold: 900 at L3), never a whole level — see the bounded-lane
+    // suite below. The ledger semantics these tests pin are unchanged.
     it('suppresses a milestone level_up re-emitted inside the window', () => {
         let state = gameReducer(makeState(), dmLevelUp(0, { sourceId: 'msg-10' }));
-        expect(state.character.level).toBe(4);
+        expect(state.character.level).toBe(3);
+        expect(state.character.exp).toBe(900);
         state = passTurns(state, 2);
         const echo = gameReducer(state, dmLevelUp(0, { sourceId: 'msg-11' }));
-        expect(echo.character.level).toBe(4); // no double level
+        expect(echo.character.exp).toBe(900); // no double milestone
         expect(echo.messages.at(-1).content).toContain('Duplicate level-up ignored');
     });
 
     it('catches the reported echo when the recap turn upgrades exp_awarded to level_up + bonus', () => {
         // Turn N: plain exp_awarded 150. Turn N+1: the DM recaps with
-        // level_up: true and the same 150 riding as bonusExp — the level-up is
+        // level_up: true and the same 150 riding as bonusExp — the milestone is
         // new (applies), but the duplicated bonus XP must not pay again.
         let state = gameReducer(makeState(), dmExp(150, { sourceId: 'msg-10' }));
         state = passTurns(state, 1);
         const echo = gameReducer(state, dmLevelUp(150, { sourceId: 'msg-11' }));
-        expect(echo.character.level).toBe(4);
-        expect(echo.character.exp).toBe(150); // the first award only
+        expect(echo.character.level).toBe(3);
+        expect(echo.character.exp).toBe(150 + 900); // the first award + the milestone only
         expect(echo.messages.some(m => (m.content || '').includes('Duplicate XP award ignored'))).toBe(true);
     });
 
@@ -159,5 +163,79 @@ describe('recentExpAwards persistence', () => {
             payload: { character: { ...hero }, messages: [] },
         });
         expect(loaded.recentExpAwards).toEqual([]);
+    });
+});
+
+/**
+ * The two DM XP lanes are bounded engine-side (2026-09-07 audit P1,
+ * rpg-balance-master ruling): `level_up` pays the front tier (half the current
+ * threshold — two milestones = one level), `exp_awarded` is capped at the
+ * quest tier (12.5%). Reproduced before the fix: four level_ups five messages
+ * apart took a hero L1→L5 with zero suppression lines; one exp_awarded at the
+ * 10000 parse clamp did the same; level_up + a big bonus double-levelled.
+ */
+describe('DM XP lanes are bounded engine-side (2026-09-07)', () => {
+    const dmLevelUp = (bonusExp, meta = {}) => ({
+        type: 'LEVEL_UP',
+        payload: { bonusExp, reason: 'milestone', _meta: meta },
+    });
+
+    it('level_up pays the front tier, not a whole level', () => {
+        const state = gameReducer(makeState(), dmLevelUp(0, { sourceId: 'msg-10' }));
+        expect(state.character.level).toBe(3);
+        expect(state.character.exp).toBe(900); // 50% of the L3→4 threshold (1800)
+        expect(state.messages.at(-1).content).toContain('story milestone');
+    });
+
+    it('four milestones outside the echo window are two levels, not four', () => {
+        let state = makeState();
+        for (let i = 0; i < 4; i++) {
+            state = gameReducer(state, dmLevelUp(0, { sourceId: `msg-${10 + i}` }));
+            state = passTurns(state, 5); // outside the 4-message echo window
+        }
+        // L3 (1800) crossed by two milestones of 900, L4 (3800) by two of 1900.
+        expect(state.character.level).toBe(5);
+        expect(state.character.exp).toBe(0);
+        expect(state.messages.some(m => (m.content || '').includes('Duplicate'))).toBe(false);
+    });
+
+    it('exp_awarded is capped at the quest tier with a visible note', () => {
+        const state = gameReducer(makeState(), dmExp(10000, { sourceId: 'msg-10' }));
+        expect(state.character.level).toBe(3);
+        expect(state.character.exp).toBe(225); // 12.5% of 1800
+        expect(state.messages.some(m => (m.content || '').includes('capped at **+225 XP**'))).toBe(true);
+    });
+
+    it('a capped oversized award still matches its own echo', () => {
+        let state = gameReducer(makeState(), dmExp(10000, { sourceId: 'msg-10' }));
+        state = passTurns(state, 1);
+        const echo = gameReducer(state, dmExp(10000, { sourceId: 'msg-11' }));
+        expect(echo.character.exp).toBe(225);
+        expect(echo.messages.at(-1).content).toContain('Duplicate XP award ignored');
+    });
+
+    it('level_up plus a threshold-sized bonus can never double-level', () => {
+        const state = gameReducer(makeState(), dmLevelUp(5000, { sourceId: 'msg-10' }));
+        expect(state.character.level).toBe(3);
+        expect(state.character.exp).toBe(900 + 225); // milestone + capped bonus
+        expect(state.messages.some(m => (m.content || '').includes('capped at **+225 XP**'))).toBe(true);
+    });
+
+    it('a level-20 milestone posts a line instead of a silent no-op', () => {
+        const base = makeState();
+        const state = gameReducer(
+            { ...base, character: { ...base.character, level: 20, maxHP: 150, currentHP: 150, hitDice: { total: 20, remaining: 20, die: 10 } } },
+            dmLevelUp(0, { sourceId: 'msg-10' }),
+        );
+        expect(state.character.level).toBe(20);
+        const line = state.messages.at(-1).content;
+        expect(line).toContain('max level reached, no level gained');
+        expect(line).toContain('Max level reached');
+    });
+
+    it('engine-path (meta-less) awards stay unbounded', () => {
+        const state = gameReducer(makeState(), { type: 'ADD_EXP', payload: 10000 });
+        expect(state.character.level).toBeGreaterThan(4);
+        expect(state.messages.some(m => (m.content || '').includes('capped'))).toBe(false);
     });
 });

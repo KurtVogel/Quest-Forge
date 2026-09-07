@@ -335,11 +335,12 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         expAwarded = 0;
     }
     if (events.levelUp) {
-        // Explicit level-up from the DM — skip ADD_EXP to avoid double-leveling
-        // if the awarded XP would also cross the threshold. Any bonus XP carries
-        // over as progress toward the next level. _meta arms the recentExpAwards
-        // replay guard: a level_up or exp_awarded re-emitted on a recap turn must
-        // not pay twice (2026-08-26 player report).
+        // Explicit story milestone from the DM. The reducer's DM lane pays the
+        // engine-bounded milestone tier (half a level) plus the quest-tier-capped
+        // bonus in ONE award, so the two can never double-level (2026-09-07
+        // audit P1). _meta arms the recentExpAwards replay guard: a level_up or
+        // exp_awarded re-emitted on a recap turn must not pay twice (2026-08-26
+        // player report).
         dispatch({ type: 'LEVEL_UP', payload: { bonusExp: expAwarded, reason: 'milestone', _meta: transactionMeta } });
     } else if (expAwarded > 0) {
         dispatch({ type: 'ADD_EXP', payload: { amount: expAwarded, _meta: transactionMeta } });

@@ -58,7 +58,7 @@ export function reviewOutsideCombatRollsSync(rolls, playerMessage) {
     return { acceptedRolls, rejectedRolls, attackAsCheck };
 }
 
-export async function reviewOutsideCombatRolls(rolls, playerMessage, dmNarrative = '', settings = null) {
+export async function reviewOutsideCombatRolls(rolls, playerMessage, dmNarrative = '', settings = null, { signal } = {}) {
     const background = getBackgroundConfig(settings);
     // Fall back to synchronous regex-based rules if settings, API key, or inputs are missing
     if (!background.apiKey || !playerMessage || !rolls || rolls.length === 0) {
@@ -104,6 +104,7 @@ Output ONLY the JSON, no prose outside the JSON.`;
             messageHistory: [],
             userMessage,
             temperature: 0.2, // adjudication audit — determinism over flair
+            signal, // the turn's Stop cancels the arbiter too (2026-09-07 P2)
         });
 
         const jsonMatch = extractBalancedJson(response, 'rolls_evaluation');
@@ -156,6 +157,9 @@ Output ONLY the JSON, no prose outside the JSON.`;
 
         return { acceptedRolls, rejectedRolls, preNarrated, attackAsCheck };
     } catch (e) {
+        // A deliberate Stop propagates — the sync floor is a fallback for the
+        // arbiter FAILING, not for the player cancelling the turn.
+        if (e?.name === 'AbortError' && signal?.aborted) throw e;
         console.warn('[RollPolicy] Scribe review failed, falling back to regex. Error:', e.message || e);
         return reviewOutsideCombatRollsSync(rolls, playerMessage);
     }

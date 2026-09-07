@@ -546,3 +546,83 @@ describe('turn runner — an empty reply never commits a blank turn (2026-09-06 
         expect(getState().character.gold).toBe(goldBefore + 5);
     });
 });
+
+describe('turn runner — a JSON-only reply on an event-discarding lane is a failed turn (2026-09-07 P1)', () => {
+    const jsonOnly = '```json\n{"gold_found": 5, "damage_taken": 3}\n```';
+
+    it('narration-only: throws, commits no bubble, applies nothing', async () => {
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream([jsonOnly]) });
+        const goldBefore = getState().character.gold;
+        await expect(runner.sendToLLM('Narrate the exchange.', null, { narrationOnly: true })).rejects.toThrow(/only a data block/);
+        expect(getState().messages.filter(m => m.role === 'assistant')).toHaveLength(0);
+        expect(getState().character.gold).toBe(goldBefore);
+    });
+
+    it('table talk: throws, commits no bubble, applies nothing', async () => {
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream([jsonOnly]) });
+        const hpBefore = getState().character.currentHP;
+        await expect(runner.sendToLLM('OOC: recap please', 'OOC: recap please', { tableTalk: true })).rejects.toThrow(/only a data block/);
+        expect(getState().messages.filter(m => m.role === 'assistant')).toHaveLength(0);
+        expect(getState().character.currentHP).toBe(hpBefore);
+    });
+
+    it('a normal turn with a JSON-only reply still commits and applies (unchanged)', async () => {
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream(['```json\n{"gold_found": 5}\n```']) });
+        const goldBefore = getState().character.gold;
+        await runner.sendToLLM('I search.', 'I search.');
+        expect(getState().character.gold).toBe(goldBefore + 5);
+    });
+});
+
+describe('turn runner — an opening scene that asks for a roll stands visible (2026-09-07 P1)', () => {
+    const chaseOpening = 'Hooves thunder behind you as the toll bridge looms. Make an Athletics check to reach it first.\n'
+        + '```json\n{"requested_rolls": [{"type": "skill", "skill": "athletics", "dc": 12, "description": "Reach the bridge"}],'
+        + ' "starting_items": [{"name": "Courier Satchel", "description": "Your sealed dispatch bag", "equipped": false, "quantity": 1}],'
+        + ' "quest_updates": [{"id": "dispatch", "name": "Deliver the dispatch", "status": "new", "description": "Reach the garrison before dawn."}]}\n```';
+
+    it('strips the roll, commits the narration visibly, and applies the premise items and quests', async () => {
+        const sendMessage = vi.fn(async () => '');
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream([chaseOpening]), sendMessage });
+        const inventoryBefore = getState().inventory.length;
+
+        const events = await runner.sendToLLM('[SYSTEM: open the campaign]', null, { openingScene: true });
+
+        expect(events.requestedRolls).toEqual([]);
+        const committed = runner.getLastCommittedTurn();
+        expect(committed.hidden).toBe(false);
+        expect(committed.content).toContain('Hooves thunder');
+        const assistants = getState().messages.filter(m => m.role === 'assistant');
+        expect(assistants).toHaveLength(1);
+        expect(assistants[0].hidden).toBe(false);
+        // No proposal staged — there is no player action to adjudicate yet.
+        expect(getState().pendingRoleplayCheck).toBeFalsy();
+        // The opening's own channels were NOT deferred into a setup phase.
+        expect(getState().quests.some(q => /Deliver the dispatch/.test(q.name))).toBe(true);
+        expect(getState().inventory.length).toBe(inventoryBefore + 1);
+        // An event-carrying opening never fires the missing-events nudge.
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('an ordinary (non-opening) turn keeps its roll request (unchanged)', async () => {
+        const { runner } = createHarness({ streamMessage: scriptedStream([chaseOpening]) });
+        const events = await runner.sendToLLM('I run for the bridge.', 'I run for the bridge.');
+        expect(events.requestedRolls).toHaveLength(1);
+        expect(runner.getLastCommittedTurn().hidden).toBe(true);
+    });
+});
+
+describe('turn runner — the post-stream helpers ride the turn abort signal (2026-09-07 P2)', () => {
+    it('the missing-events nudge receives the turn AbortSignal', async () => {
+        // A prose-only opening is the contract moment that fires the nudge.
+        const sendMessage = vi.fn(async () => '```json\n{"quest_updates": []}\n```');
+        const { runner } = createHarness({
+            streamMessage: scriptedStream(['You wake in the hayloft of the Greyfell inn. What do you do?']),
+            sendMessage,
+        });
+        await runner.sendToLLM('[SYSTEM: open the campaign]', null, { openingScene: true });
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        const call = sendMessage.mock.calls[0][0];
+        expect(call.signal).toBeInstanceOf(AbortSignal);
+        expect(call.signal.aborted).toBe(false);
+    });
+});

@@ -76,7 +76,15 @@ function createSystemMessage(kind, content) {
     };
 }
 
-function applySingleLevelUp(character, { milestone = false } = {}) {
+/** Is this (living) hero down — 0 HP, dying, defeated, or unconscious? */
+function isHeroDown(character) {
+    return !!character.dying
+        || !!character.lowLevelDefeat
+        || (Number(character.currentHP) || 0) <= 0
+        || (character.conditions || []).some(c => String(c).toLowerCase() === 'unconscious');
+}
+
+function applySingleLevelUp(character, { milestone = false, keepDowned = false } = {}) {
     const classData = CLASSES[character.class];
     const hitDie = classData?.hitDie || 8;
     const conMod = getModifier(character.abilityScores?.constitution || 10);
@@ -93,8 +101,22 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
     // cannot continue at full HP. Mirrors reviveCharacter in
     // state/handlers/shared.js (kept inline: importing it here would cycle
     // progression ⇄ handlers/shared).
+    //
+    // `revived` is judged on the DOWNED state, not just the dying flags
+    // (2026-09-07 audit P1): a hero who STABILIZED (3 successes → dying false,
+    // 0 HP, Unconscious) used to take the full heal with no condition cleanup —
+    // full HP and still Unconscious, the exact limbo the 08-30 fix targeted.
+    //
+    // `keepDowned` (END_COMBAT on a defeat/escape): the fight is LOST and the
+    // narration prompt tells the DM to narrate the collapse — a level crossed
+    // by the slain-foe XP must not stand the hero back up mid-defeat. The sheet
+    // grows (maxHP, features, resources); currentHP and the downed state stay
+    // exactly as the fight left them. A standing hero (an escape on their feet)
+    // still gets the ordinary full heal.
     const isDead = !!character.isDead;
-    const revived = !isDead && (!!character.dying || !!character.lowLevelDefeat);
+    const down = !isDead && isHeroDown(character);
+    const staysDown = down && keepDowned;
+    const revived = down && !keepDowned;
 
     const newFeatures = getFeaturesForLevel(character.class, newLevel);
     const existingFeatures = character.features || [];
@@ -113,7 +135,7 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
         ...character,
         level: newLevel,
         maxHP: newMaxHP,
-        currentHP: isDead ? character.currentHP : newMaxHP,
+        currentHP: (isDead || staysDown) ? character.currentHP : newMaxHP,
         ...(revived && {
             dying: false,
             lowLevelDefeat: false,
@@ -147,7 +169,9 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
     const milestoneMsg = milestone ? ' Milestone level-up.' : '';
     const healMsg = isDead
         ? ''
-        : (revived ? ' Fully healed — back on your feet, no longer dying!' : ' Fully healed!');
+        : staysDown
+            ? ' The new vigor waits — you are still down; it returns when you recover.'
+            : (revived ? ' Fully healed — back on your feet, no longer dying!' : ' Fully healed!');
 
     return {
         character: updatedCharacter,
@@ -158,6 +182,38 @@ function applySingleLevelUp(character, { milestone = false } = {}) {
     };
 }
 
+/*
+ * THE TWO DM-WRITABLE XP LANES ARE BOUNDED ENGINE-SIDE (rpg-balance-master
+ * ruling, 2026-09-07 audit P1 — completes DECISIONS.md 2026-08-26, which only
+ * ledgered the ECHO). `level_up: true` used to hand out a whole level whenever
+ * the DM emitted it (four emissions five messages apart = L1→L5, zero
+ * suppression), and `exp_awarded` clamped at 10000 while the prompt promised
+ * "tens to low hundreds". Boss XP is the precedent: an untrusted flag honored
+ * only inside an engine-verifiable band. A DM milestone now pays the FRONT
+ * tier (50% of the current threshold — two milestones = exactly one level, the
+ * same weight as decisively ending a campaign pressure), and a DM bonus is
+ * capped at the QUEST tier (12.5%) — a freeform flourish can never outrank a
+ * completed quest. Neither lane can cross more than one level per emission.
+ */
+
+/** XP a DM-declared story milestone (`level_up: true`) is worth: the front tier. */
+export function getStoryMilestoneXp(level) {
+    return getFrontResolutionMilestoneXp(level);
+}
+
+/** The most a DM freeform bonus (`exp_awarded`) may pay at this level: the quest tier. */
+export function getDmBonusXpCap(level) {
+    return getQuestCompletionXp(level);
+}
+
+/**
+ * @param {object} options
+ * @param {string} [options.reason] - shown on the XP system line.
+ * @param {boolean} [options.milestoneLevelUp] - engine/legacy whole-level grant.
+ * @param {boolean} [options.keepDowned] - a level crossed while the hero is
+ *   down (0 HP / dying / defeated / Unconscious) grows the sheet but never
+ *   heals or revives — END_COMBAT passes it on a lost or escaped fight.
+ */
 export function awardExperience(character, amount = 0, options = {}) {
     if (!character) return { character, messages: [] };
 
@@ -179,8 +235,9 @@ export function awardExperience(character, amount = 0, options = {}) {
         ));
     }
 
+    const keepDowned = !!options.keepDowned;
     if (options.milestoneLevelUp && !isMaxLevel(updatedCharacter.level)) {
-        const leveled = applySingleLevelUp(updatedCharacter, { milestone: true });
+        const leveled = applySingleLevelUp(updatedCharacter, { milestone: true, keepDowned });
         updatedCharacter = leveled.character;
         messages.push(leveled.message);
     }
@@ -191,7 +248,7 @@ export function awardExperience(character, amount = 0, options = {}) {
             ...updatedCharacter,
             exp: updatedCharacter.exp - threshold,
         };
-        const leveled = applySingleLevelUp(updatedCharacter);
+        const leveled = applySingleLevelUp(updatedCharacter, { keepDowned });
         updatedCharacter = leveled.character;
         messages.push(leveled.message);
     }

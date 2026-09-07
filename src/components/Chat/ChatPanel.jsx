@@ -264,9 +264,16 @@ export default function ChatPanel() {
                 // re-rendered yet in this task (live playtest #6's stale-Scribe root
                 // cause — the first draft of this check re-made that exact bug).
                 const committed = runner.getLastCommittedTurn();
-                if (!committed || committed.hidden || !committed.content?.trim()) {
+                if (!committed || !committed.content?.trim()) {
                     throw new Error('opening scene did not commit');
                 }
+                // A committed-but-HIDDEN opening is a withheld setup (a premise
+                // that opens mid-fight: combat_start + a queued exchange, whose
+                // narration supersedes it) — it committed. Reading it as "did
+                // not commit" re-fired the opening into three hidden rows
+                // (2026-09-07 audit P1; the roll-request shape is stripped in
+                // the runner, this is the belt for every other hidden shape).
+                if (committed.hidden) console.info('[Priming] Opening scene committed as a withheld setup (superseded by its own resolution).');
                 dispatch({ type: 'UPDATE_SESSION', payload: { openingScenePending: false } });
             })
             .catch(e => {

@@ -6,7 +6,31 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-06 (third queue sweep of the day — scribe + prompt-building: token-matched Scribe merge context + appearance fragment belt, presence-first KNOWN NPCs, hardened UPDATE_NPC boundary, dossier-only importance, conversational NPC recency; deployed)._
+_Last updated: 2026-09-07 (queue sweep — progression + chat-orchestration: bounded DM XP lanes, defeat-terminal level-ups keep the hero down, opening-scene roll strip, JSON-only guard on discard lanes, committed-record post-turn reads, Stop-aware helpers; queue empty). Previous: 2026-09-06 (third queue sweep of the day — scribe + prompt-building: token-matched Scribe merge context + appearance fragment belt, presence-first KNOWN NPCs, hardened UPDATE_NPC boundary, dossier-only importance, conversational NPC recency; deployed)._
+
+## 2026-09-07 — queue sweep: progression + chat-orchestration (4 P1s, 4 P2s) — queue empty
+
+All 8 lines of the 2026-09-07 scheduled audit cleared — every queue line ticked with a fix note.
+**The Open Findings Queue is EMPTY.** **P1s:** (1) an opening scene carrying `requested_rolls`
+was committed HIDDEN, its premise items/quests deferred into nothing, and the priming ladder
+re-fired it into three hidden rows — the `openingScene` lane now strips the roll before
+visibility derivation (no player action to adjudicate) and a committed-but-hidden opening (a
+mid-fight premise) is consumed, never retried; (2) the 09-06 empty-reply guard had a JSON-only
+hole on the event-DISCARDING lanes — `narrationOnly`/`tableTalk` with no prose now throws (no
+blank bubble, the combat round no longer advances with its story lost, Retry stays); (3) the DM
+XP lanes are bounded engine-side — `level_up` pays the front tier (half a level, two = one
+level), `exp_awarded` is capped at the quest tier, clamped before the ledger, visible cap notes,
+a level-20 milestone posts a line (**ruling: DECISIONS.md 2026-09-07**); (4) a level crossed at a
+DEFEAT/escape terminal keeps the hero down (`keepDowned` from END_COMBAT) and `revived` is judged
+on the downed state so a stabilized hero never ends full-HP-and-Unconscious. **P2s:**
+`runPostTurnExtraction` reads location/combat-start from the committed turn (a travel turn
+embedded the arrival under the departure place; a fight-starting roll outcome ran the Scribe,
+audit, embed, and summarize handleSend skips); the turn's abort signal rides into the nudge,
+the semantic roll detector, and the roll arbiter so Stop is never inert (a Stop rethrows
+`AbortError` instead of degrading). 21 new pins incl. a lagging-`getState` orchestrator harness
+(`turnOrchestrator.postTurn.test.js`) that makes the same-task staleness class observable —
+all 6 new orchestrator pins verified failing against the pre-fix file. 2,214 tests green (+21),
+lint clean.
 
 ## 2026-09-06 → 09-07 (scheduled) — PRODUCTIZATION.md created, then second research pass (docs only, no code)
 

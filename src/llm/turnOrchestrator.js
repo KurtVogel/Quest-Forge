@@ -335,7 +335,18 @@ Translate the player's committed action into the single bounded combat_exchange 
         }
         // Table talk pauses the world: whatever a disobedient DM appends, no events
         // exist on an OOC turn — no rolls, loot, quests, or NPC/state mutations.
-        let events = (opts.narrationOnly || opts.tableTalk) ? null : parsed.events;
+        const discardsEvents = !!(opts.narrationOnly || opts.tableTalk);
+        // The JSON-only hole in that guard (2026-09-07 audit P1): on the lanes
+        // that DISCARD events, a reply that is only a fenced block passed the
+        // `!parsed.events` test and committed a blank assistant bubble — and on
+        // combat narration the caller then advanced the round with its story
+        // lost and the Retry affordance gone. No prose on a prose-only lane is
+        // a failed turn, whatever the block said (the documented Grok shape:
+        // pattern-matching RESPONSE_FORMAT into a narration-only request).
+        if (discardsEvents && !narrative.trim()) {
+            throw new Error('The DM returned only a data block and no prose on a narration-only turn — nothing was narrated and no game state changed. Retry the narration.');
+        }
+        let events = discardsEvents ? null : parsed.events;
         opts.onNarrative?.(narrative);
 
         // A combat_exchange with no live combat has no machine to resolve it; left in
@@ -345,10 +356,21 @@ Translate the player's committed action into the single bounded combat_exchange 
         if (dropOrphanCombatExchange(events, !!s.combat?.active)) {
             console.warn('[ChatPanel] Dropped a combat_exchange emitted outside active combat; narrating normally.');
         }
+        // The opening scene has no player action to adjudicate, so a roll the
+        // DM asks for there ("a chase in progress — Athletics?") has nothing to
+        // stage: left in place it hid the whole opening as a withheld setup,
+        // deferred the premise's starting_items/quest_updates into nothing, and
+        // the priming ladder re-fired it into three hidden rows (2026-09-07
+        // audit P1). Strip it; the narration stands and the player's first
+        // action is where the first check can be proposed.
+        if (opts.openingScene && events?.requestedRolls?.length > 0) {
+            console.warn('[ChatPanel] Dropped requested_rolls from the opening scene — there is no player action to adjudicate yet.');
+            events = { ...events, requestedRolls: [] };
+        }
 
         // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text
         if (!opts.narrationOnly && !opts.tableTalk && (!events || !events.requestedRolls?.length) && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
-            const semanticRolls = await detectSemanticTextRolls(narrative, s.settings);
+            const semanticRolls = await detectSemanticTextRolls(narrative, s.settings, { signal: abortController.signal });
             if (semanticRolls && semanticRolls.length > 0) {
                 console.warn('[ChatPanel] Scribe detected text-based rolls semantically:', semanticRolls);
                 // Merge the detected rolls into any existing events — replacing the whole
@@ -364,7 +386,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         }
 
         if (events?.requestedRolls?.length > 0 && originalPlayerMessage && !s.combat?.active) {
-            const review = await reviewOutsideCombatRolls(events.requestedRolls, originalPlayerMessage, narrative, s.settings);
+            const review = await reviewOutsideCombatRolls(events.requestedRolls, originalPlayerMessage, narrative, s.settings, { signal: abortController.signal });
             events.requestedRolls = review.acceptedRolls;
             if (review.rejectedRolls.length > 0) {
                 // An attack staged as a check takes the combat-correction path —
@@ -466,7 +488,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 narrative,
                 combatActive: !!getState().combat?.active,
             });
-            if (nudgeCue) await recoverMissingEvents(nudgeCue, narrative, msgId);
+            if (nudgeCue) await recoverMissingEvents(nudgeCue, narrative, msgId, abortController.signal);
         }
 
         return events;
@@ -477,9 +499,12 @@ Translate the player's committed action into the single bounded combat_exchange 
      * hard-whitelisted (missingEventsNudge.js) and re-shaped through the real parser
      * before applying, so nothing beyond quest_updates/starting_items can enter.
      */
-    const recoverMissingEvents = async (cue, narrative, lootSourceId) => {
+    const recoverMissingEvents = async (cue, narrative, lootSourceId, signal) => {
         try {
             const s = getState();
+            // The turn's own abort signal rides along (2026-09-07 audit P2):
+            // Stop used to be inert here — the nudge ran to the 90s stall guard
+            // (times retries) while isLoading kept the Stop button showing.
             const response = await sendMessage({
                 provider: s.settings.llmProvider,
                 apiKey: s.settings.apiKey,
@@ -488,6 +513,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 messageHistory: buildMessageHistory(),
                 userMessage: buildNudgePrompt(cue, narrative),
                 temperature: 0.2,
+                signal,
             });
             const rawFields = extractNudgeEventFields(response, cue);
             if (!rawFields) return;
@@ -535,6 +561,19 @@ Translate the player's committed action into the single bounded combat_exchange 
             ? committed
             : null;
         if (!finalNarration) return false;
+        // Same-task reads of `latest` are PRE-TURN by construction (the header
+        // trap, 2026-09-07 audit P2): the fields this very turn changed are
+        // stale here. A fight-start narration is never extracted — handleSend
+        // skips the Scribe, loot audit, embed, and summarize when combat starts
+        // (the fight's own narration lanes own it); the post-roll outcome path
+        // reached here through finalizeRoleplayTurn and ran all four.
+        if (finalNarration.events?.combatStart) return false;
+        // The DM's location event, already applied by sendToLLM, is where the
+        // hero IS — `latest.currentLocation` is where they were. A travel turn
+        // used to embed the ARRIVAL prose under the departure place.
+        const turnLocation = (finalNarration.events?.location && !latest.combat?.active && !finalNarration.events?.combatExchange)
+            ? finalNarration.events.location
+            : latest.currentLocation;
         runScribe({
             playerMessage,
             dmNarrative: finalNarration.content,
@@ -564,7 +603,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         }).catch(() => {});
         const machineryKey = getMachineryGeminiKey(latest.settings);
         if (machineryKey) {
-            const loc = latest.currentLocation;
+            const loc = turnLocation;
             const narrativeText = loc
                 ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
                 : finalNarration.content.slice(0, 500);
@@ -575,6 +614,9 @@ Translate the player's committed action into the single bounded combat_exchange 
 
     const finalizeRoleplayTurn = (playerAction) => {
         runPostTurnExtraction(playerAction, { auditCasts: true });
+        // A post-roll outcome that STARTS combat summarizes after the fight,
+        // not mid-split — the same gate handleSend applies (combatStartedNow).
+        if (getLastCommittedTurn()?.events?.combatStart) return;
         runAutoSummarize();
     };
 

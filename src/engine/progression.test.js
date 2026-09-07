@@ -358,6 +358,68 @@ describe('level-up heal revival semantics (2026-08-30 P1)', () => {
         expect(result.messages.some(m => m.content.includes('Fully healed!'))).toBe(true);
         expect(result.character.dying).toBeFalsy();
     });
+
+    // 2026-09-07 audit P1: a STABILIZED hero (3 successes → dying false, 0 HP,
+    // Unconscious) took the full heal with no condition cleanup — full HP and
+    // still Unconscious, the limbo the 08-30 fix targeted, via the stable state.
+    it('revives a stabilized (0 HP, Unconscious, not dying) hero too — never full HP while Unconscious', () => {
+        const result = awardExperience({
+            ...dyingHero,
+            dying: false,
+            deathSaves: { successes: 3, failures: 1 },
+            conditions: ['unconscious'],
+        }, 300);
+        expect(result.character.currentHP).toBe(result.character.maxHP);
+        expect(result.character.conditions).toEqual([]);
+        expect(result.character.deathSaves).toEqual({ successes: 0, failures: 0 });
+        expect(result.messages.some(m => m.content.includes('back on your feet'))).toBe(true);
+    });
+});
+
+describe('level-up at a defeat terminal keeps the hero down (2026-09-07 P1)', () => {
+    const downedHero = {
+        ...character,
+        level: 1,
+        exp: 0,
+        maxHP: 12,
+        currentHP: 0,
+        dying: false,
+        lowLevelDefeat: true,
+        deathSaves: { successes: 0, failures: 0 },
+        conditions: ['unconscious'],
+        hitDice: { total: 1, remaining: 1, die: 10 },
+    };
+
+    it('keepDowned grows the sheet but never heals or revives a defeated hero', () => {
+        const result = awardExperience(downedHero, 300, { keepDowned: true });
+        expect(result.character.level).toBe(2);
+        expect(result.character.maxHP).toBeGreaterThan(12);
+        expect(result.character.currentHP).toBe(0);
+        expect(result.character.lowLevelDefeat).toBe(true);
+        expect(result.character.conditions).toEqual(['unconscious']);
+        const line = result.messages.find(m => m.content.includes('Level Up!')).content;
+        expect(line).toContain('still down');
+        expect(line).not.toContain('Fully healed');
+    });
+
+    it('keepDowned leaves a dying hero dying — death saves continue at 0 HP', () => {
+        const result = awardExperience({ ...downedHero, lowLevelDefeat: false, dying: true, deathSaves: { successes: 1, failures: 2 } }, 300, { keepDowned: true });
+        expect(result.character.dying).toBe(true);
+        expect(result.character.currentHP).toBe(0);
+        expect(result.character.deathSaves).toEqual({ successes: 1, failures: 2 });
+    });
+
+    it('keepDowned keeps a stabilized hero at 0 HP and Unconscious', () => {
+        const result = awardExperience({ ...downedHero, lowLevelDefeat: false, deathSaves: { successes: 3, failures: 0 } }, 300, { keepDowned: true });
+        expect(result.character.currentHP).toBe(0);
+        expect(result.character.conditions).toEqual(['unconscious']);
+    });
+
+    it('keepDowned still fully heals a hero on their feet (an escape standing)', () => {
+        const result = awardExperience({ ...downedHero, lowLevelDefeat: false, currentHP: 3, conditions: [] }, 300, { keepDowned: true });
+        expect(result.character.currentHP).toBe(result.character.maxHP);
+        expect(result.messages.some(m => m.content.includes('Fully healed!'))).toBe(true);
+    });
 });
 
 describe('hostile-input robustness (2026-07-28 audit)', () => {

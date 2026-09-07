@@ -1567,7 +1567,7 @@ avoid). While there: `computeNpcImportance` should be computed from dossier fiel
 from its own stored value — today every named NPC is 5/5 at birth and the label means nothing.
 From the 2026-09-06 strengthening audit (scribe + prompt-building).
 
-### [strengthening] Bound the last two DM-writable XP levers the way boss XP is bounded — status: `idea` (2026-09-07, needs an rpg-balance-master ruling)
+### [strengthening] Bound the last two DM-writable XP levers the way boss XP is bounded — status: `done` (shipped 2026-09-07 queue sweep; ruling recorded in DECISIONS.md 2026-09-07)
 The 2026-08-26 ruling made XP engine-owned on three verifiable tiers because models award
 inconsistently, and demoted `exp_awarded` to "small freeform bonuses" — but the demotion is
 prompt-only: the wire clamp is 10000 (one event took a hero L1→L5 in the audit's reproduction),
@@ -1583,7 +1583,7 @@ hundreds" made engine-real at every level), and the prompt text follows the engi
 collapses the `level_up` + large-bonus double-level (L1→L3 from one response) the applyEvents
 comment believes it prevents. From the 2026-09-07 strengthening audit (progression).
 
-### [strengthening] A defeat is a defeat: level-ups earned at a lost fight keep the hero down — status: `idea` (2026-09-07)
+### [strengthening] A defeat is a defeat: level-ups earned at a lost fight keep the hero down — status: `done` (shipped 2026-09-07 queue sweep — `keepDowned` + widened `revived`, DECISIONS.md 2026-09-07)
 END_COMBAT's `slainXpOnly` award can cross a threshold at the DEFEAT terminal, and the level-up
 heal's revive semantics (the 2026-08-30 fix, correct for every other award path) then contradict
 the beat the engine just declared: a low-level-solo hero reads "**Astra is defeated** … capture,
@@ -1597,7 +1597,7 @@ downed state alone (the DM narrates the loss; the level shows up when the hero n
 While there: a DM `level_up` at level 20 should say so instead of vanishing silently. From the
 2026-09-07 strengthening audit (progression).
 
-### [strengthening] Every DM lane that discards events must treat "no prose" as a failed turn, and the opening lane must never hide itself — status: `idea` (2026-09-07)
+### [strengthening] Every DM lane that discards events must treat "no prose" as a failed turn, and the opening lane must never hide itself — status: `done` (shipped 2026-09-07 queue sweep, incl. the committed-record reads and the threaded abort signal)
 Two cross-lane holes in the orchestrator's visibility/commit policy, both reproduced. (1) The
 2026-09-06 empty-reply guard checks `!parsed.events`, but `narrationOnly`/`tableTalk` null the
 events two lines later — a JSON-only reply on those lanes commits a blank assistant bubble into

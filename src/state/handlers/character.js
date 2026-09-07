@@ -4,7 +4,7 @@
  */
 import { computeACFromInventory, getModifier, normalizeConditionName, CONDITION_LIST_CAP } from '../../engine/rules.js';
 import { ABILITY_NAMES, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../../engine/characterUtils.js';
-import { awardExperience } from '../../engine/progression.js';
+import { awardExperience, getDmBonusXpCap, getStoryMilestoneXp, isMaxLevel } from '../../engine/progression.js';
 import {
     applyDeath,
     applyEarlyDefeat,
@@ -273,8 +273,18 @@ export const handlers = {
         // DM-path dispatches arrive as { amount, _meta }; engine/legacy callers
         // pass a bare number and bypass the ledger entirely.
         const isDmPath = action.payload && typeof action.payload === 'object';
-        const amount = Math.max(0, Math.floor(Number(isDmPath ? action.payload.amount : action.payload) || 0));
+        const requested = Math.max(0, Math.floor(Number(isDmPath ? action.payload.amount : action.payload) || 0));
         const meta = isDmPath ? (action.payload._meta || {}) : null;
+        // DM lane bound (2026-09-07 audit P1): a freeform bonus pays at most the
+        // quest tier for the hero's level — the prompt promises "tens to low
+        // hundreds" and one 10000-XP emission used to take a hero L1→L5. The
+        // clamp runs BEFORE the ledger so a re-emitted oversized award still
+        // matches its own echo signature.
+        const bonusCap = meta ? getDmBonusXpCap(state.character?.level) : Infinity;
+        const amount = Math.min(requested, bonusCap);
+        const clampNote = amount < requested
+            ? [systemMessage(`The DM's **+${requested} XP** bonus exceeds what a freeform award may pay at level ${state.character?.level || 1} — capped at **+${amount} XP** (the quest-completion tier).`)]
+            : [];
         let recentExpAwards = state.recentExpAwards || [];
         if (meta && amount > 0) {
             const guarded = guardExpAwardLedger(recentExpAwards, amount, meta, currentMessageIndex(state), state.messages);
@@ -297,7 +307,7 @@ export const handlers = {
             ...state,
             character: result.character,
             recentExpAwards,
-            messages: [...state.messages, ...result.messages],
+            messages: [...state.messages, ...clampNote, ...result.messages],
             // Remember XP was earned mid-fight so the manual End-Combat fallback won't re-award.
             combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
         };
@@ -365,16 +375,44 @@ export const handlers = {
             recentExpAwards = rememberTransaction(recentExpAwards, levelUpMarker, sourceId, messageIndex);
             // The bonus XP riding the level-up answers to the exp ledger too — the
             // observed double-award lands here whenever the recap turn adds
-            // level_up: true beside the re-emitted exp_awarded.
+            // level_up: true beside the re-emitted exp_awarded. Bounded at the
+            // quest tier like ADD_EXP's DM lane (clamped before the ledger).
+            const level = state.character?.level || 1;
+            const requestedBonus = bonusExp;
+            bonusExp = Math.min(bonusExp, getDmBonusXpCap(level));
+            if (bonusExp < requestedBonus) {
+                extraMessages.push(systemMessage(`The DM's **+${requestedBonus} XP** bonus exceeds what a freeform award may pay at level ${level} — capped at **+${bonusExp} XP** (the quest-completion tier).`));
+            }
             if (bonusExp > 0) {
                 const guarded = guardExpAwardLedger(recentExpAwards, bonusExp, meta, messageIndex, state.messages);
                 recentExpAwards = guarded.recentExpAwards;
                 if (guarded.suppressed) {
-                    extraMessages.push(systemMessage(`Duplicate XP award ignored — **+${bonusExp} XP** matches an award just granted; the level-up itself stands.`));
+                    extraMessages.push(systemMessage(`Duplicate XP award ignored — **+${bonusExp} XP** matches an award just granted; the milestone itself stands.`));
                     bonusExp = 0;
                 }
             }
+            // DM lane bound (2026-09-07 audit P1, rpg-balance-master ruling): a
+            // DM milestone is worth the FRONT tier of XP (half the current
+            // threshold — two milestones = exactly one level), never a whole
+            // level on the DM's say-so. With the bonus capped at the quest tier
+            // a single emission can bank at most 62.5% of a level, so the old
+            // level_up + big-bonus double-level is structurally gone. At max
+            // level the XP line says so explicitly — a silent no-op used to be
+            // the one suppressed reward with no line (2026-09-07 P2).
+            const milestoneXp = getStoryMilestoneXp(level);
+            const atCap = isMaxLevel(level);
+            const result = awardExperience(state.character, milestoneXp + bonusExp, {
+                reason: atCap ? 'story milestone — max level reached, no level gained' : 'story milestone',
+            });
+            return {
+                ...state,
+                character: result.character,
+                recentExpAwards,
+                messages: [...state.messages, ...extraMessages, ...result.messages],
+                combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
+            };
         }
+        // Engine/legacy path (no _meta): the whole-level milestone grant.
         const result = awardExperience(state.character, bonusExp, {
             milestoneLevelUp: true,
             reason: action.payload?.reason || 'milestone',
