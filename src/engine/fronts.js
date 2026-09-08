@@ -1,7 +1,12 @@
 export const DEFAULT_MAX_CLOCK = 6;
 export const FRONTS_VERSION = 2;
 
+// Type-strict (2026-09-08 hidden-fronts P2): `String(value)` on an object
+// minted "[object Object]" as a front's resolution epitaph, the RECENT
+// VICTORY echo, the hearsay text AND a permanent world fact. Only strings
+// and finite numbers carry text; every other shape is junk → fallback.
 function cleanText(value, fallback = '') {
+    if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return fallback;
     const text = String(value || '').trim();
     return text || fallback;
 }
@@ -12,10 +17,35 @@ function clampInt(value, min, max, fallback) {
     return Math.max(min, Math.min(max, Math.round(n)));
 }
 
+/**
+ * A DM-supplied number that MEANS a number: `null`, `""`, `"unchanged"`, and
+ * `"same"` are the parser-wide string-or-null shape for "no change", and
+ * `clampInt`'s fallback-to-0 read every one of them as clock 0 — a silent,
+ * unthrottled softening lever on private state (2026-09-08 P1: three
+ * `clock: null` emissions walked a front 3 → 0). Junk means OMIT the key.
+ */
+function finiteOrUndefined(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+    if (typeof value === 'string' && value.trim() !== '') {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : undefined;
+    }
+    return undefined;
+}
+
+// Textual clamps for the front record itself (2026-09-08 P2: generated and
+// emergent paths clamp upstream, but a hand-edited or hostile save carried
+// 20k-char titles through normalizeFront and into the 🕰️ resolution line).
+const FRONT_ID_MAX = 120;
+const FRONT_TITLE_MAX = 160;
+const FRONT_PROSE_MAX = 400;
+const FRONT_NOTES_MAX = 500;
+const FRONT_HINT_MAX = 240;
+
 function normalizeTextArray(value, fallback = []) {
     const source = Array.isArray(value) ? value : fallback;
     return source
-        .map(v => cleanText(v))
+        .map(v => cleanText(v).slice(0, FRONT_HINT_MAX))
         .filter(Boolean)
         .slice(0, 6);
 }
@@ -23,7 +53,7 @@ function normalizeTextArray(value, fallback = []) {
 function normalizeRecentTextArray(value, fallback = []) {
     const source = Array.isArray(value) ? value : fallback;
     return source
-        .map(v => cleanText(v))
+        .map(v => cleanText(v).slice(0, FRONT_HINT_MAX))
         .filter(Boolean)
         .slice(-6);
 }
@@ -170,10 +200,10 @@ export function normalizeFront(front = {}, existing = null) {
         .slice(0, 12);
 
     return {
-        id: cleanText(front.id, existing?.id || `front-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
-        title: cleanText(front.title || front.name, existing?.title || 'Unnamed Front'),
-        goal: cleanText(front.goal, existing?.goal || 'A hidden threat advances its agenda.'),
-        stakes: cleanText(front.stakes, existing?.stakes || 'What happens if the player does nothing?'),
+        id: cleanText(front.id, existing?.id || `front-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`).slice(0, FRONT_ID_MAX),
+        title: cleanText(front.title || front.name, existing?.title || 'Unnamed Front').slice(0, FRONT_TITLE_MAX),
+        goal: cleanText(front.goal, existing?.goal || 'A hidden threat advances its agenda.').slice(0, FRONT_PROSE_MAX),
+        stakes: cleanText(front.stakes, existing?.stakes || 'What happens if the player does nothing?').slice(0, FRONT_PROSE_MAX),
         grimPortents,
         clock,
         maxClock,
@@ -183,7 +213,7 @@ export function normalizeFront(front = {}, existing = null) {
         lastAdvancedAt: front.lastAdvancedAt || front.last_advanced_at || existing?.lastAdvancedAt || null,
         lastAdvanceId: cleanText(front.lastAdvanceId || front.last_advance_id, existing?.lastAdvanceId || '') || null,
         lastAdvanceDelta: clampInt(front.lastAdvanceDelta ?? front.last_advance_delta, -1, 1, existing?.lastAdvanceDelta ?? 0),
-        notes: cleanText(front.notes, existing?.notes || ''),
+        notes: cleanText(front.notes, existing?.notes || '').slice(0, FRONT_NOTES_MAX),
         faction: normalizeFaction(front.faction, existing?.faction || null),
         resolvedAtMessage,
         resolution: cleanText(front.resolution, existing?.resolution || '').slice(0, 240),
@@ -206,21 +236,34 @@ export function buildFrontResolutionFact(front, note = '') {
 }
 
 export function normalizeFrontUpdate(update = {}) {
-    if (!update || typeof update !== 'object') return null;
-    const id = cleanText(update.id || update.frontId || update.front_id);
-    const title = cleanText(update.title || update.name);
+    if (!update || typeof update !== 'object' || Array.isArray(update)) return null;
+    const id = cleanText(update.id || update.frontId || update.front_id).slice(0, FRONT_ID_MAX);
+    const title = cleanText(update.title || update.name).slice(0, FRONT_TITLE_MAX);
     if (!id && !title) return null;
+
+    // JUNK MEANS OMIT (2026-09-08 P1/P2): a non-numeric clock/stage, an
+    // unknown status ("ongoing", "escalating", null — which used to normalize
+    // to 'active' and silently revive a DORMANT front), an object `notes`,
+    // and an empty hint list all drop their key so the existing front value
+    // stands. A single string hint is the common one-item LLM shape and
+    // wraps to a list; the reducer APPENDS hints to the front's ledger.
+    const clock = finiteOrUndefined(update.clock);
+    const stage = finiteOrUndefined(update.stage);
+    const rawHints = update.publicHints ?? update.public_hints;
+    const publicHints = normalizeRecentTextArray(typeof rawHints === 'string' ? [rawHints] : rawHints);
+    const status = update.status === undefined ? null : normalizeStatus(update.status, null);
+    const notes = cleanText(update.notes).slice(0, FRONT_NOTES_MAX);
 
     const normalized = {
         ...(id && { id }),
         ...(title && { title }),
-        ...(update.clock !== undefined && { clock: clampInt(update.clock, 0, 12, 0) }),
-        ...(update.stage !== undefined && { stage: clampInt(update.stage, 0, 12, 0) }),
-        ...((update.publicHints || update.public_hints) && { publicHints: normalizeRecentTextArray(update.publicHints || update.public_hints) }),
-        ...(update.notes !== undefined && { notes: cleanText(update.notes).slice(0, 500) }),
+        ...(clock !== undefined && { clock: clampInt(clock, 0, 12, 0) }),
+        ...(stage !== undefined && { stage: clampInt(stage, 0, 12, 0) }),
+        ...(publicHints.length > 0 && { publicHints }),
+        ...(notes && { notes }),
         lastAdvancedAt: Date.now(),
     };
-    if (update.status !== undefined) normalized.status = normalizeStatus(update.status);
+    if (status) normalized.status = status;
     return normalized;
 }
 

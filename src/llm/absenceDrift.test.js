@@ -190,6 +190,8 @@ describe('promptBuilder wiring', () => {
             currentLocation: 'Aldermill',
             messages: msgs(4),
             messageCount: 4,
+            // The away block is roster-checked at render (2026-09-08 P2).
+            npcs: [{ id: 'npc-marta', name: 'Marta' }],
             regionalHearsay: {
                 locationName: 'Aldermill',
                 arrivedAtMessage: 2,

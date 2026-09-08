@@ -23,7 +23,9 @@ import { findLocationRecord, isSameLocation } from '../engine/locationRegistry.j
 import {
     ABSENCE_DRIFT_MIN_AWAY,
     ABSENCE_DRIFT_WINDOW_MESSAGES,
+    INTENSITY_LEVELS,
     MAX_DRIFT_DEVELOPMENTS,
+    clampIntensity,
     describeIntensity,
     distanceSince,
     getFrontIntensityBand,
@@ -184,19 +186,40 @@ export async function generateAbsenceDrift(state) {
  * is still at the return location; the installed canon (NPC records, world
  * fact) persists regardless — the block is just the DM's cue to surface it.
  */
-export function buildWhileYouWereAwayBlock(absenceDrift, { currentLocation, messages = null, messageCount = 0 } = {}) {
+export function buildWhileYouWereAwayBlock(absenceDrift, { currentLocation, messages = null, messageCount = 0, fronts = null, npcs = null } = {}) {
     if (!absenceDrift || typeof absenceDrift !== 'object') return '';
     if (!Number.isFinite(absenceDrift.arrivedAtMessage)) return '';
-    if (!isSameLocation(String(absenceDrift.locationName || ''), String(currentLocation || ''))) return '';
+    if (!isSameLocation(cleanText(absenceDrift.locationName), cleanText(currentLocation))) return '';
     if (distanceSince(messages, absenceDrift.arrivedAtMessage, messageCount) > ABSENCE_DRIFT_WINDOW_MESSAGES) return '';
 
+    // Roster-checked when the caller supplies the roster (2026-09-08 P2): a
+    // stored development naming nobody the campaign knows is not canon.
+    const roster = Array.isArray(npcs) ? npcs : null;
     const developments = (Array.isArray(absenceDrift.developments) ? absenceDrift.developments : [])
         .map(dev => ({ name: cleanText(dev?.name, 100), detail: cleanText(dev?.visible || dev?.lastNotes, 300) }))
-        .filter(dev => dev.name && dev.detail)
+        .filter(dev => dev.name && dev.detail
+            && (!roster || roster.some(npc => namesMatch(npc?.name, dev.name))))
         .slice(0, MAX_DRIFT_DEVELOPMENTS);
     const fact = cleanText(absenceDrift.fact, 300);
-    const symptom = absenceDrift.frontSymptom && typeof absenceDrift.frontSymptom === 'object'
+    // Front LIVENESS is judged at render, not at install (2026-09-08 P2): a
+    // symptom installed for a front that resolves inside the 12-message
+    // window (or a tampered one) must stop reading as "permitted here", and
+    // the label is re-clamped against the front's LIVE band — never the
+    // stored string, which a hostile save could set to anything.
+    const storedSymptom = absenceDrift.frontSymptom && typeof absenceDrift.frontSymptom === 'object'
         ? absenceDrift.frontSymptom
+        : null;
+    const liveFront = storedSymptom && Array.isArray(fronts)
+        ? fronts.find(front => front?.id === storedSymptom.frontId && (front.status || 'active') === 'active')
+        : null;
+    const symptomText = cleanText(storedSymptom?.text, 240);
+    // Without a fronts list (unit callers) the label is still whitelisted.
+    const storedBand = INTENSITY_LEVELS.includes(storedSymptom?.maxIntensity) ? storedSymptom.maxIntensity : 'whispers';
+    const symptom = storedSymptom && symptomText && (liveFront || !Array.isArray(fronts))
+        ? {
+            text: symptomText,
+            maxIntensity: clampIntensity(storedBand, liveFront ? getFrontIntensityBand(liveFront) : storedBand),
+        }
         : null;
     if (developments.length === 0 && !fact && !symptom) return '';
 

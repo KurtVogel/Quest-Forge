@@ -9,8 +9,14 @@
  */
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 
-/** Whitespace-collapse + trim + optional clamp. Omit maxLength to keep the full text. */
+/**
+ * Whitespace-collapse + trim + optional clamp. Omit maxLength to keep the full text.
+ * Type-strict (2026-09-08 living-world P2): only strings and finite numbers
+ * carry text — `String(object)` installed "[object Object]" as a permanent
+ * world fact through absence drift and as a front symptom through reflection.
+ */
 export function cleanText(value, maxLength) {
+    if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return '';
     return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
 

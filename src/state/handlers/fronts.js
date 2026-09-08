@@ -222,6 +222,18 @@ export const handlers = {
                     ? (existing.stage || 0)
                     : Math.max(existing.stage || 0, Math.min((existing.stage || 0) + 1, update.stage)),
             }),
+            // Symptoms ACCUMULATE (2026-09-08 P2): the DM only ever sees the
+            // last three hints, so its one new symptom used to replace — i.e.
+            // wipe — the front's whole ledger and the tempo block's anti-repeat
+            // line with it. Append, dedupe case-insensitively, keep the cadence
+            // engine's rolling cap through normalizeFront.
+            ...(Array.isArray(update.publicHints) && {
+                publicHints: [
+                    ...(existing.publicHints || []),
+                    ...update.publicHints.filter(hint =>
+                        !(existing.publicHints || []).some(known => known.toLowerCase() === hint.toLowerCase())),
+                ],
+            }),
             maxClock: existing.maxClock || DEFAULT_MAX_CLOCK,
         };
         // Resolution is a one-way, one-time transition with side effects; a DM
@@ -306,7 +318,11 @@ export const handlers = {
         const pending = state.session?.pendingFrontAftermath;
         // One-shot per resolution: only the pending front's own generation may
         // land, and it lands once — stale or cross-session results are dropped.
-        if (!pending || payload.sessionId !== state.session?.id || payload.frontId !== pending.frontId) return state;
+        // A typed marker only (2026-09-08 P2): a string marker from a hostile
+        // save made `pending.frontId` undefined, and `undefined !== undefined`
+        // let a keyless install through. Load sanitizes; this is the backstop.
+        if (!pending || typeof pending.frontId !== 'string' || !pending.frontId
+            || payload.sessionId !== state.session?.id || payload.frontId !== pending.frontId) return state;
         const session = { ...state.session, pendingFrontAftermath: null };
         const fronts = state.fronts || [];
         const activeCount = fronts.filter(f => (f.status || 'active') === 'active').length;
@@ -334,7 +350,8 @@ export const handlers = {
     INSTALL_REGIONAL_FRONTS(state, action) {
         const payload = action.payload || {};
         const pending = state.session?.pendingRegionalFronts;
-        if (!pending || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
+        if (!pending || typeof pending.key !== 'string' || !pending.key
+            || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
         const seededRegions = [...(state.session?.seededRegions || []), pending.region].slice(-12);
         const session = { ...state.session, pendingRegionalFronts: null, seededRegions };
         const fronts = state.fronts || [];

@@ -8,6 +8,39 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-08 · On the `front_updates` wire JUNK MEANS OMIT, and every living-world / hidden-fronts field is typed at its load AND render boundary.**
+The 2026-09-08 strengthening audit (Lap 2, hostile input) reproduced three P1s of one shape — "the
+sweep stopped one array short": `validateSaveState` entry-guarded seven arrays but not `fronts` /
+`locations` (a JSON round-trip `null` made the campaign un-loadable, loudly, since 09-02); five ledgers
+had typed sanitizers and `recentEncounters` only sliced (one `null` entry crashed `buildSystemPrompt`
+on EVERY turn after a clean load); and the parser-wide string-or-null rule never reached
+`normalizeFrontUpdate`, whose `clampInt(update.clock, 0, 12, 0)` read `null` / `""` / `"unchanged"` as
+clock 0 — a silent, unthrottled softening lever on private state (three `clock: null` emissions walked a
+front 3 → 0), the mirror image of the +1 replay the 08-26 throttle closed. **Rulings:** (1) a DM value
+that does not MEAN a number (or a known status, or a non-empty hint list, or string notes) drops its key
+so the existing front value stands — `finiteOrUndefined` in `normalizeFrontUpdate`; an unknown/null
+`status` no longer normalizes to `'active'` (it revived dormant fronts); a single string hint wraps to a
+list; and UPDATE_FRONT APPENDS hints (deduped) instead of replacing the ledger, because the DM only ever
+sees the last three and its one new symptom used to wipe the anti-repeat line. (2) Every private
+`cleanText` in the family (`fronts.js`, `directorUtils.js`, `worldTempo.js`, `locationRegistry.js`,
+`regionalHearsay.js`) is type-strict — non-string/non-number → empty — because `String(object)` minted
+"[object Object]" as a resolution epitaph, the RECENT VICTORY echo, hearsay text, a reflection symptom,
+AND a permanent world fact. (3) Stored permission is re-judged at RENDER, not trusted from the store:
+the tempo card re-clamps `maxIntensity` against the front's LIVE band (a `presence` window granted at
+clock 4 lowers with the clock the player softened; a hostile label whitelists), and the WHILE YOU WERE
+AWAY block takes `fronts` + `npcs` and drops a symptom whose front resolved inside the window,
+re-clamps its band, and roster-checks developments. (4) Load re-types the rest: `sanitizeWorldTempo`
+(window as bounded distances, legacy raw indices translated), `sanitizeRecentEncounters` (typed or
+drop), `normalizeLocationRecord` types its arrays, `normalizeFront` clamps its text (id 120 / title 160
+/ goal+stakes 400 / notes 500 / hints 240), and the new `engine/livingWorldSession.js` re-types
+`absenceDrift` / `regionalHearsay` / the three `pending*` one-shot markers complete-or-null — a string
+marker used to fire the DM-model director call and then pass the install key guard on
+`undefined !== undefined`; the three installers now also require a typed marker key. (5) The absence-
+drift gate and write name the SAME record: the development resolves to the matched LOCAL NPC's id and
+full name before `upsertNpc` (a bare "Maren" at Millhaven rewrote the fen witch "Maren of the Reeds"
+instead of the local "Maren Tallow"). Lap-2 lesson carried forward: when a hostile-input pass opens a
+file, list its sanitized neighbors first and diff.
+
 **2026-09-07 · The last two DM-writable XP levers are bounded engine-side (`level_up` pays the front tier, `exp_awarded` is capped at the quest tier), and a level crossed at a defeat keeps the hero down.**
 Completes the 2026-08-26 pair, which ledgered the ECHO of these lanes but left their SIZE to the
 prompt. The 2026-09-07 strengthening audit reproduced what that leaves open: four `level_up: true`

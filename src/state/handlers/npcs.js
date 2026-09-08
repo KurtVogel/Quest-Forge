@@ -285,23 +285,37 @@ export const handlers = {
     INSTALL_ABSENCE_DRIFT(state, action) {
         const payload = action.payload || {};
         const pending = state.session?.pendingAbsenceDrift;
-        if (!pending || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
+        // A typed marker only (2026-09-08 P2): a string marker from a hostile
+        // save made `pending.key` undefined and `undefined !== undefined` let a
+        // keyless install through with no locality check at all.
+        if (!pending || typeof pending.key !== 'string' || !pending.key
+            || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
         const session = { ...state.session, pendingAbsenceDrift: null };
         const drift = payload.drift && typeof payload.drift === 'object' ? payload.drift : {};
+        // Strings only — `String(object)` minted "[object Object]" canon.
+        const text = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
+        const localNpcs = (state.npcs || []).filter(npc => isAbsenceDriftLocalNpc(npc, pending.locationName));
         const developments = (Array.isArray(drift.developments) ? drift.developments : [])
             .map(dev => ({
-                name: String(dev?.name || '').trim().slice(0, 100),
-                agenda: String(dev?.agenda || '').trim().slice(0, 300),
-                lastNotes: String(dev?.lastNotes || '').trim().slice(0, 400),
-                visible: String(dev?.visible || '').trim().slice(0, 240),
+                name: text(dev?.name, 100),
+                agenda: text(dev?.agenda, 300),
+                lastNotes: text(dev?.lastNotes, 400),
+                visible: text(dev?.visible, 240),
             }))
             // Local NPCs only (2026-08-19 audit): the director's context holds
             // just the NPCs of the return place, so a development naming a
             // distant roster NPC is a hallucination, never a valid install.
-            .filter(dev => dev.name && (dev.agenda || dev.lastNotes)
-                && (state.npcs || []).some(npc => isAbsenceDriftLocalNpc(npc, pending.locationName)
-                    && namesMatch(npc.name, dev.name)))
+            // The gate and the write name the SAME record (2026-09-08 P2): a
+            // bare "Maren" at Millhaven used to pass because the local "Maren
+            // Tallow" matched, then upsertNpc wrote to the first roster match —
+            // the fen witch "Maren of the Reeds". Resolve to the local record.
+            .map(dev => {
+                if (!dev.name || !(dev.agenda || dev.lastNotes)) return null;
+                const local = localNpcs.find(npc => namesMatch(npc.name, dev.name));
+                return local ? { ...dev, name: local.name || dev.name, npcId: local.id || null } : null;
+            })
+            .filter(Boolean)
             .slice(0, MAX_DRIFT_DEVELOPMENTS);
 
         let npcs = state.npcs || [];
@@ -309,6 +323,7 @@ export const handlers = {
             // Off-screen developments are not sightings: the hero has not seen
             // these people, so the recency stamps stay untouched (2026-09-06).
             npcs = upsertNpc(npcs, {
+                ...(dev.npcId && { id: dev.npcId }),
                 name: dev.name,
                 ...(dev.agenda && { agenda: dev.agenda }),
                 ...(dev.lastNotes && { lastNotes: dev.lastNotes }),
@@ -323,12 +338,12 @@ export const handlers = {
             ? (state.fronts || []).find(front => (front.status || 'active') === 'active'
                 && (record.theaterFrontIds || []).includes(front.id))
             : null;
-        const symptomText = String(drift.frontSymptom || '').trim().slice(0, 240);
+        const symptomText = text(drift.frontSymptom, 240);
         const frontSymptom = theaterFront && symptomText
             ? { frontId: theaterFront.id, maxIntensity: getFrontIntensityBand(theaterFront), text: symptomText }
             : null;
 
-        const fact = String(drift.worldFact || '').trim().slice(0, 300);
+        const fact = text(drift.worldFact, 300);
         const installed = developments.length > 0 || fact || frontSymptom;
         const next = {
             ...state,

@@ -111,8 +111,83 @@ const INTENSITY_GUIDANCE = {
     confrontation: 'the pressure may confront the hero directly and the world visibly changes',
 };
 
+// Type-strict (2026-09-08): an object `enemies` on a ledger entry rendered
+// "[object Object]" into the tempo block and the hearsay text.
 function cleanText(value, max = 200) {
+    if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return '';
     return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+const ENCOUNTER_OUTCOMES = ['victory', 'defeat', 'escaped'];
+
+/**
+ * Typed load/render boundary for the encounter ledger (2026-09-08 living-world
+ * P1): every sibling ledger had a sanitizer and this one only sliced, so a
+ * `null` entry from a JSON round-trip crashed buildSystemPrompt on EVERY turn
+ * once the campaign loaded, an object `enemies` rendered "[object Object]",
+ * and an arbitrary `outcome` string printed verbatim into the prompt. An
+ * entry without a string `enemies` summary or a known outcome is dropped.
+ */
+export function sanitizeRecentEncounters(list) {
+    if (!Array.isArray(list)) return [];
+    return list
+        .map(entry => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+            const enemies = cleanText(entry.enemies, 200);
+            if (!enemies || !ENCOUNTER_OUTCOMES.includes(entry.outcome)) return null;
+            const messageIndex = Number(entry.messageIndex);
+            const at = Number(entry.at);
+            return {
+                at: Number.isFinite(at) ? at : null,
+                messageIndex: Number.isFinite(messageIndex) ? Math.max(0, Math.round(messageIndex)) : null,
+                location: cleanText(entry.location, 120) || null,
+                enemies,
+                foeFamilies: (Array.isArray(entry.foeFamilies) ? entry.foeFamilies : [])
+                    .map(family => cleanText(family, 60).toLowerCase())
+                    .filter(Boolean)
+                    .slice(0, 8),
+                outcome: entry.outcome,
+            };
+        })
+        .filter(Boolean)
+        .slice(-MAX_RECENT_ENCOUNTERS);
+}
+
+/**
+ * Load boundary for the stored tempo state (2026-09-08 hidden-fronts P2): the
+ * one front-adjacent field that loaded raw. A directive's window is re-derived
+ * as bounded conversational distances (legacy raw-index directives included),
+ * its intensity label is whitelisted, and its text fields are clamped. The
+ * band is NOT decided here — buildWorldTempoBlock re-clamps against the live
+ * front at render, so a clock the player softened inside the window lowers
+ * the permission with it.
+ */
+export function sanitizeWorldTempo(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const updatedAt = Number(raw.updatedAt);
+    return {
+        directive: sanitizeStoredDirective(raw.directive),
+        lastCadenceId: cleanText(raw.lastCadenceId, 160) || null,
+        updatedAt: Number.isFinite(updatedAt) ? updatedAt : null,
+    };
+}
+
+function sanitizeStoredDirective(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const granted = Number(raw.grantedAtMessage);
+    const { activation, expiry } = tempoDirectiveDistances(raw);
+    const maxActivation = (TEMPO_TIMING_DIE_SIDES - 1) * 2;
+    return {
+        frontId: cleanText(raw.frontId, 60) || null,
+        maxIntensity: INTENSITY_LEVELS.includes(raw.maxIntensity) ? raw.maxIntensity : 'whispers',
+        where: cleanText(raw.where, 120),
+        suggestedSymptom: cleanText(raw.suggestedSymptom),
+        rationale: cleanText(raw.rationale),
+        quietHook: cleanText(raw.quietHook),
+        grantedAtMessage: Number.isFinite(granted) ? Math.max(0, Math.round(granted)) : null,
+        activationDistance: Math.max(0, Math.min(maxActivation, Number.isFinite(activation) ? Math.round(activation) : 0)),
+        expiryDistance: Math.max(0, Math.min(TEMPO_WINDOW_MESSAGES, Number.isFinite(expiry) ? Math.round(expiry) : TEMPO_WINDOW_MESSAGES)),
+    };
 }
 
 export function normalizePaceDial(value) {
@@ -438,9 +513,13 @@ export function buildWorldTempoBlock({
     combatActive = false,
     solo = false,
 } = {}) {
-    const activeFronts = fronts.filter(f => (f.status || 'active') === 'active');
+    const activeFronts = (Array.isArray(fronts) ? fronts : []).filter(f => f && (f.status || 'active') === 'active');
     const resolvedEchoes = recentlyResolvedFronts(fronts, messageCount, messages);
-    if (activeFronts.length === 0 && recentEncounters.length === 0 && resolvedEchoes.length === 0) return '';
+    // Render from the typed projection (2026-09-08 P1): the "Recent fights"
+    // line read `entry.enemies` unguarded, so one null ledger entry threw out
+    // of buildSystemPrompt on every turn.
+    const encounters = sanitizeRecentEncounters(recentEncounters);
+    if (activeFronts.length === 0 && encounters.length === 0 && resolvedEchoes.length === 0) return '';
 
     const dial = normalizePaceDial(paceDial);
     const lines = [];
@@ -467,8 +546,16 @@ export function buildWorldTempoBlock({
         const faction = permittedFront.faction?.name
             ? `${permittedFront.faction.name} — ${permittedFront.faction.goal || permittedFront.goal}`
             : permittedFront.goal;
+        // Re-clamp against the LIVE band at render (2026-09-08 P2): the band
+        // was decided at grant time only, so a `presence` window granted at
+        // clock 4 stayed `presence` after the player softened the clock to 1,
+        // and a stored/tampered label (`confrontation` on a clock-0 front, or
+        // hostile text) rendered verbatim. clampIntensity whitelists too.
+        const maxIntensity = clampIntensity(directive.maxIntensity, getFrontIntensityBand(permittedFront));
+        const where = cleanText(directive.where, 120);
+        const suggestedSymptom = cleanText(directive.suggestedSymptom);
         lines.push(`THIS SCENE'S PERMISSION: you may surface ONE symptom of ${permittedFront.id} (${faction}).`);
-        lines.push(`Maximum intensity: ${directive.maxIntensity} — ${describeIntensity(directive.maxIntensity)}.${directive.where ? ` Natural place: ${directive.where}.` : ''}${directive.suggestedSymptom ? ` Suggested expression: ${directive.suggestedSymptom}.` : ''} Weave it in only where the fiction allows; never exceed this intensity, and one symptom is the cap.`);
+        lines.push(`Maximum intensity: ${maxIntensity} — ${describeIntensity(maxIntensity)}.${where ? ` Natural place: ${where}.` : ''}${suggestedSymptom ? ` Suggested expression: ${suggestedSymptom}.` : ''} Weave it in only where the fiction allows; never exceed this intensity, and one symptom is the cap.`);
         // Spend the accrued symptom ledger as anti-repeat guidance (2026-08-02
         // audit: publicHints rode every save but nothing re-injected it since
         // the tempo redesign).
@@ -477,7 +564,8 @@ export function buildWorldTempoBlock({
             lines.push(`Symptoms of this pressure ALREADY shown: ${surfaced.map(hint => `"${hint}"`).join('; ')}. Never re-run these beats — a new symptom must bring new information, escalation, or a different face of the same pressure.`);
         }
     } else {
-        const hook = directive?.quietHook ? ` If a small beat is wanted: ${directive.quietHook}.` : '';
+        const quietHook = cleanText(directive?.quietHook);
+        const hook = quietHook ? ` If a small beat is wanted: ${quietHook}.` : '';
         lines.push(`The world is QUIET this scene: introduce no unprovoked new threats or pressure symptoms. Daily life, local color, small personal hooks, travel, and character beats are complete scenes on their own.${hook}`);
     }
     lines.push('The player may always seek danger on their own ("I go hunt goblins") — honor player-initiated risk normally; this section only limits UNPROVOKED intrusions.');
@@ -491,14 +579,14 @@ export function buildWorldTempoBlock({
         }
     }
 
-    if (recentEncounters.length > 0) {
-        const recent = recentEncounters.slice(-4)
-            .map(entry => `${entry.enemies}${entry.location ? ` (${entry.location}` : ' ('}${entry.location ? `, ${entry.outcome})` : `${entry.outcome})`}`)
+    if (encounters.length > 0) {
+        const recent = encounters.slice(-4)
+            .map(entry => `${entry.enemies} (${entry.location ? `${entry.location}, ` : ''}${entry.outcome})`)
             .join('; ');
         lines.push(`Recent fights: ${recent}. Do not repeat near-identical encounters — vary, escalate, or let places stay cleared once won.`);
-        const fatigue = computeFoeFatigue(recentEncounters);
+        const fatigue = computeFoeFatigue(encounters);
         if (fatigue.length > 0) {
-            const list = fatigue.map(({ family, count }) => `${family}-type foes in ${count} of the last ${recentEncounters.length} fights`).join('; ');
+            const list = fatigue.map(({ family, count }) => `${family}-type foes in ${count} of the last ${encounters.length} fights`).join('; ');
             lines.push(`FOE FATIGUE: ${list}. This bestiary is exhausted — unless the player deliberately hunts them or established canon requires them in THIS exact place, field something different: new species, new imagery, new tactics, new mood. Distant locations must not share one monster ecology.`);
         }
     }

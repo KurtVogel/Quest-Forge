@@ -6,7 +6,30 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-08 (scheduled PRODUCTIZATION.md third pass, docs only — proxy shape resolved as a Gemini-wire SSE function, images and trial abuse priced, $2k startup credit, Patreon supporter rail). Previous: 2026-09-07 (queue sweep — progression + chat-orchestration: bounded DM XP lanes, defeat-terminal level-ups keep the hero down, opening-scene roll strip, JSON-only guard on discard lanes, committed-record post-turn reads, Stop-aware helpers; queue empty). Previous: 2026-09-06 (third queue sweep of the day — scribe + prompt-building: token-matched Scribe merge context + appearance fragment belt, presence-first KNOWN NPCs, hardened UPDATE_NPC boundary, dossier-only importance, conversational NPC recency; deployed)._
+_Last updated: 2026-09-08 (queue sweep — hidden-fronts + living-world Lap-2 hostile input: junk-means-omit on `front_updates`, type-strict cleanText family, typed encounter ledger / worldTempo / fronts / locations / living-world session sub-objects at load, render-time band re-clamp + front liveness, id-resolved absence-drift writes; queue empty; deployed). Same day earlier: scheduled PRODUCTIZATION.md third pass (docs only — proxy shape resolved as a Gemini-wire SSE function, images and trial abuse priced, $2k startup credit, Patreon supporter rail). Previous: 2026-09-07 (queue sweep — progression + chat-orchestration: bounded DM XP lanes, defeat-terminal level-ups keep the hero down, opening-scene roll strip, JSON-only guard on discard lanes, committed-record post-turn reads, Stop-aware helpers; queue empty)._
+
+## 2026-09-08 — queue sweep: hidden-fronts + living-world (3 P1s, 4 P2s) — queue empty
+
+All 7 lines of the 2026-09-08 scheduled audit (the second cycle's Lap-2 opener: hostile input)
+cleared — every queue line ticked with a fix note. **The Open Findings Queue is EMPTY.**
+**Ruling: DECISIONS.md 2026-09-08.** **P1s:** (1) on the `front_updates` wire JUNK MEANS OMIT —
+`finiteOrUndefined` drops a non-numeric clock/stage key instead of reading `null`/`""`/"unchanged"
+as clock 0 (three such emissions walked a front 3 → 0, softening is unthrottled by design);
+unknown/null `status` drops too (it revived dormant fronts); (2) `validateSaveState` entry-guards
+`fronts` and `locations` and `normalizeLocationRecord` types its arrays — a JSON-round-trip `null`
+made the campaign un-loadable; (3) `sanitizeRecentEncounters` types the encounter ledger at load
+AND inside `buildWorldTempoBlock` (one `null` entry crashed the prompt build on every turn).
+**P2s:** every private `cleanText` in the fronts/director/tempo/registry/hearsay family is
+type-strict (no more "[object Object]" epitaphs, echoes, hearsay, or world facts); a string hint
+wraps, an empty list is omitted, and UPDATE_FRONT APPENDS hints deduped instead of wiping the
+ledger; `normalizeFront` clamps its text; `sanitizeWorldTempo` re-bounds a stored directive and
+the permission card re-clamps `maxIntensity` against the LIVE band at render (a softened clock
+lowers the window; hostile labels whitelist); the absence-drift gate resolves the development to
+the matched LOCAL NPC record before the upsert (bare "Maren" no longer rewrites the wrong Maren);
+new `engine/livingWorldSession.js` re-types `absenceDrift`/`regionalHearsay`/the three `pending*`
+markers complete-or-null, all three installers require a typed marker key, and the WHILE YOU WERE
+AWAY block judges front liveness, re-clamps the band, and roster-checks developments at render.
+33 new pins across 6 new test files. 2,247 tests green (+33), lint clean, deployed.
 
 ## 2026-09-07 — queue sweep: progression + chat-orchestration (4 P1s, 4 P2s) — queue empty
 

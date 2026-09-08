@@ -41,7 +41,10 @@ const GRADE_GUIDANCE = {
     legend: 'distant folklore — names garbled or wrong, the scale exaggerated at least twofold, motives possibly inverted; the teller is confident anyway',
 };
 
+// Type-strict (2026-09-08): an object `enemies`/`resolution` on a source must
+// never travel as "[object Object]" hearsay.
 function cleanText(value, max = 200) {
+    if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return '';
     return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 

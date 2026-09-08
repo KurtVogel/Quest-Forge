@@ -8,7 +8,8 @@ import { createInitialFronts, normalizeFront } from '../../engine/fronts.js';
 import { normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { dedupeLocationRecords, normalizeLocationRecord } from '../../engine/locationRegistry.js';
 import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
-import { MAX_RECENT_ENCOUNTERS } from '../../engine/worldTempo.js';
+import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
+import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES, normalizeCombatExchange } from '../../engine/combatExchange.js';
@@ -141,7 +142,12 @@ function validateSaveState(payload) {
                 : [],
             npcs
         ),
-        fronts: Array.isArray(payload.fronts) ? payload.fronts.map(f => normalizeFront(f)) : [],
+        // Entry-shape guard (2026-09-08 hidden-fronts P1): a null entry threw
+        // out of normalizeFront (default params skip null) and made the campaign
+        // un-loadable; a string entry loaded as a live "Unnamed Front".
+        fronts: Array.isArray(payload.fronts)
+            ? payload.fronts.filter(f => f && typeof f === 'object' && !Array.isArray(f)).map(f => normalizeFront(f))
+            : [],
         // Player-facing saga chapters: entry heal (see healChronicleChapter) —
         // a poisoned entry crashed the Journal panel on open (2026-09-04 audit).
         chronicle: Array.isArray(payload.chronicle)
@@ -151,15 +157,21 @@ function validateSaveState(payload) {
             ? payload.party.filter(c => c && typeof c === 'object')
             : [],
         currentLocation: payload.currentLocation || null,
+        // Same guard for the registry (2026-09-08): a null record threw
+        // `(reading 'name')`; normalizeLocationRecord also types its arrays now.
         locations: Array.isArray(payload.locations)
-            ? dedupeLocationRecords(payload.locations.map(record => normalizeLocationRecord(record)).filter(Boolean))
+            ? dedupeLocationRecords(payload.locations
+                .filter(record => record && typeof record === 'object' && !Array.isArray(record))
+                .map(record => normalizeLocationRecord(record))
+                .filter(Boolean))
             : [],
-        recentEncounters: Array.isArray(payload.recentEncounters)
-            ? payload.recentEncounters.slice(-MAX_RECENT_ENCOUNTERS)
-            : [],
-        worldTempo: payload.worldTempo && typeof payload.worldTempo === 'object' && !Array.isArray(payload.worldTempo)
-            ? payload.worldTempo
-            : null,
+        // Typed like every sibling ledger (2026-09-08 living-world P1): one null
+        // entry crashed buildSystemPrompt on every turn after a clean load.
+        recentEncounters: sanitizeRecentEncounters(payload.recentEncounters),
+        // The one front-adjacent field that loaded raw (2026-09-08 P2): a stored
+        // directive's window and intensity label are re-bounded here and the
+        // band is re-clamped against the live front at render.
+        worldTempo: sanitizeWorldTempo(payload.worldTempo),
         pendingRoleplayCheck: sanitizePendingRoleplayCheck(payload.pendingRoleplayCheck),
         appliedLootSourceIds: Array.isArray(payload.appliedLootSourceIds) ? payload.appliedLootSourceIds : [],
         recentPurchases: normalizeRecentTransactions(payload.recentPurchases),
@@ -222,7 +234,12 @@ function validateSaveState(payload) {
                     : [],
             };
         })(),
-        session: payload.session || initialGameState.session,
+        // The living-world sub-objects (absenceDrift, regionalHearsay, the three
+        // pending one-shot markers) are re-typed (2026-09-08 living-world P2): a
+        // string pending marker fired the DM-model call and passed the install
+        // key guard on `undefined !== undefined`; a stored symptom label rendered
+        // verbatim. Everything else in session passes through as before.
+        session: sanitizeLivingWorldSession(payload.session || initialGameState.session),
     };
 }
 

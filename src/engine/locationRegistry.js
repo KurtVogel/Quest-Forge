@@ -26,7 +26,9 @@ const MAX_ALIASES = 6;
 // North Gate and South Gate are different places.
 const STOP_WORDS = new Set(['the', 'a', 'an', 'of', 'in', 'at', 'on', 'to', 'by', 'near']);
 
+// Type-strict (2026-09-08): an object name/alias must never become "[object Object]".
 function cleanText(value, max = 120) {
+    if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return '';
     return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
@@ -132,13 +134,22 @@ export function normalizeDangerLevel(value) {
     return DANGER_LEVELS.includes(raw) ? raw : null;
 }
 
-export function normalizeLocationRecord(record = {}, existing = null) {
+export function normalizeLocationRecord(rawRecord = {}, existing = null) {
+    // A null record (JSON round-trip of an array hole) skips the default param
+    // and threw `(reading 'name')`; a string-valued aliases/theaterFrontIds
+    // threw `.map is not a function` — either made the save un-loadable
+    // (2026-09-08 hidden-fronts P1). Type the record and its arrays here.
+    const record = rawRecord && typeof rawRecord === 'object' && !Array.isArray(rawRecord) ? rawRecord : {};
+    const recordAliases = Array.isArray(record.aliases) ? record.aliases : [];
+    const recordTheaters = Array.isArray(record.theaterFrontIds) ? record.theaterFrontIds : [];
+    const existingAliases = Array.isArray(existing?.aliases) ? existing.aliases : [];
+    const existingTheaters = Array.isArray(existing?.theaterFrontIds) ? existing.theaterFrontIds : [];
     const name = cleanText(record.name, 120) || existing?.name;
     if (!name) return null;
     return {
         id: cleanText(record.id, 60) || existing?.id || `loc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         name,
-        aliases: [...new Set([...(existing?.aliases || []), ...((record.aliases || []).map(a => cleanText(a, 120)))].filter(Boolean))].slice(-MAX_ALIASES),
+        aliases: [...new Set([...existingAliases, ...recordAliases.map(a => cleanText(a, 120))].filter(Boolean))].slice(-MAX_ALIASES),
         type: normalizeLocationType(record.type) || existing?.type || null,
         // Town-scale is PERMANENT once established (live playtest 2026-08-20:
         // Cold Harbor re-profiled settlement → haven, which silently switched
@@ -150,7 +161,7 @@ export function normalizeLocationRecord(record = {}, existing = null) {
             || existing?.type === 'settlement'
             || normalizeLocationType(record.type) === 'settlement',
         danger: normalizeDangerLevel(record.danger) || existing?.danger || null,
-        theaterFrontIds: [...new Set([...(existing?.theaterFrontIds || []), ...((record.theaterFrontIds || []).map(id => cleanText(id, 60)))].filter(Boolean))].slice(0, 6),
+        theaterFrontIds: [...new Set([...existingTheaters, ...recordTheaters.map(id => cleanText(id, 60))].filter(Boolean))].slice(0, 6),
         firstSeenAt: existing?.firstSeenAt || record.firstSeenAt || Date.now(),
         lastVisitedAt: record.lastVisitedAt || Date.now(),
         // Message-index visit stamp (living-world system, DECISIONS.md 2026-08-05):
