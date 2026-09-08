@@ -1614,6 +1614,34 @@ of a same-task `getState()` (travel turns embed the arrival narration under the 
 and the post-stream helpers (nudge, roll review) should carry the turn's abort `signal` so Stop
 is never inert. From the 2026-09-07 strengthening audit (chat-orchestration).
 
+### [strengthening] Junk means "omit", never the default: one typing rule for every DM-writable front field
+The `front_updates` normalizer reads any non-numeric `clock` (`null`, `""`, `"unchanged"` — the
+"no change" shapes an LLM actually writes) as clock 0, and the reducer's ±1 bound turns that into
+a softening step that is deliberately never throttled: three "no change" emissions walked a
+front 3 → 0 with no system line (reproduced). `status` and `publicHints` share the shape — an
+unknown or `null` status revives a dormant front as `'active'`, a single-string `publicHints`
+wipes the accumulated symptom ledger (and the tempo block's anti-repeat line with it). The
+parser already treats free-text fields as string-or-null at the boundary (2026-09-05); the same
+rule belongs here: a field that fails its type is DROPPED from the update, never coerced to a
+default that happens to be a mutation. Companion: the two `cleanText` helpers (`fronts.js`,
+`directorUtils.js`) should return `''` for non-string input so an object `notes`/`symptom`/
+`world_fact` can never mint "[object Object]" as a resolution epitaph or a permanent world fact.
+From the 2026-09-08 strengthening audit (hidden-fronts, Lap 2).
+
+### [strengthening] Every persisted array and session sub-object gets a load sanitizer — finish the sweep
+`validateSaveState` entry-guards seven arrays; `fronts` and `locations` are not among them, so
+one `null` entry (a JSON round-trip of an array hole — cloud saves ARE a round-trip) throws out
+of LOAD_GAME and the campaign is un-loadable. `recentEncounters` is the one ledger of six with no
+typed sanitizer, and its unguarded render line makes a null entry crash `buildSystemPrompt` on
+EVERY turn. `worldTempo` and the living-world `session.*` sub-objects pass through raw, so a
+stale or tampered directive grants `confrontation` on a clock-0 front forever and a string pending
+marker fires a DM-model call and slips past the install key guard. Rule: no persisted field
+reaches live state without a shape/type/finite-stamp normalizer, and any render of stored
+private state (`maxIntensity`, intensity labels, front ids) re-validates against LIVE state
+(band re-clamp, active-front check, label whitelist) — hiding beats instructing only if the
+hidden state is itself trustworthy. From the 2026-09-08 strengthening audit (living-world +
+hidden-fronts, Lap 2).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
