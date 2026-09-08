@@ -54,7 +54,14 @@ its 18+ pages allow AI-generated illustrated content → the zero-negotiation ra
 BYOK Supporter membership. Re-verified: Flash-Lite $0.25/$1.50, Flash 2027 doubling, 3.1 Pro
 implicit-cache floor 4,096 tokens (our ~6k prefix clears it narrowly → tripwire idea).
 Open questions 15 → 19. **Track A (`usageMetadata`) still unstarted — third grep.** Nothing
-decided — Vesa reviews; settled calls go to DECISIONS.md.
+decided — Vesa reviews; settled calls go to DECISIONS.md. **Later the same day, Vesa's call: the
+daily productization task is PAUSED** (it grew questions faster than answers; the file is now
+event-driven) and replaced by **`docs/SCHEDULED_WOW.md`** — a player-experience audit in the
+strengthening audit's shape (Moment Registry of 21 player-facing moments, last-8 rotation, four
+lap lenses, ≤2 one-session proposals per run tagged W0/W1/W2, backlog-neutral rule against
+IDEAS.md growth, 8-item Open Proposals cap, self-commits to master). The scheduler prompt to paste
+is at the bottom of that file; recommended cadence twice a week. Twins CLAUDE.md/AGENTS.md carry
+the new bullet.
 
 ## 2026-09-06 → 09-07 (scheduled) — PRODUCTIZATION.md created, then second research pass (docs only, no code)
 

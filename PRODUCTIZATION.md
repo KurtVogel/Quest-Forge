@@ -2,8 +2,10 @@
 
 The working file for turning Quest Forge into a business: pricing models, hosting, model
 selection, customer acquisition, unit economics, open questions, and what we learned from
-comparable products. **Living document** — a scheduled research task appends to it; humans and
-agents edit freely. Settled calls get promoted to `docs/DECISIONS.md`; the *why/for whom* lives in
+comparable products. **Living document** — updated on events (a batch of answered questions,
+measured unit costs from track A, the payment-partner reply, the 2027-01-01 Flash price step), not
+on a schedule: the daily research task that built it was paused 2026-09-08 after three passes
+because it grew open questions faster than they could be answered. Humans and agents edit freely. Settled calls get promoted to `docs/DECISIONS.md`; the *why/for whom* lives in
 `docs/PRODUCT.md`; the pitch in `docs/MARKETING.md`; the rival field notes in `docs/COMPETITORS.md`.
 This file is the *how we get paid* layer on top of those.
 

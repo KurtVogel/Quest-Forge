@@ -58,8 +58,9 @@ Research reports live in `cowork/research/` (local, not committed); settled outc
 **2026-09-06:** the working answers to these questions now live in the repo-root
 [`PRODUCTIZATION.md`](../PRODUCTIZATION.md) (competitor pricing research, pricing-model options
 with a margin sketch, hosting/proxy options, model-selection stance, the hosted content-policy
-blocker, acquisition patterns, open questions, phasing). A scheduled task keeps it updated;
-settled calls still get promoted to `DECISIONS.md`.
+blocker, acquisition patterns, open questions, phasing). Updated on events, not on a clock (the
+daily research task was paused 2026-09-08 — it grew open questions faster than they could be
+answered); settled calls still get promoted to `DECISIONS.md`.
 
 ## Success, in order
 
