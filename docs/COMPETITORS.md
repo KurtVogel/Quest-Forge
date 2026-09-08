@@ -110,6 +110,10 @@ prompt-driven, how persistence actually holds up, and whether they're BYO-key or
 multi-provider", no BYOK. Pricing is contradictory across sources (€7.99 + 20 free turns/day vs
 $9/$19/$39 + 500 one-time credits, 1 credit = 3 rounds) — verify the live page by hand; if the
 daily free grant is gone, the "generous free funnel" story in this file needs revising.
+*2026-09-08:* LoreKeeper's own current blog still says "20 daily turns, permanent" at €7.99
+entry; the $-tier picture is third-party only. Category-wide, hosted rivals are repricing
+**upward** (F&F raised every tier Dec 2025) — the metering wedge in this file is getting
+sharper, not duller.
 
 ## Note: Friends & Fables
 Tactical VTT angle (grid maps, tokens, worldbuilding suite). Broader/heavier than us by design —

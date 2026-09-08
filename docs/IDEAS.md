@@ -1173,6 +1173,19 @@ gate), the hosted content-policy posture (the adult-capable default DM prompt ru
 key against Gemini ToS — needs an explicit call), and the production image chain (hosted xAI
 key for Grok Imagine vs shipping Gemini-image-only, which is already the labeled
 full-quality fallback).
+**2026-09-08 (PRODUCTIZATION.md §3.2):** shape resolved in research. Firebase AI Logic cannot
+meter plans (its per-user limit is one project-wide value), so the proxy is our own code —
+but cheaper than feared: build it as an `onRequest` Cloud Function that **emits Gemini's own
+`streamGenerateContent` SSE wire format**, so `providers/gemini.js` + `readSseStream` are
+reused with a base-URL swap plus `Authorization: Bearer <Firebase ID token>` and an App Check
+header. Server side: verify both tokens (Admin SDK), reserve one turn per call in a Firestore
+transaction (typed "plan spent" error the client renders), inject our key + the hosted prompt
+variant + the pinned model id, pipe chunks back, and on stream end persist the final
+`usageMetadata` (prompt/cached/thoughts/candidates) per uid and lane — which is track A's
+instrumentation for the hosted door as a side effect. Machinery calls ride the same function
+on a `lane` field; embeddings get a sibling non-SSE endpoint. `minInstances: 1` handles cold
+starts. Image renders ($0.05 xAI / ~$0.134 Gemini fallback) need their own per-plan
+allowance through the same gate.
 
 ### Inventory-panel "Give to <companion>" buttons for weapons/armor — status: `shipped` (2026-07-22, `GIVE_GEAR_TO_COMPANION` + `deriveGiftAC`; live-verified in playtest #11)
 Mirror of the potion `→ Name` buttons: an engine-owned UI path that drives the same

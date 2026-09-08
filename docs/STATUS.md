@@ -6,7 +6,7 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-07 (queue sweep — progression + chat-orchestration: bounded DM XP lanes, defeat-terminal level-ups keep the hero down, opening-scene roll strip, JSON-only guard on discard lanes, committed-record post-turn reads, Stop-aware helpers; queue empty). Previous: 2026-09-06 (third queue sweep of the day — scribe + prompt-building: token-matched Scribe merge context + appearance fragment belt, presence-first KNOWN NPCs, hardened UPDATE_NPC boundary, dossier-only importance, conversational NPC recency; deployed)._
+_Last updated: 2026-09-08 (scheduled PRODUCTIZATION.md third pass, docs only — proxy shape resolved as a Gemini-wire SSE function, images and trial abuse priced, $2k startup credit, Patreon supporter rail). Previous: 2026-09-07 (queue sweep — progression + chat-orchestration: bounded DM XP lanes, defeat-terminal level-ups keep the hero down, opening-scene roll strip, JSON-only guard on discard lanes, committed-record post-turn reads, Stop-aware helpers; queue empty). Previous: 2026-09-06 (third queue sweep of the day — scribe + prompt-building: token-matched Scribe merge context + appearance fragment belt, presence-first KNOWN NPCs, hardened UPDATE_NPC boundary, dossier-only importance, conversational NPC recency; deployed)._
 
 ## 2026-09-07 — queue sweep: progression + chat-orchestration (4 P1s, 4 P2s) — queue empty
 
@@ -31,6 +31,30 @@ the semantic roll detector, and the roll arbiter so Stop is never inert (a Stop 
 (`turnOrchestrator.postTurn.test.js`) that makes the same-task staleness class observable —
 all 6 new orchestrator pins verified failing against the pre-fix file. 2,214 tests green (+21),
 lint clean.
+
+## 2026-09-08 (scheduled) — PRODUCTIZATION.md third research pass (docs only, no code)
+
+Read its "What changed on 2026-09-08" box. **(1) Proxy architecture resolved in research:**
+Firebase AI Logic's per-user rate limit is ONE project-wide value (no per-user/per-tier
+setting), so the 09-07 "AI Logic + Firestore entitlements" shape cannot express plan
+allowances and a client-side decrement is not a gate — withdrawn. Cloud Functions callables
+stream and `onRequest` can emit SSE, so the build is a **Gemini-wire-compatible SSE proxy** the
+shipped `providers/gemini.js` adapter uses unchanged (base URL + ID-token/App Check headers):
+server-side turn reservation, key injection, hosted prompt variant + model pinning, per-uid
+`usageMetadata` rows (hosted-side track A for free). **(2) Images priced** (new §2.1): xAI
+quality $0.05/render, Gemini Pro Image fallback ~$0.134 (2.7× the primary) → hosted chain
+xAI → Pollinations with the Gemini fallback capped, per-plan render allowances, one free trial
+portrait; Scribe-composed image prompts under our xAI key need the hosted register too.
+**(3) Trial abuse priced** (SMS OTP $0.01–0.46; Firebase Phone Number Verification GA May 2026
+but native-only): real sign-in + App Check on the proxy + proxy-only grants + per-uid/IP
+ceilings + a daily spend circuit breaker. **(4) Google for Startups pre-funded tier = $2,000
+credit, no investor** (~40k turns, the whole trial budget; needs a business-domain mailbox —
+register the domain now). **(5) Patreon** collects/remits EU VAT itself as a marketplace and
+its 18+ pages allow AI-generated illustrated content → the zero-negotiation rail for a Phase-1
+BYOK Supporter membership. Re-verified: Flash-Lite $0.25/$1.50, Flash 2027 doubling, 3.1 Pro
+implicit-cache floor 4,096 tokens (our ~6k prefix clears it narrowly → tripwire idea).
+Open questions 15 → 19. **Track A (`usageMetadata`) still unstarted — third grep.** Nothing
+decided — Vesa reviews; settled calls go to DECISIONS.md.
 
 ## 2026-09-06 → 09-07 (scheduled) — PRODUCTIZATION.md created, then second research pass (docs only, no code)
 
