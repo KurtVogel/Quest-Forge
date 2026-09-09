@@ -50,6 +50,8 @@ import { createInitialFronts } from '../engine/fronts.js';
 import { isSpellcaster, sanitizeSpellSlots, sanitizeSustainedSpell } from '../engine/spellcasting.js';
 import { initialGameState } from './initialState.js';
 import { coverage, tokenSet } from '../engine/textMatch.js';
+import { sanitizePortraitUrl } from '../engine/portraitUrl.js';
+import { CHARACTER_APPEARANCE_MAX, cleanTextField } from '../config/contentLimits.js';
 import { applyEarlyDefeat, isLowLevelSolo, stackIdentity, systemMessage } from './handlers/shared.js';
 
 /**
@@ -287,8 +289,22 @@ function healLoadedCharacter(character) {
         remaining: Math.min(hitDiceTotal, Math.max(0, toInt(rawHitDice.remaining, hitDiceTotal))),
         die: CLASSES[character.class]?.hitDie || 8,
     };
+    // Identity fields are string-or-empty with the vault's own clamps
+    // (2026-09-09 audit P1: `gender: {}` threw `.trim is not a function` out of
+    // buildSystemPrompt on EVERY turn and out of the Character Sheet render;
+    // `appearance: {}` made Scene mode reject). sanitizeCharacter — the export
+    // sibling — always clamped these; the live save never did. The hero
+    // portrait gets the shared allowlist (P2) — see engine/portraitUrl.js.
+    const name = cleanTextField(character.name, 30) || 'Adventurer';
     const healed = {
         ...character,
+        name,
+        gender: cleanTextField(character.gender, 60),
+        appearance: cleanTextField(character.appearance, CHARACTER_APPEARANCE_MAX),
+        background: cleanTextField(character.background, 2000),
+        portraitUrl: sanitizePortraitUrl(character.portraitUrl),
+        portraitPrompt: cleanTextField(character.portraitPrompt, 2000),
+        portraitProvider: cleanTextField(character.portraitProvider, 40),
         level,
         exp: Math.max(0, toInt(character.exp, 0)),
         maxHP,

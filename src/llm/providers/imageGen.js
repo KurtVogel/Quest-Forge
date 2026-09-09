@@ -100,6 +100,32 @@ function mimeFromBase64(b64) {
     return 'image/jpeg'; // xAI returns JPEG by default
 }
 
+// Provider payloads are trusted by TYPE, not shape (2026-09-09 audit P2): a
+// non-string body used to become `data:image/png;base64,[object Object]`,
+// returned as a SUCCESS, cached under the scene key, and rendered as a broken
+// <img> until Reroll; a verbatim `text/html` mime flowed into the portrait
+// writes. Anything that is not a base64 string is "no image" for that tier.
+const BASE64_BODY = /^[a-z0-9+/=]+$/i;
+const IMAGE_MIME = /^image\/(?:png|jpe?g|webp|gif)$/i;
+
+function base64ImageBody(value) {
+    return typeof value === 'string' && value.length > 0 && BASE64_BODY.test(value) ? value : null;
+}
+
+function geminiInlineImage(parts) {
+    for (const part of Array.isArray(parts) ? parts : []) {
+        const inline = part?.inlineData;
+        const data = base64ImageBody(inline?.data);
+        if (!data) continue;
+        const mimeType = typeof inline.mimeType === 'string' && IMAGE_MIME.test(inline.mimeType.trim())
+            ? inline.mimeType.trim().toLowerCase()
+            : (inline.mimeType ? null : 'image/png');
+        if (!mimeType) continue;
+        return { data, mimeType };
+    }
+    return null;
+}
+
 async function downscaleDataUrl(dataUrl, { maxWidth, maxHeight, quality = 0.82 } = {}) {
     if (!dataUrl?.startsWith('data:image/') || (!maxWidth && !maxHeight)) return dataUrl;
 
@@ -186,7 +212,7 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
 
             if (response.ok) {
                 const data = await response.json();
-                const b64 = data?.data?.[0]?.b64_json;
+                const b64 = base64ImageBody(data?.data?.[0]?.b64_json);
                 if (b64) {
                     const dataUrl = `data:${mimeFromBase64(b64)};base64,${b64}`;
                     const finalUrl = await downscaleDataUrl(dataUrl, {
@@ -235,10 +261,9 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
             });
             if (response.ok) {
                 const data = await response.json();
-                const parts = data?.candidates?.[0]?.content?.parts || [];
-                const inline = parts.find(p => p?.inlineData?.data)?.inlineData;
+                const inline = geminiInlineImage(data?.candidates?.[0]?.content?.parts);
                 if (inline) {
-                    const dataUrl = `data:${inline.mimeType || 'image/png'};base64,${inline.data}`;
+                    const dataUrl = `data:${inline.mimeType};base64,${inline.data}`;
                     const finalUrl = await downscaleDataUrl(dataUrl, {
                         maxWidth: options.maxWidth,
                         maxHeight: options.maxHeight,

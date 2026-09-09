@@ -13,7 +13,10 @@ export const PORTRAIT_STYLE = 'Adult low-fantasy tabletop RPG portrait, grounded
 
 export function buildPortraitPrompt(character, appearance, equippedItems = []) {
     const gear = equippedItems.length > 0 ? ` Wearing/carrying: ${equippedItems.join(', ')}.` : '';
-    const gender = character.gender?.trim() ? ` (${character.gender.trim()})` : '';
+    // String-or-empty belt (2026-09-09 audit P1): the sheet computes this at
+    // RENDER, so an object gender crashed the whole panel into its boundary.
+    const genderText = typeof character.gender === 'string' ? character.gender.trim() : '';
+    const gender = genderText ? ` (${genderText})` : '';
     return [
         // Display names, never data keys: 'halfOrc' painted as "a halfOrc
         // fighter" under an inviolable-species rule (2026-09-01 P2).

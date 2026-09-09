@@ -8,6 +8,7 @@ import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { curateNpcsForPrompt } from '../engine/npcRoster.js';
 import { classDisplayName, raceDisplayName } from '../engine/characterUtils.js';
+import { cleanTextField } from '../config/contentLimits.js';
 
 /**
  * One foe's state for the art director's cast list (2026-09-01 P2): combat
@@ -67,9 +68,12 @@ export async function composeScenePrompt({ situation, character, party = [], npc
     if (situation) lines.push(`Current situation: ${preserveSceneSituation(situation)}`);
 
     if (character) {
-        const equipped = (character.equippedSummary || '').trim();
-        const gender = character.gender?.trim() || '';
-        const desc = character.appearance?.trim()
+        // String-or-empty belts (2026-09-09 audit P1): this line sits ABOVE the
+        // try below, so an object field rejected the whole compose call and
+        // Scene mode showed the raw TypeError as its error.
+        const equipped = cleanTextField(character.equippedSummary);
+        const gender = cleanTextField(character.gender);
+        const desc = cleanTextField(character.appearance)
             || `a ${gender ? `${gender} ` : ''}${raceDisplayName(character)} ${classDisplayName(character) || 'adventurer'}`.replace(/\s+/g, ' ').trim();
         lines.push(`Player character — ${character.name}${gender ? ` (${gender})` : ''}: ${desc}${equipped ? ` Wearing/wielding: ${equipped}.` : ''}`);
     }
@@ -80,8 +84,8 @@ export async function composeScenePrompt({ situation, character, party = [], npc
     const companionNames = new Set();
     for (const c of (party || []).filter(c => c?.name)) {
         companionNames.add(c.name.toLowerCase());
-        const identity = [c.species, c.gender].map(v => String(v || '').trim()).filter(Boolean).join(' ');
-        const desc = (c.appearance || c.notes || '').trim() || `${c.role || 'companion'}`.trim();
+        const identity = [c.species, c.gender].map(v => cleanTextField(v)).filter(Boolean).join(' ');
+        const desc = cleanTextField(c.appearance) || cleanTextField(c.notes) || cleanTextField(c.role) || 'companion';
         lines.push(`Party companion — ${c.name}${identity ? ` (${identity})` : ''}: ${desc}${c.weapon ? ` Wielding ${c.weapon}.` : ''}`);
     }
 
@@ -93,8 +97,8 @@ export async function composeScenePrompt({ situation, character, party = [], npc
         .filter(n => !companionNames.has(n.name.toLowerCase()))
         .slice(0, 4);
     for (const n of recentNpcs) {
-        const identity = [n.species, n.gender].map(v => String(v || '').trim()).filter(Boolean).join(' ');
-        const desc = n.appearance?.trim() || `${n.disposition || ''} NPC`.trim();
+        const identity = [n.species, n.gender].map(v => cleanTextField(v)).filter(Boolean).join(' ');
+        const desc = cleanTextField(n.appearance) || `${cleanTextField(n.disposition)} NPC`.trim();
         lines.push(`NPC — ${n.name}${identity ? ` (${identity})` : ''}: ${desc}`);
     }
 

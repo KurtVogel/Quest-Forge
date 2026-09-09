@@ -5,6 +5,7 @@
 import { computeACFromInventory, getModifier, normalizeConditionName, CONDITION_LIST_CAP } from '../../engine/rules.js';
 import { ABILITY_NAMES, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../../engine/characterUtils.js';
 import { awardExperience, getDmBonusXpCap, getStoryMilestoneXp, isMaxLevel } from '../../engine/progression.js';
+import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import {
     applyDeath,
     applyEarlyDefeat,
@@ -97,7 +98,27 @@ export const handlers = {
     },
 
     UPDATE_CHARACTER(state, action) {
-        return { ...state, character: { ...state.character, ...action.payload } };
+        const payload = { ...(action.payload || {}) };
+        // The hero portrait gets the shared allowlist at the WRITE too
+        // (2026-09-09 audit P2): the sheet/wizard dispatch whatever the provider
+        // chain returned. A URL that fails it never lands, and the portrait
+        // metadata stamps only when the URL survived — "Rendered by gemini"
+        // beside no picture was the NPC-side symptom of the same gap.
+        if (Object.prototype.hasOwnProperty.call(payload, 'portraitUrl')) {
+            const safeUrl = sanitizePortraitUrl(payload.portraitUrl);
+            if (safeUrl) {
+                payload.portraitUrl = safeUrl;
+            } else if (payload.portraitUrl === '' || payload.portraitUrl == null) {
+                // An explicit clear stays a clear.
+                payload.portraitUrl = '';
+            } else {
+                delete payload.portraitUrl;
+                delete payload.portraitPrompt;
+                delete payload.portraitProvider;
+                delete payload.portraitUpdatedAt;
+            }
+        }
+        return { ...state, character: { ...state.character, ...payload } };
     },
 
     APPLY_ABILITY_SCORE_IMPROVEMENT(state, action) {

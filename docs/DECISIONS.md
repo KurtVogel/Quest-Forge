@@ -8,6 +8,39 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-09 · Every trust boundary sanitizes EVERY record type that crosses it — the same sanitizer, not just one — and a guard that turns a silent coercion into a throw must be re-checked at its fallback callers.**
+The 2026-09-09 strengthening audit (Lap 2, hostile input) found three P1s of one shape: a sanitizer
+that existed for a SIBLING and stopped one record short. `boundWeaponDamage` (hero) had no
+companion twin, so `100d1000+1000000` from the DM lane or a save hit once for 1,099,957;
+`sanitizeLoadedEnemy` had no party twin, so a loaded string `attackBonus` concatenated to `"+40"`
+and threw out of every exchange (a deadlock — no rest, no removal mid-fight); `sanitizeCharacter`
+(exports) clamped the hero's identity fields while `healLoadedCharacter` (saves) spread them raw,
+so `gender: {}` threw out of every prompt build; the NPC roster had a portrait allowlist and the
+hero's live save had none. Rulings: (1) **`parseNotation` bounds all three notation axes** —
+`MAX_DICE_COUNT`, `MAX_DIE_SIDES`, and now `MAX_ROLL_MODIFIER` (1000, the same absurd-but-harmless
+headroom) — because the 2026-09-01 `rollWithModifier` throw was correct at the kernel but sat
+OUTSIDE `rollDamage`'s wrapped parse, so every `onInvalid: 'fallback'` caller propagated instead of
+degrading; **a fix that turns a silent coercion into a throw moves the failure, it does not remove
+it** — when a guard becomes a throw, grep its callers for try coverage. (2) **Companion damage is
+bounded like weapon damage** (`boundCompanionDamage`: count ≤2, sides ≤12, flat ≤8 — the existing
+competence cap — trailing damage-type words stripped, junk → the weapon's own default) on BOTH
+`normalizeCompanion` branches, and **LOAD_GAME re-runs the DM add path on every party record**
+(`normalizeCompanion(c, {})`: catalog dice win, the flat bonus survives from the string, the magic
+bonus from the name — the same deterministic result the add produced); the roll site numbers the
+bonus as a belt, and the two engine-plan React effects reject the exchange instead of dying.
+(3) **A persisted text field is a TYPE assumption, not a null check**: `x?.trim()` is retired in
+favour of `cleanTextField` (`config/contentLimits.js`, string-or-empty, never "[object Object]")
+at the load boundary (`healLoadedCharacter` with the vault's limits, `normalizeNpcRecord` for
+appearance/gender/species, `normalizeCompanion` for role/notes/appearance) AND at the consumers.
+(4) **ONE portrait allowlist** — `sanitizePortraitUrl` in `engine/portraitUrl.js` (inline image
+data URL or Pollinations prompt URL, 300k cap) — behind the hero load, `UPDATE_CHARACTER`, the NPC
+roster, and the vault; a rejected URL never lands and never stamps `portraitProvider`/`UpdatedAt`
+(the "Rendered by gemini" beside no picture symptom), while an explicit '' still clears. (5)
+**Provider image payloads are trusted by type**: a base64 string body and an `image/*` mime, else
+that tier is `*-empty` and falls through the chain (never a cached `[object Object]` success).
+Process rule for future lap openers: for each trust boundary, list the record types that cross it
+and check each one has the SAME sanitizer.
+
 **2026-09-08 · On the `front_updates` wire JUNK MEANS OMIT, and every living-world / hidden-fronts field is typed at its load AND render boundary.**
 The 2026-09-08 strengthening audit (Lap 2, hostile input) reproduced three P1s of one shape — "the
 sweep stopped one array short": `validateSaveState` entry-guarded seven arrays but not `fronts` /

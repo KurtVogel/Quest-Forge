@@ -15,6 +15,7 @@ import { ABILITY_NAMES, SKILL_LABELS, buildDerivedCharacterFields, normalizeAbil
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 import { normalizeEquippedSlots } from './equipment.js';
 import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
+import { sanitizePortraitUrl } from './portraitUrl.js';
 
 export const EXPORT_FORMAT = 'quest-forge-character';
 export const EXPORT_VERSION = 1;
@@ -38,8 +39,9 @@ const MAX_PORTRAIT_PROMPT_LENGTH = 2000;
 // imageGen.js) before they ever reach a hero file; the old 2.5M ceiling let a
 // hand-bloated import ride every campaign autosave snapshot 2-4×/turn and
 // single-handedly push a cloud save into chunking (2026-08-04 audit). An
-// over-ceiling portrait is stripped — the hero imports fine, one click regenerates.
-const MAX_PORTRAIT_URL_LENGTH = 300_000;
+// over-ceiling portrait is stripped — the hero imports fine, one click
+// regenerates. The allowlist + ceiling live in engine/portraitUrl.js since
+// 2026-09-09 (shared with the NPC roster and the live hero save).
 
 /** Clamp to an integer in [min, max]; non-numeric input yields `fallback`. */
 function clampInt(value, min, max, fallback) {
@@ -48,13 +50,7 @@ function clampInt(value, min, max, fallback) {
     return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
-function sanitizeImageUrl(value) {
-    const s = String(value || '').trim();
-    if (!s || s.length > MAX_PORTRAIT_URL_LENGTH) return '';
-    if (/^https:\/\/image\.pollinations\.ai\/prompt\//i.test(s)) return s;
-    if (/^data:image\/(png|jpe?g|webp|gif);base64,[a-z0-9+/=]+$/i.test(s)) return s;
-    return '';
-}
+const sanitizeImageUrl = sanitizePortraitUrl;
 
 export function buildCharacterExport(character, inventory) {
     return {

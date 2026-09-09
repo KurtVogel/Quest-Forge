@@ -32,6 +32,13 @@ export const MAX_DICE_COUNT = 100;
 // reached the engine via un-sanitized LLM damage fields (a self-favoring one-shot).
 // d100 is the largest real die; 1000 leaves absurd-but-harmless headroom.
 export const MAX_DIE_SIDES = 1000;
+// The third notation axis (2026-09-09 audit P1): "1d6+1000000" was valid and a
+// 400-digit modifier parsed to Infinity. The 09-01 rollWithModifier guard turned
+// that into a THROW outside rollDamage's fallback try — every 'fallback' caller
+// propagated instead of degrading to 1d4. Rejecting it HERE, inside the wrapped
+// parse, makes the fallback engage for free. No real roll carries a four-digit
+// flat bonus; 1000 is the same absurd-but-harmless headroom as MAX_DIE_SIDES.
+export const MAX_ROLL_MODIFIER = 1000;
 // Looser engine-level backstop so internal doubling (crit rolls take parsed.count * 2)
 // can never trip it — this catches programming errors, not LLM input.
 const DICE_COUNT_BACKSTOP = 1000;
@@ -135,11 +142,11 @@ export function parseNotation(notation: string): { count: number; sides: number;
   if (count < 1 || sides < 1 || count > MAX_DICE_COUNT || sides > MAX_DIE_SIDES) {
     throw new Error(`Invalid dice notation: "${notation}"`);
   }
-  return {
-    count,
-    sides,
-    modifier: match[3] ? parseInt(match[3], 10) : 0,
-  };
+  const modifier = match[3] ? parseInt(match[3], 10) : 0;
+  if (!Number.isFinite(modifier) || Math.abs(modifier) > MAX_ROLL_MODIFIER) {
+    throw new Error(`Invalid dice notation: "${notation}"`);
+  }
+  return { count, sides, modifier };
 }
 
 /**

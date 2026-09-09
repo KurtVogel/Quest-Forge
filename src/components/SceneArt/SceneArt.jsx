@@ -291,6 +291,9 @@ export default function SceneArt() {
                             src={currentImage.url}
                             alt={currentImage.caption || state.currentLocation || 'Scene'}
                             className="scene-art-image"
+                            // A provider body the browser cannot decode used to
+                            // sit as a silent broken frame (2026-09-09 audit P2).
+                            onError={() => setError('The image provider returned a picture the browser could not display. Use "Reroll image" to try again.')}
                         />
                         <div className="scene-art-caption">
                             <span className="scene-location-icon" aria-hidden="true" />

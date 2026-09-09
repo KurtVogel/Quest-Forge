@@ -464,10 +464,26 @@ export default function ChatPanel() {
         return true;
     };
 
+    /**
+     * The two engine-driven plans below run inside React effects with no catch
+     * (2026-09-09 audit P1): a plan that THREW (a pre-fix save's string
+     * attackBonus) crashed the effect instead of rejecting the exchange. The
+     * inputs are typed at load now; this is the belt — a rejected exchange
+     * clears the queue and hands the turn back, never a dead effect.
+     */
+    const commitPlannedExchange = (plan) => {
+        try {
+            commitCombatPlan(plan());
+        } catch (e) {
+            console.error('[Combat] engine plan threw', e);
+            dispatch({ type: 'REJECT_COMBAT_EXCHANGE', payload: { reason: `The engine could not resolve this exchange (${String(e?.message || e).slice(0, 160)}).` } });
+        }
+    };
+
     /** Opening Initiative is engine-owned and resolves before any queued player action. */
     useEffect(() => {
         if (isLoading || state.combat?.phase !== COMBAT_PHASES.OPENING) return;
-        commitCombatPlan(planOpeningExchange(state));
+        commitPlannedExchange(() => planOpeningExchange(state));
     // commitCombatPlan only dispatches the pure plan for the current combat snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state.combat?.phase, isLoading]);
@@ -475,7 +491,7 @@ export default function ChatPanel() {
     /** A player action that started combat waits safely behind Opening Initiative. */
     useEffect(() => {
         if (isLoading || state.combat?.phase !== COMBAT_PHASES.AWAITING_PLAYER || !state.combat.queuedExchange) return;
-        commitCombatPlan(planCombatExchange(state, state.combat.queuedExchange));
+        commitPlannedExchange(() => planCombatExchange(state, state.combat.queuedExchange));
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state.combat?.phase, state.combat?.queuedExchange, isLoading]);
 

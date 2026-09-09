@@ -34,6 +34,42 @@ export function appendRollHistory(rollHistory, rolls) {
     return [...(rollHistory || []), ...additions].slice(-ROLL_HISTORY_CAP);
 }
 
+const ROLL_HISTORY_TEXT_MAX = 120;
+
+/**
+ * Type one loaded rollHistory entry (2026-09-09 audit P2): the old guard was
+ * `object && Array.isArray(rolls)`, so object faces/total/description rendered
+ * "[object Object]" into RECENT DICE ROLLS on every turn and a 5k-char
+ * description rode the prompt unclamped. Faces must be finite numbers (at least
+ * one), total is recomputed when the stored one is junk, modifier defaults to
+ * 0, text fields are string-or-empty and clamped. Returns null to drop.
+ */
+export function sanitizeRollHistoryEntry(entry) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    if (!Array.isArray(entry.rolls)) return null;
+    const rolls = entry.rolls.map(Number).filter(Number.isFinite);
+    if (rolls.length === 0) return null;
+    const modifier = Number.isFinite(Number(entry.modifier)) && typeof entry.modifier !== 'boolean'
+        ? Math.trunc(Number(entry.modifier))
+        : 0;
+    const subtotal = rolls.reduce((sum, value) => sum + value, 0);
+    const storedTotal = Number(entry.total);
+    const total = Number.isFinite(storedTotal) && typeof entry.total !== 'boolean' ? storedTotal : subtotal + modifier;
+    const text = value => (typeof value === 'string' ? value.trim().slice(0, ROLL_HISTORY_TEXT_MAX) : '');
+    return {
+        ...entry,
+        id: typeof entry.id === 'string' ? entry.id.slice(0, 80) : String(entry.id ?? `roll-${subtotal}-${rolls.length}`).slice(0, 80),
+        rolls,
+        subtotal,
+        modifier,
+        total,
+        description: text(entry.description),
+        notation: text(entry.notation),
+        isCritical: entry.isCritical === true,
+        isCritFail: entry.isCritFail === true,
+    };
+}
+
 export function systemMessage(content, extra = {}) {
     return {
         id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -444,6 +480,30 @@ function parseTrailingFlatBonus(damage) {
     return Math.max(0, Math.min(8, Math.trunc(n)));
 }
 
+// Companion damage bound — the twin of the hero's `boundWeaponDamage`
+// (2026-09-09 audit P1: `100d1000+1000000` from the DM lane or a loaded save
+// hit once for 1,099,957 and ended the fight). Ceilings mirror the best
+// catalog dice a companion can hold (2d6 / 1d12); the flat bonus shares the
+// competence cap parseTrailingFlatBonus already enforces (0..8). A trailing
+// damage-type word ("1d8+2 slashing") is tolerated and stripped — the DM's
+// 20-char slice used to carry it straight into a notation the kernel could
+// not parse. Anything else becomes the weapon's own default.
+const MAX_COMPANION_DICE_COUNT = 2;
+const MAX_COMPANION_DIE_SIDES = 12;
+
+export function boundCompanionDamage(value, weapon = '') {
+    const match = String(value ?? '').trim()
+        .match(/^(\d{1,3})\s*d\s*(\d{1,4})\s*(?:([+-])\s*(\d{1,4}))?(?:\s+[a-z ,/-]+)?$/i);
+    if (!match) return defaultCompanionDamage(weapon);
+    const count = Number(match[1]);
+    const sides = Number(match[2]);
+    if (count < 1 || sides < 1 || count > MAX_COMPANION_DICE_COUNT || sides > MAX_COMPANION_DIE_SIDES) {
+        return defaultCompanionDamage(weapon);
+    }
+    const bonus = match[3] === '-' ? 0 : (parseTrailingFlatBonus(`+${match[4] || 0}`) ?? 0);
+    return `${count}d${sides}${bonus > 0 ? `+${bonus}` : ''}`;
+}
+
 function deriveCompanionWeaponProfile(weapon, existingDamage, payloadDamage) {
     const weaponBonus = clampMagicBonus(parseMagicBonusFromName(weapon));
     const flatBonus = parseTrailingFlatBonus(existingDamage)
@@ -455,12 +515,16 @@ function deriveCompanionWeaponProfile(weapon, existingDamage, payloadDamage) {
         // Recognized catalog mechanics override LLM-supplied dice (D5). Versatile
         // weapons use the one-handed die — companions don't model hands.
         const damage = flatBonus > 0 ? `${catalog.damage}+${flatBonus}` : catalog.damage;
-        return { damage, weaponBonus };
+        return { damage: boundCompanionDamage(damage, weapon), weaponBonus };
     }
     const fallback = (typeof payloadDamage === 'string' && payloadDamage.trim())
-        ? payloadDamage.trim().slice(0, 20)
+        ? boundCompanionDamage(payloadDamage, weapon)
         : defaultCompanionDamage(weapon);
     return { damage: fallback, weaponBonus };
+}
+
+function companionText(value, max) {
+    return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
 export function companionStatus(hp, maxHp) {
@@ -499,14 +563,16 @@ export function normalizeCompanion(payload = {}, existing = {}) {
         damage = derived.damage;
         weaponBonus = derived.weaponBonus;
     } else {
-        damage = merged.damage || existing.damage || defaultCompanionDamage(weapon);
+        // Bounded on this branch too: an `add_companions` entry without a
+        // weapon, or a loaded save, takes the raw damage field here.
+        damage = boundCompanionDamage(merged.damage || existing.damage, weapon);
         weaponBonus = clampMagicBonus(Number(existing.weaponBonus) || 0);
     }
 
     return {
         id: merged.id || `companion-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
         name: String(merged.name || existing.name || 'Companion').trim().slice(0, 40),
-        role: merged.role || existing.role || 'ally',
+        role: companionText(merged.role, 40) || companionText(existing.role, 40) || 'ally',
         affinity: clampNumber(merged.affinity, 0, 100, existing.affinity ?? 50),
         level,
         maxHp,
@@ -527,8 +593,10 @@ export function normalizeCompanion(payload = {}, existing = {}) {
             ? (merged.status || companionStatus(hp, maxHp))
             : (existing.status === 'dead' ? 'dead' : companionStatus(hp, maxHp)),
         conditions: Array.isArray(merged.conditions) ? merged.conditions : (existing.conditions || []),
-        notes: merged.notes || existing.notes || '',
-        appearance: merged.appearance || existing.appearance || '',
+        // Typed text: sceneDirector trims `appearance || notes` and the party
+        // prompt block prints them — an object here threw at Scene mode.
+        notes: companionText(merged.notes, NPC_DOSSIER_FIELD_MAX) || companionText(existing.notes, NPC_DOSSIER_FIELD_MAX),
+        appearance: companionText(merged.appearance, NPC_DOSSIER_FIELD_MAX) || companionText(existing.appearance, NPC_DOSSIER_FIELD_MAX),
         // Sentimental gifts as a durable capped list (never wholesale replaced):
         // per-update `keepsake` beats append; restatements drop by containment.
         keepsakes: appendKeepsakes(existing.keepsakes, [

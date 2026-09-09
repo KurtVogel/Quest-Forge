@@ -16,13 +16,20 @@ import { COMBAT_PHASES, normalizeCombatExchange } from '../../engine/combatExcha
 import { dedupeNpcRoster, healPromotedStoryMemoryTwins, migrateLegacyNpc } from '../../engine/npcRoster.js';
 import {
     ensureCompanionRosterRecord,
+    normalizeCompanion,
     normalizeRecentTransactions,
     RECENT_REST_LIMIT,
     RECENT_SPELL_CAST_LIMIT,
     ROLL_HISTORY_CAP,
+    sanitizeRollHistoryEntry,
     sanitizeWorldFactPayload,
     healChronicleChapter,
 } from './shared.js';
+
+// The party statuses the engine actually recognizes (companionStatus + the
+// explicit 'dead' the DM/END_COMBAT set). Anything else on a loaded record
+// re-derives from HP.
+const COMPANION_STATUSES = new Set(['healthy', 'bloodied', 'critical', 'downed', 'dead']);
 
 function sanitizeStoredExchangeResult(result) {
     if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
@@ -107,8 +114,9 @@ function validateSaveState(payload) {
         // Capped like every other rollHistory boundary (append + serialize are
         // both 50) — a hand-edited save must not carry an unbounded array into
         // live state until the next append (2026-08-20 audit).
+        // Typed per entry since 2026-09-09 (see sanitizeRollHistoryEntry).
         rollHistory: Array.isArray(payload.rollHistory)
-            ? payload.rollHistory.filter(r => r && typeof r === 'object' && Array.isArray(r.rolls)).slice(-ROLL_HISTORY_CAP)
+            ? payload.rollHistory.map(sanitizeRollHistoryEntry).filter(Boolean).slice(-ROLL_HISTORY_CAP)
             : [],
         quests: Array.isArray(payload.quests)
             ? payload.quests.filter(q => q && typeof q === 'object')
@@ -153,8 +161,29 @@ function validateSaveState(payload) {
         chronicle: Array.isArray(payload.chronicle)
             ? payload.chronicle.map(healChronicleChapter).filter(Boolean)
             : [],
+        // Companions get the same load sanitizer as the hero (healLoadedCharacter)
+        // and enemies (sanitizeLoadedEnemy) — 2026-09-09 audit P1: an object-only
+        // filter let a string attackBonus deadlock every exchange and an
+        // unbounded damage string one-shot a fight. normalizeCompanion(c, {}) is
+        // the DM add path re-run on the record: catalog dice win, the flat bonus
+        // survives from the damage string, the magic bonus from the name.
         party: Array.isArray(payload.party)
-            ? payload.party.filter(c => c && typeof c === 'object')
+            ? payload.party
+                .filter(c => c && typeof c === 'object' && !Array.isArray(c))
+                .map(c => ({
+                    ...normalizeCompanion(
+                        // An unknown status string derives from HP instead of
+                        // surviving as a label nothing in the engine recognizes.
+                        COMPANION_STATUSES.has(c.status) ? c : { ...c, status: undefined },
+                        {}
+                    ),
+                    // The one transient field the canonical shape omits: a
+                    // sustained-spell AC buff persists until combat ends, so a
+                    // mid-fight save keeps it (clamped like a companion shield).
+                    ...(Number.isFinite(Number(c.spellAcBonus)) && Number(c.spellAcBonus) > 0
+                        ? { spellAcBonus: Math.min(6, Math.trunc(Number(c.spellAcBonus))) }
+                        : {}),
+                }))
             : [],
         currentLocation: payload.currentLocation || null,
         // Same guard for the registry (2026-09-08): a null record threw

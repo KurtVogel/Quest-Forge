@@ -13,7 +13,7 @@ import { buildStoryMemoryPromptBlock, formatSecrecyTag } from '../engine/storyMe
 import { describeCatalogForPrompt } from '../data/items.js';
 import { formatCurrency } from '../engine/currency.js';
 import { CLASSES } from '../data/classes.js';
-import { normalizeCampaignPremise } from '../config/contentLimits.js';
+import { cleanTextField, normalizeCampaignPremise } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 import { TABLE_TALK_STANDING_RULE } from './tableTalk.js';
 import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js';
@@ -701,16 +701,21 @@ function buildCharacterBlock(character, combat = null) {
         ? `${character.exp || 0} XP (max level reached)`
         : `${character.exp || 0} / ${getExperienceThreshold(character.level)} to next level`;
 
-    const genderLine = character.gender?.trim()
-        ? `\n- **Gender:** ${character.gender.trim().slice(0, 60)}`
+    // String-or-empty belts (2026-09-09 audit P1): `x?.trim()` is a TYPE
+    // assumption, and an object here threw out of every prompt build.
+    const heroGender = cleanTextField(character.gender, 60);
+    const heroAppearance = cleanTextField(character.appearance, 300);
+    const heroBackground = cleanTextField(character.background);
+    const genderLine = heroGender
+        ? `\n- **Gender:** ${heroGender}`
         : '';
-    const appearanceLine = character.appearance?.trim()
-        ? `\n- **Appearance (established canon — keep it exactly consistent in narration):** ${character.appearance.trim().slice(0, 300)}`
+    const appearanceLine = heroAppearance
+        ? `\n- **Appearance (established canon — keep it exactly consistent in narration):** ${heroAppearance}`
         : '';
     // Player-authored personal history: canon like the campaign premise, but it
     // travels WITH the hero (roster/exports) rather than belonging to one campaign.
-    const backgroundLine = character.background?.trim()
-        ? `\n- **Background (player-authored personal canon — honor it and weave it into the world; it is established history, not a hook you may contradict):** ${character.background.trim().slice(0, 2000)}`
+    const backgroundLine = heroBackground
+        ? `\n- **Background (player-authored personal canon — honor it and weave it into the world; it is established history, not a hook you may contradict):** ${heroBackground.slice(0, 2000)}`
         : '';
 
     const spellcasting = describeSpellcastingForPrompt(character);

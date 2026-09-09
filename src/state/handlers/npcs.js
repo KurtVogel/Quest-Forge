@@ -4,6 +4,7 @@
  */
 import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
+import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
@@ -17,11 +18,17 @@ import { upsertNpc } from './shared.js';
  * unsafe URLs.
  */
 export function applyNpcPortrait(npcs = [], payload = {}) {
+    // Metadata stamps only when the URL survives the allowlist (2026-09-09
+    // audit P2): a rejected URL used to leave "Rendered by gemini" beside no
+    // picture, and the reroll button flipped to "Reroll" for a portrait that
+    // never existed.
+    const portraitUrl = sanitizePortraitUrl(payload.portraitUrl);
+    if (!portraitUrl) return npcs || [];
     return (npcs || []).map(npc => (
         npc.id === payload.id
             ? normalizeNpcRecord({
                 ...npc,
-                portraitUrl: payload.portraitUrl,
+                portraitUrl,
                 portraitPrompt: String(payload.portraitPrompt || '').slice(0, 2000),
                 portraitProvider: String(payload.portraitProvider || '').slice(0, 40),
                 portraitUpdatedAt: Date.now(),

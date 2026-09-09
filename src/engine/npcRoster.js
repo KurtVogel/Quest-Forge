@@ -4,7 +4,8 @@
  * campaigns keep early antagonists (e.g. a starting-town captain).
  */
 
-import { NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
+import { NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../config/contentLimits.js';
+import { sanitizePortraitUrl } from './portraitUrl.js';
 import { conversationalDistance } from './replayLedger.js';
 import { coverage, tokenSet } from './textMatch.js';
 
@@ -36,7 +37,6 @@ const DISAMBIGUATOR = /^(?:[a-z]|\d{1,3}|i{1,3}|iv|v|vi{0,3}|ix|x|one|two|three|
 // Mirror of characterVault's sanitizeImageUrl allowlist, kept local so this
 // module stays dependency-free. A loaded save is untrusted input: only the two
 // sources portraits can legitimately come from survive normalization.
-const SAFE_PORTRAIT_URL = /^(?:https:\/\/image\.pollinations\.ai\/prompt\/|data:image\/(?:png|jpe?g|webp|gif);base64,)/i;
 
 const COMBAT_ONLY_NOTE = /\b(attack|fought|slain|killed|defeated|stabbed|shot|arrow|spear|sword|combat|battle|ambush|patrol)\b/i;
 
@@ -582,8 +582,21 @@ export function migrateLegacyNpc(npc = {}) {
     if (!merged.arcDisposition) {
         merged.relationshipHistory = compactRelationshipHistory(merged.relationshipHistory);
     }
-    if (merged.portraitUrl && !(typeof merged.portraitUrl === 'string' && SAFE_PORTRAIT_URL.test(merged.portraitUrl))) {
-        delete merged.portraitUrl;
+    if (merged.portraitUrl !== undefined) {
+        const safeUrl = sanitizePortraitUrl(merged.portraitUrl);
+        if (safeUrl) merged.portraitUrl = safeUrl;
+        else delete merged.portraitUrl;
+    }
+    // Identity/looks fields are string-or-absent (2026-09-09 audit P1): an
+    // object `appearance`/array `gender`/numeric `species` survived here and
+    // threw at composeScenePrompt's NPC line, or joined "[object Object]" into
+    // the painter's prompt. upsertNpc clamps the DM/Scribe lanes; this is the
+    // load boundary's twin.
+    for (const [field, max] of [['appearance', NPC_DOSSIER_FIELD_MAX], ['gender', NPC_GENDER_MAX], ['species', NPC_SPECIES_MAX]]) {
+        if (merged[field] === undefined) continue;
+        const text = typeof merged[field] === 'string' ? merged[field].trim().slice(0, max) : '';
+        if (text) merged[field] = text;
+        else delete merged[field];
     }
     if (!NPC_ROSTER_TIERS.has(merged.rosterTier)) {
         merged.rosterTier = 'character';

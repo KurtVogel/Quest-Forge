@@ -6,7 +6,32 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-08 (queue sweep — hidden-fronts + living-world Lap-2 hostile input: junk-means-omit on `front_updates`, type-strict cleanText family, typed encounter ledger / worldTempo / fronts / locations / living-world session sub-objects at load, render-time band re-clamp + front liveness, id-resolved absence-drift writes; queue empty; deployed). Same day earlier: scheduled PRODUCTIZATION.md third pass (docs only — proxy shape resolved as a Gemini-wire SSE function, images and trial abuse priced, $2k startup credit, Patreon supporter rail). Previous: 2026-09-07 (queue sweep — progression + chat-orchestration: bounded DM XP lanes, defeat-terminal level-ups keep the hero down, opening-scene roll strip, JSON-only guard on discard lanes, committed-record post-turn reads, Stop-aware helpers; queue empty)._
+_Last updated: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input: `MAX_ROLL_MODIFIER` at the notation boundary, companion damage bound + party normalized at load, typed rollHistory, typed hero/NPC identity fields, ONE portrait allowlist, typed provider payloads, no-apology scene picker; queue empty; NOT deployed — pending). Same day: scheduled WOW audit's first entry (first-ten-minutes, two proposals in its queue). Previous: 2026-09-08 (queue sweep — hidden-fronts + living-world Lap-2 hostile input: junk-means-omit on `front_updates`, type-strict cleanText family, typed living-world sub-objects at load, render-time band re-clamp, id-resolved absence-drift writes; queue empty; deployed)._
+
+## 2026-09-09 — queue sweep: dice-engine + scene-art (3 P1s, 5 P2s) — queue empty
+
+All 8 lines of the 2026-09-09 scheduled audit (Lap 2, hostile input — the rotation's opening
+pair again) cleared — every queue line ticked with a fix note. **The Open Findings Queue is
+EMPTY.** **Ruling: DECISIONS.md 2026-09-09.** **P1s:** (1) `parseNotation` bounds its THIRD
+axis — `MAX_ROLL_MODIFIER` (1000) — so a 400-digit or million-point modifier fails as the
+notation error INSIDE `rollDamage`'s wrapped parse and every `onInvalid: 'fallback'` caller
+degrades to 1d4 again (the 09-01 kernel guard had moved that failure to a throw outside the
+try); (2) companions got the hero's damage twin — `boundCompanionDamage` (count ≤2, sides ≤12,
+flat ≤8, trailing type words stripped) on BOTH `normalizeCompanion` branches, LOAD_GAME runs
+every party record through `normalizeCompanion(c, {})` (unknown status re-derives, a mid-fight
+`spellAcBonus` survives), `resolveCompanionAttack` numbers the bonus (a loaded `"+4"` used to
+throw out of EVERY exchange — a deadlock), and ChatPanel's two engine-plan effects reject the
+exchange instead of throwing; (3) the hero's identity fields load typed through the new
+`cleanTextField` (`config/contentLimits.js`), `normalizeNpcRecord` types appearance/gender/
+species, and the four `?.trim()` consumer sites (promptBuilder, sceneDirector ×2,
+portraitPrompt) use it — `gender: {}` used to throw out of every prompt build and the sheet
+render. **P2s:** ONE portrait allowlist (`sanitizePortraitUrl`, `engine/portraitUrl.js`)
+behind the hero load, `UPDATE_CHARACTER`, the NPC roster, and the vault (a rejected URL never
+lands and never stamps metadata; explicit clear still clears); `imageGen.js` requires a base64
+string body + `image/*` mime from both providers (else `*-empty`, never cached) and SceneArt's
+`<img onError>` reports an undecodable picture; `sanitizeRollHistoryEntry` types the dice
+ledger at load; `pickSceneSituation` skips `fallback` journal entries. 49 pins in 10 new test
+files, 37 verified failing pre-fix. 2,296 tests green (+49), lint clean. **Not deployed yet.**
 
 ## 2026-09-08 — queue sweep: hidden-fronts + living-world (3 P1s, 4 P2s) — queue empty
 

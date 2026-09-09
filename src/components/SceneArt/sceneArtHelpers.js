@@ -100,8 +100,16 @@ export function buildFallbackScenePrompt({ location, character, situation }) {
  */
 export function pickSceneSituation({ messages = [], journal = [], location = '' } = {}) {
     const narration = findLatestNarration(messages);
-    const lastJournal = journal?.length ? journal[journal.length - 1]?.summary : '';
-    const situation = (narration?.content || lastJournal || `The scene at ${location}.`).trim();
+    // The newest REAL summary: a `fallback` entry is the "Auto-summary was
+    // unavailable…" apology, never a scene (the 2026-09-06 "never embedded"
+    // rule, one consumer over — 2026-09-09 audit P2).
+    const lastJournal = (Array.isArray(journal) ? journal : [])
+        .slice()
+        .reverse()
+        .find(entry => entry && typeof entry === 'object' && !entry.fallback && typeof entry.summary === 'string' && entry.summary.trim())
+        ?.summary || '';
+    const narrationText = typeof narration?.content === 'string' ? narration.content : '';
+    const situation = (narrationText || lastJournal || `The scene at ${location}.`).trim();
     return { situation, narrationId: narration?.id ?? null };
 }
 

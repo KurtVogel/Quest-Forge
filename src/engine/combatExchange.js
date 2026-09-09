@@ -1206,8 +1206,12 @@ function resolveCompanionAttack(companion, target, events, rolls, situationalRul
         ? { mode: 'advantage', reason: 'flanking' }
         : situationalRuling;
     const modifiers = conditionAwareAttackModifiers(companion.conditions, target.conditions, ruling.advantage || companionFlanking, ruling.disadvantage || !!target.defending);
+    // Numeric belt (2026-09-09 audit P1): a string attackBonus from a pre-fix
+    // save concatenated ("+4" + 0 → "+40") and threw out of EVERY exchange —
+    // a deadlock, since rests and companion removal are refused mid-fight.
+    const baseAttackBonus = Number(companion.attackBonus);
     const outcome = resolveAttackRoll({
-        attackBonus: (companion.attackBonus ?? 2) + companionWeaponBonus(companion),
+        attackBonus: (Number.isFinite(baseAttackBonus) ? baseAttackBonus : 2) + companionWeaponBonus(companion),
         description: `${companion.name} attacks ${target.name}`,
         modifiers,
         targetAc: target.ac,

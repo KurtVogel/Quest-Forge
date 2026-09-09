@@ -25,6 +25,17 @@ export const NPC_GENDER_MAX = 40;
  * art, and the DM's own prose so a goblin can never quietly turn human. */
 export const NPC_SPECIES_MAX = 40;
 
+/**
+ * String-or-empty for a persisted text field (2026-09-09 audit P1). `x?.trim()`
+ * reads as a null guard but is a TYPE assumption — an object in a hand-edited
+ * or hostile save threw at every consumer. Non-strings become '' rather than
+ * "[object Object]" canon.
+ */
+export function cleanTextField(value, max = Infinity) {
+    if (typeof value !== 'string') return '';
+    return value.trim().slice(0, max);
+}
+
 export function normalizeCampaignPremise(value) {
     return String(value || '').trim().slice(0, CAMPAIGN_PREMISE_MAX_LENGTH);
 }
