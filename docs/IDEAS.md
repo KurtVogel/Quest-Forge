@@ -1655,6 +1655,38 @@ private state (`maxIntensity`, intensity labels, front ids) re-validates against
 hidden state is itself trustworthy. From the 2026-09-08 strengthening audit (living-world +
 hidden-fronts, Lap 2).
 
+### [strengthening] Every combatant crosses the same three gates: bounded damage, typed stats, normalized at load
+The hero's weapon damage is bounded (`boundWeaponDamage`, 2026-09-03), enemy damage is bounded
+(`sanitizeEnemyDamage`), enemy string stats coerce, and both are re-sanitized at load — companions
+got none of it: `normalizeCompanion` stores a DM-supplied `damage` string raw, LOAD_GAME's `party`
+guard is an object filter, and the dice kernel bounds `count`/`sides` but not the modifier axis.
+Reproduced: `100d1000+1000000` from `update_companions` = a 1,099,957-damage companion hit and an
+instant victory; a loaded `attackBonus: "+4"` = "Invalid roll modifier" thrown out of every
+exchange and a deadlocked fight; a 400-digit modifier = `Infinity` escaping `rollDamage`'s
+fallback because the 2026-09-01 kernel guard throws from OUTSIDE the wrapped parse. Rule: one
+damage bounder per actor type sharing the kernel's `MAX_*` constants (add `MAX_ROLL_MODIFIER` at
+the notation boundary so every fallback caller degrades instead of throwing), string stats
+coerced before every validator, and every combatant record — hero, enemy, companion —
+normalized at load through the same function the live lane uses. From the 2026-09-09
+strengthening audit (dice-engine, Lap 2).
+
+### [strengthening] Identity fields are strings at every boundary; provider payloads are typed, not shaped
+`sanitizeCharacter` (hero exports) clamps `name`/`gender`/`appearance`/`background`/`portraitUrl`;
+`healLoadedCharacter` (saves) spreads them raw, and `normalizeNpcRecord` never types
+`appearance`/`gender`/`species`. Four consumers then assume strings with `x?.trim()` — a null
+guard that reads as a type guard — so an object `gender` in a save throws out of `buildSystemPrompt`
+on every turn AND out of the Character Sheet render, an object `appearance` rejects
+`composeScenePrompt` with a raw TypeError (reproduced). The same shape-not-type trust sits on the
+image providers: a non-string Gemini `inlineData.data` is cached as a successful
+`data:image/png;base64,[object Object]`, a verbatim `mimeType` mints `data:text/html;…` that the
+NPC allowlist drops (while still stamping "Rendered by gemini") and the hero's `UPDATE_CHARACTER`
+stores — the hero `portraitUrl` being the one portrait path with no allowlist at all, so a
+`https://tracker…` URL in a shared save renders as a tracking pixel. Rule: persisted identity
+strings are `String(x ?? '')`-clamped at load with the export limits, portrait URLs pass ONE
+allowlist on every write path (hero and NPC, load and reducer), and a provider response is a
+typed contract (string body, `image/*` mime whitelist) before it becomes a URL. From the
+2026-09-09 strengthening audit (scene-art, Lap 2).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
