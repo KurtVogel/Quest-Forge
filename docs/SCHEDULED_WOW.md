@@ -80,7 +80,7 @@ or loses a moment (note it under Process notes).
 
 | Moment ID | The moment the player feels | Scope (where we produce it) | Last audited |
 |---|---|---|---|
-| first-ten-minutes | Premise → hero reveal → first scene; "I'm already in" | creation wizard (`components/CharacterSheet`), `llm/sessionPriming.js`, `openingScene` lane, `starting_items` | — |
+| first-ten-minutes | Premise → hero reveal → first scene; "I'm already in" | creation wizard (`components/CharacterSheet`), `components/Chat/sessionPriming.js`, `openingScene` lane, `starting_items` | 2026-09-09 (L1) |
 | ordinary-turn | The default beat: brief, vivid, ends in a live choice | DM rules + `RESPONSE_FORMAT` in `promptBuilder.js`, `MESSAGE_WINDOW`, custom DM prompt default | — |
 | session-return | Coming back after days: "previously on…", instant re-immersion | `sessionPriming.js`, Continue/Load handoff, Journal | — |
 | checks-and-consequence | A roll that *matters*: stakes stated, failure is content, one roll settles it | `outOfCombatRollPolicy.js`, `pendingRoleplayCheck`, DC ladder + `recentRulings` blocks | — |
@@ -121,6 +121,7 @@ they do *better*, honestly).
 | loot-and-economy | **Diablo II**, **Kenshi**, **Dwarf Fortress** | Loot as story, an economy that pushes back, artifacts with histories |
 | journal-and-chronicle | **Dwarf Fortress legends**, **Caves of Qud**, **Crusader Kings** | The game writing your history back to you; procedural chronicle as a feature |
 | tone-and-voice, mystery-and-secrets | **Mythic GME**, **Slay the Princess** | Oracle-driven surprise, an unreliable but consistent narrator |
+| first-ten-minutes | **Disco Elysium** (the first room, editable archetypes), **Wildermyth** (chapter 1), **King of Dragon Pass** (first council), **Baldur's Gate 1** (Candlekeep), **Citizen Sleeper** (wake to one voice and one clock), **Ironsworn** (truths, first vow) | A start you didn't have to write but may edit; an opening that hands you concrete, characterful first moves inside the fiction — named people you already know, never a blank box, never a menu (added 2026-09-09) |
 
 ## Open Proposals
 
@@ -130,7 +131,8 @@ reason) on Lap-4 runs.
 
 Format: `- [ ] **W1** (moment-id, YYYY-MM-DD): one-line title — entry date below`
 
-_(empty — first run fills this)_
+- [ ] **W0** (first-ten-minutes, 2026-09-09): Premise starters — tap a curated start on "Set the stage", then edit it; plus a "Draft from my hero" button (one call, three premises) — entry 2026-09-09
+- [ ] **W1** (first-ten-minutes, 2026-09-09): The opening ends on a handle and echoes the hero — ANCHOR (people the hero knows on screen), ECHO (one background detail surfaces), HANDLE (2–3 ordinary next things in prose, never urgent) — entry 2026-09-09
 
 ## Scheduler prompt (paste this into the scheduled task)
 
@@ -156,6 +158,14 @@ runs triaging.
 
 ## Process notes
 
+- **2026-09-09 — first landed run, Lap 1 begins.** The routine's first two firings (2026-09-08
+  and 2026-09-09) ran without a repository attached, cloned by hand, completed the audit, and
+  were refused at push; a third firing with the repository selected landed. All three chose
+  `first-ten-minutes` at Lap 1 and independently proposed the same two slices, so the single
+  entry below is a consolidation of the best of the three — not three entries, not a re-audit.
+  Registry scope for `first-ten-minutes` corrected (`sessionPriming.js` lives in
+  `components/Chat/`, not `llm/`). Backlog: +1 [wow] entry (W0, exempt), −3 (two shipped
+  `[strengthening]` entries marked, "Onboarding / demo mode" superseded).
 - **2026-09-08 — created.** Design rationale above. The productization research task is paused;
   `PRODUCTIZATION.md` stays the working business file, updated on events (answered questions,
   measured unit costs from track A, the MoR reply, the 2027 Flash price step), not on a clock.
@@ -164,4 +174,32 @@ runs triaging.
 
 ## Log
 
-_(no entries yet)_
+### 2026-09-09 — first-ten-minutes — Lap 1 (genre benchmark)
+
+_Consolidated from three runs of the same audit (two detached firings on 2026-09-08 and 2026-09-09 that could not push, plus the landed one); all three chose this moment and converged on the same two slices._
+
+**What we ship.** Start card → 7-step wizard (`CharacterCreation.jsx:18`) ending in the hero reveal (`:677-783`: real `createCharacter` numbers, inline portrait — DECISIONS 2026-07-26) → "Set the stage" (`:786-811`, roster twin `:363-381`): a name field and one blank 8,000-char textarea whose only guidance is a placeholder. With a premise, Begin Adventure posts "**Your tale begins.**" and ChatPanel fires ONE call with `buildCampaignOpeningPrompt()` (`components/Chat/sessionPriming.js:23-34`): normal-life-first (DECISIONS 2026-07-14), `starting_items` reconciled once, "End with 'What do you do?'", up to 3 paragraphs (`promptBuilder.js:371`); Gemini lands it at TTFT ~19 s / 22 s total (PLAYTEST_REPORT_OPENAI.md). Without a premise there is no DM opening at all: `shouldPrimeCampaignOpening` gates on `premise?.trim()`, the chat opens on "Send a message to begin your adventure!" (`CharacterCreation.jsx:215-217`).
+
+**Best in genre.** Old Greg's Tavern / AI Dungeon: playing within a minute, a scenario you didn't write, never an empty box. Disco Elysium: editable archetypes, and a first room where every object is an offered move. BG1 Candlekeep: Gorion, named monks, tiny errands before the road. Wildermyth ch. 1 / King of Dragon Pass: a named home, ordinary life, three obvious things to do before pressure arrives. Citizen Sleeper: wake to one voice and one clock. Ironsworn: truths, then a first vow. Shared shape: **a start you didn't have to write, a named person in reach, one ordinary next thing.**
+
+**Where we fall short.** (1) The reveal is genre-best engine proof; the very next screen is the genre's weakest moment — an empty box the whole campaign depends on (opening, `frontDirector` fronts, canon). A stranger (PRODUCT.md success #2) writes cold or skips it and lands in an empty chat — the exact moment DECISIONS 2026-06-14 called our weakest, still live on the no-premise path. (2) The opening has no people in it by contract: nothing asks for a person the hero already knows, a concrete next thing, or the player-authored Background (`promptBuilder.js:712-714`) to surface — so the ordinary post-turn Scribe pass seeds an empty roster, and the first player message is the hardest one in the campaign to write.
+
+**W0 · first-ten-minutes · Premise starters: tap a start you didn't write, then edit it**
+- Today: blank textarea + placeholder on both "Set the stage" steps; blank premise → no opening, "Send a message to begin" (cites above).
+- Best in genre: AI Dungeon's scenario library; Old Greg's zero-prep start; Disco Elysium's editable archetypes; BG3 origins; Wildermyth deriving chapter 1 from who the hero is.
+- Proposal: (a) `data/premiseStarters.js` — 4–5 curated starters (~400–600 chars, `${name}` interpolated, normal-life-first idiom, each seeding 2–3 proper nouns of place and people so `frontDirector` and the location registry anchor on real names), rendered as tap-cards above BOTH textareas; a tap fills the editable textarea, `normalizeCampaignPremise` unchanged, the chosen id stamped as `session.premiseStarterId` so evals and playtests get a reproducible fixed premise. (b) A "Draft from my hero" button beside the cards: one JSON-only call with name/gender/race/class/background/appearance + the tone preset returning three 3–5-sentence premises `{title, premise}` with distinct stakes (a debt, a place, a person) — a named home place, one person who matters, one ordinary concern, pressure only as atmosphere, in medias res only when the background begs it, `nameGuidance` applied; gated on `isMachineryReady` with the portrait button's Settings pointer. (a) is the floor and ships first; (b) is the second half of the same session. Manual blank start untouched (DECISIONS 2026-06-14 not reversed).
+- Cost: 0 per turn. At most one thinking-free Flash machinery call at creation (~1.5k in / ~600 out; the DM model is also acceptable per the `frontDirector` creative-work precedent). Prefix untouched.
+- Pillar check: 3 (editable fill, explicit capture — still player-authored), 1 (a proper-noun-rich premise is richer canon). Serves success #2; PRODUCTIZATION.md §6 already names the first ten minutes as the monetization feature. Strains none.
+- Proof: a first-time playtester reaches a narrated first scene in under 3 minutes without typing a premise; the next playtest report has no blank-chat start; `frontDirector` grounds 2–3 fronts in a starter; one starter becomes the fixed premise for eval:memory runs.
+- IDEAS.md: new entry "[wow] Premise starters" (W0 — exempt); "Onboarding / demo mode" superseded (its in-app half lands here, its key/trial half already lives in PRODUCTIZATION.md §6 + the hosted-tier entry).
+
+**W1 · first-ten-minutes · The opening ends on a handle and echoes the hero**
+- Today: `buildCampaignOpeningPrompt()` asks for setting + situation, normal life, `starting_items`, "What do you do?" — nothing requires a person in reach, a concrete next thing, or the hero's Background.
+- Best in genre: BG1 Candlekeep's errands from named people; Disco Elysium's first room; Wildermyth's pre-calamity village; Citizen Sleeper's wake-up.
+- Proposal: three clauses on the one-time opening prompt ONLY. ANCHOR — 1–2 people the hero ALREADY knows on screen with a line each, from the premise/background, invented only if neither names anyone. ECHO — one concrete detail from the hero's background/appearance surfaces in-scene (a scar someone notices, an old debt named), never retold. HANDLE — the final paragraph plants 2–3 concrete ordinary next things (a named person to speak to, a place within reach, a small want or errand of the hero's own) woven as prose — never a numbered list, never an urgent summons (the 2026-07-14 normal-life rule stays sovereign) — then "What do you do?". `sessionPriming.test.js` pins the clauses; one golden fixture asserts an opening names ≥2 leads.
+- Cost: ~100 tokens on the priming user message, once per campaign; system prefix untouched; DM lane.
+- Pillar check: 1 (persistence visible in minute one), 5 (a stance exists from turn 1), 3 (offers, not rails). Watch 4: the leads must fit the existing 3-paragraph opening cap, never a fourth — say so in the clause.
+- Proof: six fresh openings on one fixed starter (3 Gemini, 3 OpenAI) scored for named-person-in-reach / concrete handhold / background echo / no urgent hook, baseline measured in the same run; then ≥1 roster NPC with `stanceToPlayer` after turn 1 and the player's first message picking an offered lead.
+- IDEAS.md: extends "Durable player-authored canon" (no new entry). Retired: "[strengthening] Make `resolved` a terminal front status" and "[strengthening] Make the post-roll outcome call a first-class narrative turn" — both shipped (DECISIONS 2026-09-01, 2026-09-02 §6).
+
+Lap-3 material, noted not proposed: the ~19 s opening wait spent staring at the premise echo. Checked and NOT a gap: the reveal's portrait button is gated on the image key OR the mandatory machinery key (`CharacterCreation.jsx:167`), so the no-key Pollinations rung is unreachable only for a player who cannot start a turn anyway — the deliberate 2026-07-26 call. Backlog: +1 [wow] entry, −3. Queue 2/8. Reference Shelf +1 row. Registry scope path corrected.

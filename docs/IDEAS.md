@@ -386,8 +386,23 @@ embedded into RAG, so it fell through every durable tier once the 20-message win
   `playerCanon` cards when they have callback value.
 - Further idea: tune the extractor after real play if it records too many or too few
   player-authored details.
-
-### Experience scorecard: shift directed playtests from defense to offense — status: `planned` (2026-08-22 focus plan, track C)
+- **[wow] The opening ends on a handle and echoes the hero (wow audit 2026-09-09, W1):**
+  `buildCampaignOpeningPrompt` (`components/Chat/sessionPriming.js`) asks for setting,
+  situation, normal-life pacing, and `starting_items`, then "End with 'What do you do?'" — it
+  never references the hero's Background line and requires nobody on screen, so the ordinary
+  post-turn Scribe pass seeds an empty roster from a nameless scene and the first player
+  message is the hardest one in the campaign to write. BG1's Candlekeep, Disco Elysium's first
+  room, Wildermyth's pre-calamity village, Citizen Sleeper's wake-up all open on *people the
+  hero already knows* and a small concrete next thing. Slice: three clauses on the one-time
+  opening prompt only — ANCHOR (1–2 people the hero ALREADY knows on screen with a line each,
+  from the premise/background, invented only if neither names anyone), ECHO (one concrete
+  background/appearance detail surfaces in-scene, never retold), HANDLE (the final paragraph
+  plants 2–3 ordinary next things — a named person in reach, a place, an errand or debt due —
+  in prose, never a menu, never urgent, then "What do you do?"). Normal-life-first (DECISIONS
+  2026-07-14) stays sovereign; the 3-paragraph opening cap stays the ceiling. ~100 tokens once
+  per campaign, zero per turn, prefix untouched. Pinned in `sessionPriming.test.js` plus one
+  golden fixture asserting ≥2 leads. Proof: six fresh openings (3 Gemini, 3 OpenAI) on one
+  fixed starter scored for person-in-reach / handhold / echo / no urgent hook.: shift directed playtests from defense to offense — status: `planned` (2026-08-22 focus plan, track C)
 The hardening program has converged (queue at 0 P1s; playtest #10's finds were P2/P3 edge
 cases), so the next unit of "significantly better" comes from the magic, not the engine.
 Add an experience-quality section to the directed-playtest brief and score it with the same
@@ -789,9 +804,45 @@ A local list of saved heroes, plus JSON file export/import operated from it.
   a fresh campaign.
 - Effort: ~half a day. Orthogonal to combat tuning, so it can slot in anytime, like portraits.
 
-### Onboarding / demo mode — status: `idea`
+### Onboarding / demo mode — status: `superseded` (wow audit 2026-09-09, [wow])
 BYO API key + BYO Firebase is a wall for new users. Ideas: guided setup wizard, key-validation
 test button, possibly a limited demo mode. Matters at "going public" threshold.
+**Superseded 2026-09-09:** the key/trial half is answered — production is hosted Gemini
+(DECISIONS.md 2026-08-22), the instant card-free ~30-turn trial and its abuse defences are
+specified in PRODUCTIZATION.md §6, and the proxy lives in "Hosted-tier key proxy" below; the
+in-app half (what a new player meets in minute three) is now the concrete "[wow] Premise
+starters" entry next. Nothing here is still separately actionable.
+
+### [wow] Premise starters: tap a start you didn't write, then edit it — status: `idea` (wow audit 2026-09-09, **W0**)
+The hero reveal is genre-best engine proof; the very next screen ("Set the stage") is the
+genre's weakest moment — one blank 8,000-char textarea with a placeholder the player cannot
+tap, on BOTH the new-hero and roster paths, and the whole campaign depends on it (opening
+scene, `frontDirector` fronts, canon). Skip it and there is no DM opening at all:
+`shouldPrimeCampaignOpening` gates on `premise?.trim()`, so the chat opens on "Send a message
+to begin your adventure!" — the exact moment DECISIONS.md 2026-06-14 called our weakest, still
+live. Every reference game gives you a start you didn't have to write: AI Dungeon's scenario
+library, Old Greg's zero-prep drop-in, Disco Elysium's editable archetypes, BG3 origins,
+Ironsworn's truths, Wildermyth deriving chapter 1 from who the hero is. Slice, one session:
+(a) `data/premiseStarters.js` — 4–5 curated starters (~400–600 chars, `${name}` interpolated,
+normal-life-first idiom, each seeding 2–3 proper nouns of place and people so `frontDirector`
+and the location registry anchor on real names instead of "the starting region"), rendered as
+tap-cards above both textareas; a tap fills the editable textarea, `normalizeCampaignPremise`
+unchanged, the chosen id stamped as `session.premiseStarterId` so evals and playtests get a
+reproducible fixed premise. (b) A "Draft from my hero" button beside the cards: one JSON-only
+thinking-free Flash machinery call (the DM model is also fine per the `frontDirector`
+creative-work precedent) with name/gender/race/class/background/appearance + the tone preset,
+returning three 3–5-sentence premises `{title, premise}` with distinct stakes (a debt, a place,
+a person) — a named home place, one person who matters, one ordinary concern, pressure only as
+atmosphere, in medias res only when the background begs it, `nameGuidance` applied; gated on
+`isMachineryReady` with the portrait button's Settings pointer. (a) is the floor and ships
+first; (b) is the second half of the same session. Zero per-turn cost, prefix untouched; the
+manual blank start stays (DECISIONS.md 2026-06-14 not reversed) and the premise remains
+player-authored and explicitly captured (pillar 3). Why W0: the first ten minutes are the
+marketing experience, PRODUCTIZATION.md §6 names them the monetization feature, and success #2
+(a stranger plays 50 turns) needs them to *start*. Proof: a first-time playtester reaches a
+narrated first scene in under 3 minutes without typing a premise; no blank-chat start in the
+next playtest report. Absorbs the in-app half of the superseded "Onboarding / demo mode" idea
+(above); full shape in `SCHEDULED_WOW.md` 2026-09-09.
 
 ### Findings from the 2026-07-03 live playtest — status: `idea` backlog
 Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md.
@@ -1273,7 +1324,7 @@ is the precedent. Pin with a fake-timer test on the timeout path and an abort te
 the chain does NOT fall through on a deliberate cancel (cancel ≠ provider failure). From the
 2026-09-01 strengthening audit (scene-art, Lap 1).
 
-### [strengthening] Make `resolved` a terminal front status in the engine — status: `idea` (2026-09-01)
+### [strengthening] Make `resolved` a terminal front status in the engine — status: `shipped` (2026-09-01 queue sweep — DECISIONS.md 2026-09-01 "Resolved is TERMINAL in the engine"; marked by the 2026-09-09 wow audit [wow])
 Front resolution is designed as a one-way, one-shot canonized transition (DECISIONS.md
 2026-08-03): milestone XP, a revealed canon fact, retired theaters, the victory echo, an
 aftermath director. But the reducer enforces the one-shot only as "status was active a moment
@@ -1289,7 +1340,7 @@ may still update), `dormant` either leaves the DM channel or a dormant → resol
 goes through the ceremony, and three tests pin resurrection-ignored, re-resolution-ignored, and
 dormant-resolve-ceremony. From the 2026-09-01 strengthening audit (hidden-fronts, Lap 1 r2).
 
-### [strengthening] Make the post-roll outcome call a first-class narrative turn — status: `idea` (2026-09-02)
+### [strengthening] Make the post-roll outcome call a first-class narrative turn — status: `shipped` (2026-09-02 queue sweep — DECISIONS.md 2026-09-02 ruling (6) "The post-roll outcome call is a first-class turn"; marked by the 2026-09-09 wow audit [wow])
 The out-of-combat check flow splits one beat into two DM calls: the setup (withheld) and the
 outcome narrated after the dice. The outcome is the consequence beat — the part the north
 star says to spend the LLM on — yet it is the ONE narrative call the turn runner builds with
