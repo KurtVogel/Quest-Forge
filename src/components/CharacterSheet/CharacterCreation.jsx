@@ -11,6 +11,8 @@ import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
 import { buildPortraitPrompt } from './portraitPrompt.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH, normalizeCampaignPremise } from '../../config/contentLimits.js';
+import { buildPremiseFromStarter, findPremiseStarter } from '../../data/premiseStarters.js';
+import PremiseStarters from './PremiseStarters.jsx';
 import './CharacterSheet.css';
 
 const formatModifier = (mod) => (mod >= 0 ? `+${mod}` : `${mod}`);
@@ -48,6 +50,10 @@ export default function CharacterCreation() {
     const [expertiseSkills, setExpertiseSkills] = useState([]);
     const [adventureName, setAdventureName] = useState('');
     const [premise, setPremise] = useState('');
+    // The curated starter a tap seeded the box with (null for drafts / free
+    // text). Begin Adventure re-checks the text is still verbatim before it
+    // stamps `session.premiseStarterId` — an edited premise is the player's own.
+    const [premiseStarterId, setPremiseStarterId] = useState(null);
     const [roster, setRoster] = useState([]);
     const [selectedHeroId, setSelectedHeroId] = useState(null);
     const [rosterError, setRosterError] = useState(null);
@@ -197,12 +203,19 @@ export default function CharacterCreation() {
         // Create session — the premise is pinned here as permanent campaign canon.
         const sessionName = adventureName.trim() || `${character.name}'s Adventure`;
         const trimmedPremise = normalizeCampaignPremise(premise);
+        // A curated starter id rides the session ONLY while the premise is still
+        // that starter's text verbatim (evals/playtests key on a reproducible
+        // fixed premise); once edited it is the player's own premise.
+        const starter = premiseStarterId ? findPremiseStarter(premiseStarterId) : null;
+        const starterUnedited = !!starter
+            && trimmedPremise === normalizeCampaignPremise(buildPremiseFromStarter(starter, character.name));
         dispatch({
             type: 'UPDATE_SESSION',
             payload: {
                 id: `session-${Date.now()}`,
                 name: sessionName,
                 premise: trimmedPremise || undefined,
+                premiseStarterId: starterUnedited ? starter.id : undefined,
                 openingScenePending: !!trimmedPremise,
                 createdAt: Date.now(),
                 lastPlayedAt: Date.now(),
@@ -369,6 +382,13 @@ export default function CharacterCreation() {
                                 onChange={(e) => setAdventureName(e.target.value)}
                                 placeholder={`${selectedHero.name}'s Adventure`}
                                 maxLength={60}
+                            />
+                            <PremiseStarters
+                                hero={selectedHero}
+                                heroName={selectedHero.name}
+                                settings={state.settings}
+                                premise={premise}
+                                onPick={(text, starterId) => { setPremise(text); setPremiseStarterId(starterId); }}
                             />
                             <textarea
                                 className="creation-input creation-premise"
@@ -798,6 +818,13 @@ export default function CharacterCreation() {
                                 placeholder={`${name}'s Adventure`}
                                 autoFocus
                                 maxLength={60}
+                            />
+                            <PremiseStarters
+                                hero={preview?.character || null}
+                                heroName={name.trim()}
+                                settings={state.settings}
+                                premise={premise}
+                                onPick={(text, starterId) => { setPremise(text); setPremiseStarterId(starterId); }}
                             />
                             <textarea
                                 className="creation-input creation-premise"
