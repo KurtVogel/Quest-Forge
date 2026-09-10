@@ -1738,6 +1738,38 @@ allowlist on every write path (hero and NPC, load and reducer), and a provider r
 typed contract (string body, `image/*` mime whitelist) before it becomes a URL. From the
 2026-09-09 strengthening audit (scene-art, Lap 2).
 
+### [strengthening] The hero's death state is typed at load, and a ledger stamp can never point into the future
+`healLoadedCharacter` types level/HP/abilities/hit dice/conditions/identity and spreads
+`dying`/`deathSaves`/`lowLevelDefeat`/`isDead` raw, so the death tally is the one numeric field
+the reducer still does arithmetic on untyped: `failures: "1"` + one failed save → `"11" >= 3` →
+`isDead: true` on the FIRST failure (reproduced) — the single irreversible outcome in the game,
+from one string in a save; `failures: -1000` makes the hero unkillable; `dying: "false"` reads
+truthy everywhere. The sibling shape sits on the roleplay ledgers: `atMessageCount`/`messageIndex`
+are floored at 0 but never ceilinged, so a future-stamped `withdrawn` ruling with a null location
+binds the DM ("succeeds without dice") in every scene until five newer rulings push it out, and
+future-stamped checks read as "under pressure" on every turn (+3 heat forever). Rule: every
+persisted numeric that feeds a decision gets `toInt` + a range at load (tallies 0..3, dc 0..30),
+booleans are coerced, and every conversational stamp is clamped to the live message count (or the
+entry dropped) — a stamp in the future is the same bug as a ledger with no window. From the
+2026-09-10 strengthening audit (roll-resolution, Lap 2).
+
+### [strengthening] A rendered list is a trust boundary: project save metadata once, type it, key it by document id
+Both save lists (start screen, Settings Saves tab) spread persisted rows straight into JSX —
+`listCloudSaves` returns Firestore documents verbatim, `listSaves` strips only `state` — and
+`buildSaveMetadata` copies `session.name`/`currentLocation` from live state, which LOAD_GAME never
+types. Reproduced: one object-valued `currentLocation` in a save flows into the metadata of the
+next local AND cloud save, React's "Objects are not valid as a React child" fires on Load Game
+(the one screen without its own boundary — Try Again remounts the same crash) and on the Saves
+tab, and every save on the device is unreachable from the UI; the same campaign's
+`buildSystemPrompt` throws on every turn. A slotId-less or object-valued metadata doc from
+another device does it alone and cannot be deleted from the app because rows are addressed by
+the stored `slotId` field, not `doc.id`. Rule: `projectSaveMetadata` — string-or-'' text, finite
+numbers, `slotId: data.slotId || doc.id` — is the ONE shape both lists render, shared by local
+and cloud; `currentLocation` and `session.name` get `cleanTextField` at load like the hero's
+identity did on 09-09; and the stale-chunk sweeps integer-guard + cap the stored count (a
+corrupt `payloadChunks: Infinity` today makes a slot un-overwritable and un-deletable). From the
+2026-09-10 strengthening audit (cloud-sync, Lap 2).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
