@@ -569,6 +569,88 @@
     font-weight: 600;
 }
 
+/* Premise starters (wow audit 2026-09-09, W0): tap-cards above the "Set the
+   stage" textarea. A tap FILLS the editable box; the selected card is the one
+   whose text the box still holds verbatim. */
+.premise-starters {
+    margin-top: 0.75rem;
+}
+
+.premise-starters-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.premise-starters-label {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.premise-starter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.5rem;
+}
+
+.premise-starter-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    text-align: left;
+    padding: 0.6rem 0.75rem;
+    background: var(--surface-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.premise-starter-card:hover {
+    border-color: var(--gold);
+}
+
+.premise-starter-card.selected {
+    border-color: var(--gold);
+    background: var(--surface-secondary, var(--surface-primary));
+}
+
+.premise-starter-card.drafted .premise-starter-title::before {
+    content: '✦ ';
+    color: var(--gold);
+}
+
+.premise-starter-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.premise-starter-blurb {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+.premise-starters-hint {
+    margin: 0.5rem 0 0 0;
+}
+
+.premise-starters-error {
+    margin-top: 0.5rem;
+    color: #e74c3c;
+    font-size: 0.85rem;
+}
+
+.btn-small {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
 .creation-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

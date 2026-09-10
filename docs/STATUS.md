@@ -6,7 +6,33 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input: `MAX_ROLL_MODIFIER` at the notation boundary, companion damage bound + party normalized at load, typed rollHistory, typed hero/NPC identity fields, ONE portrait allowlist, typed provider payloads, no-apology scene picker; queue empty; NOT deployed — pending). Same day: scheduled WOW audit's first entry (first-ten-minutes, two proposals in its queue). Previous: 2026-09-08 (queue sweep — hidden-fronts + living-world Lap-2 hostile input: junk-means-omit on `front_updates`, type-strict cleanText family, typed living-world sub-objects at load, render-time band re-clamp, id-resolved absence-drift writes; queue empty; deployed)._
+_Last updated: 2026-09-10 (WOW build — first-ten-minutes: premise starter tap-cards + "Draft from my hero" on "Set the stage", ANCHOR/ECHO/HANDLE clauses on the opening prompt; built on branch `wow/first-ten-minutes` in a separate worktree while another agent swept the strengthening queue on master, then merged and deployed; WOW Open Proposals queue empty). Previous: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input: `MAX_ROLL_MODIFIER` at the notation boundary, companion damage bound + party normalized at load, typed rollHistory, typed hero/NPC identity fields, ONE portrait allowlist, typed provider payloads, no-apology scene picker; queue empty; NOT deployed — pending). Same day: scheduled WOW audit's first entry (first-ten-minutes, two proposals in its queue). Previous: 2026-09-08 (queue sweep — hidden-fronts + living-world Lap-2 hostile input: junk-means-omit on `front_updates`, type-strict cleanText family, typed living-world sub-objects at load, render-time band re-clamp, id-resolved absence-drift writes; queue empty; deployed)._
+
+## 2026-09-10 — WOW build: first-ten-minutes (W0 premise starters + drafter, W1 opening clauses) — WOW queue empty
+
+Both Open Proposals of the 2026-09-09 wow audit built and ticked. **Ruling: DECISIONS.md
+2026-09-10.** **W0 — premise starters:** `data/premiseStarters.js` ships five curated
+normal-life-first starts (Saltmere harbor debt, the Kettle Inn winter, a Brannock's Ford
+homecoming, a Varrowgate courier, the Long Furrow harvest — hero's name woven in, two or three
+proper nouns each so `frontDirector` and the location registry anchor on real names, none from
+the stock-name list), rendered as tap-cards by `components/CharacterSheet/PremiseStarters.jsx`
+ABOVE the textarea on BOTH the new-hero and roster "Set the stage" steps; a tap FILLS the
+editable box, the selected card is the one whose text the box still holds verbatim, and Begin
+Adventure stamps `session.premiseStarterId` only while that holds (an edited premise is the
+player's own). **"Draft from my hero"** (`llm/premiseDrafter.js`): one thinking-free Flash
+machinery call, JSON-only, three clamped premises with distinct stakes (a debt, a place, a
+person) from the confirmed sheet + tone preset, name-diversity rules applied, gated on
+`isMachineryReady` with a Settings pointer, abortable on unmount; drafts render as ✦ cards.
+**W1 — the opening ends on a handle:** ANCHOR / ECHO / HANDLE clauses on
+`buildCampaignOpeningPrompt` only (people the hero already knows on screen with a line each;
+one background/appearance detail surfacing unvarnished; 2–3 ordinary next things woven as
+prose, never a menu, never urgent — normal-life-first and the 3-paragraph cap stay sovereign).
+Browser-verified in the wizard: tap → fill → edit drops the highlight → re-tap → Begin →
+autosave carries `premiseStarterId: "saltmere-debt"`. 20 new pins (starters, drafter, opening
+clauses); 2,316 tests green, lint clean. **Proof still owed:** the audit's six-opening
+real-provider scoring (person-in-reach / handhold / echo / no urgent hook) has not been run.
+Built on branch `wow/first-ten-minutes` in a separate worktree (master was mid-sweep by
+another agent), then merged to master and deployed.
 
 ## 2026-09-09 — queue sweep: dice-engine + scene-art (3 P1s, 5 P2s) — queue empty
 

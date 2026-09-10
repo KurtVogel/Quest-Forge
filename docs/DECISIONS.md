@@ -8,6 +8,32 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-10 · Premise starters are a FILL, not a mode — and the opening owes the player a person, an echo, and a handle.**
+The 2026-09-09 wow audit (first-ten-minutes, Lap 1) named "Set the stage" the genre's weakest
+moment we ship: one blank 8,000-char textarea the whole campaign depends on, and no DM opening at
+all when it is skipped. Every reference game hands you a start you didn't have to write. Rulings:
+(1) **Starters fill the editable box; they never replace it.** `data/premiseStarters.js` ships
+five curated normal-life-first starts with the hero's name woven in and two or three proper
+nouns each (a home place, the people who matter) so `frontDirector` and the location registry
+anchor on real names; a tap writes the text INTO the textarea, `normalizeCampaignPremise` is
+unchanged, the blank manual start stays (2026-06-14 not reversed), and the premise remains
+player-authored and explicitly captured (PRODUCT.md pillar 3). (2) **`session.premiseStarterId`
+is stamped only while the text is still the starter's verbatim** — its purpose is a reproducible
+fixed premise for evals and playtests; an edited premise is the player's own and carries no id.
+(3) **"Draft from my hero" runs on the machinery lane, not the DM lane:** one thinking-free Flash
+call (`llm/premiseDrafter.js`, `getBackgroundConfig`), JSON-only, three clamped premises with
+DISTINCT stakes (a debt, a place, a person), the name-diversity rules applied, gated on
+`isMachineryReady` with the portrait button's Settings pointer — zero per-turn cost, prompt
+prefix untouched. The frontDirector "creative work on the DM model" precedent was considered and
+not taken: drafts are seeds the player edits, and the machinery key is the one every player has.
+(4) **The one-time opening prompt carries ANCHOR / ECHO / HANDLE** (`buildCampaignOpeningPrompt`
+only): one or two people the hero ALREADY knows on screen with a line each (invented only if
+neither premise nor background names anyone); ONE background/appearance detail surfacing
+unvarnished in-scene, never retold; and a final paragraph that plants two or three ordinary next
+things as prose — never a numbered list or a menu, never an urgent summons. Normal-life-first
+(2026-07-14) and the 3-paragraph opening cap stay sovereign; the clauses must fit inside them.
+Proof owed: the audit's six-opening real-provider scoring has not been run yet.
+
 **2026-09-09 · Every trust boundary sanitizes EVERY record type that crosses it — the same sanitizer, not just one — and a guard that turns a silent coercion into a throw must be re-checked at its fallback callers.**
 The 2026-09-09 strengthening audit (Lap 2, hostile input) found three P1s of one shape: a sanitizer
 that existed for a SIBLING and stopped one record short. `boundWeaponDamage` (hero) had no

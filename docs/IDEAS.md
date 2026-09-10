@@ -402,7 +402,12 @@ embedded into RAG, so it fell through every durable tier once the 20-message win
   2026-07-14) stays sovereign; the 3-paragraph opening cap stays the ceiling. ~100 tokens once
   per campaign, zero per turn, prefix untouched. Pinned in `sessionPriming.test.js` plus one
   golden fixture asserting ≥2 leads. Proof: six fresh openings (3 Gemini, 3 OpenAI) on one
-  fixed starter scored for person-in-reach / handhold / echo / no urgent hook.: shift directed playtests from defense to offense — status: `planned` (2026-08-22 focus plan, track C)
+  fixed starter scored for person-in-reach / handhold / echo / no urgent hook. **Status:
+  `shipped` 2026-09-10** (branch `wow/first-ten-minutes`: the three clauses live in
+  `buildCampaignOpeningPrompt`, pinned by `sessionPriming.opening.test.js`; the six-opening
+  real-provider scoring is the remaining proof step, not yet run).
+
+### Experience scorecard: shift directed playtests from defense to offense — status: `planned` (2026-08-22 focus plan, track C)
 The hardening program has converged (queue at 0 P1s; playtest #10's finds were P2/P3 edge
 cases), so the next unit of "significantly better" comes from the magic, not the engine.
 Add an experience-quality section to the directed-playtest brief and score it with the same
@@ -813,7 +818,7 @@ specified in PRODUCTIZATION.md §6, and the proxy lives in "Hosted-tier key prox
 in-app half (what a new player meets in minute three) is now the concrete "[wow] Premise
 starters" entry next. Nothing here is still separately actionable.
 
-### [wow] Premise starters: tap a start you didn't write, then edit it — status: `idea` (wow audit 2026-09-09, **W0**)
+### [wow] Premise starters: tap a start you didn't write, then edit it — status: `shipped` (2026-09-10, branch `wow/first-ten-minutes` — `data/premiseStarters.js` five starters + `components/CharacterSheet/PremiseStarters.jsx` on both paths, `session.premiseStarterId` stamped while verbatim; "Draft from my hero" in `llm/premiseDrafter.js` on the Flash machinery lane; wow audit 2026-09-09, **W0**)
 The hero reveal is genre-best engine proof; the very next screen ("Set the stage") is the
 genre's weakest moment — one blank 8,000-char textarea with a placeholder the player cannot
 tap, on BOTH the new-hero and roster paths, and the whole campaign depends on it (opening
