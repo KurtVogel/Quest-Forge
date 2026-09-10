@@ -34,7 +34,7 @@
  * Later steps always win over earlier ones; validateSaveState never touches
  * the character.
  */
-import { computeACFromInventory, normalizeConditionList } from '../engine/rules.js';
+import { computeACFromInventory, normalizeConditionList, normalizeDeathSaves } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
 import {
@@ -263,6 +263,22 @@ function backfillCharacterShape(save) {
  * audit). Casters from any-era saves additionally get an authoritative spell
  * slot table and a sane sustained spell.
  */
+/** Strict booleans for the death flags; "true"/"false" strings from a hand edit coerce. */
+function toFlag(value) {
+    if (typeof value === 'string') return value.trim().toLowerCase() === 'true';
+    return value === true;
+}
+
+/** The hero's death state, typed — only the keys the save actually carries. */
+function typedDeathState(character) {
+    const typed = {};
+    for (const flag of ['dying', 'isDead', 'lowLevelDefeat']) {
+        if (character[flag] !== undefined) typed[flag] = toFlag(character[flag]);
+    }
+    if (character.deathSaves !== undefined) typed.deathSaves = normalizeDeathSaves(character.deathSaves);
+    return typed;
+}
+
 function healLoadedCharacter(character) {
     if (!character || typeof character !== 'object') return null;
     const toInt = (value, fallback) => {
@@ -314,6 +330,13 @@ function healLoadedCharacter(character) {
         // Canonical strings only: a hostile/hand-edited object element used to
         // crash every heal path and the sheet render (2026-09-05 audit P1).
         conditions: normalizeConditionList(character.conditions),
+        // The death state is typed like everything above (2026-09-10 audit P1):
+        // a string tally string-concatenated in DEATH_SAVE_RESULT ("1" + 1 =
+        // "11" >= 3) and KILLED the hero on the first failed save; a negative
+        // tally made them unkillable; `dying: "false"` read truthy everywhere.
+        // Only keys the save carries are typed — a fresh character never gets
+        // explicit false flags minted onto it.
+        ...typedDeathState(character),
     };
     if (!isSpellcaster(healed.class)) return healed;
     return {

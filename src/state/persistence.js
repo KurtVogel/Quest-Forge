@@ -232,6 +232,54 @@ export function buildSaveMetadata(gameState) {
     };
 }
 
+const META_TEXT_MAX = 200;
+const metaText = (value, fallback) => {
+    if (typeof value !== 'string') return fallback;
+    const trimmed = value.trim().slice(0, META_TEXT_MAX);
+    return trimmed || fallback;
+};
+const metaNumber = (value, fallback) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+};
+
+/**
+ * ONE typed projection for a save-list row, shared by `listSaves` (IndexedDB)
+ * and `listCloudSaves` (Firestore) — the start screen and the Settings Saves
+ * tab render these fields as React children with no boundary of their own
+ * (2026-09-10 audit P1): an object `name`/`location` in a stored record made
+ * React throw "Objects are not valid as a React child", so Load Game crashed
+ * the root boundary and EVERY save became unreachable from the UI. Text is
+ * string-or-fallback, counts are finite numbers, and `slotId` falls back to
+ * the record's own key (P2: a cloud doc without the field rendered as a
+ * permanent phantom row that could be neither loaded nor deleted).
+ */
+export function projectSaveMetadata(data, fallbackSlotId = null) {
+    const record = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+    const slotId = metaText(record.slotId, null) || (typeof fallbackSlotId === 'string' && fallbackSlotId.trim() ? fallbackSlotId : null);
+    const savedAt = typeof record.savedAt === 'number' || typeof record.savedAt === 'string' ? record.savedAt : 0;
+    return {
+        slotId,
+        sessionId: metaText(record.sessionId, null), // absent on legacy saves
+        name: metaText(record.name, 'Unnamed Save'),
+        characterName: metaText(record.characterName, 'Unknown'),
+        characterLevel: metaNumber(record.characterLevel, 1),
+        characterClass: metaText(record.characterClass, 'Unknown'),
+        characterHP: metaNumber(record.characterHP, 0),
+        characterMaxHP: metaNumber(record.characterMaxHP, 0),
+        characterAC: metaNumber(record.characterAC, 10),
+        gold: metaNumber(record.gold, 0),
+        silver: metaNumber(record.silver, 0),
+        copper: metaNumber(record.copper, 0),
+        inventoryCount: metaNumber(record.inventoryCount, 0),
+        location: metaText(record.location, null),
+        questCount: metaNumber(record.questCount, 0),
+        partySize: metaNumber(record.partySize, 0),
+        messageCount: metaNumber(record.messageCount, 0),
+        savedAt,
+    };
+}
+
 /**
  * Save game state to a named slot: a metadata-only record in `saves` plus the
  * full state payload in `savePayloads`, committed in ONE transaction (listing
@@ -308,18 +356,13 @@ export function listSaves() {
         const store = tx.objectStore(STORE_NAME);
         const request = store.getAll();
         request.onsuccess = () => {
+            // Typed projection (never the raw record — a legacy record still
+            // carries its whole `state`, and the renderers trust every field).
             const saves = request.result
-                .filter(s => s.slotId !== AUTOSAVE_SLOT)
-                .sort((a, b) => b.savedAt - a.savedAt)
-                // Strip-`state` destructure instead of re-enumerating every
-                // metadata field (a drop-prone duplicate of buildSaveMetadata's
-                // list — 2026-08-27 audit). Post-v3 records are metadata-only;
-                // `state` only exists on legacy records whose payload never
-                // migrated out.
-                .map(({ state: _state, ...meta }) => ({
-                    ...meta,
-                    sessionId: meta.sessionId || null, // absent on legacy saves
-                }));
+                .filter(s => s && typeof s === 'object' && s.slotId !== AUTOSAVE_SLOT)
+                .map(record => projectSaveMetadata(record))
+                .filter(save => save.slotId)
+                .sort((a, b) => metaNumber(b.savedAt, 0) - metaNumber(a.savedAt, 0));
             resolve(saves);
         };
         request.onerror = () => reject(request.error);

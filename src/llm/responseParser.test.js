@@ -1189,10 +1189,11 @@ describe('requested_rolls hostile-field guards (2026-07-23 audit)', () => {
             ],
         }) + '\n```';
         const { events } = parseResponse(raw);
-        expect(events.requestedRolls[0].skill).toBeNull();
-        expect(events.requestedRolls[1].skill).toBeNull();
-        expect(events.requestedRolls[1].ability).toBeNull();
-        expect(events.requestedRolls[2].skill).toBe('perception'); // trimmed
+        // Since 2026-09-10 a player roll whose skill/ability coerce to null AND
+        // whose description names none is DROPPED at the boundary (it used to
+        // stage a card that resolved to nothing) — only the honest roll survives.
+        expect(events.requestedRolls).toHaveLength(1);
+        expect(events.requestedRolls[0].skill).toBe('perception'); // trimmed
     });
 });
 

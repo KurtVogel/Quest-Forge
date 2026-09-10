@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, getDocs, runTransaction } from "firebase/firestore";
 import { db } from "../config/firebase.js";
-import { serializeGameState, buildSaveMetadata } from "./persistence.js";
+import { serializeGameState, buildSaveMetadata, projectSaveMetadata } from "./persistence.js";
 
 /**
  * Cloud save layer (bring-your-own Firebase, manual saves only).
@@ -23,6 +23,20 @@ const CLOUD_AUTOSAVE_DOC_ID = 'autosave';
 
 function cloudDocId(slotId) {
     return slotId === AUTOSAVE_SLOT ? CLOUD_AUTOSAVE_DOC_ID : slotId;
+}
+
+/**
+ * Most stale chunks a sweep will ever queue. A save is at most ~32 chunks by
+ * the 9 MiB pre-flight (CLOUD_SAVE_BYTE_LIMIT / CHUNK_CHAR_LIMIT), so the
+ * stored `payloadChunks` count is trusted only as a bounded integer
+ * (2026-09-10 audit P2): a hostile `200000` queued 199,999 deletes into one
+ * transaction and `Infinity` never terminated — the slot could be neither
+ * overwritten nor deleted from the app.
+ */
+const MAX_STALE_CHUNK_SWEEP = 64;
+
+function boundedChunkCount(value) {
+    return Number.isInteger(value) && value > 0 ? Math.min(MAX_STALE_CHUNK_SWEEP, value) : 0;
 }
 
 /**
@@ -146,7 +160,7 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // the same ~10 MiB request ceiling the previous writeBatch had.)
         await runTransaction(db, async (transaction) => {
             const existingSnap = await transaction.get(saveDocRef);
-            const previousChunkCount = existingSnap.exists() ? (existingSnap.data().payloadChunks || 0) : 0;
+            const previousChunkCount = existingSnap.exists() ? boundedChunkCount(existingSnap.data()?.payloadChunks) : 0;
             transaction.set(saveDocRef, { ...metadata, payload: null, payloadChunks: chunks.length });
             chunks.forEach((data, index) => {
                 transaction.set(doc(chunksCollection(uid, slotId), String(index)), { index, data });
@@ -233,14 +247,14 @@ export async function listCloudSaves(uid) {
 
         snapshot.forEach((doc) => {
             const data = doc.data();
-            // Don't include the massive payload string in the list view
-            delete data.payload;
-            delete data.payloadChunks;
             // Exclude the autosave doc from the manual-saves list (match by doc ID too,
             // since the stored slotId field is the legacy "__autosave__" name)
-            if (data.slotId !== AUTOSAVE_SLOT && doc.id !== CLOUD_AUTOSAVE_DOC_ID) {
-                saves.push(data);
-            }
+            if (data?.slotId === AUTOSAVE_SLOT || doc.id === CLOUD_AUTOSAVE_DOC_ID) return;
+            // The typed projection (never the raw doc: it drops the payload
+            // fields and types every rendered value); a doc without a slotId
+            // field is addressed by its own id — the doc id IS the slot id for
+            // every manual save.
+            saves.push(projectSaveMetadata(data, doc.id));
         });
 
         return saves.sort((a, b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0));
@@ -264,7 +278,7 @@ export async function deleteGameFromCloud(uid, slotId) {
         // another device cannot leave the sweep working from a stale count.
         await runTransaction(db, async (transaction) => {
             const existingSnap = await transaction.get(saveDocRef);
-            const chunkCount = existingSnap.exists() ? (existingSnap.data().payloadChunks || 0) : 0;
+            const chunkCount = existingSnap.exists() ? boundedChunkCount(existingSnap.data()?.payloadChunks) : 0;
             for (let i = 0; i < chunkCount; i++) {
                 transaction.delete(doc(chunksCollection(uid, slotId), String(i)));
             }

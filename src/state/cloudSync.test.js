@@ -330,3 +330,42 @@ describe('guards and failure surfacing', () => {
         expect(firestore.__store.has('users/u1/saves/slot-1')).toBe(true);
     });
 });
+
+describe('hostile metadata docs (2026-09-10 audit)', () => {
+    it('a junk payloadChunks on the existing doc never queues an unbounded sweep — save and delete both complete', async () => {
+        for (const payloadChunks of [200000, Infinity, '12', -5, NaN]) {
+            firestore.__store.clear();
+            firestore.__store.set('users/u1/saves/slot-1', { slotId: 'slot-1', name: 'Old', payloadChunks, payload: null });
+            const deletesDuringSave = [];
+            const origDelete = firestore.__store.delete.bind(firestore.__store);
+            firestore.__store.delete = (key) => { deletesDuringSave.push(key); return origDelete(key); };
+            expect((await saveGameToCloud('u1', 'slot-1', makeGameState())).ok).toBe(true);
+            firestore.__store.delete = origDelete;
+            // At most the bounded sweep (64) touched stale chunk paths, never 199,999.
+            expect(deletesDuringSave.filter(k => k.includes('/chunks/')).length).toBeLessThanOrEqual(64);
+            expect(firestore.__store.get('users/u1/saves/slot-1').payloadChunks).toBe(1);
+
+            firestore.__store.get('users/u1/saves/slot-1').payloadChunks = payloadChunks;
+            expect(await deleteGameFromCloud('u1', 'slot-1')).toBe(true);
+            expect(firestore.__store.has('users/u1/saves/slot-1')).toBe(false);
+        }
+    });
+
+    it('list rows are typed: a doc without a slotId field is addressed by its doc id, object text falls back', async () => {
+        firestore.__store.set('users/u1/saves/orphan-doc', { name: { title: 'x' }, characterName: ['a'], characterLevel: '3', location: { name: 'Docks' }, savedAt: '2026-09-10T00:00:00.000Z' });
+        const [row] = await listCloudSaves('u1');
+        expect(row).toMatchObject({ slotId: 'orphan-doc', name: 'Unnamed Save', characterName: 'Unknown', characterLevel: 3, location: null });
+        expect(row.payload).toBeUndefined();
+        expect(row.payloadChunks).toBeUndefined();
+        // Addressable now: delete by the projected slotId removes the doc.
+        expect(await deleteGameFromCloud('u1', row.slotId)).toBe(true);
+        expect(firestore.__store.has('users/u1/saves/orphan-doc')).toBe(false);
+    });
+
+    it('an object session.name / currentLocation in the SAVED state never reaches the list as an object', async () => {
+        await saveGameToCloud('u1', 'slot-obj', makeGameState({ session: { id: 's1', name: { title: 'Campaign' } }, currentLocation: { name: 'Docks' } }));
+        const [row] = await listCloudSaves('u1');
+        expect(row.name).toBe('Unnamed Save');
+        expect(row.location).toBeNull();
+    });
+});

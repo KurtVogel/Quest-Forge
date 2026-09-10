@@ -470,3 +470,59 @@ export function getMaxHitPoints(className, level, conMod, classData) {
 export function formatModifier(mod) {
     return mod >= 0 ? `+${mod}` : `${mod}`;
 }
+
+// --- Death-save tallies ------------------------------------------------------
+
+/** Three successes stabilize, three failures kill — the tally never stores more. */
+export const DEATH_SAVE_TALLY_MAX = 3;
+
+/**
+ * ONE canonical form for the hero's death-save tally: a plain object with two
+ * integer counts clamped 0..3. Shared by the load heal (`healLoadedCharacter`),
+ * the reducer (`DEATH_SAVE_RESULT`), and the resolver's chat-line mirror.
+ * Before 2026-09-10 all three read `prev.failures + 1` on whatever the save
+ * carried: `failures: "1"` string-concatenated to "11" >= 3 and killed the hero
+ * on the FIRST failed save (the one irreversible outcome in the game), and a
+ * negative tally made the hero unkillable.
+ */
+export function normalizeDeathSaves(value) {
+    const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const tally = (n) => {
+        const x = Number(n);
+        return Number.isFinite(x) ? Math.min(DEATH_SAVE_TALLY_MAX, Math.max(0, Math.trunc(x))) : 0;
+    };
+    return { successes: tally(raw.successes), failures: tally(raw.failures) };
+}
+
+// --- Skill-name canonicalization ----------------------------------------------
+
+/** "sleightOfHand" → /\bsleight[\s-]*of[\s-]*hand\b/i — the key itself also matches. */
+const SKILL_TEXT_PATTERNS = Object.keys(SKILL_ABILITIES)
+    .map(key => {
+        const words = key.replace(/([A-Z])/g, ' $1').toLowerCase().trim().split(' ');
+        return { key, re: new RegExp(`\\b(?:${key}|${words.join('[\\s-]*')})\\b`, 'i') };
+    })
+    // Longest display form first so a multi-word skill wins over a nested single word.
+    .sort((a, b) => b.key.length - a.key.length);
+// Inline rather than characterUtils' ABILITY_NAMES: characterUtils imports this module.
+const ABILITY_TEXT_PATTERN = /\b(strength|dexterity|constitution|intelligence|wisdom|charisma)\b/i;
+
+/**
+ * The canonical skill/ability/attack key named in free text, or null. Used at
+ * the parser boundary to (a) canonicalize a display-cased skill ("Sleight of
+ * Hand" → `sleightOfHand`, which SKILL_ABILITIES otherwise misses) and (b)
+ * derive the skill from a roll's description when the DM omitted the field —
+ * its most common omission ("Make a Perception check", 2026-09-10 audit): such
+ * a roll used to survive both sanitizers, render a Roll/Challenge/Change card,
+ * and resolve to NOTHING.
+ */
+export function findSkillInText(value) {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    for (const { key, re } of SKILL_TEXT_PATTERNS) {
+        if (re.test(value)) return key;
+    }
+    const ability = value.match(ABILITY_TEXT_PATTERN);
+    if (ability) return ability[1].toLowerCase();
+    if (/\battack\b/i.test(value)) return 'attack';
+    return null;
+}

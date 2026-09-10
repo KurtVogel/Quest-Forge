@@ -2,7 +2,7 @@
  * Character domain: creation/update, ability score improvements, damage &
  * healing, the death-save state machine, XP/levels, and conditions.
  */
-import { computeACFromInventory, getModifier, normalizeConditionName, CONDITION_LIST_CAP } from '../../engine/rules.js';
+import { computeACFromInventory, getModifier, normalizeConditionName, normalizeDeathSaves, CONDITION_LIST_CAP } from '../../engine/rules.js';
 import { ABILITY_NAMES, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../../engine/characterUtils.js';
 import { awardExperience, getDmBonusXpCap, getStoryMilestoneXp, isMaxLevel } from '../../engine/progression.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
@@ -251,7 +251,8 @@ export const handlers = {
         // disagreed, nothing was rolled, so nothing is tallied — never let a
         // null die count as a failure.
         if (!Number.isInteger(die)) return state;
-        const prev = character.deathSaves || { successes: 0, failures: 0 };
+        // Belt behind the load heal: integer tallies 0..3, never `"1" + 1`.
+        const prev = normalizeDeathSaves(character.deathSaves);
 
         if (die === 20) {
             // Natural 20: back on your feet with 1 HP.

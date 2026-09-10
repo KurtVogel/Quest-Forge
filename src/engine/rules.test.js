@@ -21,6 +21,7 @@ import {
     getWeaponDamageNotation,
     getSneakAttackDice,
     isProficientWithWeapon,
+    findSkillInText,
 } from './rules.js';
 
 const fighter = {
@@ -434,5 +435,16 @@ describe('getIncapacitatingCondition', () => {
         expect(getIncapacitatingCondition(['poisoned', 'prone'])).toBe(null);
         expect(getIncapacitatingCondition([])).toBe(null);
         expect(getIncapacitatingCondition(null)).toBe(null);
+    });
+});
+
+describe('findSkillInText (2026-09-10)', () => {
+    it('finds canonical skill keys, abilities, and attack in free text; null otherwise', () => {
+        expect(findSkillInText('Make a Stealth check')).toBe('stealth');
+        expect(findSkillInText('Sleight-of-Hand to palm the coin')).toBe('sleightOfHand');
+        expect(findSkillInText('a Wisdom saving throw')).toBe('wisdom');
+        expect(findSkillInText('swing at the goblin (attack)')).toBe('attack');
+        expect(findSkillInText('Describe what you do')).toBeNull();
+        expect(findSkillInText(42)).toBeNull();
     });
 });

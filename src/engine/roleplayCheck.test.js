@@ -186,3 +186,29 @@ describe('recent-checks heat ledger', () => {
         expect(sanitizeRecentChecks(null)).toEqual([]);
     });
 });
+
+describe('ledger stamps cap at the live message count (2026-09-10 audit P2)', () => {
+    it('normalizeRollRuling clamps a future atMessageCount to the ceiling and dc into 0..30', () => {
+        const ruling = normalizeRollRuling(
+            { objective: 'Slip past', skill: 'stealth', dc: -1000000000, outcome: 'withdrawn', atMessageCount: 1e12 },
+            { maxMessageCount: 200 }
+        );
+        expect(ruling.atMessageCount).toBe(200);
+        expect(ruling.dc).toBe(0);
+        expect(normalizeRollRuling({ objective: 'x', outcome: 'set_aside', dc: 99, atMessageCount: 5 }, { maxMessageCount: 200 }).dc).toBe(30);
+        // Once clamped to "now", the ordinary TTL expires it.
+        expect(pruneRecentRulings([ruling], { messageCount: 200 + RULING_MESSAGE_TTL + 1, location: null })).toEqual([]);
+    });
+
+    it('is safe under Array.prototype.map (the index is never read as a ceiling)', () => {
+        const rulings = [{ objective: 'A', outcome: 'withdrawn', atMessageCount: 40 }, { objective: 'B', outcome: 'withdrawn', atMessageCount: 40 }]
+            .map(normalizeRollRuling);
+        expect(rulings.map(r => r.atMessageCount)).toEqual([40, 40]);
+    });
+
+    it('sanitizeRecentChecks clamps future indexes and leaves past ones alone', () => {
+        const checks = sanitizeRecentChecks([{ messageIndex: 1e9, dc: 15 }, { messageIndex: 3, dc: 15 }], { maxMessageCount: 50 });
+        expect(checks.map(c => c.messageIndex)).toEqual([50, 3]);
+        expect(sanitizeRecentChecks([{ messageIndex: 1e9 }])[0].messageIndex).toBe(1e9); // no ceiling given
+    });
+});

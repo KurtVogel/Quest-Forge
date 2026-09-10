@@ -8,11 +8,17 @@ export let auth = null;
 export let db = null;
 export let googleProvider = null;
 
+// Type-strict, never `x?.trim()` (2026-09-10 audit P2): a non-string apiKey in
+// localStorage settings threw OUTSIDE initializeFirebase's try, so
+// GameContext.initAuth rejected unhandled, never dispatched SIGNOUT_USER, and
+// the start screen sat on "Checking cloud sync..." forever.
+const configText = (value) => (typeof value === 'string' ? value.trim() : '');
+
 export function getFirebaseConfigError(config) {
-    if (!config) return "Firebase config is missing";
-    if (!config.apiKey?.trim()) return "Firebase apiKey is required";
-    if (!config.authDomain?.trim()) return "Firebase authDomain is required for Google Sign-In";
-    if (!config.projectId?.trim()) return "Firebase projectId is required";
+    if (!config || typeof config !== 'object') return "Firebase config is missing";
+    if (!configText(config.apiKey)) return "Firebase apiKey is required";
+    if (!configText(config.authDomain)) return "Firebase authDomain is required for Google Sign-In";
+    if (!configText(config.projectId)) return "Firebase projectId is required";
     return "";
 }
 

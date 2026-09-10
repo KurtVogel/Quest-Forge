@@ -35,6 +35,7 @@ const {
     deleteRosterCharacter,
     autoSave,
     loadAutoSave,
+    projectSaveMetadata,
     SAVE_VERSION,
 } = await import('./persistence.js');
 
@@ -574,5 +575,34 @@ describe('failure surfacing', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+describe('projectSaveMetadata — the ONE typed list row (2026-09-10 audit P1)', () => {
+    it('types every rendered field: text string-or-fallback, counts finite, slotId falls back to the record key', () => {
+        const row = projectSaveMetadata({
+            name: { title: 'x' }, characterName: 7, characterLevel: '4', characterClass: null, characterHP: 'lots',
+            gold: '12', location: ['Docks'], savedAt: { d: 1 }, messageCount: Infinity, sessionId: 5, state: { huge: true },
+        }, 'doc-key');
+        expect(row).toEqual({
+            slotId: 'doc-key', sessionId: null, name: 'Unnamed Save', characterName: 'Unknown', characterLevel: 4,
+            characterClass: 'Unknown', characterHP: 0, characterMaxHP: 0, characterAC: 10, gold: 12, silver: 0, copper: 0,
+            inventoryCount: 0, location: null, questCount: 0, partySize: 0, messageCount: 0, savedAt: 0,
+        });
+        expect('state' in row).toBe(false);
+    });
+
+    it('keeps honest values and the stored slotId over the fallback', () => {
+        const row = projectSaveMetadata({ slotId: 'slot-1', name: 'Coast', characterLevel: 3, location: 'Oakhaven', savedAt: 1700000000000 }, 'doc-key');
+        expect(row).toMatchObject({ slotId: 'slot-1', name: 'Coast', characterLevel: 3, location: 'Oakhaven', savedAt: 1700000000000 });
+        expect(projectSaveMetadata(null).slotId).toBeNull();
+    });
+
+    it('listSaves returns typed rows even when the saved state carried object text', async () => {
+        await saveGame('slot-junk', makeGameState({ session: { id: 's1', name: { title: 'Campaign' } }, currentLocation: { name: 'Docks' } }));
+        const [row] = await listSaves();
+        expect(row.slotId).toBe('slot-junk');
+        expect(row.name).toBe('Unnamed Save');
+        expect(row.location).toBeNull();
     });
 });

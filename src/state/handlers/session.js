@@ -10,6 +10,7 @@ import { dedupeLocationRecords, normalizeLocationRecord } from '../../engine/loc
 import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
 import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
 import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
+import { cleanTextField } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES, normalizeCombatExchange } from '../../engine/combatExchange.js';
@@ -25,6 +26,11 @@ import {
     sanitizeWorldFactPayload,
     healChronicleChapter,
 } from './shared.js';
+
+/** Widest the registry itself keeps a place string (locationRegistry's own cleanText cap). */
+const LOCATION_NAME_MAX = 200;
+/** Campaign name as typed at adventure start (the save-slot list renders it). */
+const SESSION_NAME_MAX = 120;
 
 // The party statuses the engine actually recognizes (companionStatus + the
 // explicit 'dead' the DM/END_COMBAT set). Anything else on a loaded record
@@ -86,6 +92,16 @@ function validateSaveState(payload) {
     const npcs = Array.isArray(payload.npcs)
         ? payload.npcs.filter(n => n && typeof n === 'object' && typeof n.name === 'string' && n.name.trim())
         : [];
+    // The live transcript length caps every conversational stamp the ledgers
+    // below carry (2026-09-10 audit P2): a future-stamped ruling/check never
+    // aged, so it was binding table history forever.
+    const messageCount = Array.isArray(payload.messages)
+        ? payload.messages.filter(message => message && typeof message === 'object').length
+        : 0;
+    const rawSession = payload.session && typeof payload.session === 'object' && !Array.isArray(payload.session)
+        ? payload.session
+        : initialGameState.session;
+    const session = sanitizeLivingWorldSession(rawSession);
     return {
         ...payload,
         inventory: Array.isArray(payload.inventory) ? payload.inventory : [],
@@ -185,7 +201,11 @@ function validateSaveState(payload) {
                         : {}),
                 }))
             : [],
-        currentLocation: payload.currentLocation || null,
+        // String-or-null (2026-09-10 audit P1): an object here survived load,
+        // threw `loc.trim is not a function` out of every prompt build, and
+        // landed in the NEXT save's list metadata, where React refused to
+        // render it — every save unreachable from Load Game and the Saves tab.
+        currentLocation: cleanTextField(payload.currentLocation, LOCATION_NAME_MAX) || null,
         // Same guard for the registry (2026-09-08): a null record threw
         // `(reading 'name')`; normalizeLocationRecord also types its arrays now.
         locations: Array.isArray(payload.locations)
@@ -210,8 +230,8 @@ function validateSaveState(payload) {
         recentItemGrants: normalizeRecentTransactions(payload.recentItemGrants),
         recentExpAwards: normalizeRecentTransactions(payload.recentExpAwards),
         recentRulings: (Array.isArray(payload.recentRulings) ? payload.recentRulings : [])
-            .map(normalizeRollRuling).filter(Boolean).slice(-RECENT_RULING_LIMIT),
-        recentChecks: sanitizeRecentChecks(payload.recentChecks),
+            .map(ruling => normalizeRollRuling(ruling, { maxMessageCount: messageCount })).filter(Boolean).slice(-RECENT_RULING_LIMIT),
+        recentChecks: sanitizeRecentChecks(payload.recentChecks, { maxMessageCount: messageCount }),
         recentSpellCasts: Array.isArray(payload.recentSpellCasts)
             ? payload.recentSpellCasts.filter(entry => typeof entry === 'string').slice(-RECENT_SPELL_CAST_LIMIT)
             : [],
@@ -268,7 +288,9 @@ function validateSaveState(payload) {
         // string pending marker fired the DM-model call and passed the install
         // key guard on `undefined !== undefined`; a stored symptom label rendered
         // verbatim. Everything else in session passes through as before.
-        session: sanitizeLivingWorldSession(payload.session || initialGameState.session),
+        // …and the campaign name is string-or-empty (2026-09-10 audit P1): an
+        // object name rode into the next save's metadata and crashed both lists.
+        session: { ...session, name: cleanTextField(session?.name, SESSION_NAME_MAX) },
     };
 }
 

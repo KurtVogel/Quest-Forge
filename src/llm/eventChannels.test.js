@@ -172,11 +172,12 @@ describe('requested_rolls field hardening (2026-09-05 audit)', () => {
 
     it('string-guards type/description/attacker/target/notation/damage — objects never reach the UI', () => {
         const [roll] = normalizeEvents({ requested_rolls: [{
-            type: { nested: true }, description: ['a'], attacker: 7, target: { id: 'x' },
+            // `skill` named so the roll survives the 2026-09-10 skill-less drop.
+            type: { nested: true }, skill: 'stealth', description: ['a'], attacker: 7, target: { id: 'x' },
             notation: { dice: '1d6' }, damage: 4, attackerId: {}, modifier: NaN,
         }] }).requestedRolls;
         expect(roll).toMatchObject({
-            type: 'skill_check', description: '', attacker: null, target: null,
+            type: 'skill_check', skill: 'stealth', description: '', attacker: null, target: null,
             notation: null, damage: null, attackerId: null, modifier: null,
         });
     });
@@ -225,5 +226,45 @@ describe('combat_start string-typed enemy stats (2026-09-05 audit)', () => {
         expect(orc).toMatchObject({ hp: 20, ac: 12 });
         expect(orc.attackBonus).toBeUndefined();
         expect(orc.saveBonus).toBeUndefined();
+    });
+});
+
+describe('requested_rolls skill derivation + boundary clamps (2026-09-10 audit P2)', () => {
+    const rollsOf = (list) => normalizeEvents({ requested_rolls: list }).requestedRolls;
+
+    it('derives the skill from the description when the DM omitted the field', () => {
+        const [roll] = rollsOf([{ type: 'skill_check', dc: 12, description: 'Make a Perception check to notice the ambush' }]);
+        expect(roll.skill).toBe('perception');
+    });
+
+    it('canonicalizes a display-cased multi-word skill and keeps an unknown skill verbatim', () => {
+        expect(rollsOf([{ skill: 'Sleight of Hand', dc: 10 }])[0].skill).toBe('sleightOfHand');
+        expect(rollsOf([{ skill: 'animal handling', dc: 10 }])[0].skill).toBe('animalHandling');
+        expect(rollsOf([{ skill: "thieves' tools", dc: 10 }])[0].skill).toBe("thieves' tools");
+    });
+
+    it('an attack_roll without a skill defaults to attack; an ability-only roll survives', () => {
+        expect(rollsOf([{ type: 'attack_roll', target: 'gob', dc: 13 }])[0].skill).toBe('attack');
+        expect(rollsOf([{ type: 'saving_throw', ability: 'constitution', dc: 12 }])[0]).toMatchObject({ skill: null, ability: 'constitution' });
+    });
+
+    it('drops a player roll nothing names a skill for; NPC / damage / death rolls are untouched', () => {
+        expect(rollsOf([{ type: 'skill_check', dc: 12, description: 'See what happens' }])).toEqual([]);
+        expect(rollsOf([{ type: 'death_save' }])).toHaveLength(1);
+        expect(rollsOf([{ type: 'damage_roll', notation: '2d6' }])).toHaveLength(1);
+        expect(rollsOf([{ type: 'npc_attack', attacker: 'Chief', target: 'player' }])).toHaveLength(1);
+    });
+
+    it('clamps description/skill/attacker/target/damage/notation at the boundary like reason', () => {
+        const [roll] = rollsOf([{
+            skill: 'x'.repeat(500), description: 'y'.repeat(50000), attacker: 'a'.repeat(5000), target: 't'.repeat(5000),
+            damage: 'd'.repeat(500), notation: 'n'.repeat(500), dc: 10,
+        }]);
+        expect(roll.skill).toHaveLength(80);
+        expect(roll.description).toHaveLength(300);
+        expect(roll.attacker).toHaveLength(120);
+        expect(roll.target).toHaveLength(120);
+        expect(roll.damage).toHaveLength(40);
+        expect(roll.notation).toHaveLength(40);
     });
 });

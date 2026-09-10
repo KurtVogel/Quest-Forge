@@ -20,7 +20,7 @@
 import { canonicalEnemyId, validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 import { MAX_COIN_EVENT } from '../config/contentLimits.js';
-import { normalizeConditionName, CONDITION_LIST_CAP } from '../engine/rules.js';
+import { normalizeConditionName, findSkillInText, CONDITION_LIST_CAP } from '../engine/rules.js';
 
 /**
  * Clamp a numeric LLM value to a sane range; unusable values become the fallback.
@@ -108,23 +108,55 @@ export function validateCombatStart(combatStart) {
 /** DC band the resolvers honor (roleplayCheck + combat slots clamp the same way). */
 export const MAX_ROLL_DC = 30;
 
+/** Player roll types that resolve through a skill/ability — the resolver has no other lane for them. */
+const SKILL_BEARING_ROLL_TYPES = new Set(['skill_check', 'ability_check', 'saving_throw', 'attack_roll']);
+
+/**
+ * The roll's skill in the form the resolver reads: an explicit skill wins
+ * (canonicalized when it is a known skill in display casing — "Sleight of Hand"
+ * → sleightOfHand, which SKILL_ABILITIES otherwise misses and rolls a plain
+ * d20), an `attack_roll` defaults to `attack`, and the DM's most common
+ * omission — the skill named only in the description ("Make a Perception
+ * check…") — derives from the description (2026-09-10 audit P2). Returns null
+ * when nothing names one.
+ */
+function resolveRollSkill(r, type, description) {
+    const explicit = typeof r.skill === 'string' && r.skill.trim() ? r.skill.trim().slice(0, 80) : null;
+    if (explicit) return findSkillInText(explicit) || explicit;
+    if (type === 'attack_roll') return 'attack';
+    return findSkillInText(description);
+}
+
 export function normalizeRequestedRoll(r) {
     // String-or-null: `|| null` used to pass objects/arrays straight through,
-    // and `description` renders as a React child (2026-09-05 audit).
-    const str = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+    // and `description` renders as a React child (2026-09-05 audit). Clamped at
+    // this boundary like `reason` (2026-09-10 audit P2): the proposal store caps
+    // one step later, but the roll arbiter's JSON payload and the parser's debug
+    // line rode a 50,000-char description raw.
+    const str = (value, max = 500) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
+    const type = str(r.type, 40) || 'skill_check';
+    const description = str(r.description, 300) || '';
+    const ability = str(r.ability, 80);
+    // Type-guarded like dc/modifier: a truthy non-string (array/number)
+    // throws deep in rollResolver AFTER dice are shown (2026-07-23 audit).
+    const skill = resolveRollSkill(r, type, description);
+    if (!skill && !ability && SKILL_BEARING_ROLL_TYPES.has(type)) {
+        // Nothing to roll against: such a roll used to survive both sanitizers,
+        // stage a Roll/Challenge/Change card, and resolve to NOTHING silently.
+        console.warn('[eventChannels] Dropping requested roll with no skill/ability:', description || type);
+        return null;
+    }
     return {
-        type: str(r.type) || 'skill_check',
-        // Type-guarded like dc/modifier: a truthy non-string (array/number)
-        // throws deep in rollResolver AFTER dice are shown (2026-07-23 audit).
-        skill: typeof r.skill === 'string' && r.skill.trim() ? r.skill.trim() : null,
-        ability: typeof r.ability === 'string' && r.ability.trim() ? r.ability.trim() : null,
+        type,
+        skill,
+        ability,
         // DC default 10, the solo-play standard obstacle — NOT 15: the prompt's
         // own ladder says "never default DC 15", and the text-roll detector
         // already used 10 for exactly that reason. One default, both paths.
         // Coerced ("15" → 15) and clamped 0..30 like sanitizeProposalRoll —
         // an unclamped `-40` auto-succeeded and `1e9` auto-failed (2026-09-05).
         dc: Math.round(clamp(r.dc, 0, MAX_ROLL_DC, 10)),
-        description: str(r.description) || '',
+        description,
         reason: String(r.reason || r.roll_reason || '').slice(0, 500),
         opposition: String(r.opposition || '').slice(0, 500),
         failureStakes: String(r.failure_stakes || r.failureStakes || '').slice(0, 500),
@@ -132,14 +164,14 @@ export function normalizeRequestedRoll(r) {
         advantageReason: String(r.advantage_reason || r.advantageReason || '').slice(0, 500),
         disadvantageReason: String(r.disadvantage_reason || r.disadvantageReason || '').slice(0, 500),
         // NPC attack fields
-        attacker: str(r.attacker),
-        attackerId: str(r.attackerId) || str(r.companionId) || str(r.companion_id),
+        attacker: str(r.attacker, 120),
+        attackerId: str(r.attackerId, 120) || str(r.companionId, 120) || str(r.companion_id, 120),
         modifier: typeof r.modifier === 'number' && Number.isFinite(r.modifier) ? r.modifier : null,
         // Damage roll field
-        notation: str(r.notation),
+        notation: str(r.notation, 40),
         // Combat (batched-round) fields: who takes the hit + inline weapon damage
-        target: str(r.target),
-        damage: str(r.damage),
+        target: str(r.target, 120),
+        damage: str(r.damage, 40),
         // Advantage / Disadvantage
         advantage: !!r.advantage,
         disadvantage: !!r.disadvantage,

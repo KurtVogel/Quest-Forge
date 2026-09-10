@@ -2,7 +2,7 @@
  * Helpers shared by multiple reducer domains and the save-migration pipeline
  * (migrations.js). Single-domain helpers live in their domain module instead.
  */
-import { computeACFromInventory, normalizeConditionName } from '../../engine/rules.js';
+import { computeACFromInventory, normalizeConditionList, normalizeConditionName } from '../../engine/rules.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
 import { itemIdentityMatches } from '../../engine/textMatch.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName } from '../../data/items.js';
@@ -592,7 +592,9 @@ export function normalizeCompanion(payload = {}, existing = {}) {
         status: hasExplicitStatus
             ? (merged.status || companionStatus(hp, maxHp))
             : (existing.status === 'dead' ? 'dead' : companionStatus(hp, maxHp)),
-        conditions: Array.isArray(merged.conditions) ? merged.conditions : (existing.conditions || []),
+        // The hero's canonical form (2026-09-10 audit P2): an object element
+        // rendered "[object Object]" in the COMPANIONS prompt block on every turn.
+        conditions: normalizeConditionList(Array.isArray(merged.conditions) ? merged.conditions : existing.conditions),
         // Typed text: sceneDirector trims `appearance || notes` and the party
         // prompt block prints them — an object here threw at Scene mode.
         notes: companionText(merged.notes, NPC_DOSSIER_FIELD_MAX) || companionText(existing.notes, NPC_DOSSIER_FIELD_MAX),

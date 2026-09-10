@@ -8,6 +8,46 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-10 · A tally the reducer does arithmetic on is typed at the load boundary AND at the arithmetic; a list row the UI renders goes through ONE typed projection; a load-time ceiling for conversational stamps takes an options object, never a positional parameter.**
+The 2026-09-10 strengthening audit (Lap 2, hostile input) found two P1s of the shape the
+09-09 ruling named — a sanitizer that stopped one record short — plus one new shape. (1)
+`healLoadedCharacter` typed level/HP/abilities/hit dice/conditions/identity but spread the
+death state raw, and `DEATH_SAVE_RESULT` did `prev.failures + 1` on it: `failures: "1"` +
+one failed save = `"11" >= 3` = **isDead on the first failed save** (the one irreversible
+outcome), `failures: -1000` = unkillable, and the resolver's chat mirror agreed with the wrong
+answer. Ruling: **`normalizeDeathSaves` in `engine/rules.js` (integers 0..3) is the ONE tally
+form**, read by the load heal, the reducer, AND the mirror — the same three-site pattern as
+`normalizeConditionName` (09-05) and `isLowLevelSolo` (09-02): the boundary types it, the
+arithmetic re-types it as a belt, and the mirror can never disagree. The load heal
+boolean-coerces `dying`/`isDead`/`lowLevelDefeat` for the keys a save actually carries (never
+minting explicit false flags onto a fresh hero). (2) Both save lists rendered `{save.name}` /
+`{save.location}` as React children with no boundary of their own, and the values feeding them
+(`currentLocation`, `session.name`) loaded untyped: one object in a save crashed Load Game AND
+the Saves tab — every save unreachable — while `buildSystemPrompt` threw on every turn. Ruling:
+**`projectSaveMetadata` in `persistence.js` is the ONE typed list row**, shared by `listSaves`
+and `listCloudSaves` (text string-or-fallback, counts finite, `slotId` falls back to the doc id
+— which also retires the P2 phantom row that could be neither loaded nor deleted), and LOAD_GAME
+types `currentLocation`/`session.name` through `cleanTextField`. This deliberately revisits the
+2026-08-27 "strip-`state` destructure instead of re-enumerating fields" choice: that rule
+protected against DROPPING a field; the projection protects against TRUSTING one, and a row the
+UI renders must be enumerated to be typed — the renderers read exactly these fields, and the
+list is pinned. (3) `normalizeRollRuling`/`sanitizeRecentChecks` gained a load-time ceiling so a
+future-stamped entry (never ages → binding table history / +3 heat forever) clamps to "now" and
+expires through the ordinary window; the first cut took it as a second positional parameter and
+`pruneRecentRulings`' `.map(normalizeRollRuling)` passed the array INDEX as the ceiling — caught
+by an existing test. Ruling: **a sanitizer that is ever passed to `.map` takes options as an
+object, never positionally.** Smaller rulings: a player roll whose skill/ability is absent now
+derives the skill from its description (`findSkillInText`, which also canonicalizes "Sleight of
+Hand" → `sleightOfHand` — SKILL_ABILITIES silently rolled a plain d20 for display-cased
+multi-word skills) or is DROPPED at the parser (it used to stage a Roll/Challenge/Change card
+that resolved to nothing); the resolver's "Roll skipped" line is visible but NOT a result, so a
+lone skill-less roll still lands on the 09-02 set-aside rather than an outcome call around a roll
+that never happened; the stale-chunk sweep trusts `payloadChunks` only as a bounded integer
+(`MAX_STALE_CHUNK_SWEEP` 64 — a save is ≤ ~32 chunks by the 9 MiB pre-flight); the hero's
+DM-supplied damage fallback passes the NPC lane's `sanitizeEnemyDamage`; companion condition
+lists share the hero's normalizer; `getFirebaseConfigError` is type-strict (a non-string apiKey
+used to reject `initAuth` unhandled — "Checking cloud sync..." forever).
+
 **2026-09-09 · Every trust boundary sanitizes EVERY record type that crosses it — the same sanitizer, not just one — and a guard that turns a silent coercion into a throw must be re-checked at its fallback callers.**
 The 2026-09-09 strengthening audit (Lap 2, hostile input) found three P1s of one shape: a sanitizer
 that existed for a SIBLING and stopped one record short. `boundWeaponDamage` (hero) had no

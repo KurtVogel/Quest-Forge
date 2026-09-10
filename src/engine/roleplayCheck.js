@@ -12,6 +12,9 @@ const text = (value, max = 500) => String(value || '').replace(/\s+/g, ' ').trim
  */
 function sanitizeProposalRoll(roll) {
     const typed = normalizeRequestedRoll(roll);
+    // The parser drops a skill-less player roll (nothing to roll against);
+    // a stored proposal carrying one drops here for the same reason.
+    if (!typed) return null;
     // String-or-null: the parser passes these through with `|| null`, so an
     // object/array from a hostile save must not stringify to "[object Object]".
     const str = (value, max) => (typeof value === 'string' ? text(value, max) || null : null);
@@ -42,7 +45,8 @@ export function sanitizePendingRoleplayCheck(value) {
     const rolls = (Array.isArray(value.rolls) ? value.rolls : [])
         .filter(roll => roll && typeof roll === 'object')
         .slice(0, 6)
-        .map(sanitizeProposalRoll);
+        .map(sanitizeProposalRoll)
+        .filter(Boolean);
     if (rolls.length === 0) return null;
     return {
         // Timestamp + random tail: two proposals minted in the same millisecond
@@ -131,11 +135,19 @@ export function appendRecentCheck(list = [], entry, supersedesId = null) {
     return [...base, entry].slice(-RECENT_CHECK_LIMIT);
 }
 
-export function sanitizeRecentChecks(list) {
+/**
+ * `{ maxMessageCount }` (the live transcript length at load) caps a stored stamp:
+ * a future-stamped entry never ages, so a hand-edited `messageIndex: 1e9`
+ * read as "checks under pressure in the last scenes" on EVERY turn and ran the
+ * tempo thermostat hot forever (2026-09-10 audit P2). A future stamp clamps to
+ * "just now" — bounded by the ordinary window from there.
+ */
+export function sanitizeRecentChecks(list, { maxMessageCount = Infinity } = {}) {
+    const ceiling = Number.isFinite(maxMessageCount) ? Math.max(0, maxMessageCount) : Infinity;
     return (Array.isArray(list) ? list : [])
         .filter(entry => entry && typeof entry === 'object' && Number.isFinite(entry.messageIndex))
         .map(entry => ({
-            messageIndex: Math.max(0, entry.messageIndex),
+            messageIndex: Math.min(ceiling, Math.max(0, entry.messageIndex)),
             dc: Number.isFinite(entry.dc) ? Math.min(30, Math.max(0, entry.dc)) : null,
             skill: text(entry.skill, 80) || null,
             proposalId: text(entry.proposalId, 160) || null,
@@ -155,21 +167,24 @@ export function sanitizeRecentChecks(list) {
 export const RULING_MESSAGE_TTL = 24;
 export const RECENT_RULING_LIMIT = 5;
 
-export function normalizeRollRuling(value) {
+/** Same `{ maxMessageCount }` ceiling as sanitizeRecentChecks: a future `atMessageCount` clamps to "now" so it expires. An options object, never positional — `.map(normalizeRollRuling)` would pass the index. */
+export function normalizeRollRuling(value, { maxMessageCount = Infinity } = {}) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const outcome = value.outcome === 'withdrawn' ? 'withdrawn'
         : value.outcome === 'set_aside' ? 'set_aside'
             : null;
     const objective = text(value.objective, 200);
     if (!outcome || !objective) return null;
+    const ceiling = Number.isFinite(maxMessageCount) ? Math.max(0, maxMessageCount) : Infinity;
     return {
         objective,
         skill: text(value.skill, 80) || null,
-        dc: Number.isFinite(value.dc) ? value.dc : null,
+        // Same band the resolvers honor — a stored `-1000000000` rendered as-is.
+        dc: Number.isFinite(value.dc) ? Math.min(MAX_ROLL_DC, Math.max(0, Math.round(value.dc))) : null,
         outcome,
         finalRuling: value.finalRuling === true,
         challenge: text(value.challenge, 300),
-        atMessageCount: Number.isFinite(value.atMessageCount) ? Math.max(0, value.atMessageCount) : 0,
+        atMessageCount: Number.isFinite(value.atMessageCount) ? Math.min(ceiling, Math.max(0, value.atMessageCount)) : 0,
         location: text(value.location, 120) || null,
         t: Number.isFinite(value.t) ? value.t : Date.now(),
     };

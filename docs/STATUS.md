@@ -6,7 +6,34 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input: `MAX_ROLL_MODIFIER` at the notation boundary, companion damage bound + party normalized at load, typed rollHistory, typed hero/NPC identity fields, ONE portrait allowlist, typed provider payloads, no-apology scene picker; queue empty; NOT deployed — pending). Same day: scheduled WOW audit's first entry (first-ten-minutes, two proposals in its queue). Previous: 2026-09-08 (queue sweep — hidden-fronts + living-world Lap-2 hostile input: junk-means-omit on `front_updates`, type-strict cleanText family, typed living-world sub-objects at load, render-time band re-clamp, id-resolved absence-drift writes; queue empty; deployed)._
+_Last updated: 2026-09-10 (queue sweep — roll-resolution + cloud-sync Lap-2 hostile input: ONE death-save tally form, ONE typed save-list projection, typed currentLocation/session.name at load, load-time ceiling on ruling/check stamps, skill inference + drop at the parser, bounded chunk sweep, type-strict Firebase config; queue empty; deployed together with the 09-09 sweep). Previous: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input: `MAX_ROLL_MODIFIER` at the notation boundary, companion damage bound + party normalized at load, typed rollHistory, typed hero/NPC identity fields, ONE portrait allowlist, typed provider payloads, no-apology scene picker; queue empty). Same day: scheduled WOW audit's first entry (first-ten-minutes, two proposals in its queue)._
+
+## 2026-09-10 — queue sweep: roll-resolution + cloud-sync (2 P1s, 9 P2s) — queue empty
+
+All 11 lines of the 2026-09-10 scheduled audit (Lap 2, hostile input) cleared — every queue line
+ticked with a fix note. **The Open Findings Queue is EMPTY.** **Ruling: DECISIONS.md
+2026-09-10.** **P1s:** (1) the hero's death state loads TYPED — `normalizeDeathSaves`
+(`engine/rules.js`, integers 0..3) is the ONE tally form behind `healLoadedCharacter`,
+`DEATH_SAVE_RESULT`, and the resolver's chat mirror (a string tally used to string-concatenate
+to `"11" >= 3` and KILL the hero on the first failed save; a negative one made them unkillable),
+and `dying`/`isDead`/`lowLevelDefeat` boolean-coerce for the keys a save carries; (2) save-list
+rows go through ONE typed projection — `projectSaveMetadata` (`persistence.js`) shared by
+`listSaves` and `listCloudSaves` (text string-or-fallback, counts finite, `slotId` falls back to
+the doc id), and LOAD_GAME types `currentLocation`/`session.name` — an object in either used to
+crash Load Game AND the Saves tab (every save unreachable) and throw out of every prompt build.
+**P2s:** the stale-chunk sweeps trust `payloadChunks` only as a bounded integer
+(`MAX_STALE_CHUNK_SWEEP` 64 — 200000/Infinity used to make a slot un-overwritable and
+un-deletable); the slotId-less phantom row is addressable by doc id; `getFirebaseConfigError`
+is type-strict (a non-string apiKey stranded the start screen on "Checking cloud sync...");
+`normalizeRollRuling`/`sanitizeRecentChecks` take a `{ maxMessageCount }` ceiling at load so
+future-stamped entries clamp to "now" and expire (ruling `dc` clamps 0..30); a skill-less player
+roll derives its skill from the description via `findSkillInText` (also canonicalizing "Sleight
+of Hand" → `sleightOfHand`), an `attack_roll` defaults to `attack`, and a roll nothing names a
+skill for is DROPPED at the parser (the resolver's visible "Roll skipped" belt is not a result);
+description/skill/attacker/target/damage/notation clamp at the parser; the hero's DM-supplied
+damage fallback passes `sanitizeEnemyDamage`; companion `conditions` share the hero's
+normalizer. 37 new pins (4 new test files + 5 extended), 31 verified failing pre-fix.
+2,333 tests green (+37), lint clean. **Deployed** (this sweep and the 09-09 sweep together).
 
 ## 2026-09-09 — queue sweep: dice-engine + scene-art (3 P1s, 5 P2s) — queue empty
 
@@ -31,7 +58,7 @@ lands and never stamps metadata; explicit clear still clears); `imageGen.js` req
 string body + `image/*` mime from both providers (else `*-empty`, never cached) and SceneArt's
 `<img onError>` reports an undecodable picture; `sanitizeRollHistoryEntry` types the dice
 ledger at load; `pickSceneSituation` skips `fallback` journal entries. 49 pins in 10 new test
-files, 37 verified failing pre-fix. 2,296 tests green (+49), lint clean. **Not deployed yet.**
+files, 37 verified failing pre-fix. 2,296 tests green (+49), lint clean. Deployed 2026-09-10 with the next sweep.
 
 ## 2026-09-08 — queue sweep: hidden-fronts + living-world (3 P1s, 4 P2s) — queue empty
 

@@ -14,7 +14,7 @@
  */
 
 import { rollWithModifier } from './dice.ts';
-import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, SKILL_ABILITIES } from './rules.js';
+import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, normalizeDeathSaves, SKILL_ABILITIES } from './rules.js';
 import { validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
 import { applyUncannyDodge, conditionAwareAttackModifiers, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
 import { isCompanionActive, isLowLevelSolo } from './combatExchange.js';
@@ -201,8 +201,11 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
             }
             const resolved = resolvePlayerRoll(effectiveRoll, character, dispatch, inventory);
             const list = Array.isArray(resolved) ? resolved : (resolved ? [resolved] : []);
+            // The DM-supplied fallback passes the same band check the NPC lane
+            // uses (2026-09-10 audit P2 parity): a weaponless hero used to roll
+            // a literal "100d1000+3" from the wire; junk degrades to 1d4.
             const damageNotation = isAttack
-                ? getWeaponDamageNotation(character, inventory, roll.damage || '1d4')
+                ? getWeaponDamageNotation(character, inventory, sanitizeEnemyDamage(roll.damage) || '1d4')
                 : roll.damage;
 
             for (const one of list) {
@@ -229,6 +232,15 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
                     }
                 }
             }
+        } else if (character) {
+            // Belt behind the parser's skill inference (2026-09-10 audit P2): a
+            // roll that reaches here without a skill used to vanish silently —
+            // no result, no dispatch — and the whole proposal landed on the
+            // "none could be resolved" set-aside with nothing to explain why.
+            // Deliberately NOT a result: a lone skill-less roll still lands on
+            // that set-aside (no outcome call around a roll that never happened).
+            const note = `${roll.description || 'A requested roll'} names no skill or ability and could not be rolled.`;
+            dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `**Roll skipped:** ${note}` } });
         }
     }
 
@@ -717,7 +729,10 @@ function resolveDeathSave(character, dispatch, party = []) {
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     const die = result.rolls[0];
-    const prev = character.deathSaves || { successes: 0, failures: 0 };
+    // Same typed tally the reducer reads, so the chat line and the DM summary
+    // can never disagree with DEATH_SAVE_RESULT (a string tally used to make
+    // both announce a death on the first failed save).
+    const prev = normalizeDeathSaves(character.deathSaves);
     let successes = prev.successes;
     let failures = prev.failures;
     let outcome;
