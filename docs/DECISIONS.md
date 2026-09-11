@@ -8,6 +8,42 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-12 · A companion's look is ONE record (the roster, Scribe-merged) — and every portrait/scene prompt opens with a deterministic IDENTITY LOCK.**
+Vesa's report: a bald, statuesque, dark-skinned companion came back from the imager as anything
+from a pale heavy woman to a dark-skinned woman with cornrows. Two findings. **(1) The real bug
+was a split record, not the prompt.** The Scribe writes a companion's `appearance`/`gender`/
+`species` to their linked ROSTER NPC record ("one system owns all bonds", 2026-07-23), but the
+scene director (`composeScenePrompt`) read ONLY the PARTY record — the DM's recruitment-time
+`add_companions` note, which the Scribe never updates and which carries no gender or species at
+all — and SceneArt's focus-portrait path merged the two with the party record WINNING. So the
+painter was told "companion" or a stale one-liner, with no "(woman)" tag, and invented a person
+each time. `resolveCompanionLook(companion, npcs)` in `engine/npcRoster.js` is now the ONE source:
+roster record first, party record as the field-by-field fallback — used by the scene director,
+SceneArt's focus targets, the DM's COMPANIONS party line (a new `Looks (species gender):` sub-line
+so the DM's own prose stays consistent even when KNOWN NPCs curation drops the record), and the
+Companions panel (a new "Looks" block, so the player can SEE what the painter is told — the same
+visibility fix the Journal card got on 2026-07-05). **(2) The prompt was not the weak link but it
+had no belt.** A 3+3 render test through xAI (old prompt vs new, same clear record) came back
+correct all six times — a clear record already paints right on the primary provider. Still, only
+gender and species were marked inviolable; skin tone, hair state, build, and age — exactly the
+features image models drift on — rode as free prose that the art director may paraphrase and a
+fallback provider may ignore. `engine/appearanceIdentity.js` now extracts those four from the
+record DETERMINISTICALLY (never inferred: no stated skin tone → no skin lock; hair colors never
+read as skin; "balding" ≠ bald; a build word describing a scar/smile/sword never locks the body)
+and normalizes each to the least ambiguous wording ("black woman" → "deep dark brown skin";
+"shaved head" → "completely bald — a smooth shaved scalp with no hair at all (no braids, no
+cornrows…)"), rendered by `buildIdentityLockLine` as the LEAD line of every hero portrait, NPC
+portrait, focused portrait, and each scene-director cast line, closed by a one-line reminder; the
+art director's rules now name skin tone / hair state / build / age as equally inviolable and
+require the prompt to OPEN with every lock verbatim. The Scribe and "Deepen memory" field
+descriptions now ask for skin tone and an explicit hair state (color and style, or bald/shaved)
+in unambiguous words, since a record that only implies them gets painted wrong.
+**Why:** a companion is the game's most sustained relationship and was the one character whose
+look the painter could not see; the lock costs nothing per turn, is engine-owned (no LLM between
+the canon and the painter), and makes the fallback providers and the art director's paraphrase
+safe. Not a fix for a record that never captured the look — that is what the Scribe field change
+and the visible "Looks" block are for: if the block is thin, "Deepen memory" backfills it.
+
 **2026-09-11 · The combat envelope, the purse, and the hero's class/race load TYPED — and the ordinary turn has a grammar.**
 The 2026-09-11 scheduled audit (combat-exchange + persistence, Lap 2 hostile input) found the
 last untyped corners of LOAD_GAME, and the same day's wow audit (ordinary-turn, Lap 1) found

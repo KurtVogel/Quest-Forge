@@ -1,5 +1,5 @@
 import { useGame } from '../../state/GameContext.jsx';
-import { namesMatch } from '../../engine/npcRoster.js';
+import { namesMatch, resolveCompanionLook } from '../../engine/npcRoster.js';
 import './Companions.css';
 
 export default function CompanionsPanel() {
@@ -36,6 +36,8 @@ export default function CompanionsPanel() {
                     const affinityPercent = Math.max(0, Math.min(100, companion.affinity || 50));
                     const status = companion.status || (companion.hp <= 0 ? 'downed' : 'healthy');
                     const dossier = npcs.find(npc => namesMatch(npc.name, companion.name));
+                    const look = resolveCompanionLook(companion, npcs);
+                    const lookIdentity = [look.species, look.gender].filter(Boolean).join(' ');
                     const bondMoments = (dossier?.bondMoments || [])
                         .map(moment => moment?.text)
                         .filter(Boolean);
@@ -75,6 +77,13 @@ export default function CompanionsPanel() {
                                 <div className="comp-keepsakes" title="Keepsakes from your journey together">
                                     {companion.keepsakes.join(' · ')}
                                 </div>
+                            )}
+
+                            {(look.appearance || lookIdentity) && (
+                                <p className="comp-stance" title="The look scene art and the DM paint from — the Scribe records it as the story establishes it">
+                                    <span className="comp-bond-label">Looks{lookIdentity ? ` (${lookIdentity})` : ''}</span>
+                                    {look.appearance || 'No description recorded yet — the story has not described them.'}
+                                </p>
                             )}
 
                             {dossier?.stanceToPlayer && (

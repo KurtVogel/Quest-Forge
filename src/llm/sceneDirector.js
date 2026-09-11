@@ -6,9 +6,10 @@
  */
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
-import { curateNpcsForPrompt } from '../engine/npcRoster.js';
+import { curateNpcsForPrompt, resolveCompanionLook } from '../engine/npcRoster.js';
 import { classDisplayName, raceDisplayName } from '../engine/characterUtils.js';
 import { cleanTextField } from '../config/contentLimits.js';
+import { buildIdentityLockLine } from '../engine/appearanceIdentity.js';
 
 /**
  * One foe's state for the art director's cast list (2026-09-01 P2): combat
@@ -38,6 +39,7 @@ Rules:
 - Make the player character the visual anchor when present. State other subjects' spatial relationship to them so the image model cannot quietly omit half the scene.
 - Use the EXACT appearance details provided for each named character so they look consistent across scenes. If a character has no given appearance, infer modestly from their race/class/equipment — do not contradict known details.
 - A character's stated gender and species are inviolable: when a name carries "(woman)", "(man)", "(goblin woman)", or the situation establishes them, the rendered figure MUST read unmistakably as that gender and species — never default a described woman to a generic male figure, and never default a goblin, dwarf, or other non-human to a human figure.
+- Skin tone, hair state (including baldness), build, and age are equally inviolable. A character line may carry an "IDENTITY LOCK — Name: …" clause: OPEN your prompt with every identity lock, copied word for word, before anything else, and never contradict one later in the prompt — a bald head stays bald with no hairstyle of any kind, dark skin stays dark, a statuesque build stays tall and statuesque.
 - Depict only what the situation supports. This is an adult, gritty world: render violence, grime, and mature/sensual content frankly and unvarnished when the scene calls for it — bodies as established, not idealized — but keep it grounded, never gratuitous. Describe bodies in neutral anatomical language, never profanity or crude slang.
 - End with this quality direction: "grounded cinematic dark-fantasy realism, professional concept art, anatomically coherent figures, detailed materials, dramatic natural lighting, not cartoonish or childlike".
 - Do NOT include any on-image text, captions, watermarks, UI, or speech bubbles.`;
@@ -75,7 +77,8 @@ export async function composeScenePrompt({ situation, character, party = [], npc
         const gender = cleanTextField(character.gender);
         const desc = cleanTextField(character.appearance)
             || `a ${gender ? `${gender} ` : ''}${raceDisplayName(character)} ${classDisplayName(character) || 'adventurer'}`.replace(/\s+/g, ' ').trim();
-        lines.push(`Player character — ${character.name}${gender ? ` (${gender})` : ''}: ${desc}${equipped ? ` Wearing/wielding: ${equipped}.` : ''}`);
+        const lock = buildIdentityLockLine(character.name, cleanTextField(character.appearance), { species: raceDisplayName(character), gender });
+        lines.push(`Player character — ${character.name}${gender ? ` (${gender})` : ''}: ${desc}${equipped ? ` Wearing/wielding: ${equipped}.` : ''}${lock ? ` ${lock}` : ''}`);
     }
 
     // Party companions stand beside the hero in nearly every frame — they get
@@ -84,9 +87,14 @@ export async function composeScenePrompt({ situation, character, party = [], npc
     const companionNames = new Set();
     for (const c of (party || []).filter(c => c?.name)) {
         companionNames.add(c.name.toLowerCase());
-        const identity = [c.species, c.gender].map(v => cleanTextField(v)).filter(Boolean).join(' ');
-        const desc = cleanTextField(c.appearance) || cleanTextField(c.notes) || cleanTextField(c.role) || 'companion';
-        lines.push(`Party companion — ${c.name}${identity ? ` (${identity})` : ''}: ${desc}${c.weapon ? ` Wielding ${c.weapon}.` : ''}`);
+        // The roster record is the companion's living look (2026-09-12): the
+        // party record alone painted a long-established companion from a thin
+        // recruitment note — or nothing — every time.
+        const look = resolveCompanionLook(c, npcs);
+        const identity = [look.species, look.gender].filter(Boolean).join(' ');
+        const desc = look.appearance || cleanTextField(c.notes) || cleanTextField(c.role) || 'companion';
+        const lock = buildIdentityLockLine(c.name, look.appearance, { species: look.species, gender: look.gender });
+        lines.push(`Party companion — ${c.name}${identity ? ` (${identity})` : ''}: ${desc}${c.weapon ? ` Wielding ${c.weapon}.` : ''}${lock ? ` ${lock}` : ''}`);
     }
 
     // Roster NPCs likely in frame: the shared prompt curation (location-aware,
@@ -99,7 +107,8 @@ export async function composeScenePrompt({ situation, character, party = [], npc
     for (const n of recentNpcs) {
         const identity = [n.species, n.gender].map(v => cleanTextField(v)).filter(Boolean).join(' ');
         const desc = cleanTextField(n.appearance) || `${cleanTextField(n.disposition)} NPC`.trim();
-        lines.push(`NPC — ${n.name}${identity ? ` (${identity})` : ''}: ${desc}`);
+        const lock = buildIdentityLockLine(n.name, cleanTextField(n.appearance), { species: cleanTextField(n.species), gender: cleanTextField(n.gender) });
+        lines.push(`NPC — ${n.name}${identity ? ` (${identity})` : ''}: ${desc}${lock ? ` ${lock}` : ''}`);
     }
 
     if (combat?.active && combat.enemies?.length > 0) {

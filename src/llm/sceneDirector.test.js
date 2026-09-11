@@ -58,7 +58,9 @@ describe('composeScenePrompt (scene-art test depth, 2026-09-01)', () => {
         const npcLine = text.indexOf('NPC — Grub (goblin man): one ear');
         expect(companionLine).toBeGreaterThan(-1);
         expect(npcLine).toBeGreaterThan(companionLine);
-        expect(text.match(/Kaarina/g)).toHaveLength(1);
+        // One CAST line — the identity lock on that line names her once more by design (2026-09-12).
+        expect(text.match(/(?:Party companion|NPC) — Kaarina/g)).toHaveLength(1);
+        expect(text).toContain('IDENTITY LOCK — Kaarina: dwarf woman');
     });
 
     it('routes roster NPCs through prompt curation and caps the cast at four, dropping nameless rows first', async () => {
@@ -92,6 +94,48 @@ describe('composeScenePrompt (scene-art test depth, 2026-09-01)', () => {
         });
         expect(userMessageOf()).toContain('In combat against: Kraul (dead), goblin (bloodied), wolf (fled).');
         expect(userMessageOf()).toContain('no longer fighting');
+    });
+});
+
+describe('companion look resolves through the roster record (2026-09-12)', () => {
+    beforeEach(() => sendMessage.mockReset());
+
+    it('paints a companion from the Scribe-merged roster record even when the party record has no look at all', async () => {
+        sendMessage.mockResolvedValue('prompt');
+        await composeScenePrompt({
+            situation: 'x',
+            character: { name: 'Vesa' },
+            party: [{ name: 'Nyanza Okoro', role: 'pilot', weapon: 'Boathook' }],
+            npcs: [{ id: 'n1', name: 'Nyanza Okoro', gender: 'woman', species: 'human', appearance: 'A tall, statuesque Black woman with a shaved head.', lastLocation: 'Pier', importance: 5 }],
+            currentLocation: 'Pier',
+            settings,
+        });
+        const text = userMessageOf();
+        expect(text).toContain('Party companion — Nyanza Okoro (human woman): A tall, statuesque Black woman with a shaved head. Wielding Boathook.');
+        expect(text).toContain('IDENTITY LOCK — Nyanza Okoro: human woman; deep dark brown skin; completely bald');
+        expect(text.match(/Nyanza Okoro/g).length).toBe(2); // one cast line + its lock, never a second roster line
+    });
+
+    it('the roster record wins over a stale recruitment-time party appearance', async () => {
+        sendMessage.mockResolvedValue('prompt');
+        await composeScenePrompt({
+            situation: 'x',
+            character: { name: 'Vesa' },
+            party: [{ name: 'Nyanza Okoro', appearance: 'a harbour pilot in an oilskin' }],
+            npcs: [{ id: 'n1', name: 'Nyanza Okoro', appearance: 'A tall, statuesque Black woman with a shaved head.', lastLocation: 'Pier', importance: 5 }],
+            currentLocation: 'Pier',
+            settings,
+        });
+        expect(userMessageOf()).toContain('Party companion — Nyanza Okoro: A tall, statuesque Black woman with a shaved head.');
+        expect(userMessageOf()).not.toContain('harbour pilot in an oilskin');
+    });
+
+    it('the art director is told skin tone, hair, build, and age are inviolable and to open with the locks', async () => {
+        sendMessage.mockResolvedValue('prompt');
+        await composeScenePrompt({ situation: 'x', character: { name: 'Vesa' }, settings });
+        const system = sendMessage.mock.calls.at(-1)[0].systemPrompt;
+        expect(system).toContain('Skin tone, hair state (including baldness), build, and age are equally inviolable');
+        expect(system).toContain('OPEN your prompt with every identity lock, copied word for word');
     });
 });
 

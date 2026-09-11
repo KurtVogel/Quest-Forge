@@ -115,7 +115,7 @@ Output ONLY valid JSON:
   "relationshipTension": "compact note on rivalry, humiliation, debt, attraction, resentment, fear, or unresolved conflict with the hero",
   "stanceToPlayer": "how this NPC personally regards the HERO right now — affection, attraction, romantic feeling, friendship, gratitude, respect, amusement, resentment, fear, obligation — written from the NPC's side and grounded in what actually passed between them",
   "bondMoments": ["up to 3 one-line records of significant personal moments between the hero and this NPC that the context establishes — flirtation, confession, shared danger, gift, promise, betrayal, deep insult"],
-  "appearance": "the NPC's COMPLETE physical/visual description — build, body proportions, face, hair, clothing, distinguishing and intimate features — merging the existing record with any concrete visual details the recent conversation states. Omit unless the context actually establishes looks",
+  "appearance": "the NPC's COMPLETE physical/visual description — skin tone, hair (explicit: color and style, or bald/shaved), build, body proportions, face, apparent age, clothing, distinguishing and intimate features — merging the existing record with any concrete visual details the recent conversation states. Omit unless the context actually establishes looks",
   "gender": "the NPC's gender as the context establishes or makes clearly apparent (pronouns, titles, explicit statements) — 'woman', 'man', or the fiction's own wording. Omit only if genuinely unknowable",
   "species": "the NPC's species/ancestry as the context establishes it — 'goblin', 'human', 'dwarf', 'high elf'. Omit only if genuinely unknowable",
   "personality": "stable traits and how they present, only if grounded in context",

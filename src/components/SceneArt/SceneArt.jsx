@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { generatePortraitImageDetailed, generateSceneImageDetailed, peekCachedImage } from '../../llm/providers/imageGen.js';
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
-import { namesMatch } from '../../engine/npcRoster.js';
+import { namesMatch, resolveCompanionLook } from '../../engine/npcRoster.js';
 import { isSameLocation } from '../../engine/locationRegistry.js';
 import { composeScenePrompt } from '../../llm/scribe.js';
 import {
@@ -40,18 +40,15 @@ export default function SceneArt() {
             gear,
         },
         // A companion's species/gender/appearance live on their linked roster
-        // record (DECISIONS.md 2026-07-23, one system owns all bonds) — merge them in.
-        ...(state.party || []).map(c => {
-            const dossier = (state.npcs || []).find(n => namesMatch(n.name, c.name));
-            return {
-                id: `companion:${c.id || c.name}`,
-                type: 'companion',
-                label: c.name,
-                entity: dossier
-                    ? { ...c, gender: c.gender || dossier.gender, species: c.species || dossier.species, appearance: c.appearance || dossier.appearance }
-                    : c,
-            };
-        }),
+        // record (DECISIONS.md 2026-07-23, one system owns all bonds) — and the
+        // roster record WINS (2026-09-12): the party record is the recruitment
+        // note, the roster record is the Scribe-merged living look.
+        ...(state.party || []).map(c => ({
+            id: `companion:${c.id || c.name}`,
+            type: 'companion',
+            label: c.name,
+            entity: { ...c, ...resolveCompanionLook(c, state.npcs || []) },
+        })),
         ...(state.npcs || []).filter(n => n.name).map(n => ({
             id: `npc:${n.id || n.name}`,
             type: 'npc',

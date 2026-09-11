@@ -108,6 +108,22 @@ describe('stable cache prefix (DECISIONS.md 2026-07-18)', () => {
     });
 });
 
+describe('party line carries the companion look from the roster record (2026-09-12)', () => {
+    it('renders Looks with the registered identity from the linked roster record, not the party note', () => {
+        const text = prompt({
+            party: [{ id: 'c1', name: 'Nyanza Okoro', role: 'pilot', level: 1, hp: 9, maxHp: 9, ac: 12, affinity: 50, appearance: 'a harbour pilot' }],
+            npcs: [{ id: 'n1', name: 'Nyanza Okoro', gender: 'woman', species: 'human', appearance: 'A tall, statuesque Black woman with a shaved head.' }],
+        });
+        expect(text).toContain('  Looks (human woman): A tall, statuesque Black woman with a shaved head.');
+        expect(text).not.toContain('Looks (human woman): a harbour pilot');
+    });
+
+    it('omits the Looks line when nothing is recorded anywhere', () => {
+        const text = prompt({ party: [{ id: 'c1', name: 'Grub', role: 'scout', level: 1, hp: 9, maxHp: 9, ac: 12, affinity: 50 }], npcs: [] });
+        expect(text).not.toContain('Looks');
+    });
+});
+
 describe('THE ORDINARY TURN grammar block (WOW 2026-09-11, ordinary-turn W1)', () => {
     it('sits in the cached static prefix ahead of the premise and carries the four elements in order', () => {
         const text = prompt({ premise: 'A premise.' });

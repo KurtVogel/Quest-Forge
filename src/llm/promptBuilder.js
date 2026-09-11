@@ -21,7 +21,7 @@ import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
 import { isLowLevelSolo } from '../engine/combatExchange.js';
-import { namesMatch } from '../engine/npcRoster.js';
+import { namesMatch, resolveCompanionLook } from '../engine/npcRoster.js';
 
 /**
  * Tripwire against unbounded prompt growth, NOT a target. A deliberately
@@ -781,6 +781,14 @@ ${party.map(c => {
         // line so it never depends on KNOWN NPCs curation.
         const dossier = npcs.find(npc => namesMatch(npc.name, c.name));
         const bond = [];
+        // The companion's registered look rides the party line (2026-09-12) so
+        // the DM's own prose keeps a bald, dark-skinned companion bald and
+        // dark-skinned even when KNOWN NPCs curation drops their record.
+        const look = resolveCompanionLook(c, npcs);
+        const identity = [look.species, look.gender].filter(Boolean).join(' ');
+        if (look.appearance || identity) {
+            bond.push(`  Looks${identity ? ` (${identity})` : ''}: ${(look.appearance || 'no recorded description').slice(0, 300)}`);
+        }
         if (dossier?.stanceToPlayer) {
             bond.push(`  Toward the hero: ${String(dossier.stanceToPlayer).slice(0, 300)}`);
         }

@@ -6,6 +6,7 @@
  */
 import { classDisplayName, raceDisplayName } from '../../engine/characterUtils.js';
 import { findLatestNarration } from '../../llm/narrativeMessages.js';
+import { buildIdentityLockLine, IDENTITY_LOCK_REMINDER } from '../../engine/appearanceIdentity.js';
 import { PORTRAIT_STYLE } from '../CharacterSheet/portraitPrompt.js';
 
 export function equippedSummary(inventory = []) {
@@ -58,11 +59,19 @@ export function describeEntity(target) {
 
 export function buildFocusedPrompt(target, location) {
     const description = describeEntity(target);
+    const entity = target?.entity || {};
+    // Identity lock leads (2026-09-12) — see engine/appearanceIdentity.js.
+    const lock = buildIdentityLockLine(entity.name || target?.label, entity.appearance, {
+        species: target?.type === 'player' ? raceDisplayName(entity) : entity.species,
+        gender: entity.gender,
+    });
     return [
+        lock,
         `Focused waist-up portrait of ${target.label}.`,
         description,
         location && `Current setting: ${location}.`,
         PORTRAIT_STYLE,
+        lock && IDENTITY_LOCK_REMINDER,
     ].filter(Boolean).join(' ');
 }
 

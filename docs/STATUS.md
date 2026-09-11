@@ -6,7 +6,26 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-11 (queue sweep — combat-exchange + persistence Lap-2 hostile input: typed turn order and stored exchange result, narration effect with an exit, typed purse, class/race whitelist with a one-time notice, unique enemy ids at load, inventory/roster/payload typing; plus WOW ordinary-turn W1: `## THE ORDINARY TURN` grammar block in the cached prefix; both queues empty; deployed) — then the wow proof run: `npm run eval:turns` three rounds on Gemini + Grok, MOTION anti-escalation guard and THE ASK stop rule tuned in, report in `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`, redeployed. Previous: 2026-09-10 (WOW build — first-ten-minutes: premise starter tap-cards + "Draft from my hero", ANCHOR/ECHO/HANDLE opening clauses; same day queue sweep — roll-resolution + cloud-sync: ONE death-save tally form, ONE typed save-list projection; both deployed). Previous: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input; deployed with the 09-10 sweep)._
+_Last updated: 2026-09-12 (companion look = ONE record via `resolveCompanionLook`, roster-first; deterministic IDENTITY LOCK leading every portrait/scene prompt from `engine/appearanceIdentity.js`; Companions panel shows Looks; deployed). Previous: 2026-09-11 (queue sweep — combat-exchange + persistence Lap-2 hostile input: typed turn order and stored exchange result, narration effect with an exit, typed purse, class/race whitelist with a one-time notice, unique enemy ids at load, inventory/roster/payload typing; plus WOW ordinary-turn W1: `## THE ORDINARY TURN` grammar block in the cached prefix; both queues empty; deployed) — then the wow proof run: `npm run eval:turns` three rounds on Gemini + Grok, MOTION anti-escalation guard and THE ASK stop rule tuned in, report in `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`, redeployed. Previous: 2026-09-10 (WOW build — first-ten-minutes: premise starter tap-cards + "Draft from my hero", ANCHOR/ECHO/HANDLE opening clauses; same day queue sweep — roll-resolution + cloud-sync: ONE death-save tally form, ONE typed save-list projection; both deployed). Previous: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input; deployed with the 09-10 sweep)._
+
+## 2026-09-12 — companion look = ONE record + IDENTITY LOCK on every portrait/scene prompt
+
+Vesa's report (a bald, statuesque, dark-skinned companion rendered as a pale heavy woman or with
+cornrows) — **Ruling: DECISIONS.md 2026-09-12.** Root cause was a SPLIT RECORD: the Scribe writes
+a companion's appearance/gender/species to the linked roster NPC record, but the scene director
+read only the party record (the recruitment note, never updated, no gender/species) and the
+focus-portrait path let the party record win. `resolveCompanionLook` (`engine/npcRoster.js`,
+roster first, party fallback) is now the one source for the scene director, SceneArt focus
+targets, the DM's party line (new `Looks (species gender):` sub-line), and the Companions panel
+(new "Looks" block — the player can see what the painter is told). Belt on top:
+`engine/appearanceIdentity.js` extracts skin tone / hair state (bald included) / build / age from
+the record deterministically and every portrait and scene-cast line OPENS with an `IDENTITY
+LOCK — Name: …` line; the art director's rules name those four inviolable and require the locks
+verbatim first; the Scribe and Deepen-memory field text now ask for skin tone and explicit hair
+state. Proof: 3+3 xAI renders of a clear record were correct on BOTH the old and new prompt — the
+prompt was not the weak link, the split record was. 24 new pins (3 new test files + 4 extended).
+2,396 tests green, lint clean. **Deployed.** Known flake: one `storyMemory.test.js` presence-bonus
+pin fails intermittently in the full run and passes in isolation (untouched here; flagged).
 
 ## 2026-09-11 — queue sweep: combat-exchange + persistence (4 P1s, 6 P2s) + WOW ordinary-turn W1 — both queues empty
 

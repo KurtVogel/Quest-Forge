@@ -901,6 +901,27 @@ function meaningfulNameTokens(name) {
  * creature/role names ("Guard", "a bandit") never containment-match — only proper names
  * fold, and title-only names strip to zero tokens so they cannot match anything.
  */
+/**
+ * ONE source for how a party companion LOOKS (2026-09-12). The Scribe records a
+ * companion's appearance/gender/species on their linked ROSTER record ("one
+ * system owns all bonds", DECISIONS.md 2026-07-23), while the party record
+ * only ever holds what the DM's add_companions said at recruitment. Scene art
+ * read the party record — so a companion whose bald head and dark skin the
+ * fiction had long established was painted from a thin recruitment note, or
+ * from nothing, and came back as a different person every time. The roster
+ * record is the living canon and wins; the party record is the fallback.
+ */
+export function resolveCompanionLook(companion, npcs = []) {
+    const name = String(companion?.name || '').trim();
+    const dossier = name ? (Array.isArray(npcs) ? npcs : []).find(npc => namesMatch(npc?.name, name)) : null;
+    const pick = field => {
+        const fromRoster = typeof dossier?.[field] === 'string' ? dossier[field].trim() : '';
+        const fromParty = typeof companion?.[field] === 'string' ? companion[field].trim() : '';
+        return fromRoster || fromParty;
+    };
+    return { appearance: pick('appearance'), gender: pick('gender'), species: pick('species') };
+}
+
 export function namesMatch(name1, name2) {
     if (!name1 || !name2) return false;
     const n1 = name1.toLowerCase();
