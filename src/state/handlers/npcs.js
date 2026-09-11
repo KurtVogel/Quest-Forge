@@ -10,6 +10,7 @@ import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { upsertNpc } from './shared.js';
+import { cleanTextField, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
 
 /**
  * Attach a generated portrait to an NPC by id. Shared by the SET_NPC_PORTRAIT
@@ -128,6 +129,30 @@ export const handlers = {
         return {
             ...state,
             npcs: applyNpcPortrait(state.npcs, action.payload || {}),
+        };
+    },
+
+    /**
+     * The player's own edit of a character's look (2026-09-12): a PLAIN
+     * REPLACE of appearance / gender / species on the roster record by id —
+     * never the Scribe's fragment merge or the dossier append (upsertNpc),
+     * because the player IS the rewrite. Only keys the payload carries change;
+     * an empty string clears the field. The portrait stays (the card offers a
+     * reroll), and everything else on the record is untouched.
+     */
+    SET_NPC_LOOK(state, action) {
+        const payload = action.payload || {};
+        const id = typeof payload.id === 'string' ? payload.id : '';
+        if (!id || !(state.npcs || []).some(npc => npc.id === id)) return state;
+        const fields = [['appearance', NPC_DOSSIER_FIELD_MAX], ['gender', NPC_GENDER_MAX], ['species', NPC_SPECIES_MAX]];
+        const update = {};
+        for (const [field, max] of fields) {
+            if (payload[field] !== undefined) update[field] = cleanTextField(payload[field], max);
+        }
+        if (Object.keys(update).length === 0) return state;
+        return {
+            ...state,
+            npcs: state.npcs.map(npc => (npc.id === id ? normalizeNpcRecord({ ...npc, ...update }) : npc)),
         };
     },
 

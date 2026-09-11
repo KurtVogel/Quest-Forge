@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { generatePortraitImageDetailed, generateSceneImageDetailed, peekCachedImage } from '../../llm/providers/imageGen.js';
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
-import { namesMatch, resolveCompanionLook } from '../../engine/npcRoster.js';
+import { resolveCompanionLook } from '../../engine/npcRoster.js';
 import { isSameLocation } from '../../engine/locationRegistry.js';
 import { composeScenePrompt } from '../../llm/scribe.js';
 import {

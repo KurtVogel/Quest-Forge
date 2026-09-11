@@ -1,15 +1,28 @@
+import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
+import LookEditor from '../Journal/LookEditor.jsx';
 import { namesMatch, resolveCompanionLook } from '../../engine/npcRoster.js';
 import './Companions.css';
 
 export default function CompanionsPanel() {
-    const { state } = useGame();
+    const { state, dispatch, flushAutoSave } = useGame();
 
     // Fall back to empty array if undefined
     const party = state.party || [];
     // A companion's personal bond with the hero (stance + moments) lives in
     // their roster NPC record — the party record carries only mechanics.
     const npcs = state.npcs || [];
+    const [editingLookId, setEditingLookId] = useState(null);
+    // A companion's look lives on their linked roster record (one system
+    // owns all bonds); ADD_COMPANION/LOAD_GAME guarantee the record exists.
+    const handleSaveLook = async (dossier, companion, look) => {
+        const action = dossier
+            ? { type: 'SET_NPC_LOOK', payload: { id: dossier.id, ...look } }
+            : { type: 'UPDATE_NPC', payload: { name: companion.name, kind: 'character', rosterEligible: true, disposition: 'friendly', ...look } };
+        dispatch(action);
+        await flushAutoSave({ action });
+        setEditingLookId(null);
+    };
 
     if (party.length === 0) {
         return (
@@ -79,9 +92,26 @@ export default function CompanionsPanel() {
                                 </div>
                             )}
 
-                            {(look.appearance || lookIdentity) && (
+                            {editingLookId === companion.id ? (
+                                <LookEditor
+                                    key={companion.id}
+                                    npc={{ ...look }}
+                                    onSave={(next) => handleSaveLook(dossier, companion, next)}
+                                    onCancel={() => setEditingLookId(null)}
+                                />
+                            ) : (
                                 <p className="comp-stance" title="The look scene art and the DM paint from — the Scribe records it as the story establishes it">
-                                    <span className="comp-bond-label">Looks{lookIdentity ? ` (${lookIdentity})` : ''}</span>
+                                    <span className="comp-bond-label">
+                                        Looks{lookIdentity ? ` (${lookIdentity})` : ''}
+                                        <button
+                                            type="button"
+                                            className="look-edit-btn"
+                                            title="Edit the recorded look — this exact text is what portraits, scene art, and the DM paint from"
+                                            onClick={() => setEditingLookId(companion.id)}
+                                        >
+                                            Edit
+                                        </button>
+                                    </span>
                                     {look.appearance || 'No description recorded yet — the story has not described them.'}
                                 </p>
                             )}

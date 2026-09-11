@@ -8,6 +8,23 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-12 · The player can edit any character's recorded look — a plain replace through SET_NPC_LOOK, never the Scribe merge.**
+Vesa asked for a way to adjust an NPC's or companion's looks. Until now `appearance`/`gender`/
+`species` on a roster record were Scribe-written only (the hero's own appearance was editable on
+the Character Sheet, nobody else's). `SET_NPC_LOOK { id, appearance?, gender?, species? }` is the
+one player-authored write: a PLAIN REPLACE by id (clamped 600/40/40, typed through
+`cleanTextField`, only the keys the payload carries change, an empty string clears, the portrait
+and every other field stay), deliberately bypassing `upsertNpc`'s fragment-merge belt and dossier
+append — the player IS the rewrite, and a later Scribe fragment merges INTO the edited text
+instead of restoring the old look (the edited record is the KNOWN APPEARANCES merge base).
+`components/Journal/LookEditor.jsx` (species + gender inputs, appearance textarea with the plain-
+words hint) sits inline on the Journal character card ("Looks · Edit", never on archived rows)
+and on the Companions panel card (writing to the linked roster record; a missing record is
+minted through UPDATE_NPC). Browser-verified: edit → save → the Companions card, the Journal
+card, and a reload all show the new text. **Why:** the record is now visible everywhere the
+painter reads it (2026-09-12 companion-look ruling), so the player must be able to correct it
+without waiting for the fiction to re-describe someone; a Scribe mis-capture used to be permanent.
+
 **2026-09-12 · A companion's look is ONE record (the roster, Scribe-merged) — and every portrait/scene prompt opens with a deterministic IDENTITY LOCK.**
 Vesa's report: a bald, statuesque, dark-skinned companion came back from the imager as anything
 from a pale heavy woman to a dark-skinned woman with cornrows. Two findings. **(1) The real bug

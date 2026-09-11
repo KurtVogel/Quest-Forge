@@ -7,6 +7,7 @@ import { scoreNpcForPrompt } from '../../engine/npcRoster.js';
 import { groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
 import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
+import LookEditor from './LookEditor.jsx';
 import { writeChronicleChapters, chronicleToMarkdown, collectChapterMessages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNK_SIZE, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
 import './Journal.css';
 
@@ -163,6 +164,14 @@ export default function JournalPanel({ isOpen, onClose }) {
         URL.revokeObjectURL(url);
     };
 
+    const [editingLookId, setEditingLookId] = useState(null);
+    const handleSaveLook = async (id, look) => {
+        const action = { type: 'SET_NPC_LOOK', payload: { id, ...look } };
+        dispatch(action);
+        await flushAutoSave({ action });
+        setEditingLookId(null);
+    };
+
     const handlePortrait = async (npc) => {
         if (portraitBusyId) return;
         setEnrichError('');
@@ -302,6 +311,9 @@ export default function JournalPanel({ isOpen, onClose }) {
                                 onDeepen={handleDeepen}
                                 onPortrait={imageKeyAvailable ? handlePortrait : null}
                                 portraitBusyId={portraitBusyId}
+                                editingLookId={editingLookId}
+                                onEditLook={setEditingLookId}
+                                onSaveLook={handleSaveLook}
                             />
                         </>
                     )}
@@ -579,6 +591,9 @@ function NPCTab({
     onDeepen,
     onPortrait = null,
     portraitBusyId = null,
+    editingLookId = null,
+    onEditLook = null,
+    onSaveLook = null,
 }) {
     if (npcs.length === 0) {
         return (
@@ -639,10 +654,29 @@ function NPCTab({
                                 )}
                             </div>
                         )}
-                        {npc.appearance && (
+                        {editingLookId === npc.id && onSaveLook ? (
+                            <LookEditor
+                                key={npc.id}
+                                npc={npc}
+                                onSave={(look) => onSaveLook(npc.id, look)}
+                                onCancel={() => onEditLook(null)}
+                            />
+                        ) : (npc.appearance || onEditLook) && (
                             <p className="journal-npc-looks">
-                                <span className="journal-npc-looks-label">Looks</span>
-                                {npc.appearance}
+                                <span className="journal-npc-looks-label">
+                                    Looks
+                                    {onEditLook && !archived && (
+                                        <button
+                                            type="button"
+                                            className="look-edit-btn"
+                                            title="Edit the recorded look — this exact text is what portraits, scene art, and the DM paint from"
+                                            onClick={() => onEditLook(npc.id)}
+                                        >
+                                            Edit
+                                        </button>
+                                    )}
+                                </span>
+                                {npc.appearance || 'No description recorded yet.'}
                             </p>
                         )}
                         {npc.stanceToPlayer && (

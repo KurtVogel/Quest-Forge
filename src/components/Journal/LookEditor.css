@@ -1,0 +1,84 @@
+.look-editor {
+    margin: 0.4rem 0 0;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: 6px;
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.2));
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.look-editor-row {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.look-editor-row .look-editor-field {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.look-editor-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-size: 0.72rem;
+}
+
+.look-editor-field > span:first-child {
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.look-editor-field input,
+.look-editor-field textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    padding: 0.3rem 0.4rem;
+    border-radius: 4px;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    background: var(--bg-primary, rgba(0, 0, 0, 0.3));
+    color: var(--text-primary, inherit);
+    resize: vertical;
+}
+
+.look-editor-count {
+    align-self: flex-end;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+}
+
+.look-editor-hint {
+    margin: 0;
+    font-size: 0.68rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+}
+
+.look-editor-actions {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.look-edit-btn {
+    margin-left: 0.4rem;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: none;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    border-radius: 4px;
+    color: var(--text-muted);
+    padding: 0.05rem 0.35rem;
+    cursor: pointer;
+}
+
+.look-edit-btn:hover {
+    color: var(--text-primary, inherit);
+}
