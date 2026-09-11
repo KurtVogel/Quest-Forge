@@ -420,7 +420,7 @@ follow-through, and foe/scenery variety beyond what FOE FATIGUE already forces. 
 WOW layer's open "real-provider eval for natural recall" idea from memory mechanics to felt
 play quality. Findings feed salience tuning (WOW layer's open item), the scenery/motif
 fatigue idea (2026-08-03), and the cross-faction-contradiction guard idea (2026-07-14).
-**[wow] Turn-grammar rubric (wow audit 2026-09-11, ordinary-turn Lap 1, W1 — the prompt block SHIPPED 2026-09-11 as `## THE ORDINARY TURN`, DECISIONS.md 2026-09-11; the scoring run below is what remains):** the ordinary
+**[wow] Turn-grammar rubric (wow audit 2026-09-11, ordinary-turn Lap 1, W1 — the prompt block SHIPPED 2026-09-11 as `## THE ORDINARY TURN` and the scoring run below is BUILT as `npm run eval:turns` / `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`, DECISIONS.md 2026-09-11; what remains is Gemini's echo-of-action, the one column three wordings did not move — a candidate for a later ordinary-turn lap, possibly as a machinery-side detector rather than more prompt):** the ordinary
 turn's only craft instructions were the length rule and "ask what they do"
 (`promptBuilder.js:270,311-312,338,371`; default custom prompt) — no content shape, no
 anti-pattern list, no floor (Grok over-obeys brevity). Apocalypse World's GM-move grammar,

@@ -339,10 +339,10 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 ## THE ORDINARY TURN
 
 An ordinary turn is 60–180 words and contains, in this order:
-1. **CONSEQUENCE.** Open on what the player's action changed — never a restatement of the action ("You step forward and say…"); the player knows what they did.
+1. **CONSEQUENCE.** Open on what the player's action changed — never a restatement of the action. Do not begin by narrating the player doing what they just said they do ("You climb down and start hauling…", "You step forward and say…"); the player knows what they did. The first sentence names something NEW — a reaction, a change, a sound, someone's line — never the player's own movement or speech.
 2. **ONE PARTICULAR.** One concrete sensory or physical detail specific to this place or person. Never abstractions: "the tension is palpable", "the air is thick", "a chill runs down your spine", "silence hangs heavy".
-3. **MOTION.** The world or someone present acts on their own want or agenda — a sign of something coming, an offer with a cost, an unwelcome truth, a small want voiced. A QUIET tempo forbids new threats, not life; quiet is never static.
-4. **THE ASK.** End on the situation's live question. Leave space for the player: answer the immediate consequence and stop before the next meaningful choice. Write "What do you do?" only when nothing in the scene already asks it — never a menu of stacked rhetorical questions ("Will you…? Or perhaps…?").
+3. **MOTION.** The world or someone present acts on their own want or agenda — a sign of something coming, an offer with a cost, an unwelcome truth, a small want voiced, an errand handed over. Motion is LIFE, not escalation: it is never a new threat, an attack, a grab, or a hostile act unless the WORLD TEMPO section grants one or the player's own action provoked it. A QUIET tempo forbids new threats, not life; quiet is never static.
+4. **THE ASK.** End on the situation's live question and STOP. If a character's last line or the situation itself already asks something of the player, that IS the ask — do not append "What do you do?" or any generic prompt after it. Write "What do you do?" only when nothing in the scene already asks it — never a menu of stacked rhetorical questions ("Will you…? Or perhaps…?"). Leave space for the player: answer the immediate consequence and stop before the next meaningful choice.
 Major moments (openings, big consequences, important NPC scenes, climaxes) may run to 3 paragraphs; nothing runs to 4.`;
 
 const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)

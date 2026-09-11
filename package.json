@@ -12,6 +12,7 @@
     "test:play": "node scripts/test_play.cjs",
     "eval:combat": "node scripts/combatPacingEval.mjs",
     "eval:memory": "node scripts/memoryTuningPlaytest.cjs",
+    "eval:turns": "node scripts/turnGrammarEval.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

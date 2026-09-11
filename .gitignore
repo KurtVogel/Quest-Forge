@@ -50,3 +50,6 @@ coverage/
 
 # Local Claude Code settings
 .claude/settings.local.json
+
+# real-provider eval transcripts (scripts/turnGrammarEval.mjs)
+scripts/.eval-out/

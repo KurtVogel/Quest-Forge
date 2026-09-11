@@ -6,7 +6,7 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-11 (queue sweep — combat-exchange + persistence Lap-2 hostile input: typed turn order and stored exchange result, narration effect with an exit, typed purse, class/race whitelist with a one-time notice, unique enemy ids at load, inventory/roster/payload typing; plus WOW ordinary-turn W1: `## THE ORDINARY TURN` grammar block in the cached prefix; both queues empty; deployed). Previous: 2026-09-10 (WOW build — first-ten-minutes: premise starter tap-cards + "Draft from my hero", ANCHOR/ECHO/HANDLE opening clauses; same day queue sweep — roll-resolution + cloud-sync: ONE death-save tally form, ONE typed save-list projection; both deployed). Previous: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input; deployed with the 09-10 sweep)._
+_Last updated: 2026-09-11 (queue sweep — combat-exchange + persistence Lap-2 hostile input: typed turn order and stored exchange result, narration effect with an exit, typed purse, class/race whitelist with a one-time notice, unique enemy ids at load, inventory/roster/payload typing; plus WOW ordinary-turn W1: `## THE ORDINARY TURN` grammar block in the cached prefix; both queues empty; deployed) — then the wow proof run: `npm run eval:turns` three rounds on Gemini + Grok, MOTION anti-escalation guard and THE ASK stop rule tuned in, report in `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`, redeployed. Previous: 2026-09-10 (WOW build — first-ten-minutes: premise starter tap-cards + "Draft from my hero", ANCHOR/ECHO/HANDLE opening clauses; same day queue sweep — roll-resolution + cloud-sync: ONE death-save tally form, ONE typed save-list projection; both deployed). Previous: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input; deployed with the 09-10 sweep)._
 
 ## 2026-09-11 — queue sweep: combat-exchange + persistence (4 P1s, 6 P2s) + WOW ordinary-turn W1 — both queues empty
 
@@ -32,9 +32,14 @@ blanked; local `loadGame` shares the cloud loader's `asSaveObject` guard (one ex
 rows typed through `projectRosterEntry`. **WOW W1 — THE ORDINARY TURN:** one prefix-stable
 block in `CORE_INSTRUCTIONS` (60–180 words; CONSEQUENCE → ONE PARTICULAR → MOTION → THE ASK;
 short banned-abstraction list; "What do you do?" only when nothing in the scene already asks
-it); default custom prompt's closing line softened to match. **Proof still owed:** the audit's
-20-turn before/after scoring (Gemini + Grok). 24 new pins (2 new test files + 2 extended), 21
-verified failing pre-fix. 2,377 tests green (+24), lint clean, built. **Deployed.** Note: the two
+it); default custom prompt's closing line softened to match. **Proof RUN the same day** (`npm run
+eval:turns`, `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`): three tuning rounds on Gemini 3.1 Pro + Grok
+4.3 — the MOTION guard against escalation (round 1's Gemini run drifted into a brawl; the eval
+also now seeds fronts so the tempo QUIET line renders as in play) and THE ASK as a stop rule.
+Final: Gemini in-band 11% → 94%, median 210 → 147 words, tics 0%; Grok live endings 5% → 85%,
+echo 63% → 10%, every turn in band. Gemini's echo (61%) is the one unmoved column — a later lap.
+24 new pins (2 new test files + 2 extended), 21 verified failing pre-fix. 2,377 tests green
+(+24), lint clean, built. **Deployed** (twice: the sweep, then the tuned block + eval). Note: the two
 2026-09-11 audits had landed on `origin/master-enuons` (a detached firing); master was
 fast-forwarded onto it first.
 
