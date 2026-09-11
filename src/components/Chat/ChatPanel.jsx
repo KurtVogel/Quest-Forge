@@ -505,11 +505,34 @@ export default function ChatPanel() {
         if (narratedCombatExchangeIdsRef.current.has(result.exchangeId)) return;
         narratedCombatExchangeIdsRef.current.add(result.exchangeId);
 
+        // The prompt build is wrapped like the plan effects were on 09-09
+        // (2026-09-11 combat-exchange P1): a stored result the load could not
+        // fully heal used to throw out of this effect into the Chat boundary,
+        // where Try Again remounted into the same throw — no way out of the
+        // phase. Mechanics are already committed; the narration is only an
+        // acknowledgment, so completing it with a visible line is the exit.
+        let narrationPrompt;
+        try {
+            narrationPrompt = combatNarrationPrompt(result);
+        } catch (e) {
+            console.error('[Combat] narration prompt build threw', e);
+            dispatch({
+                type: 'ADD_MESSAGE',
+                payload: {
+                    role: 'system',
+                    kind: 'error',
+                    content: `**Combat narration skipped:** the stored exchange result could not be read (${String(e?.message || e).slice(0, 160)}). The mechanics stand; play on.`,
+                },
+            });
+            dispatch({ type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: result.exchangeId } });
+            return;
+        }
+
         let narrative = '';
         setIsLoading(true);
         clearStreamingDisplay();
         setLoadingStatus('Narrating combat outcome');
-        runner.sendToLLM(combatNarrationPrompt(result), null, {
+        runner.sendToLLM(narrationPrompt, null, {
             narrationOnly: true,
             onNarrative: text => { narrative = text; },
         })

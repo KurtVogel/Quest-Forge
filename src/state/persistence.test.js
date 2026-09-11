@@ -99,6 +99,29 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         expect(await loadGame('never-saved')).toBeNull();
     });
 
+    it('resolves null for a stored payload that is not a plain object (2026-09-11 persistence P2)', async () => {
+        // The cloud loader got asSaveObject on 07-25; the local sibling passed a
+        // string/array payload straight to LOAD_GAME, whose spread minted index
+        // keys into live state with a null character — Load looked like a no-op.
+        await saveGame('slot-seed', makeGameState());
+        await new Promise((resolve, reject) => {
+            const open = indexedDB.open('rpg-client-saves', 3);
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+                const db = open.result;
+                const tx = db.transaction(['saves', 'savePayloads'], 'readwrite');
+                tx.objectStore('savePayloads').put({ slotId: 'junk-string', state: 'garbage' });
+                tx.objectStore('savePayloads').put({ slotId: 'junk-array', state: [1, 2, 3] });
+                tx.objectStore('saves').put({ slotId: 'junk-legacy', name: 'Legacy', savedAt: 1, state: 'garbage' });
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onabort = () => { db.close(); reject(tx.error); };
+            };
+        });
+        expect(await loadGame('junk-string')).toBeNull();
+        expect(await loadGame('junk-array')).toBeNull();
+        expect(await loadGame('junk-legacy')).toBeNull();
+    });
+
     it('falls back to a legacy embedded-state metadata record when no payload record exists (2026-08-27 audit)', async () => {
         // Pre-v3 records embedded the full state in the `saves` store; a record
         // whose payload never migrated/landed must still load through the belt.
@@ -384,6 +407,28 @@ describe('character roster', () => {
         const roster = await listRosterCharacters();
         expect(roster).toHaveLength(1);
         expect(roster[0].level).toBe(5);
+    });
+
+    it('projects roster rows to typed render fields and drops unkeyed/non-object records (2026-09-11 persistence P2)', async () => {
+        await saveRosterCharacter(makeHero(), []);
+        await new Promise((resolve, reject) => {
+            const open = indexedDB.open('rpg-client-saves', 3);
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+                const db = open.result;
+                const tx = db.transaction('characters', 'readwrite');
+                tx.objectStore('characters').put({ id: 'junk-1', name: { first: 'X' }, race: 7, class: null, level: 'abc', savedAt: 'later', character: 'nope', inventory: 'none' });
+                tx.objectStore('characters').put({ id: 'junk-2', name: '', level: 2, savedAt: 5, character: { name: 'From Character' } });
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onabort = () => { db.close(); reject(tx.error); };
+            };
+        });
+        const roster = await listRosterCharacters();
+        expect(roster.map(entry => entry.id)).toEqual(['hero-1', 'junk-2', 'junk-1']);
+        const junk = roster.find(entry => entry.id === 'junk-1');
+        expect(junk).toEqual({ id: 'junk-1', name: 'Unnamed hero', race: '', class: '', level: 1, savedAt: 0, character: null, inventory: [] });
+        expect(roster.find(entry => entry.id === 'junk-2').name).toBe('From Character');
+        expect(roster.find(entry => entry.id === 'hero-1').character.name).toBe('Astra');
     });
 
     it('generates an id when the character has none', async () => {

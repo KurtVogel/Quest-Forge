@@ -36,10 +36,12 @@
  */
 import { computeACFromInventory, normalizeConditionList, normalizeDeathSaves } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
+import { RACES } from '../data/races.js';
 import { normalizeItem } from '../data/items.js';
 import {
     ABILITY_NAMES,
     buildClassResources,
+    buildDerivedCharacterFields,
     normalizeAbilityScoreImprovementState,
     normalizeFightingStyle,
     normalizeMartialArchetype,
@@ -51,7 +53,7 @@ import { isSpellcaster, sanitizeSpellSlots, sanitizeSustainedSpell } from '../en
 import { initialGameState } from './initialState.js';
 import { coverage, tokenSet } from '../engine/textMatch.js';
 import { sanitizePortraitUrl } from '../engine/portraitUrl.js';
-import { CHARACTER_APPEARANCE_MAX, cleanTextField } from '../config/contentLimits.js';
+import { CHARACTER_APPEARANCE_MAX, cleanTextField, MAX_COIN_HELD } from '../config/contentLimits.js';
 import { applyEarlyDefeat, isLowLevelSolo, stackIdentity, systemMessage } from './handlers/shared.js';
 
 /**
@@ -224,6 +226,61 @@ function healEquippedSlots(save) {
     return { ...save, inventory: normalizeEquippedSlots(inventory) };
 }
 
+const FALLBACK_CLASS = 'fighter';
+const FALLBACK_RACE = 'human';
+
+/**
+ * Class and race are whitelisted against the live catalogs (2026-09-11
+ * persistence P1) — every rules lookup keys on them, and the vault's
+ * sanitizeCharacter THROWS on an unknown value while the live-save heal never
+ * looked: `class: {}` printed "[object Object]" into the prompt, collapsed
+ * classResources to `{}`, and threw as a React child on the sheet; the
+ * plausible stale shape — a pre-balance-overhaul hero of a CUT class or race
+ * (paladin, halfling: the 8-race/6-class era) — loaded featureless on a d8
+ * with no notice. Unknown values fall back to Fighter / Human, the class- and
+ * race-derived fields (features, saves, resources, traits, speed, spell
+ * slots) are rebuilt from the catalogs, and a one-time visible system line
+ * mirrors the vault's message. Runs FIRST: backfillCharacterShape reads
+ * `character.class` for its own defaults. Idempotent by construction — once
+ * the value is known the heal is a no-op.
+ */
+function healUnknownClassRace(save) {
+    const character = save.character;
+    if (!character || typeof character !== 'object') return save;
+    const classKnown = typeof character.class === 'string' && !!CLASSES[character.class];
+    const raceKnown = typeof character.race === 'string' && !!RACES[character.race];
+    if (classKnown && raceKnown) return save;
+    const charClass = classKnown ? character.class : FALLBACK_CLASS;
+    const race = raceKnown ? character.race : FALLBACK_RACE;
+    const levelNumber = Number(character.level);
+    const level = Math.min(MAX_CHARACTER_LEVEL, Math.max(1, Number.isFinite(levelNumber) ? Math.trunc(levelNumber) : 1));
+    // Everything derived from the OLD class/race is stale; the catalog rebuild
+    // owns it. Conditions and hit-dice spend are campaign state and stay (the
+    // die itself is re-derived by healLoadedCharacter from the new class).
+    const { conditions: _conditions, hitDice: _hitDice, ...derived } = buildDerivedCharacterFields(race, charClass, level);
+    const {
+        classResources: _oldResources, features: _oldFeatures, spellSlots: _oldSlots, sustainedSpell: _oldSustained,
+        fightingStyle: _oldStyle, martialArchetype: _oldArchetype, ...rest
+    } = character;
+    const label = (value, fallback) => cleanTextField(value, 40) || fallback;
+    const changes = [];
+    if (!classKnown) changes.push(`class "${label(character.class, 'unknown')}" → ${CLASSES[charClass].name}`);
+    if (!raceKnown) changes.push(`race "${label(character.race, 'unknown')}" → ${RACES[race].name}`);
+    return {
+        ...save,
+        character: { ...rest, ...derived, race, class: charClass },
+        messages: [
+            ...(save.messages || []),
+            systemMessage(
+                `**Hero updated for this version of the game:** ${changes.join('; ')}. `
+                + 'This hero came from an older version whose options are no longer part of the core set '
+                + '(Human, Elf, Dwarf, Half-Orc; Fighter, Wizard, Rogue, Cleric). Features, saving throws, class resources, '
+                + 'traits, and hit die were rebuilt from the new option; name, level, XP, ability scores, gear, and story are untouched.'
+            ),
+        ],
+    };
+}
+
 /**
  * Backfill character fields newer than the save (skill/expertise lists, class
  * resources, hit dice) and re-derive normalized progression state (fighting
@@ -323,6 +380,14 @@ function healLoadedCharacter(character) {
         portraitProvider: cleanTextField(character.portraitProvider, 40),
         level,
         exp: Math.max(0, toInt(character.exp, 0)),
+        // The purse is typed like every other numeric field (2026-09-11
+        // persistence P1): `gold: {}` beside 40 sp 5 cp made toCopper NaN, so
+        // the first "+1 gp" grant fromCopper'd the WHOLE purse to zero and the
+        // receipt line printed "purse: 0 cp" as if correct. The vault's own
+        // clamp band (0..MAX_COIN_HELD) applies; a numeric string coerces.
+        gold: Math.min(MAX_COIN_HELD, Math.max(0, toInt(character.gold, 0))),
+        silver: Math.min(MAX_COIN_HELD, Math.max(0, toInt(character.silver, 0))),
+        copper: Math.min(MAX_COIN_HELD, Math.max(0, toInt(character.copper, 0))),
         maxHP,
         currentHP: Math.min(maxHP, Math.max(0, toInt(character.currentHP, maxHP))),
         abilityScores,
@@ -438,6 +503,7 @@ function reseedMissingFronts(save) {
 }
 
 const UNCONDITIONAL_HEALS = [
+    healUnknownClassRace,
     healDuplicateInventoryRows,
     healShadowInventoryRows,
     healStackedInventoryRows,

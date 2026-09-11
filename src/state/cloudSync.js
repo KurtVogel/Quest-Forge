@@ -1,6 +1,6 @@
 import { collection, doc, getDoc, getDocs, runTransaction } from "firebase/firestore";
 import { db } from "../config/firebase.js";
-import { serializeGameState, buildSaveMetadata, projectSaveMetadata } from "./persistence.js";
+import { asSaveObject, serializeGameState, buildSaveMetadata, projectSaveMetadata } from "./persistence.js";
 
 /**
  * Cloud save layer (bring-your-own Firebase, manual saves only).
@@ -201,13 +201,8 @@ export async function loadGameFromCloud(uid, slotId) {
         if (!docSnap.exists()) return null;
         const data = docSnap.data();
 
-        // A corrupted payload parsing to a number/string/array passes callers'
-        // truthy checks and reaches LOAD_GAME as a primitive — only a plain
-        // object is a save (2026-07-25 audit).
-        const asSaveObject = (parsed) => (
-            parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
-        );
-
+        // Only a plain object is a save (2026-07-25 audit) — the guard is the
+        // one persistence.js exports, shared with the local loader since 2026-09-11.
         if (data.payloadChunks > 0) {
             const snapshot = await getDocs(chunksCollection(uid, slotId));
             const chunks = [];

@@ -249,6 +249,11 @@ export function boundWeaponDamage(value) {
 
 export function normalizeItem(raw = {}) {
     const source = typeof raw === 'string' ? { name: raw } : { ...raw };
+    // A non-string name is no name (2026-09-11 persistence P2): an object
+    // survived as `{ x: 1 }` — "[object Object]" in the inventory block and a
+    // React child throw in the Inventory panel. Falls to the 'Unknown item'
+    // default below like a missing name.
+    if (typeof source.name !== 'string') delete source.name;
     // A count embedded in the name becomes quantity ("3 Torches" → Torch ×3);
     // an explicit quantity field from the payload still wins when present.
     const counted = parseCountedItemName(source.name);

@@ -284,7 +284,7 @@ export const handlers = {
         // lines ("X is defeated", "X falls!"). Those must render AFTER the exchange's
         // roll summary — the dice caused the defeat, so the reader sees them first.
         const statusMessages = next.messages.slice(preExchangeMessageCount);
-        const playerIdx = state.combat.turnOrder.findIndex(actor => actor.type === 'player');
+        const playerIdx = state.combat.turnOrder.findIndex(actor => actor?.type === 'player');
         let character = payload.consumeActionSurge && next.character?.pendingActionSurge
             ? { ...next.character, pendingActionSurge: false }
             : next.character;
@@ -337,7 +337,7 @@ export const handlers = {
         if (result.terminal === 'escaped') {
             return gameReducer(state, { type: 'END_COMBAT', payload: { escaped: true, slainXpOnly: true } });
         }
-        const playerIdx = state.combat.turnOrder.findIndex(actor => actor.type === 'player');
+        const playerIdx = state.combat.turnOrder.findIndex(actor => actor?.type === 'player');
         const completedOpening = result.kind === 'opening';
         return {
             ...state,
@@ -359,7 +359,7 @@ export const handlers = {
         // OPENING or AWAITING_NARRATION would force AWAITING_PLAYER and abandon
         // the pending opening/narration bookkeeping (2026-08-27 audit).
         if (![COMBAT_PHASES.AWAITING_PLAYER, COMBAT_PHASES.AWAITING_INTENT].includes(state.combat.phase)) return state;
-        const playerIdx = state.combat.turnOrder.findIndex(actor => actor.type === 'player');
+        const playerIdx = state.combat.turnOrder.findIndex(actor => actor?.type === 'player');
         return {
             ...state,
             combat: {

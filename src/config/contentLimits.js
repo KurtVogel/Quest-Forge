@@ -16,6 +16,14 @@ export const CHARACTER_APPEARANCE_MAX = 600;
  * and the Scribe loot audit so no boundary is looser than the others. */
 export const MAX_COIN_EVENT = 10000;
 
+/** Ceiling for a single coin denomination the hero can HOLD (gold, silver,
+ * or copper as its own field) — the vault import clamp and the load heal
+ * share it (2026-09-11 persistence P1: the live-save boundary had none, and a
+ * non-numeric field made the purse total NaN so the first coin movement wiped
+ * the whole purse to zero). The per-event caps (MAX_COIN_EVENT, the sale
+ * ceiling) stay far below it. */
+export const MAX_COIN_HELD = 1_000_000;
+
 /** Short plain-replace roster gender field ("woman", "man", the fiction's own
  * wording) — reducer boundary and NPC enrichment share the cap. */
 export const NPC_GENDER_MAX = 40;

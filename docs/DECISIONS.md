@@ -8,6 +8,78 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-09-11 · The combat envelope, the purse, and the hero's class/race load TYPED — and the ordinary turn has a grammar.**
+The 2026-09-11 scheduled audit (combat-exchange + persistence, Lap 2 hostile input) found the
+last untyped corners of LOAD_GAME, and the same day's wow audit (ordinary-turn, Lap 1) found
+that the only craft instruction for an ordinary DM turn was its length. Both queues cleared in
+one session. **(1) Combat envelope (`validateSaveState` in `handlers/session.js`):** every
+`turnOrder` entry goes through `sanitizeTurnOrderEntry` (type ∈ player|companion|enemy, string
+id/name, finite initiative — else dropped; one `null` entry used to throw out of every prompt
+build, out of the exchange commit AND the reject inside the reducer, and out of
+`planOpeningExchange`, whose belt dispatched a REJECT the OPENING phase guard ignored: phase
+`opening` forever with End Combat gated shut — a deadlocked campaign); the four reducer/prompt
+reads keep a `?.` belt. `active`/`xpAwarded`/`bonusActionUsed` boolean-coerce, `round` is an
+integer ≥ 1 (`"3"` string-concatenated to `"31"` on every completed exchange; `"no"` was truthy
+and paid 0 XP for slain foes / refused Second Wind all round), `openingActorIds`/
+`resolvedExchangeIds` keep strings only, and the envelope is projected to its KNOWN keys (plus
+`startedAtMessage`) — an unknown key used to re-persist through `{ ...merged }` forever. **Enemy
+ids are unique handles at load** (`assignUniqueEnemyIds`): a valid unique id is kept VERBATIM
+(the turn order, flank list, and queued exchange reference it); only absent/duplicate ids are
+re-minted through START_COMBAT's `canonicalEnemyId` with the kept ids reserved — two loaded foes
+sharing `enemy-goblin` both died to one UPDATE_ENEMY and only the first ever received an intent.
+**(2) Stored exchange result:** `sanitizeStoredExchangeResult` types EVERY sub-shape — events
+through `sanitizeStoredExchangeEvent` (type whitelist attack|check|save|death_save|note, text
+clamps 1200/100, finite numbers, strict flags, re-typed Sneak Attack detail, and the renderer's
+fallbacks: an attack without an actor prints "An attacker", a hit without damage is 0, a roll
+without a DC drops its roll clause — the AUTHORITATIVE narration prompt used to read "**undefined
+attacks …** Hit for undefined damage"), the player/enemy/companion snapshots (string-or-fallback
+names, finite HP, whitelisted status), and a null entry anywhere drops instead of throwing. The
+100-event cap now bounds the narration prompt (100 stored notes of 20k built a 2,001,123-char
+prompt — Lap 3 hiding in Lap 2). ChatPanel's narration effect wraps `combatNarrationPrompt` like
+the plan effects were on 09-09: a build that still throws posts a visible "narration skipped"
+error line and COMPLETES the narration by exchangeId — mechanics are already committed, the
+narration is only an acknowledgment, so completing it IS the exit (Try Again used to remount
+into the same throw with no way out of the phase). **(3) Purse:** `healLoadedCharacter` clamps
+`gold`/`silver`/`copper` to 0..`MAX_COIN_HELD` (1,000,000 — the vault's own band, now ONE shared
+constant in `config/contentLimits.js`): `gold: {}` beside 40 sp 5 cp made `toCopper` NaN, so the
+first "+1 gp" grant `fromCopper`'d the WHOLE purse to zero and the receipt line printed
+"purse: 0 cp" as if correct. **(4) Class/race whitelist — `healUnknownClassRace`, FIRST in the
+unconditional heals** (backfillCharacterShape reads `character.class` for its own defaults):
+an unknown value falls back to Fighter / Human, the class- and race-derived fields (features,
+saving throws, class resources, traits, speed, spell slots, fighting style, archetype) are rebuilt
+from the catalogs via `buildDerivedCharacterFields`, conditions and hit-dice spend stay, and a
+one-time visible system line names the old option — mirroring the vault's "older version"
+message where the live-save heal never looked. `class: {}` printed "[object Object]" into the
+prompt, collapsed a Fighter's resources to `{}`, and threw as a React child on the sheet; the
+plausible STALE shape — a pre-balance-overhaul paladin or halfling — loaded featureless on a d8
+with no notice. Idempotent by construction: once known, no-op. **(5) The last two untyped lists:**
+`inventory` entries are object-filtered at load like every sibling list (a `null`/`42` row became
+a permanent "Unknown item"), `normalizeItem` treats a non-string name as no name, local
+`loadGame` resolves null for a non-object payload through the shared `asSaveObject` (the cloud
+loader's 07-25 guard, now ONE export in `persistence.js` — a string payload used to spread index
+keys into live state and show the start screen again with the slot still listed), and roster rows
+go through `projectRosterEntry` (the 09-10 save-list projection, one list over: string-or-fallback
+name/race/class, finite level/savedAt, unkeyed records dropped; the embedded character still
+passes the vault's `sanitizeCharacter`, the real gate). **(6) THE ORDINARY TURN (wow W1):** one
+static block in `CORE_INSTRUCTIONS` (prefix-stable, ~160 cached tokens, zero per-turn marginal)
+replaces the exploration cycle's "end by asking" step and the "Leave space" pacing line: an
+ordinary turn is 60–180 words and contains, in order, CONSEQUENCE (never a restatement of the
+player's action), ONE PARTICULAR (a short banned-abstraction list: palpable, air is thick, chill
+down the spine, silence hangs heavy), MOTION (someone present acts on their own want or agenda;
+tempo QUIET forbids new threats, not life — quiet is never static), THE ASK (end on the
+situation's live question; "What do you do?" only when nothing in the scene already asks it,
+never a menu of stacked rhetorical questions). The 3-paragraph ceiling, rule 6, and check
+discipline are untouched; the default custom DM prompt's "Then ask What do you do?" softens to
+match (device-local; applies on Reset to default). The floor is deliberately in the SHARED block
+so no per-provider length hint is needed (Grok over-obeyed brevity). Proof still owed: the
+audit's 20-turn before/after scoring on one starter premise (echo / particular / motion /
+ask-shape / word count, Gemini + Grok).
+**Why:** the load boundary is a TYPE assumption everywhere a persisted field is read, and every
+one of these was a live deadlock, a silent purse wipe, or a "[object Object]" in canon; the
+narration prompt build was the last effect with no way out of its phase. The turn grammar is the
+cheapest ceiling-raiser in the genre benchmark — content shape where we only had length — and it
+lives entirely in the cached prefix.
+
 **2026-09-10 · Premise starters are a FILL, not a mode — and the opening owes the player a person, an echo, and a handle.**
 The 2026-09-09 wow audit (first-ten-minutes, Lap 1) named "Set the stage" the genre's weakest
 moment we ship: one blank 8,000-char textarea the whole campaign depends on, and no DM opening at

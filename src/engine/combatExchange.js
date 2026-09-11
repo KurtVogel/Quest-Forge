@@ -1678,6 +1678,7 @@ export function planOpeningExchange(state) {
     // calls below must not each hand the Rogue a fresh reaction.
     const uncannyDodgeState = { used: false };
     for (const actor of state.combat.turnOrder || []) {
+        if (!actor || typeof actor !== 'object') continue;
         const actorId = actor.id || actor.name;
         if (!actorIds.has(actorId)) continue;
         if (actor.type === 'companion') {

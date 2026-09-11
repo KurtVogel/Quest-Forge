@@ -73,7 +73,7 @@ export default function CombatPanel() {
                     <div id="combat-details">
                         {/* Initiative Tracker */}
                         <div className="combat-initiative">
-                            {combat.turnOrder.map((fighter, idx) => {
+                            {combat.turnOrder.filter(fighter => fighter && typeof fighter === 'object').map((fighter, idx) => {
                                 const isCurrent = idx === combat.currentTurn;
                                 const isDead = fighter.type === 'enemy'
                                     ? combat.enemies.find(e => e.id === fighter.id)?.condition === 'dead'
@@ -90,8 +90,8 @@ export default function CombatPanel() {
                                         className={`initiative-slot ${isCurrent ? 'current' : ''} ${isDead ? 'dead' : ''} ${fighter.type}`}
                                     >
                                         <span className="initiative-icon">{icon}</span>
-                                        <span className="initiative-name">{fighter.name}</span>
-                                        <span className="initiative-roll">{fighter.initiative}</span>
+                                        <span className="initiative-name">{typeof fighter.name === 'string' ? fighter.name : 'Unknown'}</span>
+                                        <span className="initiative-roll">{Number.isFinite(fighter.initiative) ? fighter.initiative : '—'}</span>
                                     </div>
                                 );
                             })}

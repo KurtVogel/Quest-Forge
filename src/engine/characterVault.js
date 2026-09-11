@@ -14,13 +14,12 @@ import { getMaxHitPoints, getModifier } from './rules.js';
 import { ABILITY_NAMES, SKILL_LABELS, buildDerivedCharacterFields, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 import { normalizeEquippedSlots } from './equipment.js';
-import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
+import { CHARACTER_APPEARANCE_MAX, MAX_COIN_HELD } from '../config/contentLimits.js';
 import { sanitizePortraitUrl } from './portraitUrl.js';
 
 export const EXPORT_FORMAT = 'quest-forge-character';
 export const EXPORT_VERSION = 1;
 
-const MAX_COIN = 1_000_000;
 // DECISIONS.md 2026-06-15: level-up HP became fixed-average (deterministic). Heroes
 // created after that boundary have exactly ONE legitimate maxHP for their class/CON/
 // level — the wide legacy clamp band exists only for pre-decision heroes whose
@@ -158,9 +157,9 @@ export function sanitizeCharacter(raw) {
         class: raw.class,
         level,
         exp,
-        gold: clampInt(raw.gold, 0, MAX_COIN, 0),
-        silver: clampInt(raw.silver, 0, MAX_COIN, 0),
-        copper: clampInt(raw.copper, 0, MAX_COIN, 0),
+        gold: clampInt(raw.gold, 0, MAX_COIN_HELD, 0),
+        silver: clampInt(raw.silver, 0, MAX_COIN_HELD, 0),
+        copper: clampInt(raw.copper, 0, MAX_COIN_HELD, 0),
         abilityScores,
         maxHP,
         // The roster is a TEMPLATE, not an afterlife (DECISIONS.md 2026-09-03):

@@ -309,7 +309,7 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 
 ### Exploration / Roleplay (no dice needed)
 1. You describe the scene, environment, or NPC dialogue
-2. You end by asking the player what they do (or by presenting a choice)
+2. You end on the situation's live question (THE ORDINARY TURN below owns the shape)
 3. Player responds with their action
 4. If the action automatically succeeds (no challenge), narrate the result and continue
 
@@ -335,7 +335,15 @@ The game follows a strict narration cycle. You must adhere to this pacing to ens
 - When you receive roll results, narrate the outcome IMMEDIATELY. Don't re-request the same rolls.
 - In combat, never use \`requested_rolls\`. Action Surge changes the number of declared player slots, never the number of enemy actions.
 - A question or clarification is not a committed action: omit \`combat_exchange\`, and nobody acts.
-- **Leave space for the player.** After ordinary player input, answer the immediate consequence and stop. Do not keep writing past the next meaningful choice.`;
+
+## THE ORDINARY TURN
+
+An ordinary turn is 60–180 words and contains, in this order:
+1. **CONSEQUENCE.** Open on what the player's action changed — never a restatement of the action ("You step forward and say…"); the player knows what they did.
+2. **ONE PARTICULAR.** One concrete sensory or physical detail specific to this place or person. Never abstractions: "the tension is palpable", "the air is thick", "a chill runs down your spine", "silence hangs heavy".
+3. **MOTION.** The world or someone present acts on their own want or agenda — a sign of something coming, an offer with a cost, an unwelcome truth, a small want voiced. A QUIET tempo forbids new threats, not life; quiet is never static.
+4. **THE ASK.** End on the situation's live question. Leave space for the player: answer the immediate consequence and stop before the next meaningful choice. Write "What do you do?" only when nothing in the scene already asks it — never a menu of stacked rhetorical questions ("Will you…? Or perhaps…?").
+Major moments (openings, big consequences, important NPC scenes, climaxes) may run to 3 paragraphs; nothing runs to 4.`;
 
 const SIMPLIFIED_5E_RULES = `## GAME MECHANICS (Simplified D&D 5e)
 
@@ -1027,8 +1035,10 @@ function buildCombatBlock(combat, character) {
         return `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac}${atk}${dmg} | Health: ${e.condition}${conditions}${status}${defense}${flanked}`;
     }).join('\n') || '- No tracked enemies';
 
+    // Entries are typed at load (session.js sanitizeTurnOrderEntry); the
+    // `?.` is a belt so a live-state hole can never throw out of the prompt.
     const turnList = turnOrder.map((t, i) =>
-        `${i === combat.currentTurn ? '→ ' : '  '}${t.name} (init: ${t.initiative})`
+        `${i === combat.currentTurn ? '→ ' : '  '}${t?.name || 'Unknown'} (init: ${t?.initiative ?? 0})`
     ).join('\n') || '- Turn order pending';
 
     const phase = combat.phase || 'awaiting_player';

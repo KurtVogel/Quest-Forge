@@ -323,7 +323,21 @@ export function saveGame(slotId, gameState) {
 }
 
 /**
- * Load game state from a slot.
+ * Only a plain object is a save. A corrupted payload parsing to a number,
+ * string, or array passes callers' truthy checks and reaches LOAD_GAME as a
+ * primitive, where validateSaveState's spread mints index keys ("0".."3")
+ * into live state with a null character — the app silently shows the start
+ * screen again with the slot still listed, and the Upload-local-saves loop
+ * ships the same junk to the cloud (2026-07-25 audit for the cloud path;
+ * 2026-09-11 persistence P2 for the local one). Shared by both loaders.
+ */
+export function asSaveObject(parsed) {
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+}
+
+/**
+ * Load game state from a slot. Resolves null for a slot whose stored payload
+ * is not a plain object — callers surface "could not be loaded".
  */
 export function loadGame(slotId) {
     return withDb((db, resolve, reject) => {
@@ -331,13 +345,13 @@ export function loadGame(slotId) {
         const request = tx.objectStore(PAYLOAD_STORE).get(slotId);
         request.onsuccess = () => {
             if (request.result?.state) {
-                resolve(request.result.state);
+                resolve(asSaveObject(request.result.state));
                 return;
             }
             // Belt: a record whose payload never migrated/landed still loads
             // from the legacy embedded-state metadata record.
             const legacyRequest = tx.objectStore(STORE_NAME).get(slotId);
-            legacyRequest.onsuccess = () => resolve(legacyRequest.result?.state || null);
+            legacyRequest.onsuccess = () => resolve(asSaveObject(legacyRequest.result?.state));
             legacyRequest.onerror = () => reject(legacyRequest.error);
         };
         request.onerror = () => reject(request.error);
@@ -439,13 +453,44 @@ export function saveRosterCharacter(character, inventory) {
  * List all roster heroes, newest first. Entries are small (no messages),
  * so this returns them whole — character and inventory included.
  */
+/**
+ * ONE typed projection for a roster row (2026-09-11 persistence P2 — the
+ * 09-10 "a render is a trust boundary" class, one list over): the hero picker
+ * renders `name` / `level` / race / class as React children with no boundary
+ * of its own. Text is string-or-fallback, level finite, savedAt a number; a
+ * record without a string id (the store's key) or a non-object record is
+ * dropped. The embedded `character` is untouched — the picker runs it
+ * through the vault's sanitizeCharacter, which is the real gate.
+ */
+export function projectRosterEntry(record) {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
+    const id = metaText(record.id, null);
+    if (!id) return null;
+    const character = record.character && typeof record.character === 'object' && !Array.isArray(record.character)
+        ? record.character
+        : null;
+    return {
+        id,
+        name: metaText(record.name, null) || metaText(character?.name, 'Unnamed hero'),
+        race: metaText(record.race, ''),
+        class: metaText(record.class, ''),
+        level: metaNumber(record.level, 1),
+        savedAt: metaNumber(record.savedAt, 0),
+        character,
+        inventory: Array.isArray(record.inventory) ? record.inventory : [],
+    };
+}
+
 export function listRosterCharacters() {
     return withDb((db, resolve, reject) => {
         const tx = db.transaction(ROSTER_STORE, 'readonly');
         const store = tx.objectStore(ROSTER_STORE);
         const request = store.getAll();
         request.onsuccess = () => {
-            resolve(request.result.sort((a, b) => b.savedAt - a.savedAt));
+            resolve((Array.isArray(request.result) ? request.result : [])
+                .map(projectRosterEntry)
+                .filter(Boolean)
+                .sort((a, b) => b.savedAt - a.savedAt));
         };
         request.onerror = () => reject(request.error);
         tx.onabort = () => reject(tx.error || request.error);

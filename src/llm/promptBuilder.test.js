@@ -108,6 +108,38 @@ describe('stable cache prefix (DECISIONS.md 2026-07-18)', () => {
     });
 });
 
+describe('THE ORDINARY TURN grammar block (WOW 2026-09-11, ordinary-turn W1)', () => {
+    it('sits in the cached static prefix ahead of the premise and carries the four elements in order', () => {
+        const text = prompt({ premise: 'A premise.' });
+        const block = text.indexOf('## THE ORDINARY TURN');
+        expect(block).toBeGreaterThan(0);
+        expect(block).toBeLessThan(text.indexOf('## CAMPAIGN PREMISE'));
+        expect(block).toBeLessThan(text.indexOf('## RESPONSE FORMAT'));
+        const order = ['**CONSEQUENCE.**', '**ONE PARTICULAR.**', '**MOTION.**', '**THE ASK.**']
+            .map(marker => text.indexOf(marker, block));
+        expect(order.every(i => i > block)).toBe(true);
+        expect([...order].sort((a, b) => a - b)).toEqual(order);
+    });
+
+    it('states the floor and ceiling, bans the echo and the abstraction tics, and makes the closing question conditional', () => {
+        const text = prompt();
+        expect(text).toContain('60–180 words');
+        expect(text).toContain('never a restatement of the action');
+        expect(text).toContain('the tension is palpable');
+        expect(text).toContain('quiet is never static');
+        expect(text).toContain('Write "What do you do?" only when nothing in the scene already asks it');
+        expect(text).toContain('never a menu of stacked rhetorical questions');
+        expect(text).not.toContain('You end by asking the player what they do');
+    });
+
+    it('is byte-identical across turns with different dynamic state (prefix-stable)', () => {
+        const a = prompt({ premise: 'A premise.' });
+        const b = prompt({ premise: 'A premise.', currentLocation: 'Elsewhere', messages: [{ role: 'user', content: 'x' }] });
+        const slice = text => text.slice(text.indexOf('## THE ORDINARY TURN'), text.indexOf('## THE ORDINARY TURN') + 900);
+        expect(slice(a)).toBe(slice(b));
+    });
+});
+
 describe('recent table rulings block', () => {
     const baseRuling = {
         objective: 'Convince Maren to share gossip about Odo',
