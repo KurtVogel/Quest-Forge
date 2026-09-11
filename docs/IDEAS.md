@@ -1775,6 +1775,48 @@ identity did on 09-09; and the stale-chunk sweeps integer-guard + cap the stored
 corrupt `payloadChunks: Infinity` today makes a slot un-overwritable and un-deletable). From the
 2026-09-10 strengthening audit (cloud-sync, Lap 2).
 
+### [strengthening] The combat envelope is typed at load like the hero: turn-order entries, the stored exchange result, the flags
+`validateSaveState`'s combat branch types `enemies`, `flankedEnemyIds`, `surprise`,
+`currentTurn`, and `queuedExchange`, then hands `turnOrder`, `round`, `active`, `xpAwarded`,
+`bonusActionUsed`, and the stored `lastExchangeResult`'s `events` / `postState.player` /
+`postState.companions` through raw — and its own `turnOrder` read optional-chains the entry
+(`actor?.type`) that five downstream consumers dereference bare. Reproduced: one `null` turn-order
+entry (a JSON round-trip hole) throws out of `buildSystemPrompt` on every turn, out of the
+exchange commit and reject inside the reducer, and out of `planOpeningExchange` — where the 09-09
+"reject on throw" belt dispatches a REJECT that the OPENING phase guard ignores, so the phase
+never moves and the End Combat button stays gated on living foes: a deadlocked campaign. A
+`null` stored event or companion throws out of the narration effect's synchronous
+`combatNarrationPrompt` call (the one engine call in ChatPanel without a try) into the Chat
+boundary, with no UI path out of `awaiting_narration`; a string `round` string-concatenates
+(`"3" + 1 = "31"`) on every completed exchange; 100 unclamped stored events built a 2 MB
+narration prompt. Rule: a typed turn-order entry (type whitelist, string id/name, finite
+initiative — drop otherwise), a typed exchange result (event-type whitelist, clamped text, finite
+numbers, typed player/companion snapshots), boolean flags and an integer round, enemy ids
+re-canonicalized with a fresh `usedIds` (a loaded duplicate id makes `UPDATE_ENEMY` kill two
+foes today) — and any belt that dispatches a reject must assert the reject actually transitioned
+the phase. From the 2026-09-11 strengthening audit (combat-exchange, Lap 2).
+
+### [strengthening] The purse and the class/race keys are typed at load — the last two untyped spreads in `healLoadedCharacter`
+`healLoadedCharacter` types level/exp/HP/abilities/hit dice/conditions/identity/death state and
+spreads `gold`/`silver`/`copper` and `class`/`race` raw. Reproduced: `gold: {}` (or `"abc"`)
+beside 40 sp 5 cp → the first "+1 gp" grant → 0 gp 0 sp 0 cp, because `toCopper`'s
+`Math.max(0, Math.trunc(x))` turns the total into `NaN` and `fromCopper(NaN)` yields zero — the
+receipt line prints "purse: 0 cp" as if that were the arithmetic; `gold: 1e15` survives with no
+ceiling where every DM-side coin channel is capped. `class: {}` loads, the prompt says
+"**Class:** [object Object]", `classResources` collapses to `{}` (a Fighter silently loses Second
+Wind / Action Surge / Extra Attack / Fighting Style), the hit die falls to d8, and the sheet's
+`{charClass?.name || character.class}` throws as a React child — while the vault's
+`sanitizeCharacter` THROWS a player-readable "this hero may come from an older version of the
+game" on exactly this input. The plausible stale shape is a string: a pre-balance-overhaul save
+whose hero is a cut class or race (`paladin`, `halfling`) loads featureless with no notice.
+Rule: `toInt`-clamp the three coin fields (0 ..≤ the sale ceiling), whitelist `class`/`race`
+against `CLASSES`/`RACES` with a fallback plus ONE visible system line mirroring the vault's
+message, `asSaveObject` in local `loadGame` (cloud has had it since 07-25 — a string payload
+today loads as a characterless start screen and uploads as-is), object-filter + name-type
+inventory rows (the one persisted list whose entries load raw — `null` becomes a permanent
+"Unknown item"), and project roster rows before rendering them. From the 2026-09-11
+strengthening audit (persistence, Lap 2).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
