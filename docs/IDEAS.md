@@ -420,6 +420,21 @@ follow-through, and foe/scenery variety beyond what FOE FATIGUE already forces. 
 WOW layer's open "real-provider eval for natural recall" idea from memory mechanics to felt
 play quality. Findings feed salience tuning (WOW layer's open item), the scenery/motif
 fatigue idea (2026-08-03), and the cross-faction-contradiction guard idea (2026-07-14).
+**[wow] Turn-grammar rubric (wow audit 2026-09-11, ordinary-turn Lap 1, W1):** the ordinary
+turn's only craft instructions today are the length rule and "ask what they do"
+(`promptBuilder.js:270,311-312,338,371`; default custom prompt) — no content shape, no
+anti-pattern list, no floor (Grok over-obeys brevity). Apocalypse World's GM-move grammar,
+Fallen London's prose economy, 80 Days' one-particular-one-agenda paragraph give the shape:
+**consequence first, one particular, the world moves, then a specific ask.** Proposed slice: a
+prefix-stable `## THE ORDINARY TURN` block (~160 cached tokens, zero per-turn marginal) —
+60–180 words containing (1) CONSEQUENCE, never an echo of the player's action; (2) ONE
+PARTICULAR, with a short banned-abstraction list (palpable, air is thick…); (3) MOTION — an NPC
+present acts on their own want/agenda, quiet ≠ static (tempo QUIET forbids new threats, not
+life); (4) THE ASK — the situation's live question, "What do you do?" only when nothing already
+asks it, never a stacked-question menu. The scorecard's brevity / stance-informed-dialogue /
+quiet-scene rows become exactly these per-turn checks: score 20 turns before/after on Gemini
+and Grok (echo / particular / motion / ask-shape / word count). Full shape in
+`SCHEDULED_WOW.md` 2026-09-11.
 
 ## Gameplay & Mechanics
 
@@ -1530,7 +1545,7 @@ While there: the enemy save lane should consult `getConditionRollEffects(…, 's
 hero's does, so `restrained` means the same thing on both sides of the table. From the
 2026-09-05 strengthening audit (enemy-stats-conditions, Lap 1).
 
-### [strengthening] Scene presence from the whole table, not the player's last line — status: `idea` (2026-09-06)
+### [strengthening] Scene presence from the whole table, not the player's last line — status: `shipped` (2026-09-06 queue sweeps — DECISIONS.md 2026-09-06 "Whoever is in the scene is at the table" + "RAG presence is judged from the SCENE"; marked by the 2026-09-11 wow audit [wow])
 Presence-aware retrieval (2026-08-28) rests person-tied memories when that person is "nowhere
 near" — but "near" is judged from the player's message plus the location string, because that is
 the retrieval query. The DM's narration is what actually establishes who is in the scene, and a
@@ -1547,7 +1562,7 @@ not first-tag-wins, so a row about two people is not permanently tied to whichev
 roster first. Neither change touches cosine scores or embed calls. From the 2026-09-06
 strengthening audit (vector-memory-rag, Lap 1).
 
-### [strengthening] Provider refusals and prompt blocks are named outcomes, never blank turns or "connection dropped" — status: `idea` (2026-09-06)
+### [strengthening] Provider refusals and prompt blocks are named outcomes, never blank turns or "connection dropped" — status: `shipped` (2026-09-06 queue sweep — DECISIONS.md 2026-09-06 "a provider refusal is an error — never a blank turn": `message.refusal`/`delta.refusal`, `promptFeedback.blockReason`, empty non-intent reply all throw; marked by the 2026-09-11 wow audit [wow])
 The 2026-08-28 refusal-cascade work made model refusals a first-class problem (DELETE_MESSAGE
 exists to scrub them from the window), but two refusal shapes still arrive as something else.
 OpenAI-compatible reasoning models return refusals in `message.refusal` / `delta.refusal` with

@@ -81,7 +81,7 @@ or loses a moment (note it under Process notes).
 | Moment ID | The moment the player feels | Scope (where we produce it) | Last audited |
 |---|---|---|---|
 | first-ten-minutes | Premise → hero reveal → first scene; "I'm already in" | creation wizard (`components/CharacterSheet`), `components/Chat/sessionPriming.js`, `openingScene` lane, `starting_items` | 2026-09-09 (L1) |
-| ordinary-turn | The default beat: brief, vivid, ends in a live choice | DM rules + `RESPONSE_FORMAT` in `promptBuilder.js`, `MESSAGE_WINDOW`, custom DM prompt default | — |
+| ordinary-turn | The default beat: brief, vivid, ends in a live choice | DM rules + `RESPONSE_FORMAT` in `promptBuilder.js`, `MESSAGE_WINDOW`, custom DM prompt default | 2026-09-11 (L1) |
 | session-return | Coming back after days: "previously on…", instant re-immersion | `sessionPriming.js`, Continue/Load handoff, Journal | — |
 | checks-and-consequence | A roll that *matters*: stakes stated, failure is content, one roll settles it | `outOfCombatRollPolicy.js`, `pendingRoleplayCheck`, DC ladder + `recentRulings` blocks | — |
 | combat-drama | Fights with fiction: openings, enemy intent variety, wounds that mean something, the victory beat | `combatExchange.js`, combat prompt blocks, narration-only call, `recentEncounters`/foe fatigue | — |
@@ -121,6 +121,7 @@ they do *better*, honestly).
 | loot-and-economy | **Diablo II**, **Kenshi**, **Dwarf Fortress** | Loot as story, an economy that pushes back, artifacts with histories |
 | journal-and-chronicle | **Dwarf Fortress legends**, **Caves of Qud**, **Crusader Kings** | The game writing your history back to you; procedural chronicle as a feature |
 | tone-and-voice, mystery-and-secrets | **Mythic GME**, **Slay the Princess** | Oracle-driven surprise, an unreliable but consistent narrator |
+| ordinary-turn | **Apocalypse World / Blades in the Dark** (GM moves), **Fallen London / Sunless Sea**, **80 Days**, **Roadwarden** | The GM turn as a move that follows from the fiction — consequence, one particular, the world acts, then a specific ask; 80–150 words of prose economy (added 2026-09-11) |
 | first-ten-minutes | **Disco Elysium** (the first room, editable archetypes), **Wildermyth** (chapter 1), **King of Dragon Pass** (first council), **Baldur's Gate 1** (Candlekeep), **Citizen Sleeper** (wake to one voice and one clock), **Ironsworn** (truths, first vow) | A start you didn't have to write but may edit; an opening that hands you concrete, characterful first moves inside the fiction — named people you already know, never a blank box, never a menu (added 2026-09-09) |
 
 ## Open Proposals
@@ -131,6 +132,7 @@ reason) on Lap-4 runs.
 
 Format: `- [ ] **W1** (moment-id, YYYY-MM-DD): one-line title — entry date below`
 
+- [ ] **W1** (ordinary-turn, 2026-09-11): Turn grammar — consequence, one particular, motion (quiet ≠ static), then the ask; 60–180-word floor and ceiling, short anti-pattern list, in the cached prefix — entry 2026-09-11
 - [x] **W0** (first-ten-minutes, 2026-09-09): Premise starters — tap a curated start on "Set the stage", then edit it; plus a "Draft from my hero" button (one call, three premises) — entry 2026-09-09. *Shipped 2026-09-10 (branch `wow/first-ten-minutes`): `data/premiseStarters.js` (five starters, name woven in, proper nouns for the front director), `PremiseStarters.jsx` tap-cards on both the wizard and roster paths, `session.premiseStarterId` stamped only while the text is verbatim, `llm/premiseDrafter.js` on the thinking-free Flash machinery lane gated on `isMachineryReady`; browser-verified tap → fill → Begin → stamped autosave.*
 - [x] **W1** (first-ten-minutes, 2026-09-09): The opening ends on a handle and echoes the hero — ANCHOR (people the hero knows on screen), ECHO (one background detail surfaces), HANDLE (2–3 ordinary next things in prose, never urgent) — entry 2026-09-09. *Shipped 2026-09-10 (same branch): three clauses on `buildCampaignOpeningPrompt` only, pinned by `sessionPriming.opening.test.js`; the six-opening real-provider scoring (proof step) is still to run.*
 
@@ -158,6 +160,10 @@ runs triaging.
 
 ## Process notes
 
+- **2026-09-11 — extra run on request (off-schedule).** Both first-ten-minutes items had shipped
+  on 2026-09-10 (ticked); rotation moved to `ordinary-turn`. One W1, second proposal withheld
+  to `npc-relationships`. Backlog: +0, −2. Off-schedule runs are fine: the rotation and the
+  queue cap make cadence a throughput knob, not a correctness one.
 - **2026-09-09 — first landed run, Lap 1 begins.** The routine's first two firings (2026-09-08
   and 2026-09-09) ran without a repository attached, cloned by hand, completed the audit, and
   were refused at push; a third firing with the repository selected landed. All three chose
@@ -173,6 +179,25 @@ runs triaging.
 ---
 
 ## Log
+
+### 2026-09-11 — ordinary-turn — Lap 1 (genre benchmark)
+
+**What we ship.** The ordinary turn is one DM call (~14k in / ~1.1k out, prefix-cached) over the last 20 raw rows (`MESSAGE_WINDOW`, `turnOrchestrator.js:45`). Its craft instructions are, in full: rule 6 "BE THE WORLD, NOT THE PLAYER … Ask what they want to do" (`promptBuilder.js:270`); the exploration cycle "describe the scene … end by asking the player what they do (or by presenting a choice)" (`:311-312`); "Leave space for the player … answer the immediate consequence and stop" (`:338`); the length rule — 1–2 short paragraphs, 3 for major moments, never 4+ (`RESPONSE_FORMAT`, `:371`); and the default custom prompt's "vivid, sensory narration … 1-2 short paragraphs … Then ask 'What do you do?'" (`initialState.js:75-83`). Rule 4 asks for concrete visual detail on a character's FIRST appearance only; the NPC rules say "play established stances consistently" (`:483`); the tempo block says QUIET scenes "are complete scenes" (`:488`). Everything else in the prompt is mechanics, contract, or memory — nothing describes what an ordinary turn must *contain*.
+
+**Best in genre.** Apocalypse World / Blades in the Dark have the cleanest grammar for this exact beat: the GM's turn is a *move* that follows from the fiction — show a sign of something coming, offer an opportunity with a cost, reveal an unwelcome truth, have an NPC act on their want — and only *then* "what do you do?", never as a bare tic. Fallen London / Sunless Sea: ~80–150 words, one striking particular, one line of dry wit, branches whose consequences are legible. 80 Days: one paragraph, one sensory specific, one NPC line with an agenda. Disco Elysium: never restates the player's action; every beat is a physical particular, and failure is content. Roadwarden: the world does not wait for you. Shared shape: **consequence first, one particular, the world moves, then a specific ask.**
+
+**Where we fall short.** (1) Our only ordinary-turn craft is LENGTH plus END-WITH-A-QUESTION. Nothing bans the known LLM tics: echoing the player's action back before the consequence ("You step forward and say…"), atmosphere abstractions ("the tension is palpable", "the air is thick"), a stacked-rhetorical-question menu ("Will you…? Or perhaps…?"), and the mandatory "What do you do?" when the scene already asks it. (2) Nothing requires the world to *move*: QUIET (the common state) reads as "no threats", and no rule says an NPC in the scene should act on their own `agenda:` this turn — so quiet turns can go static rather than quiet, the "you walk down more stairs" flat-narrator failure (DECISIONS 2026-07-14). (3) The floor is unstated: Grok "over-obeys brevity" (IDEAS, 2026-07-09 live playtest) because 1–2 paragraphs has no lower bound.
+
+**W1 · ordinary-turn · Turn grammar: consequence, particular, motion, then the ask**
+- Today: length rule + "ask what they do" (cites above); no content shape, no anti-pattern list, no floor.
+- Best in genre: Apocalypse World's soft moves; Fallen London's prose economy; 80 Days' one-particular-one-agenda paragraph; Disco Elysium's no-echo rule.
+- Proposal: one static block `## THE ORDINARY TURN` in `CORE_INSTRUCTIONS` (prefix-stable), replacing the exploration cycle's step 2 and the "Leave space" line: an ordinary turn is 60–180 words and contains, in order — (1) CONSEQUENCE: what the player's action changed, never a restatement of the action; (2) ONE PARTICULAR: a concrete sensory or physical detail specific to this place or person (a banned-abstraction list: palpable, tension hangs, air is thick, a chill runs down); (3) MOTION: the world or an NPC present acts on their own want or agenda — a sign, an offer with a cost, an unwelcome truth, a small want voiced; quiet ≠ static (tempo QUIET forbids new *threats*, not life); (4) THE ASK: end on the situation's live question — "What do you do?" only when nothing in the scene already asks it, and never a menu of stacked rhetorical questions. Default custom prompt's "Then ask 'What do you do?'" softens to match (device-local; applies on Reset to default). Rule 6, check discipline, and the 3-paragraph ceiling untouched.
+- Cost: ~+160 tokens in the CACHED static prefix — zero per-turn marginal, no dynamic interpolation; DM lane. Output unchanged or shorter.
+- Pillar check: 4 (a floor AND a ceiling, both brief), 5 (NPC agendas surface every turn, not only on stance shifts), 2 (prose craft, no mechanics). Strains none; flag: the anti-pattern list must stay short or it becomes the tic.
+- Proof: 20 ordinary turns on one starter premise, before/after, scored per turn for echo-of-action / particular present / motion present / ask-shape / word count — the exact rubric rows the planned Experience Scorecard names (brevity, stance-informed dialogue, quiet-scene quality). Gemini + Grok both; Grok's median words is the floor metric.
+- IDEAS.md: extends "Experience scorecard: shift directed playtests from defense to offense" with the four-element rubric (no new entry). Retired: "[strengthening] Scene presence from the whole table" and "[strengthening] Provider refusals and prompt blocks are named outcomes" — both shipped (DECISIONS 2026-09-06 ×2).
+
+Second proposal withheld: NPC lines played from `toward the hero:` + `agenda:` is the same gap seen from the other side and belongs to `npc-relationships`' own Lap-1 run. Lap-3 material: a per-provider length hint is unnecessary if the floor lives in the shared block. Backlog: +0 entries, −2. Queue 1/8.
 
 ### 2026-09-09 — first-ten-minutes — Lap 1 (genre benchmark)
 
