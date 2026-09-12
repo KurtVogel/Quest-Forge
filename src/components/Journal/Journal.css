@@ -951,3 +951,23 @@
     opacity: 0.55;
     cursor: not-allowed;
 }
+
+/* Tiered bond shelves (2026-09-12): key moments lead, "Lately" holds
+   unconfirmed impressions + the newest ordinary moments. */
+.journal-npc-bond-kind {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--gold);
+    opacity: 0.85;
+    margin-right: 0.35rem;
+}
+
+.journal-npc-lately .journal-npc-bonds-label {
+    color: var(--text-muted);
+}
+
+.journal-npc-impression {
+    font-style: italic;
+    opacity: 0.85;
+}

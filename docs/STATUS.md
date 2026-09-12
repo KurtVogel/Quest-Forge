@@ -6,7 +6,25 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-12 (the player can edit any character's look — `SET_NPC_LOOK` + `LookEditor` on the Journal card and Companions card; same day: companion look = ONE record via `resolveCompanionLook`, roster-first; deterministic IDENTITY LOCK leading every portrait/scene prompt from `engine/appearanceIdentity.js`; Companions panel shows Looks; deployed). Previous: 2026-09-11 (queue sweep — combat-exchange + persistence Lap-2 hostile input: typed turn order and stored exchange result, narration effect with an exit, typed purse, class/race whitelist with a one-time notice, unique enemy ids at load, inventory/roster/payload typing; plus WOW ordinary-turn W1: `## THE ORDINARY TURN` grammar block in the cached prefix; both queues empty; deployed) — then the wow proof run: `npm run eval:turns` three rounds on Gemini + Grok, MOTION anti-escalation guard and THE ASK stop rule tuned in, report in `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`, redeployed. Previous: 2026-09-10 (WOW build — first-ten-minutes: premise starter tap-cards + "Draft from my hero", ANCHOR/ECHO/HANDLE opening clauses; same day queue sweep — roll-resolution + cloud-sync: ONE death-save tally form, ONE typed save-list projection; both deployed). Previous: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input; deployed with the 09-10 sweep)._
+_Last updated: 2026-09-12 (evening — TIERED character cards: a permanent core earned in a second scene, key moments graded by kind + salience with scene collapse and value eviction, a decaying "lately" shelf; rendered on both cards, the DM prompt, and the Scribe context; deployed). Previous: 2026-09-12 (the player can edit any character's look — `SET_NPC_LOOK` + `LookEditor` on the Journal card and Companions card; same day: companion look = ONE record via `resolveCompanionLook`, roster-first; deterministic IDENTITY LOCK leading every portrait/scene prompt from `engine/appearanceIdentity.js`; Companions panel shows Looks; deployed). Previous: 2026-09-11 (queue sweep — combat-exchange + persistence Lap-2 hostile input: typed turn order and stored exchange result, narration effect with an exit, typed purse, class/race whitelist with a one-time notice, unique enemy ids at load, inventory/roster/payload typing; plus WOW ordinary-turn W1: `## THE ORDINARY TURN` grammar block in the cached prefix; both queues empty; deployed) — then the wow proof run: `npm run eval:turns` three rounds on Gemini + Grok, MOTION anti-escalation guard and THE ASK stop rule tuned in, report in `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`, redeployed. Previous: 2026-09-10 (WOW build — first-ten-minutes: premise starter tap-cards + "Draft from my hero", ANCHOR/ECHO/HANDLE opening clauses; same day queue sweep — roll-resolution + cloud-sync: ONE death-save tally form, ONE typed save-list projection; both deployed). Previous: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input; deployed with the 09-10 sweep)._
+
+## 2026-09-12 (evening) — tiered character cards: permanent core earned in a second scene, key moments by kind + salience, a "lately" shelf
+
+Vesa: cards were filling "from four different positions in the latest sex scene or details of one
+tavern conversation". **Ruling: DECISIONS.md 2026-09-12 (third entry).** Three engine-owned shelves
+in `engine/npcRoster.js`: (1) `personality`/`stanceToPlayer` fragments land on `recentImpressions`
+and graduate through `mergeNpcCoreText` only when a LATER scene (>16 raw rows) restates them —
+rewrites still replace, goals/secrets unchanged, the shelf is engine-written only; (2) `bondMoment`
+is graded `{ text, kind, salience }` — same-kind moments inside the scene window collapse to one
+(the more salient text wins), eviction is lowest-salience-first (storage cap 10), and
+`splitBondMoments` picks key (salience ≥4 or first-of-kind, cap 5) vs recent; ungraded legacy rows
+stay on "lately"; (3) "Lately" = impressions + newest ordinary moments. Rendered on the Journal card
+("Key moments" with kind chips / "Lately"), the Companions card, the KNOWN NPCs line
+(`key moments with the hero:` / `lately with the hero:`), the companion party line, and the
+Scribe's KNOWN STANCES (impressions labeled unconfirmed; kind tags). Scribe + Deepen-memory schemas
+grade moments and define the stance as the ENDURING regard; the DM lane's string `bondMoment`
+stays ungraded. Browser-verified on a seeded save (Journal Characters tab + Companions panel).
+22 new/updated pins; 2,426 tests green, lint clean, built. **Deployed.**
 
 ## 2026-09-12 (later) — the player can edit any character's look (SET_NPC_LOOK + LookEditor)
 

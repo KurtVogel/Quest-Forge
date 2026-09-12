@@ -446,7 +446,29 @@ describe('party block', () => {
             ],
         });
         expect(text).toContain('Toward the hero: Trusts the hero with her life');
-        expect(text).toContain('Personal history with the hero: The hero pulled Kaarina from the river at the ford.; Kaarina gave the hero her mother\'s iron ring.');
+        // Ungraded legacy moments render under "Lately", newest first (2026-09-12 tiers).
+        expect(text).toContain('Lately with the hero: Kaarina gave the hero her mother\'s iron ring.; The hero pulled Kaarina from the river at the ford.');
+    });
+
+    it('a companion\'s key moments lead the party line and unconfirmed impressions ride "Lately" (2026-09-12)', () => {
+        const text = prompt({
+            party: [
+                { id: 'c1', name: 'Kaarina', role: 'shieldmaiden', level: 2, hp: 18, maxHp: 18, ac: 15, weapon: 'Longsword', attackBonus: 4, damage: '1d8+2', affinity: 75 },
+            ],
+            npcs: [
+                {
+                    id: 'npc-1', name: 'Kaarina', disposition: 'friendly', rosterTier: 'character', kind: 'character',
+                    stanceToPlayer: 'Trusts the hero with her life after the ford rescue.',
+                    recentImpressions: [{ field: 'stanceToPlayer', text: 'Irritated by his boasting tonight.', atMessage: 3 }],
+                    bondMoments: [
+                        { text: 'The hero pulled Kaarina from the river at the ford.', at: 1, kind: 'rescue', salience: 5 },
+                        { text: 'Kaarina and the hero shared a skin of wine on watch.', at: 2, kind: 'other', salience: 2 },
+                    ],
+                },
+            ],
+        });
+        expect(text).toContain('Key moments with the hero: The hero pulled Kaarina from the river at the ford.');
+        expect(text).toContain('Lately with the hero: Irritated by his boasting tonight.; Kaarina and the hero shared a skin of wine on watch.');
         // The DM contract: stance/bond updates route through npc_updates, not update_companions.
         expect(text).toContain('`npc_updates` with `stanceToPlayer`');
         // Stutter guard (playtest #14): stance emission is a full rewrite of the

@@ -31,8 +31,27 @@ companions first-class `npc_updates` subjects, and the Companions panel shows "T
 "Moments between you". Why: the party is the most sustained relationship surface in the game.
 Follow-up idea kept separate: the relationship timeline view (below) now benefits companions too.
 
+### Tiered character cards — permanent core, key moments, lately — status: `shipped` (2026-09-12)
+Vesa: cards filled "from four different positions in the latest sex scene or details of one
+tavern conversation". Shipped engine-owned tiers (DECISIONS.md 2026-09-12): personality/stance
+fragments become `recentImpressions` and graduate only when a later scene restates them; bond
+moments are graded by kind + salience with scene collapse (one moment per kind per scene) and
+value-based eviction; `splitBondMoments` splits key vs recent for every card and prompt line.
+Follow-ups:
+- **Regrade legacy moments on Deepen memory** — ungraded rows never become key; a one-shot
+  Deepen pass could grade the EXISTING list (kind + salience) instead of only adding. Why:
+  every mature campaign is all legacy rows today, so its cards show no "Key moments" until new
+  play grades some.
+- **Confirm impressions from the DM's own prose** — only the Scribe/DM `npc_updates` lanes can
+  restate an impression today; a cheap token check of whether the narrative itself shows the
+  trait again would confirm without a Scribe emission. Why: the Scribe omits the stance when
+  "nothing shifted", which is exactly when a trait is being quietly confirmed.
+- **"How you got here" from key moments** — the card (and the Chronicle) could narrate the
+  key-moment list as one paragraph; the overflow-archival idea below is now cheaper because the
+  key moments already ARE the milestones.
+
 ### Relationship timeline view — status: partially `shipped` (2026-07-25), archival still `idea`
-`bondMoments` is capped at 8 for prompt economy, but the full history could be archived (e.g.
+`bondMoments` is capped (10 since 2026-09-12, evicted by salience — see the tiered-cards entry above) for prompt economy, but the full history could be archived (e.g.
 oldest moments folded into a compact "relationship chronicle" paragraph on overflow instead of
 dropped) and shown as a scrollable timeline in the Journal card. Why: long romances/rivalries
 lose their earliest beats exactly when they've become the most meaningful.

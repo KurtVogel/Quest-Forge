@@ -17,6 +17,14 @@ import {
     locationMatchesPlace,
     MAX_NPC_BOND_MOMENTS,
     MAX_NPC_CALLBACK_HOOKS,
+    MAX_NPC_IMPRESSIONS,
+    NPC_IMPRESSION_TTL_MESSAGES,
+    bondKindLabel,
+    listNpcImpressions,
+    mergeNpcCoreText,
+    normalizeImpressions,
+    selectKeyBondMoments,
+    splitBondMoments,
     mergeNpcDossierText,
     compactRelationshipHistory,
     migrateLegacyNpc,
@@ -80,13 +88,140 @@ describe('player-relationship memory (stanceToPlayer + bondMoments)', () => {
         expect(genuinelyNew[1].text).toContain('real name');
     });
 
-    it('caps bond moments and drops the oldest first', () => {
+    it('caps bond moments and drops the oldest first among ungraded equals', () => {
         let moments = [];
+        const topics = ['ribbons', 'wine', 'scars', 'letters', 'oaths', 'daggers', 'songs', 'maps', 'storms', 'debts', 'graves', 'boots', 'lanterns', 'ferries'];
         for (let i = 0; i < MAX_NPC_BOND_MOMENTS + 3; i++) {
-            moments = appendBondMoments(moments, [`Distinct shared beat number ${i} about ${['ribbons', 'wine', 'scars', 'letters', 'oaths', 'daggers', 'songs', 'maps', 'storms', 'debts', 'graves'][i]}.`]);
+            moments = appendBondMoments(moments, [`Distinct shared beat number ${i} about ${topics[i]}.`]);
         }
         expect(moments).toHaveLength(MAX_NPC_BOND_MOMENTS);
         expect(moments[0].text).not.toContain('number 0');
+    });
+
+    describe('tiered bond moments (2026-09-12): scene collapse, salience eviction, key selection', () => {
+        const night = { text: 'Maren and the hero spent their first night together above the inn.', kind: 'intimacy', salience: 5, atMessage: 10 };
+
+        it('normalizes kind/salience/atMessage only when valid, and a legacy row round-trips byte-identical', () => {
+            expect(normalizeBondMoments([{ text: 'Legacy beat.', at: 5 }])).toEqual([{ text: 'Legacy beat.', at: 5 }]);
+            const [row] = normalizeBondMoments([{ text: 'Graded.', at: 5, kind: 'Shared Danger', salience: '4.4', atMessage: 12.9 }]);
+            expect(row).toEqual({ text: 'Graded.', at: 5, kind: 'shared_danger', salience: 4, atMessage: 12 });
+            const [junk] = normalizeBondMoments([{ text: 'Junk.', at: 5, kind: 'apotheosis', salience: 'high', atMessage: -3 }]);
+            expect(junk).toEqual({ text: 'Junk.', at: 5, atMessage: 0 });
+        });
+
+        it('collapses a same-kind moment inside the scene window, keeping the more salient text at the held time', () => {
+            const first = appendBondMoments([], [{ text: 'Maren pulled the hero into her room and undressed him.', kind: 'intimacy', salience: 3 }], { messageCount: 10 });
+            const second = appendBondMoments(first, [{ text: 'They moved to the window bench, Maren astride the hero.', kind: 'intimacy', salience: 3 }], { messageCount: 13 });
+            expect(second).toHaveLength(1);
+            expect(second[0].text).toContain('undressed');
+            const third = appendBondMoments(second, [night], { messageCount: 16 });
+            expect(third).toHaveLength(1);
+            expect(third[0].text).toContain('first night together');
+            expect(third[0].salience).toBe(5);
+            expect(third[0].atMessage).toBe(10);
+        });
+
+        it('does not collapse across kinds, across scenes, or for ungraded "other" beats', () => {
+            const base = appendBondMoments([], [night], { messageCount: 10 });
+            expect(appendBondMoments(base, [{ text: 'Maren confessed she has no family left.', kind: 'confession', salience: 4 }], { messageCount: 12 })).toHaveLength(2);
+            expect(appendBondMoments(base, [{ text: 'Weeks on, a second night in the hayloft.', kind: 'intimacy', salience: 3 }], { messageCount: 60 })).toHaveLength(2);
+            const others = appendBondMoments(base, [{ text: 'Maren joked about the ferryman.', kind: 'other' }], { messageCount: 11 });
+            expect(appendBondMoments(others, [{ text: 'Maren mocked the hero\'s boots.', kind: 'other' }], { messageCount: 12 })).toHaveLength(3);
+        });
+
+        it('evicts the lowest salience first, oldest among equals — the first night survives twelve jokes', () => {
+            let moments = appendBondMoments([], [night], { messageCount: 4 });
+            for (let i = 0; i < 12; i++) {
+                moments = appendBondMoments(moments, [{ text: `Maren and the hero traded a joke about topic number ${i}.`, kind: 'other', salience: 2 }], { messageCount: 30 + i * 20 });
+            }
+            expect(moments).toHaveLength(MAX_NPC_BOND_MOMENTS);
+            expect(moments[0].text).toContain('first night together');
+            expect(moments.some(m => m.text.includes('number 0'))).toBe(false);
+        });
+
+        it('selects key moments: salience >= 4 or the first of an explicit kind, chronological; ungraded rows never qualify', () => {
+            const rows = [
+                { text: 'First kiss on the stairs.', at: 1, kind: 'flirtation', salience: 3 },
+                { text: 'A dull joke.', at: 2, kind: 'other', salience: 2 },
+                { text: 'Second kiss in the rain.', at: 3, kind: 'flirtation', salience: 3 },
+                { text: 'She saved the hero at the ford.', at: 4, kind: 'rescue', salience: 5 },
+                { text: 'Legacy beat with no grade.', at: 5 },
+            ];
+            expect(selectKeyBondMoments(rows).map(m => m.text)).toEqual(['First kiss on the stairs.', 'She saved the hero at the ford.']);
+            const { key, recent } = splitBondMoments(rows);
+            expect(key).toHaveLength(2);
+            expect(recent.map(m => m.text)).toEqual(['Legacy beat with no grade.', 'Second kiss in the rain.', 'A dull joke.']);
+        });
+
+        it('caps key moments by score, then re-sorts them chronologically', () => {
+            const rows = Array.from({ length: 8 }, (_, i) => ({ text: `Turning point ${i}.`, at: i, kind: 'promise', salience: i % 2 ? 5 : 4 }));
+            // Salience 5 rows (50) outrank the first-of-kind salience-4 row (45).
+            const key = selectKeyBondMoments(rows, 3);
+            expect(key.map(m => m.at)).toEqual([1, 3, 5]);
+        });
+
+        it('bondKindLabel humanizes a kind and hides "other" and junk', () => {
+            expect(bondKindLabel('shared_danger')).toBe('shared danger');
+            expect(bondKindLabel('other')).toBe('');
+            expect(bondKindLabel({})).toBe('');
+        });
+    });
+
+    describe('impressions + mergeNpcCoreText (2026-09-12): permanence is earned in a second scene', () => {
+        const core = 'Warm and openly flirtatious with the hero; she trusts him with her worry about her sister.';
+
+        it('a first-time fragment becomes an impression and leaves the core untouched', () => {
+            const merged = mergeNpcCoreText(core, 'Impressed by the hero\'s swordplay in the alley.', [], { field: 'stanceToPlayer', messageCount: 40 });
+            expect(merged.text).toBe(core);
+            expect(merged.impressions).toEqual([{ field: 'stanceToPlayer', text: 'Impressed by the hero\'s swordplay in the alley.', atMessage: 40 }]);
+        });
+
+        it('a same-scene restatement stays pending; a later-scene restatement graduates', () => {
+            const pending = [{ field: 'stanceToPlayer', text: 'Impressed by the hero\'s swordplay in the alley.', atMessage: 40 }];
+            const same = mergeNpcCoreText(core, 'Impressed by the hero\'s swordplay.', pending, { field: 'stanceToPlayer', messageCount: 44 });
+            expect(same.text).toBe(core);
+            expect(same.impressions).toHaveLength(1);
+            const later = mergeNpcCoreText(core, 'Impressed by the hero\'s swordplay.', pending, { field: 'stanceToPlayer', messageCount: 70 });
+            expect(later.text).toContain(core);
+            expect(later.text).toContain('Impressed by the hero\'s swordplay');
+            expect(later.impressions).toEqual([]);
+        });
+
+        it('a complete rewrite replaces the core and absorbs the impressions it restates', () => {
+            const pending = [
+                { field: 'stanceToPlayer', text: 'Impressed by the hero\'s swordplay.', atMessage: 40 },
+                { field: 'stanceToPlayer', text: 'Wary of his drinking.', atMessage: 41 },
+            ];
+            const rewrite = `${core} Impressed by the hero's swordplay.`;
+            const merged = mergeNpcCoreText(core, rewrite, pending, { field: 'stanceToPlayer', messageCount: 42 });
+            expect(merged.text).toBe(rewrite);
+            expect(merged.impressions.map(entry => entry.text)).toEqual(['Wary of his drinking.']);
+        });
+
+        it('impressions expire unconfirmed, dedupe per field, and cap', () => {
+            const stale = [{ field: 'stanceToPlayer', text: 'Old and gone.', atMessage: 0 }];
+            expect(normalizeImpressions(stale, { messageCount: NPC_IMPRESSION_TTL_MESSAGES + 1 })).toEqual([]);
+            expect(normalizeImpressions(stale, { messageCount: NPC_IMPRESSION_TTL_MESSAGES })).toHaveLength(1);
+            const dupes = normalizeImpressions([
+                { field: 'personality', text: 'Gruff and impatient.', atMessage: 1 },
+                { field: 'personality', text: 'Impatient and gruff.', atMessage: 2 },
+                { field: 'stanceToPlayer', text: 'Gruff and impatient.', atMessage: 3 },
+                { field: 'looks', text: 'Not a core field.', atMessage: 3 },
+                { field: 'personality', text: { evil: true }, atMessage: 3 },
+                'junk',
+            ]);
+            expect(dupes).toHaveLength(2);
+            const many = normalizeImpressions(Array.from({ length: 9 }, (_, i) => ({ field: 'personality', text: `Distinct trait number ${i} about ${['ribbons', 'wine', 'scars', 'letters', 'oaths', 'daggers', 'songs', 'maps', 'storms'][i]}.`, atMessage: i })));
+            expect(many).toHaveLength(MAX_NPC_IMPRESSIONS);
+            expect(listNpcImpressions({ recentImpressions: dupes }, 'personality')).toEqual(['Gruff and impatient.']);
+        });
+
+        it('an empty record takes the first text directly; a non-core field is left alone', () => {
+            expect(mergeNpcCoreText('', 'Gruff.', [], { field: 'personality', messageCount: 3 }).text).toBe('Gruff.');
+            const merged = mergeNpcCoreText('Wants passage north.', 'Wants to find her sister.', [], { field: 'goals', messageCount: 3 });
+            expect(merged.text).toBe('Wants passage north.');
+            expect(merged.impressions).toEqual([]);
+        });
     });
 
     it('normalizes string and object entries with timestamps', () => {

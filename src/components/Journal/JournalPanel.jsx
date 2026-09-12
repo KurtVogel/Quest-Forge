@@ -3,7 +3,7 @@ import { useGame } from '../../state/GameContext.jsx';
 import { enrichNpcProfile, needsNpcEnrichment, normalizeCallbackHook } from '../../llm/npcEnrichment.js';
 import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
 import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js';
-import { scoreNpcForPrompt } from '../../engine/npcRoster.js';
+import { bondKindLabel, listNpcImpressions, scoreNpcForPrompt, splitBondMoments } from '../../engine/npcRoster.js';
 import { groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
 import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
@@ -615,6 +615,11 @@ function NPCTab({
             {sorted.map(npc => {
                 const thin = !archived && needsNpcEnrichment(npc);
                 const deepening = enrichingId === npc.id;
+                // Three shelves (2026-09-12): the permanent stance, the KEY
+                // moments the bond turns on, and "Lately" — unconfirmed
+                // impressions plus the newest ordinary moments.
+                const bonds = splitBondMoments(npc.bondMoments);
+                const impressions = listNpcImpressions(npc, 'stanceToPlayer');
                 return (
                     <div key={npc.id} className={`journal-npc ${npc.disposition || 'unknown'}${npc.pinned ? ' pinned' : ''}${selectedIds?.has(npc.id) ? ' selected' : ''}`}>
                         <div className="journal-npc-header">
@@ -685,11 +690,35 @@ function NPCTab({
                                 {npc.stanceToPlayer}
                             </p>
                         )}
-                        {npc.bondMoments?.length > 0 && (
+                        {bonds.key.length > 0 && (
                             <div className="journal-npc-bonds">
-                                <span className="journal-npc-bonds-label">Moments between you</span>
+                                <span className="journal-npc-bonds-label">Key moments</span>
                                 <ul className="journal-npc-bonds-list">
-                                    {[...npc.bondMoments].reverse().slice(0, 4).map((moment, i) => (
+                                    {bonds.key.map((moment, i) => (
+                                        <li key={i} title={moment.text}>
+                                            {bondKindLabel(moment.kind) && (
+                                                <span className="journal-npc-bond-kind">{bondKindLabel(moment.kind)}</span>
+                                            )}
+                                            {moment.text}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                        {(impressions.length > 0 || bonds.recent.length > 0) && (
+                            <div className="journal-npc-bonds journal-npc-lately">
+                                <span className="journal-npc-bonds-label">Lately</span>
+                                <ul className="journal-npc-bonds-list">
+                                    {impressions.slice(-2).map((text, i) => (
+                                        <li
+                                            key={`impression-${i}`}
+                                            className="journal-npc-impression"
+                                            title="A recent impression — it joins the permanent record only if the story bears it out again"
+                                        >
+                                            {text}
+                                        </li>
+                                    ))}
+                                    {bonds.recent.slice(0, bonds.key.length > 0 ? 2 : 4).map((moment, i) => (
                                         <li key={i} title={moment.text}>{moment.text}</li>
                                     ))}
                                 </ul>

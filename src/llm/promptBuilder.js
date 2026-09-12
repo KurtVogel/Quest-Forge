@@ -21,7 +21,7 @@ import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
 import { isLowLevelSolo } from '../engine/combatExchange.js';
-import { namesMatch, resolveCompanionLook } from '../engine/npcRoster.js';
+import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../engine/npcRoster.js';
 
 /**
  * Tripwire against unbounded prompt growth, NOT a target. A deliberately
@@ -488,8 +488,8 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - For roster-worthy people include \`kind: "character"\` and \`rosterEligible: true\`. For fodder omit npc_updates entirely.
 - Always include \`name\` and \`lastNotes\` for roster entries; include other fields only when newly learned
 - Include \`gender\` the first time a character's gender is established or apparent ("woman", "man", or the fiction's own wording) and \`species\` the first time their species/ancestry is ("goblin", "human", "high elf") — they anchor portraits, scene art, and prose consistency for the rest of the campaign; a registered species or gender in KNOWN NPCs is canon you must never contradict
-- When an exchange meaningfully shifts how an NPC personally regards the hero — flirtation, gratitude, growing trust or attraction, an insult, a betrayal — include \`stanceToPlayer\` (their complete current personal stance toward the hero, from their side) and \`bondMoment\` (one line recording the moment itself). Play established stances consistently: an NPC listed with \`toward the hero:\` in KNOWN NPCs remembers that history in every scene.
-- \`stanceToPlayer\` is a REWRITE of the whole record, not a note about this exchange: start from the \`toward the hero:\` stance shown in KNOWN NPCs, keep every part that still holds IN ITS EXISTING WORDING, integrate what this exchange changed, and drop only feelings this exchange genuinely superseded. A fragment describing just this turn ("appreciates his discretion tonight") gets APPENDED to the stored stance and leaves the contradicted old feelings standing beside it — emit the full revised stance or omit the field.
+- When an exchange meaningfully shifts how an NPC personally regards the hero — flirtation, gratitude, growing trust or attraction, an insult, a betrayal — include \`stanceToPlayer\` (their complete current personal stance toward the hero, from their side) and \`bondMoment\` (one line recording the moment itself — ONE per scene, its defining beat, never one per line or position). Play established stances consistently: an NPC listed with \`toward the hero:\` in KNOWN NPCs remembers that history in every scene, and \`key moments with the hero:\` are the turning points that history rests on.
+- \`stanceToPlayer\` is a REWRITE of the whole record, not a note about this exchange: start from the \`toward the hero:\` stance shown in KNOWN NPCs, keep every part that still holds IN ITS EXISTING WORDING, integrate what this exchange changed, and drop only feelings this exchange genuinely superseded. It is the ENDURING regard — what would still be true a week from now; the heat of one scene belongs in \`lastNotes\`. A fragment describing just this turn ("appreciates his discretion tonight") is held as an unconfirmed impression until a later scene bears it out — emit the full revised stance or omit the field.
 
 ## WORLD TEMPO & HIDDEN FRONT INSTRUCTIONS
 - If the WORLD TEMPO section is present, it is private DM state. Never reveal front ids, faction stubs, intensity labels, pace levels, or that a pacing system exists. The player only ever experiences the fiction.
@@ -792,10 +792,18 @@ ${party.map(c => {
         if (dossier?.stanceToPlayer) {
             bond.push(`  Toward the hero: ${String(dossier.stanceToPlayer).slice(0, 300)}`);
         }
-        const moments = (Array.isArray(dossier?.bondMoments) ? dossier.bondMoments : [])
-            .slice(-2).map(m => String(m?.text || '').trim()).filter(Boolean);
-        if (moments.length > 0) {
-            bond.push(`  Personal history with the hero: ${moments.join('; ').slice(0, 300)}`);
+        // Two tiers (2026-09-12): the key moments the companion's bond turns
+        // on, then what is recent — same shape as the KNOWN NPCs line.
+        const { key, recent } = splitBondMoments(dossier?.bondMoments);
+        if (key.length > 0) {
+            bond.push(`  Key moments with the hero: ${key.slice(-3).map(m => m.text).join('; ').slice(0, 300)}`);
+        }
+        const lately = [
+            ...listNpcImpressions(dossier, 'stanceToPlayer').slice(-2),
+            ...recent.slice(0, key.length > 0 ? 1 : 2).map(m => m.text),
+        ];
+        if (lately.length > 0) {
+            bond.push(`  Lately with the hero: ${lately.join('; ').slice(0, 300)}`);
         }
         return bond.length > 0 ? `${line}\n${bond.join('\n')}` : line;
     }).join('\n')}

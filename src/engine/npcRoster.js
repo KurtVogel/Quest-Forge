@@ -55,7 +55,9 @@ export const NPC_PLACE_FIELD_MAX = 120;
 
 /** One recorded personal beat between the hero and an NPC. */
 export const NPC_BOND_MOMENT_MAX = 220;
-export const MAX_NPC_BOND_MOMENTS = 8;
+/** Storage cap (evicted by salience, see trimBondMoments); prompt and card
+ * injection are bounded separately through splitBondMoments. */
+export const MAX_NPC_BOND_MOMENTS = 10;
 
 const BOND_STOP_WORDS = new Set([
     'the', 'a', 'an', 'of', 'to', 'in', 'is', 'are', 'was', 'were', 'and', 'or',
@@ -88,30 +90,165 @@ export function isNearDuplicateText(candidate, existingText) {
     return coversTokens(large, small, 0.9);
 }
 
-export function normalizeBondMoments(list = []) {
-    return (Array.isArray(list) ? list : [])
-        .map(entry => {
-            const text = clampNpcDossierField(
-                typeof entry === 'string' ? entry : entry?.text,
-                NPC_BOND_MOMENT_MAX,
-            );
-            if (!text) return null;
-            const at = Number.isFinite(entry?.at) ? entry.at : Date.now();
-            return { text, at };
-        })
-        .filter(Boolean)
-        .slice(-MAX_NPC_BOND_MOMENTS);
+/**
+ * Bond-moment KINDS (2026-09-12, tiered character cards). Coarse on purpose:
+ * the scene-collapse rule keys on them — four positions in one night are ONE
+ * `intimacy` moment — so a kind must be broad enough that a scene's repeated
+ * beats share it and distinct enough that a kiss and a confession the same
+ * night stay two moments. `other` never collapses (an ungraded beat could be
+ * anything). Unknown kinds normalize to null (legacy rows carry none).
+ */
+export const BOND_MOMENT_KINDS = new Set([
+    'meeting', 'flirtation', 'intimacy', 'confession', 'promise', 'gift', 'rescue',
+    'shared_danger', 'betrayal', 'quarrel', 'reconciliation', 'farewell', 'other',
+]);
+/** Salience 1..5: 5 redefines the relationship, 4 a beat both would recall
+ * years later, 3 memorable (the ungraded default), 2 texture, 1 trivial. */
+export const BOND_SALIENCE_DEFAULT = 3;
+/** A moment at or above this salience is a KEY moment of the bond. */
+export const BOND_KEY_SALIENCE = 4;
+/** Same-kind moments this close (raw message rows — a dice turn burns ~5)
+ * are one scene's beat; the same window separates "observed again in a
+ * LATER scene" from "restated in the same scene" for impressions. */
+export const BOND_SCENE_WINDOW_MESSAGES = 16;
+/** How many key moments a card and the DM prompt lead with. */
+export const MAX_KEY_BOND_MOMENTS = 5;
+
+export function normalizeBondMomentKind(value) {
+    const kind = typeof value === 'string' ? value.trim().toLowerCase().replace(/[\s-]+/g, '_') : '';
+    return BOND_MOMENT_KINDS.has(kind) ? kind : null;
 }
 
-/** Append-only merge: new beats join the record, restatements are dropped,
- * and the list never exceeds its cap (oldest fall off first). */
-export function appendBondMoments(existing = [], additions = []) {
+export function normalizeBondSalience(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(1, Math.min(5, Math.round(n)));
+}
+
+function bondSalience(moment) {
+    return normalizeBondSalience(moment?.salience) ?? BOND_SALIENCE_DEFAULT;
+}
+
+/** Human label for a kind chip ("shared_danger" → "shared danger"). */
+export function bondKindLabel(kind) {
+    const normalized = normalizeBondMomentKind(kind);
+    return normalized && normalized !== 'other' ? normalized.replace(/_/g, ' ') : '';
+}
+
+/** Typed row: `{ text, at }` plus OPTIONAL `kind` / `salience` / `atMessage`
+ * — only carried when valid, so a legacy `{ text, at }` row round-trips
+ * byte-identical and the grading stays honest (absent ≠ default). */
+export function normalizeBondMoments(list = []) {
+    const rows = (Array.isArray(list) ? list : [])
+        .map(entry => {
+            // A text field is a TYPE assumption: an object `text` must not
+            // become "[object Object]" canon.
+            const source = typeof entry === 'string' ? entry : (typeof entry?.text === 'string' ? entry.text : '');
+            const text = clampNpcDossierField(source, NPC_BOND_MOMENT_MAX);
+            if (!text) return null;
+            const at = Number.isFinite(entry?.at) ? entry.at : Date.now();
+            const kind = normalizeBondMomentKind(entry?.kind);
+            const salience = normalizeBondSalience(entry?.salience);
+            const atMessage = Number.isFinite(entry?.atMessage) ? Math.max(0, Math.floor(entry.atMessage)) : null;
+            return {
+                text,
+                at,
+                ...(kind && { kind }),
+                ...(salience !== null && { salience }),
+                ...(atMessage !== null && { atMessage }),
+            };
+        })
+        .filter(Boolean);
+    return trimBondMoments(rows);
+}
+
+/** Cap by VALUE, not age: the lowest-salience moments fall off first, the
+ * oldest among equals — a salience-5 first night can never be pushed out by
+ * four tavern jokes. Chronological order is preserved. */
+function trimBondMoments(list, cap = MAX_NPC_BOND_MOMENTS) {
+    if (list.length <= cap) return list;
+    const ranked = list.map((moment, index) => ({ moment, index }))
+        .sort((a, b) => (bondSalience(a.moment) - bondSalience(b.moment)) || (a.index - b.index));
+    const dropped = new Set(ranked.slice(0, list.length - cap).map(entry => entry.index));
+    return list.filter((_, index) => !dropped.has(index));
+}
+
+function findSameSceneMoment(list, addition) {
+    const kind = addition.kind;
+    if (!kind || kind === 'other' || !Number.isFinite(addition.atMessage)) return -1;
+    return list.findIndex(moment => moment.kind === kind
+        && Number.isFinite(moment.atMessage)
+        && Math.abs(addition.atMessage - moment.atMessage) <= BOND_SCENE_WINDOW_MESSAGES);
+}
+
+/**
+ * Append-only merge: new beats join the record, restatements are dropped,
+ * and the list never exceeds its cap. Two filters stand between a turn and
+ * the record (2026-09-12): (1) SCENE COLLAPSE — a same-kind moment within
+ * BOND_SCENE_WINDOW_MESSAGES of one already held is the same scene's beat,
+ * so it is dropped (or, if graded MORE salient, its text replaces the held
+ * one at the held moment's time) — a night together is one moment however
+ * many turns it spans; (2) SALIENCE EVICTION (trimBondMoments). Additions
+ * without `atMessage` are stamped with `messageCount` when given.
+ */
+export function appendBondMoments(existing = [], additions = [], { messageCount } = {}) {
     let next = normalizeBondMoments(existing);
-    for (const addition of normalizeBondMoments(additions)) {
+    for (const raw of normalizeBondMoments(additions)) {
+        const addition = (raw.atMessage === undefined && Number.isFinite(messageCount))
+            ? { ...raw, atMessage: Math.max(0, Math.floor(messageCount)) }
+            : raw;
         if (next.some(moment => isNearDuplicateText(addition.text, moment.text))) continue;
+        const sceneIdx = findSameSceneMoment(next, addition);
+        if (sceneIdx !== -1) {
+            const held = next[sceneIdx];
+            if (bondSalience(addition) > bondSalience(held)) {
+                next = next.map((moment, i) => (i === sceneIdx
+                    ? { ...held, text: addition.text, salience: addition.salience }
+                    : moment));
+            }
+            continue;
+        }
         next = [...next, addition];
     }
-    return next.slice(-MAX_NPC_BOND_MOMENTS);
+    return trimBondMoments(next);
+}
+
+function selectKeyFromNormalized(list, limit) {
+    const seenKinds = new Set();
+    const scored = [];
+    list.forEach((moment, index) => {
+        const explicit = normalizeBondSalience(moment.salience);
+        const firstOfKind = !!moment.kind && moment.kind !== 'other' && !seenKinds.has(moment.kind);
+        if (moment.kind) seenKinds.add(moment.kind);
+        const qualifies = (explicit !== null && explicit >= BOND_KEY_SALIENCE) || firstOfKind;
+        if (!qualifies) return;
+        scored.push({ moment, index, score: bondSalience(moment) * 10 + (firstOfKind ? 5 : 0) });
+    });
+    return scored
+        .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+        .slice(0, limit)
+        .sort((a, b) => a.index - b.index)
+        .map(entry => entry.moment);
+}
+
+/**
+ * The KEY moments of a bond — the turning points a card leads with and the
+ * DM plays from: salience >= BOND_KEY_SALIENCE, or the FIRST moment of an
+ * explicit kind (the first kiss outranks the fourth). Chronological, capped.
+ * Ungraded legacy rows never qualify — they stay on the "lately" shelf until
+ * live play or Deepen memory grades them.
+ */
+export function selectKeyBondMoments(moments = [], limit = MAX_KEY_BOND_MOMENTS) {
+    return selectKeyFromNormalized(normalizeBondMoments(moments), limit);
+}
+
+/** `{ key, recent }`: the key moments (chronological) and everything else,
+ * NEWEST FIRST — the two shelves every card and prompt line render from. */
+export function splitBondMoments(moments = [], { keyLimit = MAX_KEY_BOND_MOMENTS } = {}) {
+    const list = normalizeBondMoments(moments);
+    const key = selectKeyFromNormalized(list, keyLimit);
+    const keySet = new Set(key);
+    return { key, recent: list.filter(moment => !keySet.has(moment)).reverse() };
 }
 
 /**
@@ -187,6 +324,112 @@ export function mergeNpcDossierText(existingText, incomingText, max = NPC_DOSSIE
         merged = shorter;
     }
     return merged;
+}
+
+/**
+ * CORE dossier prose — personality and the stance toward the hero — is the
+ * PERMANENT tier of a character card, and permanence is EARNED (2026-09-12,
+ * DECISIONS.md tiered character cards): a fragment the Scribe observed in ONE
+ * scene ("wants him again", "gruff tonight") is an impression, not a trait,
+ * and used to append straight into the record until one tavern evening or
+ * one night together WAS the card. Impressions wait on a "lately" shelf
+ * (`recentImpressions`, per field) and graduate into the core only when the
+ * fiction bears them out again in a LATER scene — a restating fragment more
+ * than BOND_SCENE_WINDOW_MESSAGES later, or a complete rewrite that carries
+ * them. Unconfirmed impressions expire after NPC_IMPRESSION_TTL_MESSAGES.
+ * `goals` and `secrets` stay on the direct merge: they are declared canon,
+ * not observed traits.
+ */
+export const NPC_CORE_TEXT_FIELDS = ['personality', 'stanceToPlayer'];
+export const MAX_NPC_IMPRESSIONS = 6;
+export const NPC_IMPRESSION_TTL_MESSAGES = 60;
+export const NPC_IMPRESSION_MAX = 200;
+
+/** Typed, deduped, expired, capped: `[{ field, text, atMessage? }]`. */
+export function normalizeImpressions(list = [], { messageCount } = {}) {
+    const out = [];
+    for (const entry of (Array.isArray(list) ? list : [])) {
+        if (!entry || typeof entry !== 'object') continue;
+        if (!NPC_CORE_TEXT_FIELDS.includes(entry.field)) continue;
+        if (typeof entry.text !== 'string') continue;
+        const text = clampNpcDossierField(entry.text, NPC_IMPRESSION_MAX);
+        if (!text) continue;
+        const atMessage = Number.isFinite(entry.atMessage) ? Math.max(0, Math.floor(entry.atMessage)) : null;
+        if (Number.isFinite(messageCount) && atMessage !== null
+            && messageCount - atMessage > NPC_IMPRESSION_TTL_MESSAGES) continue;
+        if (out.some(known => known.field === entry.field && isNearDuplicateText(text, known.text))) continue;
+        out.push({ field: entry.field, text, ...(atMessage !== null && { atMessage }) });
+    }
+    return out.slice(-MAX_NPC_IMPRESSIONS);
+}
+
+/** The live (unexpired) impression texts for one core field, oldest first. */
+export function listNpcImpressions(npc = {}, field = 'stanceToPlayer', { messageCount } = {}) {
+    return normalizeImpressions(npc?.recentImpressions, { messageCount })
+        .filter(entry => entry.field === field)
+        .map(entry => entry.text);
+}
+
+function clauseTokensMatch(aTokens, bTokens) {
+    if (aTokens.size === 0 || bTokens.size === 0) return false;
+    const small = aTokens.size <= bTokens.size ? aTokens : bTokens;
+    const large = aTokens.size <= bTokens.size ? bTokens : aTokens;
+    return coversTokens(large, small, CLAUSE_RESTATEMENT_THRESHOLD);
+}
+
+/**
+ * Merge an incoming core-field text against the record AND its pending
+ * impressions → `{ text, impressions }`.
+ * - no record yet → the incoming text IS the record (a first impression is
+ *   all we know; later rewrites can still replace it)
+ * - incoming covers the record → a complete rewrite (the Scribe merged with
+ *   KNOWN context): replace; impressions the rewrite restates are absorbed
+ * - record covers incoming → a restatement: keep
+ * - otherwise each novel clause is judged: one that restates an impression
+ *   from an EARLIER scene is CONFIRMED and merges into the core through
+ *   mergeNpcDossierText; a first-time clause becomes an impression; a
+ *   same-scene restatement stays pending (already recorded).
+ */
+export function mergeNpcCoreText(existingText, incomingText, impressions = [], { field, messageCount, max = NPC_DOSSIER_FIELD_MAX } = {}) {
+    const prev = clampNpcDossierField(existingText, max);
+    const next = clampNpcDossierField(incomingText, max);
+    const pending = normalizeImpressions(impressions, { messageCount });
+    if (!next || !NPC_CORE_TEXT_FIELDS.includes(field)) return { text: prev, impressions: pending };
+    if (!prev) return { text: next, impressions: pending };
+
+    const mine = pending.filter(entry => entry.field === field);
+    const others = pending.filter(entry => entry.field !== field);
+    const prevTokens = meaningfulTokens(prev);
+    const nextTokens = meaningfulTokens(next);
+    if (coversTokens(nextTokens, prevTokens, 0.85)) {
+        const kept = mine.filter(entry => !coversTokens(nextTokens, meaningfulTokens(entry.text), CLAUSE_RESTATEMENT_THRESHOLD));
+        return { text: next, impressions: [...others, ...kept] };
+    }
+    if (coversTokens(prevTokens, nextTokens, 0.85)) return { text: prev, impressions: pending };
+
+    const knownClauses = splitDossierClauses(prev).map(clause => meaningfulTokens(clause));
+    const confirmed = [];
+    const fresh = [];
+    let remaining = mine;
+    for (const clause of splitDossierClauses(next)) {
+        const tokens = meaningfulTokens(clause);
+        if (tokens.size === 0) continue;
+        if (knownClauses.some(known => coversTokens(known, tokens, CLAUSE_RESTATEMENT_THRESHOLD))) continue;
+        const idx = remaining.findIndex(entry => clauseTokensMatch(meaningfulTokens(entry.text), tokens));
+        if (idx !== -1) {
+            const impression = remaining[idx];
+            const laterScene = !Number.isFinite(messageCount) || !Number.isFinite(impression.atMessage)
+                || (messageCount - impression.atMessage) > BOND_SCENE_WINDOW_MESSAGES;
+            if (laterScene) {
+                confirmed.push(/[.!?…]["')\]]*$/.test(clause) ? clause : `${clause}.`);
+                remaining = remaining.filter((_, i) => i !== idx);
+            }
+            continue;
+        }
+        fresh.push({ field, text: clause, ...(Number.isFinite(messageCount) && { atMessage: Math.max(0, Math.floor(messageCount)) }) });
+    }
+    const text = confirmed.length > 0 ? mergeNpcDossierText(prev, confirmed.join(' '), max) : prev;
+    return { text, impressions: normalizeImpressions([...others, ...remaining, ...fresh], { messageCount }) };
 }
 
 /** Callback hooks are a rolling shortlist, not a per-turn scratchpad: new hooks
@@ -579,6 +822,13 @@ export function migrateLegacyNpc(npc = {}) {
     if (!merged.rosterTier) merged.rosterTier = 'character';
     if (!merged.kind) merged.kind = 'character';
     merged.bondMoments = normalizeBondMoments(merged.bondMoments);
+    // The "lately" shelf loads typed (2026-09-12) and only when present — a
+    // record without impressions stays byte-identical to its pre-tier shape.
+    if (merged.recentImpressions !== undefined) {
+        const impressions = normalizeImpressions(merged.recentImpressions);
+        if (impressions.length > 0) merged.recentImpressions = impressions;
+        else delete merged.recentImpressions;
+    }
     if (!merged.arcDisposition) {
         merged.relationshipHistory = compactRelationshipHistory(merged.relationshipHistory);
     }
@@ -980,6 +1230,7 @@ export function dedupeNpcRoster(npcs = []) {
                 ? 'character'
                 : (newer.rosterTier || base.rosterTier),
             bondMoments: appendBondMoments(base.bondMoments, newer.bondMoments),
+            recentImpressions: normalizeImpressions([...(base.recentImpressions || []), ...(newer.recentImpressions || [])]),
             callbackHooks: appendCallbackHooks(base.callbackHooks, newer.callbackHooks),
             knownFacts: [...new Set([...(base.knownFacts || []), ...(newer.knownFacts || [])])],
             relationshipHistory: [...(base.relationshipHistory || []), ...(newer.relationshipHistory || [])]

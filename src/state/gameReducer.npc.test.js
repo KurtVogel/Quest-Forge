@@ -297,6 +297,69 @@ describe('gameReducer player-relationship memory', () => {
     });
 });
 
+describe('gameReducer tiered bond moments (2026-09-12 — one scene, one moment; key moments outrank texture)', () => {
+    const messagesOf = n => Array.from({ length: n }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: `line ${i}` }));
+    const scribe = (state, moment) => gameReducer(state, {
+        type: 'UPDATE_NPC',
+        payload: { name: 'Maren', disposition: 'friendly', lastNotes: 'With the hero.', bondMoment: moment },
+    });
+
+    it('four same-kind moments from one night collapse into ONE, keeping the most salient text', () => {
+        let state = { ...initialGameState, messages: messagesOf(10) };
+        state = scribe(state, { text: 'Maren drew the hero into her room above the inn and undressed him.', kind: 'intimacy', salience: 4 });
+        state = { ...state, messages: messagesOf(13) };
+        state = scribe(state, { text: 'They moved to the window bench, Maren astride the hero.', kind: 'intimacy', salience: 3 });
+        state = { ...state, messages: messagesOf(16) };
+        state = scribe(state, { text: 'Maren and the hero spent their first night together, and she asked him to stay until dawn.', kind: 'intimacy', salience: 5 });
+        state = { ...state, messages: messagesOf(19) };
+        state = scribe(state, { text: 'Afterwards Maren traced the scar on the hero\'s shoulder and fell asleep against him.', kind: 'intimacy', salience: 3 });
+
+        const moments = state.npcs[0].bondMoments;
+        expect(moments).toHaveLength(1);
+        expect(moments[0].text).toContain('first night together');
+        expect(moments[0].salience).toBe(5);
+        expect(moments[0].atMessage).toBe(10);
+    });
+
+    it('a different kind in the same scene is a second moment, and a same kind in a later scene a third', () => {
+        let state = { ...initialGameState, messages: messagesOf(10) };
+        state = scribe(state, { text: 'Maren kissed the hero on the stairs.', kind: 'flirtation', salience: 3 });
+        state = { ...state, messages: messagesOf(14) };
+        state = scribe(state, { text: 'Maren confessed she informed on the smugglers years ago.', kind: 'confession', salience: 4 });
+        state = { ...state, messages: messagesOf(60) };
+        state = scribe(state, { text: 'Weeks later Maren kissed the hero goodbye at the harbor gate.', kind: 'flirtation', salience: 3 });
+        expect(state.npcs[0].bondMoments.map(m => m.kind)).toEqual(['flirtation', 'confession', 'flirtation']);
+    });
+
+    it('a salience-5 first night is never evicted by a run of texture', () => {
+        let state = { ...initialGameState, messages: messagesOf(4) };
+        state = scribe(state, { text: 'Maren and the hero spent their first night together above the inn.', kind: 'intimacy', salience: 5 });
+        const jokes = ['ribbons', 'wine', 'scars', 'letters', 'oaths', 'daggers', 'songs', 'maps', 'storms', 'debts', 'graves', 'boots'];
+        jokes.forEach((topic, i) => {
+            state = { ...state, messages: messagesOf(30 + i * 20) };
+            state = scribe(state, { text: `Maren and the hero traded a joke about ${topic} number ${i}.`, kind: 'other', salience: 2 });
+        });
+        const moments = state.npcs[0].bondMoments;
+        expect(moments[0].text).toContain('first night together');
+        expect(moments.length).toBeLessThanOrEqual(10);
+    });
+
+    it('a DM-lane string bondMoment is still recorded, ungraded', () => {
+        const state = scribe({ ...initialGameState, messages: messagesOf(6) }, 'Maren laughed and undercharged the hero for the room.');
+        expect(state.npcs[0].bondMoments).toEqual([
+            expect.objectContaining({ text: 'Maren laughed and undercharged the hero for the room.', atMessage: 6 }),
+        ]);
+        expect(state.npcs[0].bondMoments[0].kind).toBeUndefined();
+        expect(state.npcs[0].bondMoments[0].salience).toBeUndefined();
+    });
+
+    it('hostile kind/salience values are dropped or clamped at the boundary', () => {
+        const state = scribe({ ...initialGameState, messages: messagesOf(6) }, { text: 'Maren nodded to the hero.', kind: { evil: true }, salience: '99' });
+        expect(state.npcs[0].bondMoments[0].kind).toBeUndefined();
+        expect(state.npcs[0].bondMoments[0].salience).toBe(5);
+    });
+});
+
 describe('gameReducer NPC dossier durability (live-play finding 2026-07-09)', () => {
     const wit = () => gameReducer(initialGameState, {
         type: 'UPDATE_NPC',
@@ -311,24 +374,87 @@ describe('gameReducer NPC dossier durability (live-play finding 2026-07-09)', ()
         },
     });
 
-    it('a per-turn fragment appends to personality instead of replacing the record', () => {
+    // Tiered cards (2026-09-12): a one-scene fragment never touches the
+    // permanent personality/stance — it waits on the "lately" shelf
+    // (recentImpressions) and graduates only when a LATER scene restates it.
+    it('a per-turn personality fragment lands on the lately shelf, not in the permanent record', () => {
         const later = gameReducer(wit(), {
             type: 'UPDATE_NPC',
             payload: { name: 'Wit', personality: 'Flustered when complimented directly.' },
         });
         const record = later.npcs[0].personality;
         expect(record).toContain('fiercely protective of her sister');
-        expect(record).toContain('Flustered when complimented');
+        expect(record).not.toContain('Flustered when complimented');
+        expect(later.npcs[0].recentImpressions).toEqual([
+            { field: 'personality', text: 'Flustered when complimented directly.', atMessage: 0 },
+        ]);
     });
 
-    it('a current-scene stance fragment never erases the relationship history', () => {
+    it('a current-scene stance fragment never erases the relationship history — and never joins it on one showing', () => {
         const later = gameReducer(wit(), {
             type: 'UPDATE_NPC',
             payload: { name: 'Wit', stanceToPlayer: 'Impressed by the hero\'s swordplay in the alley.' },
         });
         const stance = later.npcs[0].stanceToPlayer;
         expect(stance).toContain('openly flirtatious');
-        expect(stance).toContain('Impressed by the hero\'s swordplay');
+        expect(stance).not.toContain('Impressed by the hero\'s swordplay');
+        expect(later.npcs[0].recentImpressions.map(entry => entry.text)).toEqual(['Impressed by the hero\'s swordplay in the alley.']);
+    });
+
+    it('an impression restated in a LATER scene graduates into the permanent stance', () => {
+        const scene1 = gameReducer(wit(), {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', stanceToPlayer: 'Impressed by the hero\'s swordplay in the alley.' },
+        });
+        // Same scene (no conversational distance): a repeat stays pending.
+        const sameScene = gameReducer(scene1, {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', stanceToPlayer: 'Impressed by the hero\'s swordplay.' },
+        });
+        expect(sameScene.npcs[0].stanceToPlayer).not.toContain('Impressed');
+        expect(sameScene.npcs[0].recentImpressions).toHaveLength(1);
+
+        // A later scene: 20 messages on, the same impression is confirmed.
+        const messages = Array.from({ length: 20 }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: `line ${i}` }));
+        const later = gameReducer({ ...sameScene, messages }, {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', stanceToPlayer: 'Impressed by the hero\'s swordplay.' },
+        });
+        expect(later.npcs[0].stanceToPlayer).toContain('openly flirtatious');
+        expect(later.npcs[0].stanceToPlayer).toContain('Impressed by the hero\'s swordplay');
+        // An emptied shelf is dropped from the record, not persisted as [].
+        expect(later.npcs[0].recentImpressions).toBeUndefined();
+    });
+
+    it('a complete stance rewrite still replaces the record and absorbs the impression it restates', () => {
+        const scene1 = gameReducer(wit(), {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', stanceToPlayer: 'Impressed by the hero\'s swordplay in the alley.' },
+        });
+        const rewrite = gameReducer(scene1, {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', stanceToPlayer: 'Warm and openly flirtatious with the hero; she trusts him with her worry about her sister, and is impressed by the hero\'s swordplay in the alley.' },
+        });
+        expect(rewrite.npcs[0].stanceToPlayer).toContain('impressed by the hero\'s swordplay');
+        expect(rewrite.npcs[0].recentImpressions).toBeUndefined();
+    });
+
+    it('a lane cannot plant or graduate an impression by writing recentImpressions', () => {
+        const planted = gameReducer(wit(), {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', recentImpressions: [{ field: 'stanceToPlayer', text: 'Secretly loyal to the hero above all.' }] },
+        });
+        expect(planted.npcs[0].recentImpressions).toBeUndefined();
+    });
+
+    it('goals and secrets stay on the direct merge — declared canon needs no second showing', () => {
+        const later = gameReducer(wit(), {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Wit', goals: 'Buy passage north before the ice closes the strait.' },
+        });
+        expect(later.npcs[0].goals).toContain('vanished with the northbound caravan');
+        expect(later.npcs[0].goals).toContain('before the ice closes the strait');
+        expect(later.npcs[0].recentImpressions).toBeUndefined();
     });
 
     it('a restatement of the known record is dropped, not duplicated', () => {

@@ -137,8 +137,29 @@ describe('worldJournal context builder', () => {
         const context = buildJournalContext([], npcs, 'Brackwater');
 
         expect(context).toContain('toward the hero: Amused and privately flattered');
-        expect(context).toContain('personal history with the hero:');
+        // Ungraded legacy moments ride "lately" (2026-09-12 tiers); none are key yet.
+        expect(context).toContain('lately with the hero:');
+        expect(context).not.toContain('key moments with the hero:');
         expect(context).toContain('sister vanished');
+    });
+
+    it('leads with the key moments and keeps impressions + texture under "lately" (2026-09-12 tiers)', () => {
+        const npcs = [{
+            name: 'Maren',
+            disposition: 'friendly',
+            lastNotes: 'Poured the hero an extra measure of wine.',
+            stanceToPlayer: 'Warm toward the hero.',
+            recentImpressions: [{ field: 'stanceToPlayer', text: 'Wants him to stay another night.', atMessage: 40 }],
+            bondMoments: [
+                { text: 'Maren and the hero spent their first night together above the inn.', at: 1000, kind: 'intimacy', salience: 5 },
+                { text: 'Maren beat the hero at dice and crowed about it.', at: 2000, kind: 'other', salience: 2 },
+                { text: 'Maren confessed her sister vanished with the northbound caravan.', at: 3000, kind: 'confession', salience: 4 },
+            ],
+            lastSeen: 1000,
+        }];
+        const context = buildJournalContext([], npcs, 'Brackwater');
+        expect(context).toContain('key moments with the hero: Maren and the hero spent their first night together above the inn.; Maren confessed her sister vanished');
+        expect(context).toContain('lately with the hero: Wants him to stay another night.; Maren beat the hero at dice');
     });
 
     it('identifies and injects the earliest location transition entry', () => {

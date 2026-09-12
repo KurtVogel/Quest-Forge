@@ -16,7 +16,32 @@ import {
     briefNpcFieldForPrompt,
     curateNpcsForPrompt,
     dispatchClassifiedNpcUpdate,
+    listNpcImpressions,
+    splitBondMoments,
 } from './npcRoster.js';
+
+/**
+ * The bond with the hero on a KNOWN NPCs line, in two tiers (2026-09-12):
+ * the KEY moments (turning points — the DM plays from these) and "lately"
+ * (unconfirmed stance impressions + the newest ordinary moment). A legacy
+ * record with ungraded moments renders them all under "lately".
+ */
+export function describeBondForPrompt(npc = {}) {
+    const { key, recent } = splitBondMoments(npc.bondMoments);
+    const impressions = listNpcImpressions(npc, 'stanceToPlayer');
+    const lines = [];
+    if (key.length > 0) {
+        lines.push(`key moments with the hero: ${briefNpcFieldForPrompt(key.slice(-3).map(m => m.text).join('; '), 240)}`);
+    }
+    const lately = [
+        ...impressions.slice(-2),
+        ...recent.slice(0, key.length > 0 ? 1 : 2).map(m => m.text),
+    ];
+    if (lately.length > 0) {
+        lines.push(`lately with the hero: ${briefNpcFieldForPrompt(lately.join('; '), 200)}`);
+    }
+    return lines;
+}
 import { runNpcFrontReflection } from '../llm/scribe.js';
 import { collectNarrativeMessages } from '../llm/narrativeMessages.js';
 import { isSameLocation, sanitizeExtractedLocation } from './locationRegistry.js';
@@ -454,8 +479,7 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
                 // The personal bond with the hero — flirtation, gratitude, grudges —
                 // is the beat players remember most; the DM must play it consistently.
                 n.stanceToPlayer && `toward the hero: ${briefNpcFieldForPrompt(n.stanceToPlayer)}`,
-                Array.isArray(n.bondMoments) && n.bondMoments.length > 0
-                    && `personal history with the hero: ${briefNpcFieldForPrompt(n.bondMoments.slice(-2).map(m => m.text).join('; '), 240)}`,
+                ...describeBondForPrompt(n),
                 Number.isFinite(n.trust) && `trust: ${n.trust}/100`,
                 n.basedIn && `based in: ${n.basedIn}`,
                 n.lastLocation && `last seen: ${n.lastLocation}`,

@@ -234,3 +234,21 @@
 .comp-bond-list li {
     margin-bottom: 0.15rem;
 }
+
+/* Tiered bond shelves (2026-09-12) — mirrors the Journal card. */
+.comp-bond-kind {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.85;
+    margin-right: 0.35rem;
+}
+
+.comp-bond-lately .comp-bond-label {
+    opacity: 0.7;
+}
+
+.comp-impression {
+    font-style: italic;
+    opacity: 0.85;
+}

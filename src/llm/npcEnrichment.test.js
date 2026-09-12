@@ -138,6 +138,27 @@ describe('enrichNpcProfile relationship synthesis', () => {
         expect(update.bondMoments).toEqual(['Vesa flirted while Maren poured wine; she smirked and poured extra.']);
         const request = sendMessage.mock.calls[0][0];
         expect(request.systemPrompt).toContain('PRIMARY output');
+    });
+
+    it('carries graded bondMoments objects (kind + salience) through to the reducer (2026-09-12 tiers)', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            stanceToPlayer: 'Charmed by Vesa\'s boldness.',
+            bondMoments: [
+                { text: 'Maren pulled Vesa out of the canal.', kind: 'rescue', salience: 5 },
+                { text: '', kind: 'gift', salience: 3 },
+                { kind: 'gift' },
+            ],
+        }));
+
+        const update = await enrichNpcProfile({
+            state,
+            npc: { id: 'npc-maren', name: 'Maren' },
+            settings,
+        });
+
+        expect(update.bondMoments).toEqual([{ text: 'Maren pulled Vesa out of the canal.', kind: 'rescue', salience: 5 }]);
+        const request = sendMessage.mock.calls[0][0];
+        expect(request.systemPrompt).toContain('never each line or position of it');
         expect(request.userMessage).toContain('recentConversation');
     });
 

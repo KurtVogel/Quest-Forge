@@ -114,7 +114,7 @@ Output ONLY valid JSON:
   "agenda": "what this NPC is actively trying to accomplish next, from their point of view",
   "relationshipTension": "compact note on rivalry, humiliation, debt, attraction, resentment, fear, or unresolved conflict with the hero",
   "stanceToPlayer": "how this NPC personally regards the HERO right now — affection, attraction, romantic feeling, friendship, gratitude, respect, amusement, resentment, fear, obligation — written from the NPC's side and grounded in what actually passed between them",
-  "bondMoments": ["up to 3 one-line records of significant personal moments between the hero and this NPC that the context establishes — flirtation, confession, shared danger, gift, promise, betrayal, deep insult"],
+  "bondMoments": [{ "text": "one-line record of a significant personal moment between the hero and this NPC that the context establishes (up to 3) — the defining beat of a scene, never each line or position of it", "kind": "meeting|flirtation|intimacy|confession|promise|gift|rescue|shared_danger|betrayal|quarrel|reconciliation|farewell|other", "salience": "1-5 — 5 redefines the relationship, 4 a beat both would recall years later, 3 memorable, 2 texture" }],
   "appearance": "the NPC's COMPLETE physical/visual description — skin tone, hair (explicit: color and style, or bald/shaved), build, body proportions, face, apparent age, clothing, distinguishing and intimate features — merging the existing record with any concrete visual details the recent conversation states. Omit unless the context actually establishes looks",
   "gender": "the NPC's gender as the context establishes or makes clearly apparent (pronouns, titles, explicit statements) — 'woman', 'man', or the fiction's own wording. Omit only if genuinely unknowable",
   "species": "the NPC's species/ancestry as the context establishes it — 'goblin', 'human', 'dwarf', 'high elf'. Omit only if genuinely unknowable",
@@ -199,7 +199,15 @@ export async function enrichNpcProfile({ state, npc, settings }) {
     }
     if (Array.isArray(parsed.bondMoments)) {
         const moments = parsed.bondMoments
-            .map(moment => clampNpcDossierField(moment, NPC_BOND_MOMENT_MAX))
+            .map(moment => {
+                const text = clampNpcDossierField(typeof moment === 'string' ? moment : moment?.text, NPC_BOND_MOMENT_MAX);
+                if (!text) return null;
+                // kind/salience are whitelisted and clamped by the reducer's
+                // normalizeBondMoments; a bare string stays an ungraded moment.
+                return (moment && typeof moment === 'object')
+                    ? { text, kind: moment.kind, salience: moment.salience }
+                    : text;
+            })
             .filter(Boolean)
             .slice(0, 3);
         // The reducer appends these into the existing record with near-duplicate

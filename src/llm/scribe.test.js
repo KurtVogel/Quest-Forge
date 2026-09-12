@@ -320,6 +320,27 @@ describe('buildKnownStances', () => {
     it('returns null when nobody in the exchange has a recorded stance', () => {
         expect(buildKnownStances(state, 'A quiet road with strangers.')).toBeNull();
     });
+
+    it('shows unconfirmed impressions and kind-tagged key moments so the Scribe can confirm or omit (2026-09-12 tiers)', () => {
+        const roster = {
+            npcs: [{
+                name: 'Maren',
+                stanceToPlayer: 'Warm toward the hero.',
+                recentImpressions: [{ field: 'stanceToPlayer', text: 'Wants him to stay another night.', atMessage: 40 }],
+                bondMoments: [
+                    { text: 'Maren and the hero spent their first night together above the inn.', at: 1, kind: 'intimacy', salience: 5 },
+                    { text: 'Maren beat the hero at dice.', at: 2, kind: 'other', salience: 2 },
+                ],
+            }],
+        };
+        const context = buildKnownStances(roster, 'Maren pours the hero another cup.');
+        expect(context).toContain('Maren: Warm toward the hero.');
+        expect(context).toContain('recent impressions (unconfirmed');
+        expect(context).toContain('"Wants him to stay another night."');
+        expect(context).toContain('"Maren and the hero spent their first night together above the inn." (intimacy)');
+        expect(context).toContain('"Maren beat the hero at dice."');
+        expect(context).toContain('same-kind moment from the same scene is already covered');
+    });
 });
 
 describe('buildKnown* match on name tokens, not full-name substrings (2026-09-06 scribe P1)', () => {

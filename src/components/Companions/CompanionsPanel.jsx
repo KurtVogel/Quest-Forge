@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import LookEditor from '../Journal/LookEditor.jsx';
-import { namesMatch, resolveCompanionLook } from '../../engine/npcRoster.js';
+import { bondKindLabel, listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../../engine/npcRoster.js';
 import './Companions.css';
 
 export default function CompanionsPanel() {
@@ -51,9 +51,10 @@ export default function CompanionsPanel() {
                     const dossier = npcs.find(npc => namesMatch(npc.name, companion.name));
                     const look = resolveCompanionLook(companion, npcs);
                     const lookIdentity = [look.species, look.gender].filter(Boolean).join(' ');
-                    const bondMoments = (dossier?.bondMoments || [])
-                        .map(moment => moment?.text)
-                        .filter(Boolean);
+                    // Key moments vs lately (2026-09-12) — same shelves as the
+                    // Journal card and the DM's party line.
+                    const bonds = splitBondMoments(dossier?.bondMoments);
+                    const impressions = listNpcImpressions(dossier, 'stanceToPlayer');
 
                     let affinityClass = '';
                     if (affinityPercent >= 75) affinityClass = 'affinity-high';
@@ -123,12 +124,36 @@ export default function CompanionsPanel() {
                                 </p>
                             )}
 
-                            {bondMoments.length > 0 && (
+                            {bonds.key.length > 0 && (
                                 <div className="comp-bond-moments">
-                                    <span className="comp-bond-label">Moments between you</span>
+                                    <span className="comp-bond-label">Key moments</span>
                                     <ul className="comp-bond-list">
-                                        {[...bondMoments].reverse().slice(0, 4).map((moment, i) => (
-                                            <li key={i} title={moment}>{moment}</li>
+                                        {bonds.key.map((moment, i) => (
+                                            <li key={i} title={moment.text}>
+                                                {bondKindLabel(moment.kind) && (
+                                                    <span className="comp-bond-kind">{bondKindLabel(moment.kind)}</span>
+                                                )}
+                                                {moment.text}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                            {(impressions.length > 0 || bonds.recent.length > 0) && (
+                                <div className="comp-bond-moments comp-bond-lately">
+                                    <span className="comp-bond-label">Lately</span>
+                                    <ul className="comp-bond-list">
+                                        {impressions.slice(-2).map((text, i) => (
+                                            <li
+                                                key={`impression-${i}`}
+                                                className="comp-impression"
+                                                title="A recent impression — it joins the permanent record only if the story bears it out again"
+                                            >
+                                                {text}
+                                            </li>
+                                        ))}
+                                        {bonds.recent.slice(0, bonds.key.length > 0 ? 2 : 4).map((moment, i) => (
+                                            <li key={i} title={moment.text}>{moment.text}</li>
                                         ))}
                                     </ul>
                                 </div>

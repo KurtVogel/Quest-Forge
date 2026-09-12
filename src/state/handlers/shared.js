@@ -17,9 +17,12 @@ import {
     clampNpcDossierField,
     classifyNpcCandidate,
     mergeNpcAppearance,
+    mergeNpcCoreText,
     mergeNpcDossierText,
     namesMatch,
+    normalizeImpressions,
     normalizeNpcRecord,
+    NPC_CORE_TEXT_FIELDS,
     NPC_DURABLE_TEXT_FIELDS,
 } from '../../engine/npcRoster.js';
 
@@ -688,6 +691,9 @@ export function upsertNpc(npcs, payload, { messageCount } = {}) {
     delete update.id;
     delete update.pinned;
     delete update.importance;
+    // The "lately" shelf is engine-written only (mergeNpcCoreText): a lane
+    // cannot plant an impression, and cannot graduate one by writing it.
+    delete update.recentImpressions;
     if ('trust' in update) {
         const trust = Number(update.trust);
         if (Number.isFinite(trust)) update.trust = Math.max(0, Math.min(100, Math.round(trust)));
@@ -740,16 +746,29 @@ export function upsertNpc(npcs, payload, { messageCount } = {}) {
         // stampNpcRelationshipArcs records a transition on the journal cadence,
         // only for shifts that actually held.
         if (bondAdditions.length > 0) {
-            update.bondMoments = appendBondMoments(existing.bondMoments, bondAdditions);
+            update.bondMoments = appendBondMoments(existing.bondMoments, bondAdditions, { messageCount });
         }
         // Durable dossier prose accumulates: a per-turn fragment appends to the
         // record, a restatement is dropped, and only a complete rewrite that carries
         // the known record may replace it. The immediate scene can never erase an
         // NPC's personality, goals, secrets, or their history with the hero.
+        // The CORE fields (personality, stance) go further (2026-09-12): a
+        // fragment lands on the "lately" shelf and joins the permanent record
+        // only when a later scene bears it out — see mergeNpcCoreText.
+        let impressions = existing.recentImpressions;
         for (const field of NPC_DURABLE_TEXT_FIELDS) {
-            if (update[field]) {
+            if (!update[field]) continue;
+            if (NPC_CORE_TEXT_FIELDS.includes(field)) {
+                const merged = mergeNpcCoreText(existing[field], update[field], impressions, { field, messageCount });
+                update[field] = merged.text;
+                impressions = merged.impressions;
+            } else {
                 update[field] = mergeNpcDossierText(existing[field], update[field]);
             }
+        }
+        const liveImpressions = normalizeImpressions(impressions, { messageCount });
+        if (liveImpressions.length > 0 || existing.recentImpressions) {
+            update.recentImpressions = liveImpressions;
         }
         if (update.callbackHooks) {
             update.callbackHooks = appendCallbackHooks(existing.callbackHooks, update.callbackHooks);
@@ -776,7 +795,7 @@ export function upsertNpc(npcs, payload, { messageCount } = {}) {
     // No match — only create roster-worthy characters.
     if (!payload.name || !classified.allowRoster) return npcs;
     if (bondAdditions.length > 0) {
-        update.bondMoments = appendBondMoments([], bondAdditions);
+        update.bondMoments = appendBondMoments([], bondAdditions, { messageCount });
     }
     if (update.callbackHooks) {
         update.callbackHooks = appendCallbackHooks([], update.callbackHooks);

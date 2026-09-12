@@ -12,7 +12,7 @@
 
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
-import { curateNpcsForPrompt, dispatchClassifiedNpcUpdate } from '../engine/npcRoster.js';
+import { bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
 import { isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { tryParseDirectorJson } from './directorUtils.js';
 import { captureReflection, captureScribePass } from '../debug/memoryInspectorStore.js';
@@ -60,8 +60,8 @@ Output ONLY valid JSON:
       "lastLocation": "where they were in this specific exchange (only if mentioned)",
       "agenda": "what this NPC is likely trying to accomplish next (only if implied or revealed)",
       "relationshipTension": "compact note about attraction, rivalry, resentment, debt, loyalty, fear, or trust strain",
-      "stanceToPlayer": "how this NPC personally regards the HERO right now — affection, attraction, romantic interest, friendship, gratitude, respect, amusement, resentment, fear, obligation, rivalry. Written from the NPC's side, complete and current (only when this exchange establishes or shifts it)",
-      "bondMoment": "one-line record of a significant personal moment between the hero and this NPC THIS turn — flirtation, confession, kiss, shared secret, gift, rescue, promise, betrayal, deep insult. Omit for ordinary interaction. The REGISTER rule binds THIS field hardest: an intimate moment is recorded in neutral anatomical language, never the scene's own crude diction",
+      "stanceToPlayer": "the ENDURING way this NPC regards the HERO as a person — affection, attraction, romantic interest, friendship, gratitude, respect, amusement, resentment, fear, obligation, rivalry — what would still be true a week from now. Written from the NPC's side, complete and current (only when this exchange establishes or shifts it). The heat of one scene (flushed, sated, briefly annoyed, tipsy and generous) belongs in lastNotes or relationshipTension, never here",
+      "bondMoment": { "text": "one-line record of the ONE significant personal moment between the hero and this NPC in this exchange — stated concretely with both parties. Omit for ordinary interaction. The REGISTER rule binds THIS field hardest: an intimate moment is recorded in neutral anatomical language, never the scene's own crude diction", "kind": "meeting|flirtation|intimacy|confession|promise|gift|rescue|shared_danger|betrayal|quarrel|reconciliation|farewell|other", "salience": "1-5 — 5 redefines the relationship (a first night together, a betrayal, a life saved, an oath); 4 a beat both would recall years later; 3 memorable; 2 texture (a shared drink, a good joke — usually not worth a moment); 1 trivial (omit)" },
       "trust": 0,
       "privateNotes": "hidden NPC intent or unrevealed motive useful for future consistency",
       "callbackHooks": ["short hooks this NPC could later bring back naturally — complete phrases in the neutral REGISTER, never crude slang"]
@@ -103,8 +103,8 @@ Rules:
 - Only include npc_updates for NPCs that appeared in this specific exchange
 - The hero's PARTY COMPANIONS are NPCs for record-keeping: emit npc_updates for them (stanceToPlayer, bondMoment, appearance, personality, goals) exactly like any other character — never skip someone because they travel with the hero. The party is the game's most sustained relationship, so companion stance shifts and bond moments matter MORE than a stranger's, not less.
 - basedIn is the NPC's current anchor in the world (not permanent): update it when they are reassigned, relocate, or fiction establishes a new base. lastLocation is ephemeral — where they were this turn
-- stanceToPlayer is about the personal relationship between this NPC and the HERO specifically — their feelings toward the hero, not their role or plot function. Update it whenever an exchange genuinely shifts how they regard the hero: a flirtation received warmly or coldly, gratitude after a rescue, trust broken, growing attraction or contempt. Write it unvarnished — desire, resentment, and awkwardness named plainly. When KNOWN PLAYER-RELATIONSHIP STANCES lists this NPC, emit the COMPLETE updated stance as a full rewrite: restate every still-true part IN ITS EXISTING WORDING, integrate what this turn changed, and drop only what this turn superseded. The engine replaces the stored stance only when your text covers it — a differently-worded fragment gets APPENDED instead, leaving contradicted old feelings standing next to the new ones ("resentful and suspicious" beside "warmly appreciative"). If nothing shifted for them personally, omit the field.
-- bondMoment must be an actual NEW event from THIS exchange, stated concretely with both parties ("The hero flirted with Maren over the map table; she laughed and let her hand linger"). At most one per NPC per turn; interpersonal continuity is exempt from the extraction budget. If KNOWN PLAYER-RELATIONSHIP STANCES already lists a moment covering this beat, omit bondMoment entirely — never re-report or paraphrase a recorded moment.
+- stanceToPlayer is about the personal relationship between this NPC and the HERO specifically — their feelings toward the hero, not their role or plot function. Update it whenever an exchange genuinely shifts how they regard the hero: a flirtation received warmly or coldly, gratitude after a rescue, trust broken, growing attraction or contempt. Write it unvarnished — desire, resentment, and awkwardness named plainly. When KNOWN PLAYER-RELATIONSHIP STANCES lists this NPC, emit the COMPLETE updated stance as a full rewrite: restate every still-true part IN ITS EXISTING WORDING, integrate what this turn changed, and drop only what this turn superseded. The engine replaces the stored stance only when your text covers it — a differently-worded fragment gets APPENDED instead, leaving contradicted old feelings standing next to the new ones ("resentful and suspicious" beside "warmly appreciative"). If nothing shifted for them personally, omit the field. When KNOWN PLAYER-RELATIONSHIP STANCES lists RECENT IMPRESSIONS (unconfirmed) for this NPC, carry one into the stance ONLY if this exchange bears it out again — the engine makes an impression permanent only when the fiction shows it in a second scene.
+- bondMoment must be an actual NEW event from THIS exchange, stated concretely with both parties ("The hero flirted with Maren over the map table; she laughed and let her hand linger"). ONE per NPC per SCENE, not per turn: a scene has one defining beat per kind — a night together is ONE intimacy moment however many turns or positions it spans, a long conversation is one confession or flirtation — never one entry per line, position, or round. Interpersonal continuity is exempt from the extraction budget. If KNOWN PLAYER-RELATIONSHIP STANCES already lists a moment covering this beat, or a same-kind moment from this same scene, omit bondMoment entirely — never re-report or paraphrase a recorded moment. Grade salience honestly: what both would still remember a month later is 4 or 5; texture is 2 and usually not worth recording at all.
 - Use kind "character" and rosterEligible true only for named people worth tracking across sessions (dialogue, rivalry, debt, secrets, recurring villains, quest givers). Use kind "creature" or "ephemeral" with rosterEligible false for nameless combat fodder, generic goblins/guards, or one-line minions that should not enter the durable roster.
 - Capture "appearance"/"player_appearance" from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation AND the DM's own long-term visual continuity, so accuracy matters. Skin tone, hair state (including a bald or shaved head), build, and apparent age are the features generated art drifts on first: whenever the fiction states or makes one plainly apparent, record it in unambiguous words ("deep dark brown skin", "completely bald", "tall and statuesque") — a record that only implies them gets painted wrong.
 - "gender" and "species" are first-class continuity fields: pronouns, titles ("the widow", "the young man"), and explicit statements establish gender; any stated or apparent ancestry ("the goblin merchant", "a dwarven smith") establishes species. A character whose gender or species is knowable but unrecorded WILL get misrendered in generated art — a goblin woman recorded only as "woman" comes back human — so capture both as soon as the fiction shows them; both are exempt from the extraction budget like appearance.
@@ -201,15 +201,24 @@ export function buildKnownStances({ npcs = [] } = {}, ...texts) {
         if (entries.length >= 8) break;
         const name = String(npc?.name || '').trim();
         const stance = String(npc?.stanceToPlayer || '').trim();
-        const moments = (Array.isArray(npc?.bondMoments) ? npc.bondMoments : [])
-            .map(moment => String(moment?.text || '').trim())
-            .filter(Boolean);
-        if (!name || (!stance && moments.length === 0)) continue;
+        // Key moments lead, the newest ordinary ones follow (2026-09-12 tiers):
+        // the Scribe sees what the scene-collapse rule already holds for this
+        // scene, so a second same-kind beat is omitted at the source too.
+        const { key, recent } = splitBondMoments(npc?.bondMoments);
+        const onRecord = [...key.slice(-3), ...recent.slice(0, 2)];
+        const impressions = listNpcImpressions(npc, 'stanceToPlayer');
+        if (!name || (!stance && onRecord.length === 0)) continue;
         if (!isPresent(name)) continue;
         const lines = [];
         if (stance) lines.push(`${name}: ${stance.slice(0, 240)}`);
-        if (moments.length > 0) {
-            lines.push(`${name} — moments already on record (do NOT re-report or paraphrase these): ${moments.slice(-3).map(m => `"${m.slice(0, 140)}"`).join('; ')}`);
+        if (impressions.length > 0) {
+            lines.push(`${name} — recent impressions (unconfirmed; carry one into the stance ONLY if this exchange bears it out again): ${impressions.slice(-3).map(text => `"${text.slice(0, 140)}"`).join('; ')}`);
+        }
+        if (onRecord.length > 0) {
+            lines.push(`${name} — moments already on record (do NOT re-report or paraphrase these; a same-kind moment from the same scene is already covered): ${onRecord.map(moment => {
+                const kind = bondKindLabel(moment.kind);
+                return `"${moment.text.slice(0, 140)}"${kind ? ` (${kind})` : ''}`;
+            }).join('; ')}`);
         }
         entries.push(lines.join('\n'));
     }
@@ -286,7 +295,12 @@ function npcUpdateContradictsAuthoritativeCombat(npc, authoritativeContext) {
     const enemies = authoritativeContext?.postState?.enemies || [];
     if (enemies.length === 0) return false;
     const fields = NPC_UPDATE_CLAIM_FIELDS
-        .map(key => (typeof npc[key] === 'string' ? npc[key] : ''))
+        .map(key => {
+            const value = npc[key];
+            if (typeof value === 'string') return value;
+            // bondMoment is `{ text, kind, salience }` since 2026-09-12.
+            return (value && typeof value === 'object' && typeof value.text === 'string') ? value.text : '';
+        })
         .filter(Boolean);
     if (fields.length === 0) return false;
     return contradictsAuthoritativeCombat(`${npc.name}: ${fields.join(' ')}`, authoritativeContext);
@@ -559,10 +573,12 @@ function projectNpcForReflection(npc = {}) {
             .slice(-3)
             .map(hook => reflectionText(hook, 200))
             .filter(Boolean),
-        bondMoments: (Array.isArray(npc.bondMoments) ? npc.bondMoments : [])
-            .slice(-2)
-            .map(moment => reflectionText(moment?.text || moment, 240))
-            .filter(Boolean),
+        bondMoments: (() => {
+            const { key, recent } = splitBondMoments(npc.bondMoments);
+            return [...key.slice(-2), ...recent.slice(0, 1)]
+                .map(moment => reflectionText(moment.text, 240))
+                .filter(Boolean);
+        })(),
         basedIn: reflectionText(npc.basedIn, 120),
         lastLocation: reflectionText(npc.lastLocation, 120),
     };
