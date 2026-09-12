@@ -1713,3 +1713,48 @@ describe('2026-09-03 audit: sale quantity coercion, covered-purchase ledger stat
         expect(second.character.silver * 10 + second.character.copper).toBe(15); // 20 cp − 2 − 3, consolidated
     });
 });
+
+describe('numeric-string parity and contract symmetry (2026-09-12 inventory-economy P2)', () => {
+    it('PURCHASE_ITEM honors a string quantity and a string priceCp', () => {
+        const state = makeState({ character: { gold: 1, silver: 0, copper: 0 } });
+        const next = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: { name: 'Torch', quantity: '5', priceCp: '50' },
+        });
+        expect(next.character.gold).toBe(0);
+        expect(next.character.silver).toBe(5);
+        expect(next.inventory.find(i => i.itemKey === 'torch').quantity).toBe(5);
+    });
+
+    it('PURCHASE_ITEM refuses a nameless purchase visibly and charges nothing', () => {
+        const state = makeState({ character: { gold: 5, silver: 0, copper: 0 } });
+        const next = gameReducer(state, {
+            type: 'PURCHASE_ITEM',
+            payload: { item: [], priceCp: 300 },
+        });
+        expect(next.character.gold).toBe(5);
+        expect(next.inventory).toEqual(state.inventory);
+        expect(next.messages.at(-1).content).toMatch(/Purchase ignored/);
+        expect(next.recentPurchases ?? []).toEqual(state.recentPurchases ?? []);
+    });
+
+    it('SELL_ITEM "all" sells the whole stack, and a string priceCp override is honored', () => {
+        const state = makeState({
+            inventory: [{ id: 'torch-1', itemKey: 'torch', name: 'Torch', type: 'gear', valueCp: 1, quantity: 5 }],
+        });
+        const next = gameReducer(state, {
+            type: 'SELL_ITEM',
+            payload: { itemId: 'torch-1', quantity: 'ALL', priceCp: '50' },
+        });
+        expect(next.inventory.find(i => i.id === 'torch-1')).toBeUndefined();
+        expect(next.character.silver).toBe(5);
+    });
+
+    it('SELL_ITEM still sells one unit on a junk quantity', () => {
+        const state = makeState({
+            inventory: [{ id: 'torch-1', itemKey: 'torch', name: 'Torch', type: 'gear', valueCp: 1, quantity: 5 }],
+        });
+        const next = gameReducer(state, { type: 'SELL_ITEM', payload: { itemId: 'torch-1', quantity: 'some' } });
+        expect(next.inventory.find(i => i.id === 'torch-1').quantity).toBe(4);
+    });
+});

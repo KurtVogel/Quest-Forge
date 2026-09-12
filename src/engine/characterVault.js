@@ -11,10 +11,10 @@ import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
 import { getMaxHitPoints, getModifier } from './rules.js';
-import { ABILITY_NAMES, SKILL_LABELS, buildDerivedCharacterFields, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
+import { ABILITY_NAMES, SKILL_LABELS, buildDerivedCharacterFields, isKnownClass, isKnownRace, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 import { normalizeEquippedSlots } from './equipment.js';
-import { CHARACTER_APPEARANCE_MAX, MAX_COIN_HELD } from '../config/contentLimits.js';
+import { CHARACTER_APPEARANCE_MAX, MAX_COIN_HELD, cleanTextField } from '../config/contentLimits.js';
 import { sanitizePortraitUrl } from './portraitUrl.js';
 
 export const EXPORT_FORMAT = 'quest-forge-character';
@@ -96,13 +96,19 @@ export function sanitizeCharacter(raw) {
         throw new Error('No character data found in this file.');
     }
 
-    const name = String(raw.name || '').trim().slice(0, 30);
+    // Identity text is string-or-empty (2026-09-12 P2): the `String(x || '')`
+    // idiom imported `name: {}` as "[object Object]" past the no-name check and
+    // fed the same to the DM prompt, the art director's identity line, and the
+    // Scribe merge base. The hand-editable file gets the LOAD heal's typing.
+    const name = cleanTextField(raw.name, 30);
     if (!name) throw new Error('This character has no name.');
 
+    // Own-key gate (2026-09-12 P1): `race: 'constructor'` passed a truthiness
+    // test on the plain-object catalog and imported a featureless "Object".
+    if (!isKnownRace(raw.race)) throw new Error(`Unknown race "${cleanTextField(raw.race, 40) || 'unknown'}" — this hero may come from an older version of the game.`);
+    if (!isKnownClass(raw.class)) throw new Error(`Unknown class "${cleanTextField(raw.class, 40) || 'unknown'}" — this hero may come from an older version of the game.`);
     const race = RACES[raw.race];
     const charClass = CLASSES[raw.class];
-    if (!race) throw new Error(`Unknown race "${raw.race}" — this hero may come from an older version of the game.`);
-    if (!charClass) throw new Error(`Unknown class "${raw.class}" — this hero may come from an older version of the game.`);
 
     const abilityScores = {};
     for (const ability of ABILITY_NAMES) {
@@ -177,13 +183,13 @@ export function sanitizeCharacter(raw) {
         expertiseSkills,
         fightingStyle: normalizeFightingStyle(raw.class, raw.fightingStyle),
         martialArchetype: normalizeMartialArchetype(raw.class, level, raw.martialArchetype),
-        gender: String(raw.gender || '').trim().slice(0, 60),
-        background: String(raw.background || '').trim().slice(0, 2000),
-        appearance: String(raw.appearance || '').trim().slice(0, CHARACTER_APPEARANCE_MAX),
+        gender: cleanTextField(raw.gender, 60),
+        background: cleanTextField(raw.background, 2000),
+        appearance: cleanTextField(raw.appearance, CHARACTER_APPEARANCE_MAX),
         portraitUrl: sanitizeImageUrl(raw.portraitUrl),
-        portraitPrompt: String(raw.portraitPrompt || '').trim().slice(0, MAX_PORTRAIT_PROMPT_LENGTH),
+        portraitPrompt: cleanTextField(raw.portraitPrompt, MAX_PORTRAIT_PROMPT_LENGTH),
         portraitUpdatedAt: Number.isFinite(raw.portraitUpdatedAt) ? raw.portraitUpdatedAt : null,
-        notes: String(raw.notes || '').slice(0, 2000),
+        notes: cleanTextField(raw.notes, 2000),
         createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
     };
 

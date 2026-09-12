@@ -116,15 +116,25 @@ export function parseMagicBonusFromName(name = '') {
     return match ? Number(match[1]) : 0;
 }
 
+// OWN-key lookups only (2026-09-12 inventory-economy P1): the catalog tables are
+// plain objects, so `NAME_TO_KEY['constructor']` used to return the Object
+// FUNCTION as a "key" and `ITEM_CATALOG[fn]` threw out of normalizeItem on every
+// write path — an `items_found: ["Constructor"]` grant threw AFTER the loot
+// source was claimed (the same response's coin/quests never dispatched, a retry
+// paid nothing), and one stored row with that name made LOAD_GAME throw inside
+// the unconditional equipped-slot heal: an unloadable campaign.
+const catalogEntry = (key) => (typeof key === 'string' && Object.hasOwn(ITEM_CATALOG, key) ? ITEM_CATALOG[key] : null);
+const catalogKeyForName = (name) => (typeof name === 'string' && Object.hasOwn(NAME_TO_KEY, name) ? NAME_TO_KEY[name] : null);
+
 export function normalizeItemKey(value = '') {
     const raw = String(value).trim();
     if (!raw) return null;
-    if (ITEM_CATALOG[raw]) return raw;
+    if (catalogEntry(raw)) return raw;
     const lower = raw.toLowerCase();
-    if (NAME_TO_KEY[lower]) return NAME_TO_KEY[lower];
+    if (catalogKeyForName(lower)) return catalogKeyForName(lower);
     const withoutBonus = lower.replace(/\s*\+[1-3]\b/g, '').trim();
     const compact = withoutBonus.replace(/[^a-z0-9]/g, '');
-    if (NAME_TO_KEY[compact]) return NAME_TO_KEY[compact];
+    if (catalogKeyForName(compact)) return catalogKeyForName(compact);
 
     // LLMs commonly add a bounded descriptive prefix to ordinary equipment
     // ("massive warhammer", "weathered leather armor"). Match only a complete
@@ -180,7 +190,7 @@ export function parseCountedItemName(name = '') {
     // Exact catalog identities pass through untouched. Deliberately NOT the full
     // normalizeItemKey resolution: its plural/suffix fallbacks can resolve
     // "3 Torches" (via "3 torch") and would swallow the count we are here for.
-    if (ITEM_CATALOG[raw] || NAME_TO_KEY[raw.toLowerCase()]) return null;
+    if (catalogEntry(raw) || catalogKeyForName(raw.toLowerCase())) return null;
     let count;
     let rest;
     let match = raw.match(/^(\d{1,3})\s*[x×]\s*(.+)$/i)
@@ -247,6 +257,70 @@ export function boundWeaponDamage(value) {
     return `${count}d${sides}${bonus ? `+${bonus}` : ''}`;
 }
 
+// Item types the engine knows. A non-catalog `type` is LLM- or import-authored:
+// it is case-folded and whitelisted here (2026-09-12 P2 — a capitalized
+// "Weapon" kept unbounded damage, was not equippable, and still read as a
+// weapon in the prompt; an object type stored as an object).
+const ITEM_TYPES = new Set(['weapon', 'armor', 'shield', 'consumable', 'gear', 'tool']);
+const DEFAULT_ITEM_TYPE = 'gear';
+// Weapon-property flags are BOOLEANS at every boundary (2026-09-12 P2): a
+// string "no"/"false" is truthy, so `twoHanded: 'no'` on an imported Longsword
+// sheathed the equipped shield and `isShield: 'no'` on a gear row equipped as a
+// shield. Catalog rows carry only their catalog flags (a DM cannot make a
+// Longsword two-handed); non-catalog rows get theirs typed.
+const ITEM_FLAG_KEYS = ['ranged', 'finesse', 'thrown', 'twoHanded', 'versatile', 'isShield'];
+const FALSE_FLAG_WORDS = new Set(['false', 'no', '0', 'off', 'none', 'null', 'undefined']);
+// Free-text descriptors ride the payload untyped otherwise; string-or-drop with
+// a clamp so an object never reaches the prompt or a React child.
+const ITEM_TEXT_FIELDS = { damageType: 40, rarity: 40, description: 600, consumableType: 40, actionType: 40, category: 40, armorType: 40 };
+// Healing is the weapon-damage bound's sibling (2026-09-12 P2): a non-catalog
+// potion with `healing: '100d1000+1000'` imported intact and rolled 100 dice on
+// a bonus action. Ceilings admit a 5e Supreme (10d4+20); junk falls back to the
+// catalog potion's dice so a labeled healing consumable still heals SOMETHING.
+const MAX_HEALING_DICE_COUNT = 10;
+const MAX_HEALING_DIE_SIDES = 12;
+const MAX_HEALING_FLAT_BONUS = 20;
+const FALLBACK_HEALING = '2d4+2';
+
+/** Coerce a payload boolean: false-words and 0 are false, anything else truthy is `!!`. */
+export function toFlag(value) {
+    if (typeof value === 'string') return !FALSE_FLAG_WORDS.has(value.trim().toLowerCase()) && value.trim() !== '';
+    return !!value;
+}
+
+/**
+ * Numeric-string parity with the coin clamp (2026-09-12 P2): the DM emits
+ * counts and prices as strings often enough that `Number.isFinite` on the raw
+ * value silently dropped them (`quantity: "5"` bought ONE torch). Numbers pass,
+ * numeric strings parse, everything else is null.
+ */
+export function toFiniteNumber(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string' && value.trim() !== '') {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+    return null;
+}
+
+/** Bound a healing notation like boundWeaponDamage bounds a weapon's dice. */
+export function boundHealingNotation(value) {
+    const match = String(value ?? '').trim().match(/^(\d{1,3})\s*d\s*(\d{1,4})\s*(?:\+\s*(\d{1,4}))?$/i);
+    if (!match) return FALLBACK_HEALING;
+    const count = Number(match[1]);
+    const sides = Number(match[2]);
+    const bonus = Number(match[3] || 0);
+    if (count < 1 || sides < 1 || count > MAX_HEALING_DICE_COUNT || sides > MAX_HEALING_DIE_SIDES || bonus > MAX_HEALING_FLAT_BONUS) {
+        return FALLBACK_HEALING;
+    }
+    return `${count}d${sides}${bonus ? `+${bonus}` : ''}`;
+}
+
+function normalizeItemType(value) {
+    const type = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return ITEM_TYPES.has(type) ? type : DEFAULT_ITEM_TYPE;
+}
+
 export function normalizeItem(raw = {}) {
     const source = typeof raw === 'string' ? { name: raw } : { ...raw };
     // A non-string name is no name (2026-09-11 persistence P2): an object
@@ -254,6 +328,20 @@ export function normalizeItem(raw = {}) {
     // React child throw in the Inventory panel. Falls to the 'Unknown item'
     // default below like a missing name.
     if (typeof source.name !== 'string') delete source.name;
+    // Numeric fields accept numeric strings before their finite checks.
+    for (const key of ['quantity', 'valueCp', 'priceCp', 'weight', 'magicBonus', 'enhancement', 'bonus', 'attackBonus', 'damageBonus', 'acBonus', 'baseAC', 'shieldAC']) {
+        if (source[key] !== undefined) {
+            const n = toFiniteNumber(source[key]);
+            if (n === null) delete source[key];
+            else source[key] = n;
+        }
+    }
+    for (const [key, max] of Object.entries(ITEM_TEXT_FIELDS)) {
+        if (source[key] === undefined) continue;
+        const text = typeof source[key] === 'string' ? source[key].trim().slice(0, max) : '';
+        if (text) source[key] = text;
+        else delete source[key];
+    }
     // A count embedded in the name becomes quantity ("3 Torches" → Torch ×3);
     // an explicit quantity field from the payload still wins when present.
     const counted = parseCountedItemName(source.name);
@@ -264,16 +352,17 @@ export function normalizeItem(raw = {}) {
         }
     }
     const itemKey = normalizeItemKey(source.itemKey || source.key || source.name);
-    const base = itemKey ? ITEM_CATALOG[itemKey] : {};
+    const base = catalogEntry(itemKey) || {};
     const parsedBonus = parseMagicBonusFromName(source.name || base.name);
     const magicBonus = clampMagicBonus(source.magicBonus ?? source.enhancement ?? source.bonus ?? parsedBonus);
     const hasExplicitValue = Number.isFinite(source.valueCp) || Number.isFinite(source.priceCp);
     const quantity = Number.isFinite(source.quantity) && source.quantity > 0
         ? Math.min(MAX_ITEM_QUANTITY, Math.trunc(source.quantity))
         : (base.quantity || 1);
-    const itemType = base.type || source.type || 'gear';
+    const sourceIsShield = toFlag(source.isShield);
+    const itemType = itemKey ? base.type : normalizeItemType(source.type);
     const isWeapon = itemType === 'weapon';
-    const isArmorLike = itemType === 'armor' || itemType === 'shield' || source.isShield || base.isShield;
+    const isArmorLike = itemType === 'armor' || itemType === 'shield' || (itemKey ? !!base.isShield : sourceIsShield);
     const normalized = {
         ...base,
         ...source,
@@ -294,6 +383,24 @@ export function normalizeItem(raw = {}) {
         rarity: source.rarity || base.rarity || (magicBonus ? MAGIC_ITEM_RARITY[magicBonus] : undefined),
         quantity,
     };
+
+    // Flags: catalog rows carry exactly the catalog's flags; non-catalog rows
+    // get theirs typed. A key neither side defines stays absent.
+    for (const key of ITEM_FLAG_KEYS) {
+        const owner = itemKey ? base : source;
+        if (owner[key] === undefined) delete normalized[key];
+        else normalized[key] = toFlag(owner[key]);
+    }
+    // Consumable mechanics follow the same rule: a catalog Torch cannot be
+    // relabeled a healing potion by a payload `consumableType`/`healing`.
+    if (itemKey) {
+        for (const key of ['consumableType', 'healing']) {
+            if (base[key] === undefined) delete normalized[key];
+            else normalized[key] = base[key];
+        }
+    } else if (normalized.healing !== undefined) {
+        normalized.healing = boundHealingNotation(normalized.healing);
+    }
 
     // Non-catalog values come straight from the LLM; a sold item pays out half its
     // valueCp, so an unbounded value is an unbounded mint.
@@ -319,11 +426,23 @@ export function normalizeItem(raw = {}) {
         }
     }
 
-    // Catalog weapons carry catalog dice (the spread above restored them); a
-    // non-catalog weapon's notation is LLM- or import-authored and gets bounded.
-    if (normalized.type === 'weapon' && !itemKey) {
-        if (normalized.damage !== undefined) normalized.damage = boundWeaponDamage(normalized.damage);
-        if (normalized.damageVersatile !== undefined) normalized.damageVersatile = boundWeaponDamage(normalized.damageVersatile);
+    // Catalog rows carry catalog dice (the spread above restored them); a
+    // non-catalog row's notation is LLM- or import-authored and gets bounded
+    // whenever PRESENT (2026-09-12 P2: the old weapon-only gate let a gear row
+    // keep '99d12' or an OBJECT — "[object Object] x" in the inventory block
+    // and a React child throw in the panel). Junk on a non-weapon is dropped
+    // rather than invented as 1d6.
+    if (!itemKey) {
+        for (const key of ['damage', 'damageVersatile']) {
+            if (normalized[key] === undefined) continue;
+            const bounded = boundWeaponDamage(normalized[key]);
+            if (normalized.type === 'weapon' || bounded !== FALLBACK_WEAPON_DAMAGE) normalized[key] = bounded;
+            else delete normalized[key];
+        }
+    } else {
+        for (const key of ['damage', 'damageVersatile']) {
+            if (base[key] === undefined) delete normalized[key];
+        }
     }
 
     if (normalized.type === 'shield') {

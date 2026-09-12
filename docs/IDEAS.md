@@ -1874,7 +1874,7 @@ Inventory panel); `healing` has no bound at all (`100d1000+1000` heals to full a
 action). Bound `damage` whenever present, whitelist `type`, add `boundHealingNotation`, and
 coerce numeric strings on item `quantity`/purchase `priceCp` like the coin `clamp` already
 does (`"5"` torches for `"50"` cp bought ONE for 1 cp). From the 2026-09-12 strengthening
-audit (character-vault + inventory-economy, Lap 2).
+audit (character-vault + inventory-economy, Lap 2). **Applied 2026-09-13** (DECISIONS.md 2026-09-13): `isKnownRace`/`isKnownClass`, `catalogEntry`/`catalogKeyForName`, the type whitelist, `boundHealingNotation`, `toFlag`, `toFiniteNumber`. Spell lookups were already Map-indexed; `CONDITION_EFFECTS[...]?.[kind]` dereferences an inherited function member to undefined and is harmless.
 
 ---
 

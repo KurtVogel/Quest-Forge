@@ -1,5 +1,7 @@
 export function isShieldItem(item) {
-    return item?.type === 'shield' || item?.isShield;
+    // Boolean-strict (2026-09-12 P2): a string flag ("no") is truthy and equipped
+    // a gear row as a shield; normalizeItem types the flag, this is the belt.
+    return item?.type === 'shield' || item?.isShield === true;
 }
 
 export function isArmorItem(item) {

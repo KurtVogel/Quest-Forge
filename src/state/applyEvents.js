@@ -12,7 +12,7 @@
  */
 
 import { CLASSES } from '../data/classes.js';
-import { normalizeItem } from '../data/items.js';
+import { normalizeItem, toFlag } from '../data/items.js';
 import { isLowLevelSolo } from '../engine/combatExchange.js';
 
 /**
@@ -229,18 +229,20 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                 ...(item.armorType && { armorType: item.armorType }),
                 ...(item.acBonus !== undefined && { acBonus: item.acBonus }),
                 ...(item.magicBonus !== undefined && { magicBonus: item.magicBonus }),
-                ...(item.isShield && { isShield: true, type: 'shield' }),
+                // Flags are typed through toFlag (2026-09-12 P2): `!!` read a
+                // DM `"twoHanded": "false"` as true and sheathed the shield.
+                ...(toFlag(item.isShield) && { isShield: true, type: 'shield' }),
                 ...(item.shieldAC !== undefined && { shieldAC: item.shieldAC }),
                 ...(item.damage && { damage: item.damage }),
                 ...(item.damageVersatile && { damageVersatile: item.damageVersatile }),
                 ...(item.damageType && { damageType: item.damageType }),
                 ...(item.attackBonus !== undefined && { attackBonus: item.attackBonus }),
                 ...(item.damageBonus !== undefined && { damageBonus: item.damageBonus }),
-                ...(item.ranged !== undefined && { ranged: !!item.ranged }),
-                ...(item.finesse !== undefined && { finesse: !!item.finesse }),
-                ...(item.thrown !== undefined && { thrown: !!item.thrown }),
-                ...(item.twoHanded !== undefined && { twoHanded: !!item.twoHanded }),
-                ...(item.versatile !== undefined && { versatile: !!item.versatile }),
+                ...(item.ranged !== undefined && { ranged: toFlag(item.ranged) }),
+                ...(item.finesse !== undefined && { finesse: toFlag(item.finesse) }),
+                ...(item.thrown !== undefined && { thrown: toFlag(item.thrown) }),
+                ...(item.twoHanded !== undefined && { twoHanded: toFlag(item.twoHanded) }),
+                ...(item.versatile !== undefined && { versatile: toFlag(item.versatile) }),
                 ...(item.consumableType && { consumableType: item.consumableType }),
                 ...(item.healing && { healing: item.healing }),
                 ...(item.quantity && { quantity: item.quantity }),

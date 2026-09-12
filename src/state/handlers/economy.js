@@ -2,7 +2,7 @@
  * Coin and trade: replay-guarded coin grants/losses, the Scribe payment audit,
  * and one-shot purchase/sale transactions.
  */
-import { normalizeItem, normalizeItemKey } from '../../data/items.js';
+import { normalizeItem, normalizeItemKey, toFiniteNumber } from '../../data/items.js';
 import { addCurrency, characterCurrencyToCopper, formatCurrency, spendCurrency } from '../../engine/currency.js';
 import { MAX_COIN_EVENT } from '../../config/contentLimits.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
@@ -42,18 +42,24 @@ function buildPurchaseTransaction(payload = {}) {
             ? { name: String(root.item) }
             : { ...root };
     const { _meta: _rawMeta, ...raw } = rawWithMeta;
+    const textOrNull = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+    const itemKeyRef = textOrNull(raw.itemKey) || textOrNull(root.itemKey) || textOrNull(raw.key) || textOrNull(root.key);
+    const nameRef = textOrNull(raw.name) || textOrNull(root.name);
     const item = normalizeItem({
         ...raw,
-        itemKey: raw.itemKey || root.itemKey || raw.key || root.key,
-        name: raw.name || root.name,
+        itemKey: itemKeyRef || undefined,
+        name: nameRef || undefined,
         quantity: root.quantity || raw.quantity || 1,
     });
     // priceCp is a flat total the DM supplies, independent of quantity — an unbounded
     // quantity would mint an arbitrary stack for a trivial fixed price. Negative or
-    // fractional prices are hostile input on the same boundary.
+    // fractional prices are hostile input on the same boundary. Numeric strings
+    // coerce like the coin clamp (2026-09-12 P2: `priceCp: "50"` bought at
+    // catalog price, the DM's own price silently dropped).
     const quantity = Math.max(1, Math.min(MAX_PURCHASE_QUANTITY, Math.trunc(item.quantity || 1)));
-    const rawPriceCp = Number.isFinite(root.priceCp)
-        ? root.priceCp
+    const rootPriceCp = toFiniteNumber(root.priceCp);
+    const rawPriceCp = rootPriceCp !== null
+        ? rootPriceCp
         : Number.isFinite(item.valueCp)
             ? item.valueCp * quantity
             : 0;
@@ -64,6 +70,9 @@ function buildPurchaseTransaction(payload = {}) {
         item,
         quantity,
         priceCp,
+        // A purchase with no item name or key (`item: []` spread to `{}`) used
+        // to buy "Unknown item" for the stated price — refused visibly instead.
+        nameless: !item.itemKey && !nameRef,
         signature: `${identity || normalizeRefToken(item.name)}|${quantity}|${Math.max(0, Math.trunc(priceCp))}`,
     };
 }
@@ -776,6 +785,15 @@ export const handlers = {
     PURCHASE_ITEM(state, action) {
         const transaction = buildPurchaseTransaction(action.payload);
         const { item, quantity, priceCp } = transaction;
+        if (transaction.nameless) {
+            return {
+                ...state,
+                messages: [
+                    ...state.messages,
+                    coinLine(`Purchase ignored — the DM named no item to buy (${formatCurrency(priceCp)} not charged).`),
+                ],
+            };
+        }
         const meta = action.payload?._meta || {};
         const sourceId = String(meta.sourceId || '').slice(0, 160);
         // Pass messages so the window measures conversational distance — without
@@ -864,16 +882,21 @@ export const handlers = {
 
         // Finite + trunc like buildPurchaseTransaction (2026-09-03 P2): a
         // fractional/string DM quantity left "Rations ×2.5" and paid 1.5×.
-        const requestedQuantity = Number(payload.quantity);
+        // "all" sells the whole stack — contract parity with items_lost
+        // (2026-09-12 P2: it used to sell ONE unit).
+        const heldQuantity = Math.max(1, Math.trunc(item.quantity || 1));
+        const sellsAll = typeof payload.quantity === 'string' && payload.quantity.trim().toLowerCase() === 'all';
+        const requestedQuantity = sellsAll ? heldQuantity : toFiniteNumber(payload.quantity);
         const quantity = Math.max(1, Math.min(
-            Math.max(1, Math.trunc(item.quantity || 1)),
-            Number.isFinite(requestedQuantity) ? Math.trunc(requestedQuantity) : 1
+            heldQuantity,
+            requestedQuantity !== null ? Math.trunc(requestedQuantity) : 1
         ));
         // Proceeds share the coin-grant ceiling whichever path priced them: the DM's
         // override is unbounded LLM input, and legacy save items may carry an
         // unclamped valueCp.
-        const proceedsCp = Math.min(MAX_SALE_PROCEEDS_CP, Number.isFinite(payload.priceCp)
-            ? Math.max(0, Math.trunc(payload.priceCp))
+        const overridePriceCp = toFiniteNumber(payload.priceCp);
+        const proceedsCp = Math.min(MAX_SALE_PROCEEDS_CP, overridePriceCp !== null
+            ? Math.max(0, Math.trunc(overridePriceCp))
             : Math.floor((item.valueCp || 0) / 2) * quantity);
 
         // Sales get the same one-shot replay protection as purchases: a re-emitted

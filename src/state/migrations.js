@@ -42,6 +42,8 @@ import {
     ABILITY_NAMES,
     buildClassResources,
     buildDerivedCharacterFields,
+    isKnownClass,
+    isKnownRace,
     normalizeAbilityScoreImprovementState,
     normalizeFightingStyle,
     normalizeMartialArchetype,
@@ -247,8 +249,10 @@ const FALLBACK_RACE = 'human';
 function healUnknownClassRace(save) {
     const character = save.character;
     if (!character || typeof character !== 'object') return save;
-    const classKnown = typeof character.class === 'string' && !!CLASSES[character.class];
-    const raceKnown = typeof character.race === 'string' && !!RACES[character.race];
+    // Own-key gate shared with the vault (2026-09-12 P1): `class: 'constructor'`
+    // passed the old truthiness test and round-tripped as class "constructor".
+    const classKnown = isKnownClass(character.class);
+    const raceKnown = isKnownRace(character.race);
     if (classKnown && raceKnown) return save;
     const charClass = classKnown ? character.class : FALLBACK_CLASS;
     const race = raceKnown ? character.race : FALLBACK_RACE;

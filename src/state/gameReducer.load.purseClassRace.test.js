@@ -111,3 +111,32 @@ describe('LOAD_GAME inventory row typing (2026-09-11 persistence P2)', () => {
         expect(promptOf(next)).not.toContain('[object Object]');
     });
 });
+
+describe('LOAD_GAME own-key class/race gate + prototype-key item names (2026-09-12 P1)', () => {
+    it('class "constructor" heals to Fighter with a notice instead of round-tripping as class "Object"', () => {
+        const next = load({ class: 'constructor', race: '__proto__' });
+        expect(next.character.class).toBe('fighter');
+        expect(next.character.race).toBe('human');
+        expect(next.character.hitDice.die).toBe(10);
+        expect(next.character.classResources.secondWind).toBeDefined();
+        expect(next.messages.some(m => m.role === 'system' && /class "constructor"/.test(m.content))).toBe(true);
+        expect(promptOf(next)).toContain('**Class:** Fighter');
+        expect(promptOf(next)).not.toContain('Object');
+    });
+
+    it('a stored inventory row named "Constructor" loads as a plain row — the campaign is loadable', () => {
+        let next;
+        expect(() => {
+            next = load({}, {
+                inventory: [
+                    { id: 'i1', name: 'Constructor', type: 'gear', quantity: 1 },
+                    { id: 'i2', name: '__proto__', type: 'gear', quantity: 1 },
+                    { id: 'i3', name: 'Cursed Idol', type: 'gear', damage: { dice: 99 } },
+                ],
+            });
+        }).not.toThrow();
+        expect(next.inventory.map(i => i.name)).toEqual(['Constructor', '__proto__', 'Cursed Idol']);
+        expect(next.inventory[2].damage).toBeUndefined();
+        expect(promptOf(next)).not.toContain('[object Object]');
+    });
+});

@@ -13,7 +13,7 @@ import {
     sanitizeInventory,
     parseCharacterExport,
 } from './characterVault.js';
-import { createCharacter, createStartingInventory } from './characterUtils.js';
+import { classDisplayName, createCharacter, createStartingInventory, isKnownClass, isKnownRace, normalizeFightingStyle, raceDisplayName } from './characterUtils.js';
 import { getProficiencyBonus } from './rules.js';
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 
@@ -464,5 +464,91 @@ describe('2026-09-03 audit: vault test depth', () => {
         const begun = { ...sanitizeCharacter(once.character), id: rosterId };
         expect(begun.id).toBe(rosterId);
         expect(sanitizeCharacter(once.character).id).not.toBe(rosterId);
+    });
+});
+
+describe('prototype keys never pass the race/class gate (2026-09-12 character-vault P1)', () => {
+    it('rejects inherited object keys as unknown race/class with a readable message', () => {
+        const { character } = makeFighter();
+        for (const key of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+            expect(() => sanitizeCharacter({ ...character, race: key })).toThrow(/Unknown race/);
+            expect(() => sanitizeCharacter({ ...character, class: key })).toThrow(/Unknown class/);
+        }
+        expect(() => sanitizeCharacter({ ...character, race: {} })).toThrow('Unknown race "unknown"');
+    });
+
+    it('a prototype-key fighting style or archetype falls back to the class default', () => {
+        const { character } = makeFighter();
+        const imported = sanitizeCharacter({ ...character, level: 3, fightingStyle: 'constructor', martialArchetype: '__proto__' });
+        expect(imported.fightingStyle).toBe('defense');
+        expect(imported.martialArchetype).toBe('champion');
+        expect(normalizeFightingStyle('fighter', 'toString')).toBe('defense');
+        expect(normalizeFightingStyle('fighter', 'archery')).toBe('archery');
+    });
+
+    it('display names never resolve a prototype key to "Object"', () => {
+        expect(classDisplayName({ class: 'constructor' })).toBe('constructor');
+        expect(raceDisplayName({ race: '__proto__' })).toBe('__proto__');
+        expect(classDisplayName({ class: 'fighter' })).toBe('Fighter');
+        expect(isKnownClass('constructor')).toBe(false);
+        expect(isKnownRace('halfOrc')).toBe(true);
+    });
+});
+
+describe('identity text is string-or-empty on import (2026-09-12 character-vault P2)', () => {
+    it('an object name is no name', () => {
+        const { character } = makeFighter();
+        expect(() => sanitizeCharacter({ ...character, name: {} })).toThrow('This character has no name.');
+        expect(() => sanitizeCharacter({ ...character, name: 42 })).toThrow('This character has no name.');
+    });
+
+    it('non-string gender/appearance/background/notes/portraitPrompt import as empty, never "[object Object]"', () => {
+        const { character } = makeFighter();
+        const imported = sanitizeCharacter({
+            ...character,
+            gender: {}, appearance: ['tall'], background: 42, notes: { a: 1 }, portraitPrompt: null,
+        });
+        expect(imported.gender).toBe('');
+        expect(imported.appearance).toBe('');
+        expect(imported.background).toBe('');
+        expect(imported.notes).toBe('');
+        expect(imported.portraitPrompt).toBe('');
+        expect(JSON.stringify(imported)).not.toContain('[object Object]');
+    });
+
+    it('string identity text still trims and clamps', () => {
+        const { character } = makeFighter();
+        const imported = sanitizeCharacter({ ...character, gender: '  woman  ', background: 'b'.repeat(2500) });
+        expect(imported.gender).toBe('woman');
+        expect(imported.background).toHaveLength(2000);
+    });
+});
+
+describe('inventory flags are typed on import (2026-09-12 character-vault + inventory-economy P2)', () => {
+    it('twoHanded "no" on an imported Longsword never sheathes the equipped shield', () => {
+        const inventory = sanitizeInventory([
+            { name: 'Longsword', type: 'weapon', equipped: true, twoHanded: 'no' },
+            { name: 'Shield', type: 'shield', equipped: true },
+        ]);
+        const shield = inventory.find(i => i.itemKey === 'shield');
+        expect(shield.equipped).toBe(true);
+        expect(inventory.find(i => i.itemKey === 'longsword').twoHanded).toBeUndefined();
+    });
+
+    it('isShield "no" on a gear row imports as a plain gear row, not an equipped shield', () => {
+        const inventory = sanitizeInventory([{ name: 'Cursed Idol', type: 'gear', isShield: 'no', equipped: true }]);
+        expect(inventory[0].isShield).toBe(false);
+        expect(inventory[0].equipped).toBe(false);
+    });
+
+    it('a hostile healing notation and a prototype-key item name import bounded and without throwing', () => {
+        const inventory = sanitizeInventory([
+            { name: 'Elixir', type: 'consumable', consumableType: 'healing', healing: '100d1000+1000' },
+            { name: 'Constructor', type: 'gear' },
+            { name: 'Cursed Idol', type: 'gear', damage: '99d12' },
+        ]);
+        expect(inventory[0].healing).toBe('2d4+2');
+        expect(inventory[1].name).toBe('Constructor');
+        expect(inventory[2].damage).toBeUndefined();
     });
 });

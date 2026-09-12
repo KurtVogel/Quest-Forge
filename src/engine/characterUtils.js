@@ -20,12 +20,32 @@ import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
  */
 export function raceDisplayName(character) {
     const key = String(character?.race || '').trim();
-    return RACES[key]?.name || key;
+    return isKnownRace(key) ? RACES[key].name : key;
 }
 
 export function classDisplayName(character) {
     const key = String(character?.class || '').trim();
-    return CLASSES[key]?.name || key;
+    return isKnownClass(key) ? CLASSES[key].name : key;
+}
+
+/**
+ * The ONE race/class gate (2026-09-12 character-vault P1): the catalogs are
+ * plain objects, so a truthiness test on `RACES[key]` passed inherited keys —
+ * `race: 'constructor'` imported as a featureless hero whose class rendered as
+ * "Object" and whose legacy-path HP was NaN. Own string keys only, used by the
+ * vault, the load heal, the style/archetype normalizers, and the display names.
+ */
+export function isKnownRace(key) {
+    return typeof key === 'string' && Object.hasOwn(RACES, key);
+}
+
+export function isKnownClass(key) {
+    return typeof key === 'string' && Object.hasOwn(CLASSES, key);
+}
+
+/** Own-key lookup into a class option table (fighting styles, archetypes). */
+function hasOwnOption(table, value) {
+    return !!table && typeof value === 'string' && Object.hasOwn(table, value);
 }
 
 /**
@@ -124,9 +144,9 @@ export function buildClassResources(className, level, previous = null) {
 }
 
 export function normalizeFightingStyle(className, value) {
-    const styles = CLASSES[className]?.fightingStyles;
+    const styles = isKnownClass(className) ? CLASSES[className].fightingStyles : null;
     if (!styles) return null;
-    return styles[value] ? value : DEFAULT_FIGHTER_FIGHTING_STYLE;
+    return hasOwnOption(styles, value) ? value : DEFAULT_FIGHTER_FIGHTING_STYLE;
 }
 
 export function getFightingStyleLabel(className, value) {
@@ -135,9 +155,9 @@ export function getFightingStyleLabel(className, value) {
 }
 
 export function normalizeMartialArchetype(className, level, value) {
-    const archetypes = CLASSES[className]?.martialArchetypes;
+    const archetypes = isKnownClass(className) ? CLASSES[className].martialArchetypes : null;
     if (!archetypes || (Number(level) || 1) < 3) return null;
-    return archetypes[value] ? value : DEFAULT_FIGHTER_MARTIAL_ARCHETYPE;
+    return hasOwnOption(archetypes, value) ? value : DEFAULT_FIGHTER_MARTIAL_ARCHETYPE;
 }
 
 export function getMartialArchetypeLabel(className, level, value) {

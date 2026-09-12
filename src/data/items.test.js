@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boundWeaponDamage, normalizeItem, normalizeItemKey, parseCountedItemName } from './items.js';
+import { boundHealingNotation, boundWeaponDamage, normalizeItem, normalizeItemKey, parseCountedItemName, toFiniteNumber, toFlag } from './items.js';
 
 describe('item catalog normalization', () => {
     it('recognizes a catalog item with a descriptive prefix', () => {
@@ -177,5 +177,141 @@ describe('parseCountedItemName corner cases (2026-09-03 P2)', () => {
     it('does not read "2 Handed Sword" as two swords', () => {
         expect(parseCountedItemName('2 Handed Sword')).toBeNull();
         expect(normalizeItem({ name: '2 Handed Sword', type: 'weapon', damage: '2d6' })).toMatchObject({ name: '2 Handed Sword', quantity: 1 });
+    });
+});
+
+describe('prototype keys never resolve or throw (2026-09-12 inventory-economy P1)', () => {
+    it('normalizeItemKey treats inherited object keys as no catalog match', () => {
+        for (const name of ['constructor', 'Constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf']) {
+            expect(normalizeItemKey(name)).toBeNull();
+        }
+        expect(parseCountedItemName('3 Constructors')).toEqual({ name: 'Constructors', quantity: 3 });
+    });
+
+    it('normalizeItem mints a plain custom row named as given instead of throwing', () => {
+        for (const name of ['Constructor', 'constructor', '__proto__', 'toString']) {
+            let item;
+            expect(() => { item = normalizeItem({ name, type: 'gear' }); }).not.toThrow();
+            expect(item.name).toBe(name);
+            expect(item.itemKey).toBeNull();
+            expect(item.type).toBe('gear');
+            expect(item.quantity).toBe(1);
+        }
+    });
+});
+
+describe('item flags are booleans at the normalize boundary (2026-09-12 P2)', () => {
+    it('toFlag reads false-words as false and anything else truthy as true', () => {
+        expect(toFlag('no')).toBe(false);
+        expect(toFlag('false')).toBe(false);
+        expect(toFlag('0')).toBe(false);
+        expect(toFlag(0)).toBe(false);
+        expect(toFlag('')).toBe(false);
+        expect(toFlag('yes')).toBe(true);
+        expect(toFlag(true)).toBe(true);
+        expect(toFlag(1)).toBe(true);
+    });
+
+    it('a catalog Longsword keeps ONLY its catalog flags — a payload twoHanded never lands', () => {
+        const sword = normalizeItem({ name: 'Longsword', twoHanded: 'no', ranged: true });
+        expect(sword.twoHanded).toBeUndefined();
+        expect(sword.ranged).toBeUndefined();
+        expect(sword.versatile).toBe(true);
+    });
+
+    it('a non-catalog weapon gets its string flags typed', () => {
+        const item = normalizeItem({ name: 'Bone Cleaver', type: 'weapon', damage: '1d8', twoHanded: 'no', finesse: 'yes', thrown: 'false' });
+        expect(item.twoHanded).toBe(false);
+        expect(item.finesse).toBe(true);
+        expect(item.thrown).toBe(false);
+    });
+
+    it('isShield "no" on a gear row is false, so it never equips as a shield', () => {
+        const idol = normalizeItem({ name: 'Cursed Idol', type: 'gear', isShield: 'no' });
+        expect(idol.isShield).toBe(false);
+        expect(idol.type).toBe('gear');
+    });
+});
+
+describe('non-catalog type whitelist, damage bound on any row, typed descriptors (2026-09-12 P2)', () => {
+    it('case-folds a capitalized type and bounds its damage', () => {
+        const item = normalizeItem({ name: 'Ashen Blade', type: 'Weapon', damage: '99d12' });
+        expect(item.type).toBe('weapon');
+        expect(item.damage).toBe('1d6');
+    });
+
+    it('an unknown or object type becomes gear', () => {
+        expect(normalizeItem({ name: 'Idol', type: {} }).type).toBe('gear');
+        expect(normalizeItem({ name: 'Idol', type: 'treasure' }).type).toBe('gear');
+        expect(normalizeItem({ name: 'Idol', type: 'Tool' }).type).toBe('tool');
+    });
+
+    it('junk damage on a non-weapon row is dropped, sane damage is kept bounded', () => {
+        expect(normalizeItem({ name: 'Cursed Idol', type: 'gear', damage: { dice: 99 } }).damage).toBeUndefined();
+        expect(normalizeItem({ name: 'Cursed Idol', type: 'gear', damage: '99d12' }).damage).toBeUndefined();
+        expect(normalizeItem({ name: 'Alchemist Vial', type: 'consumable', damage: '1d4 fire' }).damage).toBe('1d4');
+    });
+
+    it('a catalog non-weapon never keeps a payload damage', () => {
+        expect(normalizeItem({ name: 'Torch', damage: '99d12' }).damage).toBeUndefined();
+    });
+
+    it('descriptive fields are string-or-dropped and clamped', () => {
+        const item = normalizeItem({
+            name: 'Odd Relic', type: 'gear',
+            description: { html: '<b>' }, rarity: ['rare'], damageType: 42, consumableType: {}, actionType: '  bonus  ',
+        });
+        expect(item.description).toBeUndefined();
+        expect(item.rarity).toBeUndefined();
+        expect(item.damageType).toBeUndefined();
+        expect(item.consumableType).toBeUndefined();
+        expect(item.actionType).toBe('bonus');
+        expect(normalizeItem({ name: 'Odd Relic', type: 'gear', description: 'x'.repeat(700) }).description).toHaveLength(600);
+    });
+});
+
+describe('healing notation is bounded like weapon damage (2026-09-12 P2)', () => {
+    it('boundHealingNotation admits a 5e Supreme and falls back beyond it', () => {
+        expect(boundHealingNotation('2d4+2')).toBe('2d4+2');
+        expect(boundHealingNotation('10d4+20')).toBe('10d4+20');
+        expect(boundHealingNotation('100d1000+1000')).toBe('2d4+2');
+        expect(boundHealingNotation('11d4')).toBe('2d4+2');
+        expect(boundHealingNotation('1d20')).toBe('2d4+2');
+        expect(boundHealingNotation('2d4+21')).toBe('2d4+2');
+        expect(boundHealingNotation({})).toBe('2d4+2');
+    });
+
+    it('normalizeItem bounds a non-catalog potion and keeps the catalog potion intact', () => {
+        const hostile = normalizeItem({ name: 'Elixir of the Titan', type: 'consumable', consumableType: 'healing', healing: '100d1000+1000' });
+        expect(hostile.healing).toBe('2d4+2');
+        expect(normalizeItem({ name: 'Potion of Healing' }).healing).toBe('2d4+2');
+    });
+
+    it('a catalog Torch cannot be relabeled a healing potion by the payload', () => {
+        const torch = normalizeItem({ name: 'Torch', consumableType: 'healing', healing: '100d1000' });
+        expect(torch.consumableType).toBeUndefined();
+        expect(torch.healing).toBeUndefined();
+    });
+});
+
+describe('numeric strings coerce before the finite checks (2026-09-12 P2)', () => {
+    it('toFiniteNumber parses numeric strings and rejects the rest', () => {
+        expect(toFiniteNumber('5')).toBe(5);
+        expect(toFiniteNumber(' 50 ')).toBe(50);
+        expect(toFiniteNumber(3)).toBe(3);
+        expect(toFiniteNumber('all')).toBeNull();
+        expect(toFiniteNumber('')).toBeNull();
+        expect(toFiniteNumber(NaN)).toBeNull();
+        expect(toFiniteNumber(null)).toBeNull();
+        expect(toFiniteNumber({})).toBeNull();
+    });
+
+    it('quantity, valueCp, and magic bonus strings are honored on normalizeItem', () => {
+        const item = normalizeItem({ name: 'Torch', quantity: '5' });
+        expect(item.quantity).toBe(5);
+        const custom = normalizeItem({ name: 'Glass Bead', type: 'gear', valueCp: '250', magicBonus: '2' });
+        expect(custom.valueCp).toBe(250);
+        expect(custom.magicBonus).toBe(2);
+        expect(normalizeItem({ name: 'Torch', quantity: 'all' }).quantity).toBe(1);
     });
 });
