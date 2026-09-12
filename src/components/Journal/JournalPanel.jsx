@@ -108,6 +108,9 @@ export default function JournalPanel({ isOpen, onClose }) {
         setEnrichError('');
         setEnrichingId(npc.id);
         try {
+            // One action carries the deepening AND the regrade of existing
+            // moments (`gradedMoments`, applied by the UPDATE_NPC handler after
+            // the upsert) so the flush's single-action replay persists both.
             const update = await enrichNpcProfile({ state, npc, settings: state.settings });
             const updateAction = { type: 'UPDATE_NPC', payload: update };
             dispatch(updateAction);

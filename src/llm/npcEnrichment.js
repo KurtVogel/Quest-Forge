@@ -5,6 +5,7 @@
  */
 
 import {
+    MAX_NPC_BOND_MOMENTS,
     NPC_BOND_MOMENT_MAX,
     NPC_DOSSIER_FIELD_MAX,
     NPC_PLACE_FIELD_MAX,
@@ -91,7 +92,18 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
             secrets: npc.secrets,
             relationshipTension: npc.relationshipTension,
             stanceToPlayer: npc.stanceToPlayer,
-            bondMoments: (npc.bondMoments || []).map(moment => moment?.text || moment).filter(Boolean),
+            // Every recorded moment with its grade, so the archivist can grade
+            // the UNGRADED ones (pre-tier rows) instead of only adding new ones.
+            bondMoments: (npc.bondMoments || [])
+                .map(moment => {
+                    const text = typeof moment === 'string' ? moment : moment?.text;
+                    if (!text) return null;
+                    const graded = moment && typeof moment === 'object' && (moment.kind !== undefined || moment.salience !== undefined);
+                    return graded
+                        ? { text, kind: moment.kind, salience: moment.salience }
+                        : { text, ungraded: true };
+                })
+                .filter(Boolean),
             trust: npc.trust,
             callbackHooks: npc.callbackHooks || [],
             basedIn: npc.basedIn,
@@ -114,7 +126,8 @@ Output ONLY valid JSON:
   "agenda": "what this NPC is actively trying to accomplish next, from their point of view",
   "relationshipTension": "compact note on rivalry, humiliation, debt, attraction, resentment, fear, or unresolved conflict with the hero",
   "stanceToPlayer": "how this NPC personally regards the HERO right now — affection, attraction, romantic feeling, friendship, gratitude, respect, amusement, resentment, fear, obligation — written from the NPC's side and grounded in what actually passed between them",
-  "bondMoments": [{ "text": "one-line record of a significant personal moment between the hero and this NPC that the context establishes (up to 3) — the defining beat of a scene, never each line or position of it", "kind": "meeting|flirtation|intimacy|confession|promise|gift|rescue|shared_danger|betrayal|quarrel|reconciliation|farewell|other", "salience": "1-5 — 5 redefines the relationship, 4 a beat both would recall years later, 3 memorable, 2 texture" }],
+  "bondMoments": [{ "text": "one-line record of a significant personal moment between the hero and this NPC that the context establishes (up to 3) — NEW moments only, never one already in existingRecord.bondMoments — the defining beat of a scene, never each line or position of it", "kind": "meeting|flirtation|intimacy|confession|promise|gift|rescue|shared_danger|betrayal|quarrel|reconciliation|farewell|other", "salience": "1-5 — 5 redefines the relationship, 4 a beat both would recall years later, 3 memorable, 2 texture" }],
+  "gradedMoments": [{ "text": "the EXACT verbatim text of an existing moment marked ungraded in existingRecord.bondMoments (copy it character for character)", "kind": "same kind list as above", "salience": "1-5 as above", "sameSceneAs": "OPTIONAL — the exact verbatim text of an EARLIER existing moment this one is the same scene's beat of (same kind: another position of one night, another line of one conversation); omit when it stands alone" }],
   "appearance": "the NPC's COMPLETE physical/visual description — skin tone, hair (explicit: color and style, or bald/shaved), build, body proportions, face, apparent age, clothing, distinguishing and intimate features — merging the existing record with any concrete visual details the recent conversation states. Omit unless the context actually establishes looks",
   "gender": "the NPC's gender as the context establishes or makes clearly apparent (pronouns, titles, explicit statements) — 'woman', 'man', or the fiction's own wording. Omit only if genuinely unknowable",
   "species": "the NPC's species/ancestry as the context establishes it — 'goblin', 'human', 'dwarf', 'high elf'. Omit only if genuinely unknowable",
@@ -133,6 +146,7 @@ Rules:
 - If the hero publicly defied this NPC's authority, capture that grudge precisely.
 - Agenda and relationshipTension are required when context supports them; stanceToPlayer is required whenever the hero and this NPC have directly interacted. Be specific, not generic.
 - bondMoments must be actual moments the context establishes, each naming what happened between them; omit the field when none exist. Do not restate moments already listed in the existing record.
+- gradedMoments: grade EVERY moment marked ungraded in existingRecord.bondMoments — copy its text verbatim, give its kind and an honest salience (5 redefines the relationship: a first night together, a betrayal, a life saved, an oath; 4 a beat both would recall years later; 3 memorable; 2 texture; 1 trivial). When several ungraded moments are beats of ONE scene of the same kind — positions of one night, lines of one conversation — mark each later one with sameSceneAs naming the earliest, so they fold to the scene's one defining beat. Never grade a moment that already carries a kind or salience, never invent text, and omit the field when nothing is ungraded.
 - appearance: emit ONLY if the premise/journal/facts/conversation actually describe how this NPC looks. When you do, output the COMPLETE merged description — start from the existing record's appearance and weave in any new concrete visual details the context states, dropping or altering an established detail only when the fiction explicitly changed it, and reconciling into clean prose (drop duplicate adjectives, resolve contradictions) without losing any distinct established detail. This is an adult game: body proportions and intimate, sensual, or unflattering details the fiction establishes are canonical continuity exactly like a scar — record them frankly and unvarnished, never blurred, shrunk, or omitted, and never launder a detail already on record. REGISTER: describe them in plain, neutral anatomical vocabulary (backside/buttocks, breasts, hips, genitals) at full specificity — never profanity or crude slang, even when the fiction or the existing record phrased it coarsely; restate a crudely worded detail in neutral terms without losing any of it. Never invent looks the context does not state.
 - callbackHooks: 1-3 items max, each under 200 characters, complete thoughts.
 - trust is 0-100 if inferable, else omit.
@@ -177,6 +191,8 @@ export async function enrichNpcProfile({ state, npc, settings }) {
         || extractBalancedJson(response, 'stanceToPlayer')
         || extractBalancedJson(response, 'appearance')
         || extractBalancedJson(response, 'callbackHooks')
+        || extractBalancedJson(response, 'bondMoments')
+        || extractBalancedJson(response, 'gradedMoments')
         || extractBalancedJson(response, 'basedIn');
     if (!jsonMatch) {
         throw new Error('Could not parse NPC enrichment response.');
@@ -214,6 +230,26 @@ export async function enrichNpcProfile({ state, npc, settings }) {
         // rejection — enrichment can only add moments, never rewrite history.
         if (moments.length > 0) update.bondMoments = moments;
     }
+    if (Array.isArray(parsed.gradedMoments)) {
+        // The regrade of existing rows rides a separate action
+        // (GRADE_NPC_BOND_MOMENTS) — the reducer matches by verbatim text and
+        // owns every rule (ungraded rows only, same-kind folds, no new text).
+        const grades = parsed.gradedMoments
+            .map(grade => {
+                if (!grade || typeof grade !== 'object' || typeof grade.text !== 'string') return null;
+                const text = grade.text.trim();
+                if (!text) return null;
+                return {
+                    text,
+                    kind: grade.kind,
+                    salience: grade.salience,
+                    ...(typeof grade.sameSceneAs === 'string' && grade.sameSceneAs.trim() && { sameSceneAs: grade.sameSceneAs.trim() }),
+                };
+            })
+            .filter(Boolean)
+            .slice(0, MAX_NPC_BOND_MOMENTS);
+        if (grades.length > 0) update.gradedMoments = grades;
+    }
     // Appearance replaces at the reducer boundary, so enrichment must emit the
     // COMPLETE merged look (600-char clamp mirrors the per-turn Scribe path).
     if (cleanText(parsed.appearance)) update.appearance = clampNpcDossierField(parsed.appearance);
@@ -236,7 +272,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
     }
 
     if (!update.agenda && !update.relationshipTension && !update.stanceToPlayer
-        && !update.bondMoments?.length && !update.callbackHooks?.length
+        && !update.bondMoments?.length && !update.gradedMoments?.length && !update.callbackHooks?.length
         && !update.appearance && !update.basedIn && !update.lastLocation) {
         throw new Error('Enrichment returned no usable depth for this NPC.');
     }

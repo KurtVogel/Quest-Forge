@@ -694,6 +694,9 @@ export function upsertNpc(npcs, payload, { messageCount } = {}) {
     // The "lately" shelf is engine-written only (mergeNpcCoreText): a lane
     // cannot plant an impression, and cannot graduate one by writing it.
     delete update.recentImpressions;
+    // A regrade of existing moments is applied by the UPDATE_NPC handler
+    // (gradeBondMoments) — never spread onto the record as a field.
+    delete update.gradedMoments;
     if ('trust' in update) {
         const trust = Number(update.trust);
         if (Number.isFinite(trust)) update.trust = Math.max(0, Math.min(100, Math.round(trust)));

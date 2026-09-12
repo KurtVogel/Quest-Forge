@@ -38,10 +38,10 @@ fragments become `recentImpressions` and graduate only when a later scene restat
 moments are graded by kind + salience with scene collapse (one moment per kind per scene) and
 value-based eviction; `splitBondMoments` splits key vs recent for every card and prompt line.
 Follow-ups:
-- **Regrade legacy moments on Deepen memory** — ungraded rows never become key; a one-shot
-  Deepen pass could grade the EXISTING list (kind + salience) instead of only adding. Why:
-  every mature campaign is all legacy rows today, so its cards show no "Key moments" until new
-  play grades some.
+- [x] **Regrade legacy moments on Deepen memory** — shipped 2026-09-12 (night): Deepen memory
+  returns `gradedMoments` for the existing ungraded rows and `gradeBondMoments` applies them
+  engine-side (verbatim match, same-scene folds). Why it mattered: every mature campaign was all
+  legacy rows, so its cards showed no "Key moments" until new play graded some.
 - **Confirm impressions from the DM's own prose** — only the Scribe/DM `npc_updates` lanes can
   restate an impression today; a cheap token check of whether the narrative itself shows the
   trait again would confirm without a Scribe emission. Why: the Scribe omits the stance when

@@ -2,7 +2,7 @@
  * NPC roster and locations: upsert/pin/archive/portrait/migration plus the
  * canonical location registry writes.
  */
-import { buildStoryMemoryPromotion, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
+import { buildStoryMemoryPromotion, gradeBondMoments, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
@@ -63,9 +63,22 @@ export const handlers = {
     // brand-new NPC the instant it appears, instead of being silently dropped
     // until the next journal pass.
     UPDATE_NPC(state, action) {
-        const nextNpcs = upsertNpc(state.npcs, action.payload, { messageCount: (state.messages || []).length });
+        let nextNpcs = upsertNpc(state.npcs, action.payload, { messageCount: (state.messages || []).length });
         if (nextNpcs === state.npcs) return state;
-        const touched = findTouchedNpc(nextNpcs, action.payload);
+        let touched = findTouchedNpc(nextNpcs, action.payload);
+        // Deepen memory's regrade of the record's EXISTING bond moments
+        // (2026-09-12 follow-up) rides the same action so the autosave flush's
+        // single-action replay persists it: kind + salience land on ungraded
+        // rows matched by verbatim text, same-scene same-kind twins fold to
+        // one, text is never rewritten and rows never invented
+        // (gradeBondMoments). upsertNpc strips the field from the record.
+        const grades = action.payload?.gradedMoments;
+        if (touched && Array.isArray(grades) && grades.length > 0) {
+            const bondMoments = gradeBondMoments(touched.bondMoments, grades);
+            const regraded = normalizeNpcRecord({ ...touched, bondMoments });
+            nextNpcs = nextNpcs.map(npc => (npc === touched ? regraded : npc));
+            touched = regraded;
+        }
         let storyMemory = state.storyMemory || [];
         if (touched) {
             const promotion = buildStoryMemoryPromotion(touched);

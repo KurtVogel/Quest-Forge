@@ -344,6 +344,35 @@ describe('gameReducer tiered bond moments (2026-09-12 — one scene, one moment;
         expect(moments.length).toBeLessThanOrEqual(10);
     });
 
+    it('UPDATE_NPC applies Deepen memory\'s gradedMoments to existing rows and never stores the field', () => {
+        const seeded = {
+            ...initialGameState,
+            messages: messagesOf(6),
+            npcs: [{
+                id: 'npc-maren', name: 'Maren', rosterTier: 'character', kind: 'character', disposition: 'friendly',
+                bondMoments: [
+                    { text: 'Maren pulled the hero into her room above the inn.', at: 1 },
+                    { text: 'Maren asked the hero to stay until dawn.', at: 2 },
+                ],
+            }],
+        };
+        const next = gameReducer(seeded, {
+            type: 'UPDATE_NPC',
+            payload: {
+                id: 'npc-maren', name: 'Maren',
+                stanceToPlayer: 'Wants the hero in her bed and at her table.',
+                gradedMoments: [
+                    { text: 'Maren pulled the hero into her room above the inn.', kind: 'intimacy', salience: 4 },
+                    { text: 'Maren asked the hero to stay until dawn.', kind: 'intimacy', salience: 5, sameSceneAs: 'Maren pulled the hero into her room above the inn.' },
+                ],
+            },
+        });
+        const record = next.npcs[0];
+        expect(record.gradedMoments).toBeUndefined();
+        expect(record.stanceToPlayer).toBe('Wants the hero in her bed and at her table.');
+        expect(record.bondMoments).toEqual([{ text: 'Maren asked the hero to stay until dawn.', at: 1, kind: 'intimacy', salience: 5 }]);
+    });
+
     it('a DM-lane string bondMoment is still recorded, ungraded', () => {
         const state = scribe({ ...initialGameState, messages: messagesOf(6) }, 'Maren laughed and undercharged the hero for the room.');
         expect(state.npcs[0].bondMoments).toEqual([

@@ -20,6 +20,7 @@ import {
     MAX_NPC_IMPRESSIONS,
     NPC_IMPRESSION_TTL_MESSAGES,
     bondKindLabel,
+    gradeBondMoments,
     listNpcImpressions,
     mergeNpcCoreText,
     normalizeImpressions,
@@ -158,6 +159,47 @@ describe('player-relationship memory (stanceToPlayer + bondMoments)', () => {
             // Salience 5 rows (50) outrank the first-of-kind salience-4 row (45).
             const key = selectKeyBondMoments(rows, 3);
             expect(key.map(m => m.at)).toEqual([1, 3, 5]);
+        });
+
+        it('gradeBondMoments grades ungraded rows by verbatim text, folds same-scene same-kind twins, and never touches text or graded rows', () => {
+            const legacy = [
+                { text: 'Maren pulled the hero into her room above the inn.', at: 1 },
+                { text: 'They moved to the window bench.', at: 2 },
+                { text: 'Maren asked the hero to stay until dawn.', at: 3 },
+                { text: 'Maren confessed her sister vanished with the caravan.', at: 4 },
+                { text: 'Already graded by live play.', at: 5, kind: 'gift', salience: 2 },
+            ];
+            const graded = gradeBondMoments(legacy, [
+                { text: 'maren pulled the hero into her room above the inn.', kind: 'intimacy', salience: 4 },
+                { text: 'They moved to the window bench.', kind: 'intimacy', salience: 3, sameSceneAs: 'Maren pulled the hero into her room above the inn.' },
+                { text: 'Maren asked the hero to stay until dawn.', kind: 'intimacy', salience: 5, sameSceneAs: 'Maren pulled the hero into her room above the inn.' },
+                { text: 'Maren confessed her sister vanished with the caravan.', kind: 'confession', salience: 4, sameSceneAs: 'Maren pulled the hero into her room above the inn.' },
+                { text: 'Already graded by live play.', kind: 'betrayal', salience: 5 },
+                { text: 'A row that does not exist.', kind: 'rescue', salience: 5 },
+            ]);
+            expect(graded.map(m => m.text)).toEqual([
+                'Maren asked the hero to stay until dawn.',
+                'Maren confessed her sister vanished with the caravan.',
+                'Already graded by live play.',
+            ]);
+            // The folded scene keeps the earliest row's time and the most salient text.
+            expect(graded[0]).toEqual({ text: 'Maren asked the hero to stay until dawn.', at: 1, kind: 'intimacy', salience: 5 });
+            // A different kind never folds, even when the model says same scene.
+            expect(graded[1]).toEqual({ text: 'Maren confessed her sister vanished with the caravan.', at: 4, kind: 'confession', salience: 4 });
+            // Live play's grade stands.
+            expect(graded[2]).toEqual({ text: 'Already graded by live play.', at: 5, kind: 'gift', salience: 2 });
+            expect(selectKeyBondMoments(graded).map(m => m.text)).toEqual([
+                'Maren asked the hero to stay until dawn.',
+                'Maren confessed her sister vanished with the caravan.',
+                'Already graded by live play.',
+            ]);
+        });
+
+        it('gradeBondMoments ignores junk grades and returns the rows unchanged', () => {
+            const legacy = [{ text: 'Legacy beat.', at: 1 }];
+            expect(gradeBondMoments(legacy, [{ text: 'Legacy beat.', kind: 'apotheosis', salience: 'high' }])).toEqual(legacy);
+            expect(gradeBondMoments(legacy, 'junk')).toEqual(legacy);
+            expect(gradeBondMoments(legacy, [null, 7, { kind: 'gift' }])).toEqual(legacy);
         });
 
         it('bondKindLabel humanizes a kind and hides "other" and junk', () => {

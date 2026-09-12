@@ -242,6 +242,57 @@ export function selectKeyBondMoments(moments = [], limit = MAX_KEY_BOND_MOMENTS)
     return selectKeyFromNormalized(normalizeBondMoments(moments), limit);
 }
 
+function bondTextKey(text) {
+    return String(text || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * REGRADE existing bond moments (Deepen memory, 2026-09-12 follow-up): every
+ * moment recorded before the tiers exists ungraded and can never become a
+ * key moment on its own. A grade is `{ text, kind, salience, sameSceneAs? }`
+ * where `text` must match an existing row VERBATIM (whitespace/case-folded)
+ * — the engine never changes a row's text, never adds or invents a row, and
+ * never regrades a row that already carries a kind or salience (live play's
+ * grade stands). `sameSceneAs` names an EARLIER existing row this moment is
+ * the same scene's beat of: the two fold to one ONLY when they end up the
+ * same kind, keeping the more salient text (the earlier on a tie) at the
+ * earlier row's time — the legacy twin of appendBondMoments' scene collapse,
+ * which needs `atMessage` stamps legacy rows do not have.
+ */
+export function gradeBondMoments(existing = [], grades = []) {
+    const rows = normalizeBondMoments(existing);
+    if (rows.length === 0 || !Array.isArray(grades)) return rows;
+    const indexByText = new Map(rows.map((row, index) => [bondTextKey(row.text), index]));
+    let next = rows.map(row => ({ ...row }));
+    const folds = [];
+    for (const grade of grades) {
+        if (!grade || typeof grade !== 'object') continue;
+        const index = indexByText.get(bondTextKey(grade.text));
+        if (index === undefined) continue;
+        const row = next[index];
+        if (row.kind !== undefined || row.salience !== undefined) continue;
+        const kind = normalizeBondMomentKind(grade.kind);
+        const salience = normalizeBondSalience(grade.salience);
+        if (!kind && salience === null) continue;
+        next[index] = { ...row, ...(kind && { kind }), ...(salience !== null && { salience }) };
+        const earlier = indexByText.get(bondTextKey(grade.sameSceneAs));
+        if (earlier !== undefined && earlier < index) folds.push([earlier, index]);
+    }
+    const dropped = new Set();
+    for (const [earlier, later] of folds) {
+        if (dropped.has(earlier) || dropped.has(later)) continue;
+        const a = next[earlier];
+        const b = next[later];
+        if (!a.kind || a.kind === 'other' || a.kind !== b.kind) continue;
+        if (bondSalience(b) > bondSalience(a)) {
+            next[earlier] = { ...a, text: b.text, salience: b.salience };
+        }
+        dropped.add(later);
+    }
+    next = next.filter((_, index) => !dropped.has(index));
+    return normalizeBondMoments(next);
+}
+
 /** `{ key, recent }`: the key moments (chronological) and everything else,
  * NEWEST FIRST — the two shelves every card and prompt line render from. */
 export function splitBondMoments(moments = [], { keyLimit = MAX_KEY_BOND_MOMENTS } = {}) {

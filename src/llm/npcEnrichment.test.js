@@ -89,7 +89,8 @@ describe('npcEnrichment', () => {
         expect(context.recentConversation[1].speaker).toBe('DM');
         expect(context.recentConversation.some(m => m.text.includes('stables'))).toBe(false);
         expect(context.existingRecord.stanceToPlayer).toBe('Amused by the hero.');
-        expect(context.existingRecord.bondMoments).toEqual(['Shared wine at the Gilded Fern.']);
+        // Pre-tier rows are handed over marked ungraded so the archivist grades them.
+        expect(context.existingRecord.bondMoments).toEqual([{ text: 'Shared wine at the Gilded Fern.', ungraded: true }]);
     });
 
     it('trims truncated hook fragments from incomplete model output', () => {
@@ -159,6 +160,35 @@ describe('enrichNpcProfile relationship synthesis', () => {
         expect(update.bondMoments).toEqual([{ text: 'Maren pulled Vesa out of the canal.', kind: 'rescue', salience: 5 }]);
         const request = sendMessage.mock.calls[0][0];
         expect(request.systemPrompt).toContain('never each line or position of it');
+    });
+
+    it('parses gradedMoments (the regrade of existing rows) and counts it as usable depth', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            gradedMoments: [
+                { text: ' Shared wine at the Gilded Fern. ', kind: 'flirtation', salience: 3 },
+                { text: 'Late kiss on the stairs.', kind: 'flirtation', salience: 3, sameSceneAs: 'Shared wine at the Gilded Fern.' },
+                { text: '', kind: 'gift', salience: 3 },
+                { kind: 'gift' },
+                'junk',
+            ],
+        }));
+
+        const update = await enrichNpcProfile({
+            state,
+            npc: { id: 'npc-maren', name: 'Maren', bondMoments: [{ text: 'Shared wine at the Gilded Fern.', at: 1 }, { text: 'Late kiss on the stairs.', at: 2 }] },
+            settings,
+        });
+
+        expect(update.gradedMoments).toEqual([
+            { text: 'Shared wine at the Gilded Fern.', kind: 'flirtation', salience: 3 },
+            { text: 'Late kiss on the stairs.', kind: 'flirtation', salience: 3, sameSceneAs: 'Shared wine at the Gilded Fern.' },
+        ]);
+        const request = sendMessage.mock.calls[0][0];
+        expect(request.systemPrompt).toContain('grade EVERY moment marked ungraded');
+        expect(JSON.parse(request.userMessage).existingRecord.bondMoments).toEqual([
+            { text: 'Shared wine at the Gilded Fern.', ungraded: true },
+            { text: 'Late kiss on the stairs.', ungraded: true },
+        ]);
         expect(request.userMessage).toContain('recentConversation');
     });
 
