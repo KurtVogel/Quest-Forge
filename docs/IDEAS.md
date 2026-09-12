@@ -1832,6 +1832,31 @@ inventory rows (the one persisted list whose entries load raw — `null` becomes
 "Unknown item"), and project roster rows before rendering them. From the 2026-09-11
 strengthening audit (persistence, Lap 2).
 
+### [strengthening] A data table is a Map with a hole in it: `Object.hasOwn` at every gate keyed by an external string, and item bounds that don't hide behind `type`
+Every catalog in `data/` is a plain object literal, and every gate that keys it with a string
+from a hero file, a save, or the DM's JSON uses truthiness (`RACES[raw.race]`,
+`CLASSES[raw.class]`, `styles[value]`, `ITEM_CATALOG[raw]`, `NAME_TO_KEY[lower]`). Inherited
+keys pass: reproduced `class: 'constructor'` importing a featureless hero the prompt calls
+"**Class:** Object" with "Hit Dice: 3/3 dundefined" and a short rest that heals 0 forever (the
+load heal's `healUnknownClassRace` runs the same truthy test, so the save round-trips), and an
+item named `'Constructor'` throwing `base.quantity` out of `normalizeItem` — which `ADD_ITEM`,
+`PURCHASE_ITEM`, the vault import AND the unconditional `healEquippedSlots` at load all call,
+so one string is a reducer throw (root boundary), an aborted event batch after the loot source
+was already claimed, and an unloadable campaign. The two shapes differ by what the table
+holds: a table of objects fails SILENTLY (a truthy `Object` function reads as a record whose
+every field is undefined), a table of strings fails LOUDLY (the function is dereferenced next).
+Rule: one `isKnown*`/`hasOwn` helper per table at the gate (the ~30 downstream `CLASSES[…]`
+reads sit behind those gates), and grep `SPELLS[`/`CONDITION_EFFECTS[` for the same idiom.
+Second rule from the same run: **a bound behind a type check is only as strong as the type
+field** — `normalizeItem` bounds weapon dice only when `type === 'weapon'`, and `type` is
+DM-authored, never lowercased or whitelisted (`'Weapon'` keeps `99d12`; a `gear` row with an
+object `damage` prints "[object Object]" in the prompt and throws as a React child in the
+Inventory panel); `healing` has no bound at all (`100d1000+1000` heals to full as a bonus
+action). Bound `damage` whenever present, whitelist `type`, add `boundHealingNotation`, and
+coerce numeric strings on item `quantity`/purchase `priceCp` like the coin `clamp` already
+does (`"5"` torches for `"50"` cp bought ONE for 1 cp). From the 2026-09-12 strengthening
+audit (character-vault + inventory-economy, Lap 2).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
