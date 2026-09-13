@@ -5,7 +5,7 @@ import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
 import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js';
 import { bondKindLabel, listNpcImpressions, scoreNpcForPrompt, splitBondMoments } from '../../engine/npcRoster.js';
 import { deriveRelationshipStage, describeAbsence, listKnownByNpc, resolveOpenThread } from '../../engine/relationshipArc.js';
-import { groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
+import { describeTravelLink, groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
 import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 import LookEditor from './LookEditor.jsx';
@@ -568,6 +568,11 @@ function PlacesTab({ places, currentLocation }) {
                                 {place.aliases.length > 0 && (
                                     <p className="journal-place-aliases">
                                         Also known as {place.aliases.slice(0, 4).join(' · ')}
+                                    </p>
+                                )}
+                                {place.ways.length > 0 && (
+                                    <p className="journal-place-ways" title="Places you have traveled to from here, with the bearing, distance, and road the story established">
+                                        Ways from here: {place.ways.slice(0, 6).map(way => describeTravelLink(way, way.name)).join(' · ')}
                                     </p>
                                 )}
                                 {(place.firstSeenAt || place.lastVisitedAt) && (

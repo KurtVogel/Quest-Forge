@@ -56,7 +56,7 @@ export function describeBondForPrompt(npc = {}, storyMemory = [], { messages = n
 import { describeAbsence, describeStageForPrompt, resolveOpenThread } from './relationshipArc.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
 import { collectNarrativeMessages } from '../llm/narrativeMessages.js';
-import { isSameLocation, sanitizeExtractedLocation } from './locationRegistry.js';
+import { describeTravelLink, isSameLocation, listKnownWays, sanitizeExtractedLocation } from './locationRegistry.js';
 
 export function normalizeLocationName(loc) {
     if (!loc) return '';
@@ -385,11 +385,20 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
  *   `presentNames` (roster names found in the scene text) reserve slots ahead
  *   of the score ranking; `messages` feeds the conversational recency term.
  */
-export function buildJournalContext(journal, npcs, currentLocation, { presentNames = null, messages = null, storyMemory = [] } = {}) {
+export function buildJournalContext(journal, npcs, currentLocation, { presentNames = null, messages = null, storyMemory = [], locations = [] } = {}) {
     const parts = [];
 
     if (currentLocation) {
         parts.push(`**Current location:** ${currentLocation}`);
+        // Geography as canon (2026-09-14): the ways the hero has actually
+        // traveled from here, with whatever bearing / duration / road the
+        // fiction stated. Consistency, not a map — an unlisted place is
+        // unmapped, never nonexistent, so the DM stays free to invent roads
+        // that have not been walked yet.
+        const ways = listKnownWays(locations, currentLocation, { limit: 6 });
+        if (ways.length > 0) {
+            parts.push(`**Known ways from here (established geography — keep every stated direction, distance, and road consistent with this; unlisted places are simply not yet charted):** ${ways.map(way => describeTravelLink(way, way.name)).join('; ')}`);
+        }
     }
 
     // Last 3 journal entries for narrative context

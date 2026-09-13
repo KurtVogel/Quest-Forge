@@ -87,7 +87,8 @@ Output ONLY valid JSON:
   ],
   "player_appearance": "concrete physical/visual description of the PLAYER's character, only if newly described this turn — otherwise omit",
   "location": "The place the hero PHYSICALLY STANDS at the END of this narrative, only if it changed — NEVER a place that is merely mentioned, discussed, remembered, watched from afar, or being left behind; null if unchanged",
-  "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly", "region": "the broad NAMED land or realm containing many settlements that THIS PLACE ITSELF lies in, ONLY as the fiction has explicitly stated it — a capitalized proper name, NEVER a town, district, quarter, dock, street, building, or generic feature like 'the coast', and NEVER a distant land that is merely mentioned, discussed, or named as a destination in the scene. Omit unless the narrative has actually NAMED the land this place lies in — never invent one, never guess one, and never reuse a name from these instructions" }
+  "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly", "region": "the broad NAMED land or realm containing many settlements that THIS PLACE ITSELF lies in, ONLY as the fiction has explicitly stated it — a capitalized proper name, NEVER a town, district, quarter, dock, street, building, or generic feature like 'the coast', and NEVER a distant land that is merely mentioned, discussed, or named as a destination in the scene. Omit unless the narrative has actually NAMED the land this place lies in — never invent one, never guess one, and never reuse a name from these instructions" },
+  "travel": { "from": "the named place the hero DEPARTED, exactly as the narrative calls it", "to": "the named place the hero ARRIVED at, exactly as the narrative calls it", "direction": "north|northeast|east|southeast|south|southwest|west|northwest|up|down|upriver|downriver — ONLY if the narrative states the bearing; omit otherwise", "travel_time": "how long the journey took, in the narrative's own words ('half a day', 'three days by cart') — ONLY if stated; omit otherwise", "route": "the NAMED road, river, pass, or ferry taken ('the Coast Road') — ONLY if the narrative names it; omit otherwise" }
 }
 
 Rules:
@@ -115,6 +116,7 @@ Rules:
 - REGISTER: write every record in plain, neutral anatomical language — backside/buttocks, breasts, chest, hips, genitals — never in profanity or crude slang, no matter how coarsely the player or DM phrased it. Translating vocabulary is NOT censoring content: keep the full detail, size, and specificity of what the fiction established. "Notably large buttocks" preserves a crude description completely; "curvy", a vague compliment, or dropping the detail loses canon and is forbidden. Neutral wording, complete facts.
 - When KNOWN APPEARANCES lists a character and this turn adds or changes a visual detail, emit their appearance as the COMPLETE updated description: start from the known look and weave in what this turn established. Drop or alter a known detail ONLY when the fiction explicitly changed it (haircut, dye, disguise, wound, healing, new gear). NEVER emit just the new fragment — "a fresh scar on his cheek" alone would erase the white hair, the build, everything else on record. When merging, never launder the record: an intimate or unflattering detail already in KNOWN APPEARANCES stays in the merged description at full specificity until the fiction explicitly changes it — if the old record used crude slang, restate that detail in neutral anatomical wording (see REGISTER), but never blur, shrink, or drop it. As you merge, reconcile the description into clean prose: drop duplicate adjectives and resolve contradictions rather than stacking them ("scrawny ... scrawny ... large backside" should become one coherent line like "a scrawny goblin with notably large buttocks"), but never lose a distinct established detail in the process. If this turn adds nothing visually new for them, omit the field entirely.
 - location_profile classifies what KIND of place the current location is, from what the narrative itself establishes: a haven is genuinely safe (a defended town, a temple sanctuary), a settlement is ordinary inhabited civilization, wilderness is uninhabited country, a frontier is contested or lawless ground, a hostile_site is intrinsically dangerous by nature (a ghoul-warren, a bandit camp). "danger" is the place's own intrinsic danger, independent of any current plot. Emit it when a location is first meaningfully established or when the fiction changes a place's fundamental nature (the town falls, the warren is cleared) — omit otherwise. Positional continuity, like appearance, is exempt from the extraction budget.
+- travel records GEOGRAPHY: emit it ONLY when this exchange narrates the hero completing a journey between two DISTINCT named places (town to town, camp to ruin) — never for movement inside one town or building, never for a journey merely planned or discussed. Copy every detail from the narrative's own words and omit any the narrative does not state: a direction, duration, or road you infer is a falsehood the DM will be held to later. Exempt from the extraction budget like location.
 - Only include fields you have actual information for — omit empty/unknown fields
 - DO NOT alter established details: copy names, proper nouns, and numbers exactly as the DM wrote them — never rename, paraphrase, translate, or invent (the REGISTER rule for anatomical vocabulary is the one exception). Refer to each NPC by the exact name used in the narrative so their record never forks.
 - ONE PERSON, ONE RECORD: when a character's proper name is known — from the narrative, KNOWN APPEARANCES, or KNOWN PLAYER-RELATIONSHIP STANCES — always use their FULLEST known name ("Saima Aallotar", not "Saima") and NEVER a role title ("The Innkeeper", "the merchant"). Role-title names are allowed only for characters whose proper name has genuinely never been given.
@@ -451,6 +453,26 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     profile: { type: locationProfile.type, danger: locationProfile.danger, region: locationProfile.region },
                     // The turn's own text, inspected by the reducer's first-seen
                     // region evidence gate at dispatch time — never stored.
+                    evidenceText: `${playerMessage || ''}\n${dmNarrative || ''}`.slice(0, 6000),
+                },
+            });
+        }
+
+        // Geography as canon (2026-09-14): a narrated journey between two
+        // known places becomes a travel link; the reducer evidence-gates every
+        // detail against the same turn text and never mints a place from it.
+        const travel = extracted.travel;
+        if (travel && typeof travel === 'object' && !Array.isArray(travel)
+            && typeof travel.from === 'string' && travel.from.trim()
+            && typeof travel.to === 'string' && travel.to.trim()) {
+            dispatch({
+                type: 'ADD_TRAVEL_LINK',
+                payload: {
+                    from: travel.from.trim(),
+                    to: travel.to.trim(),
+                    direction: typeof travel.direction === 'string' ? travel.direction : null,
+                    travelTime: typeof travel.travel_time === 'string' ? travel.travel_time : null,
+                    route: typeof travel.route === 'string' ? travel.route : null,
                     evidenceText: `${playerMessage || ''}\n${dmNarrative || ''}`.slice(0, 6000),
                 },
             });

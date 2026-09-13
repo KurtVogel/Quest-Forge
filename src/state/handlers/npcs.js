@@ -48,7 +48,7 @@ export function stampLastDmMessage(messages, marks) {
 }
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
-import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
+import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isDirectionEvidencedInText, isLocationEvidencedInText, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, linkLocations, normalizeTravelDirection, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
@@ -292,12 +292,9 @@ export const handlers = {
         // name ("Ghyll, Rimefell Marches" mints normally — token EQUALITY, not
         // containment, decides).
         const regionOnly = targetIdx === -1 && isRegionNameOnly(priorLocations, name);
-        const locations = regionOnly
+        let locations = regionOnly
             ? departed
             : upsertLocation(departed, name, { ...(profile || {}), lastVisitedMessage: messageIndex });
-
-        const next = { ...state, currentLocation: name, locations };
-        if (!arrived) return next;
 
         // Pseudo-place guard (live playtest #8): a destination that neither
         // resolves to nor mints a canonical record ("the threshold of the hidden
@@ -308,6 +305,17 @@ export const handlers = {
         // hearsay window untouched (the render guard hides it if the hero truly
         // moved on) and skip selection entirely.
         const destinationIdx = findLocationRecord(locations, name);
+
+        // Geography as canon (2026-09-14): an arrival at a different record IS
+        // a bare travel edge from the place just left — detail (direction, time,
+        // route) arrives later from the Scribe's `travel` report. linkLocations
+        // skips one-cluster hops (the square → its tavern is not a road).
+        if (arrived && prevRecord && destinationIdx !== -1) {
+            locations = linkLocations(locations, prevRecord.id, locations[destinationIdx].id, { atMessage: messageIndex });
+        }
+
+        const next = { ...state, currentLocation: name, locations };
+        if (!arrived) return next;
         if (destinationIdx === -1) return next;
 
         // Traveling rumor: deterministically pick which of the hero's deeds
@@ -468,6 +476,46 @@ export const handlers = {
         };
         if (!fact) return next;
         return gameReducer(next, { type: 'ADD_WORLD_FACTS', payload: [{ fact, category: 'event' }] });
+    },
+
+    /**
+     * A narrated journey between two KNOWN records (the Scribe's `travel`
+     * report, 2026-09-14). Never mints a place: both ends must already be
+     * registry records — the destination is the arrival SET_LOCATION minted
+     * moments before. Every detail is evidence-gated against the turn's own
+     * text (a compass word the narration never used is a hallucination, not
+     * geography), and an unevidenced detail is dropped while the bare edge
+     * still lands. The destination itself must be named in the turn.
+     */
+    ADD_TRAVEL_LINK(state, action) {
+        const payload = action.payload && typeof action.payload === 'object' ? action.payload : {};
+        const text = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+        const from = text(payload.from, 120);
+        const to = text(payload.to, 120);
+        if (!from || !to) return state;
+        const locations = state.locations || [];
+        const fromIdx = findLocationRecord(locations, from);
+        const toIdx = findLocationRecord(locations, to);
+        if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return state;
+        const evidence = typeof payload.evidenceText === 'string' ? payload.evidenceText : '';
+        if (!isLocationEvidencedInText(to, evidence)) return state;
+        // The origin is usually the place the hero just left, which the turn
+        // may not name again — a visit stamp is the alternative proof.
+        if (!isLocationEvidencedInText(from, evidence) && !Number.isFinite(locations[fromIdx].lastVisitedMessage)) return state;
+
+        const direction = normalizeTravelDirection(payload.direction);
+        const directionEvidenced = direction && isDirectionEvidencedInText(direction, evidence);
+        const travelTime = text(payload.travelTime, 40);
+        const route = text(payload.route, 60);
+        return {
+            ...state,
+            locations: linkLocations(locations, locations[fromIdx].id, locations[toIdx].id, {
+                direction: directionEvidenced ? direction : null,
+                travelTime: travelTime && isLocationEvidencedInText(travelTime, evidence) ? travelTime : null,
+                route: route && isLocationEvidencedInText(route, evidence) ? route : null,
+                atMessage: (state.messages || []).length,
+            }),
+        };
     },
 
     // Scribe-classified profile for an already-known place (type/danger/theater/

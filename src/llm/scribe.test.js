@@ -1990,3 +1990,44 @@ describe('loss audit carries the narrated quantity (2026-09-03 P1: one torch bur
         ]);
     });
 });
+
+describe('Scribe travel report → ADD_TRAVEL_LINK (geography as canon, 2026-09-14)', () => {
+    beforeEach(() => sendMessage.mockReset());
+    const settings = { apiKey: 'test-key', llmProvider: 'gemini' };
+
+    it('dispatches the journey with the turn text as evidence, mapping travel_time → travelTime', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: 'Deep Fen',
+            travel: { from: 'Aldermill', to: 'Deep Fen', direction: 'north', travel_time: 'half a day', route: 'the Old Causeway' },
+        }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I take the Old Causeway north.',
+            dmNarrative: 'Half a day later the Deep Fen swallows the road.',
+            settings, dispatch,
+        });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'ADD_TRAVEL_LINK',
+            payload: {
+                from: 'Aldermill',
+                to: 'Deep Fen',
+                direction: 'north',
+                travelTime: 'half a day',
+                route: 'the Old Causeway',
+                evidenceText: 'I take the Old Causeway north.\nHalf a day later the Deep Fen swallows the road.',
+            },
+        });
+        // The arrival SET_LOCATION lands before the link so the destination record exists.
+        const types = dispatch.mock.calls.map(([a]) => a.type);
+        expect(types.indexOf('SET_LOCATION')).toBeLessThan(types.indexOf('ADD_TRAVEL_LINK'));
+    });
+
+    it('ignores a travel report missing either end, or shaped as junk', async () => {
+        for (const travel of [{ to: 'Deep Fen' }, { from: 'Aldermill', to: '' }, 'Aldermill to Deep Fen', ['Aldermill', 'Deep Fen'], { from: { name: 'x' }, to: 'y' }]) {
+            sendMessage.mockResolvedValue(JSON.stringify({ world_facts: [], npc_updates: [], story_memory: [], location: null, travel }));
+            const dispatch = vi.fn();
+            await runScribe({ playerMessage: 'x', dmNarrative: 'y', settings, dispatch });
+            expect(dispatch.mock.calls.some(([a]) => a.type === 'ADD_TRAVEL_LINK')).toBe(false);
+        }
+    });
+});

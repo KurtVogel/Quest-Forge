@@ -6,7 +6,7 @@ import { initialGameState } from '../initialState.js';
 import { migrateLoadedSave } from '../migrations.js';
 import { createInitialFronts, normalizeFront } from '../../engine/fronts.js';
 import { normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
-import { dedupeLocationRecords, normalizeLocationRecord } from '../../engine/locationRegistry.js';
+import { dedupeLocationRecords, normalizeLocationRecord, seedTravelLinksFromTrail } from '../../engine/locationRegistry.js';
 import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
 import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
 import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
@@ -352,11 +352,19 @@ function validateSaveState(payload) {
         currentLocation: cleanTextField(payload.currentLocation, LOCATION_NAME_MAX) || null,
         // Same guard for the registry (2026-09-08): a null record threw
         // `(reading 'name')`; normalizeLocationRecord also types its arrays now.
+        // Travel links backfill from the journal's location trail (2026-09-14):
+        // pre-link saves get bare edges between consecutively visited records
+        // for free; idempotent, and detail only ever comes from the fiction.
         locations: Array.isArray(payload.locations)
-            ? dedupeLocationRecords(payload.locations
-                .filter(record => record && typeof record === 'object' && !Array.isArray(record))
-                .map(record => normalizeLocationRecord(record))
-                .filter(Boolean))
+            ? seedTravelLinksFromTrail(
+                dedupeLocationRecords(payload.locations
+                    .filter(record => record && typeof record === 'object' && !Array.isArray(record))
+                    .map(record => normalizeLocationRecord(record))
+                    .filter(Boolean)),
+                (Array.isArray(payload.journal) ? payload.journal : [])
+                    .map(entry => (entry && typeof entry === 'object' && typeof entry.location === 'string' ? entry.location : null))
+                    .filter(Boolean),
+            )
             : [],
         // Typed like every sibling ledger (2026-09-08 living-world P1): one null
         // entry crashed buildSystemPrompt on every turn after a clean load.

@@ -156,6 +156,7 @@ export function createTurnRunner({
             npcs: s.npcs,
             party: s.party,
             currentLocation: s.currentLocation,
+            locations: s.locations || [],
             combat: s.combat,
             worldFacts: s.worldFacts || [],
             fronts: s.fronts || [],

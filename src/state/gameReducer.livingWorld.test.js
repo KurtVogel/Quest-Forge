@@ -906,3 +906,79 @@ describe('LOAD_GAME sanitation', () => {
         expect(loaded.recentHearsay).toEqual(['fight:1|town|1']);
     });
 });
+
+describe('travel links — geography as canon (2026-09-14)', () => {
+    const travel = () => {
+        let state = gameReducer(atMessages(initialGameState, 4), { type: 'SET_LOCATION', payload: 'Aldermill' });
+        return gameReducer(atMessages(state, 10), { type: 'SET_LOCATION', payload: 'Deep Fen' });
+    };
+    const byName = (state, name) => state.locations.find(record => record.name === name);
+
+    it('an arrival at a different record mints a bare edge on both ends, stamped with the arrival message', () => {
+        const state = travel();
+        const aldermill = byName(state, 'Aldermill');
+        const fen = byName(state, 'Deep Fen');
+        expect(aldermill.links).toEqual([{ id: fen.id, direction: null, travelTime: null, route: null, atMessage: 10 }]);
+        expect(fen.links).toEqual([{ id: aldermill.id, direction: null, travelTime: null, route: null, atMessage: 10 }]);
+    });
+
+    it('an alias re-statement or a hop inside one place cluster mints nothing', () => {
+        let state = gameReducer(atMessages(initialGameState, 2), { type: 'SET_LOCATION', payload: 'Harrowmere' });
+        state = gameReducer(atMessages(state, 4), { type: 'SET_LOCATION', payload: 'Harrowmere market square' });
+        state = gameReducer(atMessages(state, 6), { type: 'SET_LOCATION', payload: 'Harrowmere' });
+        expect(state.locations.every(record => record.links.length === 0)).toBe(true);
+    });
+
+    it('ADD_TRAVEL_LINK fills evidenced detail onto the arrival edge and drops what the turn never said', () => {
+        const state = gameReducer(travel(), {
+            type: 'ADD_TRAVEL_LINK',
+            payload: {
+                from: 'Aldermill', to: 'the Deep Fen', direction: 'North', travel_time: 'x',
+                travelTime: 'half a day', route: 'the Old Causeway',
+                evidenceText: 'You leave Aldermill and walk north along the Old Causeway; by half a day you reach the Deep Fen.',
+            },
+        });
+        expect(byName(state, 'Aldermill').links).toEqual([{ id: byName(state, 'Deep Fen').id, direction: 'north', travelTime: 'half a day', route: 'the Old Causeway', atMessage: 10 }]);
+        expect(byName(state, 'Deep Fen').links[0]).toMatchObject({ direction: 'south', route: 'the Old Causeway' });
+
+        // A compass word the narration never used is a hallucination: the bare edge stays bare.
+        const unevidenced = gameReducer(travel(), {
+            type: 'ADD_TRAVEL_LINK',
+            payload: { from: 'Aldermill', to: 'Deep Fen', direction: 'west', travelTime: 'three weeks', route: 'the Silk Road', evidenceText: 'You reach the Deep Fen at dusk.' },
+        });
+        expect(byName(unevidenced, 'Aldermill').links[0]).toMatchObject({ direction: null, travelTime: null, route: null });
+    });
+
+    it('ADD_TRAVEL_LINK never mints a place and ignores an unnamed destination or a junk payload', () => {
+        const state = travel();
+        const before = state.locations;
+        expect(gameReducer(state, { type: 'ADD_TRAVEL_LINK', payload: { from: 'Aldermill', to: 'Frostpeak', direction: 'north', evidenceText: 'north to Frostpeak' } }).locations).toBe(before);
+        expect(gameReducer(state, { type: 'ADD_TRAVEL_LINK', payload: { from: 'Aldermill', to: 'Deep Fen', direction: 'north', evidenceText: 'You walk north.' } }).locations).toBe(before);
+        expect(gameReducer(state, { type: 'ADD_TRAVEL_LINK', payload: 'Aldermill' }).locations).toBe(before);
+        expect(gameReducer(state, { type: 'ADD_TRAVEL_LINK', payload: { from: { name: 'Aldermill' }, to: ['Deep Fen'] } }).locations).toBe(before);
+        expect(state.locations).toHaveLength(2);
+    });
+
+    it('LOAD_GAME types stored links and backfills bare edges from the journal trail', () => {
+        const a = { id: 'a', name: 'Aldermill', links: [{ id: 'b', direction: 'sideways', route: 7 }, null] };
+        const b = { id: 'b', name: 'Deep Fen', links: 'junk' };
+        const c = { id: 'c', name: 'Rimehollow' };
+        const loaded = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...initialGameState,
+                locations: [a, b, c],
+                journal: [
+                    { summary: 's1', location: 'Aldermill' },
+                    { summary: 's2', location: 'Deep Fen' },
+                    { summary: 's3', location: 'Rimehollow' },
+                    { summary: 's4', location: { name: 'junk' } },
+                ],
+            },
+        });
+        const find = name => loaded.locations.find(record => record.name === name);
+        expect(find('Aldermill').links).toEqual([{ id: 'b', direction: null, travelTime: null, route: null, atMessage: null }]);
+        expect(find('Deep Fen').links.map(l => l.id).sort()).toEqual(['a', 'c']);
+        expect(find('Rimehollow').links.map(l => l.id)).toEqual(['b']);
+    });
+});

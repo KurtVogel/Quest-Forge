@@ -7,6 +7,14 @@ import {
     getCurrentLocationRecord,
     groupPlacesByRegion,
     listVisitedPlaces,
+    describeTravelLink,
+    isDirectionEvidencedInText,
+    linkLocations,
+    listKnownWays,
+    normalizeTravelDirection,
+    normalizeTravelLink,
+    seedTravelLinksFromTrail,
+    MAX_LINKS_PER_LOCATION,
     isLocationEvidencedInText,
     isMintableLocationName,
     isRegionEvidenced,
@@ -487,7 +495,7 @@ describe('listVisitedPlaces / groupPlacesByRegion (player-facing Places tab, 202
         const [place] = listVisitedPlaces([visited], {});
         expect(place).not.toHaveProperty('theaterFrontIds');
         expect(Object.keys(place).sort()).toEqual([
-            'aliases', 'danger', 'firstSeenAt', 'id', 'isCurrent', 'lastVisitedAt', 'name', 'region', 'type',
+            'aliases', 'danger', 'firstSeenAt', 'id', 'isCurrent', 'lastVisitedAt', 'name', 'region', 'type', 'ways',
         ]);
     });
 
@@ -539,5 +547,177 @@ describe('listVisitedPlaces / groupPlacesByRegion (player-facing Places tab, 202
         expect(listVisitedPlaces(undefined, {})).toEqual([]);
         expect(listVisitedPlaces([null, {}], { currentLocation: null })).toEqual([]);
         expect(groupPlacesByRegion(undefined)).toEqual([]);
+    });
+});
+
+describe('travel links — geography as canon (2026-09-14)', () => {
+    const rec = (name, extra = {}) => normalizeLocationRecord({ name, ...extra });
+    const stamp = (record, lastVisitedMessage) => ({ ...record, lastVisitedMessage });
+
+    it('normalizeTravelDirection folds prose bearings to the compass whitelist and rejects the rest', () => {
+        expect(normalizeTravelDirection('North')).toBe('north');
+        expect(normalizeTravelDirection('to the north-east')).toBe('northeast');
+        expect(normalizeTravelDirection('NE')).toBe('northeast');
+        expect(normalizeTravelDirection('southward')).toBe('south');
+        expect(normalizeTravelDirection('westerly')).toBe('west');
+        expect(normalizeTravelDirection('up the river')).toBe('upriver');
+        expect(normalizeTravelDirection('downstream')).toBe('downriver');
+        expect(normalizeTravelDirection('uphill')).toBe('up');
+        expect(normalizeTravelDirection('past the mill')).toBeNull();
+        expect(normalizeTravelDirection('left')).toBeNull();
+        expect(normalizeTravelDirection({ direction: 'north' })).toBeNull();
+        expect(normalizeTravelDirection(null)).toBeNull();
+    });
+
+    it('isDirectionEvidencedInText accepts the prose forms of a bearing and nothing else', () => {
+        expect(isDirectionEvidencedInText('north', 'You ride northward at dawn.')).toBe(true);
+        expect(isDirectionEvidencedInText('northeast', 'The road bends to the north-east.')).toBe(true);
+        expect(isDirectionEvidencedInText('upriver', 'Two days up the river.')).toBe(true);
+        expect(isDirectionEvidencedInText('downriver', 'You drift downstream.')).toBe(true);
+        expect(isDirectionEvidencedInText('north', 'The road bends to the north-east.')).toBe(false); // northeast is not north
+        expect(isDirectionEvidencedInText('east', 'The road bends to the north east.')).toBe(false);
+        expect(isDirectionEvidencedInText('east', 'The road bends east, then north.')).toBe(true);
+        expect(isDirectionEvidencedInText('south', 'Southwold is a fine town.')).toBe(false);
+        expect(isDirectionEvidencedInText('west', '')).toBe(false);
+        expect(isDirectionEvidencedInText('sideways', 'sideways')).toBe(false);
+    });
+
+    it('an upsert payload can never wipe or displace an existing links list', () => {
+        const a = rec('Ashford');
+        const b = rec('Deep Fen');
+        const linked = linkLocations([a, b], a.id, b.id, { direction: 'north' });
+        const wiped = normalizeLocationRecord({ name: 'Ashford', links: [] }, linked[0]);
+        expect(wiped.links).toEqual(linked[0].links);
+        const flooded = normalizeLocationRecord({ name: 'Ashford', links: Array.from({ length: 20 }, (_, i) => ({ id: `junk-${i}` })) }, linked[0]);
+        expect(flooded.links[0]).toEqual(linked[0].links[0]);
+        expect(flooded.links).toHaveLength(MAX_LINKS_PER_LOCATION);
+    });
+
+    it('normalizeTravelLink types every field and drops junk without inventing detail', () => {
+        expect(normalizeTravelLink(null)).toBeNull();
+        expect(normalizeTravelLink('loc-1')).toBeNull();
+        expect(normalizeTravelLink({ direction: 'north' })).toBeNull(); // no id
+        expect(normalizeTravelLink({ id: 'loc-2', direction: 'sideways', travelTime: { days: 2 }, route: 42, atMessage: '7' })).toEqual({
+            id: 'loc-2', direction: null, travelTime: null, route: null, atMessage: null,
+        });
+        const long = normalizeTravelLink({ id: 'loc-2', travelTime: 'x'.repeat(100), route: 'y'.repeat(100), atMessage: 7 });
+        expect(long.travelTime).toHaveLength(40);
+        expect(long.route).toHaveLength(60);
+        expect(long.atMessage).toBe(7);
+    });
+
+    it('normalizeLocationRecord types the links list (dedupe by id, cap, junk entries dropped)', () => {
+        const record = normalizeLocationRecord({
+            name: 'Ashford',
+            links: [null, 'x', { id: 'a', direction: 'north' }, { id: 'a', direction: 'south' }, { direction: 'east' },
+                ...Array.from({ length: 12 }, (_, i) => ({ id: `b${i}` }))],
+        });
+        expect(record.links).toHaveLength(MAX_LINKS_PER_LOCATION);
+        expect(record.links[0]).toEqual({ id: 'a', direction: 'north', travelTime: null, route: null, atMessage: null });
+        // A profile re-upsert without links keeps the existing list.
+        const reprofiled = normalizeLocationRecord({ name: 'Ashford', type: 'settlement' }, record);
+        expect(reprofiled.links).toEqual(record.links);
+        expect(normalizeLocationRecord({ name: 'Bare', links: 'north' }).links).toEqual([]);
+    });
+
+    it('linkLocations writes both ends with the opposite bearing and never mutates its input', () => {
+        const a = rec('Ashford');
+        const b = rec('Deep Fen');
+        const list = [a, b];
+        const linked = linkLocations(list, a.id, b.id, { direction: 'north', travelTime: 'half a day', route: 'the Coast Road', atMessage: 12 });
+        expect(list[0].links).toEqual([]);
+        expect(linked[0].links).toEqual([{ id: b.id, direction: 'north', travelTime: 'half a day', route: 'the Coast Road', atMessage: 12 }]);
+        expect(linked[1].links).toEqual([{ id: a.id, direction: 'south', travelTime: 'half a day', route: 'the Coast Road', atMessage: 12 }]);
+    });
+
+    it('linkLocations is fill-only: first-stated geography wins, blanks fill, the earliest stamp is kept', () => {
+        const a = rec('Ashford');
+        const b = rec('Deep Fen');
+        let list = linkLocations([a, b], a.id, b.id, { atMessage: 20 }); // bare arrival edge
+        list = linkLocations(list, a.id, b.id, { direction: 'north', travelTime: 'a day', atMessage: 22 });
+        list = linkLocations(list, a.id, b.id, { direction: 'west', route: 'the Old Ford', atMessage: 40 });
+        expect(list[0].links).toEqual([{ id: b.id, direction: 'north', travelTime: 'a day', route: 'the Old Ford', atMessage: 20 }]);
+        expect(list[1].links[0]).toMatchObject({ id: a.id, direction: 'south', route: 'the Old Ford' });
+        expect(list[0].links).toHaveLength(1);
+    });
+
+    it('linkLocations no-ops on an unknown id, a self-link, or one place cluster', () => {
+        const town = rec('Harrowmere');
+        const tavern = rec('The Gilded Eel', { aliases: ['Gilded Eel tavern, Harrowmere'] });
+        const fen = rec('Deep Fen');
+        const list = [town, tavern, fen];
+        expect(linkLocations(list, town.id, 'nope')).toBe(list);
+        expect(linkLocations(list, town.id, town.id)).toBe(list);
+        expect(linkLocations(list, town.id, tavern.id, { direction: 'north' })).toBe(list); // shares a name token via alias
+        expect(linkLocations(undefined, town.id, fen.id)).toEqual([]);
+    });
+
+    it('over the cap a bare link is evicted before a detailed one, oldest first', () => {
+        const here = rec('Hub');
+        const others = Array.from({ length: MAX_LINKS_PER_LOCATION + 1 }, (_, i) => rec(`Spoke ${i}`));
+        let list = [here, ...others];
+        // Spoke 0 is detailed and oldest; Spoke 1 is bare and oldest of the bare.
+        list = linkLocations(list, here.id, others[0].id, { direction: 'north', atMessage: 1 });
+        for (let i = 1; i < others.length; i += 1) {
+            list = linkLocations(list, here.id, others[i].id, { atMessage: i + 1 });
+        }
+        const ids = list[0].links.map(l => l.id);
+        expect(ids).toHaveLength(MAX_LINKS_PER_LOCATION);
+        expect(ids).toContain(others[0].id);
+        expect(ids).not.toContain(others[1].id);
+    });
+
+    it('seedTravelLinksFromTrail mints bare edges between consecutive DIFFERENT records, idempotently', () => {
+        const a = rec('Ashford');
+        const b = rec('Deep Fen');
+        const c = rec('Rimehollow');
+        const trail = ['Ashford', 'Ashford', 'the Deep Fen', 'an unknown swamp', 'Rimehollow', 'Deep Fen'];
+        const once = seedTravelLinksFromTrail([a, b, c], trail);
+        expect(once[0].links.map(l => l.id)).toEqual([b.id]);
+        expect(once[1].links.map(l => l.id).sort()).toEqual([a.id, c.id].sort());
+        expect(once[2].links.map(l => l.id)).toEqual([b.id]);
+        expect(once[1].links.every(l => l.direction === null && l.atMessage === null)).toBe(true);
+        expect(seedTravelLinksFromTrail(once, trail)).toEqual(once);
+        expect(seedTravelLinksFromTrail(undefined, trail)).toEqual([]);
+    });
+
+    it('describeTravelLink + listKnownWays render detailed ways first and skip orphaned ids', () => {
+        const here = rec('Ashford');
+        const fen = rec('Deep Fen');
+        const hollow = rec('Rimehollow');
+        let list = [here, fen, hollow];
+        list = linkLocations(list, here.id, fen.id, { atMessage: 30 });
+        list = linkLocations(list, here.id, hollow.id, { direction: 'north', travelTime: 'half a day', route: 'the Coast Road', atMessage: 10 });
+        list[0] = { ...list[0], links: [...list[0].links, { id: 'evicted', direction: 'east', travelTime: null, route: null, atMessage: 99 }] };
+        const ways = listKnownWays(list, 'Library landing, Ashford');
+        expect(ways.map(w => describeTravelLink(w, w.name))).toEqual([
+            'Rimehollow (north, half a day, by the Coast Road)',
+            'Deep Fen',
+        ]);
+        expect(listKnownWays(list, 'Nowhere')).toEqual([]);
+        expect(listKnownWays(list, 'Ashford', { limit: 1 })).toHaveLength(1);
+    });
+
+    it('listVisitedPlaces projects ways toward VISITED records only — a theater-only target never renders', () => {
+        const here = stamp(rec('Ashford'), 5);
+        const fen = stamp(rec('Deep Fen'), 9);
+        const theater = rec('The Sunken Chapel', { theaterFrontIds: ['front-1'] });
+        let list = [here, fen, theater];
+        list = linkLocations(list, here.id, fen.id, { direction: 'south' });
+        // A hostile save could carry a link to the theater; the projection must still hide it.
+        list[0] = { ...list[0], links: [...list[0].links, { id: theater.id, direction: 'north', travelTime: null, route: null, atMessage: null }] };
+        const places = listVisitedPlaces(list, {});
+        const ashford = places.find(p => p.name === 'Ashford');
+        expect(ashford.ways).toEqual([{ id: fen.id, name: 'Deep Fen', direction: 'south', travelTime: null, route: null }]);
+        expect(JSON.stringify(places)).not.toContain('Sunken Chapel');
+    });
+
+    it('dedupeLocationRecords re-aims links at a folded duplicate\'s keeper and drops dangling / self links', () => {
+        const keeper = { ...rec('Clockwork Tower'), id: 'keep' };
+        const dupe = { ...rec('Library landing, Clockwork Tower'), id: 'dupe' };
+        const fen = { ...rec('Deep Fen'), id: 'fen', links: [{ id: 'dupe', direction: 'north' }, { id: 'keep' }, { id: 'gone' }, { id: 'fen' }] };
+        const healed = dedupeLocationRecords([keeper, dupe, fen]);
+        expect(healed.map(r => r.id).sort()).toEqual(['fen', 'keep']);
+        expect(healed.find(r => r.id === 'fen').links).toEqual([{ id: 'keep', direction: 'north', travelTime: null, route: null, atMessage: null }]);
     });
 });

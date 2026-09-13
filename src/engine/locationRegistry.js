@@ -22,6 +22,20 @@ export const DANGER_LEVELS = ['none', 'low', 'moderate', 'high', 'deadly'];
 export const MAX_LOCATIONS = 60;
 const MAX_ALIASES = 6;
 
+// Travel links (geography-as-canon, 2026-09-14): a bounded compass so a
+// direction is either one of these or nothing — "north-ish", "past the
+// mill", and "left" are prose, not geography.
+export const TRAVEL_DIRECTIONS = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest', 'up', 'down', 'upriver', 'downriver'];
+const OPPOSITE_DIRECTION = {
+    north: 'south', south: 'north', east: 'west', west: 'east',
+    northeast: 'southwest', southwest: 'northeast', northwest: 'southeast', southeast: 'northwest',
+    up: 'down', down: 'up', upriver: 'downriver', downriver: 'upriver',
+};
+const DIRECTION_ABBREVIATIONS = { n: 'north', s: 'south', e: 'east', w: 'west', ne: 'northeast', nw: 'northwest', se: 'southeast', sw: 'southwest' };
+export const MAX_LINKS_PER_LOCATION = 8;
+const TRAVEL_TIME_MAX = 40;
+const ROUTE_MAX = 60;
+
 // Only connective filler — direction/age words ("north", "old") stay meaningful:
 // North Gate and South Gate are different places.
 const STOP_WORDS = new Set(['the', 'a', 'an', 'of', 'in', 'at', 'on', 'to', 'by', 'near']);
@@ -134,6 +148,123 @@ export function normalizeDangerLevel(value) {
     return DANGER_LEVELS.includes(raw) ? raw : null;
 }
 
+/**
+ * Boundary for a model-reported compass direction: "North", "NE", "to the
+ * north-east", "northward", "up the river" all normalize to one of
+ * TRAVEL_DIRECTIONS; anything else is null (never a free-text direction).
+ */
+export function normalizeTravelDirection(value) {
+    const raw = cleanText(value, 40).toLowerCase();
+    if (!raw) return null;
+    let core = raw.replace(/^(?:to|towards?|heading|bearing)\s+/, '').replace(/^the\s+/, '')
+        .replace(/[\s-]+/g, '')
+        .replace(/(?:wards?|ern|erly)$/, '');
+    if (core === 'uptheriver' || core === 'upstream') core = 'upriver';
+    if (core === 'downtheriver' || core === 'downstream') core = 'downriver';
+    if (core === 'uphill' || core === 'upward' || core === 'upstairs') core = 'up';
+    if (core === 'downhill' || core === 'downward' || core === 'downstairs') core = 'down';
+    if (DIRECTION_ABBREVIATIONS[core]) core = DIRECTION_ABBREVIATIONS[core];
+    return TRAVEL_DIRECTIONS.includes(core) ? core : null;
+}
+
+export function oppositeTravelDirection(direction) {
+    return OPPOSITE_DIRECTION[direction] || null;
+}
+
+/**
+ * Did the turn's own text state this bearing? A compass word the narration
+ * never used is a hallucination, not geography — the Scribe's direction is
+ * accepted only when the prose carries it ("north", "northward", "to the
+ * north-east", "up the river", "upstream").
+ */
+export function isDirectionEvidencedInText(direction, text) {
+    const normalized = normalizeTravelDirection(direction);
+    if (!normalized || typeof text !== 'string' || !text) return false;
+    const suffix = '(?:ward|wards|ern|erly)?';
+    const patterns = {
+        upriver: '(?:upriver|upstream|up[- ]the[- ]river)',
+        downriver: '(?:downriver|downstream|down[- ]the[- ]river)',
+        up: '(?:up|uphill|upward|upwards|upstairs)',
+        down: '(?:down|downhill|downward|downwards|downstairs)',
+        // A cardinal is not evidenced by a compound that contains it: "to the
+        // north-east" says nothing about north (the hyphen is a word boundary).
+        north: `north${suffix}(?![- ]?(?:east|west))`,
+        south: `south${suffix}(?![- ]?(?:east|west))`,
+        east: `(?<!(?:north|south)[- ]?)east${suffix}`,
+        west: `(?<!(?:north|south)[- ]?)west${suffix}`,
+    };
+    const core = patterns[normalized]
+        || `${normalized.replace(/^(north|south)(east|west)$/, '$1[- ]?$2')}${suffix}`;
+    return new RegExp(`\\b${core}\\b`, 'i').test(text);
+}
+
+/**
+ * Type one stored travel link: a string target id, a whitelisted direction,
+ * clamped travel time / route text, a finite-or-null message stamp. Junk
+ * detail is dropped, never invented; a link without an id is nothing.
+ */
+export function normalizeTravelLink(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const id = typeof raw.id === 'string' ? cleanText(raw.id, 60) : '';
+    if (!id) return null;
+    // Strings only: a number is not a road name, and cleanText admits numbers.
+    const textOnly = (value, max) => (typeof value === 'string' ? cleanText(value, max) : '');
+    return {
+        id,
+        direction: normalizeTravelDirection(raw.direction),
+        travelTime: textOnly(raw.travelTime, TRAVEL_TIME_MAX) || null,
+        route: textOnly(raw.route, ROUTE_MAX) || null,
+        atMessage: Number.isFinite(raw.atMessage) ? raw.atMessage : null,
+    };
+}
+
+function hasLinkDetail(link) {
+    return !!(link?.direction || link?.travelTime || link?.route);
+}
+
+/**
+ * Merge a reported link into a record's list: same target → the FIRST
+ * fiction-established detail wins (geography is canon like `region`), blanks
+ * fill from the new report, the stamp keeps the earliest sighting. Over the
+ * cap, bare links go first, then the oldest.
+ */
+function mergeTravelLinks(existingLinks, incoming) {
+    const list = (Array.isArray(existingLinks) ? existingLinks : []).map(normalizeTravelLink).filter(Boolean);
+    const link = normalizeTravelLink(incoming);
+    if (!link) return list;
+    const idx = list.findIndex(l => l.id === link.id);
+    if (idx === -1) {
+        const merged = [...list, link];
+        if (merged.length <= MAX_LINKS_PER_LOCATION) return merged;
+        const rank = l => (hasLinkDetail(l) ? 1 : 0) * 1e9 + (Number.isFinite(l.atMessage) ? l.atMessage : -1);
+        const victim = merged.reduce((lowest, l) => (rank(l) < rank(lowest) ? l : lowest));
+        return merged.filter(l => l !== victim);
+    }
+    const kept = list[idx];
+    const combined = {
+        id: kept.id,
+        direction: kept.direction || link.direction,
+        travelTime: kept.travelTime || link.travelTime,
+        route: kept.route || link.route,
+        atMessage: Number.isFinite(kept.atMessage)
+            ? (Number.isFinite(link.atMessage) ? Math.min(kept.atMessage, link.atMessage) : kept.atMessage)
+            : link.atMessage,
+    };
+    return list.map((l, i) => (i === idx ? combined : l));
+}
+
+function normalizeTravelLinks(raw) {
+    const seen = new Set();
+    const links = [];
+    for (const entry of Array.isArray(raw) ? raw : []) {
+        const link = normalizeTravelLink(entry);
+        if (!link || seen.has(link.id)) continue;
+        seen.add(link.id);
+        links.push(link);
+    }
+    return links.slice(0, MAX_LINKS_PER_LOCATION);
+}
+
 export function normalizeLocationRecord(rawRecord = {}, existing = null) {
     // A null record (JSON round-trip of an array hole) skips the default param
     // and threw `(reading 'name')`; a string-valued aliases/theaterFrontIds
@@ -178,7 +309,97 @@ export function normalizeLocationRecord(rawRecord = {}, existing = null) {
         // sanitizeRegionName rejects locality junk ("the docks") at every path,
         // including load-time re-normalization of polluted saves.
         region: sanitizeRegionName(existing?.region, name) || sanitizeRegionName(record.region, name) || null,
+        // Travel links (2026-09-14): which OTHER records the hero has traveled
+        // to from here, with the direction / travel time / route the fiction
+        // stated. Union, existing first: no upsert payload can wipe or
+        // displace the list (junk ids past the cap are simply truncated);
+        // linkLocations is the one writer that adds detail.
+        links: normalizeTravelLinks([
+            ...(Array.isArray(existing?.links) ? existing.links : []),
+            ...(Array.isArray(record.links) ? record.links : []),
+        ]),
     };
+}
+
+/**
+ * Record a journey between two registry records, on BOTH ends: the reverse
+ * link carries the opposite compass direction and the same time / route.
+ * Fill-only against what each record already holds (first-stated geography
+ * wins). No-op when either id is unknown, when both are the same record, or
+ * when the two are one place cluster (a shop and its street are not a road).
+ * Never mutates its input.
+ */
+export function linkLocations(locations = [], fromId, toId, details = {}) {
+    const list = Array.isArray(locations) ? locations : [];
+    if (!fromId || !toId || fromId === toId) return list;
+    const from = list.find(record => record?.id === fromId);
+    const to = list.find(record => record?.id === toId);
+    if (!from || !to || areRelatedPlaces(from, to)) return list;
+    const direction = normalizeTravelDirection(details?.direction);
+    const shared = {
+        travelTime: details?.travelTime,
+        route: details?.route,
+        atMessage: details?.atMessage,
+    };
+    return list.map(record => {
+        if (record === from) return { ...record, links: mergeTravelLinks(record.links, { ...shared, id: to.id, direction }) };
+        if (record === to) return { ...record, links: mergeTravelLinks(record.links, { ...shared, id: from.id, direction: oppositeTravelDirection(direction) }) };
+        return record;
+    });
+}
+
+/**
+ * Bare edges from a chronological trail of location names (the journal's
+ * per-entry `location` stamps at load): consecutive entries at DIFFERENT
+ * records mean the hero traveled between them. Detail-free by design — the
+ * trail knows the hero went, not how — and idempotent, so pre-link saves get
+ * their geography backfilled without a migration.
+ */
+export function seedTravelLinksFromTrail(locations = [], trail = []) {
+    let list = Array.isArray(locations) ? locations : [];
+    let prevId = null;
+    for (const name of Array.isArray(trail) ? trail : []) {
+        const idx = findLocationRecord(list, name);
+        if (idx === -1) continue;
+        const id = list[idx].id;
+        if (prevId && prevId !== id) list = linkLocations(list, prevId, id);
+        prevId = id;
+    }
+    return list;
+}
+
+/**
+ * One rendered link: "Aldermill (north, half a day, by the Coast Road)" —
+ * shared by the DM prompt line and the Places tab so both read the same
+ * geography.
+ */
+export function describeTravelLink(link, targetName) {
+    const detail = [
+        link?.direction || null,
+        link?.travelTime || null,
+        link?.route ? `by ${link.route}` : null,
+    ].filter(Boolean).join(', ');
+    return detail ? `${targetName} (${detail})` : targetName;
+}
+
+/**
+ * The hero's known ways out of the current place, as records: detailed links
+ * first, then the newest. Links to records the registry no longer holds are
+ * skipped (eviction can orphan an id).
+ */
+export function listKnownWays(locations = [], currentLocation, { limit = MAX_LINKS_PER_LOCATION } = {}) {
+    const list = Array.isArray(locations) ? locations : [];
+    const idx = findLocationRecord(list, currentLocation);
+    if (idx === -1) return [];
+    const here = list[idx];
+    const ways = [];
+    for (const link of Array.isArray(here.links) ? here.links : []) {
+        const target = list.find(record => record?.id === link?.id);
+        if (!target || target === here) continue;
+        ways.push({ ...link, name: target.name });
+    }
+    ways.sort((a, b) => (hasLinkDetail(b) - hasLinkDetail(a)) || ((b.atMessage ?? -1) - (a.atMessage ?? -1)));
+    return ways.slice(0, limit);
 }
 
 /**
@@ -556,6 +777,9 @@ export function listVisitedPlaces(locations = [], { currentLocation = null, jour
         const idx = findLocationRecord(list, name);
         if (idx !== -1) visitedIdx.add(idx);
     }
+    // Ways render only toward OTHER visited places: a link can only be minted
+    // by an arrival or a narrated journey, but the whitelist stays structural.
+    const visitedNameById = new Map([...visitedIdx].map(i => [list[i].id, list[i].name]));
     const places = [...visitedIdx].map((i) => {
         const record = list[i];
         return {
@@ -568,6 +792,15 @@ export function listVisitedPlaces(locations = [], { currentLocation = null, jour
             firstSeenAt: record.firstSeenAt || null,
             lastVisitedAt: record.lastVisitedAt || null,
             isCurrent: i === currentIdx,
+            ways: (Array.isArray(record.links) ? record.links : [])
+                .filter(link => link?.id && link.id !== record.id && visitedNameById.has(link.id))
+                .map(link => ({
+                    id: link.id,
+                    name: visitedNameById.get(link.id),
+                    direction: link.direction || null,
+                    travelTime: link.travelTime || null,
+                    route: link.route || null,
+                })),
         };
     });
     places.sort((a, b) => (b.isCurrent - a.isCurrent) || ((b.lastVisitedAt || 0) - (a.lastVisitedAt || 0)));
@@ -607,13 +840,20 @@ export function getCurrentLocationRecord(locations = [], currentLocation) {
  * shadowing the real town record on every exact lookup.
  */
 export function dedupeLocationRecords(locations = []) {
-    const mergeInto = (kept, record) => normalizeLocationRecord({
-        aliases: [record.name, ...(record.aliases || [])].filter(a => isRegistrableLocationName(a)),
-        type: kept.type || record.type,
-        danger: kept.danger || record.danger,
-        theaterFrontIds: record.theaterFrontIds,
-        lastVisitedAt: Math.max(kept.lastVisitedAt || 0, record.lastVisitedAt || 0),
-    }, kept);
+    // Folded record ids → the keeper's id, so travel links that pointed at a
+    // duplicate are re-aimed at the surviving record instead of dangling.
+    const foldedInto = new Map();
+    const mergeInto = (kept, record) => {
+        if (record.id && kept.id && record.id !== kept.id) foldedInto.set(record.id, kept.id);
+        return normalizeLocationRecord({
+            aliases: [record.name, ...(record.aliases || [])].filter(a => isRegistrableLocationName(a)),
+            type: kept.type || record.type,
+            danger: kept.danger || record.danger,
+            theaterFrontIds: record.theaterFrontIds,
+            lastVisitedAt: Math.max(kept.lastVisitedAt || 0, record.lastVisitedAt || 0),
+            links: [...(kept.links || []), ...(record.links || [])],
+        }, kept);
+    };
 
     // Pass 1: fold exact same-named duplicates.
     const byName = new Map();
@@ -673,9 +913,29 @@ export function dedupeLocationRecords(locations = []) {
     // load normalization). Translate each through the registry exactly like
     // live profiling now does — a chain (district → town → land) resolves to
     // the land, a region-less place-scale match resolves to null.
-    return cleanedRecords.map(record => {
+    const regionHealed = cleanedRecords.map(record => {
         if (!record.region) return record;
         const resolved = resolvePlaceNamedRegion(cleanedRecords, record.region, { excludeId: record.id });
         return resolved === record.region ? record : { ...record, region: resolved };
+    });
+
+    // Pass 4 — travel-link heal (2026-09-14): re-aim links at folded records'
+    // keepers (chains resolve), then drop self-links, duplicates, and links
+    // to ids no surviving record carries.
+    const survivingIds = new Set(regionHealed.map(record => record.id));
+    const resolveId = (id) => {
+        let current = id;
+        for (let hop = 0; hop < 4 && foldedInto.has(current); hop += 1) current = foldedInto.get(current);
+        return current;
+    };
+    return regionHealed.map(record => {
+        const links = Array.isArray(record.links) ? record.links : [];
+        if (links.length === 0) return record;
+        const healed = normalizeTravelLinks(links
+            .map(link => (link?.id ? { ...link, id: resolveId(link.id) } : null))
+            .filter(link => link && link.id !== record.id && survivingIds.has(link.id)));
+        return healed.length === links.length && healed.every((link, i) => link.id === links[i].id)
+            ? record
+            : { ...record, links: healed };
     });
 }

@@ -367,6 +367,39 @@ background call and two prompt lines. Anti-abuse is the usual pattern: one-shot 
 caps, mechanics-inert, complete-or-nothing installs. Start with Half 2 if scoping down —
 it's engine-side selection + one prompt line, no new LLM call at all.
 
+### Geography as canon — a map without coordinates — status: phase 1 `shipped` (2026-09-14), phases 2–4 open
+Vesa: "should there be some kind of a map system in the game?" The answer settled on was
+**yes, but a geography system, not a map with coordinates** (DECISIONS.md 2026-09-14). An LLM
+DM cannot keep coordinates straight over a hundred turns; a hex or grid map would force the
+engine to either reject travel narration or let the picture contradict the prose, and it pushes
+the game toward a hex-crawl it isn't. The real problem a map solves here is *consistency* — the
+DM saying the village is north of the city on turn 12 and south on turn 90 — and consistency is
+a canon problem, which is what the Scribe pipeline is built for. The registry already carried
+region / type / danger / aliases / visit stamps / theaters; the one missing thing was
+*relations between places*.
+- [x] **Phase 1 — travel edges as canon (2026-09-14).** `locations[i].links` (`{ id, direction,
+  travelTime, route, atMessage }`, cap 8, compass whitelist): an arrival at a different record
+  mints a bare edge on both ends (SET_LOCATION, one-cluster hops skipped), the Scribe's `travel`
+  field fills bearing / duration / road through `ADD_TRAVEL_LINK` (evidence-gated per detail
+  against the turn text, never mints a place, first-stated geography wins like `region`),
+  `seedTravelLinksFromTrail` backfills old saves from the journal's location trail at load, and
+  the prompt's `**Known ways from here**` line + the Places tab's "Ways from here" render one
+  shared `describeTravelLink`. No new DM channel, no ledger (Scribe-observed, not DM-declared;
+  the merge is idempotent).
+- [ ] **Phase 2 — the graph view.** A force-directed sketch of visited places and edges on the
+  Places tab, parchment register, compass-biased layout (a `north` edge pulls its target up).
+  Fog-of-war for free: only visited records exist. Zero LLM cost; the player-facing "wow".
+- [ ] **Phase 3 — premise geography.** The 8,000-char premise often states geography outright
+  ("Aldermill, half a day north of the capital"); a one-time Scribe pass at campaign start could
+  pre-link premise-named places once BOTH have records (never mint from the premise — the mint
+  gate stays SET_LOCATION's).
+- [ ] **Phase 4 — a hand-drawn map image** through the existing image chain, labeled a SKETCH
+  and never canon: atmospheric, never spatially truthful, so it can never be contradicted.
+- **Rejected inside the design:** DM-declared positions or distances as a mechanical channel (a
+  numeric channel needs a ledger and there is no honest way to validate a hallucinated
+  distance); any requirement to click a map to move — the player types where they go, the DM
+  narrates the road, the engine remembers what the road was.
+
 ### Location-transition recall ledger — status: `shipped` (2026-06-23)
 Journal entries now store `location`; the DM prompt receives a deterministic
 `## LOCATION TRANSITION HISTORY` block for chronological "what happened right before I arrived?"

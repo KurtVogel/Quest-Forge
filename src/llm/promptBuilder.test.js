@@ -1034,3 +1034,21 @@ describe('prompt size budget (tripwire against unbounded growth)', () => {
     });
 });
 
+
+describe('Known ways from here rides the live prompt (geography as canon, 2026-09-14)', () => {
+    it('renders the current place\'s travel links beside Current location, and nothing without a registry', () => {
+        const locations = [
+            { id: 'a', name: 'Jewelglade', links: [{ id: 'b', direction: 'east', travelTime: 'two days', route: 'the River Road', atMessage: 2 }] },
+            { id: 'b', name: 'Saltmere', links: [{ id: 'a', direction: 'west', travelTime: 'two days', route: 'the River Road', atMessage: 2 }] },
+        ];
+        const withWays = buildSystemPrompt({
+            character: makeCharacter(), inventory: [], quests: [], rollHistory: [], preset: 'classicFantasy', ruleset: 'simplified5e',
+            customSystemPrompt: '', journal: [], npcs: [], party: [], currentLocation: 'Jewelglade', combat: { active: false },
+            worldFacts: [], fronts: [], storyMemory: [], retrievedMemories: [], premise: '', recentRulings: [], messages: [], messageCount: 0,
+            locations,
+        });
+        expect(withWays).toContain('**Current location:** Jewelglade');
+        expect(withWays).toContain('Saltmere (east, two days, by the River Road)');
+        expect(prompt({ currentLocation: 'Jewelglade' })).not.toContain('Known ways from here');
+    });
+});

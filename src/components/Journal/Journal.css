@@ -795,6 +795,14 @@
     overflow-wrap: anywhere;
 }
 
+/* Travel links: the ways the hero has actually walked out of this place. */
+.journal-place-ways {
+    margin: 0.3rem 0 0;
+    font-size: 0.72rem;
+    color: var(--text-secondary, var(--text-muted));
+    overflow-wrap: anywhere;
+}
+
 .journal-place-visits {
     margin: 0.25rem 0 0;
     font-size: 0.68rem;

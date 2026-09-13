@@ -403,3 +403,18 @@ describe('KNOWN NPCs extras rendering (queue 2026-07-18)', () => {
         expect(context).toContain('*(1 other NPCs available via RETRIEVED MEMORIES when relevant)*');
     });
 });
+
+describe('Known ways from here (geography as canon, 2026-09-14)', () => {
+    it('renders the established ways out of the current place, detailed first, and stays silent with none', () => {
+        const locations = [
+            { id: 'a', name: 'Ashford', links: [{ id: 'b', direction: 'north', travelTime: 'half a day', route: 'the Coast Road', atMessage: 3 }, { id: 'c', direction: null, travelTime: null, route: null, atMessage: 9 }, { id: 'gone' }] },
+            { id: 'b', name: 'Deep Fen', links: [] },
+            { id: 'c', name: 'Rimehollow', links: [] },
+        ];
+        const context = buildJournalContext([], [], 'Library landing, Ashford', { locations });
+        expect(context).toContain('**Known ways from here (established geography');
+        expect(context).toContain('Deep Fen (north, half a day, by the Coast Road); Rimehollow');
+        expect(buildJournalContext([], [], 'Deep Fen', { locations })).not.toContain('Known ways');
+        expect(buildJournalContext([], [], 'Ashford')).not.toContain('Known ways');
+    });
+});
