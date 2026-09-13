@@ -1876,6 +1876,30 @@ coerce numeric strings on item `quantity`/purchase `priceCp` like the coin `clam
 does (`"5"` torches for `"50"` cp bought ONE for 1 cp). From the 2026-09-12 strengthening
 audit (character-vault + inventory-economy, Lap 2). **Applied 2026-09-13** (DECISIONS.md 2026-09-13): `isKnownRace`/`isKnownClass`, `catalogEntry`/`catalogKeyForName`, the type whitelist, `boundHealingNotation`, `toFlag`, `toFiniteNumber`. Spell lookups were already Map-indexed; `CONDITION_EFFECTS[...]?.[kind]` dereferences an inherited function member to undefined and is harmless.
 
+### [strengthening] A class-gated heal must strip what it doesn't type; a budget must count in the clamp's unit; a minutes-long UI flow must carry the session id
+Three rules from one Lap-2 run (2026-09-13, spellcasting + chronicler). **(1)** `healLoadedCharacter`
+types `spellSlots`/`sustainedSpell` only when the class is a caster; a Fighter's raw value rides
+the `...character` spread, and the one consumer that gates on truthiness instead of on
+`isSpellcaster` (`CombatPanel.jsx:37`) crashes the Combat panel on `{ 1: null }` every fight. A
+class-conditional heal must either type the field for everyone or strip it for the other class
+(the `healUnknownClassRace` destructure already does exactly that for unknown classes) — and
+every consumer must gate on the SAME predicate the heal used. **(2)** The chronicler closes a
+part every 10 chunks assuming ~4.5k chars per passage, while the reducer clamps the chapter at
+60,000 CHARACTERS; ten 7,000-char passages (≈1,100 words, a mild overshoot of the 300–700-word
+aim) lose 10k chars mid-sentence with `toIndex` claiming the whole span — the 2026-08-29 bug
+one level down. A budget counted in a different unit from its clamp is a proxy, not a budget:
+close by accumulated characters too, or clip per passage with a visible warning. **(3)**
+`handleWriteChapter` captures `state`, awaits minutes of DM calls, then dispatches
+`ADD_CHRONICLE_CHAPTER` + `flushAutoSave` against whatever campaign is live; `LOAD_GAME`
+remounts `AppShell` (protecting the render) but the closure and `dispatch` survive, so campaign
+A's chapter lands on campaign B and persists. Any async flow that outlives a plausible load
+(chapter close, Deepen memory, portrait generation) should capture `session.id` + `loadNonce`
+at start and drop its dispatch with a status line when the live session differs. Smaller
+siblings in the same run: `slot_level: "2"` silently downcasts (numeric-string parity, the
+09-13 `toFiniteNumber` tool), a loaded `used: "4"` REFILLS a slot (the wrong direction),
+`chapterCloseSuggested.title` and a chapter's `toIndex` are unclamped at load. From the
+2026-09-13 strengthening audit (spellcasting + chronicler, Lap 2).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
