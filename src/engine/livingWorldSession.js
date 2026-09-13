@@ -15,6 +15,7 @@
  * the same rule that keeps the living-world constants in worldTempo.js.
  */
 import { INTENSITY_LEVELS } from './worldTempo.js';
+import { sanitizeRelationshipBeat } from './relationshipArc.js';
 
 const HEARSAY_GRADES = ['firsthand', 'secondhand', 'legend'];
 
@@ -125,7 +126,13 @@ export function sanitizeLivingWorldSession(session) {
         ['pendingAbsenceDrift', sanitizePendingAbsenceDrift],
         ['pendingRegionalFronts', sanitizePendingRegionalFronts],
         ['pendingFrontAftermath', sanitizePendingFrontAftermath],
+        // NPC initiative window (2026-09-13 overhaul): complete-or-null.
+        ['relationshipBeat', sanitizeRelationshipBeat],
     ];
+    if (session.lastRelationshipBeatMessage !== undefined) {
+        const n = Number(session.lastRelationshipBeatMessage);
+        next.lastRelationshipBeatMessage = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+    }
     for (const [field, sanitize] of fields) {
         if (session[field] === undefined) continue;
         next[field] = sanitize(session[field]);

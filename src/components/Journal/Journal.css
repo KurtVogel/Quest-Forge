@@ -993,3 +993,32 @@
 .journal-npc-thread {
     border-left: 2px solid var(--gold);
 }
+
+/* Overhaul slices (2026-09-13): the moment in their own words, what they
+   know about you, and the absence line. */
+.journal-npc-bond-voice {
+    display: block;
+    font-style: italic;
+    color: var(--text-secondary);
+    opacity: 0.9;
+    margin: 0.1rem 0 0.25rem;
+}
+
+.journal-npc-bond-voice::before {
+    content: '“';
+}
+
+.journal-npc-bond-voice::after {
+    content: '”';
+}
+
+.journal-npc-absence {
+    font-style: italic;
+    list-style: none;
+    margin-left: -1.1rem;
+    opacity: 0.85;
+}
+
+.journal-npc-knows .journal-npc-bonds-label {
+    color: var(--text-muted);
+}

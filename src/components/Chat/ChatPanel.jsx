@@ -1044,6 +1044,13 @@ const ChatMessage = memo(function ChatMessage({ message, onDelete }) {
             <div className="message-content">
                 <div className="message-role">
                     {roleLabels[message.role]}
+                    {Array.isArray(message.bondMarks) && message.bondMarks.map((mark, i) => (
+                        // The quiet tell (2026-09-13 overhaul): a key moment
+                        // landed or a bond moved — a chip, never a score screen.
+                        <span key={i} className={`message-bond-mark ${mark.kind || 'moment'}`} title={mark.label || ''}>
+                            ✦ {mark.name}
+                        </span>
+                    ))}
                     {onDelete && (
                         <button
                             className={`message-delete${confirmingDelete ? ' confirming' : ''}`}

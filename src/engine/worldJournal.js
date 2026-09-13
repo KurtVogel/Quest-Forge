@@ -26,7 +26,7 @@ import {
  * (unconfirmed stance impressions + the newest ordinary moment). A legacy
  * record with ungraded moments renders them all under "lately".
  */
-export function describeBondForPrompt(npc = {}, storyMemory = []) {
+export function describeBondForPrompt(npc = {}, storyMemory = [], { messages = null, messageCount } = {}) {
     const { key, recent } = splitBondMoments(npc.bondMoments);
     const impressions = listNpcImpressions(npc, 'stanceToPlayer');
     const lines = [];
@@ -37,6 +37,10 @@ export function describeBondForPrompt(npc = {}, storyMemory = []) {
     if (stage) lines.push(`bond: ${stage}`);
     const thread = resolveOpenThread(npc, storyMemory);
     if (thread) lines.push(`between you now: ${thread.text}`);
+    // Absence (overhaul): a bond left alone meets the reunion in a changed
+    // register — cooled, sharpened, scarred, or stinging. Bounded, engine-read.
+    const absence = describeAbsence(npc, { messages, messageCount });
+    if (absence) lines.push(`apart: ${absence.line}`);
     if (key.length > 0) {
         lines.push(`key moments with the hero: ${briefNpcFieldForPrompt(key.slice(-3).map(m => m.text).join('; '), 240)}`);
     }
@@ -49,7 +53,7 @@ export function describeBondForPrompt(npc = {}, storyMemory = []) {
     }
     return lines;
 }
-import { describeStageForPrompt, resolveOpenThread } from './relationshipArc.js';
+import { describeAbsence, describeStageForPrompt, resolveOpenThread } from './relationshipArc.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
 import { collectNarrativeMessages } from '../llm/narrativeMessages.js';
 import { isSameLocation, sanitizeExtractedLocation } from './locationRegistry.js';
@@ -487,7 +491,7 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
                 // The personal bond with the hero — flirtation, gratitude, grudges —
                 // is the beat players remember most; the DM must play it consistently.
                 n.stanceToPlayer && `toward the hero: ${briefNpcFieldForPrompt(n.stanceToPlayer)}`,
-                ...describeBondForPrompt(n, storyMemory),
+                ...describeBondForPrompt(n, storyMemory, { messages, messageCount: Array.isArray(messages) ? messages.length : undefined }),
                 Number.isFinite(n.trust) && `trust: ${n.trust}/100`,
                 n.basedIn && `based in: ${n.basedIn}`,
                 n.lastLocation && `last seen: ${n.lastLocation}`,
@@ -501,7 +505,7 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
             ? `\n*(${hiddenCount} other NPCs available via RETRIEVED MEMORIES when relevant)*`
             : '';
 
-        parts.push(`\n## KNOWN NPCs (keep names, registered gender, and established looks EXACTLY consistent — a character's gender and pronouns NEVER change from the registered value or the fiction that introduced them, and never re-invent or launder hair, eyes, build, body proportions, scars, intimate details, or clothing that "looks:" already records. Each NPC's "secret:" and "agenda:" entries are that character's PRIVATE interior — other characters do not know them unless the fiction has shown the reveal, per rule 9. "bond:" is where that person and the hero stand; "between you now:" is the LIVE thread between them — the thing they would raise first, so let them act on it, ask about it, or visibly avoid it when they share a scene)\n${npcList}${overflow}`);
+        parts.push(`\n## KNOWN NPCs (keep names, registered gender, and established looks EXACTLY consistent — a character's gender and pronouns NEVER change from the registered value or the fiction that introduced them, and never re-invent or launder hair, eyes, build, body proportions, scars, intimate details, or clothing that "looks:" already records. Each NPC's "secret:" and "agenda:" entries are that character's PRIVATE interior — other characters do not know them unless the fiction has shown the reveal, per rule 9. "bond:" is where that person and the hero stand; "between you now:" is the LIVE thread between them — the thing they would raise first, so let them act on it, ask about it, or visibly avoid it when they share a scene; "apart:" is how time alone has changed the register they meet in — cooled, sharpened, scarred, or stinging — play the reunion in that register before the old warmth or heat returns)\n${npcList}${overflow}`);
     }
 
     return parts.join('\n');

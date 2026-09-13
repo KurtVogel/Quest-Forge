@@ -90,7 +90,7 @@ describe('npcEnrichment', () => {
         expect(context.recentConversation.some(m => m.text.includes('stables'))).toBe(false);
         expect(context.existingRecord.stanceToPlayer).toBe('Amused by the hero.');
         // Pre-tier rows are handed over marked ungraded so the archivist grades them.
-        expect(context.existingRecord.bondMoments).toEqual([{ text: 'Shared wine at the Gilded Fern.', ungraded: true }]);
+        expect(context.existingRecord.bondMoments).toEqual([{ text: 'Shared wine at the Gilded Fern.', ungraded: true, voiced: false }]);
     });
 
     it('trims truncated hook fragments from incomplete model output', () => {
@@ -194,9 +194,32 @@ describe('enrichNpcProfile relationship synthesis', () => {
         const request = sendMessage.mock.calls[0][0];
         expect(request.systemPrompt).toContain('grade EVERY moment marked ungraded');
         expect(JSON.parse(request.userMessage).existingRecord.bondMoments).toEqual([
-            { text: 'Shared wine at the Gilded Fern.', ungraded: true },
-            { text: 'Late kiss on the stairs.', ungraded: true },
+            { text: 'Shared wine at the Gilded Fern.', ungraded: true, voiced: false },
+            { text: 'Late kiss on the stairs.', ungraded: true, voiced: false },
         ]);
+    });
+
+    it('parses voicedMoments and a grade\'s voice into the same gradedMoments channel (2026-09-13 overhaul)', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            gradedMoments: [{ text: 'Late kiss on the stairs.', kind: 'flirtation', salience: 4, voice: 'I told myself it was the wine.' }],
+            voicedMoments: [
+                { text: 'Shared wine at the Gilded Fern.', voice: 'He paid. That was the whole of it.' },
+                { text: 'No voice here.' },
+                { voice: 'orphan' },
+            ],
+        }));
+        const update = await enrichNpcProfile({
+            state,
+            npc: { id: 'npc-maren', name: 'Maren', bondMoments: [{ text: 'Shared wine at the Gilded Fern.', at: 1, kind: 'gift', salience: 4 }, { text: 'Late kiss on the stairs.', at: 2 }] },
+            settings,
+        });
+        expect(update.gradedMoments).toEqual([
+            { text: 'Late kiss on the stairs.', kind: 'flirtation', salience: 4, voice: 'I told myself it was the wine.' },
+            { text: 'Shared wine at the Gilded Fern.', voice: 'He paid. That was the whole of it.' },
+        ]);
+        const request = sendMessage.mock.calls[0][0];
+        expect(JSON.parse(request.userMessage).existingRecord.bondMoments[0]).toEqual({ text: 'Shared wine at the Gilded Fern.', kind: 'gift', salience: 4, voiced: false });
+        expect(request.systemPrompt).toContain('a rival\'s grudge');
         expect(request.userMessage).toContain('recentConversation');
     });
 

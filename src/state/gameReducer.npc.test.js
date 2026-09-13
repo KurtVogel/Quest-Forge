@@ -399,6 +399,67 @@ describe('gameReducer tiered bond moments (2026-09-12 — one scene, one moment;
         expect(settled.npcs[0].openThreadResolved).toBeUndefined();
     });
 
+    it('a key moment landing or a stage moving stamps the newest DM message with a quiet mark (2026-09-13)', () => {
+        const messages = [...messagesOf(9), { id: 'sys', role: 'system', content: 'engine line' }];
+        const state = { ...initialGameState, messages };
+        const first = scribe(state, { text: 'Maren laughed at a joke.', kind: 'other', salience: 2 });
+        expect(first.messages.some(msg => msg.bondMarks)).toBe(false);
+        const key = scribe(first, { text: 'Maren and the hero spent their first night together.', kind: 'intimacy', salience: 5 });
+        // The newest VISIBLE DM row (index 7; 8 is the player's, 9 a system line).
+        const marked = key.messages[7];
+        expect(marked.role).toBe('assistant');
+        expect(marked.bondMarks).toEqual([
+            { name: 'Maren', kind: 'moment', label: 'A moment with Maren was recorded: Maren and the hero spent their first night together.' },
+            { name: 'Maren', kind: 'stage', label: 'Maren: now intimate' },
+        ]);
+        expect(key.messages[8].bondMarks).toBeUndefined();
+        expect(key.messages[9].bondMarks).toBeUndefined();
+        // A re-mention never re-marks.
+        const again = gameReducer(key, { type: 'UPDATE_NPC', payload: { name: 'Maren', lastNotes: 'Still here.' } });
+        expect(again.messages[7].bondMarks).toHaveLength(2);
+    });
+
+    it('a seen NPC settles their own reach-out window once it has opened (2026-09-13)', () => {
+        const beat = { npcId: 'npc-maren', npcName: 'Maren', stage: 'intimate', thread: 'x', mintedAtMessage: 10, opensAtMessage: 20, closesAtMessage: 44 };
+        const seeded = {
+            ...initialGameState,
+            messages: messagesOf(25),
+            session: { ...initialGameState.session, relationshipBeat: beat },
+            npcs: [{ id: 'npc-maren', name: 'Maren', rosterTier: 'character', kind: 'character', disposition: 'friendly' }],
+        };
+        const other = gameReducer(seeded, { type: 'UPDATE_NPC', payload: { name: 'Bran', disposition: 'neutral', lastNotes: 'x' } });
+        expect(other.session.relationshipBeat).toEqual(beat);
+        const early = gameReducer({ ...seeded, messages: messagesOf(15) }, { type: 'UPDATE_NPC', payload: { name: 'Maren', lastNotes: 'Seen before the window.' } });
+        expect(early.session.relationshipBeat).toEqual(beat);
+        const seen = gameReducer(seeded, { type: 'UPDATE_NPC', payload: { name: 'Maren', lastNotes: 'She came to the inn herself.' } });
+        expect(seen.session.relationshipBeat).toBeNull();
+    });
+
+    it('the journal cadence mints a beat for the bonded absent NPC with an engine-rolled delay, honors the cooldown, and never double-mints (2026-09-13)', async () => {
+        const { rollRelationshipBeat } = await import('./handlers/worldMemory.js');
+        const npcs = [{ id: 'npc-maren', name: 'Maren', rosterTier: 'character', kind: 'character', disposition: 'friendly', lastSeenMessage: 2, openThread: 'Waiting.', openThreadMessage: 2, bondMoments: [{ text: 'First night.', at: 1, kind: 'intimacy', salience: 5 }] }];
+        const state = { ...initialGameState, messages: messagesOf(50), npcs };
+        const minted = rollRelationshipBeat(state, { roll: () => 3 });
+        expect(minted.relationshipBeat).toMatchObject({ npcName: 'Maren', opensAtMessage: 50 + 18, closesAtMessage: 50 + 18 + 24 });
+        expect(minted.lastRelationshipBeatMessage).toBe(50);
+        // Pending beat blocks a new mint.
+        expect(rollRelationshipBeat({ ...state, session: minted }, { roll: () => 0 })).toBe(minted);
+        // Expired beat + cooldown not yet passed → cleared, nothing minted.
+        const expired = { ...minted, relationshipBeat: { ...minted.relationshipBeat, opensAtMessage: 55, closesAtMessage: 60 } };
+        const cooled = rollRelationshipBeat({ ...state, messages: messagesOf(70), session: expired }, { roll: () => 0 });
+        expect(cooled.relationshipBeat).toBeNull();
+        // Cooldown passed → a fresh mint.
+        const again = rollRelationshipBeat({ ...state, messages: messagesOf(100), session: expired }, { roll: () => 0 });
+        expect(again.relationshipBeat).toMatchObject({ opensAtMessage: 100 });
+        // ADD_JOURNAL_ENTRY runs the tick (a real crypto roll: 0..4 scenes).
+        const entry = gameReducer(state, { type: 'ADD_JOURNAL_ENTRY', payload: { id: 'j1', summary: 'A quiet week.' } });
+        expect(entry.session.relationshipBeat.npcName).toBe('Maren');
+        expect(entry.session.relationshipBeat.opensAtMessage).toBeGreaterThanOrEqual(50);
+        expect(entry.session.relationshipBeat.opensAtMessage).toBeLessThanOrEqual(50 + 24);
+        // Nobody eligible → session untouched.
+        expect(rollRelationshipBeat({ ...state, npcs: [] }, { roll: () => 0 })).toBe(state.session);
+    });
+
     it('a DM-lane string bondMoment is still recorded, ungraded', () => {
         const state = scribe({ ...initialGameState, messages: messagesOf(6) }, 'Maren laughed and undercharged the hero for the room.');
         expect(state.npcs[0].bondMoments).toEqual([

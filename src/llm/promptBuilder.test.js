@@ -51,6 +51,8 @@ function prompt(overrides = {}) {
         premise: overrides.premise ?? '',
         recentRulings: overrides.recentRulings ?? [],
         messages: overrides.messages ?? [],
+        messageCount: overrides.messageCount ?? (overrides.messages ?? []).length,
+        relationshipBeat: overrides.relationshipBeat ?? null,
     });
 }
 
@@ -486,6 +488,17 @@ describe('party block', () => {
             storyMemory: [{ type: 'promise', status: 'active', text: 'The hero swore to Kaarina they would bury her brother properly.', linkedNpcNames: ['Kaarina'] }],
         });
         expect(withPromise).toContain('Between you now: The hero swore to Kaarina they would bury her brother properly.');
+    });
+
+    it('renders the SOMEONE REACHES OUT cue only while the beat window is open and never in combat (2026-09-13)', () => {
+        const npcs = [{ id: 'npc-1', name: 'Maren', rosterTier: 'character', kind: 'character', disposition: 'friendly', bondMoments: [{ text: 'First night.', at: 1, kind: 'intimacy', salience: 5 }] }];
+        const beat = { npcId: 'npc-1', npcName: 'Maren', stage: 'intimate', thread: 'Waiting to hear about the caravan.', mintedAtMessage: 10, opensAtMessage: 20, closesAtMessage: 44 };
+        const messages = Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: 'x' }));
+        const open = prompt({ npcs, relationshipBeat: beat, messages, messageCount: 30 });
+        expect(open).toContain('## SOMEONE REACHES OUT — PRIVATE');
+        expect(open).toContain('Maren (intimate toward the hero)');
+        expect(prompt({ npcs, relationshipBeat: beat, messages, messageCount: 10 })).not.toContain('SOMEONE REACHES OUT');
+        expect(prompt({ npcs, relationshipBeat: beat, messages, messageCount: 30, combat: { active: true, enemies: [] } })).not.toContain('SOMEONE REACHES OUT');
     });
 
     it('the party block carries the stance/bond DM contract', () => {

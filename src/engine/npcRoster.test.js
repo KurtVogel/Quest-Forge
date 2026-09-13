@@ -195,6 +195,29 @@ describe('player-relationship memory (stanceToPlayer + bondMoments)', () => {
             ]);
         });
 
+        it('a voice (the moment in their own words) is typed, clamped, carried through folds, and lands only where none is (2026-09-13)', () => {
+            const [row] = normalizeBondMoments([{ text: 'Kiss.', at: 1, kind: 'flirtation', salience: 4, voice: '  I told myself it was the wine. ' }]);
+            expect(row.voice).toBe('I told myself it was the wine.');
+            expect(normalizeBondMoments([{ text: 'Kiss.', at: 1, voice: { evil: true } }])[0].voice).toBeUndefined();
+            expect(normalizeBondMoments([{ text: 'Kiss.', at: 1, voice: 'x'.repeat(400) }])[0].voice.length).toBeLessThanOrEqual(220);
+
+            const graded = gradeBondMoments([
+                { text: 'Already graded.', at: 1, kind: 'rescue', salience: 5 },
+                { text: 'Voiced already.', at: 2, kind: 'gift', salience: 4, voice: 'Mine.' },
+                { text: 'Night one.', at: 3 },
+                { text: 'Night two.', at: 4 },
+            ], [
+                { text: 'Already graded.', kind: 'betrayal', salience: 1, voice: 'She dragged me out of the river and never let me forget it.' },
+                { text: 'Voiced already.', voice: 'Overwrite attempt.' },
+                { text: 'Night one.', kind: 'intimacy', salience: 4 },
+                { text: 'Night two.', kind: 'intimacy', salience: 5, sameSceneAs: 'Night one.', voice: 'I asked him to stay. I do not ask.' },
+            ]);
+            expect(graded[0]).toEqual({ text: 'Already graded.', at: 1, kind: 'rescue', salience: 5, voice: 'She dragged me out of the river and never let me forget it.' });
+            expect(graded[1].voice).toBe('Mine.');
+            expect(graded[2]).toEqual({ text: 'Night two.', at: 3, kind: 'intimacy', salience: 5, voice: 'I asked him to stay. I do not ask.' });
+            expect(graded).toHaveLength(3);
+        });
+
         it('gradeBondMoments ignores junk grades and returns the rows unchanged', () => {
             const legacy = [{ text: 'Legacy beat.', at: 1 }];
             expect(gradeBondMoments(legacy, [{ text: 'Legacy beat.', kind: 'apotheosis', salience: 'high' }])).toEqual(legacy);

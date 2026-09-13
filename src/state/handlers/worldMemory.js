@@ -12,6 +12,42 @@ import {
 } from '../../engine/storyMemory.js';
 import { gameReducer } from '../gameReducer.js';
 import { sanitizeWorldFactPayload, stampNpcRelationshipArcs } from './shared.js';
+import { rollDie } from '../../engine/dice.ts';
+import {
+    BEAT_COOLDOWN_MESSAGES,
+    BEAT_TIMING_DIE_SIDES,
+    isRelationshipBeatExpired,
+    mintRelationshipBeat,
+    sanitizeRelationshipBeat,
+    selectRelationshipBeatCandidate,
+} from '../../engine/relationshipArc.js';
+
+/**
+ * The journal cadence's NPC-initiative tick (2026-09-13 overhaul). Selection
+ * is pure (selectRelationshipBeatCandidate); the delay is an engine-rolled
+ * crypto die of 0–4 scenes, the world-tempo rule ("arc reasoning decides
+ * what, dice decide when"). A pending unexpired beat blocks a new mint; so
+ * does the cooldown since the last mint. Session-only state: the DM sees
+ * the cue only while the window is open (buildRelationshipBeatBlock).
+ */
+export function rollRelationshipBeat(state, { roll = () => rollDie(BEAT_TIMING_DIE_SIDES) - 1 } = {}) {
+    let session = state.session || {};
+    const messages = state.messages || [];
+    const messageCount = messages.length;
+    const current = sanitizeRelationshipBeat(session.relationshipBeat);
+    if (current && !isRelationshipBeatExpired(current, messageCount)) return session;
+    // A malformed stored beat is junk: drop it rather than carry it.
+    if (!current && session.relationshipBeat) session = { ...session, relationshipBeat: null };
+    const last = Number.isFinite(session.lastRelationshipBeatMessage) ? session.lastRelationshipBeatMessage : null;
+    if (last !== null && messageCount - last < BEAT_COOLDOWN_MESSAGES) {
+        return current ? { ...session, relationshipBeat: null } : session;
+    }
+    const candidate = selectRelationshipBeatCandidate(state.npcs, state.storyMemory, { messages, messageCount });
+    if (!candidate) return current ? { ...session, relationshipBeat: null } : session;
+    const beat = mintRelationshipBeat(candidate, { messageCount, delayScenes: roll() });
+    if (!beat) return session;
+    return { ...session, relationshipBeat: beat, lastRelationshipBeatMessage: messageCount };
+}
 
 // --- World-fact near-duplicate detection (Scribe over-extraction guard) ---
 const FACT_STOP_WORDS = new Set([
@@ -190,6 +226,10 @@ export const handlers = {
             // ...and as the relationship-arc stamp: a disposition shift enters
             // an NPC's history only if it held until this cadence (2026-08-28).
             npcs: stampNpcRelationshipArcs(state.npcs),
+            // ...and as the NPC-initiative tick (2026-09-13 overhaul): if no
+            // beat is pending and the cooldown has passed, the one bonded NPC
+            // with the most pull may reach out — the engine rolls WHEN.
+            session: rollRelationshipBeat(state),
         };
     },
 

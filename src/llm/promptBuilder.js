@@ -22,7 +22,7 @@ import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
 import { isLowLevelSolo } from '../engine/combatExchange.js';
 import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../engine/npcRoster.js';
-import { describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
+import { buildRelationshipBeatBlock, describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
 
 /**
  * Tripwire against unbounded prompt growth, NOT a target. A deliberately
@@ -39,7 +39,7 @@ export const PROMPT_CHAR_BUDGET = 160000;
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat }) {
     /** Named [{name, text}] parts — joined in push order; names feed the DEV size log only. */
     const namedParts = [];
     const parts = {
@@ -137,6 +137,15 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         fronts: fronts || [],
         npcs: npcs || [],
     });
+    // NPC initiative (2026-09-13 overhaul): one bonded NPC may reach out on
+    // their own while their engine-rolled window is open; re-judged at render.
+    const beatBlock = buildRelationshipBeatBlock(relationshipBeat, npcs || [], {
+        messageCount: messageCount || 0,
+        combatActive: !!combat?.active,
+    });
+    if (beatBlock) {
+        parts.push(beatBlock, 'relationshipBeat');
+    }
     if (awayBlock) {
         parts.push(awayBlock, 'absenceDrift');
     }
@@ -159,7 +168,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
 
     // Party / Companions
     if (party && party.length > 0) {
-        parts.push(buildPartyBlock(party, npcs || [], storyMemory || []), 'party');
+        parts.push(buildPartyBlock(party, npcs || [], storyMemory || [], { messages: Array.isArray(messages) ? messages : null, messageCount: messageCount || 0 }), 'party');
     }
 
     // Inventory
@@ -769,7 +778,7 @@ The player has already spent Action Surge. Their next declared action gets one a
 - The client clears this state only after both validated slots commit successfully.`;
 }
 
-function buildPartyBlock(party, npcs = [], storyMemory = []) {
+function buildPartyBlock(party, npcs = [], storyMemory = [], { messages = null, messageCount } = {}) {
     return `## COMPANIONS (PARTY)
 These characters are currently traveling with the player. They act in combat and can be conversed with.
 ${party.map(c => {
@@ -796,6 +805,9 @@ ${party.map(c => {
         if (stage) bond.push(`  Bond: ${stage}`);
         const thread = dossier ? resolveOpenThread(dossier, storyMemory) : null;
         if (thread) bond.push(`  Between you now: ${thread.text}`);
+        // A companion is rarely "away", but an open thread can still go stale.
+        const absence = dossier ? describeAbsence(dossier, { messages, messageCount }) : null;
+        if (absence) bond.push(`  Apart: ${absence.line}`);
         if (dossier?.stanceToPlayer) {
             bond.push(`  Toward the hero: ${String(dossier.stanceToPlayer).slice(0, 300)}`);
         }

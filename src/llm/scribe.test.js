@@ -342,6 +342,16 @@ describe('buildKnownStances', () => {
         expect(context).toContain('same-kind moment from the same scene is already covered');
     });
 
+    it('the Scribe schema asks for a voice on key moments, in the NPC\'s own register (2026-09-13)', async () => {
+        const { SCRIBE_SCHEMA_TEXT } = await import('./scribe.js').then(mod => ({ SCRIBE_SCHEMA_TEXT: mod.__scribeSchemaText ?? null }));
+        // The schema is private; assert through the exported builder's sibling by reading the module source instead.
+        const fs = await import('node:fs');
+        const source = fs.readFileSync(new URL('./scribe.js', import.meta.url), 'utf8');
+        expect(SCRIBE_SCHEMA_TEXT).toBeNull();
+        expect(source).toContain('"voice": "ONLY for salience 4-5: the moment in this NPC\'s OWN words');
+        expect(source).toContain('a rival\'s line is a grudge');
+    });
+
     it('shows the open thread on record so the Scribe updates or settles it instead of re-minting (2026-09-13)', () => {
         const roster = { npcs: [{ name: 'Maren', openThread: 'Waiting to hear whether the hero found the caravan.' }] };
         const context = buildKnownStances(roster, 'Maren looks up as the hero enters.');

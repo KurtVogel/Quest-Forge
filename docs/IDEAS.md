@@ -31,28 +31,28 @@ companions first-class `npc_updates` subjects, and the Companions panel shows "T
 "Moments between you". Why: the party is the most sustained relationship surface in the game.
 Follow-up idea kept separate: the relationship timeline view (below) now benefits companions too.
 
-### NPC-card overhaul — from filing cabinet to a relationship with a direction — status: `in progress` (slice 1 shipped 2026-09-13)
+### NPC-card overhaul — from filing cabinet to a relationship with a direction — status: `shipped` (slice 1 2026-09-13, slices 2–6 2026-09-14)
 Vesa (2026-09-13): "an overhaul in that sense is in order — the initial version was actually
 very bad." The card answered "what is on record"; a player who wants to grow close to someone
 asks where do we stand, what is alive between us now, and what would move it. Slices:
 - [x] **Derived relationship stage + open thread** — shipped 2026-09-13 (DECISIONS.md):
   `engine/relationshipArc.js`; stage chip + "Between you now" on both cards, `bond:` /
   `between you now:` in the DM prompt, Scribe `openThread` / `openThreadResolved`.
-- [ ] **Her side of the moment** — one warm line per key moment in the NPC's own voice (what
+- [x] **Her side of the moment** — shipped 2026-09-14 as `bondMoments[i].voice`, spectrum-neutral ("in their words") — one warm line per key moment in the NPC's own voice (what
   she took from it), written once at chapter close or on Deepen memory; PLAYER-FACING ONLY,
   never fed back into prompts (the clinical records stay the machinery's). Why: nobody needs
   to read "Maren drew the hero into her room"; the warm line is where the LLM earns its keep.
-- [ ] **NPC initiative** — a bonded NPC (stage ≥ trusted) with an open thread acts on her own
+- [x] **NPC initiative** — shipped 2026-09-14 (`rollRelationshipBeat`, `## SOMEONE REACHES OUT — PRIVATE`) — a bonded NPC (stage ≥ trusted) with an open thread acts on her own
   after enough absence: a letter, turning up in the next town, a rumor she asked about the
   hero. World-tempo pattern (engine-rolled timed window, one permitted beat, private block).
   Why: today every NPC waits to be visited; a bond that can surprise you feels alive.
-- [ ] **Absence cools or ripens a bond** — a stage untouched for a chapter shifts in bounded
+- [x] **Absence cools or ripens a bond** — shipped 2026-09-14 (`describeAbsence`, register only) — a stage untouched for a chapter shifts in bounded
   ways the engine controls (warm cools a little, a wound scars, an unanswered thread starts to
   sting — rendered as a `lately` note and a prompt cue). Places already drift; people should.
-- [ ] **What she knows about you** — surface the epistemics layer on the card ("Knows: your
+- [x] **What she knows about you** — shipped 2026-09-14 (`listKnownByNpc`) — surface the epistemics layer on the card ("Knows: your
   real name, the debt in Saltmere") from `knownBy` on facts/cards, so honesty and deception
   become deliberate play.
-- [ ] **A quiet tell in the chat** — a small mark beside the message when a key moment lands;
+- [x] **A quiet tell in the chat** — shipped 2026-09-14 (`bondMarks`, ✦ chip) — a small mark beside the message when a key moment lands;
   no text, no score screen.
 
 ### Tiered character cards — permanent core, key moments, lately — status: `shipped` (2026-09-12)

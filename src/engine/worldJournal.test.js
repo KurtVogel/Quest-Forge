@@ -176,6 +176,20 @@ describe('worldJournal context builder', () => {
         expect(context).toContain('"between you now:" is the LIVE thread between them');
     });
 
+    it('renders the absence register — cooled / sharpened / stinging — measured in conversational distance (2026-09-13)', () => {
+        const messages = Array.from({ length: 40 }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: 'x' }));
+        const npcs = [
+            { name: 'Maren', disposition: 'friendly', lastNotes: 'x', lastSeenMessage: 2, bondMoments: [{ text: 'First night.', at: 1, kind: 'intimacy', salience: 5 }] },
+            { name: 'Odo', disposition: 'hostile', lastNotes: 'y', lastSeenMessage: 2, bondMoments: [{ text: 'Odo swore to see the hero hang.', at: 1, kind: 'quarrel', salience: 4 }] },
+            { name: 'Bran', disposition: 'neutral', lastNotes: 'z', lastSeenMessage: 38, stanceToPlayer: 'Polite.', openThread: 'Wants his cart back.', openThreadMessage: 2 },
+        ];
+        const context = buildJournalContext([], npcs, 'Brackwater', { messages });
+        expect(context).toContain('apart: 38 exchanges since you last met — the closeness has cooled');
+        expect(context).toContain('the grudge has had time to sharpen');
+        expect(context).toContain('has waited 38 exchanges and has begun to sting');
+        expect(context).toContain('"apart:" is how time alone has changed the register');
+    });
+
     it('identifies and injects the earliest location transition entry', () => {
         const journal = [
             { summary: 'Left the tavern in Millhaven.', location: 'Millhaven' }, // index 0 (Entry 1)

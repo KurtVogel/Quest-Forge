@@ -4,7 +4,7 @@ import { enrichNpcProfile, needsNpcEnrichment, normalizeCallbackHook } from '../
 import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
 import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js';
 import { bondKindLabel, listNpcImpressions, scoreNpcForPrompt, splitBondMoments } from '../../engine/npcRoster.js';
-import { deriveRelationshipStage, resolveOpenThread } from '../../engine/relationshipArc.js';
+import { deriveRelationshipStage, describeAbsence, listKnownByNpc, resolveOpenThread } from '../../engine/relationshipArc.js';
 import { groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
 import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
@@ -307,6 +307,8 @@ export default function JournalPanel({ isOpen, onClose }) {
                             <NPCTab
                                 npcs={characterNpcs}
                                 storyMemory={state.storyMemory}
+                                worldFacts={state.worldFacts}
+                                messages={state.messages}
                                 location={state.currentLocation}
                                 enrichingId={enrichingId}
                                 selectedIds={selectedIds}
@@ -329,6 +331,8 @@ export default function JournalPanel({ isOpen, onClose }) {
                         <NPCTab
                             npcs={archivedNpcs}
                             storyMemory={state.storyMemory}
+                            worldFacts={state.worldFacts}
+                            messages={state.messages}
                             location={state.currentLocation}
                             archived
                             onPin={(id, pinned) => dispatch({ type: 'PIN_NPC', payload: { id, pinned } })}
@@ -601,6 +605,8 @@ function NPCTab({
     onEditLook = null,
     onSaveLook = null,
     storyMemory = [],
+    worldFacts = [],
+    messages = null,
 }) {
     if (npcs.length === 0) {
         return (
@@ -631,6 +637,8 @@ function NPCTab({
                 // slice 1): the derived stage chip and the live thread.
                 const arc = deriveRelationshipStage(npc);
                 const thread = resolveOpenThread(npc, storyMemory);
+                const knows = listKnownByNpc(npc, worldFacts, storyMemory);
+                const absence = archived ? null : describeAbsence(npc, { messages, messageCount: Array.isArray(messages) ? messages.length : undefined });
                 return (
                     <div key={npc.id} className={`journal-npc ${npc.disposition || 'unknown'}${npc.pinned ? ' pinned' : ''}${selectedIds?.has(npc.id) ? ' selected' : ''}`}>
                         <div className="journal-npc-header">
@@ -728,15 +736,31 @@ function NPCTab({
                                                 <span className="journal-npc-bond-kind">{bondKindLabel(moment.kind)}</span>
                                             )}
                                             {moment.text}
+                                            {moment.voice && (
+                                                <span className="journal-npc-bond-voice" title={`In ${npc.name}'s own words`}>{moment.voice}</span>
+                                            )}
                                         </li>
                                     ))}
                                 </ul>
                             </div>
                         )}
-                        {(impressions.length > 0 || bonds.recent.length > 0) && (
+                        {knows.length > 0 && (
+                            <div className="journal-npc-bonds journal-npc-knows">
+                                <span className="journal-npc-bonds-label">Knows about you</span>
+                                <ul className="journal-npc-bonds-list">
+                                    {knows.map((item, i) => (
+                                        <li key={i} title={item.source === 'fact' ? 'A private fact they were let in on' : 'A private beat they were part of or told'}>{item.text}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                        {(impressions.length > 0 || bonds.recent.length > 0 || absence) && (
                             <div className="journal-npc-bonds journal-npc-lately">
                                 <span className="journal-npc-bonds-label">Lately</span>
                                 <ul className="journal-npc-bonds-list">
+                                    {absence && (
+                                        <li className="journal-npc-absence" title="How time apart has changed the register you will meet in">Apart: {absence.line}.</li>
+                                    )}
                                     {impressions.slice(-2).map((text, i) => (
                                         <li
                                             key={`impression-${i}`}

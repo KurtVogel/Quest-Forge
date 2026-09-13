@@ -170,6 +170,7 @@ export function createTurnRunner({
             premise: s.session?.premise,
             regionalHearsay: s.session?.regionalHearsay || null,
             absenceDrift: s.session?.absenceDrift || null,
+            relationshipBeat: s.session?.relationshipBeat || null,
             recentRulings: pruneRecentRulings(s.recentRulings, {
                 messageCount: (s.messages || []).length,
                 location: s.currentLocation,

@@ -2,7 +2,50 @@
  * NPC roster and locations: upsert/pin/archive/portrait/migration plus the
  * canonical location registry writes.
  */
-import { buildStoryMemoryPromotion, gradeBondMoments, migrateLegacyNpc, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
+import { buildStoryMemoryPromotion, gradeBondMoments, migrateLegacyNpc, namesMatch, normalizeNpcRecord, selectKeyBondMoments } from '../../engine/npcRoster.js';
+import { beatTargets, deriveRelationshipStage, sanitizeRelationshipBeat } from '../../engine/relationshipArc.js';
+
+/**
+ * The quiet tell (2026-09-13 overhaul): what changed in the bond between
+ * the record before and after an update — a NEW key moment (salience >= 4)
+ * or a stage that moved. `[{ name, kind, label }]`, at most one of each.
+ */
+export function describeBondMarks(before, after) {
+    if (!after?.name) return [];
+    const marks = [];
+    const keyBefore = new Set(selectKeyBondMoments(before?.bondMoments || [], 50).map(m => m.text));
+    const newKey = selectKeyBondMoments(after.bondMoments || [], 50)
+        .find(m => Number.isFinite(m.salience) && m.salience >= 4 && !keyBefore.has(m.text));
+    if (newKey) {
+        marks.push({ name: after.name, kind: 'moment', label: `A moment with ${after.name} was recorded: ${newKey.text}` });
+    }
+    // Only turning points tell: familiar and below are not news.
+    const stageBefore = before ? deriveRelationshipStage(before).stage : 'stranger';
+    const stageAfter = deriveRelationshipStage(after);
+    if (stageAfter.stage !== stageBefore && !['stranger', 'acquaintance', 'familiar'].includes(stageAfter.stage)) {
+        marks.push({ name: after.name, kind: 'stage', label: `${after.name}: now ${stageAfter.label.toLowerCase()}` });
+    }
+    return marks;
+}
+
+/** Stamp the newest visible DM message with bond marks (deduped by name+kind). */
+export function stampLastDmMessage(messages, marks) {
+    if (!Array.isArray(messages) || marks.length === 0) return messages;
+    let idx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m && m.role === 'assistant' && !m.hidden && !m.deleted) { idx = i; break; }
+    }
+    if (idx === -1) return messages;
+    const existing = Array.isArray(messages[idx].bondMarks) ? messages[idx].bondMarks : [];
+    const merged = [...existing];
+    for (const mark of marks) {
+        if (merged.some(m => m.name === mark.name && m.kind === mark.kind)) continue;
+        merged.push(mark);
+    }
+    if (merged.length === existing.length) return messages;
+    return messages.map((m, i) => (i === idx ? { ...m, bondMarks: merged.slice(-6) } : m));
+}
 import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
@@ -79,6 +122,22 @@ export const handlers = {
             nextNpcs = nextNpcs.map(npc => (npc === touched ? regraded : npc));
             touched = regraded;
         }
+        // The quiet tell + the initiative consume (2026-09-13 overhaul): a
+        // key moment landing or the stage moving marks the DM message it
+        // came from (a small chip, no text); a seen NPC settles their own
+        // reach-out window — the fiction has brought them together again.
+        const before = findTouchedNpc(state.npcs || [], action.payload);
+        const seen = action.payload?._seen !== false;
+        let messages = state.messages;
+        let session = state.session;
+        if (touched && seen) {
+            const marks = describeBondMarks(before, touched);
+            if (marks.length > 0) messages = stampLastDmMessage(state.messages, marks);
+            if (session?.relationshipBeat && beatTargets(session.relationshipBeat, touched)
+                && (state.messages || []).length >= (sanitizeRelationshipBeat(session.relationshipBeat)?.opensAtMessage ?? Infinity)) {
+                session = { ...session, relationshipBeat: null };
+            }
+        }
         let storyMemory = state.storyMemory || [];
         if (touched) {
             const promotion = buildStoryMemoryPromotion(touched);
@@ -106,7 +165,7 @@ export const handlers = {
                 }
             }
         }
-        return { ...state, npcs: nextNpcs, storyMemory };
+        return { ...state, npcs: nextNpcs, storyMemory, messages, session };
     },
 
     PIN_NPC(state, action) {

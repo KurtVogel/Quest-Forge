@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import LookEditor from '../Journal/LookEditor.jsx';
 import { bondKindLabel, listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../../engine/npcRoster.js';
-import { deriveRelationshipStage, resolveOpenThread } from '../../engine/relationshipArc.js';
+import { deriveRelationshipStage, describeAbsence, resolveOpenThread } from '../../engine/relationshipArc.js';
 import './Companions.css';
 
 export default function CompanionsPanel() {
@@ -60,6 +60,7 @@ export default function CompanionsPanel() {
                     // stage and the live thread lead the bond section.
                     const arc = dossier ? deriveRelationshipStage(dossier) : null;
                     const thread = dossier ? resolveOpenThread(dossier, state.storyMemory) : null;
+                    const absence = dossier ? describeAbsence(dossier, { messages: state.messages, messageCount: (state.messages || []).length }) : null;
 
                     let affinityClass = '';
                     if (affinityPercent >= 75) affinityClass = 'affinity-high';
@@ -153,15 +154,21 @@ export default function CompanionsPanel() {
                                                     <span className="comp-bond-kind">{bondKindLabel(moment.kind)}</span>
                                                 )}
                                                 {moment.text}
+                                                {moment.voice && (
+                                                    <span className="comp-bond-voice" title={`In ${companion.name}'s own words`}>{moment.voice}</span>
+                                                )}
                                             </li>
                                         ))}
                                     </ul>
                                 </div>
                             )}
-                            {(impressions.length > 0 || bonds.recent.length > 0) && (
+                            {(impressions.length > 0 || bonds.recent.length > 0 || absence) && (
                                 <div className="comp-bond-moments comp-bond-lately">
                                     <span className="comp-bond-label">Lately</span>
                                     <ul className="comp-bond-list">
+                                        {absence && (
+                                            <li className="comp-absence" title="How time apart has changed the register you will meet in">Apart: {absence.line}.</li>
+                                        )}
                                         {impressions.slice(-2).map((text, i) => (
                                             <li
                                                 key={`impression-${i}`}

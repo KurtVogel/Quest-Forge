@@ -568,3 +568,19 @@
 .chat-stop-btn:hover {
   background: #ff6b6b;
 }
+
+/* The quiet tell (2026-09-13): a key moment landed or a bond moved. */
+.message-bond-mark {
+  display: inline-block;
+  margin-left: 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--gold, #d4af37);
+  opacity: 0.8;
+}
+
+.message-bond-mark.stage {
+  opacity: 1;
+}

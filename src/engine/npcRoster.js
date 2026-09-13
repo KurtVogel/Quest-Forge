@@ -113,6 +113,10 @@ export const BOND_KEY_SALIENCE = 4;
 export const BOND_SCENE_WINDOW_MESSAGES = 16;
 /** How many key moments a card and the DM prompt lead with. */
 export const MAX_KEY_BOND_MOMENTS = 5;
+/** The moment in the NPC's OWN words (2026-09-13 overhaul): player-facing
+ * only — never a prompt, never RAG. A rival's line is a grudge, an
+ * indifferent one's a shrug; the clinical `text` stays the machinery's. */
+export const NPC_BOND_VOICE_MAX = 220;
 
 export function normalizeBondMomentKind(value) {
     const kind = typeof value === 'string' ? value.trim().toLowerCase().replace(/[\s-]+/g, '_') : '';
@@ -150,12 +154,14 @@ export function normalizeBondMoments(list = []) {
             const kind = normalizeBondMomentKind(entry?.kind);
             const salience = normalizeBondSalience(entry?.salience);
             const atMessage = Number.isFinite(entry?.atMessage) ? Math.max(0, Math.floor(entry.atMessage)) : null;
+            const voice = typeof entry?.voice === 'string' ? clampNpcDossierField(entry.voice, NPC_BOND_VOICE_MAX) : '';
             return {
                 text,
                 at,
                 ...(kind && { kind }),
                 ...(salience !== null && { salience }),
                 ...(atMessage !== null && { atMessage }),
+                ...(voice && { voice }),
             };
         })
         .filter(Boolean);
@@ -203,7 +209,7 @@ export function appendBondMoments(existing = [], additions = [], { messageCount 
             const held = next[sceneIdx];
             if (bondSalience(addition) > bondSalience(held)) {
                 next = next.map((moment, i) => (i === sceneIdx
-                    ? { ...held, text: addition.text, salience: addition.salience }
+                    ? { ...held, text: addition.text, salience: addition.salience, ...(addition.voice && { voice: addition.voice }) }
                     : moment));
             }
             continue;
@@ -270,11 +276,15 @@ export function gradeBondMoments(existing = [], grades = []) {
         const index = indexByText.get(bondTextKey(grade.text));
         if (index === undefined) continue;
         const row = next[index];
+        // A VOICE lands on any matched row that has none yet (graded or not —
+        // live play grades without voicing); it never overwrites one.
+        const voice = typeof grade.voice === 'string' ? clampNpcDossierField(grade.voice, NPC_BOND_VOICE_MAX) : '';
+        if (voice && !row.voice) next[index] = { ...next[index], voice };
         if (row.kind !== undefined || row.salience !== undefined) continue;
         const kind = normalizeBondMomentKind(grade.kind);
         const salience = normalizeBondSalience(grade.salience);
         if (!kind && salience === null) continue;
-        next[index] = { ...row, ...(kind && { kind }), ...(salience !== null && { salience }) };
+        next[index] = { ...next[index], ...(kind && { kind }), ...(salience !== null && { salience }) };
         const earlier = indexByText.get(bondTextKey(grade.sameSceneAs));
         if (earlier !== undefined && earlier < index) folds.push([earlier, index]);
     }
@@ -285,7 +295,9 @@ export function gradeBondMoments(existing = [], grades = []) {
         const b = next[later];
         if (!a.kind || a.kind === 'other' || a.kind !== b.kind) continue;
         if (bondSalience(b) > bondSalience(a)) {
-            next[earlier] = { ...a, text: b.text, salience: b.salience };
+            next[earlier] = { ...a, text: b.text, salience: b.salience, ...(b.voice && { voice: b.voice }) };
+        } else if (!a.voice && b.voice) {
+            next[earlier] = { ...a, voice: b.voice };
         }
         dropped.add(later);
     }
