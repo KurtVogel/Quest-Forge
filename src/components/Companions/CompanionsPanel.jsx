@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import LookEditor from '../Journal/LookEditor.jsx';
 import { bondKindLabel, listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../../engine/npcRoster.js';
+import { deriveRelationshipStage, resolveOpenThread } from '../../engine/relationshipArc.js';
 import './Companions.css';
 
 export default function CompanionsPanel() {
@@ -55,6 +56,10 @@ export default function CompanionsPanel() {
                     // Journal card and the DM's party line.
                     const bonds = splitBondMoments(dossier?.bondMoments);
                     const impressions = listNpcImpressions(dossier, 'stanceToPlayer');
+                    // Where you stand + what is pending (2026-09-13): derived
+                    // stage and the live thread lead the bond section.
+                    const arc = dossier ? deriveRelationshipStage(dossier) : null;
+                    const thread = dossier ? resolveOpenThread(dossier, state.storyMemory) : null;
 
                     let affinityClass = '';
                     if (affinityPercent >= 75) affinityClass = 'affinity-high';
@@ -64,6 +69,14 @@ export default function CompanionsPanel() {
                         <div key={companion.id} className="companion-card">
                             <div className="companion-top">
                                 <span className="companion-name">{companion.name}</span>
+                                {arc && arc.stage !== 'stranger' && arc.stage !== 'acquaintance' && (
+                                    <span
+                                        className={`companion-stage ${arc.stage}`}
+                                        title={arc.since ? `${arc.label} — since: ${arc.since}` : arc.label}
+                                    >
+                                        {arc.label}
+                                    </span>
+                                )}
                                 <span className={`companion-status ${status}`}>{status}</span>
                             </div>
 
@@ -117,6 +130,12 @@ export default function CompanionsPanel() {
                                 </p>
                             )}
 
+                            {thread && (
+                                <p className="comp-stance comp-thread" title={thread.source === 'promise' ? 'From an open promise on record' : 'What is pending between you, as the story last left it'}>
+                                    <span className="comp-bond-label">Between you now</span>
+                                    {thread.text}
+                                </p>
+                            )}
                             {dossier?.stanceToPlayer && (
                                 <p className="comp-stance">
                                     <span className="comp-bond-label">Toward you</span>

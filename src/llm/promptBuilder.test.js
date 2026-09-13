@@ -469,6 +469,30 @@ describe('party block', () => {
         });
         expect(text).toContain('Key moments with the hero: The hero pulled Kaarina from the river at the ford.');
         expect(text).toContain('Lately with the hero: Irritated by his boasting tonight.; Kaarina and the hero shared a skin of wine on watch.');
+        // Stage + thread lead the companion's bond lines (2026-09-13 slice 1).
+        expect(text).toContain('Bond: trusted (since: The hero pulled Kaarina from the river at the ford.)');
+    });
+
+    it('a companion\'s open thread rides the party line — the Scribe thread, else an active linked promise (2026-09-13)', () => {
+        const party = [{ id: 'c1', name: 'Kaarina', role: 'shieldmaiden', level: 2, hp: 18, maxHp: 18, ac: 15, weapon: 'Longsword', attackBonus: 4, damage: '1d8+2', affinity: 75 }];
+        const withThread = prompt({
+            party,
+            npcs: [{ id: 'npc-1', name: 'Kaarina', disposition: 'friendly', rosterTier: 'character', kind: 'character', openThread: 'Waiting for the hero to say whether they go north or home.' }],
+        });
+        expect(withThread).toContain('Between you now: Waiting for the hero to say whether they go north or home.');
+        const withPromise = prompt({
+            party,
+            npcs: [{ id: 'npc-1', name: 'Kaarina', disposition: 'friendly', rosterTier: 'character', kind: 'character' }],
+            storyMemory: [{ type: 'promise', status: 'active', text: 'The hero swore to Kaarina they would bury her brother properly.', linkedNpcNames: ['Kaarina'] }],
+        });
+        expect(withPromise).toContain('Between you now: The hero swore to Kaarina they would bury her brother properly.');
+    });
+
+    it('the party block carries the stance/bond DM contract', () => {
+        const text = prompt({
+            party: [{ id: 'c1', name: 'Kaarina', role: 'shieldmaiden', level: 2, hp: 18, maxHp: 18, ac: 15, weapon: 'Longsword', attackBonus: 4, damage: '1d8+2', affinity: 75 }],
+            npcs: [{ id: 'npc-1', name: 'Kaarina', disposition: 'friendly', rosterTier: 'character', kind: 'character', stanceToPlayer: 'Trusts the hero.' }],
+        });
         // The DM contract: stance/bond updates route through npc_updates, not update_companions.
         expect(text).toContain('`npc_updates` with `stanceToPlayer`');
         // Stutter guard (playtest #14): stance emission is a full rewrite of the

@@ -13,6 +13,7 @@ import {
     normalizeCallbackHook,
 } from '../engine/npcRoster.js';
 import { NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../config/contentLimits.js';
+import { NPC_OPEN_THREAD_MAX } from '../engine/relationshipArc.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
@@ -92,6 +93,7 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
             secrets: npc.secrets,
             relationshipTension: npc.relationshipTension,
             stanceToPlayer: npc.stanceToPlayer,
+            openThread: npc.openThread,
             // Every recorded moment with its grade, so the archivist can grade
             // the UNGRADED ones (pre-tier rows) instead of only adding new ones.
             bondMoments: (npc.bondMoments || [])
@@ -127,6 +129,7 @@ Output ONLY valid JSON:
   "relationshipTension": "compact note on rivalry, humiliation, debt, attraction, resentment, fear, or unresolved conflict with the hero",
   "stanceToPlayer": "how this NPC personally regards the HERO right now — affection, attraction, romantic feeling, friendship, gratitude, respect, amusement, resentment, fear, obligation — written from the NPC's side and grounded in what actually passed between them",
   "bondMoments": [{ "text": "one-line record of a significant personal moment between the hero and this NPC that the context establishes (up to 3) — NEW moments only, never one already in existingRecord.bondMoments — the defining beat of a scene, never each line or position of it", "kind": "meeting|flirtation|intimacy|confession|promise|gift|rescue|shared_danger|betrayal|quarrel|reconciliation|farewell|other", "salience": "1-5 — 5 redefines the relationship, 4 a beat both would recall years later, 3 memorable, 2 texture" }],
+  "openThread": "the ONE thing currently pending between this NPC and the hero, from the NPC's side, one line — a promise the hero made, a question she asked and he dodged, a favor owed, an invitation left open. Only when the context actually leaves something pending; omit otherwise",
   "gradedMoments": [{ "text": "the EXACT verbatim text of an existing moment marked ungraded in existingRecord.bondMoments (copy it character for character)", "kind": "same kind list as above", "salience": "1-5 as above", "sameSceneAs": "OPTIONAL — the exact verbatim text of an EARLIER existing moment this one is the same scene's beat of (same kind: another position of one night, another line of one conversation); omit when it stands alone" }],
   "appearance": "the NPC's COMPLETE physical/visual description — skin tone, hair (explicit: color and style, or bald/shaved), build, body proportions, face, apparent age, clothing, distinguishing and intimate features — merging the existing record with any concrete visual details the recent conversation states. Omit unless the context actually establishes looks",
   "gender": "the NPC's gender as the context establishes or makes clearly apparent (pronouns, titles, explicit statements) — 'woman', 'man', or the fiction's own wording. Omit only if genuinely unknowable",
@@ -193,6 +196,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
         || extractBalancedJson(response, 'callbackHooks')
         || extractBalancedJson(response, 'bondMoments')
         || extractBalancedJson(response, 'gradedMoments')
+        || extractBalancedJson(response, 'openThread')
         || extractBalancedJson(response, 'basedIn');
     if (!jsonMatch) {
         throw new Error('Could not parse NPC enrichment response.');
@@ -229,6 +233,9 @@ export async function enrichNpcProfile({ state, npc, settings }) {
         // The reducer appends these into the existing record with near-duplicate
         // rejection — enrichment can only add moments, never rewrite history.
         if (moments.length > 0) update.bondMoments = moments;
+    }
+    if (cleanText(parsed.openThread)) {
+        update.openThread = clampNpcDossierField(parsed.openThread, NPC_OPEN_THREAD_MAX);
     }
     if (Array.isArray(parsed.gradedMoments)) {
         // The regrade of existing rows rides a separate action
@@ -272,7 +279,7 @@ export async function enrichNpcProfile({ state, npc, settings }) {
     }
 
     if (!update.agenda && !update.relationshipTension && !update.stanceToPlayer
-        && !update.bondMoments?.length && !update.gradedMoments?.length && !update.callbackHooks?.length
+        && !update.bondMoments?.length && !update.gradedMoments?.length && !update.openThread && !update.callbackHooks?.length
         && !update.appearance && !update.basedIn && !update.lastLocation) {
         throw new Error('Enrichment returned no usable depth for this NPC.');
     }

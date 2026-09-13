@@ -6,7 +6,7 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-09-13 (queue sweep — character-vault + inventory-economy Lap-2 hostile input: own-key gates on every catalog, typed item flags/type/damage/healing, numeric-string parity, sell "all"; queue empty; deployed). Previous: 2026-09-12 (night — Deepen memory REGRADES legacy bond moments: verbatim-matched grades, same-scene folds, engine-owned, live-verified; deployed). Previous: 2026-09-12 (evening — TIERED character cards: a permanent core earned in a second scene, key moments graded by kind + salience with scene collapse and value eviction, a decaying "lately" shelf; rendered on both cards, the DM prompt, and the Scribe context; deployed). Previous: 2026-09-12 (the player can edit any character's look — `SET_NPC_LOOK` + `LookEditor` on the Journal card and Companions card; same day: companion look = ONE record via `resolveCompanionLook`, roster-first; deterministic IDENTITY LOCK leading every portrait/scene prompt from `engine/appearanceIdentity.js`; Companions panel shows Looks; deployed). Previous: 2026-09-11 (queue sweep — combat-exchange + persistence Lap-2 hostile input: typed turn order and stored exchange result, narration effect with an exit, typed purse, class/race whitelist with a one-time notice, unique enemy ids at load, inventory/roster/payload typing; plus WOW ordinary-turn W1: `## THE ORDINARY TURN` grammar block in the cached prefix; both queues empty; deployed) — then the wow proof run: `npm run eval:turns` three rounds on Gemini + Grok, MOTION anti-escalation guard and THE ASK stop rule tuned in, report in `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`, redeployed. Previous: 2026-09-10 (WOW build — first-ten-minutes: premise starter tap-cards + "Draft from my hero", ANCHOR/ECHO/HANDLE opening clauses; same day queue sweep — roll-resolution + cloud-sync: ONE death-save tally form, ONE typed save-list projection; both deployed). Previous: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input; deployed with the 09-10 sweep)._
+_Last updated: 2026-09-13 (NPC-card overhaul slice 1 — DERIVED relationship stage + the open thread "between you now" on both cards and in the DM prompt; `engine/relationshipArc.js`; deployed). Previous: 2026-09-13 (queue sweep — character-vault + inventory-economy Lap-2 hostile input: own-key gates on every catalog, typed item flags/type/damage/healing, numeric-string parity, sell "all"; queue empty; deployed). Previous: 2026-09-12 (night — Deepen memory REGRADES legacy bond moments: verbatim-matched grades, same-scene folds, engine-owned, live-verified; deployed). Previous: 2026-09-12 (evening — TIERED character cards: a permanent core earned in a second scene, key moments graded by kind + salience with scene collapse and value eviction, a decaying "lately" shelf; rendered on both cards, the DM prompt, and the Scribe context; deployed). Previous: 2026-09-12 (the player can edit any character's look — `SET_NPC_LOOK` + `LookEditor` on the Journal card and Companions card; same day: companion look = ONE record via `resolveCompanionLook`, roster-first; deterministic IDENTITY LOCK leading every portrait/scene prompt from `engine/appearanceIdentity.js`; Companions panel shows Looks; deployed). Previous: 2026-09-11 (queue sweep — combat-exchange + persistence Lap-2 hostile input: typed turn order and stored exchange result, narration effect with an exit, typed purse, class/race whitelist with a one-time notice, unique enemy ids at load, inventory/roster/payload typing; plus WOW ordinary-turn W1: `## THE ORDINARY TURN` grammar block in the cached prefix; both queues empty; deployed) — then the wow proof run: `npm run eval:turns` three rounds on Gemini + Grok, MOTION anti-escalation guard and THE ASK stop rule tuned in, report in `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`, redeployed. Previous: 2026-09-10 (WOW build — first-ten-minutes: premise starter tap-cards + "Draft from my hero", ANCHOR/ECHO/HANDLE opening clauses; same day queue sweep — roll-resolution + cloud-sync: ONE death-save tally form, ONE typed save-list projection; both deployed). Previous: 2026-09-09 (queue sweep — dice-engine + scene-art Lap-2 hostile input; deployed with the 09-10 sweep)._
 
 ## 2026-09-13 — queue sweep: character-vault + inventory-economy (2 P1s, 6 P2s) — queue empty
 
@@ -24,6 +24,22 @@ and `damage` bounded whenever present; `boundHealingNotation` (≤10d12+20, else
 fields string-or-drop; `toFiniteNumber` numeric-string parity on item fields, purchase and sale
 `priceCp`; `sell.quantity: "all"`; nameless purchase refused visibly. 34 new pins (one new test
 file, `applyEvents.itemFlags.test.js`); 2,464 tests green, lint clean, built. **Deployed.**
+
+## 2026-09-13 — NPC-card overhaul slice 1: derived relationship stage + the open thread ("between you now")
+
+Vesa agreed the card needs an overhaul ("the initial version was actually very bad"). **Ruling:
+DECISIONS.md 2026-09-13.** New `engine/relationshipArc.js`: `deriveRelationshipStage` reads
+stranger / acquaintance / familiar / trusted / intimate / rival / estranged off the graded key
+moments, disposition, trust, and arc history (never stored, never LLM-declared; legacy ungraded
+rows cap at familiar until regraded) with the moment that earned it; `resolveOpenThread` returns
+the Scribe's current-state `openThread` (replace; `openThreadResolved: true` clears; engine-stamped
+`openThreadMessage`) or the newest active promise card linked to the NPC. Renders as a stage chip
++ "Between you now" line on the Journal and Companions cards, `bond:` / `between you now:` on the
+KNOWN NPCs line (header tells the DM to play toward it) and the companion party line; the Scribe
+sees the thread on record and Deepen memory can fill it. Browser-verified on a seeded save
+(Intimate / Trusted / Rival chips; Scribe thread and promise fallback both rendering). Remaining
+slices listed under IDEAS.md "NPC-card overhaul". 47 new pins (1 new test file); 2,481 tests
+green, lint clean, built. **Deployed.**
 
 ## 2026-09-12 (night) — Deepen memory regrades legacy bond moments
 

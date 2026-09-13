@@ -25,6 +25,7 @@ import {
     NPC_CORE_TEXT_FIELDS,
     NPC_DURABLE_TEXT_FIELDS,
 } from '../../engine/npcRoster.js';
+import { NPC_OPEN_THREAD_MAX } from '../../engine/relationshipArc.js';
 
 // Live rollHistory cap, matching persistence's MAX_SAVED_ROLLS: only 50 are
 // ever persisted, 20 render, 5 reach the prompt — but the live array grew
@@ -716,6 +717,29 @@ export function upsertNpc(npcs, payload, { messageCount } = {}) {
     }
     if (update.stanceToPlayer) {
         update.stanceToPlayer = clampNpcDossierField(update.stanceToPlayer);
+    }
+    // The open thread (2026-09-13): the one thing pending between this NPC
+    // and the hero — current-state REPLACE like lastNotes, engine-stamped
+    // with the message it was set at, cleared by an explicit
+    // `openThreadResolved: true` (pruneBlankFields drops '' so a clear needs
+    // its own token). The stamp is never payload-writable.
+    delete update.openThreadMessage;
+    const threadResolved = update.openThreadResolved === true;
+    delete update.openThreadResolved;
+    if (update.openThread !== undefined) {
+        const thread = typeof update.openThread === 'string'
+            ? update.openThread.trim().slice(0, NPC_OPEN_THREAD_MAX)
+            : '';
+        if (thread) {
+            update.openThread = thread;
+            if (Number.isFinite(messageCount)) update.openThreadMessage = messageCount;
+        } else {
+            delete update.openThread;
+        }
+    }
+    if (threadResolved && !update.openThread) {
+        update.openThread = '';
+        update.openThreadMessage = null;
     }
     // Bond moments are append-only history: a turn's `bondMoment` (or an enrichment
     // batch of `bondMoments`) joins the existing record — it can never replace it.

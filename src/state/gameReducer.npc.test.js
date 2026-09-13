@@ -373,6 +373,32 @@ describe('gameReducer tiered bond moments (2026-09-12 — one scene, one moment;
         expect(record.bondMoments).toEqual([{ text: 'Maren asked the hero to stay until dawn.', at: 1, kind: 'intimacy', salience: 5 }]);
     });
 
+    it('openThread is a stamped current-state field; openThreadResolved clears it; the stamp is never payload-writable', () => {
+        const base = { ...initialGameState, messages: messagesOf(12) };
+        const opened = gameReducer(base, {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Maren', disposition: 'friendly', lastNotes: 'x', openThread: ' Waiting to hear whether the hero found the caravan. ', openThreadMessage: 999 },
+        });
+        expect(opened.npcs[0].openThread).toBe('Waiting to hear whether the hero found the caravan.');
+        expect(opened.npcs[0].openThreadMessage).toBe(12);
+
+        const replaced = gameReducer({ ...opened, messages: messagesOf(20) }, {
+            type: 'UPDATE_NPC',
+            payload: { name: 'Maren', openThread: 'Wants the hero to meet her sister\'s husband.' },
+        });
+        expect(replaced.npcs[0].openThread).toBe('Wants the hero to meet her sister\'s husband.');
+        expect(replaced.npcs[0].openThreadMessage).toBe(20);
+
+        const junk = gameReducer(replaced, { type: 'UPDATE_NPC', payload: { name: 'Maren', openThread: { evil: true }, openThreadResolved: 'yes' } });
+        expect(junk.npcs[0].openThread).toBe('Wants the hero to meet her sister\'s husband.');
+        expect(junk.npcs[0].openThreadResolved).toBeUndefined();
+
+        const settled = gameReducer(junk, { type: 'UPDATE_NPC', payload: { name: 'Maren', lastNotes: 'Met the husband.', openThreadResolved: true } });
+        expect(settled.npcs[0].openThread).toBe('');
+        expect(settled.npcs[0].openThreadMessage).toBeNull();
+        expect(settled.npcs[0].openThreadResolved).toBeUndefined();
+    });
+
     it('a DM-lane string bondMoment is still recorded, ungraded', () => {
         const state = scribe({ ...initialGameState, messages: messagesOf(6) }, 'Maren laughed and undercharged the hero for the room.');
         expect(state.npcs[0].bondMoments).toEqual([

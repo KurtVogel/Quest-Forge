@@ -341,6 +341,14 @@ describe('buildKnownStances', () => {
         expect(context).toContain('"Maren beat the hero at dice."');
         expect(context).toContain('same-kind moment from the same scene is already covered');
     });
+
+    it('shows the open thread on record so the Scribe updates or settles it instead of re-minting (2026-09-13)', () => {
+        const roster = { npcs: [{ name: 'Maren', openThread: 'Waiting to hear whether the hero found the caravan.' }] };
+        const context = buildKnownStances(roster, 'Maren looks up as the hero enters.');
+        expect(context).toContain('open thread on record');
+        expect(context).toContain('"Waiting to hear whether the hero found the caravan."');
+        expect(context).toContain('openThreadResolved: true only if it settles it');
+    });
 });
 
 describe('buildKnown* match on name tokens, not full-name substrings (2026-09-06 scribe P1)', () => {

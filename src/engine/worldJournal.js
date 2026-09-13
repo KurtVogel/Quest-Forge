@@ -26,10 +26,17 @@ import {
  * (unconfirmed stance impressions + the newest ordinary moment). A legacy
  * record with ungraded moments renders them all under "lately".
  */
-export function describeBondForPrompt(npc = {}) {
+export function describeBondForPrompt(npc = {}, storyMemory = []) {
     const { key, recent } = splitBondMoments(npc.bondMoments);
     const impressions = listNpcImpressions(npc, 'stanceToPlayer');
     const lines = [];
+    // Where they stand and what is pending (2026-09-13 overhaul slice 1):
+    // the stage is derived from the record, the thread is the live beat the
+    // DM plays toward — both lead the bond fields.
+    const stage = describeStageForPrompt(npc);
+    if (stage) lines.push(`bond: ${stage}`);
+    const thread = resolveOpenThread(npc, storyMemory);
+    if (thread) lines.push(`between you now: ${thread.text}`);
     if (key.length > 0) {
         lines.push(`key moments with the hero: ${briefNpcFieldForPrompt(key.slice(-3).map(m => m.text).join('; '), 240)}`);
     }
@@ -42,6 +49,7 @@ export function describeBondForPrompt(npc = {}) {
     }
     return lines;
 }
+import { describeStageForPrompt, resolveOpenThread } from './relationshipArc.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
 import { collectNarrativeMessages } from '../llm/narrativeMessages.js';
 import { isSameLocation, sanitizeExtractedLocation } from './locationRegistry.js';
@@ -373,7 +381,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
  *   `presentNames` (roster names found in the scene text) reserve slots ahead
  *   of the score ranking; `messages` feeds the conversational recency term.
  */
-export function buildJournalContext(journal, npcs, currentLocation, { presentNames = null, messages = null } = {}) {
+export function buildJournalContext(journal, npcs, currentLocation, { presentNames = null, messages = null, storyMemory = [] } = {}) {
     const parts = [];
 
     if (currentLocation) {
@@ -479,7 +487,7 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
                 // The personal bond with the hero — flirtation, gratitude, grudges —
                 // is the beat players remember most; the DM must play it consistently.
                 n.stanceToPlayer && `toward the hero: ${briefNpcFieldForPrompt(n.stanceToPlayer)}`,
-                ...describeBondForPrompt(n),
+                ...describeBondForPrompt(n, storyMemory),
                 Number.isFinite(n.trust) && `trust: ${n.trust}/100`,
                 n.basedIn && `based in: ${n.basedIn}`,
                 n.lastLocation && `last seen: ${n.lastLocation}`,
@@ -493,7 +501,7 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
             ? `\n*(${hiddenCount} other NPCs available via RETRIEVED MEMORIES when relevant)*`
             : '';
 
-        parts.push(`\n## KNOWN NPCs (keep names, registered gender, and established looks EXACTLY consistent — a character's gender and pronouns NEVER change from the registered value or the fiction that introduced them, and never re-invent or launder hair, eyes, build, body proportions, scars, intimate details, or clothing that "looks:" already records. Each NPC's "secret:" and "agenda:" entries are that character's PRIVATE interior — other characters do not know them unless the fiction has shown the reveal, per rule 9)\n${npcList}${overflow}`);
+        parts.push(`\n## KNOWN NPCs (keep names, registered gender, and established looks EXACTLY consistent — a character's gender and pronouns NEVER change from the registered value or the fiction that introduced them, and never re-invent or launder hair, eyes, build, body proportions, scars, intimate details, or clothing that "looks:" already records. Each NPC's "secret:" and "agenda:" entries are that character's PRIVATE interior — other characters do not know them unless the fiction has shown the reveal, per rule 9. "bond:" is where that person and the hero stand; "between you now:" is the LIVE thread between them — the thing they would raise first, so let them act on it, ask about it, or visibly avoid it when they share a scene)\n${npcList}${overflow}`);
     }
 
     return parts.join('\n');

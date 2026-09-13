@@ -162,6 +162,14 @@ describe('enrichNpcProfile relationship synthesis', () => {
         expect(request.systemPrompt).toContain('never each line or position of it');
     });
 
+    it('parses openThread and counts it as usable depth (2026-09-13)', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({ openThread: ' Waiting for Vesa to say whether he will help find her sister. ' }));
+        const update = await enrichNpcProfile({ state, npc: { id: 'npc-maren', name: 'Maren' }, settings });
+        expect(update.openThread).toBe('Waiting for Vesa to say whether he will help find her sister.');
+        const request = sendMessage.mock.calls[0][0];
+        expect(request.systemPrompt).toContain('"openThread"');
+    });
+
     it('parses gradedMoments (the regrade of existing rows) and counts it as usable depth', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             gradedMoments: [

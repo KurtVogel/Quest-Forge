@@ -252,3 +252,27 @@
     font-style: italic;
     opacity: 0.85;
 }
+
+/* Relationship arc (2026-09-13) — mirrors the Journal card. */
+.companion-stage {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 600;
+    background: rgba(212, 175, 55, 0.14);
+    color: var(--gold, #d4af37);
+    margin-left: 0.4rem;
+}
+
+.companion-stage.rival,
+.companion-stage.estranged {
+    background: rgba(180, 60, 60, 0.18);
+    color: #e08080;
+}
+
+.comp-thread {
+    border-left: 2px solid var(--gold, #d4af37);
+    padding-left: 0.5rem;
+}

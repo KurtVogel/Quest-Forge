@@ -4,6 +4,7 @@ import { enrichNpcProfile, needsNpcEnrichment, normalizeCallbackHook } from '../
 import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
 import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js';
 import { bondKindLabel, listNpcImpressions, scoreNpcForPrompt, splitBondMoments } from '../../engine/npcRoster.js';
+import { deriveRelationshipStage, resolveOpenThread } from '../../engine/relationshipArc.js';
 import { groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
 import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
@@ -305,6 +306,7 @@ export default function JournalPanel({ isOpen, onClose }) {
                             {enrichError && <p className="journal-npc-error">{enrichError}</p>}
                             <NPCTab
                                 npcs={characterNpcs}
+                                storyMemory={state.storyMemory}
                                 location={state.currentLocation}
                                 enrichingId={enrichingId}
                                 selectedIds={selectedIds}
@@ -326,6 +328,7 @@ export default function JournalPanel({ isOpen, onClose }) {
                     {tab === 'archived' && (
                         <NPCTab
                             npcs={archivedNpcs}
+                            storyMemory={state.storyMemory}
                             location={state.currentLocation}
                             archived
                             onPin={(id, pinned) => dispatch({ type: 'PIN_NPC', payload: { id, pinned } })}
@@ -597,6 +600,7 @@ function NPCTab({
     editingLookId = null,
     onEditLook = null,
     onSaveLook = null,
+    storyMemory = [],
 }) {
     if (npcs.length === 0) {
         return (
@@ -623,6 +627,10 @@ function NPCTab({
                 // impressions plus the newest ordinary moments.
                 const bonds = splitBondMoments(npc.bondMoments);
                 const impressions = listNpcImpressions(npc, 'stanceToPlayer');
+                // Where you stand + what is pending (2026-09-13 overhaul
+                // slice 1): the derived stage chip and the live thread.
+                const arc = deriveRelationshipStage(npc);
+                const thread = resolveOpenThread(npc, storyMemory);
                 return (
                     <div key={npc.id} className={`journal-npc ${npc.disposition || 'unknown'}${npc.pinned ? ' pinned' : ''}${selectedIds?.has(npc.id) ? ' selected' : ''}`}>
                         <div className="journal-npc-header">
@@ -647,6 +655,14 @@ function NPCTab({
                             <span className={`journal-npc-disposition ${npc.disposition}`}>
                                 {npc.disposition || 'unknown'}
                             </span>
+                            {arc.stage !== 'stranger' && arc.stage !== 'acquaintance' && (
+                                <span
+                                    className={`journal-npc-stage ${arc.stage}`}
+                                    title={arc.since ? `${arc.label} — since: ${arc.since}` : `${arc.label} — where you two stand, read from the moments on record`}
+                                >
+                                    {arc.label}
+                                </span>
+                            )}
                         </div>
                         {npc.portraitUrl && (
                             <div className="journal-npc-portrait">
@@ -685,6 +701,15 @@ function NPCTab({
                                     )}
                                 </span>
                                 {npc.appearance || 'No description recorded yet.'}
+                            </p>
+                        )}
+                        {thread && (
+                            <p
+                                className="journal-npc-stance journal-npc-thread"
+                                title={thread.source === 'promise' ? 'From an open promise on record' : 'What is pending between you, as the story last left it'}
+                            >
+                                <span className="journal-npc-stance-label">Between you now</span>
+                                {thread.text}
                             </p>
                         )}
                         {npc.stanceToPlayer && (

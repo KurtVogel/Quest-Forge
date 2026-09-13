@@ -22,6 +22,7 @@ import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
 import { isLowLevelSolo } from '../engine/combatExchange.js';
 import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../engine/npcRoster.js';
+import { describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
 
 /**
  * Tripwire against unbounded prompt growth, NOT a target. A deliberately
@@ -158,7 +159,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
 
     // Party / Companions
     if (party && party.length > 0) {
-        parts.push(buildPartyBlock(party, npcs || []), 'party');
+        parts.push(buildPartyBlock(party, npcs || [], storyMemory || []), 'party');
     }
 
     // Inventory
@@ -201,6 +202,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     const journalContext = buildJournalContext(journal || [], npcs || [], currentLocation, {
         presentNames,
         messages: Array.isArray(messages) ? messages : null,
+        storyMemory: storyMemory || [],
     });
     if (journalContext) {
         parts.push(journalContext, 'journalAndNpcs');
@@ -767,7 +769,7 @@ The player has already spent Action Surge. Their next declared action gets one a
 - The client clears this state only after both validated slots commit successfully.`;
 }
 
-function buildPartyBlock(party, npcs = []) {
+function buildPartyBlock(party, npcs = [], storyMemory = []) {
     return `## COMPANIONS (PARTY)
 These characters are currently traveling with the player. They act in combat and can be conversed with.
 ${party.map(c => {
@@ -789,6 +791,11 @@ ${party.map(c => {
         if (look.appearance || identity) {
             bond.push(`  Looks${identity ? ` (${identity})` : ''}: ${(look.appearance || 'no recorded description').slice(0, 300)}`);
         }
+        // Where they stand + the live thread (2026-09-13 overhaul slice 1).
+        const stage = dossier ? describeStageForPrompt(dossier) : '';
+        if (stage) bond.push(`  Bond: ${stage}`);
+        const thread = dossier ? resolveOpenThread(dossier, storyMemory) : null;
+        if (thread) bond.push(`  Between you now: ${thread.text}`);
         if (dossier?.stanceToPlayer) {
             bond.push(`  Toward the hero: ${String(dossier.stanceToPlayer).slice(0, 300)}`);
         }

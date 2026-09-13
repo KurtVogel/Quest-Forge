@@ -160,6 +160,20 @@ describe('worldJournal context builder', () => {
         const context = buildJournalContext([], npcs, 'Brackwater');
         expect(context).toContain('key moments with the hero: Maren and the hero spent their first night together above the inn.; Maren confessed her sister vanished');
         expect(context).toContain('lately with the hero: Wants him to stay another night.; Maren beat the hero at dice');
+        // The derived stage leads the bond fields (2026-09-13 slice 1).
+        expect(context).toContain('bond: intimate (since: Maren and the hero spent their first night together above the inn.)');
+    });
+
+    it('renders the live thread — the Scribe thread, else an active linked promise — and tells the DM to play toward it (2026-09-13)', () => {
+        const npcs = [
+            { name: 'Maren', disposition: 'friendly', lastNotes: 'x', openThread: 'Waiting to hear whether the hero found the caravan.' },
+            { name: 'Bran', disposition: 'neutral', lastNotes: 'y' },
+        ];
+        const storyMemory = [{ type: 'promise', status: 'active', text: 'The hero promised Bran a share of the reward.', linkedNpcNames: ['Bran'] }];
+        const context = buildJournalContext([], npcs, 'Brackwater', { storyMemory });
+        expect(context).toContain('between you now: Waiting to hear whether the hero found the caravan.');
+        expect(context).toContain('between you now: The hero promised Bran a share of the reward.');
+        expect(context).toContain('"between you now:" is the LIVE thread between them');
     });
 
     it('identifies and injects the earliest location transition entry', () => {

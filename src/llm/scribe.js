@@ -62,6 +62,8 @@ Output ONLY valid JSON:
       "relationshipTension": "compact note about attraction, rivalry, resentment, debt, loyalty, fear, or trust strain",
       "stanceToPlayer": "the ENDURING way this NPC regards the HERO as a person — affection, attraction, romantic interest, friendship, gratitude, respect, amusement, resentment, fear, obligation, rivalry — what would still be true a week from now. Written from the NPC's side, complete and current (only when this exchange establishes or shifts it). The heat of one scene (flushed, sated, briefly annoyed, tipsy and generous) belongs in lastNotes or relationshipTension, never here",
       "bondMoment": { "text": "one-line record of the ONE significant personal moment between the hero and this NPC in this exchange — stated concretely with both parties. Omit for ordinary interaction. The REGISTER rule binds THIS field hardest: an intimate moment is recorded in neutral anatomical language, never the scene's own crude diction", "kind": "meeting|flirtation|intimacy|confession|promise|gift|rescue|shared_danger|betrayal|quarrel|reconciliation|farewell|other", "salience": "1-5 — 5 redefines the relationship (a first night together, a betrayal, a life saved, an oath); 4 a beat both would recall years later; 3 memorable; 2 texture (a shared drink, a good joke — usually not worth a moment); 1 trivial (omit)" },
+      "openThread": "the ONE thing currently pending between this NPC and the hero, from the NPC's side, one line — a promise the hero made her, a question she asked and he dodged, a favor owed, a confession she is waiting to hear answered, an invitation left open. Emit only when this exchange opens or changes it; it replaces the recorded thread",
+      "openThreadResolved": "true ONLY when this exchange settles the recorded open thread (the promise kept, the question answered, the debt paid) and nothing new is pending — omit otherwise",
       "trust": 0,
       "privateNotes": "hidden NPC intent or unrevealed motive useful for future consistency",
       "callbackHooks": ["short hooks this NPC could later bring back naturally — complete phrases in the neutral REGISTER, never crude slang"]
@@ -104,6 +106,7 @@ Rules:
 - The hero's PARTY COMPANIONS are NPCs for record-keeping: emit npc_updates for them (stanceToPlayer, bondMoment, appearance, personality, goals) exactly like any other character — never skip someone because they travel with the hero. The party is the game's most sustained relationship, so companion stance shifts and bond moments matter MORE than a stranger's, not less.
 - basedIn is the NPC's current anchor in the world (not permanent): update it when they are reassigned, relocate, or fiction establishes a new base. lastLocation is ephemeral — where they were this turn
 - stanceToPlayer is about the personal relationship between this NPC and the HERO specifically — their feelings toward the hero, not their role or plot function. Update it whenever an exchange genuinely shifts how they regard the hero: a flirtation received warmly or coldly, gratitude after a rescue, trust broken, growing attraction or contempt. Write it unvarnished — desire, resentment, and awkwardness named plainly. When KNOWN PLAYER-RELATIONSHIP STANCES lists this NPC, emit the COMPLETE updated stance as a full rewrite: restate every still-true part IN ITS EXISTING WORDING, integrate what this turn changed, and drop only what this turn superseded. The engine replaces the stored stance only when your text covers it — a differently-worded fragment gets APPENDED instead, leaving contradicted old feelings standing next to the new ones ("resentful and suspicious" beside "warmly appreciative"). If nothing shifted for them personally, omit the field. When KNOWN PLAYER-RELATIONSHIP STANCES lists RECENT IMPRESSIONS (unconfirmed) for this NPC, carry one into the stance ONLY if this exchange bears it out again — the engine makes an impression permanent only when the fiction shows it in a second scene.
+- openThread is what is LIVE between this NPC and the hero — the thing she would bring up first if they met tomorrow. It is not her agenda (that is her own business) and not the stance (that is how she feels): it is the pending beat between the two of them. One line, from her side, concrete ("Waiting for the hero to tell her whether he found the caravan"). When KNOWN PLAYER-RELATIONSHIP STANCES shows an open thread on record, emit openThread only if this exchange changes it, and openThreadResolved: true only if this exchange settles it.
 - bondMoment must be an actual NEW event from THIS exchange, stated concretely with both parties ("The hero flirted with Maren over the map table; she laughed and let her hand linger"). ONE per NPC per SCENE, not per turn: a scene has one defining beat per kind — a night together is ONE intimacy moment however many turns or positions it spans, a long conversation is one confession or flirtation — never one entry per line, position, or round. Interpersonal continuity is exempt from the extraction budget. If KNOWN PLAYER-RELATIONSHIP STANCES already lists a moment covering this beat, or a same-kind moment from this same scene, omit bondMoment entirely — never re-report or paraphrase a recorded moment. Grade salience honestly: what both would still remember a month later is 4 or 5; texture is 2 and usually not worth recording at all.
 - Use kind "character" and rosterEligible true only for named people worth tracking across sessions (dialogue, rivalry, debt, secrets, recurring villains, quest givers). Use kind "creature" or "ephemeral" with rosterEligible false for nameless combat fodder, generic goblins/guards, or one-line minions that should not enter the durable roster.
 - Capture "appearance"/"player_appearance" from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation AND the DM's own long-term visual continuity, so accuracy matters. Skin tone, hair state (including a bald or shaved head), build, and apparent age are the features generated art drifts on first: whenever the fiction states or makes one plainly apparent, record it in unambiguous words ("deep dark brown skin", "completely bald", "tall and statuesque") — a record that only implies them gets painted wrong.
@@ -207,10 +210,14 @@ export function buildKnownStances({ npcs = [] } = {}, ...texts) {
         const { key, recent } = splitBondMoments(npc?.bondMoments);
         const onRecord = [...key.slice(-3), ...recent.slice(0, 2)];
         const impressions = listNpcImpressions(npc, 'stanceToPlayer');
-        if (!name || (!stance && onRecord.length === 0)) continue;
+        const thread = typeof npc?.openThread === 'string' ? npc.openThread.trim() : '';
+        if (!name || (!stance && onRecord.length === 0 && !thread)) continue;
         if (!isPresent(name)) continue;
         const lines = [];
         if (stance) lines.push(`${name}: ${stance.slice(0, 240)}`);
+        if (thread) {
+            lines.push(`${name} — open thread on record (emit openThread only if this exchange changes it; openThreadResolved: true only if it settles it): "${thread.slice(0, 200)}"`);
+        }
         if (impressions.length > 0) {
             lines.push(`${name} — recent impressions (unconfirmed; carry one into the stance ONLY if this exchange bears it out again): ${impressions.slice(-3).map(text => `"${text.slice(0, 140)}"`).join('; ')}`);
         }
@@ -289,7 +296,7 @@ function contradictsAuthoritativeCombat(value, authoritativeContext) {
  * a snapshot enemy is checked on its narrative fields (the claim is built as
  * "name: fields" so the enemy-name presence test matches the same way).
  */
-const NPC_UPDATE_CLAIM_FIELDS = ['lastNotes', 'disposition', 'secrets', 'agenda', 'notes', 'stanceToPlayer', 'relationshipTension', 'bondMoment'];
+const NPC_UPDATE_CLAIM_FIELDS = ['lastNotes', 'disposition', 'secrets', 'agenda', 'notes', 'stanceToPlayer', 'relationshipTension', 'bondMoment', 'openThread'];
 function npcUpdateContradictsAuthoritativeCombat(npc, authoritativeContext) {
     if (!npc || typeof npc !== 'object' || !npc.name) return false;
     const enemies = authoritativeContext?.postState?.enemies || [];
