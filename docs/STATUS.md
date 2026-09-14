@@ -23,7 +23,7 @@ backfills pre-link saves from the journal's location trail at LOAD_GAME. Read by
 Current location; detailed first, cap 6) and the Places tab's "Ways from here" (visited targets
 only — the theater whitelist holds). `dedupeLocationRecords` heals links across folds. No new DM
 channel, no ledger. 22 new pins across 5 test files; 2,518 tests green, lint clean, built.
-**Not deployed** (not asked). Next: phase 2 graph view on the Places tab (IDEAS.md).
+**Not deployed** (not asked). **Playtest pending keys:** `scripts/playtest_geography.cjs` (Gemini Pro / GPT Terra, never Grok) is written, lint-clean, and harness-verified end to end in the hosted container (wizard → rounds → link snapshots; Chromium needs the TLS 1.2 cap through the egress proxy, wired in) — it stops at the first DM call because the environment carries no `GEMINI_API_KEY`/`OPENAI_API_KEY`. Run once keys exist: `npm run preview` then `node scripts/playtest_geography.cjs gemini gemini gemini-3.1-pro-preview` and `... terra openai gpt-5.6-terra`; output in `test-results/geography/<label>/`. Next: phase 2 graph view on the Places tab (IDEAS.md).
 
 ## 2026-09-13 — queue sweep: character-vault + inventory-economy (2 P1s, 6 P2s) — queue empty
 
