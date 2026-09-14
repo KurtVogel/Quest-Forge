@@ -1957,6 +1957,31 @@ siblings in the same run: `slot_level: "2"` silently downcasts (numeric-string p
 `chapterCloseSuggested.title` and a chapter's `toIndex` are unclamped at load. From the
 2026-09-13 strengthening audit (spellcasting + chronicler, Lap 2).
 
+### [strengthening] A default-by-spread is a presence heal, not a type heal; every parser whitelist needs its load twin
+Two rules from one Lap-2 run (2026-09-14, rules-math + quests). **(1)** `backfillCharacterShape`
+writes `skillProficiencies: []` / `expertiseSkills: []` and then spreads `...character` over them,
+so a present-but-junk value always wins, `savingThrowProficiencies` has no default at all, and
+`healLoadedCharacter` never types any of the three. A number / boolean / object value throws
+`?.includes is not a function` out of every skill roll, the Character Sheet, AND
+`buildSystemPrompt` (every turn — the campaign is unplayable); a STRING value substring-matches
+proficiency (`"stealth and perception"` → stealth proficient) while the prompt throws on
+`.join`. Rule: a default-by-spread only fixes ABSENCE; the `toInt`/`cleanTextField` lane in
+`healLoadedCharacter` is where TYPES live, so any field the backfill defaults must be typed there
+too — and `?.includes` / `?.length` / `?.join` on a persisted field is a null guard, never a type
+guard. Same run, one line over: `computeACFromInventory` reads a non-caster's untyped
+`sustainedSpell.acBonus` bare, and `"5"` string-concatenates the hero's AC to `"115"` at load AND
+live in the exchange — an unhittable hero persisted into the next save; coerce at the read site
+whatever the heal does (the 08-28 `baseAC` lesson). **(2)** `normalizeQuestUpdate` has typed the
+wire since 07-25; `validateSaveState` keeps any quest object and types no field, so an object
+`name` renders "[object Object]" in the prompt and trips the Quests boundary on every open, a
+200k-char name rides the prompt in full, `status: "ACTIVE"` is invisible to the panel, the
+prompt, and the active-only dedupe. Rule for the Lap-2 lens: for each `normalize*` in
+`eventChannels.js`, find the matching sanitizer in `validateSaveState` — a missing twin is a
+finding before any repro (07-25 quests, 09-05 conditions, 09-09 identity fields were the same
+family). Smaller sibling: the same-response quest instant tier compounds through the wire cap
+(four new+completed pairs = 100 XP at L1 vs 38 for a real completion) — a 2026-08-26 ruling to
+revisit explicitly. From the 2026-09-14 strengthening audit (rules-math + quests, Lap 2).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
