@@ -9,7 +9,7 @@ import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromNam
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
-import { NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
+import { CHRONICLE_CHAPTER_TEXT_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatExchange.js';
 import {
     appendBondMoments,
@@ -123,23 +123,53 @@ export function applyEarlyDefeat(character) {
  * Plain objects with text survive; from/toIndex are coerced to finite
  * integers; junk drops.
  */
-export function healChronicleChapter(entry) {
+export function healChronicleChapter(entry, { maxMessageCount = Infinity } = {}) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
-    const text = typeof entry.text === 'string' ? entry.text.trim().slice(0, 60000) : '';
+    const text = typeof entry.text === 'string' ? entry.text.trim().slice(0, CHRONICLE_CHAPTER_TEXT_MAX) : '';
     if (!text) return null;
+    // Indexes are clamped to the live transcript like the 09-10 ruling stamps
+    // (2026-09-13 audit P2): a future toIndex (1e15) loaded intact and every
+    // later close threw "Not enough new play" forever. Known keys only — a
+    // junk/nested payload used to round-trip through the spread.
+    const ceiling = Number.isFinite(maxMessageCount) ? Math.max(0, Math.trunc(maxMessageCount) - 1) : Infinity;
     const index = (value) => {
         const n = Number(value);
-        return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+        return Number.isFinite(n) ? Math.min(ceiling, Math.max(0, Math.trunc(n))) : 0;
     };
     return {
-        ...entry,
-        id: typeof entry.id === 'string' && entry.id ? entry.id : `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: typeof entry.id === 'string' && entry.id ? entry.id.slice(0, 80) : `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         title: String(entry.title ?? '').trim().slice(0, 80),
         text,
         fromIndex: index(entry.fromIndex),
         toIndex: index(entry.toIndex),
         createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
     };
+}
+
+/**
+ * The live campaign's identity, for async writes that resolve minutes after
+ * they were started (2026-09-13 audit P1): a chapter close, a Deepen memory,
+ * or a portrait captured campaign A, awaited a long DM-model call, and then
+ * dispatched against whatever campaign was LIVE — campaign B, loaded from
+ * Settings meanwhile. LOAD_GAME remounts the shell (the closure survives and
+ * dispatch is stable), so the reducer is the one place that can tell. Callers
+ * stamp `action.meta = campaignStamp(state)` at start; handlers drop a stale
+ * action through isStaleCampaignAction.
+ */
+export function campaignStamp(state) {
+    return {
+        sessionId: state?.session?.id ?? null,
+        loadNonce: Number.isFinite(state?.session?.loadNonce) ? state.session.loadNonce : 0,
+    };
+}
+
+export function isStaleCampaignAction(state, action) {
+    const meta = action?.meta;
+    if (!meta || typeof meta !== 'object') return false;
+    if (meta.sessionId === undefined && meta.loadNonce === undefined) return false;
+    const live = campaignStamp(state);
+    if (meta.sessionId !== undefined && meta.sessionId !== live.sessionId) return true;
+    return meta.loadNonce !== undefined && meta.loadNonce !== live.loadNonce;
 }
 
 export function reviveCharacter(character) {

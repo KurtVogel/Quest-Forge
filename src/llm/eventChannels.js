@@ -20,6 +20,7 @@
 import { canonicalEnemyId, validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
 import { MAX_COIN_EVENT } from '../config/contentLimits.js';
+import { toFiniteNumber } from '../data/items.js';
 import { normalizeConditionName, findSkillInText, CONDITION_LIST_CAP } from '../engine/rules.js';
 
 /**
@@ -246,7 +247,9 @@ function normalizeSpellCasts(raw) {
             if (!isPlainObject(entry)) return null;
             const spell = String(entry.spell || entry.name || entry.key || '').trim().slice(0, 80);
             if (!spell) return null;
-            const rawLevel = entry.slot_level ?? entry.slotLevel;
+            // Numeric-string parity (2026-09-13 audit P2): `"slot_level": "2"`
+            // silently DOWNCAST an upcast Cure Wounds to a level-1 slot.
+            const rawLevel = toFiniteNumber(entry.slot_level ?? entry.slotLevel);
             // upTo3 ally spells (Mass Healing Word / Mass Cure Wounds) name
             // their recipients via `targets` — the darts pattern's ally twin.
             // CAST_SPELL honors the list only for spells whose catalog entry
@@ -260,7 +263,11 @@ function normalizeSpellCasts(raw) {
             return {
                 spell,
                 slotLevel: Number.isFinite(rawLevel) ? Math.max(1, Math.min(5, Math.round(rawLevel))) : null,
-                target: entry.target ? String(entry.target).trim().slice(0, 100) : (targets[0] ?? null),
+                // String-or-drop like the `targets` list above: an object
+                // target was "[object Object]" in two visible system lines.
+                target: typeof entry.target === 'string' && entry.target.trim()
+                    ? entry.target.trim().slice(0, 100)
+                    : (targets[0] ?? null),
                 ...(targets.length > 0 && { targets }),
             };
         })

@@ -13,7 +13,7 @@
  */
 import { awardExperience, getQuestCompletionXp, QUEST_INSTANT_XP } from '../../engine/progression.js';
 import { containment, tokenSet } from '../../engine/textMatch.js';
-import { normalizeRefToken } from './shared.js';
+import { normalizeRefToken, systemMessage } from './shared.js';
 
 // Quest-name stopwords: articles/fillers that survive normalizeRefToken but
 // carry no identity ("The Cellar Rats" ≈ "Clear the Cellar Rats").
@@ -47,6 +47,72 @@ function questNamesFuzzyMatch(a, b) {
 export const QUEST_NAME_MAX_LENGTH = 160;
 export const QUEST_DESCRIPTION_MAX_LENGTH = 800;
 const clampQuestText = (value, max) => String(value ?? '').trim().slice(0, max);
+
+const QUEST_STATUSES = new Set(['active', 'completed', 'failed']);
+const mintQuestId = () => `quest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+/**
+ * The parser whitelist's LOAD twin (2026-09-14 audit P1 + P2): validateSaveState
+ * kept any object and typed no field. Name is string-or-drop (an object name
+ * was "[object Object]" in the prompt and a React-child crash in the panel),
+ * status lowercases + whitelists ("ACTIVE" was invisible to the panel, the
+ * prompt, AND the dedupe, so the DM minted a twin), an id-less row gets one
+ * (✓ sent `undefined`, ✕ removed every id-less row at once), a duplicate id
+ * is re-minted, and openedAtMessage clamps to the live transcript so a
+ * future stamp can never read as "same turn".
+ */
+export function sanitizeQuestRecord(raw, { maxMessageCount = Infinity } = {}) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const name = typeof raw.name === 'string' ? clampQuestText(raw.name, QUEST_NAME_MAX_LENGTH) : '';
+    if (!name) return null;
+    const id = (typeof raw.id === 'string' && raw.id.trim()) || (typeof raw.id === 'number' && Number.isFinite(raw.id))
+        ? String(raw.id).trim().slice(0, 80)
+        : mintQuestId();
+    const rawStatus = typeof raw.status === 'string' ? raw.status.trim().toLowerCase() : '';
+    const source = typeof raw.source === 'string' ? raw.source.trim().slice(0, 40) : '';
+    const addedAt = Number(raw.addedAt);
+    const opened = Number(raw.openedAtMessage);
+    const ceiling = Number.isFinite(maxMessageCount) ? Math.max(0, Math.trunc(maxMessageCount)) : Infinity;
+    return {
+        id,
+        name,
+        description: typeof raw.description === 'string' ? clampQuestText(raw.description, QUEST_DESCRIPTION_MAX_LENGTH) : '',
+        ...(source && { source }),
+        status: QUEST_STATUSES.has(rawStatus) ? rawStatus : 'active',
+        addedAt: Number.isFinite(addedAt) ? addedAt : Date.now(),
+        ...(Number.isFinite(opened) && { openedAtMessage: Math.min(ceiling, Math.max(0, Math.trunc(opened))) }),
+    };
+}
+
+/**
+ * "Same response" = no player or DM message has been appended since the row
+ * was opened; engine system lines (an XP receipt, a coin line) never end a
+ * response. The old exact-count test broke on its own XP line: the first
+ * instant payout appended a system message, so the next opened-and-closed
+ * errand in the SAME reply stamped a different count and paid again.
+ */
+function isSameResponse(messages, openedAtMessage) {
+    if (!Number.isInteger(openedAtMessage) || openedAtMessage < 0 || openedAtMessage > messages.length) return false;
+    for (let i = openedAtMessage; i < messages.length; i++) {
+        if (messages[i]?.role !== 'system') return false;
+    }
+    return true;
+}
+
+/** Every loaded quest row typed, with ids unique across the list. */
+export function sanitizeQuestRecords(list, options = {}) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const raw of list) {
+        const record = sanitizeQuestRecord(raw, options);
+        if (!record) continue;
+        if (seen.has(record.id)) record.id = mintQuestId();
+        seen.add(record.id);
+        out.push(record);
+    }
+    return out;
+}
 
 export const handlers = {
     ADD_QUEST(state, action) {
@@ -156,16 +222,37 @@ export const handlers = {
                 // flat instant tier — the turn boundary is the anti-farming lever.
                 // Missing openedAtMessage (pre-ruling saves) is "definitely not
                 // same-turn": the conservative, non-exploitable direction.
-                const sameTurn = paying.openedAtMessage === (state.messages || []).length;
-                const xp = sameTurn ? QUEST_INSTANT_XP : getQuestCompletionXp(state.character.level);
-                const result = awardExperience(next.character, xp, {
-                    reason: `quest completed: ${paying.name || 'quest'}`,
-                });
-                next = {
-                    ...next,
-                    character: result.character,
-                    messages: [...next.messages, ...result.messages],
-                };
+                const messages = state.messages || [];
+                const sameTurn = isSameResponse(messages, paying.openedAtMessage);
+                // ONE instant payout per response (DECISIONS.md 2026-09-14,
+                // revisiting the 2026-08-26 flat tier): the wire cap let four
+                // opened-and-closed errands in one response compound to 100 XP
+                // at L1 — a level in three responses. Any OTHER row completed
+                // in this same response (paid or record-only — the engine may
+                // refuse to give on suspicion) spends the response's one
+                // instant payout; the refusal is visible.
+                const instantAlreadyPaid = sameTurn && state.quests.some(q =>
+                    q.id !== paying.id && q.status === 'completed' && isSameResponse(messages, q.openedAtMessage));
+                const xp = sameTurn
+                    ? (instantAlreadyPaid ? 0 : QUEST_INSTANT_XP)
+                    : getQuestCompletionXp(state.character.level);
+                if (xp > 0) {
+                    const result = awardExperience(next.character, xp, {
+                        reason: `quest completed: ${paying.name || 'quest'}`,
+                    });
+                    next = {
+                        ...next,
+                        character: result.character,
+                        messages: [...next.messages, ...result.messages],
+                    };
+                } else {
+                    next = {
+                        ...next,
+                        messages: [...next.messages, systemMessage(
+                            `⚖ "${paying.name || 'quest'}" closed — the instant quest tier pays once per response.`
+                        )],
+                    };
+                }
             }
             return next;
         }

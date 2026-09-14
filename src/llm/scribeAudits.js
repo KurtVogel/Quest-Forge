@@ -459,7 +459,8 @@ function reconcileNarratedCasts(narrated, lootAudit, dispatch) {
             console.warn(`[Scribe] Narrated cast "${spell.name}" already applied by the event path; skipping.`);
             continue;
         }
-        const target = typeof entry === 'object' && entry?.target ? String(entry.target).slice(0, 60) : '';
+        // String-or-drop (2026-09-13 audit P2): an object target rode into a visible line as "[object Object]".
+        const target = typeof entry === 'object' && typeof entry?.target === 'string' ? entry.target.trim().slice(0, 60) : '';
         dispatch({
             type: 'CAST_SPELL',
             payload: {

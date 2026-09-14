@@ -13,6 +13,8 @@ describe('LOAD_GAME chronicle heal (2026-09-04 audit)', () => {
             type: 'LOAD_GAME',
             payload: {
                 ...base,
+                // A real transcript: indexes now clamp to the live message count (2026-09-13 audit P2).
+                messages: Array.from({ length: 30 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `Beat ${i}` })),
                 chronicle: [
                     { id: 'ch-1', title: 'Ashes', text: 'The village burned.', fromIndex: 0, toIndex: 11 },
                     null,

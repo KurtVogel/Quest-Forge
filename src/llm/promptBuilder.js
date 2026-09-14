@@ -891,6 +891,7 @@ Magic equipment: add "magicBonus": 1, 2, or 3 only.`;
 // keep every quest at full length; only the per-turn prompt rendering is capped.
 const QUEST_PROMPT_CAP = 12;
 const QUEST_DESC_PROMPT_MAX = 250;
+const QUEST_NAME_PROMPT_MAX = 160;
 
 function buildQuestBlock(quests) {
     const shown = quests.slice(-QUEST_PROMPT_CAP);
@@ -899,11 +900,14 @@ function buildQuestBlock(quests) {
         const desc = String(text || 'No details');
         return desc.length > QUEST_DESC_PROMPT_MAX ? `${desc.slice(0, QUEST_DESC_PROMPT_MAX).trimEnd()}…` : desc;
     };
-    const lines = shown.map(q => `- **${q.name}** [id: ${q.id}]: ${clampDesc(q.description)}`).join('\n');
+    // Names are clamped here too (2026-09-14 audit P2 belt): the load
+    // sanitizer types them, but a 200k-char name rode the prompt in full.
+    const clampName = (name) => (typeof name === 'string' ? name : String(name ?? 'Untitled quest')).slice(0, QUEST_NAME_PROMPT_MAX);
+    const lines = shown.map(q => `- **${clampName(q.name)}** [id: ${q.id}]: ${clampDesc(q.description)}`).join('\n');
     // Omitted quests keep their names in view so the DM can still close them
     // (and never re-opens a duplicate) without paying for their descriptions.
     const overflow = omitted.length
-        ? `\n- …plus ${omitted.length} older active quest(s), tracked and still open: ${omitted.map(q => q.name).join(', ')}`
+        ? `\n- …plus ${omitted.length} older active quest(s), tracked and still open: ${omitted.map(q => clampName(q.name)).join(', ')}`
         : '';
     return `## ACTIVE QUESTS\n${lines}${overflow}`;
 }

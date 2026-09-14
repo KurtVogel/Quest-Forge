@@ -39,6 +39,16 @@ export const NPC_SPECIES_MAX = 40;
  * or hostile save threw at every consumer. Non-strings become '' rather than
  * "[object Object]" canon.
  */
+/**
+ * One chronicle chapter's stored text ceiling (the reducer clamp) and the
+ * PART budget the chronicler closes a part at — counted in the SAME unit
+ * (2026-09-13 audit P1): the old part budget counted chunks while the clamp
+ * counted characters, so ten verbose passages overshot 60k and were sliced
+ * mid-sentence. Shared here because handlers never import from llm/.
+ */
+export const CHRONICLE_CHAPTER_TEXT_MAX = 60000;
+export const CHRONICLE_PART_CHAR_BUDGET = 50000;
+
 export function cleanTextField(value, max = Infinity) {
     if (typeof value !== 'string') return '';
     return value.trim().slice(0, max);

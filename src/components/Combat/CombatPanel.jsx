@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getCombatStatus } from '../../engine/combatStatus.js';
 import { COMBAT_PHASES, isEnemyActive } from '../../engine/combatExchange.js';
-import { summarizeSpellSlots } from '../../engine/spellcasting.js';
+import { isSpellcaster, summarizeSpellSlots } from '../../engine/spellcasting.js';
 import './Combat.css';
 
 export default function CombatPanel() {
@@ -34,7 +34,12 @@ export default function CombatPanel() {
     const heroMaxHp = Math.max(1, state.character?.maxHP ?? 1);
     const heroHpPercent = Math.max(0, Math.min(100, (heroHp / heroMaxHp) * 100));
     const heroHpColor = heroHpPercent > 50 ? '#4caf50' : heroHpPercent > 25 ? '#e6a23c' : '#f44336';
-    const heroSlots = state.character?.spellSlots ? summarizeSpellSlots(state.character.spellSlots) : '';
+    // Gated on the CLASS like the sheet, the prompt, and the rest handler — a
+    // non-caster's stray spellSlots crashed this boundary on every fight
+    // (2026-09-13 audit P1; the load heal now strips it, this is the belt).
+    const heroSlots = isSpellcaster(state.character?.class) && state.character?.spellSlots
+        ? summarizeSpellSlots(state.character.spellSlots)
+        : '';
 
     return (
         <div className="combat-overlay">

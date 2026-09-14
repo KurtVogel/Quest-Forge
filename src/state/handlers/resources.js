@@ -294,7 +294,7 @@ export const handlers = {
         if (newSpellSlots) {
             if (isLong) {
                 newSpellSlots = refillSpellSlots(newSpellSlots);
-            } else if (state.character.class === 'wizard' && (currentResources.arcaneRecovery?.used ?? 1) === 0) {
+            } else if (state.character.class === 'wizard' && Number(currentResources.arcaneRecovery?.used ?? 1) === 0) {
                 const recovery = applyArcaneRecovery(newSpellSlots, state.character.level || 1);
                 if (recovery.recovered > 0) {
                     newSpellSlots = recovery.spellSlots;

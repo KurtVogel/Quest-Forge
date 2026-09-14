@@ -6,6 +6,7 @@
  * that plan in one dispatch; narration happens afterwards from the stored result.
  */
 import { rollWithModifier } from './dice.ts';
+import { toFiniteNumber } from '../data/items.js';
 import {
     combineRollModifiers,
     computeACFromInventory,
@@ -129,8 +130,9 @@ export function normalizeCombatExchange(raw) {
                     target: ref(slot.target),
                     targets: normalizeCastTargets(slot),
                     spell: ref(slot.spell),
-                    slotLevel: Number.isFinite(slot.slot_level ?? slot.slotLevel)
-                        ? Math.max(1, Math.min(5, Math.round(slot.slot_level ?? slot.slotLevel)))
+                    // Numeric-string parity with the out-of-combat lane (2026-09-13 audit P2).
+                    slotLevel: Number.isFinite(toFiniteNumber(slot.slot_level ?? slot.slotLevel))
+                        ? Math.max(1, Math.min(5, Math.round(toFiniteNumber(slot.slot_level ?? slot.slotLevel))))
                         : null,
                 }),
                 ...((action === 'check' || action === 'save') && {

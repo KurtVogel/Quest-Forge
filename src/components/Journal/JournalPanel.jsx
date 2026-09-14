@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { enrichNpcProfile, needsNpcEnrichment, normalizeCallbackHook } from '../../llm/npcEnrichment.js';
 import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
@@ -10,6 +10,7 @@ import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 import LookEditor from './LookEditor.jsx';
 import { writeChronicleChapters, chronicleToMarkdown, collectChapterMessages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNK_SIZE, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
+import { campaignStamp } from '../../state/handlers/shared.js';
 import './Journal.css';
 
 const DISPOSITION_MARK = {
@@ -22,6 +23,13 @@ const DISPOSITION_MARK = {
 
 export default function JournalPanel({ isOpen, onClose }) {
     const { state, dispatch, flushAutoSave } = useGame();
+    // Every async write below (Deepen memory, portrait, chapter close) resolves
+    // minutes after it started. Loading ANY save remounts the shell, so an
+    // unmounted panel means the campaign underneath changed: skip the dispatch.
+    // The reducer re-checks the campaign stamp on the action as the belt
+    // (2026-09-13 audit P1).
+    const mountedRef = useRef(true);
+    useEffect(() => () => { mountedRef.current = false; }, []);
     const [tab, setTab] = useState('journal');
     const [enrichingId, setEnrichingId] = useState(null);
     const [enrichError, setEnrichError] = useState('');
@@ -112,8 +120,10 @@ export default function JournalPanel({ isOpen, onClose }) {
             // One action carries the deepening AND the regrade of existing
             // moments (`gradedMoments`, applied by the UPDATE_NPC handler after
             // the upsert) so the flush's single-action replay persists both.
+            const meta = campaignStamp(state);
             const update = await enrichNpcProfile({ state, npc, settings: state.settings });
-            const updateAction = { type: 'UPDATE_NPC', payload: update };
+            if (!mountedRef.current) return;
+            const updateAction = { type: 'UPDATE_NPC', payload: update, meta };
             dispatch(updateAction);
             await flushAutoSave({ action: updateAction });
         } catch (error) {
@@ -128,14 +138,16 @@ export default function JournalPanel({ isOpen, onClose }) {
         setChronicleStatus('');
         setWritingChapter(true);
         try {
+            const meta = campaignStamp(state);
             const { chapters, warning } = await writeChronicleChapters({
                 state,
                 title: chapterTitle,
                 onProgress: setChronicleStatus,
             });
+            if (!mountedRef.current) return;
             // One action carries every part — the flushAutoSave action-replay
             // then persists the whole multi-part close atomically.
-            const chapterAction = { type: 'ADD_CHRONICLE_CHAPTER', payload: chapters };
+            const chapterAction = { type: 'ADD_CHRONICLE_CHAPTER', payload: chapters, meta };
             dispatch(chapterAction);
             setChapterTitle('');
             setChronicleStatus(warning || (chapters.length > 1
@@ -181,6 +193,7 @@ export default function JournalPanel({ isOpen, onClose }) {
         setEnrichError('');
         setPortraitBusyId(npc.id);
         try {
+            const meta = campaignStamp(state);
             const prompt = buildNpcPortraitPrompt(npc);
             const result = await generatePortraitImageDetailed(prompt, state.settings?.imageApiKey, {
                 geminiApiKey: getMachineryGeminiKey(state.settings),
@@ -188,8 +201,10 @@ export default function JournalPanel({ isOpen, onClose }) {
                 sessionScope: state.session?.id || '',
             });
             if (!result?.url) throw new Error('No portrait returned.');
+            if (!mountedRef.current) return;
             const portraitAction = {
                 type: 'SET_NPC_PORTRAIT',
+                meta,
                 payload: {
                     id: npc.id,
                     portraitUrl: result.url,

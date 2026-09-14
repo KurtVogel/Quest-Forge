@@ -17,6 +17,7 @@
  */
 import { sendMessage } from './adapter.js';
 import { collectNarrativeEntries } from './narrativeMessages.js';
+import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_PART_CHAR_BUDGET } from '../config/contentLimits.js';
 
 export const CHRONICLE_MIN_MESSAGES = 6;
 export const CHRONICLE_CHUNK_SIZE = 30; // exported so the UI can estimate passages/duration
@@ -29,8 +30,16 @@ const TAIL_CONTEXT = 700;
 // 59-chunk first close of a long campaign silently discarded two-thirds of
 // the paid-for retelling mid-sentence while toIndex still claimed the whole
 // span as chronicled (2026-08-29, live campaign).
+// …and ALSO by accumulated CHARACTERS (2026-09-13 audit P1): nothing bounds
+// a passage, and ten 7,000-char passages (a modest overshoot of the 300–700
+// word aim) made a 70k part the reducer sliced to 60k mid-sentence — the
+// same bug one level down. A part closes before a passage would push it
+// past CHRONICLE_PART_CHAR_BUDGET; a single passage over the chapter ceiling
+// is clipped with a visible warning.
 export const CHRONICLE_CHUNKS_PER_CHAPTER = 10;
 const CHUNKS_PER_CHAPTER = CHRONICLE_CHUNKS_PER_CHAPTER;
+const PART_CHAR_BUDGET = CHRONICLE_PART_CHAR_BUDGET;
+const PASSAGE_CLIP = CHRONICLE_CHAPTER_TEXT_MAX;
 
 const CHRONICLER_PROMPT = `You are the CHRONICLER of a tabletop RPG campaign. You receive the raw table transcript of one span of play and retell it as a single continuous narrative passage — a chapter of the saga the player will keep and reread.
 
@@ -105,31 +114,38 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
     // close shares the custom name ("Saga — Part 2") or numbers each part as
     // its own chapter so the tab's numbering stays continuous. The custom base
     // is clipped so the reducer's 80-char title clamp can never eat the suffix.
-    const multiPart = chunks.length > CHUNKS_PER_CHAPTER;
-    const customTitle = String(title || '').trim().slice(0, multiPart ? 68 : 80);
-    const partTitle = (partNumber) => {
-        if (!multiPart) return customTitle || `Chapter ${chapters.length + 1}`;
+    // Whether a close is multi-part is only KNOWN once a second part closes
+    // (the character budget can split a run the chunk count would not), so
+    // the first part is retitled into the part form at that moment.
+    const customTitle = String(title || '').trim();
+    const partTitle = (partNumber, multiPart) => {
+        if (!multiPart) return customTitle.slice(0, 80) || `Chapter ${chapters.length + 1}`;
         return customTitle
-            ? `${customTitle} — Part ${partNumber}`
+            ? `${customTitle.slice(0, 68)} — Part ${partNumber}`
             : `Chapter ${chapters.length + partNumber}`;
     };
 
     const out = [];
     let passages = []; // the part currently being written
+    let partChars = 0;
     let partFromIndex = fromIndex;
     let previousTail = '';
     let completedChunks = 0;
     let salvaged = false;
+    let clipped = false;
 
     const closePart = (coveredToIndex) => {
+        const multiPart = out.length > 0;
         out.push({
-            title: partTitle(out.length + 1),
+            title: partTitle(out.length + 1, multiPart),
             text: passages.join('\n\n'),
             fromIndex: partFromIndex,
             toIndex: coveredToIndex,
         });
+        if (out.length === 2) out[0].title = partTitle(1, true);
         partFromIndex = coveredToIndex + 1;
         passages = [];
+        partChars = 0;
     };
 
     for (let i = 0; i < chunks.length; i++) {
@@ -153,9 +169,20 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
                 userMessage,
                 temperature: 0.8, // narrative voice, but bound to transcript facts
             });
-            const passage = stripEventBlocks(response);
+            let passage = stripEventBlocks(response);
             if (!passage) throw new Error('The chronicler returned an empty passage.');
+            if (passage.length > PASSAGE_CLIP) {
+                passage = passage.slice(0, PASSAGE_CLIP);
+                clipped = true;
+            }
+            // Close the part BEFORE this passage would push it past the
+            // character budget: the previous chunk's last retold message is
+            // the honest boundary, and this passage opens the next part.
+            if (passages.length > 0 && partChars + 2 + passage.length > PART_CHAR_BUDGET) {
+                closePart(chunks[i - 1][chunks[i - 1].length - 1].index);
+            }
             passages.push(passage);
+            partChars += (passages.length > 1 ? 2 : 0) + passage.length;
             previousTail = passage.slice(-TAIL_CONTEXT);
             completedChunks = i + 1;
         } catch (error) {
@@ -187,6 +214,10 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
         ...(salvaged && {
             salvaged: true,
             warning: 'The chronicler failed partway — the completed passages were kept as a shorter chapter. Close another chapter to retell the rest.',
+        }),
+        ...(clipped && !salvaged && {
+            clipped: true,
+            warning: 'One passage ran past the chapter ceiling and was clipped at its end. Remove the chapter and close again if the cut shows.',
         }),
     };
 }

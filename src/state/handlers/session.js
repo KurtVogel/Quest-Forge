@@ -10,6 +10,7 @@ import { dedupeLocationRecords, normalizeLocationRecord, seedTravelLinksFromTrai
 import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
 import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
 import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
+import { sanitizeQuestRecords } from './quests.js';
 import { cleanTextField } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { canonicalEnemyId, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
@@ -278,9 +279,10 @@ function validateSaveState(payload) {
         rollHistory: Array.isArray(payload.rollHistory)
             ? payload.rollHistory.map(sanitizeRollHistoryEntry).filter(Boolean).slice(-ROLL_HISTORY_CAP)
             : [],
-        quests: Array.isArray(payload.quests)
-            ? payload.quests.filter(q => q && typeof q === 'object')
-            : [],
+        // Quest rows get the parser whitelist's load twin (2026-09-14 audit
+        // P1): an object name rendered "[object Object]" in the prompt every
+        // turn and tripped the Quests panel's boundary on every open.
+        quests: sanitizeQuestRecords(payload.quests, { maxMessageCount: messageCount }),
         journal: Array.isArray(payload.journal)
             ? payload.journal
                 .filter(e => e && typeof e === 'object')
@@ -319,7 +321,7 @@ function validateSaveState(payload) {
         // Player-facing saga chapters: entry heal (see healChronicleChapter) —
         // a poisoned entry crashed the Journal panel on open (2026-09-04 audit).
         chronicle: Array.isArray(payload.chronicle)
-            ? payload.chronicle.map(healChronicleChapter).filter(Boolean)
+            ? payload.chronicle.map(entry => healChronicleChapter(entry, { maxMessageCount: messageCount })).filter(Boolean)
             : [],
         // Companions get the same load sanitizer as the hero (healLoadedCharacter)
         // and enemies (sanitizeLoadedEnemy) — 2026-09-09 audit P1: an object-only

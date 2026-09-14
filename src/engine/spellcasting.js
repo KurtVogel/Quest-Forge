@@ -51,7 +51,9 @@ export function buildSpellSlots(level, previous = null) {
     const table = getSpellSlotTable(level);
     const slots = {};
     for (const [lvl, max] of Object.entries(table)) {
-        const prevUsed = previous?.[lvl]?.used;
+        // Numeric-string parity with every sibling heal (2026-09-13 audit P2):
+        // `used: "4"` used to reset to 0 — the load REFILLED the day's magic.
+        const prevUsed = Number(previous?.[lvl]?.used);
         slots[lvl] = {
             used: Number.isFinite(prevUsed) ? Math.max(0, Math.min(max, Math.trunc(prevUsed))) : 0,
             max,
@@ -84,7 +86,7 @@ export function sanitizeSustainedSpell(raw) {
         ...(spell.acBonus && { acBonus: spell.acBonus }),
         ...(spell.condition && { condition: spell.condition }),
         targetType,
-        ...(targetType === 'companion' && raw.targetId != null && { targetId: raw.targetId }),
+        ...(targetType === 'companion' && typeof raw.targetId === 'string' && raw.targetId && { targetId: raw.targetId.slice(0, 100) }),
         ...(targetType === 'companion' && raw.targetName && { targetName: String(raw.targetName).slice(0, 100) }),
     };
 }
@@ -128,7 +130,10 @@ export function chooseSlotLevel(spellSlots, spell, requestedLevel = null) {
         const slot = spellSlots?.[lvl];
         return slot && (slot.max - slot.used) > 0;
     };
-    const requested = Number.isFinite(requestedLevel) ? Math.trunc(requestedLevel) : null;
+    // A numeric string ("2") is a real request — the wire normalizers coerce
+    // too, but this is the belt for every other caller (2026-09-13 audit P2).
+    const requestedNumber = requestedLevel === null || requestedLevel === '' ? NaN : Number(requestedLevel);
+    const requested = Number.isFinite(requestedNumber) ? Math.trunc(requestedNumber) : null;
     if (requested !== null && requested >= spell.level && requested <= MAX_SPELL_LEVEL && available(requested)) {
         return requested;
     }

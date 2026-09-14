@@ -100,6 +100,20 @@ export function sanitizePendingRegionalFronts(raw) {
     return { key, region, locationName, atMessage: finiteIndex(raw.atMessage) ?? 0 };
 }
 
+/**
+ * The Chronicle tab's ceremony nudge (2026-09-13 audit P2): ChronicleTab
+ * renders `title` as a React child, and an object title survived LOAD_GAME
+ * straight into the Journal panel's boundary. Complete-or-null.
+ */
+export function sanitizeChapterCloseSuggested(raw) {
+    if (!isRecord(raw)) return null;
+    const frontId = text(raw.frontId, 120);
+    const title = text(raw.title, 160);
+    if (!frontId || !title) return null;
+    const at = Number(raw.at);
+    return { frontId, title, at: Number.isFinite(at) ? at : null };
+}
+
 export function sanitizePendingFrontAftermath(raw) {
     if (!isRecord(raw)) return null;
     const frontId = text(raw.frontId, 120);
@@ -126,6 +140,7 @@ export function sanitizeLivingWorldSession(session) {
         ['pendingAbsenceDrift', sanitizePendingAbsenceDrift],
         ['pendingRegionalFronts', sanitizePendingRegionalFronts],
         ['pendingFrontAftermath', sanitizePendingFrontAftermath],
+        ['chapterCloseSuggested', sanitizeChapterCloseSuggested],
         // NPC initiative window (2026-09-13 overhaul): complete-or-null.
         ['relationshipBeat', sanitizeRelationshipBeat],
     ];

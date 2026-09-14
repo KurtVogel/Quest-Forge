@@ -34,7 +34,7 @@
  * Later steps always win over earlier ones; validateSaveState never touches
  * the character.
  */
-import { computeACFromInventory, normalizeConditionList, normalizeDeathSaves } from '../engine/rules.js';
+import { computeACFromInventory, normalizeConditionList, normalizeDeathSaves, normalizeProficiencyLists } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
 import { RACES } from '../data/races.js';
 import { normalizeItem } from '../data/items.js';
@@ -406,8 +406,26 @@ function healLoadedCharacter(character) {
         // Only keys the save carries are typed — a fresh character never gets
         // explicit false flags minted onto it.
         ...typedDeathState(character),
+        // The three proficiency lists are typed against the catalogs
+        // (2026-09-14 audit P1): backfillCharacterShape defaults only a MISSING
+        // list, so a number/string/object value rode the spread and threw out
+        // of every skill roll, the sheet, and buildSystemPrompt — every turn.
+        ...normalizeProficiencyLists(character),
+        // Class resources are rebuilt from the class definition with the spent
+        // tally carried over (2026-09-13 audit P2): a string `used: "0"` on
+        // Arcane Recovery read `=== 0` false, so a wizard's short rest silently
+        // skipped the recovery and never re-typed the field.
+        classResources: buildClassResources(character.class, level, character.classResources),
     };
-    if (!isSpellcaster(healed.class)) return healed;
+    if (!isSpellcaster(healed.class)) {
+        // A NON-caster carries no spell state at all (2026-09-13 audit P1):
+        // the two fields used to ride the spread untyped, and a Fighter save
+        // with `spellSlots: { 1: null }` crashed the Combat panel's boundary on
+        // EVERY fight (the panel gated on truthiness). Strip, like
+        // healUnknownClassRace already does for an unknown class.
+        const { spellSlots: _slots, sustainedSpell: _sustained, ...rest } = healed;
+        return rest;
+    }
     return {
         ...healed,
         spellSlots: sanitizeSpellSlots(level, healed.spellSlots),

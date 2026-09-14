@@ -216,6 +216,22 @@ describe('engine-owned quest completion XP (rpg-balance-master ruling 2026-08-22
         expect(next.character.exp).toBe(25);
     });
 
+    it('pays the instant tier ONCE per response — four opened-and-closed errands in one reply pay 25, not 100 (DECISIONS.md 2026-09-14)', () => {
+        let state = withHero();
+        for (const name of ['Fetch the Ledger', 'Water the Mule', 'Return the Cup', 'Sweep the Step']) {
+            state = gameReducer(state, { type: 'ADD_QUEST', payload: { name } });
+            state = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name } });
+        }
+        expect(state.quests.every(q => q.status === 'completed')).toBe(true);
+        expect(state.character.exp).toBe(25);
+        // The three refused payouts say so, visibly.
+        expect(state.messages.filter(m => /pays once per response/.test(m.content))).toHaveLength(3);
+        // A completion on a LATER turn is a different response: full tier again.
+        let later = gameReducer(passTurns(state, 2), { type: 'ADD_QUEST', payload: { name: 'Mend the Fence' } });
+        later = gameReducer(later, { type: 'COMPLETE_QUEST', payload: { name: 'Mend the Fence' } });
+        expect(later.character.exp).toBe(50);
+    });
+
     it('records a never-tracked fallback insert as table history with NO XP (2026-09-04 revisit of the instant tier)', () => {
         const next = gameReducer(withHero(), {
             type: 'COMPLETE_QUEST',

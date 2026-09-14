@@ -11,7 +11,8 @@ import {
     pickMergedCardText,
 } from '../../engine/storyMemory.js';
 import { gameReducer } from '../gameReducer.js';
-import { sanitizeWorldFactPayload, stampNpcRelationshipArcs } from './shared.js';
+import { isStaleCampaignAction, sanitizeWorldFactPayload, stampNpcRelationshipArcs, systemMessage } from './shared.js';
+import { CHRONICLE_CHAPTER_TEXT_MAX } from '../../config/contentLimits.js';
 import { rollDie } from '../../engine/dice.ts';
 import {
     BEAT_COOLDOWN_MESSAGES,
@@ -82,9 +83,10 @@ export function appendChronicleChapter(chronicle = [], payload = {}) {
         chapters = [...chapters, {
             id: `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             title: String(item.title || '').trim().slice(0, 80) || `Chapter ${chapters.length + 1}`,
-            text: text.slice(0, 60000),
-            fromIndex: Number.isFinite(item.fromIndex) ? item.fromIndex : 0,
-            toIndex: Number.isFinite(item.toIndex) ? item.toIndex : 0,
+            text: text.slice(0, CHRONICLE_CHAPTER_TEXT_MAX),
+            // Non-negative integers on the write side too (2026-09-13 audit P2 nit).
+            fromIndex: Number.isFinite(item.fromIndex) ? Math.max(0, Math.trunc(item.fromIndex)) : 0,
+            toIndex: Number.isFinite(item.toIndex) ? Math.max(0, Math.trunc(item.toIndex)) : 0,
             createdAt: Date.now(),
         }];
     }
@@ -234,6 +236,21 @@ export const handlers = {
     },
 
     ADD_CHRONICLE_CHAPTER(state, action) {
+        // A close started on another campaign (or an earlier load of this one)
+        // never lands here (2026-09-13 audit P1): the prose would have been
+        // filed as a chapter of the WRONG saga with a toIndex from a transcript
+        // this campaign never played. Visible, because minutes of DM-model
+        // work were paid for.
+        if (isStaleCampaignAction(state, action)) {
+            console.warn('[Chronicle] Dropped a chapter close that started on a different campaign or load.');
+            return {
+                ...state,
+                messages: [...(state.messages || []), systemMessage(
+                    '📜 A chapter close finished after a different campaign was loaded and was discarded. Reopen that campaign and close the chapter again.',
+                    { kind: 'error' }
+                )],
+            };
+        }
         const chronicle = appendChronicleChapter(state.chronicle, action.payload);
         if (chronicle === (state.chronicle || [])) return state;
         // Writing a chapter consumes the front-resolution ceremony nudge.

@@ -17,6 +17,10 @@ export function getModifier(score) {
  * Get proficiency bonus based on character level.
  */
 export function getProficiencyBonus(level) {
+    // A non-finite level (NaN from a junk save, undefined from a companion-side
+    // caller) used to fall through every `<=` to +6 — max proficiency for
+    // free (2026-09-14 audit P2). Junk reads as level 1.
+    if (!Number.isFinite(level)) return 2;
     if (level <= 4) return 2;
     if (level <= 8) return 3;
     if (level <= 12) return 4;
@@ -43,6 +47,44 @@ export function getProficiencyBonus(level) {
 function clampItemBonus(value) {
     const n = Number(value);
     return Number.isFinite(n) ? Math.max(0, Math.min(3, Math.trunc(n))) : 0;
+}
+
+/** The largest sustained-spell AC buff the catalog grants (Mage Armor +3). */
+export const MAX_SUSTAINED_AC_BONUS = 3;
+
+function clampSustainedAcBonus(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(0, Math.min(MAX_SUSTAINED_AC_BONUS, Math.trunc(n))) : 0;
+}
+
+/**
+ * ONE typed form for the three proficiency lists (2026-09-14 audit P1): a
+ * junk value threw `?.includes is not a function` out of every skill roll,
+ * the Character Sheet, AND buildSystemPrompt (every turn), while a STRING
+ * value substring-matched proficiency ("stealth and perception" → stealth +5).
+ * Only known keys survive, deduped, capped at the key count.
+ */
+export function normalizeProficiencyList(value, known) {
+    if (!Array.isArray(value)) return [];
+    const allowed = known instanceof Set ? known : new Set(known);
+    const out = [];
+    for (const entry of value) {
+        if (typeof entry !== 'string' || !allowed.has(entry) || out.includes(entry)) continue;
+        out.push(entry);
+        if (out.length >= allowed.size) break;
+    }
+    return out;
+}
+
+/** The three proficiency lists, typed against the skill/ability catalogs. */
+export function normalizeProficiencyLists(character) {
+    const skills = normalizeProficiencyList(character?.skillProficiencies, SKILL_KEY_SET);
+    return {
+        skillProficiencies: skills,
+        // Expertise needs proficiency — a rogue's double bonus on an unproficient skill is junk.
+        expertiseSkills: normalizeProficiencyList(character?.expertiseSkills, new Set(skills)),
+        savingThrowProficiencies: normalizeProficiencyList(character?.savingThrowProficiencies, ABILITY_KEY_SET),
+    };
 }
 
 export function getArmorClass(dexMod, armor = null, shield = false) {
@@ -123,8 +165,13 @@ export function computeACFromInventory(inventory, character) {
 
     // Sustained self-buff (Mage Armor / Shield of Faith on self). Computed here so
     // the character sheet, the DM prompt, and enemy attack rolls all see one AC.
+    // Coerced + clamped at the READ site regardless of the load heal
+    // (2026-09-14 audit P1): a non-caster's sustainedSpell used to ride the
+    // save untyped, and `"5" || 0` string-concatenated the hero's AC to "115"
+    // — a persisted, unhittable hero. The clamp band is the catalog's own
+    // (Mage Armor +3 is the largest sustained AC buff).
     const spellBonus = character.sustainedSpell?.targetType !== 'companion'
-        ? (character.sustainedSpell?.acBonus || 0)
+        ? clampSustainedAcBonus(character.sustainedSpell?.acBonus)
         : 0;
 
     return getArmorClass(dexMod, equippedArmor, equippedShield) + styleBonus + spellBonus;
@@ -136,8 +183,8 @@ export function getEquippedWeapon(inventory = []) {
 }
 
 export function getWeaponAbilityModifier(character, weapon = null) {
-    const strengthMod = getModifier(character.abilityScores.strength);
-    const dexMod = getModifier(character.abilityScores.dexterity);
+    const strengthMod = getModifier(character?.abilityScores?.strength ?? 10);
+    const dexMod = getModifier(character?.abilityScores?.dexterity ?? 10);
     if (weapon?.ranged && !weapon?.thrown) return dexMod;
     if (weapon?.finesse) return Math.max(strengthMod, dexMod);
     return strengthMod;
@@ -226,6 +273,8 @@ export function getWeaponDamageNotation(character, inventory = [], fallback = '1
 /**
  * Skill-to-ability mapping.
  */
+export const ABILITY_KEY_SET = new Set(['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']);
+
 export const SKILL_ABILITIES = {
     acrobatics: 'dexterity',
     animalHandling: 'wisdom',
@@ -247,6 +296,12 @@ export const SKILL_ABILITIES = {
     survival: 'wisdom',
 };
 
+export const SKILL_KEY_SET = new Set(Object.keys(SKILL_ABILITIES));
+
+function hasListEntry(list, entry) {
+    return Array.isArray(list) && list.includes(entry);
+}
+
 /**
  * Get the modifier for a specific skill.
  * @param {object} character - Character object with abilityScores and skillProficiencies
@@ -259,8 +314,10 @@ export function getSkillModifier(character, skill) {
 
     const abilityMod = getModifier(character.abilityScores[ability]);
     const profBonus = getProficiencyBonus(character.level);
-    const isProficient = character.skillProficiencies?.includes(skill) || false;
-    const hasExpertise = character.expertiseSkills?.includes(skill) || false;
+    // Belt on the read side: only an ARRAY can grant proficiency (a string's
+    // substring `.includes` was a free +prof — 2026-09-14 audit P1).
+    const isProficient = hasListEntry(character.skillProficiencies, skill);
+    const hasExpertise = hasListEntry(character.expertiseSkills, skill);
 
     const profMultiplier = hasExpertise ? 2 : (isProficient ? 1 : 0);
     return abilityMod + (profBonus * profMultiplier);
@@ -277,8 +334,8 @@ export function getAllSkills(character) {
         skill,
         ability,
         total: getSkillModifier(character, skill),
-        isProficient: character.skillProficiencies?.includes(skill) || false,
-        hasExpertise: character.expertiseSkills?.includes(skill) || false,
+        isProficient: hasListEntry(character.skillProficiencies, skill),
+        hasExpertise: hasListEntry(character.expertiseSkills, skill),
     }));
 }
 
@@ -293,7 +350,7 @@ export function getSavingThrowModifier(character, ability) {
     const score = character?.abilityScores?.[ability];
     if (score == null) return 0;
     const abilityMod = getModifier(score);
-    const proficient = character.savingThrowProficiencies?.includes(ability) || false;
+    const proficient = hasListEntry(character.savingThrowProficiencies, ability);
     return abilityMod + (proficient ? getProficiencyBonus(character.level) : 0);
 }
 

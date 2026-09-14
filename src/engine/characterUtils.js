@@ -133,7 +133,9 @@ export function buildClassResources(className, level, previous = null) {
     const resources = {};
     for (const [key, def] of Object.entries(charClass.resources)) {
         if (level >= (def.minLevel || 1)) {
-            const prevUsed = previous?.[key]?.used;
+            // Numeric-string parity (2026-09-13 audit P2): `used: "0"` read
+            // `=== 0` false in the rest handler and skipped Arcane Recovery.
+            const prevUsed = Number(previous?.[key]?.used);
             resources[key] = {
                 used: Number.isFinite(prevUsed) ? Math.max(0, Math.min(def.max, Math.trunc(prevUsed))) : 0,
                 max: def.max,

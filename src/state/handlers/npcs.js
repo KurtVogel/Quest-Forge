@@ -52,7 +52,7 @@ import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryR
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
-import { upsertNpc } from './shared.js';
+import { isStaleCampaignAction, upsertNpc } from './shared.js';
 import { cleanTextField, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
 
 /**
@@ -106,6 +106,12 @@ export const handlers = {
     // brand-new NPC the instant it appears, instead of being silently dropped
     // until the next journal pass.
     UPDATE_NPC(state, action) {
+        // Deepen memory resolves minutes later; a stamp from another campaign
+        // or load never writes here (2026-09-13 audit P1 — the chronicle guard).
+        if (isStaleCampaignAction(state, action)) {
+            console.warn('[NPC] Dropped an NPC update that started on a different campaign or load.');
+            return state;
+        }
         let nextNpcs = upsertNpc(state.npcs, action.payload, { messageCount: (state.messages || []).length });
         if (nextNpcs === state.npcs) return state;
         let touched = findTouchedNpc(nextNpcs, action.payload);
@@ -196,6 +202,10 @@ export const handlers = {
     },
 
     SET_NPC_PORTRAIT(state, action) {
+        if (isStaleCampaignAction(state, action)) {
+            console.warn('[NPC] Dropped a portrait that started on a different campaign or load.');
+            return state;
+        }
         // normalizeNpcRecord's SAFE_PORTRAIT_URL allowlist is the belt here —
         // an unsafe URL is dropped rather than stored.
         return {
