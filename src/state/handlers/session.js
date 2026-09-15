@@ -11,7 +11,7 @@ import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
 import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
 import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
 import { sanitizeQuestRecords } from './quests.js';
-import { cleanTextField } from '../../config/contentLimits.js';
+import { cleanTextField, LOCATION_NAME_MAX } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { canonicalEnemyId, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES, normalizeCombatExchange } from '../../engine/combatExchange.js';
@@ -28,8 +28,6 @@ import {
     healChronicleChapter,
 } from './shared.js';
 
-/** Widest the registry itself keeps a place string (locationRegistry's own cleanText cap). */
-const LOCATION_NAME_MAX = 200;
 /** Campaign name as typed at adventure start (the save-slot list renders it). */
 const SESSION_NAME_MAX = 120;
 

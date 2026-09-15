@@ -74,7 +74,7 @@ describe('combat pacing prompt contract', () => {
         const text = prompt();
 
         expect(text).toContain('HP, criticals, victory/defeat, XP, Action Surge consumption, and round advancement are engine-owned');
-        expect(text).toContain('Never emit `combat_end`, `exp_awarded`, `damage_taken`, or `enemy_updates`');
+        expect(text).toContain('Never emit `combat_end`, `exp_awarded`, or `damage_taken`');
         expect(text).toContain('Never invent a retaliation, counterattack, extra hit');
     });
 

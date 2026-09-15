@@ -180,3 +180,24 @@ describe('LOAD_GAME enemy id uniqueness (2026-09-11 combat-exchange P2, parity w
         expect(promptOf(next)).not.toContain('(id: undefined)');
     });
 });
+
+describe('typed enemy text/flag fields at load (2026-09-15 audit P2)', () => {
+    it('an object name/id, a string isUndead, and an upper-cased combatStatus load typed — no "[object Object]" on the card or in the prompt', () => {
+        const next = load({
+            active: true, phase: 'awaiting_player',
+            enemies: [
+                { id: { evil: true }, name: { evil: true }, hp: 5, maxHp: 10, isUndead: 'false', combatStatus: 'FLED', conditions: 'prone' },
+                { id: { evil: true }, name: { evil: true }, hp: 8, maxHp: 10, isUndead: 'true' },
+            ],
+            turnOrder: [{ type: 'player', name: 'Survivor', initiative: 15 }], currentTurn: 0, round: 1,
+        });
+        const [first, second] = next.combat.enemies;
+        expect(first).toMatchObject({ name: 'Enemy', isUndead: false, combatStatus: 'fled', conditions: ['prone'] });
+        expect(second).toMatchObject({ name: 'Enemy', isUndead: true, combatStatus: 'active' });
+        expect(first.id).toMatch(/^enemy-/);
+        expect(second.id).toMatch(/^enemy-/);
+        expect(first.id).not.toBe(second.id);
+        expect(JSON.stringify(next.combat.enemies)).not.toContain('[object Object]');
+        expect(promptOf(next)).not.toContain('[object Object]');
+    });
+});

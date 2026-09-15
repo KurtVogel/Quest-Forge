@@ -1847,3 +1847,16 @@ describe('in-combat check/save DC default (2026-09-02 audit P2)', () => {
         expect(explicit.playerSlots[0].dc).toBe(15);
     });
 });
+
+describe('check-slot dc numeric-string parity (2026-09-15 audit P2)', () => {
+    it('coerces a string dc before the 5..30 clamp instead of defaulting to 10', () => {
+        const dcOf = dc => exchange({ player_slots: [{ action: 'check', skill: 'athletics', dc, description: 'Topple the brazier' }] }).playerSlots[0].dc;
+        expect(dcOf('15')).toBe(15);
+        expect(dcOf(' 18 ')).toBe(18);
+        expect(dcOf('3')).toBe(5);
+        expect(dcOf('99')).toBe(30);
+        expect(dcOf('hard')).toBe(10);
+        expect(dcOf(undefined)).toBe(10);
+        expect(dcOf(14)).toBe(14);
+    });
+});

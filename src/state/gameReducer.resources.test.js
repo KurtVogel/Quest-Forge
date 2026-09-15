@@ -512,3 +512,15 @@ describe('short rest expected-heal divisor (2026-09-01 dice-engine P2)', () => {
         expect(rested.character.currentHP).toBe(4);
     });
 });
+
+describe('USE_RESOURCE with an unknown key (2026-09-15 audit — the DM channel can no longer reach this branch)', () => {
+    it('posts the unavailable line and leaves every tracked resource untouched — engine/UI callers only', () => {
+        // The DM `resources_used` wire used to fall through here with display
+        // casing ("Second Wind"), telling the player a fresh Second Wind was
+        // spent; applyEvents now drops unknown keys before any dispatch.
+        const start = makeFighter();
+        const next = gameReducer(start, { type: 'USE_RESOURCE', payload: 'Second Wind' });
+        expect(next.character.classResources).toEqual(start.character.classResources);
+        expect(next.messages.at(-1).content).toContain('Second Wind unavailable');
+    });
+});

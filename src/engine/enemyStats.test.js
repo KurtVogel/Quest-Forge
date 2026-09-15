@@ -13,6 +13,7 @@ import {
     clampEnemyCurrentHP,
     clampEnemyHP,
     enemyHealthCondition,
+    isDeclaredDowned,
     normalizeEnemyAttackProfile,
     normalizeEnemyConditions,
     sanitizeEnemyDamage,
@@ -161,9 +162,15 @@ describe('normalizeEnemyConditions', () => {
         expect(normalizeEnemyConditions(flood)).toEqual(supported);
     });
 
-    it('returns an empty list for non-arrays', () => {
-        expect(normalizeEnemyConditions('prone')).toEqual([]);
+    it('reads a scalar string as a one-item list and every other non-array as empty (2026-09-15 audit P2)', () => {
+        // Parity with the exchange's condition lanes, which accepted a scalar
+        // while combat_start and the load boundary read it as [].
+        expect(normalizeEnemyConditions('prone')).toEqual(['prone']);
+        expect(normalizeEnemyConditions(' Blinded ')).toEqual(['blinded']);
+        expect(normalizeEnemyConditions('dazzled')).toEqual([]);
         expect(normalizeEnemyConditions(null)).toEqual([]);
+        expect(normalizeEnemyConditions(7)).toEqual([]);
+        expect(normalizeEnemyConditions({ prone: true })).toEqual([]);
     });
 });
 
@@ -286,5 +293,70 @@ describe('canonicalEnemyId (direct — 2026-09-05 audit test-depth item)', () =>
     it('slices an absurd name to 80 characters before prefixing', () => {
         const id = canonicalEnemyId({ name: 'x'.repeat(500) }, 0, new Set());
         expect(id).toBe(`enemy-${'x'.repeat(80)}`);
+    });
+});
+
+describe('sanitizeEnemyDamage trailing damage type (2026-09-15 audit P1)', () => {
+    it('strips a trailing damage type instead of rejecting the notation to the 1d6 default', () => {
+        // An ogre declared at "2d8+4 bludgeoning" swung for 1d6 for the whole
+        // fight, silently — the companion twin strips this since 09-09.
+        expect(sanitizeEnemyDamage('2d8+4 bludgeoning')).toBe('2d8+4');
+        expect(sanitizeEnemyDamage('1d8+2 slashing')).toBe('1d8+2');
+        expect(sanitizeEnemyDamage('1d8 + 2 (slashing)')).toBe('1d8+2');
+        expect(sanitizeEnemyDamage('1d6 piercing')).toBe('1d6');
+        expect(sanitizeEnemyDamage('1d10-1 cold')).toBe('1d10-1');
+        expect(sanitizeEnemyDamage('2d6 fire/acid')).toBe('2d6');
+    });
+
+    it('still rejects multi-part and count-less notations, and out-of-band values under a type', () => {
+        expect(sanitizeEnemyDamage('1d8+2, plus 1d6 poison')).toBeUndefined();
+        expect(sanitizeEnemyDamage('d8 slashing')).toBeUndefined();
+        expect(sanitizeEnemyDamage('9d8+2 slashing')).toBeUndefined();
+        expect(sanitizeEnemyDamage('1d20 psychic')).toBeUndefined();
+        expect(sanitizeEnemyDamage('1d8+99 necrotic')).toBeUndefined();
+        expect(sanitizeEnemyDamage('slashing 1d8')).toBeUndefined();
+    });
+
+    it('keeps the plain notation forms byte-identical', () => {
+        expect(sanitizeEnemyDamage('1d8+2')).toBe('1d8+2');
+        expect(sanitizeEnemyDamage(' 2 d 6 - 1 ')).toBe('2d6-1');
+        expect(sanitizeEnemyDamage('1d6')).toBe('1d6');
+    });
+});
+
+describe('isDeclaredDowned', () => {
+    it('is true only for a finite non-positive HP', () => {
+        expect(isDeclaredDowned(0)).toBe(true);
+        expect(isDeclaredDowned('0')).toBe(true);
+        expect(isDeclaredDowned(-3)).toBe(true);
+        expect(isDeclaredDowned(1)).toBe(false);
+        expect(isDeclaredDowned(undefined)).toBe(false);
+        expect(isDeclaredDowned(true)).toBe(false);
+        expect(isDeclaredDowned('lots')).toBe(false);
+    });
+});
+
+describe('sanitizeLoadedEnemy typed text and flag fields (2026-09-15 audit P2)', () => {
+    it('never loads "[object Object]" as a name or id — an untyped id is dropped for re-minting', () => {
+        const cleaned = sanitizeLoadedEnemy({ id: { evil: true }, name: { evil: true }, hp: 5, maxHp: 10 });
+        expect(cleaned.name).toBe('Enemy');
+        expect(cleaned.id).toBeUndefined();
+        expect(sanitizeLoadedEnemy({ id: 7, name: 'Wolf', hp: 5 }).id).toBe('7');
+        expect(sanitizeLoadedEnemy({ id: 'enemy-wolf', name: '   ', hp: 5 }).name).toBe('Enemy');
+    });
+
+    it('reads flag strings through toFlag and case-folds combatStatus', () => {
+        const fled = sanitizeLoadedEnemy({ id: 'e1', name: 'Wolf', hp: 5, isUndead: 'false', defending: 'no', combatStatus: 'FLED' });
+        expect(fled.isUndead).toBe(false);
+        expect(fled.defending).toBe(false);
+        expect(fled.combatStatus).toBe('fled');
+        const undead = sanitizeLoadedEnemy({ id: 'e2', name: 'Ghoul', hp: 5, isUndead: 'true', combatStatus: ' Surrendered ' });
+        expect(undead.isUndead).toBe(true);
+        expect(undead.combatStatus).toBe('surrendered');
+        expect(sanitizeLoadedEnemy({ id: 'e3', name: 'X', hp: 5, combatStatus: { s: 'fled' } }).combatStatus).toBe('active');
+    });
+
+    it('reads a scalar conditions string as a list', () => {
+        expect(sanitizeLoadedEnemy({ id: 'e1', name: 'Wolf', hp: 5, conditions: 'prone' }).conditions).toEqual(['prone']);
     });
 });

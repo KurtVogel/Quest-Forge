@@ -233,7 +233,7 @@ function noOutcomeFieldsWithExchange(events) {
     const hasExchange = !!events?.combatExchange;
     const hasOutcome = !!events && (
         events.damageTaken > 0 || events.damageDealt > 0 || events.healing > 0 ||
-        events.expAwarded > 0 || events.enemyUpdates.length > 0 || events.combatEnd
+        events.expAwarded > 0 || events.combatEnd
     );
     return { pass: !hasExchange || !hasOutcome, message: 'combat_exchange included forbidden outcome mutations' };
 }

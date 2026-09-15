@@ -140,7 +140,9 @@ export function normalizeCombatExchange(raw) {
                     // Missing DC defaults to 10 — the out-of-combat channel's
                     // default (eventChannels.js): the solo-play ladder is 8/10/12/15/18+
                     // and "never default DC 15" (2026-09-02 audit P2).
-                    dc: Number.isFinite(slot.dc) ? Math.max(5, Math.min(30, Math.round(slot.dc))) : 10,
+                    // Coerced first ("15" was DC 10 — 2026-09-15 audit P2), the
+                    // slot_level / out-of-combat dc parity.
+                    dc: Number.isFinite(toFiniteNumber(slot.dc)) ? Math.max(5, Math.min(30, Math.round(toFiniteNumber(slot.dc)))) : 10,
                 }),
                 ...(action === 'check' && normalizeConditionDelta(slot.on_success || slot.onSuccess) && {
                     onSuccess: normalizeConditionDelta(slot.on_success || slot.onSuccess),

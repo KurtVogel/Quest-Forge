@@ -693,17 +693,18 @@ describe('applyEvents dispatch coverage', () => {
         });
     });
 
-    it('dispatches USE_RESOURCE for a resource the class catalog does not own', () => {
-        // Rogue has no UI-tracked class resources, so any resource the DM names
-        // falls through to the generic (non-UI) dispatch path.
+    it('never dispatches USE_RESOURCE from the DM channel — an unknown key is dropped (2026-09-15 audit P1)', () => {
+        // The channel has no spend authority: the UI owns every class resource,
+        // and the old fallthrough's only reachable branch posted a FALSE
+        // "already used" line to the player.
         const dispatch = run(
             { resources_used: ['sneakAttack'] },
             { character: { class: 'rogue', classResources: {} }, party: [] },
         );
-        expect(dispatch).toHaveBeenCalledWith({ type: 'USE_RESOURCE', payload: 'sneakAttack' });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'USE_RESOURCE' }));
     });
 
-    it('does not dispatch USE_RESOURCE again for an already-exhausted resource', () => {
+    it('does not dispatch USE_RESOURCE for an already-exhausted resource either', () => {
         const dispatch = run(
             { resources_used: ['sneakAttack'] },
             { character: { class: 'rogue', classResources: { sneakAttack: { used: 1, max: 1 } } }, party: [] },
@@ -992,7 +993,7 @@ describe('applyEvents dispatch coverage', () => {
         expect(events.questUpdates).toHaveLength(8);
     });
 
-    it('dispatches combat start/end, enemy, and companion updates', () => {
+    it('dispatches combat start/end and companion updates; the retired enemy_updates key never reaches UPDATE_ENEMY', () => {
         const dispatch = run({
             combat_start: { enemies: [{ name: 'Goblin', hp: 7, maxHp: 7, ac: 12 }] },
             enemy_updates: [{ id: 'e1', hp: 3 }],
@@ -1001,7 +1002,9 @@ describe('applyEvents dispatch coverage', () => {
             remove_companions: ['Garrick'],
         });
         expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'START_COMBAT' }));
-        expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_ENEMY', payload: { id: 'e1', hp: 3 } });
+        // Retired 2026-09-15: the DM channel could never act (combat.enemies is
+        // empty outside combat; every event is dropped inside it).
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'UPDATE_ENEMY' }));
         expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_COMPANION', payload: { name: 'Garrick' } });
         expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_COMPANION', payload: { name: 'Garrick', hp: 8 } });
         expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_COMPANION', payload: { name: 'Garrick', id: '' } });
@@ -1171,11 +1174,12 @@ describe('hostile event-block shapes (2026-07-27 audit)', () => {
         expect(events.requestedRolls[0]).toMatchObject({ type: 'skill_check', skill: 'perception', dc: 12 });
     });
 
-    it('drops non-object enemy_updates elements before they reach UPDATE_ENEMY', () => {
+    it('enemy_updates is a retired channel: the events object carries no key for it (2026-09-15)', () => {
         const { events } = parseResponse(fence({
             enemy_updates: [null, 7, 'goblin', ['goblin'], { id: 'goblin-1', hp: 3 }],
+            healing: 0,
         }));
-        expect(events.enemyUpdates).toEqual([{ id: 'goblin-1', hp: 3 }]);
+        expect(events).not.toHaveProperty('enemyUpdates');
     });
 });
 
@@ -1275,5 +1279,78 @@ describe('parseResponse fence shapes (2026-09-05 audit)', () => {
         const { narrative, events } = parseResponse(raw);
         expect(events?.questUpdates).toHaveLength(1);
         expect(narrative).toBe("I'll log this under quest_updates so we remember.");
+    });
+});
+
+describe('hostile text shapes (2026-09-15 audit, Lap 2)', () => {
+    function run(payload, state = { character: {}, party: [] }) {
+        const { events } = parseResponse(fence(payload));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => state);
+        return dispatch;
+    }
+
+    it('unfenced: an unbalanced { inside a string value before the anchor key still parses the block', () => {
+        const raw = 'You pass the gate.\n{"location": "Gate {West", "quest_updates": [{"name": "Find the well", "status": "new"}]}';
+        const { narrative, events } = parseResponse(raw);
+        expect(events?.questUpdates).toEqual([{ name: 'Find the well', status: 'new' }]);
+        expect(events?.location).toBe('Gate {West');
+        expect(narrative).toBe('You pass the gate.');
+    });
+
+    it('fenced: a ``` inside a JSON string value no longer ends the block early', () => {
+        // The lazy fence regex minted quest "Read the" AND appended the JSON
+        // tail (`sign", "status": "new"}]}`) to the story as prose.
+        const raw = 'The sign creaks.\n```json\n{"quest_updates": [{"name": "Read the ``` sign", "status": "new"}]}\n```\n';
+        const { narrative, events } = parseResponse(raw);
+        expect(events?.questUpdates).toEqual([{ name: 'Read the ``` sign', status: 'new' }]);
+        expect(narrative).toBe('The sign creaks.');
+    });
+
+    it('fenced: prose after the block and a second fence still behave as before', () => {
+        const raw = 'Before.\n```json\n{"healing": 0}\n```\nAfter.\n```json\n{"healing": 5}\n```';
+        const { narrative, events } = parseResponse(raw);
+        expect(events?.healing).toBe(0);
+        expect(narrative).toBe('Before.\n\nAfter.');
+    });
+
+    it('a non-string response is no response, never a throw', () => {
+        expect(parseResponse(123)).toEqual({ narrative: '', events: null });
+        expect(parseResponse({})).toEqual({ narrative: '', events: null });
+        expect(parseResponse(null)).toEqual({ narrative: '', events: null });
+        expect(parseResponse(['x'])).toEqual({ narrative: '', events: null });
+    });
+
+    it('the DM `location` wire cannot reach SET_LOCATION as an object (the Scribe-only profile/fillOnly lane)', () => {
+        const { events } = parseResponse(fence({
+            location: { name: 'The Old Mill', profile: { type: 'hostile_site', danger: 'deadly', region: 'Ashen Reach', theaterFrontIds: ['front-1'] }, fillOnly: true },
+        }));
+        expect(events.location).toBe('The Old Mill');
+    });
+
+    it('resources_used never dispatches USE_RESOURCE — an unknown key is dropped, a UI-owned one only suppresses paired healing', () => {
+        const rogue = run(
+            { resources_used: ['sneakAttack', 'Cunning Action', 'x'.repeat(3000)], healing: 6 },
+            { character: { class: 'rogue', classResources: {} }, party: [] },
+        );
+        expect(rogue).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'USE_RESOURCE' }));
+        // No class resource owns these keys, so the loose healing is the DM's own and applies.
+        expect(rogue).toHaveBeenCalledWith({ type: 'HEAL', payload: 6 });
+
+        const fighter = run(
+            { resources_used: ['Second Wind'], healing: 8 },
+            { character: { class: 'fighter', classResources: { secondWind: { used: 0, max: 1 } } }, party: [] },
+        );
+        expect(fighter).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'USE_RESOURCE' }));
+        expect(fighter).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'HEAL' }));
+        expect(fighter).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_MESSAGE' }));
+    });
+
+    it('a resources_used key named like an Object prototype member is not "UI-owned"', () => {
+        const dispatch = run(
+            { resources_used: ['constructor'], healing: 4 },
+            { character: { class: 'fighter', classResources: { secondWind: { used: 0, max: 1 } } }, party: [] },
+        );
+        expect(dispatch).toHaveBeenCalledWith({ type: 'HEAL', payload: 4 });
     });
 });

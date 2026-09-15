@@ -274,7 +274,7 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
  * @returns {string} Formatted summary
  */
 export function formatRollSummary(rollResults) {
-    const hpApplied = '(HP applied by the system — do NOT adjust it via damage_taken/enemy_updates)';
+    const hpApplied = '(HP applied by the system — do NOT adjust it via damage_taken)';
     return rollResults.map(r => {
         if (r.type === 'note') {
             return `[${r.text}]`;
@@ -446,7 +446,7 @@ export async function handleRequestedRolls(requestedRolls, {
             : '';
 
         const hpNote = appliedHp
-            ? ` Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken or enemy_updates for them.`
+            ? ` Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken for them.`
             : '';
 
         const lootNote = formatPendingLootNote(pendingLoot);

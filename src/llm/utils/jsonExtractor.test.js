@@ -5,7 +5,7 @@
  * bug in extractBalancedJson survived 753 green tests.
  */
 import { describe, expect, it } from 'vitest';
-import { extractBalancedJson, parseJsonObjectLoose, repairJson, stripMarkdownFences } from './jsonExtractor.js';
+import { extractBalancedJson, parseJsonObjectLoose, repairJson, scanBalancedObject, stripMarkdownFences } from './jsonExtractor.js';
 
 describe('extractBalancedJson', () => {
     it('P0 regression: keyword preceded by a sibling object field extracts the ENCLOSING object', () => {
@@ -132,5 +132,47 @@ describe('extractBalancedJson anchor selection (2026-09-05 audit)', () => {
     it('accepts a caller-pre-quoted keyword without double-quoting it', () => {
         const text = 'x {"summary":"s"}';
         expect(extractBalancedJson(text, '"summary"')?.json).toBe('{"summary":"s"}');
+    });
+});
+
+describe('string-aware backward walk + last-first anchors (2026-09-15 audit P2)', () => {
+    it('an unbalanced { inside a string value BEFORE the key no longer anchors inside the string', () => {
+        const text = 'You pass the gate.\n{"location": "Gate {West", "quest_updates": [{"name": "Find the well", "status": "new"}]}';
+        const match = extractBalancedJson(text, 'quest_updates');
+        expect(match.startIndex).toBe(text.indexOf('{"location"'));
+        expect(JSON.parse(match.json).quest_updates).toHaveLength(1);
+    });
+
+    it('treats an escaped quote inside a string as content on the backward walk', () => {
+        const text = '{"a": "say \\"hi\\" {now", "requested_rolls": []}';
+        const match = extractBalancedJson(text, 'requested_rolls');
+        expect(match.startIndex).toBe(0);
+        expect(JSON.parse(match.json)).toEqual({ a: 'say "hi" {now', requested_rolls: [] });
+    });
+
+    it('tries the LAST occurrence first, so prose mentions before the block are never walked', () => {
+        const mentions = 'quest_updates '.repeat(4000);
+        const text = `${mentions}\n{"quest_updates": [{"name": "x", "status": "new"}]}`;
+        const started = performance.now();
+        const match = extractBalancedJson(text, 'quest_updates');
+        expect(performance.now() - started).toBeLessThan(200);
+        expect(JSON.parse(match.json).quest_updates).toHaveLength(1);
+    });
+
+    it('a prose mention AFTER the block falls through to the real key', () => {
+        const text = '{"quest_updates": [{"name": "x", "status": "new"}]}\nLogged under quest_updates.';
+        const match = extractBalancedJson(text, 'quest_updates');
+        expect(match.startIndex).toBe(0);
+    });
+
+    it('repairs a truncation that ends on a dangling backslash', () => {
+        // `"abc\` used to get an ESCAPED closing quote appended and stay unparseable.
+        expect(JSON.parse(repairJson('{"a": "abc\\'))).toEqual({ a: 'abc' });
+        expect(JSON.parse(repairJson('{"a": "abc\\\\'))).toEqual({ a: 'abc\\' });
+    });
+
+    it('scanBalancedObject returns the index past the matching brace, or -1 when unclosed', () => {
+        expect(scanBalancedObject('{"a": "}"} tail', 0)).toBe(10);
+        expect(scanBalancedObject('{"a": {', 0)).toBe(-1);
     });
 });

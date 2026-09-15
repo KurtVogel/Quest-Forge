@@ -54,7 +54,6 @@ describe('event-channel registry agreement', () => {
             add_companions: [...junk, { name: 'Terho' }],
             update_companions: [...junk, { id: 'companion-1' }],
             remove_companions: [...junk, 'Terho', { name: 'Kaarina' }],
-            enemy_updates: [...junk, { id: 'enemy-1' }],
             conditions_gained: [...junk, 'poisoned'],
             conditions_removed: [...junk, 'prone'],
             resources_used: [...junk, 'secondWind'],
@@ -75,7 +74,6 @@ describe('event-channel registry agreement', () => {
             { name: 'Terho', id: '' },
             { name: 'Kaarina', id: '' },
         ]);
-        expect(events.enemyUpdates).toEqual([{ id: 'enemy-1' }]);
         expect(events.conditionsGained).toEqual(['poisoned']);
         expect(events.conditionsRemoved).toEqual(['prone']);
         expect(events.resourcesUsed).toEqual(['secondWind']);
@@ -266,5 +264,80 @@ describe('requested_rolls skill derivation + boundary clamps (2026-09-10 audit P
         expect(roll.target).toHaveLength(120);
         expect(roll.damage).toHaveLength(40);
         expect(roll.notation).toHaveLength(40);
+    });
+});
+
+describe('hostile wire shapes (2026-09-15 audit, Lap 2)', () => {
+    it('types the `location` wire to the DM shape: string-or-null, a { name } object folds, nothing else rides', () => {
+        // An object used to pass straight through and SET_LOCATION honors an
+        // object payload's profile/fillOnly — the Scribe's private lane (P1).
+        expect(normalizeEvents({ location: 'The Old Mill' }).location).toBe('The Old Mill');
+        expect(normalizeEvents({ location: { name: 'The Old Mill', profile: { type: 'hostile_site', theaterFrontIds: ['front-1'] }, fillOnly: true } }).location)
+            .toBe('The Old Mill');
+        expect(normalizeEvents({ location: { profile: { region: 'Ashen Reach' } } }).location).toBeNull();
+        expect(normalizeEvents({ location: ['Mill'] }).location).toBeNull();
+        expect(normalizeEvents({ location: 42 }).location).toBeNull();
+        expect(normalizeEvents({ location: '   ' }).location).toBeNull();
+        expect(normalizeEvents({ location: 'Q'.repeat(100000) }).location).toHaveLength(200);
+    });
+
+    it('folds resources_used to catalog-key form, strings only, deduped, bounded', () => {
+        const events = normalizeEvents({
+            resources_used: ['Second Wind', 'second_wind', 'secondWind', 'ACTION SURGE', { key: 'secondWind' }, 42, '', 'x'.repeat(3000)],
+        });
+        expect(events.resourcesUsed).toEqual(['secondWind', 'actionSurge', 'x'.repeat(40)]);
+    });
+
+    it('enemy_updates is retired: not a wire key, no events key, an unknown key on the wire', () => {
+        expect(KNOWN_WIRE_KEYS.has('enemy_updates')).toBe(false);
+        const events = normalizeEvents({ enemy_updates: [{ id: 'enemy-1', hp: 0 }] });
+        expect(events).not.toHaveProperty('enemyUpdates');
+    });
+
+    it('never passes "[object Object]" through player_death / starting_items / spell_cast / memory_updates', () => {
+        const events = normalizeEvents({
+            player_death: { description: { evil: true } },
+            starting_items: [{ name: { evil: true } }, { name: 'L'.repeat(5000) }, 'S'.repeat(500), { name: 'Lute', description: { evil: true } }],
+            spell_cast: [{ spell: { evil: true } }, { name: { evil: true }, key: 'cure wounds' }],
+            memory_updates: [{ id: { evil: true }, subject: { evil: true }, text: ['x'], status: { evil: true }, location: { evil: true }, tags: [{ t: 1 }, 'promise'], linked_npc_names: [7, 'Aune'] }],
+        });
+        expect(events.playerDeath).toEqual({ description: 'Your character has fallen.' });
+        expect(events.startingItems).toEqual([
+            { name: 'L'.repeat(100) },
+            { name: 'S'.repeat(100) },
+            { name: 'Lute' },
+        ]);
+        expect(events.spellCasts).toEqual([{ spell: 'cure wounds', slotLevel: null, target: null }]);
+        expect(events.memoryUpdates).toEqual([{ tags: ['promise'], linkedNpcNames: ['Aune'] }]);
+    });
+
+    it('clamps a player_death description and keeps a real one', () => {
+        expect(normalizeEvents({ player_death: { description: 'D'.repeat(50000) } }).playerDeath.description).toHaveLength(500);
+        expect(normalizeEvents({ player_death: true }).playerDeath).toEqual({ description: 'Your character has fallen.' });
+        expect(normalizeEvents({ player_death: { description: 'The captain orders it.' } }).playerDeath.description).toBe('The captain orders it.');
+    });
+
+    it('coerces a requested_rolls modifier string through the attack-bonus band', () => {
+        const roll = extra => normalizeEvents({ requested_rolls: [{ type: 'attack_roll', description: 'The guard swings', ...extra }] }).requestedRolls[0];
+        expect(roll({ modifier: '+4' }).modifier).toBe(4);
+        expect(roll({ modifier: 3 }).modifier).toBe(3);
+        expect(roll({ modifier: '40' }).modifier).toBeNull();
+        expect(roll({ modifier: 'strong' }).modifier).toBeNull();
+        expect(roll({}).modifier).toBeNull();
+    });
+
+    it('validateCombatStart parity: scalar conditions, "true" is_undead, and a 0-HP foe is not a combatant', () => {
+        const start = validateCombatStart({
+            enemies: [
+                { name: 'Ghoul', hp: 22, ac: 12, conditions: 'prone', is_undead: 'true' },
+                { name: 'Corpse', hp: 0, ac: 10 },
+                { name: 'Ogre', hp: '0', ac: 11 },
+                { name: 'Wisp', hp: true, ac: 13, is_undead: 'no', boss: 'true' },
+            ],
+        });
+        expect(start.enemies.map(e => e.name)).toEqual(['Ghoul', 'Wisp']);
+        expect(start.enemies[0]).toMatchObject({ conditions: ['prone'], isUndead: true });
+        expect(start.enemies[1]).toMatchObject({ hp: 20, isUndead: false, boss: false });
+        expect(validateCombatStart({ enemies: [{ name: 'Corpse', hp: 0 }] })).toBeNull();
     });
 });

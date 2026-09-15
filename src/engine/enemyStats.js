@@ -11,6 +11,8 @@
  * UPDATE_ENEMY, and immediately before rolling (defense-in-depth).
  */
 
+import { toFlag } from '../data/items.js';
+
 const ATTACK_BONUS_MIN = -5;
 const ATTACK_BONUS_MAX = 15;
 const DAMAGE_DICE_MAX = 4;
@@ -54,11 +56,14 @@ export function canonicalEnemyId(enemy, index, usedIds) {
 
 /** Bounded, normalized conditions that the combat engine knows how to resolve. */
 export function normalizeEnemyConditions(value) {
-    if (!Array.isArray(value)) return [];
+    // A scalar `conditions: "prone"` is a one-item list — combat_start and the
+    // load boundary read it as `[]` while the exchange's condition lanes
+    // already accepted it (2026-09-15 audit P2).
+    const list = Array.isArray(value) ? value : (typeof value === 'string' ? [value] : []);
     // No count cap needed: the supported-set filter + dedupe already bounds
     // the result at the set's size.
-    return [...new Set(value
-        .map(condition => String(condition || '').trim().toLowerCase())
+    return [...new Set(list
+        .map(condition => (typeof condition === 'string' ? condition.trim().toLowerCase() : ''))
         .filter(condition => SUPPORTED_ENEMY_CONDITIONS.has(condition)))];
 }
 
@@ -96,18 +101,37 @@ export function validateEnemySaveBonus(value) {
     return (r >= ATTACK_BONUS_MIN && r <= ATTACK_BONUS_MAX) ? r : undefined;
 }
 
+/**
+ * NdM(±K) with an optional trailing damage TYPE. "2d8+4 bludgeoning" /
+ * "1d8 + 2 (slashing)" is how statblocks write damage, not a hallucination —
+ * the suffix used to reject the whole notation to the 1d6 default silently
+ * for the whole fight (2026-09-15 audit P1; the companion twin
+ * boundCompanionDamage strips it since 09-09). The suffix admits no digits,
+ * so multi-part damage ("1d8+2, plus 1d6 poison") still rejects: that is not
+ * one notation.
+ */
+const ENEMY_DAMAGE_NOTATION = /^(\d{1,2})\s*d\s*(\d{1,3})\s*(?:([+-])\s*(\d{1,3}))?\s*(\(?[a-z][a-z ,/()-]*)?$/i;
+
 /** A bounded NdM(+/-K) weapon-damage notation, or undefined (→ engine default) if invalid/out-of-range. */
 export function sanitizeEnemyDamage(notation) {
     if (typeof notation !== 'string') return undefined;
-    const m = notation.replace(/\s+/g, '').match(/^(\d{1,2})d(\d{1,3})([+-]\d{1,3})?$/i);
+    const m = notation.trim().match(ENEMY_DAMAGE_NOTATION);
     if (!m) return undefined;
     const count = parseInt(m[1], 10);
     const sides = parseInt(m[2], 10);
-    const mod = m[3] ? parseInt(m[3], 10) : 0;
+    const mod = m[3] ? parseInt(`${m[3]}${m[4]}`, 10) : 0;
     if (count < 1 || count > DAMAGE_DICE_MAX) return undefined;
     if (!DAMAGE_SIDES.includes(sides)) return undefined;
     if (mod < DAMAGE_MOD_MIN || mod > DAMAGE_MOD_MAX) return undefined;
-    return `${count}d${sides}${mod ? (mod > 0 ? `+${mod}` : `${mod}`) : ''}`;
+    const cleaned = `${count}d${sides}${mod ? (mod > 0 ? `+${mod}` : `${mod}`) : ''}`;
+    if (m[5]) console.warn(`[enemyStats] Dropped trailing damage type from "${notation.trim()}" → ${cleaned}.`);
+    return cleaned;
+}
+
+/** A DM-declared HP that is finite and non-positive — a foe declared already down. */
+export function isDeclaredDowned(hp) {
+    const n = toNumber(hp);
+    return Number.isFinite(n) && n <= 0;
 }
 
 /** AC clamped into a sane band (the bound is mechanically safe), defaulting when missing/absurd. */
@@ -163,17 +187,23 @@ export function sanitizeLoadedEnemy(enemy) {
     // boundary): the old `{...enemy}` spread let arbitrary unknown keys on a
     // hostile/stale save survive "sanitization" unbounded and re-persist through
     // every autosave for the rest of the fight.
+    // Typed text/flag fields (2026-09-15 audit P2): `String(enemy.name)` loaded
+    // an object name as "[object Object]" on the card AND in the combat prompt,
+    // a non-string id re-minted to `enemy-object-object`, `isUndead: "false"`
+    // was true, and `combatStatus: "FLED"` was a live foe. An untyped id is
+    // dropped so assignUniqueEnemyIds re-mints it; `boss` stays strict by policy.
+    const status = typeof enemy.combatStatus === 'string' ? enemy.combatStatus.trim().toLowerCase() : '';
     const cleaned = {
-        id: enemy.id == null ? undefined : String(enemy.id).slice(0, 120),
-        name: String(enemy.name || 'Enemy').trim().slice(0, 100) || 'Enemy',
+        id: typeof enemy.id === 'string' || typeof enemy.id === 'number' ? String(enemy.id).slice(0, 120) : undefined,
+        name: (typeof enemy.name === 'string' ? enemy.name.trim().slice(0, 100) : '') || 'Enemy',
         hp,
         maxHp,
         ac: clampEnemyAC(enemy.ac),
         condition: enemyHealthCondition(hp, maxHp),
         conditions: normalizeEnemyConditions(enemy.conditions),
-        combatStatus: ['active', 'fled', 'surrendered'].includes(enemy.combatStatus) ? enemy.combatStatus : 'active',
-        defending: !!enemy.defending,
-        isUndead: !!enemy.isUndead,
+        combatStatus: ['active', 'fled', 'surrendered'].includes(status) ? status : 'active',
+        defending: toFlag(enemy.defending),
+        isUndead: toFlag(enemy.isUndead),
         boss: enemy.boss === true,
     };
     if (typeof enemy.initiative === 'number' && Number.isFinite(enemy.initiative)) {

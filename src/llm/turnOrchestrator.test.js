@@ -293,14 +293,14 @@ describe('turn runner — suppressHpEvents (batched-round HP already applied)', 
     const response = 'The blow lands hard and the goblin reels.\n'
         + '```json\n{"damage_taken": 7, "enemy_updates": [{"id": "goblin-1", "hp": 0}]}\n```';
 
-    it('zeroes damage_taken and enemy_updates BEFORE the events object enters the store', async () => {
+    it('zeroes damage_taken BEFORE the events object enters the store (enemy_updates is a retired, unknown key)', async () => {
         const { runner, getState } = createHarness({ streamMessage: scriptedStream([response]) });
         const hpBefore = getState().character.currentHP;
 
         const events = await runner.sendToLLM('Continue.', 'Continue.', { suppressHpEvents: true });
 
         expect(events.damageTaken).toBe(0);
-        expect(events.enemyUpdates).toEqual([]);
+        expect(events).not.toHaveProperty('enemyUpdates');
         expect(getState().character.currentHP).toBe(hpBefore);
         // The stored message carries the SAME finalized object — never mutated post-dispatch.
         expect(getState().messages.findLast(m => m.role === 'assistant').events).toBe(events);

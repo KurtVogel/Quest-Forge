@@ -12,7 +12,7 @@
  * This file owns only text → parsed-JSON extraction and the prose detectors.
  */
 
-import { parseBalancedJsonAt, parseJsonObjectLoose, repairJson } from './utils/jsonExtractor.js';
+import { parseBalancedJsonAt, parseJsonObjectLoose, repairJson, scanBalancedObject } from './utils/jsonExtractor.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { normalizeEvents, EVENT_CHANNELS } from './eventChannels.js';
@@ -121,19 +121,48 @@ export function detectPreNarratedOutcome(narrative) {
 }
 
 /**
+ * Locate the fenced JSON block: `{ full, body, index }` or null. Tag
+ * case-insensitive (```JSON), and a bare ``` fence counts when its body is an
+ * object — both used to fall to the anchor path and leave a dangling opener on
+ * the narrative (2026-09-05 audit). When the body is an object, its extent is
+ * a string-aware balanced-brace walk closed by the NEXT fence, so a ``` inside
+ * a JSON string value no longer ends the block early — `"Read the ``` sign"`
+ * minted quest "Read the" AND appended the JSON tail to the story as prose
+ * (2026-09-15 audit P2). The lazy regex remains the fallback for a non-object
+ * body or a body the walk cannot close on a fence.
+ */
+function findFencedJsonBlock(response) {
+    const opener = response.match(/```json\s*/i) || response.match(/```\s*(?=\{)/);
+    if (opener) {
+        const bodyStart = opener.index + opener[0].length;
+        if (response[bodyStart] === '{') {
+            const end = scanBalancedObject(response, bodyStart);
+            const closer = end === -1 ? null : response.slice(end).match(/^\s*```/);
+            if (closer) {
+                return {
+                    full: response.slice(opener.index, end + closer[0].length),
+                    body: response.slice(bodyStart, end),
+                    index: opener.index,
+                };
+            }
+        }
+    }
+    const lazy = response.match(/```json\s*\n?([\s\S]*?)\n?\s*```/i)
+        || response.match(/```\s*\n?(\{[\s\S]*?\})\s*\n?\s*```/);
+    return lazy ? { full: lazy[0], body: lazy[1], index: lazy.index } : null;
+}
+
+/**
  * Parse an LLM response to extract narrative text and game events.
  * @param {string} response - Full LLM response text
  * @returns {{ narrative: string, events: object | null }}
  */
 export function parseResponse(response) {
-    if (!response) return { narrative: '', events: null };
+    // Callers pass strings; a non-string is no response, never a
+    // `response.match is not a function` throw (2026-09-15 audit P2 belt).
+    if (typeof response !== 'string' || !response) return { narrative: '', events: null };
 
-    // Try to find a fenced JSON block in the response. Tag case-insensitive
-    // (```JSON), and a bare ``` fence counts when its body is an object — both
-    // used to fall to the anchor path and leave a dangling opener on the
-    // narrative (2026-09-05 audit).
-    const jsonMatch = response.match(/```json\s*\n?([\s\S]*?)\n?\s*```/i)
-        || response.match(/```\s*\n?(\{[\s\S]*?\})\s*\n?\s*```/);
+    const jsonMatch = findFencedJsonBlock(response);
 
     debugLog('[ResponseParser] Raw response length:', response.length);
     debugLog('[ResponseParser] JSON block found:', !!jsonMatch);
@@ -170,7 +199,7 @@ export function parseResponse(response) {
 
     // A second fenced block is a real (Grok-observed) behavior class: today only
     // the FIRST block is parsed. Make the drop observable instead of silent.
-    const secondFence = response.slice(response.indexOf(jsonMatch[0]) + jsonMatch[0].length).match(/```json/i);
+    const secondFence = response.slice(jsonMatch.index + jsonMatch.full.length).match(/```json/i);
     if (secondFence) {
         console.warn('[ResponseParser] Response contains a second ```json block — only the first is parsed; the rest is discarded.');
     }
@@ -179,9 +208,9 @@ export function parseResponse(response) {
     // fence used to vanish silently — and a JSON-first response committed an
     // EMPTY assistant message — so non-empty trailing text (minus any further
     // fenced block, which is discarded with the warning above) is appended.
-    const jsonStart = response.indexOf(jsonMatch[0]);
+    const jsonStart = jsonMatch.index;
     let narrative = response.slice(0, jsonStart).trim();
-    const trailing = response.slice(jsonStart + jsonMatch[0].length)
+    const trailing = response.slice(jsonStart + jsonMatch.full.length)
         .replace(/```json[\s\S]*?```/gi, '')
         .trim();
     if (trailing) {
@@ -192,15 +221,15 @@ export function parseResponse(response) {
     // Parse the JSON, attempting repair on failure
     let events = null;
     try {
-        events = JSON.parse(jsonMatch[1]);
+        events = JSON.parse(jsonMatch.body);
     } catch {
         console.warn('[ResponseParser] JSON parse failed, attempting repair...');
         try {
-            events = JSON.parse(repairJson(jsonMatch[1]));
+            events = JSON.parse(repairJson(jsonMatch.body));
             console.warn('[ResponseParser] JSON repaired successfully.');
         } catch (e2) {
             console.warn('[ResponseParser] JSON repair failed too:', e2.message);
-            debugLog('[ResponseParser] Raw JSON string:', jsonMatch[1]);
+            debugLog('[ResponseParser] Raw JSON string:', jsonMatch.body);
             // Unrepairable events are DROPPED — flag it so the caller can surface
             // a visible notice instead of the events vanishing in silence. The
             // narrative is the PROSE only: returning the full response leaked the

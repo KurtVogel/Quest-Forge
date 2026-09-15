@@ -428,7 +428,6 @@ Translate the player's committed action into the single bounded combat_exchange 
             // autosaved would depend on a race with the 2s debounce.
             if (opts.suppressHpEvents) {
                 events.damageTaken = 0;
-                events.enemyUpdates = [];
             }
         }
         if (!isMounted()) return null; // Never commit a turn into a different campaign's store

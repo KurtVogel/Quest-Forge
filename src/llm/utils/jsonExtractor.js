@@ -69,6 +69,16 @@ export function parseJsonObjectLoose(text, keywords = []) {
  * @param {string} keyword - Keyword the JSON must contain (e.g. 'requested_rolls')
  * @returns {{ json: string, startIndex: number } | null}
  */
+/**
+ * Backward-walk budget across ALL anchor occurrences of one extraction: each
+ * prose mention of a wire key used to walk back to index 0 — 4,000 mentions
+ * in a 234k reply cost 1.56 s on the main thread (2026-09-15 audit P2).
+ * Occurrences are tried LAST-first (the events block trails the narrative,
+ * so the real key is the last occurrence and prose mentions are never
+ * walked); the budget is the belt for absurd inputs.
+ */
+const MAX_ANCHOR_SCAN_CHARS = 4_000_000;
+
 export function extractBalancedJson(text, keyword) {
     // Anchor candidates: every occurrence of the QUOTED key first (a JSON key
     // proper), then every bare occurrence (repair-path unquoted keys). The old
@@ -76,36 +86,24 @@ export function extractBalancedJson(text, keyword) {
     // ("I'll log this under quest_updates") and returned null, so the raw JSON
     // shipped as narrative (2026-09-05 audit).
     const quoted = keyword.startsWith('"') ? keyword : `"${keyword}"`;
+    const budget = { remaining: MAX_ANCHOR_SCAN_CHARS };
     for (const needle of quoted === keyword ? [keyword] : [quoted, keyword]) {
-        for (let keyIdx = text.indexOf(needle); keyIdx !== -1; keyIdx = text.indexOf(needle, keyIdx + 1)) {
-            const match = extractEnclosingObject(text, keyIdx);
+        for (let keyIdx = text.lastIndexOf(needle); keyIdx !== -1; keyIdx = keyIdx === 0 ? -1 : text.lastIndexOf(needle, keyIdx - 1)) {
+            if (budget.remaining <= 0) return null;
+            const match = extractEnclosingObject(text, keyIdx, budget);
             if (match) return match;
         }
     }
     return null;
 }
 
-function extractEnclosingObject(text, keyIdx) {
-    // Walk backwards to the innermost brace that actually ENCLOSES the keyword,
-    // tracking a running close-count so an already-closed earlier object is
-    // skipped over. The old nearest-'{' walk anchored on unrelated nested
-    // objects whenever the keyword wasn't the JSON's first key — e.g. in
-    // {"npc_updates":[{...}], "requested_rolls":[...]} it silently extracted
-    // the inner NPC object and dropped the roll request (P0, 2026-07-14 audit).
-    let startIdx = -1;
-    let closeCount = 0;
-    for (let i = keyIdx; i >= 0; i--) {
-        const ch = text[i];
-        if (ch === '}') {
-            closeCount++;
-        } else if (ch === '{') {
-            if (closeCount === 0) { startIdx = i; break; }
-            closeCount--;
-        }
-    }
-    if (startIdx === -1) return null;
-
-    // Walk forward counting braces to find the matching close
+/**
+ * Forward, string-aware balanced-brace walk from a known `{` at `startIdx`.
+ * Returns the index just past the matching `}`, or -1 when the object never
+ * closes. Shared by the anchor extractor and the parser's fenced-block reader
+ * (a ``` inside a JSON string value must not end a fenced block early).
+ */
+export function scanBalancedObject(text, startIdx) {
     let depth = 0;
     let inString = false;
     let escape = false;
@@ -118,11 +116,50 @@ function extractEnclosingObject(text, keyIdx) {
         if (ch === '{') depth++;
         if (ch === '}') {
             depth--;
-            if (depth === 0) {
-                return { json: text.slice(startIdx, i + 1), startIndex: startIdx };
-            }
+            if (depth === 0) return i + 1;
         }
     }
+    return -1;
+}
+
+function extractEnclosingObject(text, keyIdx, budget = null) {
+    // Walk backwards to the innermost brace that actually ENCLOSES the keyword,
+    // tracking a running close-count so an already-closed earlier object is
+    // skipped over. The old nearest-'{' walk anchored on unrelated nested
+    // objects whenever the keyword wasn't the JSON's first key — e.g. in
+    // {"npc_updates":[{...}], "requested_rolls":[...]} it silently extracted
+    // the inner NPC object and dropped the roll request (P0, 2026-07-14 audit).
+    // String-aware in REVERSE since 2026-09-15 (audit P2): the char before a
+    // JSON key is outside any string, a quote toggles, and a quote behind an
+    // odd run of backslashes is escaped content — an unbalanced `{` inside a
+    // string VALUE before the key ("Gate {West") used to anchor inside the
+    // string, parse and repair both failed, and the raw JSON shipped as prose.
+    let startIdx = -1;
+    let closeCount = 0;
+    let inString = false;
+    let scanned = 0;
+    for (let i = keyIdx - 1; i >= 0; i--) {
+        scanned++;
+        const ch = text[i];
+        if (ch === '"') {
+            let backslashes = 0;
+            for (let j = i - 1; j >= 0 && text[j] === '\\'; j--) backslashes++;
+            if (backslashes % 2 === 0) inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+        if (ch === '}') {
+            closeCount++;
+        } else if (ch === '{') {
+            if (closeCount === 0) { startIdx = i; break; }
+            closeCount--;
+        }
+    }
+    if (budget) budget.remaining -= scanned;
+    if (startIdx === -1) return null;
+
+    const end = scanBalancedObject(text, startIdx);
+    if (end !== -1) return { json: text.slice(startIdx, end), startIndex: startIdx };
     // Unbalanced — return what we have (repairJson may fix it)
     return { json: text.slice(startIdx), startIndex: startIdx };
 }
@@ -179,7 +216,13 @@ export function repairJson(str) {
         if (ch === '{' || ch === '[') stack.push(ch);
         else if (ch === '}' || ch === ']') stack.pop();
     }
-    if (inString) repaired += '"';
+    if (inString) {
+        // A truncation right after a backslash (`"abc\`) would escape the
+        // closing quote appended here and stay unparseable — drop the dangling
+        // escape first (2026-09-15 audit P2).
+        if (escape) repaired = repaired.slice(0, -1);
+        repaired += '"';
+    }
     while (stack.length > 0) {
         repaired += stack.pop() === '{' ? '}' : ']';
     }

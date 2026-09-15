@@ -53,14 +53,20 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     }
 
     const state = getState?.();
-    const resources = state?.character?.classResources || {};
+    // `resources_used` has NO spend authority (2026-09-15 audit P1): every
+    // class resource is UI-owned, so the channel's one live effect is that a
+    // key the class catalog owns suppresses the loose `healing` the DM paired
+    // with it (a narrated Second Wind must not heal through the back door).
+    // Anything else is dropped here with a warning — it used to fall through
+    // to USE_RESOURCE, whose only reachable branch posted a FALSE "already
+    // used and must be recharged" line to the player.
     const classResourceDefs = CLASSES[state?.character?.class]?.resources || {};
-    const uiOwnedResources = events.resourcesUsed.filter(resourceKey => classResourceDefs[resourceKey]);
-    const unavailableResources = events.resourcesUsed.filter(resourceKey => {
-        const res = resources[resourceKey];
-        return res && res.used >= res.max;
-    });
-    const suppressResourceHealing = (unavailableResources.length > 0 || uiOwnedResources.length > 0) && events.healing > 0;
+    const uiOwnedResources = events.resourcesUsed.filter(resourceKey => Object.hasOwn(classResourceDefs, resourceKey));
+    const unknownResources = events.resourcesUsed.filter(resourceKey => !Object.hasOwn(classResourceDefs, resourceKey));
+    if (unknownResources.length > 0) {
+        console.warn('[applyEvents] Ignored resources_used entries the class catalog does not own:', unknownResources.join(', '));
+    }
+    const suppressResourceHealing = uiOwnedResources.length > 0 && events.healing > 0;
 
     // Premise reconciliation has distinct semantics from ordinary loot: starting
     // belongings must not duplicate class gear or each other. Normalize through the
@@ -85,18 +91,6 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         const { equipped: premiseEquipped, ...payload } = normalized;
         dispatch({ type: 'ADD_ITEM', payload: { ...payload, ...(premiseEquipped === true && { equipOnAdd: true }) } });
         tokens.forEach(token => startingInventoryTokens.add(token));
-    }
-
-    // Player abilities/consumables are activated through the game UI now, which marks
-    // them spent and applies any dice-backed effect. If the DM emits a known player
-    // resource anyway, skip the spend and any paired healing so it cannot bypass the UI.
-    // If it emits a resource already spent, skip it silently — never fire a contradictory
-    // "unavailable" notice for a correct use.
-    for (const resourceKey of events.resourcesUsed) {
-        if (uiOwnedResources.includes(resourceKey)) continue;
-        const res = resources[resourceKey];
-        if (res && res.used >= res.max) continue;
-        dispatch({ type: 'USE_RESOURCE', payload: resourceKey });
     }
 
     if (events.damageTaken > 0) {
@@ -393,10 +387,6 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     if (events.combatEnd) {
         // Pass whether the LLM awarded XP so the reducer can apply a fallback
         dispatch({ type: 'END_COMBAT', payload: { llmAwardedXp: events.expAwarded > 0 } });
-    }
-
-    for (const eu of events.enemyUpdates) {
-        dispatch({ type: 'UPDATE_ENEMY', payload: eu });
     }
 
     for (const comp of events.addCompanions) {

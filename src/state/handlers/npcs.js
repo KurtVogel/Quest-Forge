@@ -53,7 +53,7 @@ import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { isStaleCampaignAction, upsertNpc } from './shared.js';
-import { cleanTextField, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
+import { cleanTextField, LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
 
 /**
  * Attach a generated portrait to an NPC by id. Shared by the SET_NPC_PORTRAIT
@@ -252,8 +252,12 @@ export const handlers = {
 
     SET_LOCATION(state, action) {
         const rawPayload = action.payload;
-        const name = typeof rawPayload === 'string' ? rawPayload : rawPayload?.name;
-        if (!name || typeof name !== 'string') return state;
+        // Clamped at the WRITE (2026-09-15 audit P2): LOAD_GAME clamps
+        // currentLocation at the same ceiling, but the live write was bare, so
+        // a 100k location rode every prompt (over the char budget) until the
+        // next location event. The registry record clamps tighter on its own.
+        const name = cleanTextField(typeof rawPayload === 'string' ? rawPayload : rawPayload?.name, LOCATION_NAME_MAX);
+        if (!name) return state;
         const profile = rawPayload && typeof rawPayload === 'object' ? rawPayload.profile : null;
 
         // Living-world arrival detection (DECISIONS.md 2026-08-05): only a move

@@ -49,6 +49,14 @@ export const NPC_SPECIES_MAX = 40;
 export const CHRONICLE_CHAPTER_TEXT_MAX = 60000;
 export const CHRONICLE_PART_CHAR_BUDGET = 50000;
 
+/**
+ * The live `currentLocation` ceiling — ONE constant for the DM `location`
+ * wire, the SET_LOCATION write, and the LOAD_GAME heal (2026-09-15 audit P2:
+ * the load clamp had no live-write twin, so a 100k location rode every prompt
+ * until the next location event). The registry record clamps tighter (120).
+ */
+export const LOCATION_NAME_MAX = 200;
+
 export function cleanTextField(value, max = Infinity) {
     if (typeof value !== 'string') return '';
     return value.trim().slice(0, max);

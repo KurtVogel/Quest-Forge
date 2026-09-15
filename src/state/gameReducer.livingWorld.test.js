@@ -982,3 +982,17 @@ describe('travel links — geography as canon (2026-09-14)', () => {
         expect(find('Rimehollow').links.map(l => l.id)).toEqual(['b']);
     });
 });
+
+describe('SET_LOCATION clamps the live currentLocation at the write (2026-09-15 audit P2)', () => {
+    it('a 100k location lands at the shared LOCATION_NAME_MAX, string or { name } payload alike', () => {
+        // LOAD_GAME clamped at 200 but the live write was bare: a 100k location
+        // rode every prompt (over the char budget) until the next location event.
+        const long = 'Q'.repeat(100000);
+        const viaString = gameReducer(initialGameState, { type: 'SET_LOCATION', payload: long });
+        expect(viaString.currentLocation).toHaveLength(200);
+        const viaObject = gameReducer(initialGameState, { type: 'SET_LOCATION', payload: { name: long } });
+        expect(viaObject.currentLocation).toHaveLength(200);
+        expect(gameReducer(initialGameState, { type: 'SET_LOCATION', payload: '   ' })).toBe(initialGameState);
+        expect(gameReducer(initialGameState, { type: 'SET_LOCATION', payload: { name: { evil: true } } })).toBe(initialGameState);
+    });
+});

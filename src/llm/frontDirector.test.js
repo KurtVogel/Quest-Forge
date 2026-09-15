@@ -66,7 +66,10 @@ describe('malformed-response guards (queue 2026-07-07)', () => {
     });
 
     it('throws the malformed error when JSON.parse and repair both fail', async () => {
-        sendMessage.mockResolvedValue('{ "fronts": [ { "title": "Broken" '.repeat(3));
+        // No enclosing object anywhere: the anchor walk finds nothing and the
+        // body is not an object (an earlier repeated-fragment input became
+        // repairable once anchors were tried last-first, 2026-09-15).
+        sendMessage.mockResolvedValue('fronts: [ { "title": "Broken" ]]] not json');
         await expect(generateCampaignFronts(campaign())).rejects.toThrow(/malformed|did not contain fronts/);
     });
 

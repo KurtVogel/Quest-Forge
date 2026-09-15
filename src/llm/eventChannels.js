@@ -17,10 +17,10 @@
  * Application (events → dispatches) lives in src/state/applyEvents.js.
  */
 
-import { canonicalEnemyId, validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, normalizeEnemyConditions } from '../engine/enemyStats.js';
+import { canonicalEnemyId, validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, isDeclaredDowned, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
-import { MAX_COIN_EVENT } from '../config/contentLimits.js';
-import { toFiniteNumber } from '../data/items.js';
+import { LOCATION_NAME_MAX, MAX_COIN_EVENT } from '../config/contentLimits.js';
+import { toFiniteNumber, toFlag } from '../data/items.js';
 import { normalizeConditionName, findSkillInText, CONDITION_LIST_CAP } from '../engine/rules.js';
 
 /**
@@ -66,6 +66,13 @@ export function validateCombatStart(combatStart) {
     const usedIds = new Set();
     const sanitizedEnemies = combatStart.enemies
         .filter(e => isPlainObject(e) && typeof e.name === 'string' && e.name.trim())
+        // A foe the DM declares at 0 HP is not a combatant: clampEnemyHP's
+        // fallback used to field it as a FRESH 20-HP enemy (2026-09-15 audit P2).
+        .filter(e => {
+            if (!isDeclaredDowned(e.hp)) return true;
+            console.warn(`[eventChannels] Dropped combat_start enemy "${e.name.trim()}" declared at 0 HP.`);
+            return false;
+        })
         .map((e, index) => {
             // Enemy turns are engine-owned, so capture the foe's stats once here, validated at
             // this boundary via the shared sanitizer. Out-of-range offensive stats are dropped
@@ -80,11 +87,15 @@ export function validateCombatStart(combatStart) {
                 name: e.name.trim().slice(0, 100),
                 hp: clampEnemyHP(e.hp),
                 ac: clampEnemyAC(e.ac),
+                // A scalar `conditions: "prone"` is a one-item list (the
+                // exchange's normalizeConditionDelta already read it so).
                 conditions: normalizeEnemyConditions(e.conditions),
                 ...(attackBonus !== undefined && { attackBonus }),
                 ...(damage !== undefined && { damage }),
                 ...(saveBonus !== undefined && { saveBonus }),
-                isUndead: e.is_undead === true || e.isUndead === true,
+                // `"is_undead": "true"` was strict-false, and undeadness gates
+                // Turn Undead (2026-09-15 audit P2). `boss` stays strict by policy.
+                isUndead: toFlag(e.is_undead ?? e.isUndead),
                 // Untrusted narrative flag — the XP estimator independently gates it
                 // on the enemy's raw statline before honoring the boss tier.
                 boss: e.boss === true || e.isBoss === true,
@@ -167,7 +178,10 @@ export function normalizeRequestedRoll(r) {
         // NPC attack fields
         attacker: str(r.attacker, 120),
         attackerId: str(r.attackerId, 120) || str(r.companionId, 120) || str(r.companion_id, 120),
-        modifier: typeof r.modifier === 'number' && Number.isFinite(r.modifier) ? r.modifier : null,
+        // Numeric-string parity ("+4" is how every statblock writes it —
+        // 2026-09-15 audit P2) through the enemy attack-bonus validator, so an
+        // out-of-band value ("40") is rejected to null HERE, not at roll time.
+        modifier: validateEnemyAttackBonus(r.modifier) ?? null,
         // Damage roll field
         notation: str(r.notation, 40),
         // Combat (batched-round) fields: who takes the hit + inline weapon damage
@@ -179,10 +193,17 @@ export function normalizeRequestedRoll(r) {
     };
 }
 
+/** Item-name ceiling at this boundary (normalizeItem has no name clamp of its own). */
+const STARTING_ITEM_NAME_MAX = 100;
+
 function normalizeStartingItem(item) {
-    if (typeof item === 'string') return { name: item };
-    const name = String(item.name || '').trim();
-    const itemKey = String(item.itemKey || item.key || '').trim();
+    if (typeof item === 'string') return { name: item.trim().slice(0, STARTING_ITEM_NAME_MAX) };
+    // String-or-drop (2026-09-15 audit P2): `String(item.name)` MINTED an item
+    // literally named "[object Object]" into the pack, and a 5,000-char name
+    // rode unclamped.
+    const name = typeof item.name === 'string' ? item.name.trim().slice(0, STARTING_ITEM_NAME_MAX) : '';
+    const rawKey = item.itemKey ?? item.key;
+    const itemKey = typeof rawKey === 'string' ? rawKey.trim().slice(0, 80) : '';
     if (!name && !itemKey) return null;
     // Premise-established stacks ("two Potions of Healing") keep their
     // count — clamped small; starting gear is belongings, not a hoard.
@@ -192,7 +213,7 @@ function normalizeStartingItem(item) {
     return {
         ...(name && { name }),
         ...(itemKey && { itemKey }),
-        ...(item.description && { description: String(item.description).slice(0, 500) }),
+        ...(typeof item.description === 'string' && item.description.trim() && { description: item.description.trim().slice(0, 500) }),
         ...(item.equipped === true && { equipped: true }),
         ...(quantity > 1 && { quantity }),
     };
@@ -245,7 +266,10 @@ function normalizeSpellCasts(raw) {
         .map(entry => {
             if (typeof entry === 'string') return entry.trim() ? { spell: entry.trim().slice(0, 80), slotLevel: null, target: null } : null;
             if (!isPlainObject(entry)) return null;
-            const spell = String(entry.spell || entry.name || entry.key || '').trim().slice(0, 80);
+            // String-or-drop: an object spell was a visible "unknown spell
+            // [object Object]" line (2026-09-15 audit P2).
+            const rawSpell = [entry.spell, entry.name, entry.key].find(v => typeof v === 'string' && v.trim());
+            const spell = rawSpell ? rawSpell.trim().slice(0, 80) : '';
             if (!spell) return null;
             // Numeric-string parity (2026-09-13 audit P2): `"slot_level": "2"`
             // silently DOWNCAST an upcast Cure Wounds to a level-1 slot.
@@ -285,18 +309,64 @@ function normalizeMemoryUpdate(update) {
     const linkedNpcNames = Array.isArray(update.linkedNpcNames)
         ? update.linkedNpcNames
         : Array.isArray(update.linked_npc_names) ? update.linked_npc_names : null;
+    // String-or-drop + clamps (2026-09-15 audit P2): `String(x)` passed
+    // "[object Object]" through for every text field. The reducer's
+    // normalizeStoryMemoryUpdate rejects/clamps again downstream — this is
+    // the parser-boundary twin so junk never leaves this file.
+    const str = (value, max) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
+    const strList = (list, max) => list.filter(v => typeof v === 'string' && v.trim()).map(v => v.trim().slice(0, max)).slice(0, 10);
+    const idText = typeof id === 'number' ? String(id) : str(id, 80);
+    const subject = str(update.subject, 200);
+    const text = str(update.text, 1000);
+    const status = str(update.status, 40);
+    const location = str(update.location, LOCATION_NAME_MAX);
     return {
-        ...(id && { id: String(id) }),
-        ...(update.subject && { subject: String(update.subject) }),
-        ...(update.text && { text: String(update.text) }),
-        ...(update.status && { status: String(update.status) }),
+        ...(idText && { id: idText }),
+        ...(subject && { subject }),
+        ...(text && { text }),
+        ...(status && { status }),
         ...(used !== undefined && { used: !!used }),
         ...(typeof update.salience === 'number' && { salience: update.salience }),
         ...(typeof emotionalCharge === 'number' && { emotionalCharge }),
-        ...(Array.isArray(update.tags) && { tags: update.tags.map(String) }),
-        ...(linkedNpcNames && { linkedNpcNames: linkedNpcNames.map(String) }),
-        ...(update.location && { location: String(update.location) }),
+        ...(Array.isArray(update.tags) && { tags: strList(update.tags, 40) }),
+        ...(linkedNpcNames && { linkedNpcNames: strList(linkedNpcNames, 100) }),
+        ...(location && { location }),
     };
+}
+
+/**
+ * The DM's `location` wire, typed to the DM's shape ONLY: string-or-null, a
+ * `{ name }` object folding to its name and nothing else riding. An object
+ * used to pass straight through, and SET_LOCATION honors an object payload's
+ * `profile`/`fillOnly` — the Scribe's private registry lane (theater claims
+ * unlock a front's full-intensity symptoms, a region one-shot-triggers
+ * regional front seeding, fillOnly makes a relocation a no-op). Living-world
+ * rule since 2026-08-05: no new DM event channels — this one existed by
+ * omission (2026-09-15 audit P1).
+ */
+function normalizeLocationWire(raw) {
+    const value = isPlainObject(raw) ? raw.name : raw;
+    if (typeof value !== 'string') return null;
+    return value.trim().slice(0, LOCATION_NAME_MAX) || null;
+}
+
+/**
+ * A class-resource key in the form `classResources` uses ("Second Wind" /
+ * "second_wind" → secondWind). The channel has NO spend authority — the
+ * prompt forbids it for every class resource and the UI owns every spend —
+ * so its one live effect is applyEvents' healing suppression for a UI-owned
+ * key. Before 2026-09-15 (audit P1) any other entry fell through to
+ * USE_RESOURCE, whose only reachable branch posted a FALSE "already used"
+ * line: `["Second Wind"]` (display casing) told the player their fresh
+ * Second Wind was spent, an object posted "[object Object] unavailable".
+ */
+function normalizeResourceKey(entry) {
+    if (typeof entry !== 'string') return null;
+    const words = entry.trim().slice(0, 40).split(/[^a-zA-Z0-9]+/).filter(Boolean);
+    if (words.length === 0) return null;
+    const [head, ...rest] = words;
+    const first = head === head.toUpperCase() ? head.toLowerCase() : head.charAt(0).toLowerCase() + head.slice(1);
+    return first + rest.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
 }
 
 /** items_found/items_lost accept catalog strings and item objects — nothing else. */
@@ -372,15 +442,18 @@ export const EVENT_CHANNELS = [
     // the enemy channel's normalizeEnemyConditions twin (2026-09-05 audit P1).
     { wire: 'conditions_gained', key: 'conditionsGained', read: raw => guardedList(raw.conditions_gained, { allowStrings: true, cap: CONDITION_LIST_CAP, map: normalizeConditionName }) },
     { wire: 'conditions_removed', key: 'conditionsRemoved', read: raw => guardedList(raw.conditions_removed, { allowStrings: true, cap: CONDITION_LIST_CAP, map: normalizeConditionName }) },
-    // Limited class abilities the player spent this turn (e.g. ["secondWind"]).
-    { wire: 'resources_used', key: 'resourcesUsed', read: raw => guardedList(raw.resources_used, { allowStrings: true, cap: 10 }) },
+    // Class-resource keys the DM claims were spent — a healing-suppression
+    // SIGNAL only (see normalizeResourceKey), never a spend; deduped.
+    { wire: 'resources_used', key: 'resourcesUsed', read: raw => [...new Set(guardedList(raw.resources_used, { allowStrings: true, cap: 10, map: normalizeResourceKey }))] },
     { wire: 'quest_updates', key: 'questUpdates', read: raw => guardedList(raw.quest_updates, { cap: 8, map: normalizeQuestUpdate }) },
-    { wire: 'location', key: 'location', read: raw => raw.location || null },
+    { wire: 'location', key: 'location', read: raw => normalizeLocationWire(raw.location) },
     { wire: 'combat_start', key: 'combatStart', read: raw => validateCombatStart(raw.combat_start) },
     { wire: 'combat_end', key: 'combatEnd', read: raw => !!raw.combat_end },
-    // Non-object elements dropped so UPDATE_ENEMY never sees a null payload
-    // (2026-07-27 audit — now the uniform guard every array channel gets).
-    { wire: 'enemy_updates', key: 'enemyUpdates', read: raw => guardedList(raw.enemy_updates, { cap: 12 }) },
+    // `enemy_updates` was RETIRED 2026-09-15 (audit P2): applyEvents drops
+    // every event during active combat and `combat.enemies` is empty outside
+    // it, so UPDATE_ENEMY from the DM was a structural no-op that still cost
+    // prompt tokens every turn. Engine callers (rollResolver's flush) keep
+    // the reducer action; the DM has no channel to it.
     { wire: 'add_companions', key: 'addCompanions', read: raw => guardedList(raw.add_companions, { cap: 6 }) },
     { wire: 'update_companions', key: 'updateCompanions', read: raw => guardedList(raw.update_companions, { cap: 6 }) },
     {
@@ -410,9 +483,15 @@ export const EVENT_CHANNELS = [
     // Player death event (not game-over — triggers narrative transition)
     {
         wire: 'player_death', key: 'playerDeath',
-        read: raw => (raw.player_death
-            ? { description: (isPlainObject(raw.player_death) && raw.player_death.description) || 'Your character has fallen.' }
-            : null),
+        // String-or-fallback + clamp (2026-09-15 audit P2): an object description
+        // rendered "**[object Object]**" in the death line and PLAYER_DEFEAT.
+        read: raw => {
+            if (!raw.player_death) return null;
+            const text = isPlainObject(raw.player_death) && typeof raw.player_death.description === 'string'
+                ? raw.player_death.description.trim().slice(0, 500)
+                : '';
+            return { description: text || 'Your character has fallen.' };
+        },
     },
     // combat_exchange is registered for wire-key recognition; its normalization
     // couples to combat_start and runs in normalizeEvents' post-pass below.

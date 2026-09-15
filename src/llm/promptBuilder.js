@@ -422,7 +422,6 @@ When game events occur, include a structured JSON block at the END of your respo
   "rest_taken": null,
   "conditions_gained": [],
   "conditions_removed": [],
-  "resources_used": [],
   "healing": 0,
   "quest_updates": [{ "status": "new|updated|completed|failed", "name": "Quest Name", "description": "Quest description" }],
   "location": "",
@@ -496,7 +495,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 
 ## NPC UPDATE INSTRUCTIONS
 - Use \`npc_updates\` only for **named characters worth tracking across sessions** — rivals, authority figures, quest givers, recurring villains, allies with relationship weight, anyone the player may meet again.
-- Do **not** emit \`npc_updates\` for nameless combat fodder, generic goblins/guards, or numbered minions. Those belong in \`combat_start\` / \`enemy_updates\` only.
+- Do **not** emit \`npc_updates\` for nameless combat fodder, generic goblins/guards, or numbered minions. Those belong in \`combat_start\` only.
 - For roster-worthy people include \`kind: "character"\` and \`rosterEligible: true\`. For fodder omit npc_updates entirely.
 - Always include \`name\` and \`lastNotes\` for roster entries; include other fields only when newly learned
 - Include \`gender\` the first time a character's gender is established or apparent ("woman", "man", or the fiction's own wording) and \`species\` the first time their species/ancestry is ("goblin", "human", "high elf") — they anchor portraits, scene art, and prose consistency for the rest of the campaign; a registered species or gender in KNOWN NPCs is canon you must never contradict
@@ -570,7 +569,7 @@ COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
 - Intent envelopes contain no dice authority: never supply modifiers, AC, damage, hit/miss, HP changes, or outcomes. Never narrate the outcome before the engine returns it.
 - The engine resolves player slots, companions, then one intent per still-active foe. A defeated foe cannot act. An invalid target loses that actor's slot and never silently redirects to the player.
 - While the player is DYING, commit one \`death_save\` slot and no other player action.
-- HP, criticals, victory/defeat, XP, Action Surge consumption, and round advancement are engine-owned. Never emit \`combat_end\`, \`exp_awarded\`, \`damage_taken\`, or \`enemy_updates\` for a combat exchange.
+- HP, criticals, victory/defeat, XP, Action Surge consumption, and round advancement are engine-owned. Never emit \`combat_end\`, \`exp_awarded\`, or \`damage_taken\` for a combat exchange.
 - When the engine returns a resolved exchange for narration, narrate it exactly once. Never invent a retaliation, counterattack, extra hit, or additional state change.
 
 PLAYER DEATH & DYING:
