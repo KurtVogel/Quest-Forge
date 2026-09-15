@@ -1982,6 +1982,30 @@ family). Smaller sibling: the same-response quest instant tier compounds through
 (four new+completed pairs = 100 XP at L1 vs 38 for a real completion) — a 2026-08-26 ruling to
 revisit explicitly. From the 2026-09-14 strengthening audit (rules-math + quests, Lap 2).
 
+### [strengthening] A channel with no valid payload is a bug factory; a `raw.x || null` read is a shape leak; a load clamp needs its live-write twin
+Three rules from one Lap-2 run (2026-09-15, response-parsing + enemy-stats-conditions). **(1)**
+`resources_used` is forbidden by the prompt for every class resource and applyEvents skips the
+four real keys as UI-owned, so EVERY entry a drifting DM emits (`["Second Wind"]`, an object, a
+3,000-char string) reaches `USE_RESOURCE`'s unknown-key branch and posts the FALSE line "**X
+unavailable** — it has already been used and must be recharged by rest"; `enemy_updates` has no
+reducer that can act at all (applyEvents drops events in active combat, `combat.enemies` is `[]`
+outside it). A dead channel is not harmless — its junk branch is the only reachable one, and its
+RESPONSE_FORMAT line is a per-turn token cost. Rule: every registry entry names ONE live reducer
+effect, or it is retired (registry + prompt + applyEvents), and the agreement test asserts it.
+**(2)** `location` is `raw.location || null` — the last registry `read` that passes an untyped
+object through — and `SET_LOCATION` honors an object payload's `profile` + `fillOnly`, the
+Scribe's private lane: a DM object location writes `type`/`danger`/`region`/`theaterFrontIds`
+onto the registry record (a theater claim unlocks a front's full-intensity symptoms there; a new
+region one-shot-triggers regional front seeding). Rule: when a reducer distinguishes senders by
+payload SHAPE, the wire must be typed to the DM's shape only. **(3)** `currentLocation` is clamped
+at 200 on LOAD and bare on the live `SET_LOCATION` write (a 100k location → a 163,785-char prompt
+every turn) — the 09-14 "every parser whitelist needs its load twin" rule inverted. Grep both
+directions. Smaller siblings: `sanitizeEnemyDamage` rejects `"2d8+4 bludgeoning"` to the 1d6
+default silently (the companion twin strips the suffix since 09-09), the combat check `dc` is
+`Number.isFinite`-gated while `slot_level` coerces ten lines below, and the JSON extractor is
+string-aware forwards but not on its backward anchor walk. From the 2026-09-15 strengthening audit
+(response-parsing + enemy-stats-conditions, Lap 2).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
