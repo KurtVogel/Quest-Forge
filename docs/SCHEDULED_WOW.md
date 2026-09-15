@@ -82,7 +82,7 @@ or loses a moment (note it under Process notes).
 |---|---|---|---|
 | first-ten-minutes | Premise → hero reveal → first scene; "I'm already in" | creation wizard (`components/CharacterSheet`), `components/Chat/sessionPriming.js`, `openingScene` lane, `starting_items` | 2026-09-09 (L1) |
 | ordinary-turn | The default beat: brief, vivid, ends in a live choice | DM rules + `RESPONSE_FORMAT` in `promptBuilder.js`, `MESSAGE_WINDOW`, custom DM prompt default | 2026-09-11 (L1) |
-| session-return | Coming back after days: "previously on…", instant re-immersion | `sessionPriming.js`, Continue/Load handoff, Journal | — |
+| session-return | Coming back after days: "previously on…", instant re-immersion | Continue/Load (`App.jsx`, `LOAD_GAME`), `session.lastPlayedAt`, Journal, OOC recap (`tableTalk.js`) | 2026-09-15 (L1) |
 | checks-and-consequence | A roll that *matters*: stakes stated, failure is content, one roll settles it | `outOfCombatRollPolicy.js`, `pendingRoleplayCheck`, DC ladder + `recentRulings` blocks | — |
 | combat-drama | Fights with fiction: openings, enemy intent variety, wounds that mean something, the victory beat | `combatExchange.js`, combat prompt blocks, narration-only call, `recentEncounters`/foe fatigue | — |
 | death-and-stakes | Dying, defeat terminals, the resurrection cut, loss that sticks | death saves, `isLowLevelSolo`, END_COMBAT terminals, defeat narration | — |
@@ -121,6 +121,7 @@ they do *better*, honestly).
 | loot-and-economy | **Diablo II**, **Kenshi**, **Dwarf Fortress** | Loot as story, an economy that pushes back, artifacts with histories |
 | journal-and-chronicle | **Dwarf Fortress legends**, **Caves of Qud**, **Crusader Kings** | The game writing your history back to you; procedural chronicle as a feature |
 | tone-and-voice, mystery-and-secrets | **Mythic GME**, **Slay the Princess** | Oracle-driven surprise, an unreliable but consistent narrator |
+| session-return | **Uncharted 4 / The Last of Us Part II** (gap-proportional "Previously on"), **Telltale's The Walking Dead** (your choices cut into the recap), **The Witcher 3** (journal in Dandelion's voice), **Blades in the Dark / Critical Role** (the spoken session-start recap) | Tell the returning player where they are, what they decided, what is open, and what was just asked — before they type; proportional to time away (added 2026-09-15) |
 | ordinary-turn | **Apocalypse World / Blades in the Dark** (GM moves), **Fallen London / Sunless Sea**, **80 Days**, **Roadwarden** | The GM turn as a move that follows from the fiction — consequence, one particular, the world acts, then a specific ask; 80–150 words of prose economy (added 2026-09-11) |
 | first-ten-minutes | **Disco Elysium** (the first room, editable archetypes), **Wildermyth** (chapter 1), **King of Dragon Pass** (first council), **Baldur's Gate 1** (Candlekeep), **Citizen Sleeper** (wake to one voice and one clock), **Ironsworn** (truths, first vow) | A start you didn't have to write but may edit; an opening that hands you concrete, characterful first moves inside the fiction — named people you already know, never a blank box, never a menu (added 2026-09-09) |
 
@@ -132,6 +133,8 @@ reason) on Lap-4 runs.
 
 Format: `- [ ] **W1** (moment-id, YYYY-MM-DD): one-line title — entry date below`
 
+- [ ] **W1** (session-return, 2026-09-15): The return card — engine-assembled "Previously, in <campaign>" above the composer after a ≥6 h gap (last journal decisions, open quests, place/party, the DM's last question); `lastPlayedAt` stamped per turn; Continue shows location + time away — entry 2026-09-15
+- [ ] **W2** (session-return, 2026-09-15): "Ask the DM for a recap" button on the return card — sends a bounded OOC recap request through the table-talk lane, player-initiated only — entry 2026-09-15
 - [x] **W1** (ordinary-turn, 2026-09-11): Turn grammar — consequence, one particular, motion (quiet ≠ static), then the ask; 60–180-word floor and ceiling, short anti-pattern list, in the cached prefix — entry 2026-09-11. *Shipped 2026-09-11: `## THE ORDINARY TURN` block in `CORE_INSTRUCTIONS` (prefix-stable, replaces the exploration cycle's "end by asking" step and the "Leave space" pacing line), default custom DM prompt's closing-question line softened to match; pinned by `promptBuilder.test.js` (position in the prefix, element order, floor/ceiling, tics, byte-stability). Proof step RUN the same day — `npm run eval:turns`, `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`: three rounds, MOTION anti-escalation guard + THE ASK stop rule tuned in; Gemini in-band 11% → 94%, Grok live endings 5% → 85% and echo 63% → 10%; Gemini's echo-of-action (61%) is the one unmoved column.*
 - [x] **W0** (first-ten-minutes, 2026-09-09): Premise starters — tap a curated start on "Set the stage", then edit it; plus a "Draft from my hero" button (one call, three premises) — entry 2026-09-09. *Shipped 2026-09-10 (branch `wow/first-ten-minutes`): `data/premiseStarters.js` (five starters, name woven in, proper nouns for the front director), `PremiseStarters.jsx` tap-cards on both the wizard and roster paths, `session.premiseStarterId` stamped only while the text is verbatim, `llm/premiseDrafter.js` on the thinking-free Flash machinery lane gated on `isMachineryReady`; browser-verified tap → fill → Begin → stamped autosave.*
 - [x] **W1** (first-ten-minutes, 2026-09-09): The opening ends on a handle and echoes the hero — ANCHOR (people the hero knows on screen), ECHO (one background detail surfaces), HANDLE (2–3 ordinary next things in prose, never urgent) — entry 2026-09-09. *Shipped 2026-09-10 (same branch): three clauses on `buildCampaignOpeningPrompt` only, pinned by `sessionPriming.opening.test.js`; the six-opening real-provider scoring (proof step) is still to run.*
@@ -160,6 +163,11 @@ runs triaging.
 
 ## Process notes
 
+- **2026-09-15 — extra run on request.** Rotation to `session-return`; the ordinary-turn W1 had shipped
+  on 2026-09-11 with a real-provider proof run (`eval:turns`), ticked. Registry scope corrected
+  (`sessionPriming.js` only primes NEW campaigns; the moment lives in `App.jsx`/`LOAD_GAME`,
+  `lastPlayedAt`, and the OOC recap lane). Finding worth naming: `lastPlayedAt` is write-once,
+  so time-away is unmeasurable today. Backlog: +1, −1, one sub-item absorbed.
 - **2026-09-11 — extra run on request (off-schedule).** Both first-ten-minutes items had shipped
   on 2026-09-10 (ticked); rotation moved to `ordinary-turn`. One W1, second proposal withheld
   to `npc-relationships`. Backlog: +0, −2. Off-schedule runs are fine: the rotation and the
@@ -179,6 +187,34 @@ runs triaging.
 ---
 
 ## Log
+
+### 2026-09-15 — session-return — Lap 1 (genre benchmark)
+
+**What we ship.** The start screen's Continue card shows `name · Lv.N class` (`App.jsx:160-168`) although the save projection already carries `location`, HP, purse, and `savedAt` (`persistence.js:257-275`). Continue dispatches `LOAD_GAME` (`App.jsx:67-74`), which is **narratively inert by decision** (DECISIONS 2026-06-19: no DM recap, no scene reset, no extra turn): the player lands on the raw transcript scrolled to its tail, with the last DM question wherever it sits under any roll-result and receipt lines. No system line marks the return. `session.lastPlayedAt` is written ONCE at creation (`CharacterCreation.jsx:221`) and never again, so the app cannot tell a ten-minute break from a ten-day one. Re-orientation exists but is all pull: the Journal tab (2–3-sentence cadence summaries with key decisions and consequences, `JournalPanel.jsx:509-522`), NPC cards, Places, Quests, and an OOC "recap" the DM answers freely (`tableTalk.js:28,41`) — none of it surfaces at the moment of return, and nothing tells the player the OOC path exists.
+
+**Best in genre.** Uncharted 4 / The Last of Us Part II: a "Previously on" cinematic plays ONLY when you load after time away — the recap is proportional to the gap. Telltale's Walking Dead: every episode opens on "Previously on…", the choices YOU made cut into it. The Witcher 3: the journal retells each quest's story so far in Dandelion's voice, so catching up is reading, not scrolling. Disco Elysium: an always-open task list is the re-entry point. Blades in the Dark / Critical Role: the session-start ritual is a spoken recap ending on the open question. Old Greg's Tavern *markets* "swing back in a month, a year" — and its reviews say the memory breaks; ours doesn't, but we never show it off at the one moment it matters. Shared shape: **when you've been away, the game tells you where you are, what you decided, what's open, and what it just asked — before you type.**
+
+**Where we fall short.** (1) Zero "previously on": the richest deterministic re-orientation data in the genre (journal decisions/consequences, open quests, party, place, pending check, the DM's last question) is never assembled at return; a returning player scrolls or opens four tabs. (2) The gap is unmeasured, so even a manual recap can't be proportional. (3) The one LLM recap path (OOC table talk) is undiscoverable.
+
+**W1 · session-return · The return card: "Previously, in <campaign>" — assembled by the engine, zero calls**
+- Today: Continue → raw transcript tail; `lastPlayedAt` write-once; Journal/Quests are pull-only (cites above).
+- Best in genre: Uncharted 4's gap-proportional recap; Telltale's "your choices" cut; The Witcher 3 journal; Disco Elysium's task list.
+- Proposal: (a) stamp `session.lastPlayedAt` on every committed turn (one reducer line in the commit path; LOAD_GAME heals absent → `savedAt`). (b) When Continue/Load finds the gap ≥ 6 h, ChatPanel renders a dismissible **return card** above the composer — UI, never a message: it never enters the transcript, the save, the DM window, RAG, or the Scribe, so DECISIONS 2026-06-19 holds exactly. Contents, all from live state: "Last time" = the last 1–2 journal entries' summary + key decisions (gap ≥ 3 days → 3 entries); "Open threads" = up to 3 active quests by recency + the pending check card if one is staged; "Where you are" = `currentLocation`, party names, HP/AC chip; "The DM asked" = the final sentence of the last narrative-eligible assistant message, quoted. (c) The Continue button detail gains `location · last played 3 days ago` from the projection it already has. Dismiss = "Continue"; the card never re-shows for the same `lastPlayedAt`.
+- Cost: 0 calls, 0 tokens; prefix untouched; no new persisted field beyond the stamp (autosaves by construction).
+- Pillar check: 1 (persistence made VISIBLE at the moment the player doubts it), 4 (nothing added to any turn). Strains none; the 6-hour threshold keeps a same-evening return silent.
+- Proof: a scripted return after ≥ 1 day (dev tooling can fake `lastPlayedAt`): the card lists a decision the journal recorded and the quest the player left open; in the next directed playtest the first message after Continue references the card without the player opening Journal.
+- IDEAS.md: new entry "[wow] The return card" (retired "[strengthening] Conversational-distance windows for the spell/rest replay ledgers" — shipped: both handlers ride `findNearbyReplay`, which measures conversational distance since 2026-07-30); absorbs "journal snippet preview per save" from "Save management polish".
+
+**W2 · session-return · "Ask the DM for a recap" — the Critical Role open, on demand**
+- Today: OOC recap works (`tableTalk.js`) but nothing reveals it; a player who wants the DM's voice for "last time on…" has to know the `OOC:` prefix.
+- Best in genre: Blades in the Dark's spoken session-start recap; Critical Role's "Last time on…" ending on the open question.
+- Proposal: one button on the return card (and in the composer's OOC affordance if one exists) that sends `OOC: Recap where we are, what's open, and what you last asked me — in your voice, under 120 words.` It rides the existing table-talk lane: events force-nulled, kept out of memory, hidden state never revealed. Player-initiated, so DECISIONS 2026-06-19 ("never asks the DM for a recap" = automatically) is honored, not reversed — flagging it here because it sits right beside that line.
+- Cost: one DM call ONLY on tap (~14k in cached / ~200 out); zero otherwise; DM lane.
+- Pillar check: 2 (the LLM spends its voice on feeling, the engine on facts — the card is the facts, the button is the voice), 4 (opt-in). Strain: none if the word cap holds.
+- Proof: three taps after ≥ 1-day returns on Gemini + Grok: every recap names the open quest and ends on the DM's last question; none leaks a front title or NPC secret.
+- IDEAS.md: extends the new "[wow] The return card" entry (no second entry).
+
+Backlog: +1 entry, −1 retired, one sub-item absorbed. Queue 2/8. Reference Shelf +1 row. Lap-3 material noted, not proposed: pinning the last DM question when receipts stack above it.
 
 ### 2026-09-11 — ordinary-turn — Lap 1 (genre benchmark)
 

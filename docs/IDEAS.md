@@ -859,6 +859,30 @@ Why: the first five minutes are the marketing experience. A player who sees thei
 backstory become a face, a sheet, and a real playable build is much more likely to believe the
 rest of the campaign will remember and respect it.
 
+### [wow] The return card: "Previously, in <campaign>" — status: `idea` (wow audit 2026-09-15, W1 + W2)
+Continue/Load is narratively inert by decision (DECISIONS.md 2026-06-19 — no DM recap, no
+extra turn) and should stay so; but today the return moment is ALSO informationally inert:
+the Continue button shows `name · Lv · class` although the save projection already carries
+location, HP, purse and `savedAt`; the player lands on the raw transcript tail; and
+`session.lastPlayedAt` is written once at creation and never again, so a ten-minute break and
+a ten-day one look identical. Re-orientation is all pull (Journal, Quests, Places, an OOC
+"recap" nobody is told about). Uncharted 4 / TLOU2 play a "Previously on" ONLY after time
+away; Telltale cuts your own choices into it; The Witcher 3's journal retells the story so
+far; Blades in the Dark opens every session with a spoken recap ending on the open question.
+**W1 slice (zero LLM):** stamp `lastPlayedAt` on every committed turn; on a ≥6 h gap, ChatPanel
+renders a dismissible return card above the composer — UI only, never a message, never in
+the transcript/save/DM window/RAG/Scribe — with "Last time" (last 1–2 journal entries'
+summary + key decisions; ≥3 days → 3), "Open threads" (≤3 active quests + a staged check
+card), "Where you are" (location, party, HP/AC), and "The DM asked" (final sentence of the
+last narrative-eligible assistant message). Continue's detail line gains
+`location · last played 3 days ago`. **W2 slice:** one button on the card, "Ask the DM for a
+recap", sends a bounded `OOC:` request (in the DM's voice, ≤120 words, ends on the open
+question) through the existing table-talk lane — player-initiated, so the 2026-06-19 decision
+is honored, not reversed. Proof: a faked ≥1-day return shows a recorded decision and the open
+quest; playtest first-message-after-Continue references the card. Full shape in
+`SCHEDULED_WOW.md` 2026-09-15. Absorbs "journal snippet preview per save" from Save
+management polish.
+
 ### Persist user music across reloads — status: `idea`, small
 The MP3 player (`AmbientControls.jsx`, shipped 2026-06-14) holds tracks as in-memory object
 URLs, so a reload clears them and the player must re-pick files. Optional fix: store the
@@ -878,7 +902,7 @@ turns) and the no-store index contract must never gain a second cache layer.
 ### Save management polish — status: partially `shipped` (2026-06-10)
 Shipped: overwrite button, cloud delete, honest cloud-status toast/messages.
 Remaining ideas: name-collision overwrite prompt on manual save, save thumbnails (scene art),
-journal snippet preview per save.
+journal snippet preview per save (absorbed 2026-09-15 by "[wow] The return card" below — the Continue card gains location + time away, the return card carries the journal tail).
 
 ### Character roster + export/import — status: `shipped` (2026-06-12, same day as proposed)
 A local list of saved heroes, plus JSON file export/import operated from it.
@@ -1352,7 +1376,7 @@ COMPANION_GEAR_SPEC.md §9; the wait-for-evidence note was overridden by Vesa's 
 go-ahead — the audit only fires when the DM misses, so shipping early costs one prompt
 block on audited turns. Untracked armor is conservatively skipped (no derivable AC).
 
-### [strengthening] Conversational-distance windows for the spell/rest replay ledgers — status: `idea` (2026-07-22)
+### [strengthening] Conversational-distance windows for the spell/rest replay ledgers — status: `shipped` (2026-07-30 "every replay window measures conversational distance" — `recentSpellCasts` and `recentRests` both ride `findNearbyReplay`/`conversationalDistance` in `engine/replayLedger.js`; marked by the 2026-09-15 wow audit [wow])
 The coin ledgers now measure their replay windows in conversational distance (system and
 hidden messages don't age the guard) after playtest #11 proved a dice turn's ~5 raw
 messages silently expired the raw-index window. `recentSpellCasts` and `recentRests` still
