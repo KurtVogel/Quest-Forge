@@ -510,7 +510,11 @@ life); (4) THE ASK — the situation's live question, "What do you do?" only whe
 asks it, never a stacked-question menu. The scorecard's brevity / stance-informed-dialogue /
 quiet-scene rows become exactly these per-turn checks: score 20 turns before/after on Gemini
 and Grok (echo / particular / motion / ask-shape / word count). Full shape in
-`SCHEDULED_WOW.md` 2026-09-11.
+`SCHEDULED_WOW.md` 2026-09-11. **[wow] Consequence follow-through row (wow audit 2026-09-16,
+checks-and-consequence Lap 1):** score ten failed out-of-combat checks per provider for
+"narrated consequence matches the card's stated failure stakes" and "no second check for the
+same objective" — the proof step of "[wow] Checks: the odds on the card, the promise in the
+outcome".
 
 ## Gameplay & Mechanics
 
@@ -882,6 +886,34 @@ is honored, not reversed. Proof: a faked ≥1-day return shows a recorded decisi
 quest; playtest first-message-after-Continue references the card. Full shape in
 `SCHEDULED_WOW.md` 2026-09-15. Absorbs "journal snippet preview per save" from Save
 management polish.
+
+### [wow] Checks: the odds on the card, the promise in the outcome — status: `idea` (wow audit 2026-09-16, two W1 slices)
+The out-of-combat check system is genre-strong at the GATE (three-condition roll gate, the
+8/10/12/15/18+ ladder, public ruling fields, the arbiter, `recentRulings`) and drops the ball
+at the two ends the player actually feels. (1) The roleplay-check card shows the DC and the
+advantage chips but never the hero's own bonus or the chance — a +7 rogue and a −1 wizard read
+the same "DC 12" card and decide Roll / Challenge / Change approach blind, although
+`resolvePlayerRoll` computes the exact modifier one click later. Disco Elysium's percentage on
+every check is the genre's most-quoted design choice; King of Dragon Pass gives odds, not
+answers. (2) `sanitizeProposalRoll` keeps `failureStakes` on every accepted roll and nothing
+downstream reads it: the post-roll prompt gets `[ROLL RESULT: …, DC 12, rolled 9 — FAILURE]`
+plus six generic rules, the proposal JSON is withheld from the DM window, so the DM re-derives a
+consequence from a message it cannot see — the seam where "failure is content" goes flat or
+cascades. Blades in the Dark's loop is state the consequence → roll → deliver THAT consequence.
+**Slice A (zero LLM):** `describeCheckOdds(character, inventory, roll)` in `engine/rules.js`
+(modifier by the resolver's own branch order, conditions folded, P(d20+mod ≥ DC) with the
+advantage/disadvantage formulas and the natural-20 auto-success) rendered as one line on the
+card: `Stealth +7 (proficient) · DC 12 · 80% — advantage: 96%`. **Slice B (~40–70 dynamic
+tokens on the post-roll system message, prefix untouched):** the resolver returns `failureStakes`,
+the objective, and the margin; `formatRollSummary` renders "FAILURE by 3 (near miss). The ruling
+promised on failure: '…'. Deliver exactly that consequence — one, proportionate, then a live
+choice" / "SUCCESS by 6. Deliver the win the ruling promised for '…' concretely". Margin bands
+are narration texture only — pass/fail and "respect the dice exactly" untouched; natural 1 = the
+stakes plus one complication, never incompetence (DECISIONS.md 2026-06-22 stays sovereign).
+Proof: a table test on the odds helper; `rollResolver.test.js` pins the summary; ten failed
+checks each on Gemini and Grok scored for "narrated consequence matches the card's stated
+stakes" and "no second check for the same objective" — the Experience scorecard's
+consequence-follow-through row. Full shape in `SCHEDULED_WOW.md` 2026-09-16.
 
 ### Persist user music across reloads — status: `idea`, small
 The MP3 player (`AmbientControls.jsx`, shipped 2026-06-14) holds tracks as in-memory object
@@ -1626,7 +1658,7 @@ becomes `kind !== 'error' && kind !== 'ooc'`, the DM-window rule becomes `kind =
 and the table-talk pairing heuristic retires. Legacy messages without `kind` keep today's
 inference as the fallback. From the 2026-09-04 strengthening audit (chronicler, Lap 1).
 
-### [strengthening] One condition normalizer for every creature — status: `idea` (2026-09-05)
+### [strengthening] One condition normalizer for every creature — status: `shipped` in three parts (hero: `normalizeConditionName`/`normalizeConditionList` in `engine/rules.js` at the parser boundary, `ADD_CONDITION`/`REMOVE_CONDITION`/`withCondition`, and the load heal — DECISIONS.md 2026-09-05; enemy save lane consults `getConditionRollEffects(…, 'save')` through `rollEnemySave` — 2026-09-05; companions through `normalizeCompanion` → `normalizeConditionList` on both branches and at LOAD_GAME — 2026-09-09; marked by the 2026-09-16 wow audit [wow])
 Three creatures carry `conditions` and one table (`CONDITION_EFFECTS`) reads all of them, but
 each has its own storage discipline: enemies pass through `normalizeEnemyConditions` at every
 boundary (lowercase, trim, supported-set, dedupe — parser, START_COMBAT, LOAD_GAME, pre-roll),

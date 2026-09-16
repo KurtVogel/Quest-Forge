@@ -83,7 +83,7 @@ or loses a moment (note it under Process notes).
 | first-ten-minutes | Premise → hero reveal → first scene; "I'm already in" | creation wizard (`components/CharacterSheet`), `components/Chat/sessionPriming.js`, `openingScene` lane, `starting_items` | 2026-09-09 (L1) |
 | ordinary-turn | The default beat: brief, vivid, ends in a live choice | DM rules + `RESPONSE_FORMAT` in `promptBuilder.js`, `MESSAGE_WINDOW`, custom DM prompt default | 2026-09-11 (L1) |
 | session-return | Coming back after days: "previously on…", instant re-immersion | Continue/Load (`App.jsx`, `LOAD_GAME`), `session.lastPlayedAt`, Journal, OOC recap (`tableTalk.js`) | 2026-09-15 (L1) |
-| checks-and-consequence | A roll that *matters*: stakes stated, failure is content, one roll settles it | `outOfCombatRollPolicy.js`, `pendingRoleplayCheck`, DC ladder + `recentRulings` blocks | — |
+| checks-and-consequence | A roll that *matters*: stakes stated, failure is content, one roll settles it | `outOfCombatRollPolicy.js`, `pendingRoleplayCheck` + `RoleplayCheckPanel` (`ChatPanel.jsx`), `rollResolver.js` (resolve + outcome prompt), DC ladder + `recentRulings` blocks | 2026-09-16 (L1) |
 | combat-drama | Fights with fiction: openings, enemy intent variety, wounds that mean something, the victory beat | `combatExchange.js`, combat prompt blocks, narration-only call, `recentEncounters`/foe fatigue | — |
 | death-and-stakes | Dying, defeat terminals, the resurrection cut, loss that sticks | death saves, `isLowLevelSolo`, END_COMBAT terminals, defeat narration | — |
 | npc-relationships | People with stance, memory, agendas; romance and grudges that evolve | `## KNOWN NPCs`, `stanceToPlayer`/`bondMoments`, Scribe `npc_updates`, `relationshipHistory` | — |
@@ -124,6 +124,7 @@ they do *better*, honestly).
 | session-return | **Uncharted 4 / The Last of Us Part II** (gap-proportional "Previously on"), **Telltale's The Walking Dead** (your choices cut into the recap), **The Witcher 3** (journal in Dandelion's voice), **Blades in the Dark / Critical Role** (the spoken session-start recap) | Tell the returning player where they are, what they decided, what is open, and what was just asked — before they type; proportional to time away (added 2026-09-15) |
 | ordinary-turn | **Apocalypse World / Blades in the Dark** (GM moves), **Fallen London / Sunless Sea**, **80 Days**, **Roadwarden** | The GM turn as a move that follows from the fiction — consequence, one particular, the world acts, then a specific ask; 80–150 words of prose economy (added 2026-09-11) |
 | first-ten-minutes | **Disco Elysium** (the first room, editable archetypes), **Wildermyth** (chapter 1), **King of Dragon Pass** (first council), **Baldur's Gate 1** (Candlekeep), **Citizen Sleeper** (wake to one voice and one clock), **Ironsworn** (truths, first vow) | A start you didn't have to write but may edit; an opening that hands you concrete, characterful first moves inside the fiction — named people you already know, never a blank box, never a menu (added 2026-09-09) |
+| checks-and-consequence | **Disco Elysium** (the % on every check before you commit; white checks reopen when the situation changes, red checks are one-shot), **Blades in the Dark** (position + effect stated before the roll, 4–5 = success with the consequence you were told about), **Ironsworn / Apocalypse World** (the weak hit: the world moves on every result), **Pathfinder 2e** (degrees by margin), **King of Dragon Pass** (advisors give odds, not answers) | The choice to roll is a decision, so show the odds; the consequence is named before the dice and DELIVERED after them; the margin gives the narration its texture without changing pass/fail (added 2026-09-16) |
 
 ## Open Proposals
 
@@ -133,6 +134,8 @@ reason) on Lap-4 runs.
 
 Format: `- [ ] **W1** (moment-id, YYYY-MM-DD): one-line title — entry date below`
 
+- [ ] **W1** (checks-and-consequence, 2026-09-16): The odds on the card — the hero's real modifier and the engine-computed success chance (advantage/disadvantage and conditions folded in) beside the DC on the roleplay-check card, zero calls — entry 2026-09-16
+- [ ] **W1** (checks-and-consequence, 2026-09-16): The promise in the outcome — the card's stated failure stakes / promised win and the roll margin ride the `[ROLL RESULT]` line into the post-roll prompt, so the DM delivers the consequence it publicly committed to; pass/fail untouched — entry 2026-09-16
 - [ ] **W1** (session-return, 2026-09-15): The return card — engine-assembled "Previously, in <campaign>" above the composer after a ≥6 h gap (last journal decisions, open quests, place/party, the DM's last question); `lastPlayedAt` stamped per turn; Continue shows location + time away — entry 2026-09-15
 - [ ] **W2** (session-return, 2026-09-15): "Ask the DM for a recap" button on the return card — sends a bounded OOC recap request through the table-talk lane, player-initiated only — entry 2026-09-15
 - [x] **W1** (ordinary-turn, 2026-09-11): Turn grammar — consequence, one particular, motion (quiet ≠ static), then the ask; 60–180-word floor and ceiling, short anti-pattern list, in the cached prefix — entry 2026-09-11. *Shipped 2026-09-11: `## THE ORDINARY TURN` block in `CORE_INSTRUCTIONS` (prefix-stable, replaces the exploration cycle's "end by asking" step and the "Leave space" pacing line), default custom DM prompt's closing-question line softened to match; pinned by `promptBuilder.test.js` (position in the prefix, element order, floor/ceiling, tics, byte-stability). Proof step RUN the same day — `npm run eval:turns`, `docs/TURN_GRAMMAR_EVAL_2026-09-11.md`: three rounds, MOTION anti-escalation guard + THE ASK stop rule tuned in; Gemini in-band 11% → 94%, Grok live endings 5% → 85% and echo 63% → 10%; Gemini's echo-of-action (61%) is the one unmoved column.*
@@ -163,6 +166,12 @@ runs triaging.
 
 ## Process notes
 
+- **2026-09-16 — scheduled run.** Rotation to `checks-and-consequence` (registry order among the
+  never-audited moments; still Lap 1). Neither session-return item has shipped (`lastPlayedAt` is
+  still write-once). Finding worth naming: `sanitizeProposalRoll` carries `failureStakes` on every
+  roll the player accepts, and the resolver drops it one function later — the one public
+  commitment the check system makes is the one thing the outcome prompt never sees. Registry
+  scope widened to the card component and the resolver. Backlog: +1, −1. Queue 4/8.
 - **2026-09-15 — extra run on request.** Rotation to `session-return`; the ordinary-turn W1 had shipped
   on 2026-09-11 with a real-provider proof run (`eval:turns`), ticked. Registry scope corrected
   (`sessionPriming.js` only primes NEW campaigns; the moment lives in `App.jsx`/`LOAD_GAME`,
@@ -187,6 +196,34 @@ runs triaging.
 ---
 
 ## Log
+
+### 2026-09-16 — checks-and-consequence — Lap 1 (genre benchmark)
+
+**What we ship.** The gate is genre-strong on paper: `## CHECK DISCIPLINE` (`promptBuilder.js:304-316`) demands uncertainty + opposition + an interesting failure, the solo ladder 8/10/12/15/18+, "one roll settles the entire immediate approach", "success must change the situation", a natural-20 rule; `## ROLL REQUEST RULES` (`:520-534`) makes every proposal a PUBLIC TABLE RULING with `reason`/`opposition`/`failure_stakes`/`difficulty_reason`; the arbiter (`outOfCombatRollPolicy.js`) throws out belief, demeanor, and attack-as-check proposals; `recentRulings` (`:942-956`) binds no-dice endings. The player sees the card (`RoleplayCheckPanel`, `ChatPanel.jsx:941-1012`): description, **DC**, advantage/disadvantage chips, the four ruling fields, then Roll / Challenge once / Change approach. On Roll, `resolvePlayerRoll` (`rollResolver.js:813-902`) computes the real modifier (`getSkillModifier`/`getSavingThrowModifier`, conditions combined), rolls crypto dice, posts `**Stealth check** (DC 12): Rolled **9** — Failure!` and returns `{ type, skill, dc, rolled, success, critical, description }`. The outcome call (`:461`) gets six rules, the withheld setup, and `formatRollSummary` (`:323-331`): `[ROLL RESULT: Slip past the patrol, DC 12, rolled 9 — FAILURE]`. `sanitizeProposalRoll` (`roleplayCheck.js:13-41`) keeps `failureStakes` on every accepted roll; nothing downstream reads it (`grep stakes rollResolver.js turnOrchestrator.js` → none). Natural 1 is printed on the line and has no rule; the only degrees-of-success text lives in the unused-by-default Narrative ruleset (`:383`).
+
+**Best in genre.** Disco Elysium: the success percentage sits on every check before you commit — the single most-quoted design choice in the game; white checks reopen when the situation changes, red ones are one-shot (our withdraw / set-aside / final-ruling ledger already has this shape). Blades in the Dark: position and effect are stated BEFORE the roll, and a 4–5 is "you do it, AND the consequence we named happens" — the consequence is a promise the GM keeps. Ironsworn / Apocalypse World: the weak hit means the world moves on every result. Pathfinder 2e: degrees by margin. King of Dragon Pass: advisors give odds, not answers. Shared shape: **the choice to roll is a decision (show the odds); the consequence is named before the dice and delivered after them; the margin colors the narration without changing pass/fail.**
+
+**Where we fall short.** (1) The player decides Roll / Challenge / Change approach **blind**: the card shows the DC but never the hero's bonus or the chance — the engine has both numbers and the advantage math, so a rogue with +7 Stealth and a wizard with −1 look at the same "DC 12" card. (2) **The promise is dropped between the card and the outcome.** The stakes the player read are the one public commitment the system makes, and the post-roll prompt carries only description + DC + total + SUCCESS/FAILURE; the proposal JSON is withheld from the DM window, so the DM re-derives a consequence from a message it cannot see — the exact seam where "failure is content" goes flat or cascades. (3) No margin: 9 vs DC 10 and 2 vs DC 10 are the same word, and natural 1 has no ruling while natural 20 has a paragraph.
+
+**W1 · checks-and-consequence · The odds on the card**
+- Today: DC + edge chips only (`ChatPanel.jsx:964-969`); the modifier is computed one click later in `resolvePlayerRoll`.
+- Best in genre: Disco Elysium's percentage; King of Dragon Pass's odds; Citizen Sleeper's visible dice.
+- Proposal: one pure helper in `engine/rules.js` (`describeCheckOdds(character, inventory, roll)` → `{ modifier, source, chance }`: skill/save/ability/attack modifier by the resolver's own branch order, conditions folded through `getConditionRollEffects` + `combineRollModifiers`, chance = P(d20 + mod ≥ DC) with the advantage/disadvantage formulas and the natural-20 auto-success the resolver already grants) and one line on the card: `Stealth +7 (proficient) · DC 12 · 80% — advantage: 96%`. Saves label the ability; an unknown skill shows "+0 (untrained)". The challenge textarea placeholder stays; nothing else moves.
+- Cost: 0 calls, 0 tokens; prefix untouched; no state.
+- Pillar check: 2 (engine truth made visible at the decision point), 3 (Change approach becomes an informed choice, not a guess). Strains none — it is the one number the resolver would print a click later anyway.
+- Proof: a table test on the helper (flat / advantage / disadvantage / DC 0 / DC 30 / conditions) matching the resolver's success rule; in the next directed playtest, at least one Change approach or Challenge taken at a low displayed chance.
+- IDEAS.md: new entry "[wow] Checks: the odds on the card, the promise in the outcome" (retired "[strengthening] One condition normalizer for every creature" — shipped in three parts: hero 2026-09-05 `normalizeConditionName`, enemy save lane 2026-09-05 `rollEnemySave`, companions 2026-09-09 `normalizeCompanion` → `normalizeConditionList`).
+
+**W1 · checks-and-consequence · The promise in the outcome**
+- Today: `[ROLL RESULT: …, DC 12, rolled 9 — FAILURE]` + six generic rules (`rollResolver.js:323-331, 461`); `failureStakes`, `reason`, `opposition` end at `sanitizeProposalRoll`.
+- Best in genre: Blades in the Dark's stated-then-delivered consequence; Pathfinder 2e's margins; Apocalypse World's weak hit.
+- Proposal: `resolvePlayerRoll` returns `failureStakes`, `objective` (description), and `margin` (total − DC, plus the natural 1/20 flags it already has); `formatRollSummary` renders them: on failure `— FAILURE by 3 (near miss). The ruling promised on failure: "The patrol notices the escape attempt." Deliver exactly that consequence — one, proportionate, then a live choice.`; on success `— SUCCESS by 6. Deliver the win the ruling promised for "Slip past the patrol" concretely.` Margin bands as narration texture ONLY (pass/fail untouched, "respect the dice exactly" untouched): short by 1–2 = the stated stakes land but the hero keeps a foothold; short by 5+ = the stakes in full; natural 1 = the stakes plus one complication, never incompetence (the existing rule); natural 20 keeps its critical paragraph; by 5+ = clean. One sentence in `## ROLL REQUEST RULES`: "your failure_stakes come back to you with the dice — write the consequence you will actually deliver." Ordinary chat line unchanged.
+- Cost: ~40–70 tokens on the dynamic post-roll system message (no prefix change); DM lane; zero extra calls.
+- Pillar check: 2 (the engine carries the contract, the LLM spends itself on the delivery), 3 (the player was told the stakes; now they get exactly those), 4 (the line says ONE consequence — the anti-cascade rule rides the result itself, not memory). Flag: DECISIONS 2026-06-22 "failure ≠ incompetence" stays sovereign and is restated on the natural-1 band.
+- Proof: `rollResolver.test.js` pins the summary carrying stakes + margin; ten failed checks each on Gemini and Grok (one starter premise) scored for "narrated consequence matches the card's stated stakes" and "no second check for the same objective" — baseline measured in the same run; the scorecard's consequence-follow-through row becomes this check.
+- IDEAS.md: same new entry (no second entry); the Experience scorecard's "consequence follow-through" row cross-linked.
+
+Lap-3 material, noted not proposed: a dice turn burns ~5 raw rows (card, roll line, receipt, outcome) — the roll line and outcome could share one message. Checked and NOT a gap: Disco Elysium's "retry when things change" already exists as `recentRulings`' set-aside/withdrawn semantics (DECISIONS 2026-07-05). Backlog: +1 [wow] entry, −1 shipped. Queue 4/8. Reference Shelf +1 row.
 
 ### 2026-09-15 — session-return — Lap 1 (genre benchmark)
 
