@@ -18,6 +18,7 @@ import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessio
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
+import CheckOddsLine from './CheckOddsLine.jsx';
 import './Chat.css';
 
 /**
@@ -883,6 +884,8 @@ export default function ChatPanel() {
             {pendingRoleplayCheck && !state.combat?.active && (
                 <RoleplayCheckPanel
                     proposal={pendingRoleplayCheck}
+                    character={state.character}
+                    inventory={state.inventory}
                     challenge={roleplayChallenge}
                     showChallenge={showRoleplayChallenge}
                     disabled={isLoading}
@@ -940,6 +943,8 @@ export default function ChatPanel() {
 
 function RoleplayCheckPanel({
     proposal,
+    character,
+    inventory,
     challenge,
     showChallenge,
     disabled,
@@ -967,6 +972,7 @@ function RoleplayCheckPanel({
                         {roll.advantage && <span className="roleplay-check-edge">Advantage</span>}
                         {roll.disadvantage && <span className="roleplay-check-edge danger">Disadvantage</span>}
                     </div>
+                    <CheckOddsLine character={character} inventory={inventory} roll={roll} />
                     <dl className="roleplay-check-reasoning">
                         <div><dt>Why roll?</dt><dd>{roll.reason || 'The DM did not provide a specific justification.'}</dd></div>
                         <div><dt>Opposition</dt><dd>{roll.opposition || 'No active opposition was specified.'}</dd></div>

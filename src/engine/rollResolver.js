@@ -14,7 +14,7 @@
  */
 
 import { rollWithModifier } from './dice.ts';
-import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, normalizeDeathSaves, SKILL_ABILITIES } from './rules.js';
+import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, normalizeDeathSaves, canonicalRollKey, SKILL_ABILITIES } from './rules.js';
 import { validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
 import { applyUncannyDodge, conditionAwareAttackModifiers, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
 import { isCompanionActive, isLowLevelSolo } from './combatExchange.js';
@@ -811,7 +811,10 @@ function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
 }
 
 function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
-    const skillName = roll.skill.toLowerCase();
+    // Shared with describeCheckOdds (the card's odds line) so the two can never
+    // disagree — and a canonical camelCase key (`sleightOfHand`) survives
+    // instead of lowercasing into an unknown skill (2026-09-16).
+    const skillName = canonicalRollKey(roll.skill) || '';
 
     // Initiative retired 2026-08-27 (DECISIONS.md): the exchange machine has
     // owned initiative since combat_start rolls it engine-side — a DM-requested

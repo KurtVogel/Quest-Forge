@@ -467,6 +467,115 @@ export function combineRollModifiers(rollAdvantage, rollDisadvantage, conditionE
     return { advantage: adv, disadvantage: dis, note };
 }
 
+const SKILL_KEY_BY_LOWER = new Map(Object.keys(SKILL_ABILITIES).map(key => [key.toLowerCase(), key]));
+
+/**
+ * Canonical roll key for a DM-declared `skill`: a SKILL_ABILITIES key in its own
+ * casing (`sleightOfHand`), an ability name, `attack`, or the lowercased raw
+ * string when nothing matches (the resolver's "unknown → plain d20" branch).
+ * One lookup shared by the resolver and the odds helper: `resolvePlayerRoll`'s
+ * bare `.toLowerCase()` turned `sleightOfHand` into `sleightofhand`, which
+ * SKILL_ABILITIES misses — an untrained +0 for a rogue's own skill (2026-09-16).
+ */
+export function canonicalRollKey(value) {
+    if (typeof value !== 'string') return null;
+    const lower = value.trim().toLowerCase();
+    if (!lower) return null;
+    return SKILL_KEY_BY_LOWER.get(lower) || lower;
+}
+
+export const MAX_CHECK_DC = 30;
+
+/**
+ * P(d20 + modifier ≥ dc) for one d20, with the natural-20 auto-success the
+ * resolver grants (`result.isCritical`). A natural 1 is NOT an auto-failure
+ * outside attacks (the resolver compares the total) — matched here.
+ */
+export function d20SuccessChance(modifier, dc, { advantage = false, disadvantage = false } = {}) {
+    const mod = Number.isFinite(modifier) ? modifier : 0;
+    const target = Number.isFinite(dc) ? Math.min(MAX_CHECK_DC, Math.max(0, dc)) : 10;
+    let faces = 0;
+    for (let face = 1; face <= 20; face += 1) {
+        if (face === 20 || face + mod >= target) faces += 1;
+    }
+    const p = faces / 20;
+    if (advantage && !disadvantage) return 1 - (1 - p) * (1 - p);
+    if (disadvantage && !advantage) return p * p;
+    return p;
+}
+
+/**
+ * The odds on the card (WOW 2026-09-16, checks-and-consequence): the hero's real
+ * modifier and the engine-computed success chance for a proposed out-of-combat
+ * roll, BEFORE any dice exist. Mirrors `resolvePlayerRoll`'s own branch order
+ * (saving throw → skill → bare ability → attack → unknown +0), folds the hero's
+ * conditions through `getConditionRollEffects` + `combineRollModifiers` exactly
+ * as the resolver does, then the roll's own advantage/disadvantage flags.
+ * Pure: no dice, no state. Returns null for a roll the resolver would skip.
+ *
+ * @returns {{ key, kind, ability, modifier, source, dc, flatChance, chance,
+ *             advantage, disadvantage, conditionSources } | null}
+ */
+export function describeCheckOdds(character, inventory, roll) {
+    if (!character || !roll || typeof roll !== 'object') return null;
+    const key = canonicalRollKey(roll.skill);
+    if (key === 'initiative') return null;
+    const isSave = roll.type === 'saving_throw';
+    const isAttackRoll = roll.type === 'attack_roll';
+    const isAbility = ABILITY_KEY_SET.has(key);
+    const skillAbility = SKILL_ABILITIES[key];
+    const scores = character.abilityScores || {};
+
+    let modifier = 0;
+    let source = 'untrained';
+    let kind = 'check';
+    let ability = null;
+
+    if (isAbility && isSave) {
+        modifier = getSavingThrowModifier(character, key);
+        source = hasListEntry(character.savingThrowProficiencies, key) ? 'proficient' : 'save';
+        kind = 'save';
+        ability = key;
+    } else if (skillAbility) {
+        modifier = getSkillModifier(character, key);
+        source = hasListEntry(character.expertiseSkills, key)
+            ? 'expertise'
+            : (hasListEntry(character.skillProficiencies, key) ? 'proficient' : 'ability');
+        ability = skillAbility;
+    } else if (isAbility) {
+        ability = key;
+        if (isAttackRoll) {
+            modifier = getWeaponAttackBonus(character, inventory || []);
+            source = 'weapon';
+            kind = 'attack';
+        } else {
+            modifier = getModifier(scores[key]);
+            source = 'ability';
+        }
+    } else if (key === 'attack') {
+        modifier = getWeaponAttackBonus(character, inventory || []);
+        source = 'weapon';
+        kind = 'attack';
+    }
+
+    const conditionEffects = getConditionRollEffects(character.conditions, kind);
+    const eff = combineRollModifiers(roll.advantage, roll.disadvantage, conditionEffects);
+    const dc = Number.isFinite(roll.dc) ? Math.min(MAX_CHECK_DC, Math.max(0, roll.dc)) : 10;
+    return {
+        key,
+        kind,
+        ability,
+        modifier,
+        source,
+        dc,
+        flatChance: d20SuccessChance(modifier, dc),
+        chance: d20SuccessChance(modifier, dc, eff),
+        advantage: eff.advantage,
+        disadvantage: eff.disadvantage,
+        conditionSources: conditionEffects.sources.slice(),
+    };
+}
+
 /**
  * Calculate the number of Sneak Attack dice (d6) for a Rogue.
  * @param {object} character

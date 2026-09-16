@@ -408,6 +408,13 @@
   color: #f2a49d;
 }
 
+.roleplay-check-odds {
+  margin-top: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .roleplay-check-reasoning {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
