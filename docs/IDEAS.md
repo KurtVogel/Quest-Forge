@@ -2030,6 +2030,30 @@ default silently (the companion twin strips the suffix since 09-09), the combat 
 string-aware forwards but not on its backward anchor walk. From the 2026-09-15 strengthening audit
 (response-parsing + enemy-stats-conditions, Lap 2).
 
+### [strengthening] The machinery is a trust boundary too; an anchor is a schema assumption the prompt must honor
+Two rules from one Lap-2 run (2026-09-16, scribe + providers-adapter). **(1)** Every earlier
+hostile-input pass hardened the DM wire and the save, but the Scribe's own JSON — same model
+class, same key, dispatched WHOLESALE into the same reducers — was treated as trusted: `UPDATE_NPC`
+deletes six dangerous keys and spreads the rest (a `relationshipHistory: []` wipes the arc history,
+a Pollinations `portraitUrl` paints the NPC from the wire, a 100k `lastNotes` puts the next prompt
+at 182,653 chars from ONE record and LOAD_GAME heals none of it), `player_appearance` plain-replaces
+the hero's look the way the NPC lane stopped doing on 09-06, the loot audit reads an `itemKey` its
+own prompt never asks for (a narrated "rusty nail" minted Plate Armor), and a card can be born
+carrying the engine's `lastUsedMessage` (scored 0 forever). Rule: a reducer fed by ANY LLM lane
+projects to known keys and clamps every text it stores; walk each lane (DM, Scribe, reflection,
+Deepen memory) into every reducer it dispatches, and "the prompt says to omit it" is never a guard.
+**(2)** `tryParseDirectorJson` anchors on `world_facts` while the Scribe prompt says "omit
+empty/unknown fields" — a turn with an NPC update, a relocation, and a six-silver payment but no
+durable fact parsed to null and dispatched NOTHING (the payment audit included); the reflection's
+"always include the tempo directive" + "omit empty arrays" yields a tempo-only reply its own
+anchors reject. Rule: an anchor list is a schema assumption — check it against the prompt's omit
+rules, and give the loose parser a whole-object fallback. Smaller siblings on the provider side: a
+`null` JSON body throws out of `makeHttpError` before `.status` is stamped (no retry), a `data:
+null` SSE event kills the stream, an object `delta.content` streams "[object Object]" to the
+player, and the settings blob is the one persisted input with no field heal (a numeric
+`geminiApiKey` takes the app shell down in render). From the 2026-09-16 strengthening audit
+(scribe + providers-adapter, Lap 2).
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
