@@ -13,13 +13,22 @@ import { appendRollHistory, reviveCharacter, systemMessage } from './shared.js';
 
 export const handlers = {
     ADD_MESSAGE(state, action) {
+        const now = Date.now();
+        const role = action.payload?.role;
         const next = {
             ...state,
             messages: [...state.messages, {
-                id: action.payload.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                timestamp: Date.now(),
+                id: action.payload.id || `msg-${now}-${Math.random().toString(36).slice(2, 7)}`,
+                timestamp: now,
                 ...action.payload,
             }],
+            // The return card (2026-09-16): every committed TURN stamps when the
+            // campaign was last played — a player line or a DM line, never an
+            // engine system line. Was written once at creation and never again,
+            // so the app could not tell a ten-minute break from a ten-day one.
+            ...(role === 'user' || role === 'assistant'
+                ? { session: { ...(state.session || {}), lastPlayedAt: now } }
+                : {}),
         };
         // Post-defeat stabilization (live playtest #8): a non-lethal low-level
         // defeat left the hero at 0 HP + Unconscious through a whole capture arc —

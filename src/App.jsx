@@ -7,6 +7,7 @@ import SettingsModal from './components/Settings/SettingsModal.jsx';
 import { loadAutoSave, listSaves, loadGame } from './state/persistence.js';
 import { loadGameFromCloud, listCloudSaves } from './state/cloudSync.js';
 import { clearImageCache } from './llm/providers/imageGen.js';
+import { describeTimeAgo } from './components/Chat/returnCard.js';
 import './App.css';
 
 function StartScreen() {
@@ -164,6 +165,18 @@ function StartScreen() {
                 <span className="start-btn-detail">
                   {autoSaveData.character?.name} · Lv.{autoSaveData.character?.level} {autoSaveData.character?.class}
                 </span>
+                {(autoSaveData.currentLocation || Number.isFinite(autoSaveData.session?.lastPlayedAt) || Number.isFinite(autoSaveData.savedAt)) && (
+                  <span className="start-btn-detail">
+                    {[
+                      typeof autoSaveData.currentLocation === 'string' ? autoSaveData.currentLocation.slice(0, 80) : '',
+                      (() => {
+                        const at = Number.isFinite(autoSaveData.session?.lastPlayedAt) ? autoSaveData.session.lastPlayedAt : autoSaveData.savedAt;
+                        const ago = describeTimeAgo(Date.now() - at);
+                        return ago ? `last played ${ago}` : '';
+                      })(),
+                    ].filter(Boolean).join(' · ')}
+                  </span>
+                )}
               </span>
             </button>
           )}

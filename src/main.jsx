@@ -6,8 +6,10 @@ import App from './App.jsx'
 // must run SYNCHRONOUSLY before GameProvider reads persisted settings, and it
 // self-gates on import.meta.env.DEV so a production build no-ops.
 import { seedDevSettings } from './dev/devSettingsSeed.js'
+import { seedDevReturnGap } from './dev/devReturnCard.js'
 
 seedDevSettings()
+seedDevReturnGap()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

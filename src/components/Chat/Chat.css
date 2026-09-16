@@ -337,6 +337,115 @@
   background-blend-mode: overlay, normal, normal;
 }
 
+/* The return card (2026-09-16): "Previously, in <campaign>" above the composer
+   after time away. UI only — never a transcript message. */
+.return-card {
+  margin: 0.75rem 1rem 0;
+  padding: 1rem;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(38, 40, 48, 0.96), rgba(25, 28, 27, 0.98));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  min-height: 0;
+  max-height: min(60dvh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.return-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.7rem;
+}
+
+.return-card-heading h3 {
+  margin: 0.15rem 0 0;
+  color: var(--gold-light);
+}
+
+.return-card-kicker {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.return-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.return-card-block {
+  padding: 0.55rem 0.65rem;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.return-card-block h4 {
+  margin: 0 0 0.25rem;
+  color: var(--gold-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.return-card-block p,
+.return-card-block ul {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.return-card-block ul {
+  padding-left: 1.1rem;
+}
+
+.return-card-block li + li {
+  margin-top: 0.3rem;
+}
+
+.return-card-decisions,
+.return-card-pending {
+  color: var(--text-muted);
+}
+
+.return-card-chips {
+  margin-top: 0.3rem !important;
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.return-card-chip {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 999px;
+  color: var(--gold-light);
+  font-size: 0.72rem;
+}
+
+.return-card-question {
+  font-style: italic;
+}
+
+.return-card-actions {
+  margin-top: 0.7rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .return-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .roleplay-check-panel {
   margin: 0.75rem 1rem 0;
   padding: 1rem;

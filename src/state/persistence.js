@@ -207,6 +207,10 @@ export function serializeGameState(gameState) {
     return {
         ...persisted,
         saveVersion: SAVE_VERSION,
+        // Wall-clock stamp on the PAYLOAD (2026-09-16, the return card): the
+        // slot metadata already carries one, but the loaded state never did,
+        // so LOAD_GAME could not heal a pre-stamp campaign's lastPlayedAt.
+        savedAt: Date.now(),
         rollHistory: (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS),
         combat: gameState.combat || { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
     };

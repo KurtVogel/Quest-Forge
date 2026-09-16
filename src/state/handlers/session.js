@@ -460,7 +460,16 @@ function validateSaveState(payload) {
         // verbatim. Everything else in session passes through as before.
         // …and the campaign name is string-or-empty (2026-09-10 audit P1): an
         // object name rode into the next save's metadata and crashed both lists.
-        session: { ...session, name: cleanTextField(session?.name, SESSION_NAME_MAX) },
+        session: {
+            ...session,
+            name: cleanTextField(session?.name, SESSION_NAME_MAX),
+            // The return card (2026-09-16): a pre-stamp campaign heals its
+            // last-played time from the payload's own save stamp, so the gap
+            // Continue measures is real on the first load after the upgrade.
+            lastPlayedAt: Number.isFinite(session?.lastPlayedAt)
+                ? session.lastPlayedAt
+                : (Number.isFinite(payload.savedAt) ? payload.savedAt : null),
+        },
     };
 }
 

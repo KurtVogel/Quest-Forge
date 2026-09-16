@@ -19,6 +19,8 @@ import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRo
 import CombatPanel from '../Combat/CombatPanel.jsx';
 import MarkdownText from './MarkdownText.jsx';
 import CheckOddsLine from './CheckOddsLine.jsx';
+import ReturnCard from './ReturnCard.jsx';
+import { buildReturnCard, returnCardDismissKey } from './returnCard.js';
 import './Chat.css';
 
 /**
@@ -813,6 +815,39 @@ export default function ChatPanel() {
         : 'Set your Gemini API key in Settings — the game’s memory (Scribe, journal, RAG) requires it.';
     const awaitingCombatNarration = state.combat?.phase === COMBAT_PHASES.AWAITING_NARRATION;
     const pendingRoleplayCheck = state.pendingRoleplayCheck;
+
+    // The return card (WOW 2026-09-15, session-return): assembled ONCE per
+    // mount from live state (ChatPanel remounts on every load via the AppShell
+    // key), UI only — never a message, never in the save, the DM window, RAG,
+    // or the Scribe. A dismissed card stays dismissed for the same
+    // lastPlayedAt across reloads (localStorage, per campaign). DEV builds may
+    // fake the gap through `?returnAfter=3d` (src/dev/devReturnCard.js).
+    const [returnCard, setReturnCard] = useState(() => {
+        const lastPlayedAt = state.session?.lastPlayedAt;
+        const devGap = import.meta.env.DEV ? Number(globalThis.__QF_DEV_RETURN_GAP_MS__) : NaN;
+        const now = Number.isFinite(devGap) && Number.isFinite(lastPlayedAt) ? lastPlayedAt + devGap : Date.now();
+        const card = buildReturnCard(state, { now });
+        if (!card) return null;
+        try {
+            if (localStorage.getItem(returnCardDismissKey(state.session?.id)) === String(card.lastPlayedAt)) return null;
+        } catch { /* storage unavailable — show the card */ }
+        return card;
+    });
+    const dismissReturnCard = useCallback(() => {
+        setReturnCard(current => {
+            if (current) {
+                try {
+                    localStorage.setItem(returnCardDismissKey(stateRef.current.session?.id), String(current.lastPlayedAt));
+                } catch { /* storage unavailable — dismissal is per mount */ }
+            }
+            return null;
+        });
+    }, []);
+    // Playing a turn IS continuing: the stamp moves, the card goes.
+    useEffect(() => {
+        if (returnCard && state.session?.lastPlayedAt !== returnCard.lastPlayedAt) setReturnCard(null);
+    }, [returnCard, state.session?.lastPlayedAt]);
+
     const combatInputLocked = state.combat?.active && (
         state.combat.phase !== COMBAT_PHASES.AWAITING_PLAYER || !!state.combat.queuedExchange
     );
@@ -895,6 +930,10 @@ export default function ChatPanel() {
                     onSubmitChallenge={handleChallengeRoleplayCheck}
                     onChangeApproach={handleChangeRoleplayApproach}
                 />
+            )}
+
+            {returnCard && !state.combat?.active && (
+                <ReturnCard card={returnCard} onDismiss={dismissReturnCard} />
             )}
 
             <div className="chat-input-area">
