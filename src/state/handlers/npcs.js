@@ -308,7 +308,13 @@ export const handlers = {
         const regionOnly = targetIdx === -1 && isRegionNameOnly(priorLocations, name);
         let locations = regionOnly
             ? departed
-            : upsertLocation(departed, name, { ...(profile || {}), lastVisitedMessage: messageIndex });
+            : upsertLocation(departed, name, {
+                ...(profile || {}),
+                lastVisitedMessage: messageIndex,
+                // The place card (2026-09-16): a genuine arrival counts a visit;
+                // an alias re-statement of the current place keeps the count.
+                ...(arrived ? { visitCount: (Number.isFinite(targetRecord?.visitCount) ? targetRecord.visitCount : 0) + 1 } : {}),
+            });
 
         // Pseudo-place guard (live playtest #8): a destination that neither
         // resolves to nor mints a canonical record ("the threshold of the hidden

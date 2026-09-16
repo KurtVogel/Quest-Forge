@@ -56,7 +56,7 @@ export function describeBondForPrompt(npc = {}, storyMemory = [], { messages = n
 import { describeAbsence, describeStageForPrompt, resolveOpenThread } from './relationshipArc.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
 import { collectNarrativeMessages } from '../llm/narrativeMessages.js';
-import { describeTravelLink, isSameLocation, listKnownWays, sanitizeExtractedLocation } from './locationRegistry.js';
+import { describeCurrentPlace, describeTravelLink, isSameLocation, listKnownWays, sanitizeExtractedLocation } from './locationRegistry.js';
 
 export function normalizeLocationName(loc) {
     if (!loc) return '';
@@ -389,7 +389,9 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
     const parts = [];
 
     if (currentLocation) {
-        parts.push(`**Current location:** ${currentLocation}`);
+        // The place card (2026-09-16): ONE line — the name, the signature
+        // particular the fiction established, and the place's current state.
+        parts.push(`**Current location:** ${describeCurrentPlace(locations, currentLocation) || currentLocation}`);
         // Geography as canon (2026-09-14): the ways the hero has actually
         // traveled from here, with whatever bearing / duration / road the
         // fiction stated. Consistency, not a map — an unlisted place is

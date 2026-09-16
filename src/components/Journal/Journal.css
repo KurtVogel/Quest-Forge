@@ -795,6 +795,46 @@
     overflow-wrap: anywhere;
 }
 
+/* The place card (2026-09-16): signature, current state, residents, what happened here. */
+.journal-place-signature {
+    margin: 0.3rem 0 0;
+    font-size: 0.8rem;
+    color: var(--text-primary, var(--text-secondary));
+    overflow-wrap: anywhere;
+}
+
+.journal-place-state,
+.journal-place-residents {
+    margin: 0.25rem 0 0;
+    font-size: 0.74rem;
+    color: var(--text-secondary, var(--text-muted));
+    overflow-wrap: anywhere;
+}
+
+.journal-place-label {
+    color: var(--gold-muted, var(--text-muted));
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.journal-place-happened {
+    margin: 0.3rem 0 0;
+    font-size: 0.72rem;
+    color: var(--text-secondary, var(--text-muted));
+}
+
+.journal-place-happened ul {
+    margin: 0.15rem 0 0;
+    padding-left: 1.1rem;
+}
+
+.journal-place-happened li {
+    margin: 0.1rem 0;
+    overflow-wrap: anywhere;
+}
+
 /* Travel links: the ways the hero has actually walked out of this place. */
 .journal-place-ways {
     margin: 0.3rem 0 0;

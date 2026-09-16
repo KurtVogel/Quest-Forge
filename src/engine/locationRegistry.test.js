@@ -495,7 +495,8 @@ describe('listVisitedPlaces / groupPlacesByRegion (player-facing Places tab, 202
         const [place] = listVisitedPlaces([visited], {});
         expect(place).not.toHaveProperty('theaterFrontIds');
         expect(Object.keys(place).sort()).toEqual([
-            'aliases', 'danger', 'firstSeenAt', 'id', 'isCurrent', 'lastVisitedAt', 'name', 'region', 'type', 'ways',
+            'aliases', 'danger', 'firstSeenAt', 'happenedHere', 'id', 'isCurrent', 'lastState', 'lastVisitedAt',
+            'name', 'region', 'residents', 'signature', 'type', 'visits', 'ways',
         ]);
     });
 

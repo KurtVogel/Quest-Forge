@@ -5,7 +5,7 @@ import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
 import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js';
 import { bondKindLabel, listNpcImpressions, scoreNpcForPrompt, splitBondMoments } from '../../engine/npcRoster.js';
 import { deriveRelationshipStage, describeAbsence, listKnownByNpc, resolveOpenThread } from '../../engine/relationshipArc.js';
-import { describeTravelLink, groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
+import { describeLastHere, describeTravelLink, groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
 import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 import LookEditor from './LookEditor.jsx';
@@ -48,9 +48,11 @@ export default function JournalPanel({ isOpen, onClose }) {
     const visitedPlaces = useMemo(
         () => listVisitedPlaces(state.locations || [], {
             currentLocation: state.currentLocation,
-            journalLocations: (state.journal || []).map(entry => entry.location).filter(Boolean),
+            journal: state.journal || [],
+            npcs: state.npcs || [],
+            messages: state.messages || [],
         }),
-        [state.locations, state.currentLocation, state.journal],
+        [state.locations, state.currentLocation, state.journal, state.npcs, state.messages],
     );
 
     const characterNpcs = useMemo(
@@ -580,23 +582,42 @@ function PlacesTab({ places, currentLocation }) {
                                         </span>
                                     )}
                                 </div>
+                                {place.signature && (
+                                    <p className="journal-place-signature" title="The one particular the story established this place by">{place.signature}</p>
+                                )}
+                                {place.lastState && (
+                                    <p className="journal-place-state"><span className="journal-place-label">Now:</span> {place.lastState}</p>
+                                )}
                                 {place.aliases.length > 0 && (
                                     <p className="journal-place-aliases">
                                         Also known as {place.aliases.slice(0, 4).join(' · ')}
                                     </p>
+                                )}
+                                {place.residents.length > 0 && (
+                                    <p className="journal-place-residents" title="Characters whose record is rooted here">
+                                        <span className="journal-place-label">People here:</span> {place.residents.join(' · ')}
+                                    </p>
+                                )}
+                                {place.happenedHere.length > 0 && (
+                                    <div className="journal-place-happened">
+                                        <span className="journal-place-label">What happened here</span>
+                                        <ul>
+                                            {place.happenedHere.map((entry, index) => (
+                                                <li key={entry.id || index}>{entry.summary}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
                                 )}
                                 {place.ways.length > 0 && (
                                     <p className="journal-place-ways" title="Places you have traveled to from here, with the bearing, distance, and road the story established">
                                         Ways from here: {place.ways.slice(0, 6).map(way => describeTravelLink(way, way.name)).join(' · ')}
                                     </p>
                                 )}
-                                {(place.firstSeenAt || place.lastVisitedAt) && (
+                                {(place.visits.count > 0 || place.visits.lastHereMessagesAgo != null) && (
                                     <p className="journal-place-visits">
-                                        {place.firstSeenAt && (
-                                            <span>First visited {new Date(place.firstSeenAt).toLocaleDateString()}</span>
-                                        )}
-                                        {!place.isCurrent && place.lastVisitedAt && place.lastVisitedAt !== place.firstSeenAt && (
-                                            <span>Last visited {new Date(place.lastVisitedAt).toLocaleDateString()}</span>
+                                        {place.visits.count > 0 && <span>Visited ×{place.visits.count}</span>}
+                                        {!place.isCurrent && place.visits.lastHereMessagesAgo != null && (
+                                            <span>{describeLastHere(place.visits.lastHereMessagesAgo)}</span>
                                         )}
                                     </p>
                                 )}

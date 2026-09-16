@@ -301,7 +301,7 @@ clocks/portents) in the WORLD TEMPO block, or add a reflection rule that reconci
 faction relations against front `relationships` and updates them explicitly. Watch whether
 real campaigns accumulate contradictory faction lore before adding anything.
 
-### [wow] The place card: a signature, a state, and a memory of you — status: `idea` (wow audit 2026-09-16, exploration-travel Lap 1, W1)
+### [wow] The place card: a signature, a state, and a memory of you — status: `shipped` (2026-09-16; the place editor and the real-provider return-visit probe remain) (wow audit 2026-09-16, exploration-travel Lap 1, W1)
 A location record holds NO content: name, aliases, type, danger, region, wall-clock dates, hidden
 theaters, and (since 2026-09-14) travel links. The engine spends it well — theater gating,
 hearsay, absence drift, NPC curation by `basedIn` — but the DM meets every place as

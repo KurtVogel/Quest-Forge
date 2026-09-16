@@ -16,6 +16,7 @@
  */
 
 import { containment, coverage, tokenSet } from './textMatch.js';
+import { conversationalDistance } from './replayLedger.js';
 
 export const LOCATION_TYPES = ['haven', 'settlement', 'wilderness', 'frontier', 'hostile_site'];
 export const DANGER_LEVELS = ['none', 'low', 'moderate', 'high', 'deadly'];
@@ -33,6 +34,47 @@ const OPPOSITE_DIRECTION = {
 };
 const DIRECTION_ABBREVIATIONS = { n: 'north', s: 'south', e: 'east', w: 'west', ne: 'northeast', nw: 'northwest', se: 'southeast', sw: 'southwest' };
 export const MAX_LINKS_PER_LOCATION = 8;
+
+/**
+ * The place card (WOW 2026-09-16, exploration-travel): two Scribe-captured
+ * texts on the record. `signature` (≤160) is the ONE particular that IS this
+ * place — first-stated-wins: a later fragment appends its novel clauses and a
+ * later rewrite never replaces it. `lastState` (≤200) is what the place is like
+ * NOW — current-state replace, like an NPC's lastNotes.
+ */
+export const LOCATION_SIGNATURE_MAX = 160;
+export const LOCATION_STATE_MAX = 200;
+const VISIT_COUNT_MAX = 100000;
+const MAX_RESIDENTS = 8;
+const MAX_HAPPENED_HERE = 3;
+const HAPPENED_HERE_SUMMARY_MAX = 240;
+
+/** "last here 40 scenes ago" — in conversational messages, never wall-clock. */
+export function describeLastHere(messagesAgo) {
+    if (!Number.isFinite(messagesAgo) || messagesAgo < 0) return '';
+    if (messagesAgo === 0) return 'last here moments ago';
+    return `last here ${Math.round(messagesAgo)} scene${Math.round(messagesAgo) === 1 ? '' : 's'} ago`;
+}
+
+/**
+ * The DM prompt's one-line place card: `Rimehollow — <signature>. Now: <lastState>.`
+ * Returns the bare name when the record holds neither text (or is unknown).
+ */
+export function describeCurrentPlace(locations = [], currentLocation) {
+    const name = cleanText(currentLocation, 200);
+    if (!name) return '';
+    const idx = findLocationRecord(Array.isArray(locations) ? locations : [], name);
+    const record = idx === -1 ? null : locations[idx];
+    const signature = cleanText(record?.signature, LOCATION_SIGNATURE_MAX);
+    const lastState = cleanText(record?.lastState, LOCATION_STATE_MAX);
+    let line = name;
+    if (signature) line += ` — ${signature.replace(/[.;,]\s*$/, '')}.`;
+    if (lastState) line += ` Now: ${lastState.replace(/[.;,]\s*$/, '')}.`;
+    return line;
+}
+const PLACE_FRAGMENT_LENGTH_RATIO = 0.5;
+const PLACE_FRAGMENT_COVERAGE = 0.5;
+const PLACE_CLAUSE_CONTAINMENT = 0.8;
 const TRAVEL_TIME_MAX = 40;
 const ROUTE_MAX = 60;
 
@@ -48,6 +90,40 @@ function cleanText(value, max = 120) {
 
 function locationTokens(name) {
     return tokenSet(name, { stopWords: STOP_WORDS, minLength: 3 });
+}
+
+function placeTextTokens(text) {
+    return tokenSet(text, { stopWords: STOP_WORDS, minLength: 3 });
+}
+
+/**
+ * First-stated-wins merge for a place's signature (the NPC appearance
+ * fragment rule, inverted for a record that is the place's fixed identity):
+ * no existing text → the incoming lands; an incoming FRAGMENT (under half the
+ * record's length, covering under half its tokens) APPENDS its novel clauses
+ * within the cap; anything else — a restatement or a rewrite — keeps the
+ * existing text. A fragment can never wipe it; a rewrite can never replace it.
+ */
+export function mergePlaceSignature(existingText, incomingText, max = LOCATION_SIGNATURE_MAX) {
+    const prev = cleanText(existingText, max);
+    const next = cleanText(incomingText, max);
+    if (!next) return prev || null;
+    if (!prev) return next;
+    const prevTokens = placeTextTokens(prev);
+    const nextTokens = placeTextTokens(next);
+    const isFragment = next.length < prev.length * PLACE_FRAGMENT_LENGTH_RATIO
+        && prevTokens.size > 0 && nextTokens.size > 0
+        && coverage(prevTokens, nextTokens) < PLACE_FRAGMENT_COVERAGE;
+    if (!isFragment) return prev;
+    // Only a genuinely novel fragment joins; a restated detail is dropped.
+    if (containment(nextTokens, prevTokens) >= PLACE_CLAUSE_CONTAINMENT) return prev;
+    const joined = `${prev.replace(/[.;,]\s*$/, '')}; ${next}`;
+    return joined.length <= max ? joined : prev;
+}
+
+function toVisitCount(value) {
+    if (!Number.isFinite(value)) return null;
+    return Math.min(VISIT_COUNT_MAX, Math.max(0, Math.round(value)));
 }
 
 // A place NAME is short ("Candlemire", "the old salthouse"); a scene DESCRIPTION
@@ -318,6 +394,15 @@ export function normalizeLocationRecord(rawRecord = {}, existing = null) {
             ...(Array.isArray(existing?.links) ? existing.links : []),
             ...(Array.isArray(record.links) ? record.links : []),
         ]),
+        // The place card (2026-09-16): signature first-stated-wins (fragment
+        // appends, rewrite never replaces), lastState current-state replace.
+        // Both typed string-or-drop and clamped here — this normalizer IS the
+        // load twin (LOAD_GAME re-runs every record through it).
+        signature: mergePlaceSignature(existing?.signature, record.signature),
+        lastState: cleanText(record.lastState, LOCATION_STATE_MAX) || cleanText(existing?.lastState, LOCATION_STATE_MAX) || null,
+        // In-fiction arrival count: SET_LOCATION passes the incremented value
+        // on a genuine arrival; every other upsert keeps the stored count.
+        visitCount: toVisitCount(record.visitCount) ?? toVisitCount(existing?.visitCount) ?? 0,
     };
 }
 
@@ -765,7 +850,14 @@ export function areRelatedPlaces(a, b) {
  * closed). The projection is a whitelist by construction: `theaterFrontIds`
  * cannot reach the UI because the returned shape never contains it.
  */
-export function listVisitedPlaces(locations = [], { currentLocation = null, journalLocations = [] } = {}) {
+export function listVisitedPlaces(locations = [], {
+    currentLocation = null,
+    journalLocations = [],
+    journal = null,
+    npcs = null,
+    messages = null,
+    messageCount = null,
+} = {}) {
     const list = Array.isArray(locations) ? locations : [];
     const visitedIdx = new Set();
     list.forEach((record, i) => {
@@ -773,15 +865,48 @@ export function listVisitedPlaces(locations = [], { currentLocation = null, jour
     });
     const currentIdx = findLocationRecord(list, currentLocation);
     if (currentIdx !== -1) visitedIdx.add(currentIdx);
-    for (const name of journalLocations || []) {
+    const journalEntries = (Array.isArray(journal) ? journal : [])
+        .filter(entry => entry && typeof entry === 'object' && typeof entry.location === 'string' && entry.location);
+    const trail = [...(journalLocations || []), ...journalEntries.map(entry => entry.location)];
+    for (const name of trail) {
         const idx = findLocationRecord(list, name);
         if (idx !== -1) visitedIdx.add(idx);
     }
+    // Derived, zero-LLM (the place card, 2026-09-16): who is rooted here
+    // (roster NPCs whose basedIn resolves to this record — never archived
+    // creatures) and what the journal recorded here (newest 3 entries stamped
+    // at this record, summary only). Both are projections of records the
+    // player can already open; nothing hidden is read.
+    const residentsByIdx = new Map();
+    for (const npc of Array.isArray(npcs) ? npcs : []) {
+        if (!npc || typeof npc !== 'object' || npc.rosterTier === 'archived_creature') continue;
+        if (typeof npc.name !== 'string' || !npc.name.trim() || typeof npc.basedIn !== 'string') continue;
+        const idx = findLocationRecord(list, npc.basedIn);
+        if (idx === -1 || !visitedIdx.has(idx)) continue;
+        const names = residentsByIdx.get(idx) || [];
+        if (!names.includes(npc.name.trim())) names.push(npc.name.trim());
+        residentsByIdx.set(idx, names);
+    }
+    const total = Number.isFinite(messageCount) ? messageCount : (Array.isArray(messages) ? messages.length : null);
     // Ways render only toward OTHER visited places: a link can only be minted
     // by an arrival or a narrated journey, but the whitelist stays structural.
     const visitedNameById = new Map([...visitedIdx].map(i => [list[i].id, list[i].name]));
     const places = [...visitedIdx].map((i) => {
         const record = list[i];
+        const happenedHere = journalEntries
+            .filter(entry => findLocationRecord(list, entry.location) === i)
+            .map(entry => ({
+                id: typeof entry.id === 'string' ? entry.id : null,
+                summary: cleanText(entry.summary, HAPPENED_HERE_SUMMARY_MAX),
+            }))
+            .filter(entry => entry.summary)
+            .slice(-MAX_HAPPENED_HERE)
+            .reverse();
+        const lastHere = i !== currentIdx && Number.isFinite(record.lastVisitedMessage) && Number.isFinite(total)
+            ? Math.max(0, Array.isArray(messages)
+                ? conversationalDistance(messages, record.lastVisitedMessage - 1, total)
+                : total - record.lastVisitedMessage)
+            : null;
         return {
             id: record.id,
             name: record.name,
@@ -792,6 +917,16 @@ export function listVisitedPlaces(locations = [], { currentLocation = null, jour
             firstSeenAt: record.firstSeenAt || null,
             lastVisitedAt: record.lastVisitedAt || null,
             isCurrent: i === currentIdx,
+            signature: cleanText(record.signature, LOCATION_SIGNATURE_MAX) || null,
+            lastState: cleanText(record.lastState, LOCATION_STATE_MAX) || null,
+            residents: (residentsByIdx.get(i) || []).slice(0, MAX_RESIDENTS),
+            happenedHere,
+            visits: {
+                count: toVisitCount(record.visitCount) || 0,
+                // Conversational messages since the hero was last here; null
+                // while standing here or for a record with no visit stamp.
+                lastHereMessagesAgo: lastHere,
+            },
             ways: (Array.isArray(record.links) ? record.links : [])
                 .filter(link => link?.id && link.id !== record.id && visitedNameById.has(link.id))
                 .map(link => ({
@@ -852,6 +987,14 @@ export function dedupeLocationRecords(locations = []) {
             theaterFrontIds: record.theaterFrontIds,
             lastVisitedAt: Math.max(kept.lastVisitedAt || 0, record.lastVisitedAt || 0),
             links: [...(kept.links || []), ...(record.links || [])],
+            // Place card fields survive a fold: the keeper's signature wins
+            // (first stated), the more recently visited record's state is
+            // the current one, and arrivals add up.
+            signature: kept.signature || record.signature,
+            lastState: (record.lastVisitedAt || 0) > (kept.lastVisitedAt || 0)
+                ? (record.lastState || kept.lastState)
+                : (kept.lastState || record.lastState),
+            visitCount: (toVisitCount(kept.visitCount) || 0) + (toVisitCount(record.visitCount) || 0),
         }, kept);
     };
 

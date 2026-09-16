@@ -45,6 +45,7 @@ function prompt(overrides = {}) {
         currentLocation: overrides.currentLocation ?? 'Jewelglade',
         combat: overrides.combat ?? { active: false },
         worldFacts: overrides.worldFacts ?? [],
+        locations: overrides.locations ?? [],
         fronts: overrides.fronts ?? [],
         storyMemory: overrides.storyMemory ?? [],
         retrievedMemories: overrides.retrievedMemories ?? [],
@@ -1062,5 +1063,14 @@ describe('the promise in the outcome (WOW 2026-09-16, checks-and-consequence W1)
         expect(clause).toBeGreaterThan(rules);
         expect(clause).toBeLessThan(text.indexOf('## CAMPAIGN PREMISE'));
         expect(text.slice(clause, clause + 400)).toContain('The margin colors the narration only; the dice decide pass or fail.');
+    });
+});
+
+describe('the place card rides the Current location line (WOW 2026-09-16, exploration-travel W1)', () => {
+    it('renders name — signature. Now: state. from the registry record, and the bare name without one', () => {
+        const locations = [{ id: 'l1', name: 'Rimehollow', signature: 'the mill wheel that turns though the river is dry', lastState: 'half-burned; the mill silent', aliases: [], links: [] }];
+        expect(prompt({ currentLocation: 'Rimehollow', locations }))
+            .toContain('**Current location:** Rimehollow — the mill wheel that turns though the river is dry. Now: half-burned; the mill silent.');
+        expect(prompt({ currentLocation: 'Jewelglade' })).toContain('**Current location:** Jewelglade\n');
     });
 });
