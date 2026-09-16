@@ -927,7 +927,7 @@ quest; playtest first-message-after-Continue references the card. Full shape in
 `SCHEDULED_WOW.md` 2026-09-15. Absorbs "journal snippet preview per save" from Save
 management polish.
 
-### [wow] Checks: the odds on the card, the promise in the outcome — status: slice A `shipped` (2026-09-16), slice B `idea` (wow audit 2026-09-16, two W1 slices)
+### [wow] Checks: the odds on the card, the promise in the outcome — status: `shipped` (both slices 2026-09-16; real-provider consequence scoring still to run) (wow audit 2026-09-16, two W1 slices)
 The out-of-combat check system is genre-strong at the GATE (three-condition roll gate, the
 8/10/12/15/18+ ladder, public ruling fields, the arbiter, `recentRulings`) and drops the ball
 at the two ends the player actually feels. (1) The roleplay-check card shows the DC and the

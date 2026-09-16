@@ -1052,3 +1052,15 @@ describe('Known ways from here rides the live prompt (geography as canon, 2026-0
         expect(prompt({ currentLocation: 'Jewelglade' })).not.toContain('Known ways from here');
     });
 });
+
+describe('the promise in the outcome (WOW 2026-09-16, checks-and-consequence W1)', () => {
+    it('tells the DM its failure_stakes return with the dice, inside the cached ROLL REQUEST RULES prefix', () => {
+        const text = prompt({ premise: 'A premise.' });
+        const rules = text.indexOf('## ROLL REQUEST RULES');
+        const clause = text.indexOf('Your failure_stakes come back to you with the dice');
+        expect(rules).toBeGreaterThan(-1);
+        expect(clause).toBeGreaterThan(rules);
+        expect(clause).toBeLessThan(text.indexOf('## CAMPAIGN PREMISE'));
+        expect(text.slice(clause, clause + 400)).toContain('The margin colors the narration only; the dice decide pass or fail.');
+    });
+});

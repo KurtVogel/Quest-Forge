@@ -327,8 +327,54 @@ export function formatRollSummary(rollResults) {
             verb = 'SUCCESS (CRITICAL SUCCESS / NATURAL 20)';
         }
         const dcLabel = isAttack ? `vs AC ${r.dc}` : `DC ${r.dc}`;
-        return `[ROLL RESULT: ${r.description || r.skill + ' check'}, ${dcLabel}, rolled ${r.rolled} — ${verb}]`;
+        const head = `${r.description || r.skill + ' check'}, ${dcLabel}, rolled ${r.rolled}`;
+        if (!isAttack && Number.isFinite(r.margin)) {
+            return `[ROLL RESULT: ${head} — ${verb}${formatRollPromise(r)}]`;
+        }
+        return `[ROLL RESULT: ${head} — ${verb}]`;
     }).join('\n');
+}
+
+/** Stakes / objective text as it rides the outcome prompt: one line, bounded. */
+const promiseText = (value, max = 300) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '');
+
+/**
+ * The promise in the outcome (WOW 2026-09-16, checks-and-consequence): the
+ * card's publicly stated failure stakes / objective and the roll margin ride
+ * the [ROLL RESULT] line into the post-roll prompt, so the DM delivers the
+ * consequence it committed to before the dice existed — the proposal JSON is
+ * withheld from its window, so this line is the one carrier. Margin bands are
+ * narration TEXTURE only: pass/fail is decided above and rule (1) "respect the
+ * dice exactly" is untouched. A natural 1 is the stakes plus one complication,
+ * never incompetence (DECISIONS.md 2026-06-22 stays sovereign).
+ */
+function formatRollPromise(r) {
+    const margin = r.margin;
+    const stakes = promiseText(r.failureStakes);
+    const objective = promiseText(r.objective || r.description, 200);
+    if (r.success) {
+        const by = Math.max(0, margin);
+        const texture = r.critical ? '' : (by >= 5 ? ' (clean)' : by <= 1 ? ' (narrow — the win holds, but only just)' : '');
+        const promise = objective
+            ? ` Deliver the win the ruling promised for "${objective}" concretely.`
+            : ' Deliver the win the ruling promised concretely.';
+        return ` by ${by}${texture}.${promise}`;
+    }
+    const short = Math.max(1, -margin);
+    let texture;
+    if (r.naturalOne) {
+        texture = ' (NATURAL 1: the stakes plus ONE complication — never incompetence; the hero\'s authored words, confidence, and delivery stand)';
+    } else if (short <= 2) {
+        texture = ' (near miss: the stated stakes land, but the hero keeps a foothold)';
+    } else if (short >= 5) {
+        texture = ' (wide miss: the stated stakes in full)';
+    } else {
+        texture = '';
+    }
+    const promise = stakes
+        ? ` The ruling promised on failure: "${stakes}". Deliver exactly that consequence — one, proportionate — then a live choice.`
+        : ' No failure stakes were stated on the ruling — deliver ONE proportionate consequence, then a live choice.';
+    return ` by ${short}${texture}.${promise}`;
 }
 
 /**
@@ -901,5 +947,13 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
         description: roll.description,
         advantage: effRoll.advantage,
         disadvantage: effRoll.disadvantage,
+        // The promise in the outcome (2026-09-16): the card's stated stakes,
+        // the objective, and the margin ride to formatRollSummary — the DM
+        // never sees the withheld proposal, so the result line carries them.
+        failureStakes: typeof roll.failureStakes === 'string' ? roll.failureStakes : null,
+        objective: roll.description || label,
+        margin: result.total - dc,
+        naturalOne: !!result.isCritFail,
+        naturalTwenty: !!result.isCritical,
     };
 }
