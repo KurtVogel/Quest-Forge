@@ -301,7 +301,39 @@ clocks/portents) in the WORLD TEMPO block, or add a reflection rule that reconci
 faction relations against front `relationships` and updates them explicitly. Watch whether
 real campaigns accumulate contradictory faction lore before adding anything.
 
-### Scenery/motif fatigue beyond combat foes — status: `idea` (2026-08-03)
+### [wow] The place card: a signature, a state, and a memory of you — status: `idea` (wow audit 2026-09-16, exploration-travel Lap 1, W1)
+A location record holds NO content: name, aliases, type, danger, region, wall-clock dates, hidden
+theaters, and (since 2026-09-14) travel links. The engine spends it well — theater gating,
+hearsay, absence drift, NPC curation by `basedIn` — but the DM meets every place as
+`**Current location:** <name>` plus "Known ways", sense of place is whatever RAG happens to
+retrieve, and the Places tab is a wall of chips with "First visited 9/14/2026" in real-world time.
+A return after 30 messages fires drift and hearsay, yet cannot pay off the first visit because
+nothing recorded what the place WAS. The NPC card got a four-slice overhaul; the place card is
+the 2026-08-30 v1 filing cabinet. Sunless Sea's ports are one line of prose each plus a resident
+and a thing to do; Roadwarden's places have residents, a problem, and a state your actions
+change; Outer Wilds' ship log is a node per place with what you learned there. **Slice:** two
+Scribe-captured fields, budget-exempt like `location_profile` — `signature` (≤160, the one
+particular that IS this place, first-stated-wins with the appearance-style fragment merge) and
+`lastState` (≤200, current-state replace like `lastNotes`) — plus three DERIVED, zero-LLM
+projections in `listVisitedPlaces`: `residents` (roster NPCs whose `basedIn` resolves to the
+record), `happenedHere` (newest 3 journal entries stamped at the record — the stamps exist since
+2026-06-23), `visits` (arrival count + "last here N scenes ago" in conversational distance; the
+wall-clock date goes). Rendered on the Places card and as ONE line beside Current location in the
+DM prompt (~+60 dynamic tokens/turn, zero new calls). Proof: every visited card carries a
+signature after 30 turns; 5/5 returns after ≥30 messages reference the signature or the changed
+state unprompted (the geography harness gains that probe). Phase 2 of "Geography as canon" (the
+graph view) lands AFTER this — a node must have content before it is worth clicking. A player
+edit for places (the `SET_NPC_LOOK` / LookEditor twin) is a later slice. Full shape in
+`SCHEDULED_WOW.md` 2026-09-16.
+- **Absorbed sub-item — scenery/motif fatigue beyond combat foes** (was its own `idea`,
+  2026-08-03; merged here by the 2026-09-16 wow audit): foe fatigue is deterministic because
+  END_COMBAT hands the engine structured enemy names, while set-dressing motifs (giant
+  sarcophagi, black ichor recurring across unrelated dungeons) had no structured source. The
+  `signature` field IS that source: once hostile sites carry a signature, the engine can count
+  motif recurrence across DISTINCT records exactly like foe families and render a MOTIF FATIGUE
+  line in the tempo block — zero new calls. Wait for the place card to exist first.
+
+### ~~Scenery/motif fatigue beyond combat foes~~ — status: `merged` into "[wow] The place card" above (2026-09-16 wow audit)
 Foe fatigue (shipped 2026-08-03) is deterministic because END_COMBAT hands the engine
 structured enemy names. The *scenery* half of Vesa's repetition complaint — giant
 sarcophagi and black-ichor set-dressing recurring across unrelated dungeons — has no
@@ -385,7 +417,15 @@ region / type / danger / aliases / visit stamps / theaters; the one missing thin
   `seedTravelLinksFromTrail` backfills old saves from the journal's location trail at load, and
   the prompt's `**Known ways from here**` line + the Places tab's "Ways from here" render one
   shared `describeTravelLink`. No new DM channel, no ledger (Scribe-observed, not DM-declared;
-  the merge is idempotent).
+  the merge is idempotent). **[wow] Finding (wow audit 2026-09-16, exploration-travel Lap 1):**
+  every detail is evidence-gated on what the DM SAYS, and nothing in the prompt asks the DM to
+  state a bearing, a duration, or a road — so an unscripted journey mints a BARE edge and
+  "Known ways" renders a bare name; the geography harness feeds the bearings in the player's
+  scripted line, which hides this. Proposed W1 "The road is a scene": one prefix-stable clause
+  (a journey between two named places gets ONE beat of the way with the bearing / duration /
+  road said in-world; arrival is its own consequence) plus the missing RESPONSE_FORMAT
+  annotation on the DM `location` wire. Proof: the harness with UNSCRIPTED actions shows
+  detailed links on ≥4 of 5 journeys. Full shape in `SCHEDULED_WOW.md` 2026-09-16.
 - [ ] **Phase 2 — the graph view.** A force-directed sketch of visited places and edges on the
   Places tab, parchment register, compass-biased layout (a `north` edge pulls its target up).
   Fog-of-war for free: only visited records exist. Zero LLM cost; the player-facing "wow".
