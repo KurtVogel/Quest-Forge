@@ -347,7 +347,11 @@ function normalizeMemoryUpdate(update) {
 function normalizeLocationWire(raw) {
     const value = isPlainObject(raw) ? raw.name : raw;
     if (typeof value !== 'string') return null;
-    return value.trim().slice(0, LOCATION_NAME_MAX) || null;
+    const trimmed = value.trim();
+    // The RESPONSE_FORMAT example annotates this wire with an <angle-bracket>
+    // placeholder (2026-09-16); a DM that copies it verbatim has not moved.
+    if (/^<[\s\S]*>$/.test(trimmed)) return null;
+    return trimmed.slice(0, LOCATION_NAME_MAX) || null;
 }
 
 /**

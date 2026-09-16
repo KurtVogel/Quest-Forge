@@ -399,7 +399,7 @@ background call and two prompt lines. Anti-abuse is the usual pattern: one-shot 
 caps, mechanics-inert, complete-or-nothing installs. Start with Half 2 if scoping down —
 it's engine-side selection + one prompt line, no new LLM call at all.
 
-### Geography as canon — a map without coordinates — status: phase 1 `shipped` (2026-09-14), phases 2–4 open
+### Geography as canon — a map without coordinates — status: phase 1 `shipped` (2026-09-14; the road-is-a-scene prefix clause that fills phase-1 bare edges shipped 2026-09-16), phases 2–4 open
 Vesa: "should there be some kind of a map system in the game?" The answer settled on was
 **yes, but a geography system, not a map with coordinates** (DECISIONS.md 2026-09-14). An LLM
 DM cannot keep coordinates straight over a hundred turns; a hex or grid map would force the

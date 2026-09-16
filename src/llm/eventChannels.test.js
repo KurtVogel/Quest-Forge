@@ -281,6 +281,12 @@ describe('hostile wire shapes (2026-09-15 audit, Lap 2)', () => {
         expect(normalizeEvents({ location: 'Q'.repeat(100000) }).location).toHaveLength(200);
     });
 
+    it('a verbatim copy of the RESPONSE_FORMAT <placeholder> annotation is "unchanged", never a place (2026-09-16)', () => {
+        expect(normalizeEvents({ location: '<the exact name of the place the hero PHYSICALLY stands at the END of this response>' }).location).toBeNull();
+        expect(normalizeEvents({ location: { name: '<omit when unchanged>' } }).location).toBeNull();
+        expect(normalizeEvents({ location: 'The <Broken> Mill' }).location).toBe('The <Broken> Mill');
+    });
+
     it('folds resources_used to catalog-key form, strings only, deduped, bounded', () => {
         const events = normalizeEvents({
             resources_used: ['Second Wind', 'second_wind', 'secondWind', 'ACTION SURGE', { key: 'secondWind' }, 42, '', 'x'.repeat(3000)],

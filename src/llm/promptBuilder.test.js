@@ -159,6 +159,39 @@ describe('THE ORDINARY TURN grammar block (WOW 2026-09-11, ordinary-turn W1)', (
     });
 });
 
+describe('THE ROAD IS A SCENE clause (WOW 2026-09-16, exploration-travel W1)', () => {
+    it('sits in the cached prefix right after THE ORDINARY TURN and says one beat, in-world bearing, arrival as consequence', () => {
+        const text = prompt({ premise: 'A premise.' });
+        const turn = text.indexOf('## THE ORDINARY TURN');
+        const road = text.indexOf('## THE ROAD IS A SCENE');
+        expect(road).toBeGreaterThan(turn);
+        expect(road).toBeLessThan(text.indexOf('## CAMPAIGN PREMISE'));
+        expect(road).toBeLessThan(text.indexOf('## RESPONSE FORMAT'));
+        // Nothing but the ordinary-turn block sits between the two headings.
+        expect(text.slice(turn, road)).not.toContain('\n## ');
+        const clause = text.slice(road, road + 1200);
+        expect(clause).toContain('ONE beat');
+        expect(clause).toContain('NAMED IN-WORLD by a character, a sign, or a milestone');
+        expect(clause).toContain('"north, half a day, by the Coast Road"');
+        expect(clause).toContain('ARRIVAL is its own CONSEQUENCE on the next turn');
+        expect(clause).toContain('still states the bearing in one sentence');
+        expect(clause).toContain('quiet rule and the 3-paragraph ceiling stay sovereign');
+    });
+
+    it('is byte-identical across turns with different dynamic state (prefix-stable)', () => {
+        const a = prompt({ premise: 'A premise.' });
+        const b = prompt({ premise: 'A premise.', currentLocation: 'Elsewhere', messages: [{ role: 'user', content: 'x' }] });
+        const slice = text => text.slice(text.indexOf('## THE ROAD IS A SCENE'), text.indexOf('## THE ROAD IS A SCENE') + 1200);
+        expect(slice(a)).toBe(slice(b));
+    });
+
+    it('annotates the DM `location` wire in RESPONSE_FORMAT with the end-of-response rule', () => {
+        const text = prompt();
+        expect(text).toContain('"location": "<the exact name of the place the hero PHYSICALLY stands at the END of this response, ONLY when it changed');
+        expect(text).toContain('never a place merely mentioned, discussed, or being left behind; omit when unchanged>"');
+    });
+});
+
 describe('recent table rulings block', () => {
     const baseRuling = {
         objective: 'Convince Maren to share gossip about Odo',
