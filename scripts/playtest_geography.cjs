@@ -339,6 +339,28 @@ const ACTIONS = [
     'I give Hesper my full report on what I found at the abbey and collect whatever pay we agreed.',
 ];
 
+// UNSCRIPTED mode (WOW 2026-09-16, "the road is a scene" proof): the player's
+// lines carry NO bearing, duration, or road, so every detail on the stored
+// links must come from what the DM chose to SAY in-world. Run with
+// UNSCRIPTED=1; the verdicts count detailed edges (bearing OR duration OR
+// route) per leg — the proposal's bar is detail on ≥4 of 5 journeys, here 4
+// legs = 8 directed edges.
+const UNSCRIPTED_ACTIONS = [
+    ACTIONS[0],
+    'I settle terms with Hesper, shoulder my pack, and set out for Brannock\'s Crossing. I want to be at the ferry landing before the evening barges load.',
+    ACTIONS[2],
+    'I leave Brannock\'s Crossing for Thornwater Abbey. When the ruins are in sight I approach carefully.',
+    ACTIONS[4],
+    ACTIONS[5],
+    ACTIONS[6],
+    'I head back to Brannock\'s Crossing and go straight to the ferry landing when I arrive.',
+    'I go home to Kettleford and find Hesper Dunmore at her warehouse to report.',
+    ACTIONS[9],
+    ACTIONS[10],
+];
+const UNSCRIPTED = process.env.UNSCRIPTED === '1';
+const RUN_ACTIONS = UNSCRIPTED ? UNSCRIPTED_ACTIONS : ACTIONS;
+
 async function run() {
     fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
     const browser = await puppeteer.launch({
@@ -455,8 +477,9 @@ async function run() {
         },
     };
 
-    for (let i = 0; i < ACTIONS.length; i++) {
-        await playRound(page, `r${i + 1}`, ACTIONS[i], { probe: probes[i] || null });
+    note('mode', UNSCRIPTED ? 'UNSCRIPTED: player lines carry no bearing / duration / road' : 'SCRIPTED: player lines state the geography');
+    for (let i = 0; i < RUN_ACTIONS.length; i++) {
+        await playRound(page, `r${i + 1}`, RUN_ACTIONS[i], { probe: probes[i] || null });
         saveNotes();
     }
 
@@ -470,10 +493,14 @@ async function run() {
         ['Brannock', 'Thornwater', 'east'],
         ['Thornwater', 'Brannock', 'west'],
     ];
+    let detailedEdges = 0;
     for (const [from, to, expected] of legs) {
         const link = linkBetween(finalState, from, to);
+        if (link && (link.direction || link.travelTime || link.route)) detailedEdges += 1;
         note('verdict', `${from} → ${to}: ${link ? `edge ${link.direction || 'bare'}${link.travelTime ? `, ${link.travelTime}` : ''}${link.route ? `, by ${link.route}` : ''} (expected ${expected}: ${link.direction === expected ? 'OK' : link.direction ? 'MISMATCH' : 'no bearing captured'})` : 'NO EDGE'}`);
     }
+
+    note('verdict', `Detailed edges (bearing or duration or route): ${detailedEdges} of ${legs.length}${UNSCRIPTED ? ' — UNSCRIPTED run: every detail came from the DM saying it in-world' : ''}`);
 
     // Places tab screenshot: the player-facing "Ways from here".
     const opened = await clickByText(page, 'button', 'Journal') || await clickByText(page, '.nav-btn, .tab-btn, button', 'Journal');

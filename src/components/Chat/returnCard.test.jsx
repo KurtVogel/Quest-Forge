@@ -150,7 +150,7 @@ describe('<ReturnCard />', () => {
     it('renders the four blocks and the Continue button', () => {
         const card = buildReturnCard(makeState(), { now: T0 + DAY });
         const html = renderToStaticMarkup(<ReturnCard card={card} onDismiss={() => {}} />);
-        expect(html).toContain('You were away 1 day ago');
+        expect(html).toContain('Last played 1 day ago');
         expect(html).toContain('Previously, in The Vellmark Freight');
         expect(html).toContain('Last time');
         expect(html).toContain('Open threads');

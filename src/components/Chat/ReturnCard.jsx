@@ -12,7 +12,7 @@ export default function ReturnCard({ card, onDismiss, onAskRecap, recapDisabled 
         <section className="return-card" aria-label="Previously in this campaign">
             <div className="return-card-heading">
                 <div>
-                    <span className="return-card-kicker">You were away {card.timeAway}</span>
+                    <span className="return-card-kicker">Last played {card.timeAway}</span>
                     <h3>Previously{card.campaignName ? `, in ${card.campaignName}` : ''}</h3>
                 </div>
                 <button type="button" className="btn btn-primary return-card-dismiss" onClick={onDismiss}>Continue</button>
