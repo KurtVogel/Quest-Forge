@@ -287,6 +287,29 @@ describe('turn runner — table-talk world pause (security-shaped: OOC can never
         await runner.sendToLLM('OOC: what happened last session?', 'OOC: what happened last session?', { tableTalk: true });
         expect(streamMessage).toHaveBeenCalledTimes(1);
     });
+
+    it('the return card recap request is detected as table talk and produces no events (WOW 2026-09-15 W2)', async () => {
+        const { RECAP_REQUEST_MESSAGE, isTableTalkMessage } = await import('./tableTalk.js');
+        expect(isTableTalkMessage(RECAP_REQUEST_MESSAGE)).toBe(true);
+        const response = 'Last time you left Hesper with the manifest unsigned. Open: the missing crates. I asked whether you sign or ask first.\n'
+            + '```json\n{"gold_found": 50, "quest_updates": [{"name": "Smuggled", "status": "new"}], "location": "Elsewhere",'
+            + ' "requested_rolls": [{"type": "skill_check", "skill": "insight", "dc": 10, "description": "Read Hesper"}]}\n```';
+        const sendMessage = vi.fn(async () => '');
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream([response]), sendMessage });
+        const before = { gold: getState().character.gold, location: getState().currentLocation };
+
+        const events = await runner.sendToLLM(RECAP_REQUEST_MESSAGE, RECAP_REQUEST_MESSAGE, { tableTalk: isTableTalkMessage(RECAP_REQUEST_MESSAGE) });
+
+        expect(events).toBeNull();
+        expect(getState().character.gold).toBe(before.gold);
+        expect(getState().currentLocation).toBe(before.location);
+        expect(getState().quests).toHaveLength(0);
+        expect(getState().pendingRoleplayCheck).toBeNull();
+        const assistant = getState().messages.findLast(m => m.role === 'assistant');
+        expect(assistant.content).toContain('Last time you left Hesper');
+        expect(assistant.events).toBeNull();
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
 });
 
 describe('turn runner — suppressHpEvents (batched-round HP already applied)', () => {

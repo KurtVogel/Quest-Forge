@@ -19,6 +19,15 @@ export function isTableTalkMessage(text) {
 }
 
 /**
+ * "Ask the DM for a recap" (WOW 2026-09-15, session-return W2): the one
+ * bounded request the return card's button sends. It rides THIS lane — the
+ * OOC prefix is what makes it table talk: events force-nulled, kept out of
+ * memory, hidden state never revealed. Player-initiated only, so DECISIONS.md
+ * 2026-06-19 ("Continue never calls the DM") is honored, not reversed.
+ */
+export const RECAP_REQUEST_MESSAGE = 'OOC: Recap where we are, what\'s open, and what you last asked me — in your voice, under 120 words.';
+
+/**
  * Response-mode block appended to the system prompt on a detected table-talk turn.
  * Mirrors the combat-intent-only mode: one unambiguous contract for this response.
  */

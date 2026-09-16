@@ -903,7 +903,7 @@ Why: the first five minutes are the marketing experience. A player who sees thei
 backstory become a face, a sheet, and a real playable build is much more likely to believe the
 rest of the campaign will remember and respect it.
 
-### [wow] The return card: "Previously, in <campaign>" — status: W1 `shipped` (2026-09-16), W2 `idea` (wow audit 2026-09-15, W1 + W2)
+### [wow] The return card: "Previously, in <campaign>" — status: `shipped` (W1 + W2 2026-09-16; real-provider recap scoring still to run) (wow audit 2026-09-15, W1 + W2)
 Continue/Load is narratively inert by decision (DECISIONS.md 2026-06-19 — no DM recap, no
 extra turn) and should stay so; but today the return moment is ALSO informationally inert:
 the Continue button shows `name · Lv · class` although the save projection already carries

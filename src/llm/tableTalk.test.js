@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { isTableTalkMessage, TABLE_TALK_RESPONSE_MODE, TABLE_TALK_STANDING_RULE } from './tableTalk.js';
+import { isTableTalkMessage, RECAP_REQUEST_MESSAGE, TABLE_TALK_RESPONSE_MODE, TABLE_TALK_STANDING_RULE } from './tableTalk.js';
+
+describe('the return card recap request (WOW 2026-09-15, session-return W2)', () => {
+    it('is explicitly table talk, bounded, and asks for the three things the card promises', () => {
+        expect(isTableTalkMessage(RECAP_REQUEST_MESSAGE)).toBe(true);
+        expect(RECAP_REQUEST_MESSAGE).toMatch(/^OOC: /);
+        expect(RECAP_REQUEST_MESSAGE).toContain('under 120 words');
+        expect(RECAP_REQUEST_MESSAGE).toContain('where we are');
+        expect(RECAP_REQUEST_MESSAGE).toContain("what's open");
+        expect(RECAP_REQUEST_MESSAGE).toContain('what you last asked me');
+    });
+});
 
 describe('isTableTalkMessage', () => {
     it.each([

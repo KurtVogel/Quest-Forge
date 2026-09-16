@@ -6,7 +6,7 @@ import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt } fr
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe } from '../../llm/scribe.js';
-import { isTableTalkMessage } from '../../llm/tableTalk.js';
+import { isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
 import { addMemory, findSubjectsInText, seedMemories } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
@@ -621,8 +621,10 @@ export default function ChatPanel() {
     /**
      * Handle the full send flow: user message → LLM → dice rolls → auto follow-up.
      */
-    const handleSend = async () => {
-        const trimmed = input.trim();
+    // One send path for the composer AND the return card's recap button
+    // (2026-09-16): `text` is the player line; `fromComposer` clears the box.
+    const submitPlayerMessage = async (text, { fromComposer = false } = {}) => {
+        const trimmed = String(text || '').trim();
         if (!trimmed) return;
         if (isLoading) {
             // A send while the previous turn's post-stream machinery is still
@@ -641,10 +643,12 @@ export default function ChatPanel() {
             && stateRef.current.combat.phase === COMBAT_PHASES.AWAITING_PLAYER;
         if (startedCombatIntent) dispatch({ type: 'BEGIN_COMBAT_INTENT' });
 
-        setInput('');
-        // Reset textarea height to single line
-        if (inputRef.current) {
-            inputRef.current.style.height = 'auto';
+        if (fromComposer) {
+            setInput('');
+            // Reset textarea height to single line
+            if (inputRef.current) {
+                inputRef.current.style.height = 'auto';
+            }
         }
 
         dispatch({
@@ -848,6 +852,12 @@ export default function ChatPanel() {
         if (returnCard && state.session?.lastPlayedAt !== returnCard.lastPlayedAt) setReturnCard(null);
     }, [returnCard, state.session?.lastPlayedAt]);
 
+    const handleSend = () => submitPlayerMessage(input, { fromComposer: true });
+    // "Ask the DM for a recap" (WOW session-return W2): one bounded OOC line
+    // through the table-talk lane — events force-nulled, kept out of memory.
+    // The user line stamps lastPlayedAt, so the card retires on its own.
+    const handleAskRecap = () => submitPlayerMessage(RECAP_REQUEST_MESSAGE);
+
     const combatInputLocked = state.combat?.active && (
         state.combat.phase !== COMBAT_PHASES.AWAITING_PLAYER || !!state.combat.queuedExchange
     );
@@ -933,7 +943,12 @@ export default function ChatPanel() {
             )}
 
             {returnCard && !state.combat?.active && (
-                <ReturnCard card={returnCard} onDismiss={dismissReturnCard} />
+                <ReturnCard
+                    card={returnCard}
+                    onDismiss={dismissReturnCard}
+                    onAskRecap={handleAskRecap}
+                    recapDisabled={isLoading || !readyToPlay}
+                />
             )}
 
             <div className="chat-input-area">
