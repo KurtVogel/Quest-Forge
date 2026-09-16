@@ -117,7 +117,7 @@ Rules:
 - When KNOWN APPEARANCES lists a character and this turn adds or changes a visual detail, emit their appearance as the COMPLETE updated description: start from the known look and weave in what this turn established. Drop or alter a known detail ONLY when the fiction explicitly changed it (haircut, dye, disguise, wound, healing, new gear). NEVER emit just the new fragment — "a fresh scar on his cheek" alone would erase the white hair, the build, everything else on record. When merging, never launder the record: an intimate or unflattering detail already in KNOWN APPEARANCES stays in the merged description at full specificity until the fiction explicitly changes it — if the old record used crude slang, restate that detail in neutral anatomical wording (see REGISTER), but never blur, shrink, or drop it. As you merge, reconcile the description into clean prose: drop duplicate adjectives and resolve contradictions rather than stacking them ("scrawny ... scrawny ... large backside" should become one coherent line like "a scrawny goblin with notably large buttocks"), but never lose a distinct established detail in the process. If this turn adds nothing visually new for them, omit the field entirely.
 - location_profile classifies what KIND of place the current location is, from what the narrative itself establishes: a haven is genuinely safe (a defended town, a temple sanctuary), a settlement is ordinary inhabited civilization, wilderness is uninhabited country, a frontier is contested or lawless ground, a hostile_site is intrinsically dangerous by nature (a ghoul-warren, a bandit camp). "danger" is the place's own intrinsic danger, independent of any current plot. Emit it when a location is first meaningfully established or when the fiction changes a place's fundamental nature (the town falls, the warren is cleared) — omit otherwise. Positional continuity, like appearance, is exempt from the extraction budget.
 - travel records GEOGRAPHY: emit it ONLY when this exchange narrates the hero completing a journey between two DISTINCT named places (town to town, camp to ruin) — never for movement inside one town or building, never for a journey merely planned or discussed. Copy every detail from the narrative's own words and omit any the narrative does not state: a direction, duration, or road you infer is a falsehood the DM will be held to later. Exempt from the extraction budget like location.
-- Only include fields you have actual information for — omit empty/unknown fields
+- Only include fields you have actual information for — omit empty/unknown fields. The ONE exception is "world_facts": ALWAYS include it, as an empty [] when nothing durable happened — it is the key the engine anchors its read on
 - DO NOT alter established details: copy names, proper nouns, and numbers exactly as the DM wrote them — never rename, paraphrase, translate, or invent (the REGISTER rule for anatomical vocabulary is the one exception). Refer to each NPC by the exact name used in the narrative so their record never forks.
 - ONE PERSON, ONE RECORD: when a character's proper name is known — from the narrative, KNOWN APPEARANCES, or KNOWN PLAYER-RELATIONSHIP STANCES — always use their FULLEST known name ("Saima Aallotar", not "Saima") and NEVER a role title ("The Innkeeper", "the merchant"). Role-title names are allowed only for characters whose proper name has genuinely never been given.
 - If nothing notable happened (pure narration, no new facts), return { "world_facts": [], "npc_updates": [], "story_memory": [], "location": null }
@@ -315,6 +315,18 @@ function npcUpdateContradictsAuthoritativeCombat(npc, authoritativeContext) {
     return contradictsAuthoritativeCombat(`${npc.name}: ${fields.join(' ')}`, authoritativeContext);
 }
 
+/**
+ * Every top-level key of the Scribe schema, so a reply that honors the
+ * prompt's omit rule still anchors on SOMETHING it did include; the
+ * whole-object fallback in tryParseDirectorJson is the belt (2026-09-16 P1).
+ */
+export const SCRIBE_ANCHORS = [
+    'world_facts', 'npc_updates', 'story_memory', 'player_appearance', 'location',
+    'location_profile', 'travel', 'narrated_loot', 'narrated_payment', 'narrated_losses', 'narrated_casts',
+];
+/** The reflection schema's keys — a quiet cadence honestly answers with the tempo directive alone. */
+export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'story_memory', 'tempo_directive', 'front_proposals'];
+
 export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownLocations = null, dmLocationEvent = null }) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
@@ -378,7 +390,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             ].filter(Boolean).join('\n\n'),
         });
 
-        const extracted = tryParseDirectorJson(response, 'world_facts', 'Scribe');
+        const extracted = tryParseDirectorJson(response, SCRIBE_ANCHORS, 'Scribe');
         if (!extracted) return;
 
         // Engine-owned budget backstop: the prompt caps extraction at 2-3 per turn,
@@ -421,8 +433,13 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             console.log(`[Scribe] Added ${storyMemory.length} story memory card(s)`);
         }
 
+        // The hero's look rides the same fragment belt as an NPC's (2026-09-16
+        // scribe P1): MERGE_CHARACTER_APPEARANCE merges a fragment into the
+        // recorded description and lets only a rewrite replace it — the plain
+        // UPDATE_CHARACTER spread let "a fresh cut over the brow" become the
+        // whole PLAYER CHARACTER look, the portrait prompt, and the identity lock.
         if (typeof extracted.player_appearance === 'string' && extracted.player_appearance.trim()) {
-            dispatch({ type: 'UPDATE_CHARACTER', payload: { appearance: extracted.player_appearance.trim().slice(0, CHARACTER_APPEARANCE_MAX) } });
+            dispatch({ type: 'MERGE_CHARACTER_APPEARANCE', payload: { appearance: extracted.player_appearance.trim().slice(0, CHARACTER_APPEARANCE_MAX) } });
         }
 
         // A model answering "where are we now?" with filler must not mint a canonical
@@ -667,7 +684,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             userMessage: JSON.stringify(context),
         });
 
-        const reflected = tryParseDirectorJson(response, ['npc_updates', 'front_advances', 'story_memory'], 'Reflection');
+        const reflected = tryParseDirectorJson(response, REFLECTION_ANCHORS, 'Reflection');
         if (!reflected) return;
 
         const reflectedNames = [];

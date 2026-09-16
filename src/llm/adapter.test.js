@@ -72,13 +72,24 @@ describe('sendMessage', () => {
 });
 
 describe('streamMessage', () => {
-    it('routes to the gemini provider and forwards onChunk/signal', async () => {
-        streamGeminiMessage.mockResolvedValue('full response');
+    it('routes to the gemini provider and forwards chunks and the caller\'s abort through its own guard', async () => {
+        const controller = new AbortController();
+        let abortedMidStream = null;
+        streamGeminiMessage.mockImplementation(async ({ onChunk: forward, signal }) => {
+            forward('a'); forward('b');
+            // The provider receives the adapter's composite signal (stall guard +
+            // caller), which follows the caller's abort while the stream runs.
+            expect(signal).toBeInstanceOf(AbortSignal);
+            expect(signal.aborted).toBe(false);
+            controller.abort();
+            abortedMidStream = signal.aborted;
+            return 'full response';
+        });
         const onChunk = vi.fn();
-        const signal = new AbortController().signal;
-        const result = await streamMessage({ ...baseOptions, provider: 'gemini', onChunk, signal });
+        const result = await streamMessage({ ...baseOptions, provider: 'gemini', onChunk, signal: controller.signal });
         expect(result).toBe('full response');
-        expect(streamGeminiMessage).toHaveBeenCalledWith(expect.objectContaining({ onChunk, signal }));
+        expect(onChunk.mock.calls.map(([c]) => c)).toEqual(['a', 'b']);
+        expect(abortedMidStream).toBe(true);
     });
 
     it('routes to the openai provider', async () => {
@@ -251,5 +262,50 @@ describe('sendMessage honors Retry-After (2026-09-06 audit)', () => {
         await vi.advanceTimersByTimeAsync(3000);
         await expect(promise).resolves.toBe('recovered');
         expect(sendGeminiMessage).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('streamMessage idle stall guard (2026-09-16 providers-adapter P2)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    const hangUntilAborted = ({ signal }) => new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')), { once: true });
+    });
+
+    it('a stream that never sends a byte is aborted with a retry message instead of parking the turn forever', async () => {
+        vi.useFakeTimers();
+        streamGeminiMessage.mockImplementation(hangUntilAborted);
+        const promise = streamMessage({ ...baseOptions, provider: 'gemini', onChunk: vi.fn(), idleTimeoutMs: 5000 });
+        const outcome = expect(promise).rejects.toThrow('gemini stream stalled — no data for 5s');
+        await vi.advanceTimersByTimeAsync(5000);
+        await outcome;
+    });
+
+    it('every chunk resets the idle timer — a long reply is never cut for being long', async () => {
+        vi.useFakeTimers();
+        streamGeminiMessage.mockImplementation(({ onChunk, signal }) => new Promise((resolve, reject) => {
+            setTimeout(() => onChunk('early'), 4000);
+            setTimeout(() => onChunk('later'), 8000);
+            setTimeout(() => resolve('earlylater'), 11000);
+            signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')), { once: true });
+        }));
+        const onChunk = vi.fn();
+        const promise = streamMessage({ ...baseOptions, provider: 'gemini', onChunk, idleTimeoutMs: 5000 });
+        await vi.advanceTimersByTimeAsync(11000);
+        await expect(promise).resolves.toBe('earlylater');
+        expect(onChunk.mock.calls.map(([c]) => c)).toEqual(['early', 'later']);
+    });
+
+    it('the Stop button still surfaces as an AbortError, never as a stall', async () => {
+        streamGeminiMessage.mockImplementation(hangUntilAborted);
+        const controller = new AbortController();
+        const promise = streamMessage({ ...baseOptions, provider: 'gemini', onChunk: vi.fn(), signal: controller.signal });
+        const outcome = promise.catch(e => e);
+        controller.abort();
+        const error = await outcome;
+        expect(error.name).toBe('AbortError');
+        expect(error.message).not.toMatch(/stalled/);
     });
 });

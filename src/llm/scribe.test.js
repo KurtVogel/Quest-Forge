@@ -1885,20 +1885,22 @@ describe('Scribe dispatcher shapes (2026-09-01 scribe test depth)', () => {
         expect(dispatch.mock.calls.some(([a]) => a.type === 'UPDATE_LOCATION_PROFILE')).toBe(false);
     });
 
-    it('player_appearance → UPDATE_CHARACTER clamped to 600 chars; blank is ignored', async () => {
+    it('player_appearance → MERGE_CHARACTER_APPEARANCE (the fragment belt, 2026-09-16 P1) clamped to 600 chars; blank is ignored', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             world_facts: [], npc_updates: [], story_memory: [], location: null,
             player_appearance: `  ${'x'.repeat(700)}  `,
         }));
         const dispatch = vi.fn();
         await runScribe({ playerMessage: 'x', dmNarrative: 'y', settings, dispatch });
-        const update = dispatch.mock.calls.find(([a]) => a.type === 'UPDATE_CHARACTER')?.[0];
+        const update = dispatch.mock.calls.find(([a]) => a.type === 'MERGE_CHARACTER_APPEARANCE')?.[0];
         expect(update.payload).toEqual({ appearance: 'x'.repeat(600) });
+        // Never the plain-replace action — that is the player's own edit lane.
+        expect(dispatch.mock.calls.some(([a]) => a.type === 'UPDATE_CHARACTER')).toBe(false);
 
         sendMessage.mockResolvedValue(JSON.stringify({ world_facts: [], npc_updates: [], story_memory: [], location: null, player_appearance: '   ' }));
         const blank = vi.fn();
         await runScribe({ playerMessage: 'x', dmNarrative: 'y', settings, dispatch: blank });
-        expect(blank.mock.calls.some(([a]) => a.type === 'UPDATE_CHARACTER')).toBe(false);
+        expect(blank.mock.calls.some(([a]) => a.type === 'MERGE_CHARACTER_APPEARANCE' || a.type === 'UPDATE_CHARACTER')).toBe(false);
     });
 
     it('buildKnownLocations orders by recency (lastVisitedAt, then firstSeenAt) and caps at 12', () => {
@@ -2029,5 +2031,82 @@ describe('Scribe travel report → ADD_TRAVEL_LINK (geography as canon, 2026-09-
             await runScribe({ playerMessage: 'x', dmNarrative: 'y', settings, dispatch });
             expect(dispatch.mock.calls.some(([a]) => a.type === 'ADD_TRAVEL_LINK')).toBe(false);
         }
+    });
+});
+
+describe('the Scribe parse boundary honors its own omit rule (2026-09-16 scribe P1)', () => {
+    beforeEach(() => sendMessage.mockReset());
+    const settings = { apiKey: 'test-key', llmProvider: 'gemini' };
+    const reply = {
+        npc_updates: [{ name: 'Maren Duskvale', kind: 'character', rosterEligible: true, lastNotes: 'Took six silver for the crossing.' }],
+        narrated_payment: { silver: 6 },
+        location: 'The Ferry',
+    };
+    const lootAudit = { sourceId: 'msg-9:scribe-loot', appliedEvents: null, getState: () => ({ appliedLootSourceIds: [], messages: [] }) };
+
+    it('a reply without world_facts still dispatches the NPC update, the relocation, AND the payment audit', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify(reply));
+        const dispatch = vi.fn();
+        await runScribe({ playerMessage: 'I pay the ferryman.', dmNarrative: 'Maren Duskvale pockets six silver and poles you across to The Ferry.', settings, dispatch, lootAudit });
+        const types = dispatch.mock.calls.map(([a]) => a.type);
+        expect(types).toContain('UPDATE_NPC');
+        expect(types).toContain('SET_LOCATION');
+        expect(types).toContain('AUDIT_COIN_PAYMENT');
+    });
+
+    it('the same reply inside a code fence dispatches too', async () => {
+        sendMessage.mockResolvedValue(`\`\`\`json\n${JSON.stringify(reply)}\n\`\`\``);
+        const dispatch = vi.fn();
+        await runScribe({ playerMessage: 'I pay the ferryman.', dmNarrative: 'Maren Duskvale pockets six silver and poles you across to The Ferry.', settings, dispatch, lootAudit });
+        expect(dispatch.mock.calls.map(([a]) => a.type)).toContain('UPDATE_NPC');
+    });
+
+    it('the prompt makes world_facts the one field that is never omitted', async () => {
+        sendMessage.mockResolvedValue('{}');
+        await runScribe({ playerMessage: 'x', dmNarrative: 'y', settings, dispatch: vi.fn() });
+        expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('The ONE exception is "world_facts": ALWAYS include it');
+    });
+
+    it('a quiet cadence\'s tempo-only reflection applies its directive (was: parsed to null)', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({ tempo_directive: { front_id: null, reason: 'A quiet stretch suits the slow burn.' } }));
+        const dispatch = vi.fn();
+        await runNpcFrontReflection({
+            state: {
+                settings, session: { id: 'campaign' },
+                fronts: [{ id: 'front-road', status: 'active' }],
+                npcs: [], journal: [], worldFacts: [], party: [],
+            },
+            dispatch,
+            cadence: { id: 'journal-campaign-40', journalEnd: 40, summary: 'Quiet days.' },
+        });
+        const tempo = dispatch.mock.calls.find(([a]) => a.type === 'APPLY_TEMPO_DIRECTIVE')?.[0];
+        expect(tempo?.payload.cadenceId).toBe('journal-campaign-40');
+        expect(tempo?.payload.directive).toEqual({ front_id: null, reason: 'A quiet stretch suits the slow burn.' });
+    });
+});
+
+describe('loot audit item identity is name-only (2026-09-16 scribe P2: itemKey minted Plate Armor)', () => {
+    beforeEach(() => sendMessage.mockReset());
+
+    it('drops a payload itemKey so the catalog resolves from the narrated name alone', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            narrated_loot: { items: [{ name: 'rusty nail', quantity: 1, itemKey: 'plateArmor' }] },
+        }));
+        const dispatch = vi.fn();
+        await runScribe({
+            playerMessage: 'I pick up the nail.',
+            dmNarrative: 'You pocket a rusty nail from the floorboards.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch,
+            lootAudit: {
+                sourceId: 'msg-2:scribe-loot',
+                appliedEvents: { goldFound: 0, itemsFound: [], purchases: [], sells: [], startingItems: [] },
+                getState: () => ({ appliedLootSourceIds: [], messages: [], recentItemGrants: [] }),
+            },
+        });
+        const add = dispatch.mock.calls.find(([a]) => a.type === 'ADD_ITEM')?.[0];
+        expect(add?.payload.name).toBe('rusty nail');
+        expect(add?.payload.itemKey).toBeUndefined();
     });
 });

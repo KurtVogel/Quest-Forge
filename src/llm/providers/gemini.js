@@ -65,6 +65,22 @@ function promptBlockedError(reason, data) {
  * reasoning summaries with `thought: true`). Reading only parts[0] silently
  * drops the rest — which for a DM turn is the trailing JSON event block.
  */
+/** A parsed provider body, or {} when it is not an object (a `null` body threw at `.candidates`). */
+function asObject(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+/**
+ * A usable embedding: the documented length AND every element a finite
+ * number (2026-09-16 audit P2 — a 768-slot vector of strings passed the
+ * length check, cosine went NaN, and the row never retrieved this session).
+ */
+function isEmbeddingVector(values) {
+    return Array.isArray(values)
+        && values.length === GEMINI_EMBED_DIMENSIONS
+        && values.every(v => typeof v === 'number' && Number.isFinite(v));
+}
+
 function extractCandidateText(candidate) {
     const parts = candidate?.content?.parts;
     if (!Array.isArray(parts)) return '';
@@ -156,7 +172,7 @@ export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHi
         throw await httpError(response);
     }
 
-    const data = await response.json();
+    const data = asObject(await response.json());
     const candidate = data.candidates?.[0];
     const blockReason = promptBlockReason(data);
     if (blockReason && !candidate) {
@@ -204,9 +220,9 @@ export async function embedText(apiKey, text, { inputType = 'document' } = {}) {
             );
             return null;
         }
-        const data = await response.json();
+        const data = asObject(await response.json());
         const values = data.embedding?.values;
-        if (!Array.isArray(values) || values.length !== GEMINI_EMBED_DIMENSIONS) {
+        if (!isEmbeddingVector(values)) {
             console.error(
                 `[Gemini embed] Expected ${GEMINI_EMBED_DIMENSIONS} values from ${GEMINI_EMBED_MODEL}, received ${values?.length || 0}:`,
                 data,
@@ -265,11 +281,11 @@ export async function embedTexts(apiKey, texts, { inputType = 'document' } = {})
                 );
                 continue;
             }
-            const data = await response.json();
+            const data = asObject(await response.json());
             const embeddings = Array.isArray(data.embeddings) ? data.embeddings : [];
             chunk.forEach(({ index }, j) => {
                 const values = embeddings[j]?.values;
-                if (Array.isArray(values) && values.length === GEMINI_EMBED_DIMENSIONS) {
+                if (isEmbeddingVector(values)) {
                     results[index] = values;
                 }
             });

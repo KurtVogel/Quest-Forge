@@ -130,6 +130,26 @@ export function formatSecrecyTag(knownBy) {
     return list.length > 0 ? `[SECRET — known only to: ${list.join(', ')}] ` : '';
 }
 
+/**
+ * The engine's own stamps, which a LANE payload may never carry (2026-09-16
+ * audit P2): a salience-5 promise born with `lastUsedMessage: 1e9` scored 0
+ * for the campaign's life, and `firstSeenMessage: 0` aged a witnessed deed
+ * into ancient legend for hearsay. The reducer strips these from an incoming
+ * card before normalizing; the load path and the engine's own merges keep
+ * passing them through normalizeStoryMemoryCard as before.
+ */
+export const STORY_MEMORY_ENGINE_STAMPS = Object.freeze([
+    'firstSeenMessage', 'lastSeenMessage', 'lastUsedMessage',
+    'firstSeenAt', 'first_seen_at', 'lastSeenAt', 'last_seen_at', 'lastUsedAt', 'last_used_at',
+]);
+
+export function stripStoryMemoryEngineStamps(card) {
+    if (!card || typeof card !== 'object') return card;
+    const out = { ...card };
+    for (const key of STORY_MEMORY_ENGINE_STAMPS) delete out[key];
+    return out;
+}
+
 export function normalizeStoryMemoryCard(card = {}, existing = null) {
     const now = Date.now();
     const text = cleanText(card.text || card.memory || card.note, existing?.text || '').slice(0, MAX_TEXT_LENGTH);

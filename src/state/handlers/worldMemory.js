@@ -9,6 +9,7 @@ import {
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
     pickMergedCardText,
+    stripStoryMemoryEngineStamps,
 } from '../../engine/storyMemory.js';
 import { gameReducer } from '../gameReducer.js';
 import { isStaleCampaignAction, sanitizeWorldFactPayload, stampNpcRelationshipArcs, systemMessage } from './shared.js';
@@ -114,7 +115,9 @@ export const handlers = {
     },
 
     ADD_STORY_MEMORY_CARD(state, action) {
-        const card = normalizeStoryMemoryCard(action.payload);
+        // A lane card never carries the engine's stamps (2026-09-16 P2) —
+        // birth and merge stamp them below from the live transcript.
+        const card = normalizeStoryMemoryCard(stripStoryMemoryEngineStamps(action.payload));
         if (!card) return state;
         const idx = findStoryMemoryMatch(state.storyMemory || [], card);
         const messageCount = (state.messages || []).length;
@@ -133,7 +136,8 @@ export const handlers = {
         // resolved promise back into DRAMATIC CALLBACKS a turn after the DM
         // paid it off. Only a DORMANT card revives on re-report; reopening a
         // resolved one takes an explicit status from the DM's memory_updates.
-        const status = existing.status === 'resolved' ? 'resolved' : card.status;
+        const resolved = existing.status === 'resolved';
+        const status = resolved ? 'resolved' : card.status;
         return {
             ...state,
             storyMemory: state.storyMemory.map((memory, i) => i === idx
@@ -141,7 +145,10 @@ export const handlers = {
                     ...existing,
                     ...card,
                     status,
-                    text: pickMergedCardText(existing.text, card.text),
+                    // A paid-off beat's text is frozen with its status
+                    // (2026-09-16 P2 belt): an id-keyed re-report used to
+                    // rewrite what the resolved card says.
+                    text: resolved ? existing.text : pickMergedCardText(existing.text, card.text),
                     firstSeenAt: existing.firstSeenAt,
                     lastSeenAt: Date.now(),
                     lastSeenMessage: messageCount,

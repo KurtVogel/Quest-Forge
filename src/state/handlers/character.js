@@ -6,6 +6,8 @@ import { computeACFromInventory, getModifier, normalizeConditionName, normalizeD
 import { ABILITY_NAMES, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../../engine/characterUtils.js';
 import { awardExperience, getDmBonusXpCap, getStoryMilestoneXp, isMaxLevel } from '../../engine/progression.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
+import { mergeNpcAppearance } from '../../engine/npcRoster.js';
+import { CHARACTER_APPEARANCE_MAX, cleanTextField } from '../../config/contentLimits.js';
 import {
     applyDeath,
     applyEarlyDefeat,
@@ -119,6 +121,23 @@ export const handlers = {
             }
         }
         return { ...state, character: { ...state.character, ...payload } };
+    },
+
+    /**
+     * The Scribe's lane for the hero's look (2026-09-16 audit P1): the NPC
+     * fragment belt, applied to the character. A FRAGMENT (under half the
+     * record's length, covering under half its tokens) merges into the
+     * recorded description; a rewrite replaces it. The wizard and the sheet
+     * keep the plain UPDATE_CHARACTER replace — the player's own edit is
+     * exactly what they typed (the SET_NPC_LOOK contract).
+     */
+    MERGE_CHARACTER_APPEARANCE(state, action) {
+        const incoming = cleanTextField(action.payload?.appearance, CHARACTER_APPEARANCE_MAX);
+        if (!incoming) return state;
+        const existing = cleanTextField(state.character?.appearance, CHARACTER_APPEARANCE_MAX);
+        const merged = mergeNpcAppearance(existing, incoming, CHARACTER_APPEARANCE_MAX);
+        if (!merged || merged === existing) return state;
+        return { ...state, character: { ...state.character, appearance: merged } };
     },
 
     APPLY_ABILITY_SCORE_IMPROVEMENT(state, action) {

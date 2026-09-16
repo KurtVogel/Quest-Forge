@@ -900,3 +900,131 @@ describe('UPDATE_NPC payload-trust boundary (2026-09-06 scribe P2 + appearance b
         expect(seen.npcs[0].lastSeenMessage).toBe(9);
     });
 });
+
+describe('UPDATE_NPC lane trust boundary (2026-09-16 scribe P1/P2 — known keys, clamps, types)', () => {
+    const seeded = gameReducer(initialGameState, {
+        type: 'LOAD_GAME',
+        payload: {
+            ...initialGameState,
+            character: initialGameState.character,
+            inventory: initialGameState.inventory,
+            messages: [],
+            npcs: [{
+                id: 'npc-maren', name: 'Maren Duskvale', rosterTier: 'character', kind: 'character',
+                disposition: 'friendly', arcDisposition: 'friendly', firstMet: 5,
+                relationshipHistory: [{ from: 'neutral', to: 'friendly', at: 1000, note: 'The rescue.' }],
+                knownFacts: ['Runs the ferry.'],
+                portraitUrl: 'data:image/png;base64,AAAA', portraitProvider: 'xai',
+            }],
+        },
+    });
+    const maren = state => state.npcs.find(npc => npc.id === 'npc-maren');
+
+    it('engine-owned keys never arrive from a lane: arc history, arcDisposition, knownFacts, firstMet, the portrait', () => {
+        const next = gameReducer(seeded, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Maren Duskvale',
+                relationshipHistory: [],
+                arcDisposition: 'hostile',
+                knownFacts: [],
+                firstMet: 1,
+                portraitUrl: 'https://image.pollinations.ai/prompt/a%20troll',
+                portraitProvider: 'wire',
+                lastNotes: 'Waved from the jetty.',
+            },
+        });
+        const record = maren(next);
+        expect(record.relationshipHistory).toEqual([{ from: 'neutral', to: 'friendly', at: 1000, note: 'The rescue.' }]);
+        expect(record.arcDisposition).toBe('friendly');
+        expect(record.knownFacts).toEqual(['Runs the ferry.']);
+        expect(record.firstMet).toBe(5);
+        expect(record.portraitUrl).toBe('data:image/png;base64,AAAA');
+        expect(record.portraitProvider).toBe('xai');
+        expect(record.lastNotes).toBe('Waved from the jetty.');
+    });
+
+    it('an unknown key never persists and every current-state text field clamps', () => {
+        const next = gameReducer(seeded, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Maren Duskvale',
+                junk: 'x'.repeat(100000),
+                lastNotes: 'n'.repeat(100000),
+                agenda: 'a'.repeat(50000),
+                privateNotes: 'p'.repeat(50000),
+                relationshipTension: 't'.repeat(50000),
+                basedIn: 'b'.repeat(5000),
+                lastLocation: 'l'.repeat(5000),
+            },
+        });
+        const record = maren(next);
+        expect(record.junk).toBeUndefined();
+        expect(record.lastNotes).toHaveLength(600);
+        expect(record.agenda).toHaveLength(600);
+        expect(record.privateNotes).toHaveLength(600);
+        expect(record.relationshipTension).toHaveLength(600);
+        expect(record.basedIn).toHaveLength(200);
+        expect(record.lastLocation).toHaveLength(200);
+        expect(JSON.stringify(record).length).toBeLessThan(6000);
+    });
+
+    it('disposition is whitelisted (case-folded); junk leaves the stored value standing', () => {
+        const junk = gameReducer(seeded, { type: 'UPDATE_NPC', payload: { name: 'Maren Duskvale', disposition: 'furious-ish' } });
+        expect(maren(junk).disposition).toBe('friendly');
+        const folded = gameReducer(seeded, { type: 'UPDATE_NPC', payload: { name: 'Maren Duskvale', disposition: ' WARY ' } });
+        expect(maren(folded).disposition).toBe('wary');
+    });
+
+    it('object identity/text fields are dropped, never "[object Object]", and never stored as objects', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Kettu', kind: 'character', rosterEligible: true, species: 'goblin',
+                gender: { a: 1 }, appearance: ['tall'], disposition: { b: 2 }, lastNotes: ['x'], basedIn: 7, agenda: null,
+            },
+        });
+        expect(next.npcs).toHaveLength(1);
+        const kettu = next.npcs[0];
+        expect(kettu.species).toBe('goblin');
+        expect(kettu.gender).toBeUndefined();
+        expect(kettu.appearance).toBeUndefined();
+        expect(kettu.disposition).toBe('unknown');
+        expect(kettu.lastNotes).toBeUndefined();
+        expect(kettu.basedIn).toBeNull();
+        expect(JSON.stringify(kettu)).not.toContain('[object Object]');
+    });
+
+    it('an object name is not a name: no throw, no change (the whole Scribe turn used to be lost behind it)', () => {
+        let next;
+        expect(() => { next = gameReducer(seeded, { type: 'UPDATE_NPC', payload: { name: { x: 1 }, lastNotes: 'hi' } }); }).not.toThrow();
+        expect(next.npcs).toBe(seeded.npcs);
+        expect(() => gameReducer(seeded, { type: 'UPDATE_NPC', payload: { id: 'npc-maren', name: 42, lastNotes: 'by id still fine' } })).not.toThrow();
+    });
+
+    it('LOAD_GAME is the twin: a pre-fix record heals its clamps, disposition, trust, and junk keys', () => {
+        const loaded = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...initialGameState,
+                character: initialGameState.character,
+                inventory: initialGameState.inventory,
+                messages: [],
+                npcs: [{
+                    id: 'npc-old', name: 'Old Record', rosterTier: 'character', kind: 'character',
+                    lastNotes: 'n'.repeat(100000), disposition: 'Furious', trust: '250',
+                    gender: { x: 1 }, basedIn: ['nowhere'], junk: { deep: 'x'.repeat(1000) },
+                    knownFacts: ['kept', { dropped: true }],
+                }],
+            },
+        });
+        const record = loaded.npcs[0];
+        expect(record.lastNotes).toHaveLength(600);
+        expect(record.disposition).toBe('unknown');
+        expect(record.trust).toBe(100);
+        expect(record.gender).toBeUndefined();
+        expect(record.basedIn).toBeNull();
+        expect(record.junk).toBeUndefined();
+        expect(record.knownFacts).toEqual(['kept']);
+    });
+});

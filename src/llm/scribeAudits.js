@@ -335,8 +335,11 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
             const name = String((typeof entry === 'string' ? entry : entry?.name) || '').trim().slice(0, 80);
             if (!name) return null;
             const quantity = coerceLootAmount(typeof entry === 'object' ? entry.quantity : 1, 20) || 1;
-            const itemKey = typeof entry === 'object' && entry.itemKey ? String(entry.itemKey).slice(0, 60) : null;
-            return { name, quantity, ...(itemKey && { itemKey }) };
+            // Name-only is the contract (2026-09-16 audit P2): the schema never
+            // asks for an itemKey, but ADD_ITEM resolves the catalog by key
+            // FIRST, so a narrated "rusty nail" carrying `itemKey: "plateArmor"`
+            // minted Plate Armor. normalizeItem resolves catalog names itself.
+            return { name, quantity };
         })
         .filter(Boolean)
         .slice(0, 4);

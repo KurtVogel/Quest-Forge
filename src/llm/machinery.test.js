@@ -53,3 +53,13 @@ describe('getBackgroundConfig', () => {
         expect(getBackgroundConfig({ llmProvider: 'openai', apiKey: 'oa-key', model: 'gpt-4o' }).apiKey).toBe('');
     });
 });
+
+describe('type-strict keys (2026-09-16 providers-adapter P2 — a numeric key crashed the app shell in render)', () => {
+    it('non-string keys read as absent instead of throwing', () => {
+        expect(() => getMachineryGeminiKey({ llmProvider: 'xai', geminiApiKey: 123 })).not.toThrow();
+        expect(getMachineryGeminiKey({ llmProvider: 'xai', geminiApiKey: 123 })).toBe('');
+        expect(getMachineryGeminiKey({ llmProvider: 'gemini', apiKey: { k: 1 } })).toBe('');
+        expect(getMachineryGeminiKey({ llmProvider: 'gemini', apiKey: ['k'], geminiApiKey: 'gem-key' })).toBe('gem-key');
+        expect(isMachineryReady({ llmProvider: 'gemini', apiKey: 42 })).toBe(false);
+    });
+});

@@ -101,13 +101,14 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             throw await httpError(response);
         }
 
-        const data = await response.json();
+        const body = await response.json();
+        const data = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
         const message = data.choices?.[0]?.message;
         if (message?.refusal) {
             throw refusalError(message.refusal);
         }
         assertCompleteResponse(data.choices?.[0]?.finish_reason);
-        const content = message?.content;
+        const content = contentText(message?.content);
         if (!content) {
             throw new Error('No response generated. The model may have been blocked or returned empty.');
         }
@@ -145,7 +146,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             if (choice?.finish_reason) finishReason = choice.finish_reason;
             const refusal = choice?.delta?.refusal;
             if (typeof refusal === 'string' && refusal) refusalText += refusal;
-            const text = choice?.delta?.content || '';
+            const text = contentText(choice?.delta?.content);
             if (text) {
                 fullText += text;
                 onChunk(text);
@@ -160,4 +161,18 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
     }
 
     return { send, stream };
+}
+
+/**
+ * Text out of an OpenAI-compatible `content` (2026-09-16 audit P2): a string
+ * as-is, a content-parts array joined on its string `text` parts (compat
+ * proxies emit these), anything else '' — an object delta used to stream
+ * "[object Object]" to the player and commit it to the transcript.
+ */
+export function contentText(content) {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+        return content.map(part => (typeof part === 'string' ? part : (typeof part?.text === 'string' ? part.text : ''))).join('');
+    }
+    return '';
 }

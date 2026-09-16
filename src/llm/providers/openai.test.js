@@ -250,3 +250,40 @@ describe('refusals, reasoning output cap, history shape (2026-09-06 audit)', () 
         ]);
     });
 });
+
+describe('non-string content on both lanes (2026-09-16 providers-adapter P2)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+    const sse = (payload) => `data: ${JSON.stringify(payload)}\n`;
+
+    it('an object delta is never streamed as "[object Object]"; content-parts arrays join on their text parts', async () => {
+        const chunks = [
+            sse({ choices: [{ delta: { content: { type: 'text', text: 'ignored object' } } }] }),
+            sse({ choices: [{ delta: { content: [{ type: 'text', text: 'Hello' }, { type: 'image_url', image_url: {} }] } }] }),
+            sse({ choices: [{ finish_reason: 'stop', delta: { content: ' there' } }] }),
+        ];
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(streamResponse(chunks)));
+        const onChunk = vi.fn();
+        const fullText = await streamOpenAIMessage({ ...SEND_ARGS, onChunk });
+        expect(fullText).toBe('Hello there');
+        expect(onChunk.mock.calls.map(([c]) => c)).toEqual(['Hello', ' there']);
+    });
+
+    it('a non-streaming content-parts array returns its text; an object content is "No response generated"', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: [{ type: 'text', text: 'Hello' }, { type: 'text', text: ' there' }] } }],
+        })));
+        expect(await sendOpenAIMessage(SEND_ARGS)).toBe('Hello there');
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+            choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: { weird: true } } }],
+        })));
+        await expect(sendOpenAIMessage(SEND_ARGS)).rejects.toThrow('No response generated');
+    });
+
+    it('a 200 with a null body is "No response generated", not a TypeError at .choices', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(null)));
+        await expect(sendOpenAIMessage(SEND_ARGS)).rejects.toThrow('No response generated');
+    });
+});

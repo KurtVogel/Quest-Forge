@@ -7,7 +7,7 @@
  * audit: six copies of the dance, eight of cleanText) — one implementation,
  * one test surface.
  */
-import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { extractBalancedJson, repairJson, scanBalancedObject, stripMarkdownFences } from './utils/jsonExtractor.js';
 
 /**
  * Whitespace-collapse + trim + optional clamp. Omit maxLength to keep the full text.
@@ -73,12 +73,28 @@ export function tryParseDirectorJson(response, anchorKey, label) {
         extracted = extractBalancedJson(text, anchor);
         if (extracted) break;
     }
-    if (!extracted) return null;
+    // Whole-object fallback (2026-09-16 scribe P1): an anchor list is a schema
+    // ASSUMPTION, and the Scribe's own prompt says "omit empty/unknown fields"
+    // — a turn with an NPC update, a relocation, and a six-silver payment but
+    // no durable fact came back without `world_facts` and parsed to null, so
+    // NOTHING dispatched (the payment audit included). When the reply IS the
+    // object (the machinery's "Output ONLY the JSON" contract), read it whole.
+    if (!extracted) {
+        const cleaned = stripMarkdownFences(text).trim();
+        if (!cleaned.startsWith('{')) return null;
+        const end = scanBalancedObject(cleaned, 0);
+        extracted = { json: end > 0 ? cleaned.slice(0, end) : cleaned, startIndex: 0 };
+    }
+    const parsed = parseObjectJson(extracted.json, label);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+}
+
+function parseObjectJson(json, label) {
     try {
-        return JSON.parse(extracted.json);
+        return JSON.parse(json);
     } catch {
         try {
-            const parsed = JSON.parse(repairJson(extracted.json));
+            const parsed = JSON.parse(repairJson(json));
             console.warn(`[${label}] JSON repaired before parsing.`);
             return parsed;
         } catch (e) {

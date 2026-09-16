@@ -2102,7 +2102,7 @@ default silently (the companion twin strips the suffix since 09-09), the combat 
 string-aware forwards but not on its backward anchor walk. From the 2026-09-15 strengthening audit
 (response-parsing + enemy-stats-conditions, Lap 2).
 
-### [strengthening] The machinery is a trust boundary too; an anchor is a schema assumption the prompt must honor
+### [strengthening] The machinery is a trust boundary too; an anchor is a schema assumption the prompt must honor — status: `shipped` (2026-09-16 queue sweep: every finding fixed the same day — `sanitizeNpcLanePayload` + the load twin, `MERGE_CHARACTER_APPEARANCE`, the whole-object parse fallback + `SCRIBE_ANCHORS`, name-only loot identity, `stripStoryMemoryEngineStamps`, typed provider bodies / SSE events / settings, the stream idle guard; the two rules now live in CLAUDE.md's Scribe, Config, and Providers bullets and DECISIONS.md 2026-09-16)
 Two rules from one Lap-2 run (2026-09-16, scribe + providers-adapter). **(1)** Every earlier
 hostile-input pass hardened the DM wire and the save, but the Scribe's own JSON — same model
 class, same key, dispatched WHOLESALE into the same reducers — was treated as trusted: `UPDATE_NPC`

@@ -4,7 +4,9 @@
  * (imageGen.js) so both repair pasted keys identically.
  */
 export function normalizeXaiApiKey(apiKey) {
-    const trimmed = apiKey?.trim();
+    // Type-strict (2026-09-16 audit P2): a non-string key from a corrupted
+    // settings row threw at the first xAI / scene-art call.
+    const trimmed = typeof apiKey === 'string' ? apiKey.trim() : '';
     if (!trimmed) return '';
     return trimmed.startsWith('xai-') ? trimmed : `xai-${trimmed}`;
 }

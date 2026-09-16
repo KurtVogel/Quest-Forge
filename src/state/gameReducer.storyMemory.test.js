@@ -298,3 +298,61 @@ describe('resolved is terminal on the Scribe re-report path (2026-09-06 P1)', ()
         expect(merged.storyMemory[1].firstSeenMessage).toBe(6);
     });
 });
+
+describe('a lane card never carries the engine\'s stamps (2026-09-16 scribe P2)', () => {
+    const messages = (n) => Array.from({ length: n }, (_, i) => ({
+        id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: `line ${i}`,
+    }));
+    const base = { ...initialGameState, messages: messages(6) };
+
+    it('birth stamps come from the live transcript, not the payload (lastUsedMessage: 1e9 scored a promise 0 forever)', () => {
+        const next = gameReducer(base, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: {
+                type: 'promise', subject: 'ferry vow', salience: 5, witnessed: true,
+                text: 'Aune promised the hero safe passage across the ferry line.',
+                lastUsedMessage: 1e9, firstSeenMessage: 0, lastSeenMessage: 999, lastUsedAt: 5, firstSeenAt: 1, lastSeenAt: 1,
+            },
+        });
+        const card = next.storyMemory[0];
+        expect(card.firstSeenMessage).toBe(6);
+        expect(card.lastSeenMessage).toBe(6);
+        expect(card.lastUsedMessage).toBeUndefined();
+        expect(card.lastUsedAt).toBeNull();
+        expect(card.firstSeenAt).toBeGreaterThan(1);
+    });
+
+    it('a merge re-report cannot backdate or age the stored card either', () => {
+        const born = gameReducer(base, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { type: 'promise', subject: 'ferry vow', text: 'Aune promised the hero safe passage across the ferry line.' },
+        });
+        const merged = gameReducer({ ...born, messages: messages(9) }, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { type: 'promise', subject: 'ferry vow', text: 'Aune promised the hero safe passage across the ferry line.', lastUsedMessage: 1e9, firstSeenMessage: 0 },
+        });
+        expect(merged.storyMemory).toHaveLength(1);
+        expect(merged.storyMemory[0].firstSeenMessage).toBe(6);
+        expect(merged.storyMemory[0].lastSeenMessage).toBe(9);
+        expect(merged.storyMemory[0].lastUsedMessage).toBeUndefined();
+    });
+
+    it('a resolved card\'s TEXT is frozen with its status on an id-keyed re-report', () => {
+        const resolvedBase = {
+            ...base,
+            storyMemory: [{
+                id: 'mem-vow', type: 'promise', subject: 'ferry vow',
+                text: 'Aune promised the hero safe passage across the ferry line.',
+                salience: 4, emotionalCharge: 3, status: 'resolved',
+                firstSeenAt: 1, lastSeenAt: 1, lastUsedAt: 1, tags: [], linkedNpcNames: ['Aune'], location: '', source: 'scribe',
+            }],
+        };
+        const next = gameReducer(resolvedBase, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { id: 'mem-vow', type: 'promise', subject: 'ferry vow', text: 'Aune promised the hero safe passage — and then sold him out to the excise men on the far bank.' },
+        });
+        expect(next.storyMemory).toHaveLength(1);
+        expect(next.storyMemory[0].status).toBe('resolved');
+        expect(next.storyMemory[0].text).toBe('Aune promised the hero safe passage across the ferry line.');
+    });
+});

@@ -116,3 +116,26 @@ describe('parseRetryAfterMs', () => {
         expect(parseRetryAfterMs('NaN')).toBeNull();
     });
 });
+
+describe('hostile bodies and events (2026-09-16 providers-adapter P2)', () => {
+    const nullBodyResponse = (status, headers = {}) => ({
+        status, statusText: 'Too Many Requests', json: async () => null,
+        headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+    });
+
+    it('makeHttpError stamps status and Retry-After even when the body parses to null (the retry classifier used to see a TypeError)', async () => {
+        const err = await makeHttpError('Gemini')(nullBodyResponse(429, { 'retry-after': '2' }));
+        expect(err.message).toBe('Gemini API error (429): Too Many Requests');
+        expect(err.status).toBe(429);
+        expect(err.retryAfterMs).toBe(2000);
+    });
+
+    it('readSseStream skips non-object events (data: null, data: 42) instead of handing them to the consumer', async () => {
+        expect(await collect(['data: null\n\ndata: 42\n\ndata: "str"\n\ndata: {"ok":true}\n\n'])).toEqual([{ ok: true }]);
+    });
+
+    it('a response without a body is a dropped connection, not a TypeError out of getReader', async () => {
+        await expect(readSseStream({ ok: true, body: null }, () => {})).rejects.toThrow(/no response body/);
+        await expect(readSseStream(undefined, () => {})).rejects.toThrow(/no response body/);
+    });
+});

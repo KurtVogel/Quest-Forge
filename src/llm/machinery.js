@@ -21,8 +21,13 @@ export const MACHINERY_MODEL = 'gemini-3.7-flash';
 /** The Gemini key powering embeddings/RAG and background extraction, or ''. */
 export function getMachineryGeminiKey(settings) {
     if (!settings) return '';
-    if (settings.llmProvider === 'gemini' && settings.apiKey) return settings.apiKey;
-    return settings.geminiApiKey?.trim() || '';
+    // Type-strict (2026-09-16 audit P2): AppShell calls isMachineryReady in
+    // RENDER, so a numeric key in a corrupted settings row took the shell
+    // down at boot through `?.trim is not a function`.
+    if (settings.llmProvider === 'gemini' && typeof settings.apiKey === 'string' && settings.apiKey.trim()) {
+        return settings.apiKey;
+    }
+    return typeof settings.geminiApiKey === 'string' ? settings.geminiApiKey.trim() : '';
 }
 
 /** True when the campaign machinery can run (a Gemini key is available). */

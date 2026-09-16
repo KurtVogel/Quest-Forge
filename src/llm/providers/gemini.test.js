@@ -417,3 +417,36 @@ describe('prompt-level blocks and history shape (2026-09-06 audit)', () => {
         ]);
     });
 });
+
+describe('hostile bodies (2026-09-16 providers-adapter P2)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    it('a 200 with a null body is "No response generated", not a TypeError at .candidates', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(null)));
+        await expect(sendGeminiMessage(SEND_ARGS)).rejects.toThrow('No response generated');
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([1, 2])));
+        await expect(sendGeminiMessage(SEND_ARGS)).rejects.toThrow('No response generated');
+    });
+
+    it('embedText rejects a vector of the right LENGTH whose elements are not finite numbers', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ embedding: { values: Array.from({ length: GEMINI_EMBED_DIMENSIONS }, () => 'x') } }) }));
+        expect(await embedText('test-key', 'Strings are not a vector.')).toBeNull();
+        const withNaN = Array.from({ length: GEMINI_EMBED_DIMENSIONS }, (_, i) => i / 1000);
+        withNaN[3] = NaN;
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ embedding: { values: withNaN } }) }));
+        expect(await embedText('test-key', 'One NaN poisons cosine.')).toBeNull();
+    });
+
+    it('embedTexts nulls the slot whose batch vector carries non-numeric elements and keeps the clean one', async () => {
+        const clean = Array.from({ length: GEMINI_EMBED_DIMENSIONS }, (_, i) => i / 1000);
+        const junk = Array.from({ length: GEMINI_EMBED_DIMENSIONS }, () => '0.1');
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ embeddings: [{ values: clean }, { values: junk }] }) }));
+        const vectors = await embedTexts('test-key', ['Clean.', 'Strings.']);
+        expect(vectors[0]).toHaveLength(GEMINI_EMBED_DIMENSIONS);
+        expect(vectors[1]).toBeNull();
+    });
+});

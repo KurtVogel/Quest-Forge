@@ -14,6 +14,11 @@
  * SSE, and a proxy in a player's path may emit either (2026-09-06 audit).
  */
 export async function readSseStream(response, onEvent) {
+    // A response without a body is a dropped connection, not a TypeError out
+    // of getReader (2026-09-16 audit P2).
+    if (!response?.body || typeof response.body.getReader !== 'function') {
+        throw new Error('The connection dropped before the reply began — no response body. Please retry.');
+    }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -34,7 +39,10 @@ export async function readSseStream(response, onEvent) {
         // empty stream and the player gets "connection dropped" instead of
         // the real cause (rate limit, context length, bad request) — the
         // 2026-09-03 OpenAI playtest failed nine streams in a row that way.
-        const streamError = parsed && typeof parsed === 'object' ? parsed.error : null;
+        // One junk event (`data: null`, `data: 42`) used to reach both
+        // consumers and kill the whole DM turn as a TypeError (2026-09-16 P2).
+        if (!parsed || typeof parsed !== 'object') return;
+        const streamError = parsed.error;
         if (streamError) {
             throw makeStreamError(streamError);
         }
@@ -165,7 +173,11 @@ export function makeCompletionGuard({ completeReason, truncatedReason, truncated
  */
 export function makeHttpError(label) {
     return async function httpError(response) {
-        const error = await response.json().catch(() => ({}));
+        // A body that parses to `null` threw out of this helper before
+        // `.status`/`.retryAfterMs` stamped, so a 429/503 shaped that way was
+        // never retried (2026-09-16 audit P2).
+        const body = await response.json().catch(() => ({}));
+        const error = body && typeof body === 'object' ? body : {};
         const detail = error.error?.message
             || (typeof error.error === 'string' ? error.error : '')
             || response.statusText;

@@ -9,7 +9,7 @@ import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromNam
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
-import { CHRONICLE_CHAPTER_TEXT_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
+import { CHRONICLE_CHAPTER_TEXT_MAX, NPC_DOSSIER_FIELD_MAX } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatExchange.js';
 import {
     appendBondMoments,
@@ -24,6 +24,7 @@ import {
     normalizeNpcRecord,
     NPC_CORE_TEXT_FIELDS,
     NPC_DURABLE_TEXT_FIELDS,
+    sanitizeNpcLanePayload,
 } from '../../engine/npcRoster.js';
 import { NPC_OPEN_THREAD_MAX } from '../../engine/relationshipArc.js';
 
@@ -704,8 +705,14 @@ export function mergeNpcUpdate(npcs, payload) {
  * @param {{ messageCount?: number }} [options] - transcript length for the
  *   conversational `lastSeenMessage` stamp the prompt curation's recency reads.
  */
-export function upsertNpc(npcs, payload, { messageCount } = {}) {
-    if (!payload || (!payload.id && !payload.name)) return npcs;
+export function upsertNpc(npcs, rawPayload, { messageCount } = {}) {
+    // The lane trust boundary (2026-09-16 P1): known keys only, text fields
+    // string-or-drop at their clamps, disposition whitelisted — see
+    // sanitizeNpcLanePayload. Engine-owned keys (relationshipHistory,
+    // arcDisposition, knownFacts, firstMet, portrait*, the stamps) can no
+    // longer arrive from a DM or Scribe payload.
+    const payload = sanitizeNpcLanePayload(rawPayload);
+    if (!payload) return npcs;
     const seen = payload._seen !== false;
     const update = pruneBlankFields({
         ...payload,
@@ -733,18 +740,8 @@ export function upsertNpc(npcs, payload, { messageCount } = {}) {
         if (Number.isFinite(trust)) update.trust = Math.max(0, Math.min(100, Math.round(trust)));
         else delete update.trust;
     }
-    if (update.appearance) {
-        update.appearance = String(update.appearance).trim().slice(0, NPC_DOSSIER_FIELD_MAX);
-    }
-    // Short current-state fields (like appearance, plain replace): feed scene art,
-    // the KNOWN NPCs block, and NPC RAG so generated images stop misgendering —
-    // and so a goblin stays a goblin instead of defaulting to a human figure.
-    if (update.gender) {
-        update.gender = String(update.gender).trim().slice(0, NPC_GENDER_MAX);
-    }
-    if (update.species) {
-        update.species = String(update.species).trim().slice(0, NPC_SPECIES_MAX);
-    }
+    // appearance / gender / species arrive typed and clamped from
+    // sanitizeNpcLanePayload (string-or-drop — never `String(object)`).
     if (update.stanceToPlayer) {
         update.stanceToPlayer = clampNpcDossierField(update.stanceToPlayer);
     }

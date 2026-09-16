@@ -4,13 +4,98 @@
  * campaigns keep early antagonists (e.g. a starting-town captain).
  */
 
-import { NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../config/contentLimits.js';
+import { LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../config/contentLimits.js';
 import { sanitizePortraitUrl } from './portraitUrl.js';
 import { conversationalDistance } from './replayLedger.js';
 import { coverage, tokenSet } from './textMatch.js';
 
 export const NPC_ROSTER_TIERS = new Set(['character', 'archived_creature']);
 export const NPC_KINDS = new Set(['character', 'creature', 'ephemeral']);
+
+/**
+ * The roster's trust boundary (2026-09-16 scribe P1). Both LLM lanes — the
+ * DM's `npc_updates` and the Scribe's — used to reach `upsertNpc` as a bare
+ * spread that deleted six known-dangerous keys and kept the rest: one payload
+ * wiped an NPC's arc history (`relationshipHistory: []`), landed a portrait
+ * URL from the wire, persisted a 100k junk key, and put a 100k `lastNotes`
+ * into every KNOWN NPCs line (182k-char prompt from ONE record). A lane may
+ * write only these keys; everything else on the record is engine-owned.
+ */
+export const NPC_DISPOSITIONS = new Set(['friendly', 'neutral', 'hostile', 'wary', 'unknown']);
+export const NPC_NAME_MAX = 80;
+/** Current-state prose a lane replaces outright — clamped like the dossier fields. */
+export const NPC_LANE_TEXT_LIMITS = Object.freeze({
+    name: NPC_NAME_MAX,
+    lastNotes: NPC_DOSSIER_FIELD_MAX,
+    notes: NPC_DOSSIER_FIELD_MAX,
+    personality: NPC_DOSSIER_FIELD_MAX,
+    goals: NPC_DOSSIER_FIELD_MAX,
+    secrets: NPC_DOSSIER_FIELD_MAX,
+    appearance: NPC_DOSSIER_FIELD_MAX,
+    stanceToPlayer: NPC_DOSSIER_FIELD_MAX,
+    agenda: NPC_DOSSIER_FIELD_MAX,
+    relationshipTension: NPC_DOSSIER_FIELD_MAX,
+    privateNotes: NPC_DOSSIER_FIELD_MAX,
+    gender: NPC_GENDER_MAX,
+    species: NPC_SPECIES_MAX,
+    basedIn: LOCATION_NAME_MAX,
+    lastLocation: LOCATION_NAME_MAX,
+});
+/** Keys a DM / Scribe / reflection / Deepen-memory / drift payload may carry into upsertNpc. */
+export const NPC_LANE_KEYS = new Set([
+    ...Object.keys(NPC_LANE_TEXT_LIMITS),
+    'id', 'kind', 'rosterEligible', 'roster_eligible', 'rosterTier', 'disposition', 'trust',
+    'bondMoment', 'bondMoments', 'openThread', 'openThreadResolved', 'callbackHooks',
+    'gradedMoments', '_seen',
+]);
+/** Every key a persisted roster record may hold — the LOAD_GAME projection. */
+export const NPC_RECORD_KEYS = new Set([
+    ...Object.keys(NPC_LANE_TEXT_LIMITS),
+    'id', 'kind', 'rosterTier', 'pinned', 'importance', 'disposition', 'trust',
+    'bondMoments', 'recentImpressions', 'openThread', 'openThreadMessage', 'callbackHooks',
+    'knownFacts', 'relationshipHistory', 'arcDisposition', 'firstMet', 'lastSeen', 'lastSeenMessage',
+    'portraitUrl', 'portraitPrompt', 'portraitProvider', 'portraitUpdatedAt',
+]);
+
+/**
+ * Project a lane payload to the writable keys and type every text field
+ * string-or-drop (an object `gender` used to be `String()`-ed into the KNOWN
+ * NPCs identity slot and the identity-lock line of every portrait prompt as
+ * "[object Object]"; an object `name` threw out of namesMatch and lost the
+ * whole Scribe turn queued behind it). `disposition` is whitelisted. The
+ * dossier merge policies downstream (fragment belt, clause append, lately
+ * shelf) still apply — this is only the type-and-shape gate.
+ */
+export function sanitizeNpcLanePayload(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    const out = {};
+    for (const [key, value] of Object.entries(payload)) {
+        if (!NPC_LANE_KEYS.has(key)) continue;
+        if (key in NPC_LANE_TEXT_LIMITS) {
+            if (typeof value !== 'string') continue;
+            const text = value.trim().slice(0, NPC_LANE_TEXT_LIMITS[key]);
+            if (text) out[key] = text;
+            continue;
+        }
+        if (key === 'id') {
+            if (typeof value === 'string' && value.trim()) out.id = value.trim();
+            continue;
+        }
+        if (key === 'disposition') {
+            const disposition = typeof value === 'string' ? value.trim().toLowerCase() : '';
+            if (NPC_DISPOSITIONS.has(disposition)) out.disposition = disposition;
+            continue;
+        }
+        out[key] = value;
+    }
+    if (!out.id && !out.name) return null;
+    return out;
+}
+
+function normalizeDisposition(value) {
+    const disposition = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return NPC_DISPOSITIONS.has(disposition) ? disposition : 'unknown';
+}
 
 const GENERIC_SPECIES = new Set([
     'goblin', 'goblinoid', 'hobgoblin', 'bugbear', 'orc', 'half-orc', 'bandit', 'thug',
@@ -856,6 +941,9 @@ export function compactRelationshipHistory(history = []) {
     return compacted;
 }
 
+/** Dossier fields whose "nothing on record" shape is '' (the birth defaults in upsertNpc). */
+const NPC_BLANK_STRING_FIELDS = new Set(['personality', 'goals', 'secrets', 'agenda', 'relationshipTension', 'stanceToPlayer', 'privateNotes']);
+
 /** Grandfather legacy saves: every pre-existing NPC becomes a durable character. */
 export function migrateLegacyNpc(npc = {}) {
     const merged = {
@@ -905,11 +993,29 @@ export function migrateLegacyNpc(npc = {}) {
     // threw at composeScenePrompt's NPC line, or joined "[object Object]" into
     // the painter's prompt. upsertNpc clamps the DM/Scribe lanes; this is the
     // load boundary's twin.
-    for (const [field, max] of [['appearance', NPC_DOSSIER_FIELD_MAX], ['gender', NPC_GENDER_MAX], ['species', NPC_SPECIES_MAX]]) {
+    // The load twin of sanitizeNpcLanePayload (2026-09-16 P1): every text
+    // field string-or-drop at its lane clamp — a pre-fix save can carry the
+    // 100k `lastNotes` the wire once landed — plus the disposition whitelist,
+    // a typed trust, and a projection to the record's known keys so a junk
+    // key persisted by the old spread does not ride the save forever.
+    for (const [field, max] of Object.entries(NPC_LANE_TEXT_LIMITS)) {
         if (merged[field] === undefined) continue;
         const text = typeof merged[field] === 'string' ? merged[field].trim().slice(0, max) : '';
         if (text) merged[field] = text;
+        else if (field === 'name') merged[field] = '';
+        else if (NPC_BLANK_STRING_FIELDS.has(field)) merged[field] = '';
+        else if (field === 'basedIn' || field === 'lastLocation') merged[field] = null;
         else delete merged[field];
+    }
+    merged.disposition = normalizeDisposition(merged.disposition);
+    if (merged.trust !== null && merged.trust !== undefined) {
+        const trust = Number(merged.trust);
+        merged.trust = Number.isFinite(trust) ? Math.max(0, Math.min(100, Math.round(trust))) : null;
+    }
+    merged.knownFacts = Array.isArray(merged.knownFacts) ? merged.knownFacts.filter(fact => typeof fact === 'string') : [];
+    merged.callbackHooks = appendCallbackHooks(merged.callbackHooks, []);
+    for (const key of Object.keys(merged)) {
+        if (!NPC_RECORD_KEYS.has(key)) delete merged[key];
     }
     if (!NPC_ROSTER_TIERS.has(merged.rosterTier)) {
         merged.rosterTier = 'character';
@@ -1236,7 +1342,7 @@ export function resolveCompanionLook(companion, npcs = []) {
 }
 
 export function namesMatch(name1, name2) {
-    if (!name1 || !name2) return false;
+    if (typeof name1 !== 'string' || typeof name2 !== 'string' || !name1 || !name2) return false;
     const n1 = name1.toLowerCase();
     const n2 = name2.toLowerCase();
     if (n1 === n2) return true;

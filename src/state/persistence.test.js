@@ -651,3 +651,29 @@ describe('projectSaveMetadata — the ONE typed list row (2026-09-10 audit P1)',
         expect(row.location).toBeNull();
     });
 });
+
+describe('loadSettings types every field (2026-09-16 providers-adapter P2 — the one persisted input without a heal)', () => {
+    it('non-string keys become empty strings, unknown keys drop, and the whitelists hold', () => {
+        globalThis.localStorage.setItem('rpg-client-settings', JSON.stringify({
+            llmProvider: 'grokker', apiKey: 123, geminiApiKey: { k: 1 }, imageApiKey: '  xai-abc  ',
+            model: ['gemini'], preset: 'nope', ruleset: 'simplified5e', paceDial: 'ludicrous',
+            customSystemPrompt: 42, memoryInspector: 'yes', firebaseConfig: { apiKey: 'fb', projectId: 7, authDomain: 'x.app' },
+            __proto__junk: 'x', evil: 'x'.repeat(10),
+        }));
+        expect(loadSettings()).toEqual({
+            apiKey: '', geminiApiKey: '', imageApiKey: 'xai-abc', model: '', ruleset: 'simplified5e', customSystemPrompt: '',
+            paceDial: 'standard', memoryInspector: false, firebaseConfig: { apiKey: 'fb', authDomain: 'x.app' },
+        });
+    });
+
+    it('a well-formed blob round-trips unchanged, including a valid provider, preset, and pace', () => {
+        const settings = { llmProvider: 'xai', apiKey: 'k', geminiApiKey: 'g', model: 'grok-4.3', preset: 'grimdark', paceDial: 'slow-burn', memoryInspector: true };
+        saveSettings(settings);
+        expect(loadSettings()).toEqual(settings);
+    });
+
+    it('an over-long custom prompt clamps instead of riding every DM call whole', () => {
+        saveSettings({ customSystemPrompt: 'p'.repeat(30000) });
+        expect(loadSettings().customSystemPrompt).toHaveLength(20000);
+    });
+});

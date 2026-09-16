@@ -36,6 +36,17 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const DEFAULT_SEND_TIMEOUT_MS = 90_000;
 
 /**
+ * The streaming twin (2026-09-16 audit P2): a proxy that accepts the POST and
+ * never sends a byte, or stops mid-reply without closing, parked the DM turn
+ * in "waiting" forever — the 2026-08-08 stall class one lane over. An idle
+ * timer aborts the stream when no chunk has arrived for this long (reset on
+ * every chunk, so a long reply is never cut for being long); the same 90 s
+ * the non-streaming guard uses, because reasoning models can think that
+ * long before the first token.
+ */
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 90_000;
+
+/**
  * Send a message to the configured LLM provider.
  *
  * Non-streaming calls (Scribe, journal, roll policy, front generation) retry
@@ -106,19 +117,47 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
  * @param {AbortSignal} [options.signal] - Optional abort signal
  * @returns {Promise<string>} Complete response text
  */
-export async function streamMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature }) {
+export async function streamMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
+    if (signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
 
-    const result = await p.stream({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature });
-    if (import.meta.env.DEV) {
-        console.log('[LLM Adapter] Full response received, length:', result.length);
-        console.log('[LLM Adapter] Contains ```json:', result.includes('```json'));
-        console.log('[LLM Adapter] Contains requested_rolls:', result.includes('requested_rolls'));
-        console.log('[LLM Adapter] Response tail (last 300 chars):', result.slice(-300));
+    // Idle stall guard: our own controller so the caller's Stop button and the
+    // stall both abort the fetch, while only the stall is renamed — a
+    // deliberate cancel must still surface as an AbortError.
+    const controller = new AbortController();
+    const onExternalAbort = () => controller.abort();
+    signal?.addEventListener('abort', onExternalAbort, { once: true });
+    let stalled = false;
+    let idleTimer = null;
+    const armIdleTimer = () => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => { stalled = true; controller.abort(); }, idleTimeoutMs);
+    };
+    const guardedOnChunk = (chunk) => {
+        armIdleTimer();
+        onChunk?.(chunk);
+    };
+    armIdleTimer();
+    try {
+        const result = await p.stream({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk: guardedOnChunk, signal: controller.signal, temperature });
+        if (import.meta.env.DEV) {
+            console.log('[LLM Adapter] Full response received, length:', result.length);
+            console.log('[LLM Adapter] Contains ```json:', result.includes('```json'));
+            console.log('[LLM Adapter] Contains requested_rolls:', result.includes('requested_rolls'));
+            console.log('[LLM Adapter] Response tail (last 300 chars):', result.slice(-300));
+        }
+        return result;
+    } catch (error) {
+        if (stalled && !signal?.aborted) {
+            throw new Error(`${provider} stream stalled — no data for ${Math.round(idleTimeoutMs / 1000)}s. Please retry.`);
+        }
+        throw error;
+    } finally {
+        clearTimeout(idleTimer);
+        signal?.removeEventListener('abort', onExternalAbort);
     }
-    return result;
 }
 
 /**

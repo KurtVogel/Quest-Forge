@@ -2,6 +2,7 @@
  * Persistence layer using LocalStorage (settings) and IndexedDB (game saves).
  */
 import { CURRENT_SAVE_VERSION } from './migrations.js';
+import { sanitizeSettings } from './settingsSchema.js';
 
 const SETTINGS_KEY = 'rpg-client-settings';
 const DB_NAME = 'rpg-client-saves';
@@ -36,8 +37,10 @@ export function loadSettings() {
         if (!stored) return null;
         const parsed = JSON.parse(stored);
         // A corrupted value parsing to a string/array would spread junk index keys
-        // into settings via GameContext's `{...defaults, ...saved}` merge.
-        return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : null;
+        // into settings via GameContext's `{...defaults, ...saved}` merge — and
+        // since 2026-09-16 the FIELDS are typed too (sanitizeSettings): a
+        // numeric API key used to crash the app shell in render.
+        return sanitizeSettings(parsed);
     } catch (e) {
         console.warn('Failed to load settings:', e);
         return null;
