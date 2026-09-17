@@ -14,8 +14,20 @@ const GEMINI_EMBED_MODEL = 'gemini-embedding-2';
 export const GEMINI_EMBED_DIMENSIONS = 768;
 export const GEMINI_EMBED_SCHEMA = `${GEMINI_EMBED_MODEL}:search-retrieval-v1:${GEMINI_EMBED_DIMENSIONS}`;
 
+/**
+ * The EMBED input ceiling in characters (2026-09-17 vector-memory P1). The
+ * embed model's per-input token limit is not recorded in the repo (2,048
+ * tokens on the predecessor model); 6,000 characters (~1,500 English tokens)
+ * stays under it with headroom for name-heavy prose. Only the wire text is
+ * truncated — the memory row keeps its full text as the dedupe key, so the
+ * seed's "already cached" check and the prompt injection are unchanged. Every
+ * live source is clamped far below this (journal 2,000, facts 400, cards 260);
+ * the cap is the belt for a pre-clamp save or an unusually long narration.
+ */
+export const MAX_EMBED_INPUT_CHARS = 6000;
+
 function formatEmbeddingInput(text, inputType) {
-    const content = String(text || '').trim();
+    const content = String(text || '').trim().slice(0, MAX_EMBED_INPUT_CHARS);
     if (inputType === 'query') {
         return `task: search result | query: ${content}`;
     }
@@ -256,8 +268,13 @@ export async function embedTexts(apiKey, texts, { inputType = 'document' } = {})
 
     const url = `${GEMINI_EMBED_BASE}/${GEMINI_EMBED_MODEL}:batchEmbedContents`;
     const BATCH_LIMIT = 100; // the API's per-call request ceiling
-    for (let start = 0; start < sendable.length; start += BATCH_LIMIT) {
-        const chunk = sendable.slice(start, start + BATCH_LIMIT);
+    let rejectedRequests = 0;
+
+    // One request for one chunk. Fills `results` on success; on failure says
+    // whether the API REJECTED the body (400/413 — one bad text among a
+    // hundred healthy ones) as opposed to a transient/network/quota failure,
+    // which a retry per item would only amplify.
+    const sendChunk = async (chunk) => {
         try {
             const response = await fetch(url, {
                 method: 'POST',
@@ -276,10 +293,10 @@ export async function embedTexts(apiKey, texts, { inputType = 'document' } = {})
             if (!response.ok) {
                 const body = await response.text().catch(() => '');
                 console.error(
-                    `[Gemini embed] Batch HTTP ${response.status} ${response.statusText} from ${GEMINI_EMBED_MODEL}:`,
+                    `[Gemini embed] Batch HTTP ${response.status} ${response.statusText} from ${GEMINI_EMBED_MODEL} (${chunk.length} texts):`,
                     body.slice(0, 500),
                 );
-                continue;
+                return { ok: false, rejected: response.status === 400 || response.status === 413 };
             }
             const data = asObject(await response.json());
             const embeddings = Array.isArray(data.embeddings) ? data.embeddings : [];
@@ -289,12 +306,40 @@ export async function embedTexts(apiKey, texts, { inputType = 'document' } = {})
                     results[index] = values;
                 }
             });
+            return { ok: true, rejected: false };
         } catch (err) {
             console.error('[Gemini embed] Batch request failed:', err);
+            return { ok: false, rejected: false };
         }
+    };
+
+    // A rejected chunk is BISECTED so one bad text costs one row (2026-09-17
+    // vector-memory P1): the whole 100-slot chunk used to null out, the seed
+    // stored none of its healthy neighbours, and the next mount rebuilt the
+    // same missing set in the same order — a permanent hole of up to 99 rows
+    // plus a wasted call per Continue. Isolating one text in a hundred costs
+    // ~8 rejected requests; the budget caps a key-level 400 (invalid key)
+    // from fanning out into a request per text — past it the rest nulls out
+    // exactly like before and the next mount retries.
+    const embedChunk = async (chunk) => {
+        if (rejectedRequests > MAX_REJECTED_EMBED_REQUESTS) return;
+        const outcome = await sendChunk(chunk);
+        if (outcome.ok || !outcome.rejected) return;
+        rejectedRequests += 1;
+        if (chunk.length < 2) return;
+        const mid = Math.ceil(chunk.length / 2);
+        await embedChunk(chunk.slice(0, mid));
+        await embedChunk(chunk.slice(mid));
+    };
+
+    for (let start = 0; start < sendable.length; start += BATCH_LIMIT) {
+        await embedChunk(sendable.slice(start, start + BATCH_LIMIT));
     }
     return results;
 }
+
+/** Rejected (400/413) batch requests one embedTexts call may spend bisecting. */
+export const MAX_REJECTED_EMBED_REQUESTS = 12;
 
 /**
  * Stream a message from Gemini.

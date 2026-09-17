@@ -57,6 +57,15 @@ export const CHRONICLE_PART_CHAR_BUDGET = 50000;
  */
 export const LOCATION_NAME_MAX = 200;
 
+/**
+ * A journal entry's summary ceiling — the live write (normalizeJournalSummary)
+ * and the LOAD_GAME heal share it (2026-09-17 vector-memory P1: the load path
+ * left the field untyped, so a 100k summary reached the RAG seed and cost its
+ * whole embed chunk on every mount). Shared here because handlers never import
+ * from engine/worldJournal.js (it pulls the LLM adapter).
+ */
+export const JOURNAL_SUMMARY_MAX = 2000;
+
 export function cleanTextField(value, max = Infinity) {
     if (typeof value !== 'string') return '';
     return value.trim().slice(0, max);

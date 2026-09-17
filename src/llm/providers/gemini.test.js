@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { embedText, embedTexts, GEMINI_EMBED_DIMENSIONS, sendGeminiMessage, streamGeminiMessage } from './gemini.js';
+import { embedText, embedTexts, GEMINI_EMBED_DIMENSIONS, MAX_EMBED_INPUT_CHARS, MAX_REJECTED_EMBED_REQUESTS, sendGeminiMessage, streamGeminiMessage } from './gemini.js';
 
 function jsonResponse(payload, { ok = true, status = 200, statusText = 'OK' } = {}) {
     return { ok, status, statusText, json: async () => payload };
@@ -448,5 +448,78 @@ describe('hostile bodies (2026-09-16 providers-adapter P2)', () => {
         const vectors = await embedTexts('test-key', ['Clean.', 'Strings.']);
         expect(vectors[0]).toHaveLength(GEMINI_EMBED_DIMENSIONS);
         expect(vectors[1]).toBeNull();
+    });
+});
+
+describe('embed input cap + rejected-chunk bisect (2026-09-17 vector-memory P1)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    const vector = () => Array.from({ length: GEMINI_EMBED_DIMENSIONS }, (_, i) => i / GEMINI_EMBED_DIMENSIONS);
+    const BAD = '[[REJECTED]]';
+    /** A fetch that 400s any request body carrying the BAD sentinel and embeds the rest. */
+    const rejectingFetch = () => vi.fn(async (_url, options) => {
+        const body = JSON.parse(options.body);
+        const requests = body.requests || [body];
+        if (requests.some(r => r.content.parts[0].text.includes(BAD))) {
+            return { ok: false, status: 400, statusText: 'Bad Request', text: async () => 'invalid input' };
+        }
+        return { ok: true, json: async () => ({ embeddings: requests.map(() => ({ values: vector() })) }) };
+    });
+
+    it('truncates the WIRE text to MAX_EMBED_INPUT_CHARS on both the single and the batch path', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ embedding: { values: vector() }, embeddings: [{ values: vector() }] }) });
+        vi.stubGlobal('fetch', fetchMock);
+        const huge = 'x'.repeat(MAX_EMBED_INPUT_CHARS * 3);
+
+        await embedText('test-key', huge);
+        await embedTexts('test-key', [huge]);
+
+        const single = JSON.parse(fetchMock.mock.calls[0][1].body).content.parts[0].text;
+        const batched = JSON.parse(fetchMock.mock.calls[1][1].body).requests[0].content.parts[0].text;
+        expect(single).toHaveLength('title: none | text: '.length + MAX_EMBED_INPUT_CHARS);
+        expect(batched).toHaveLength('title: none | text: '.length + MAX_EMBED_INPUT_CHARS);
+    });
+
+    it('one rejected text among 120 costs ONE row: its 99 chunk-mates still embed, and the second chunk is untouched', async () => {
+        const fetchMock = rejectingFetch();
+        vi.stubGlobal('fetch', fetchMock);
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const texts = Array.from({ length: 120 }, (_, i) => (i === 10 ? `Journal ${BAD} entry.` : `Fact ${i}.`));
+        const vectors = await embedTexts('test-key', texts);
+
+        expect(vectors[10]).toBeNull();
+        expect(vectors.filter(Boolean)).toHaveLength(119);
+        // 1 first attempt + ~8 rejections along the bisect + the healthy halves + the second chunk.
+        expect(fetchMock.mock.calls.length).toBeLessThan(25);
+    });
+
+    it('a key-level 400 (every request rejected) stays within the rejected-request budget instead of fanning out per text', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 400, statusText: 'API key not valid', text: async () => 'bad key' });
+        vi.stubGlobal('fetch', fetchMock);
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const vectors = await embedTexts('test-key', Array.from({ length: 100 }, (_, i) => `Fact ${i}.`));
+
+        expect(vectors.every(v => v === null)).toBe(true);
+        expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(MAX_REJECTED_EMBED_REQUESTS + 1);
+    });
+
+    it('a transient failure (429 / 5xx / network) still nulls the chunk WITHOUT bisecting - a retry per item would only amplify it', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests', text: async () => 'slow down' });
+        vi.stubGlobal('fetch', fetchMock);
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const vectors = await embedTexts('test-key', Array.from({ length: 50 }, (_, i) => `Fact ${i}.`));
+
+        expect(vectors.every(v => v === null)).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        fetchMock.mockRejectedValue(new Error('network down'));
+        expect(await embedTexts('test-key', ['a', 'b'])).toEqual([null, null]);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 });

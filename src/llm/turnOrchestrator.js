@@ -251,6 +251,13 @@ export function createTurnRunner({
             ].filter(Boolean).join('. ');
             retrievedMemories = await retrieveRelevant(machineryKey, sceneContext, 8, 0.55, {
                 presenceText: buildPresenceText(s.messages),
+                // A failed query embed is a memory-LESS turn, said out loud
+                // (2026-09-17 vector-memory P2): infrastructure line, so the
+                // chronicler never retells it and the DM window never sees it.
+                onUnavailable: () => dispatch({
+                    type: 'ADD_MESSAGE',
+                    payload: { role: 'system', kind: 'error', content: 'Long-term memory could not be consulted this turn (the embedding call failed) — the DM answers from the recent conversation only. Nothing is lost; retrieval resumes next turn.' },
+                }),
             }).catch(() => []);
             dramaticMemories = curateDramaticMemories(sceneContext);
         } else if (wantsMemories) {

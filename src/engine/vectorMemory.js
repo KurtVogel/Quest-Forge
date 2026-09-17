@@ -105,18 +105,22 @@ async function loadPersistedEmbeddings(sessionId) {
             const tx = db.transaction(EMBED_STORE, 'readonly');
             const request = tx.objectStore(EMBED_STORE).getAll();
             request.onsuccess = () => {
-                const entries = request.result || [];
+                const entries = Array.isArray(request.result) ? request.result : [];
                 const compatible = entries.filter(entry => (
+                    entry && typeof entry === 'object'
                     // Only the active campaign's rows — another campaign's memories
                     // must never leak into this session's retrieval.
-                    entry.sessionId === sessionId
+                    && entry.sessionId === sessionId
                     && entry.schema === GEMINI_EMBED_SCHEMA
+                    // The row's TEXT is its key and its prompt line — a
+                    // non-string one would read "[object Object]" (2026-09-17 belt).
+                    && typeof entry.text === 'string' && entry.text.trim()
                     && Array.isArray(entry.vector)
                     && entry.vector.length === GEMINI_EMBED_DIMENSIONS
                     // A corrupted/tampered row with NaN/non-number elements would
                     // yield NaN cosine scores and pollute the store.
                     && entry.vector.every(Number.isFinite)
-                ));
+                )).map(typeCachedRow);
                 resolve(compatible);
             };
             request.onerror = () => { db.close(); reject(request.error); };
@@ -217,10 +221,39 @@ function sameSubjects(a, b) {
     return listA.length === listB.length && listA.every((name, i) => name === listB[i]);
 }
 
+const MEMORY_LABEL_MAX = 80;
+
+/** A stored label (category / location) read string-or-fallback, clamped. */
+function cleanLabel(value, fallback = '') {
+    const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, MEMORY_LABEL_MAX) : '';
+    return text || fallback;
+}
+
+/**
+ * Type the optional fields of a cached row the way storeMemoryEntry writes
+ * them (2026-09-17 vector-memory P2 belt): `category` string-or-'general',
+ * `location` string-or-absent, `subjects` through normalizeSubjects — an
+ * app-written row, so junk is unlikely, but the prompt block and the presence
+ * gate read these fields raw.
+ */
+function typeCachedRow(entry) {
+    const location = cleanLabel(entry.location);
+    const subjects = normalizeSubjects(entry.subjects);
+    const { location: _location, subjects: _subjects, ...rest } = entry;
+    return {
+        ...rest,
+        category: cleanLabel(entry.category, 'general'),
+        ...(location && { location }),
+        ...(subjects && { subjects }),
+    };
+}
+
 /** Clamp an untrusted subjects list to a small array of clean name strings. */
 function normalizeSubjects(subjects) {
     const list = (Array.isArray(subjects) ? subjects : [])
-        .map(name => String(name || '').replace(/\s+/g, ' ').trim().slice(0, 80))
+        // String-only (2026-09-17 belt): an object element used to tag the row
+        // with the subject "[object Object]", which no scene could ever present.
+        .map(name => (typeof name === 'string' ? name : '').replace(/\s+/g, ' ').trim().slice(0, 80))
         .filter(Boolean)
         .slice(0, 4);
     return list.length > 0 ? list : null;
@@ -472,7 +505,7 @@ export const CATEGORY_BOOST = {
  * @param {{ presenceText?: string }} [options] - extra scene text (the last
  *   narrative turns) consulted ONLY for who is present; never embedded.
  */
-export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55, { presenceText = '' } = {}) {
+export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55, { presenceText = '', onUnavailable = null } = {}) {
     if (!apiKey || !query) return [];
     // A cold seed still embedding: wait for the store to be whole rather than
     // answer from the slice that happens to have landed.
@@ -480,7 +513,15 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55,
     if (memoryStore.length === 0) return [];
 
     const queryVector = await embedText(apiKey, query, { inputType: 'query' });
-    if (!queryVector) return [];
+    if (!queryVector) {
+        // Distinct from "nothing matched" (2026-09-17 P2): a failed query
+        // embed means the turn runs memory-LESS, which the caller should say
+        // out loud — a console line alone hid the class from the player.
+        if (typeof onUnavailable === 'function') {
+            try { onUnavailable(); } catch { /* a notice must never break retrieval */ }
+        }
+        return [];
+    }
 
     // Presence-aware retrieval (2026-08-28, "dormant, not deleted"): a memory
     // tagged with the people it is ABOUT loses ground when none of them are in
@@ -603,10 +644,12 @@ export function getMemoryTexts() {
 export function buildRetrievedMemoriesBlock(memories) {
     if (!memories || memories.length === 0) return '';
     const lines = memories.map(m => {
-        const label = m.category === 'player'
+        const category = cleanLabel(m.category, 'general');
+        const label = category === 'player'
             ? 'player statement/attempt — not automatically canon'
-            : m.category;
-        const locationTag = m.location ? ` — recorded at: ${m.location}` : '';
+            : category;
+        const location = cleanLabel(m.location);
+        const locationTag = location ? ` — recorded at: ${location}` : '';
         return `- [${label}${locationTag}] ${m.text}`;
     }).join('\n');
     return `## RETRIEVED MEMORIES (most relevant to current scene)\nUse canonical world facts and DM-established memories normally. An entry labeled "player statement/attempt" records something the player said, wanted, or tried; it is not proof that an external claim became true unless the established fiction corroborates it.\nThese are memories, not the current scene. An entry recorded at a DIFFERENT place than where the hero now stands is context from elsewhere — never transplant its creatures, factions, or local color into the present location unless the fiction has actually moved them here. Distant places stay distinct: give each region its own dangers.\n${lines}`;

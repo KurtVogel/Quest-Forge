@@ -163,7 +163,13 @@ export const handlers = {
 
     ADD_STORY_MEMORY_CARDS(state, action) {
         let next = state;
-        for (const card of action.payload || []) {
+        // Plain objects only (2026-09-17 P1): a `null` element used to throw
+        // mid-loop and lose every card after it plus everything the Scribe had
+        // queued behind this dispatch for the turn.
+        const cards = Array.isArray(action.payload)
+            ? action.payload.filter(card => card && typeof card === 'object' && !Array.isArray(card))
+            : [];
+        for (const card of cards) {
             next = gameReducer(next, { type: 'ADD_STORY_MEMORY_CARD', payload: card });
         }
         return next;

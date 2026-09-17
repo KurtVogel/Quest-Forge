@@ -1092,3 +1092,88 @@ describe('2026-09-06 audit: presence from the scene, seed-wins tags, durable cap
         expect(await retrieveRelevant('key', 'anything', 8, 0.55)).toEqual([]);
     });
 });
+
+describe('2026-09-17 audit: over-long texts, memory-less turns said out loud, typed cached rows', () => {
+    beforeEach(() => {
+        clearMemories();
+        globalThis.indexedDB = new IDBFactory();
+        embedTextMock.mockReset();
+    });
+
+    it('P1: an over-long seed text keeps its FULL text as the row key (the wire text is truncated in the provider) and its chunk-mates land', async () => {
+        const huge = `Journal: ${'x'.repeat(100_000)}`;
+        embedTextMock.mockImplementation(async (_key, text) => (text === huge ? unitVector(1) : unitVector(0)));
+        const items = [
+            { text: 'Kraul fell.', category: 'world_fact' },
+            { text: huge, category: 'journal' },
+            { text: 'The gate is barred.', category: 'world_fact' },
+        ];
+
+        await seedMemories('key', items, 's1');
+
+        expect(getMemoryCount()).toBe(3);
+        expect(getMemoryTexts()).toContain(huge);
+        // A second mount re-embeds nothing: every row is cached under its full text.
+        embedTextMock.mockClear();
+        await seedMemories('key', items, 's1');
+        expect(embedTextMock).not.toHaveBeenCalled();
+        expect(getMemoryCount()).toBe(3);
+    });
+
+    it('P1: a per-slot rejection inside a chunk stores every neighbour and the next mount retries ONLY the rejected text', async () => {
+        embedTextsMock.mockImplementation(async (_key, texts) => texts.map(text => (text.includes('[[REJECTED]]') ? null : unitVector(0))));
+        const items = [
+            { text: 'Kraul fell.', category: 'world_fact' },
+            { text: 'Bad [[REJECTED]] text.', category: 'journal' },
+            { text: 'The gate is barred.', category: 'world_fact' },
+        ];
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        await seedMemories('key', items, 's1');
+        expect(getMemoryTexts()).toEqual(['Kraul fell.', 'The gate is barred.']);
+
+        embedTextsMock.mockClear();
+        await seedMemories('key', items, 's1');
+        expect(embedTextsMock).toHaveBeenCalledTimes(1);
+        expect(embedTextsMock.mock.calls[0][1]).toEqual(['Bad [[REJECTED]] text.']);
+        errorSpy.mockRestore();
+    });
+
+    it('P2: a failed QUERY embed calls onUnavailable (memory-less turn) - an empty store or a clean miss does not', async () => {
+        const onUnavailable = vi.fn();
+        expect(await retrieveRelevant('key', 'anything', 8, 0.55, { onUnavailable })).toEqual([]);
+        expect(onUnavailable).not.toHaveBeenCalled();
+
+        embedTextMock.mockResolvedValue(unitVector(0));
+        await addMemory('key', 'The bridge fell last spring.', 'world_fact');
+
+        embedTextMock.mockResolvedValueOnce(null);
+        expect(await retrieveRelevant('key', 'bridge', 8, 0.55, { onUnavailable })).toEqual([]);
+        expect(onUnavailable).toHaveBeenCalledTimes(1);
+
+        embedTextMock.mockResolvedValueOnce(unitVector(5));
+        expect(await retrieveRelevant('key', 'unrelated', 8, 0.55, { onUnavailable })).toEqual([]);
+        expect(onUnavailable).toHaveBeenCalledTimes(1);
+
+        // A throwing notice never breaks retrieval.
+        embedTextMock.mockResolvedValueOnce(null);
+        await expect(retrieveRelevant('key', 'bridge', 8, 0.55, { onUnavailable: () => { throw new Error('ui'); } })).resolves.toEqual([]);
+    });
+
+    it('P2: a cached row with junk category / location / subjects / text loads typed or is dropped', async () => {
+        await putEmbedding({ sessionId: 's1', text: 'Kraul fell.', vector: unitVector(0), category: { x: 1 }, location: 42, subjects: 'Maren', schema: SCHEMA, timestamp: 1 });
+        await putEmbedding({ sessionId: 's1', text: 'Junk row.', vector: unitVector(3), category: 'world_fact', schema: SCHEMA, timestamp: 2, subjects: [{ bad: true }] });
+        embedTextMock.mockResolvedValue(unitVector(0));
+
+        await seedMemories('key', [], 's1');
+        expect(getMemoryTexts().sort()).toEqual(['Junk row.', 'Kraul fell.']);
+
+        const rows = await retrieveRelevant('key', 'Kraul', 8, 0.55);
+        const row = rows.find(r => r.text === 'Kraul fell.');
+        expect(row.category).toBe('general');
+        expect(row.location).toBeUndefined();
+        expect(row.subjects).toBeUndefined();
+        expect(buildRetrievedMemoriesBlock([row])).toContain('- [general] Kraul fell.');
+        expect(buildRetrievedMemoriesBlock([{ text: 'x', category: { y: 1 }, location: ['z'] }])).not.toContain('[object Object]');
+    });
+});

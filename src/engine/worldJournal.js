@@ -9,6 +9,7 @@
  * extraction task that doesn't need the full DM model.
  */
 
+import { JOURNAL_SUMMARY_MAX } from '../config/contentLimits.js';
 import { sendMessage } from '../llm/adapter.js';
 import { getBackgroundConfig } from '../llm/machinery.js';
 import { parseJsonObjectLoose } from '../llm/utils/jsonExtractor.js';
@@ -112,7 +113,7 @@ const toStringList = (value, maxItems, maxLen) => (Array.isArray(value) ? value 
  */
 export function normalizeJournalSummary(summary) {
     if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return null;
-    const text = clampText(summary.summary, 2000);
+    const text = clampText(summary.summary, JOURNAL_SUMMARY_MAX);
     if (!text) return null;
     return {
         summary: text,

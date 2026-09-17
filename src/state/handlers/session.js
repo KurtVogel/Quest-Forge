@@ -11,7 +11,7 @@ import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
 import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
 import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
 import { sanitizeQuestRecords } from './quests.js';
-import { cleanTextField, LOCATION_NAME_MAX } from '../../config/contentLimits.js';
+import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { canonicalEnemyId, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES, normalizeCombatExchange } from '../../engine/combatExchange.js';
@@ -288,6 +288,11 @@ function validateSaveState(payload) {
                 // consequences/keyDecisions crashed the prompt build / Journal panel.
                 .map(e => ({
                     ...e,
+                    // The live write clamps at JOURNAL_SUMMARY_MAX (normalizeJournalSummary);
+                    // the load twin types it too (2026-09-17 vector-memory P1: a
+                    // 100k summary reached the RAG seed unbounded and cost its whole
+                    // embed chunk on every mount).
+                    summary: cleanTextField(e.summary, JOURNAL_SUMMARY_MAX),
                     keyDecisions: Array.isArray(e.keyDecisions) ? e.keyDecisions : [],
                     consequences: Array.isArray(e.consequences) ? e.consequences : [],
                 }))
@@ -304,9 +309,16 @@ function validateSaveState(payload) {
         // Promotion-twin heal (2026-08-30 P1): merges stale same-subject
         // `npc_roster` cards stranded by pre-stable-id type flips and stamps
         // the survivor's stable id. No-op on healthy saves.
+        // Entry-shape guard + transcript-clamped stamps (2026-09-17 story-memory
+        // P1/P2): a `null` element threw out of normalizeStoryMemoryCard and
+        // made the campaign un-loadable; a future `lastUsedMessage` kept a
+        // promise out of DRAMATIC CALLBACKS for the campaign's life.
         storyMemory: healPromotedStoryMemoryTwins(
             Array.isArray(payload.storyMemory)
-                ? payload.storyMemory.map(m => normalizeStoryMemoryCard(m)).filter(Boolean)
+                ? payload.storyMemory
+                    .filter(m => m && typeof m === 'object' && !Array.isArray(m))
+                    .map(m => normalizeStoryMemoryCard(m, null, { maxMessageCount: messageCount }))
+                    .filter(Boolean)
                 : [],
             npcs
         ),

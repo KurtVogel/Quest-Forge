@@ -425,8 +425,12 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             }
         }
 
+        // Plain-object cards only (2026-09-17 story-memory P1): a `null`
+        // element survived `memory?.text` and threw inside the reducer batch.
         const storyMemory = (Array.isArray(extracted.story_memory)
-            ? extracted.story_memory.filter(memory => !contradictsAuthoritativeCombat(memory?.text, authoritativeContext))
+            ? extracted.story_memory
+                .filter(memory => memory && typeof memory === 'object' && !Array.isArray(memory))
+                .filter(memory => !contradictsAuthoritativeCombat(memory.text, authoritativeContext))
             : []).slice(0, 3);
         if (storyMemory.length > 0) {
             dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: storyMemory });
@@ -713,8 +717,11 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
                 },
             });
         }
-        if (Array.isArray(reflected.story_memory) && reflected.story_memory.length > 0) {
-            dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: reflected.story_memory.slice(0, 2) });
+        const reflectedCards = Array.isArray(reflected.story_memory)
+            ? reflected.story_memory.filter(memory => memory && typeof memory === 'object' && !Array.isArray(memory)).slice(0, 2)
+            : [];
+        if (reflectedCards.length > 0) {
+            dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: reflectedCards });
         }
 
         if (cadence?.id && 'tempo_directive' in reflected) {

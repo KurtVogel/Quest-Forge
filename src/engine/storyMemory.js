@@ -31,15 +31,33 @@ export const CALLBACK_COOLDOWN_MESSAGES = 8;
 const RECENCY_DECAY_MESSAGES = 20;
 const LEGACY_CALLBACK_COOLDOWN_MS = 1000 * 60 * 8;
 const LEGACY_RECENCY_DECAY_HOURS = 24;
-const TYPE_ALIASES = {
-    player_canon: 'playerCanon',
-    playercanon: 'playerCanon',
-    npc_agenda: 'npcAgenda',
-    npcagenda: 'npcAgenda',
-};
+/**
+ * Type identity folds case and punctuation before the whitelist (2026-09-17
+ * audit P2): `Promise` / `PROMISE` / `player canon` / `npc-agenda` all used to
+ * demote to `callback` — losing the promise/mystery/foreshadow scoring bonus
+ * and the dormancy exemption — because the alias map was consulted lowercase
+ * while the allowed set was not. `foldTypeKey` reduces any spelling to its
+ * alphanumeric lowercase spine ("player_canon" → "playercanon"), which is the
+ * one key the canonical names and every alias share.
+ */
+function foldTypeKey(value) {
+    return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+const TYPE_BY_FOLDED_KEY = new Map([...ALLOWED_TYPES].map(type => [foldTypeKey(type), type]));
 
+/**
+ * String-or-drop (2026-09-17 audit P2, the 09-15/09-16 rule): an object
+ * `text` / `subject` / `id` used to mint a card whose prompt line read
+ * "subject: [object Object]" into DRAMATIC CALLBACKS and the RAG seed — and
+ * an object `id` became the string "[object Object]", so the next such card
+ * MERGED into it by id. A finite number still reads as its digits (a numeric
+ * id from the DM is harmless); everything else is no text.
+ */
 function cleanText(value, fallback = '') {
-    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    const raw = typeof value === 'string'
+        ? value
+        : (typeof value === 'number' && Number.isFinite(value) ? String(value) : '');
+    const text = raw.replace(/\s+/g, ' ').trim();
     return text || fallback;
 }
 
@@ -49,10 +67,47 @@ function clampNumber(value, min, max, fallback) {
     return Math.max(min, Math.min(max, Math.round(n)));
 }
 
+/**
+ * A list field read from a lane. A SCALAR string is a one-item list (2026-09-17
+ * audit P1, the 09-15 `conditions: "prone"` parity rule): the Scribe's
+ * `"knownBy": "the hero"` used to read as NO knowers — the secret rendered as
+ * common knowledge, reached every NPC, and travelled as hearsay because
+ * `witnessed` survived an empty knowers list. Elements are clamped to
+ * MAX_SUBJECT_LENGTH (same audit P2): one 100k-character knower name rode
+ * the callback block, the save, and the RAG seed whole.
+ */
 function normalizeTextArray(value, max = MAX_TAGS) {
-    const source = Array.isArray(value) ? value : [];
-    return [...new Set(source.map(v => cleanText(v)).filter(Boolean))]
+    const source = Array.isArray(value) ? value : (typeof value === 'string' ? [value] : []);
+    return [...new Set(source.map(v => cleanText(v).slice(0, MAX_SUBJECT_LENGTH)).filter(Boolean))]
         .slice(0, max);
+}
+
+const FALSE_FLAG_WORDS = new Set(['false', 'no', 'off', '0', 'none', 'null', 'undefined']);
+
+/** A stored or lane boolean: "false" / "no" / 0 are false, anything else truthy is `!!` (the 09-15 `is_undead` rule). */
+function toFlag(value) {
+    if (typeof value === 'string') {
+        const word = value.trim().toLowerCase();
+        return word !== '' && !FALSE_FLAG_WORDS.has(word);
+    }
+    return !!value;
+}
+
+/** A finite wall-clock stamp, or the fallback (junk used to persist and NaN-compare in dormancy). */
+function finiteStamp(value, fallback) {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+/**
+ * A reducer-stamped conversational message index: finite, non-negative, and —
+ * when the caller supplies the live transcript length — never in the future
+ * (2026-09-17 audit P2): LOAD passed `lastUsedMessage: 1e9` through, so the
+ * cooldown counted 0 and the promise scored 0 for the campaign's life.
+ */
+function messageStamp(value, fallback, maxMessageCount) {
+    const n = typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : undefined;
+    if (n === undefined) return fallback;
+    return Number.isFinite(maxMessageCount) ? Math.min(n, Math.max(0, maxMessageCount)) : n;
 }
 
 const STORY_STOP_WORDS = new Set([
@@ -126,7 +181,9 @@ export function normalizeKnownBy(value) {
 
 /** "[SECRET — known only to: X, Y] " prefix, or '' for common knowledge. */
 export function formatSecrecyTag(knownBy) {
-    const list = Array.isArray(knownBy) ? knownBy.map(v => cleanText(v)).filter(Boolean).slice(0, MAX_LINKED_NPCS) : [];
+    // Same reader as the store (scalar = one knower, elements clamped): a
+    // pre-fix save's raw list must not print a 100k name into the prompt.
+    const list = normalizeTextArray(knownBy, MAX_LINKED_NPCS);
     return list.length > 0 ? `[SECRET — known only to: ${list.join(', ')}] ` : '';
 }
 
@@ -150,38 +207,51 @@ export function stripStoryMemoryEngineStamps(card) {
     return out;
 }
 
-export function normalizeStoryMemoryCard(card = {}, existing = null) {
+/** Only a plain object is a card: `null`, arrays, and scalars normalize to null. */
+function isCardShape(card) {
+    return !!card && typeof card === 'object' && !Array.isArray(card);
+}
+
+/**
+ * @param {object} card - a lane or stored card
+ * @param {object|null} [existing] - the stored card a merge lands on
+ * @param {{ maxMessageCount?: number }} [options] - the live transcript length;
+ *   LOAD_GAME passes it so the three message stamps clamp to "now" (the
+ *   09-14 `openedAtMessage` / 09-10 rollHistory pattern). An OPTIONS OBJECT,
+ *   never positional — `.map` would pass the index.
+ */
+export function normalizeStoryMemoryCard(card = {}, existing = null, { maxMessageCount } = {}) {
+    // A `null` element used to walk into `card.text` and throw — out of
+    // validateSaveState (the campaign un-loadable) and out of the middle of
+    // ADD_STORY_MEMORY_CARDS (every card and dispatch queued behind it lost
+    // for the turn) — 2026-09-17 audit P1; the 09-08 fronts null-entry class.
+    if (!isCardShape(card)) return null;
+    const base = isCardShape(existing) ? existing : null;
     const now = Date.now();
-    const text = cleanText(card.text || card.memory || card.note, existing?.text || '').slice(0, MAX_TEXT_LENGTH);
+    const text = cleanText(card.text || card.memory || card.note, base?.text || '').slice(0, MAX_TEXT_LENGTH);
     if (!text) return null;
 
-    const rawType = cleanText(card.type, existing?.type || 'callback');
-    const aliasedType = TYPE_ALIASES[rawType] || TYPE_ALIASES[rawType.toLowerCase()] || rawType;
-    const type = ALLOWED_TYPES.has(aliasedType) ? aliasedType : 'callback';
-    const rawStatus = cleanText(card.status, existing?.status || 'active');
+    const rawType = cleanText(card.type, base?.type || 'callback');
+    const type = TYPE_BY_FOLDED_KEY.get(foldTypeKey(rawType)) || 'callback';
+    const rawStatus = cleanText(card.status, base?.status || 'active');
     const status = ALLOWED_STATUS.has(rawStatus) ? rawStatus : 'active';
     // Conditional keys: an update that omits the field must not wipe the
     // stored value through the {...existing, ...card} merge spread.
-    const knownBy = normalizeKnownBy(card.knownBy ?? card.known_by ?? existing?.knownBy);
+    const knownBy = normalizeKnownBy(card.knownBy ?? card.known_by ?? base?.knownBy);
     // witnessed and knownBy are mutually exclusive; when the extractor emits
     // both (2026-08-06 live playtest: a public accusation carried
     // knownBy ["the hero"]), secrecy wins — a secret must never travel as
     // hearsay, while an under-traveled public deed is only lost color.
+    // Read through toFlag (2026-09-17 P2): `witnessed: "false"` was `true`.
     const witnessed = knownBy.length === 0
-        && (card.witnessed !== undefined ? !!card.witnessed : !!existing?.witnessed);
+        && (card.witnessed !== undefined ? toFlag(card.witnessed) : toFlag(base?.witnessed));
     // Reducer-stamped at card birth; ages witnessed deeds for regional hearsay.
-    const firstSeenMessage = Number.isFinite(card.firstSeenMessage)
-        ? card.firstSeenMessage
-        : (Number.isFinite(existing?.firstSeenMessage) ? existing.firstSeenMessage : undefined);
+    const firstSeenMessage = messageStamp(card.firstSeenMessage, messageStamp(base?.firstSeenMessage, undefined, maxMessageCount), maxMessageCount);
     // Conversational stamps for the curation windows (reducer-owned like
     // firstSeenMessage): the message count when the card was last merged and
     // when the DM last paid it off.
-    const lastSeenMessage = Number.isFinite(card.lastSeenMessage)
-        ? card.lastSeenMessage
-        : (Number.isFinite(existing?.lastSeenMessage) ? existing.lastSeenMessage : undefined);
-    const lastUsedMessage = Number.isFinite(card.lastUsedMessage)
-        ? card.lastUsedMessage
-        : (Number.isFinite(existing?.lastUsedMessage) ? existing.lastUsedMessage : undefined);
+    const lastSeenMessage = messageStamp(card.lastSeenMessage, messageStamp(base?.lastSeenMessage, undefined, maxMessageCount), maxMessageCount);
+    const lastUsedMessage = messageStamp(card.lastUsedMessage, messageStamp(base?.lastUsedMessage, undefined, maxMessageCount), maxMessageCount);
 
     return {
         ...(knownBy.length > 0 && { knownBy }),
@@ -189,20 +259,23 @@ export function normalizeStoryMemoryCard(card = {}, existing = null) {
         ...(Number.isFinite(firstSeenMessage) && { firstSeenMessage }),
         ...(Number.isFinite(lastSeenMessage) && { lastSeenMessage }),
         ...(Number.isFinite(lastUsedMessage) && { lastUsedMessage }),
-        id: cleanText(card.id, existing?.id || `mem-${now}-${Math.random().toString(36).slice(2, 7)}`),
+        id: cleanText(card.id, base?.id || `mem-${now}-${Math.random().toString(36).slice(2, 7)}`).slice(0, MAX_SUBJECT_LENGTH),
         type,
         text,
-        subject: cleanText(card.subject, existing?.subject || '').slice(0, MAX_SUBJECT_LENGTH),
+        subject: cleanText(card.subject, base?.subject || '').slice(0, MAX_SUBJECT_LENGTH),
         tags: normalizeTextArray(card.tags, MAX_TAGS),
-        salience: clampNumber(card.salience, 1, 5, existing?.salience ?? 3),
-        emotionalCharge: clampNumber(card.emotionalCharge ?? card.emotional_charge, 0, 5, existing?.emotionalCharge ?? 2),
+        salience: clampNumber(card.salience, 1, 5, base?.salience ?? 3),
+        emotionalCharge: clampNumber(card.emotionalCharge ?? card.emotional_charge, 0, 5, base?.emotionalCharge ?? 2),
         status,
-        firstSeenAt: card.firstSeenAt || card.first_seen_at || existing?.firstSeenAt || now,
-        lastSeenAt: card.lastSeenAt || card.last_seen_at || now,
-        lastUsedAt: card.lastUsedAt || card.last_used_at || existing?.lastUsedAt || null,
-        source: cleanText(card.source, existing?.source || 'scribe').slice(0, 40),
+        // Wall-clock trio typed finite (2026-09-17 P2): `firstSeenAt: "junk"`
+        // persisted and NaN-compared in applyStoryMemoryDormancy, so a
+        // salience-2 card went dormant on the very next cadence.
+        firstSeenAt: finiteStamp(card.firstSeenAt, finiteStamp(card.first_seen_at, finiteStamp(base?.firstSeenAt, now))),
+        lastSeenAt: finiteStamp(card.lastSeenAt, finiteStamp(card.last_seen_at, now)),
+        lastUsedAt: finiteStamp(card.lastUsedAt, finiteStamp(card.last_used_at, finiteStamp(base?.lastUsedAt, null))),
+        source: cleanText(card.source, base?.source || 'scribe').slice(0, 40),
         linkedNpcNames: normalizeTextArray(card.linkedNpcNames || card.linked_npc_names, MAX_LINKED_NPCS),
-        location: cleanText(card.location, existing?.location || '').slice(0, MAX_SUBJECT_LENGTH),
+        location: cleanText(card.location, base?.location || '').slice(0, MAX_SUBJECT_LENGTH),
     };
 }
 
@@ -227,8 +300,10 @@ export function normalizeStoryMemoryUpdate(update = {}) {
     if (update.emotionalCharge !== undefined || update.emotional_charge !== undefined) {
         out.emotionalCharge = clampNumber(update.emotionalCharge ?? update.emotional_charge, 0, 5, 2);
     }
-    if (Array.isArray(update.tags)) out.tags = normalizeTextArray(update.tags, MAX_TAGS);
-    if (Array.isArray(update.linkedNpcNames) || Array.isArray(update.linked_npc_names)) {
+    // Same scalar-is-a-list reading as the card lane (2026-09-17 P1).
+    const isListField = value => Array.isArray(value) || typeof value === 'string';
+    if (isListField(update.tags)) out.tags = normalizeTextArray(update.tags, MAX_TAGS);
+    if (isListField(update.linkedNpcNames) || isListField(update.linked_npc_names)) {
         out.linkedNpcNames = normalizeTextArray(update.linkedNpcNames || update.linked_npc_names, MAX_LINKED_NPCS);
     }
     if (update.location) out.location = cleanText(update.location).slice(0, MAX_SUBJECT_LENGTH);
@@ -356,7 +431,8 @@ export function applyStoryMemoryDormancy(cards = [], journal = []) {
     const next = list.map(card => {
         if (!card || (card.status || 'active') !== 'active') return card;
         if ((card.salience || 0) > 2 || DORMANCY_EXEMPT_TYPES.has(card.type)) return card;
-        const lastTouch = Math.max(card.lastSeenAt || 0, card.lastUsedAt || 0, card.firstSeenAt || 0);
+        // Belt under the load typing: a non-finite stamp reads as "never", not NaN.
+        const lastTouch = Math.max(finiteStamp(card.lastSeenAt, 0), finiteStamp(card.lastUsedAt, 0), finiteStamp(card.firstSeenAt, 0));
         if (lastTouch >= cutoff) return card;
         changed = true;
         return { ...card, status: 'dormant' };

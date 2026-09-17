@@ -15,7 +15,10 @@ describe('normalizeKnownBy', () => {
         expect(normalizeKnownBy(['Marta', 'the hero'])).toEqual(['Marta', 'the hero']);
         expect(normalizeKnownBy(['Marta', 'everyone'])).toEqual([]);
         expect(normalizeKnownBy(['PUBLIC'])).toEqual([]);
-        expect(normalizeKnownBy('not-an-array')).toEqual([]);
+        // A scalar string is ONE knower since 2026-09-17 (the 09-15
+        // `conditions: "prone"` parity rule) — it used to declassify the card.
+        expect(normalizeKnownBy('the hero')).toEqual(['the hero']);
+        expect(normalizeKnownBy(42)).toEqual([]);
         expect(normalizeKnownBy(null)).toEqual([]);
     });
 });
