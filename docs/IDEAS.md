@@ -1238,6 +1238,10 @@ the world-tempo directive/heat/timing-die readouts once that system exists. **[m
 `usageMetadata.cachedContentTokenCount` per DM turn (implicit caching is best-effort; field reports
 put hits at 42–77%, and an explicit `cachedContents` is browser-callable if ours are low) and a
 per-RAG-row retrieval hit count (AI Dungeon's Memory Bank evicts by use; ours by age).
+**First routine run, same day:** queued as **M2 "Memory telemetry"** (`MEMORY_RESEARCH.md` Adoption
+Queue) — engine-stamped `hits` / `lastHitMessage` on RAG rows (never a survival rule; AI Dungeon's
+least-used eviction admits "very old memories might stay forever if used frequently"), the DM
+response's `cachedContentTokenCount` per turn, both in the inspector and the `eval:memory` report.
 Dev/settings panel to make the invisible memory stack inspectable during real-play tuning.
 Motivation: callbacks, RAG hits, and front symptoms are engine-curated but player-invisible —
 hard to tune salience without seeing what the DM actually received.
