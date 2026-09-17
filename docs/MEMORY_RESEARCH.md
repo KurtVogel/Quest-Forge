@@ -1,0 +1,373 @@
+# Memory Research Log — "is our memory design still the best available?"
+
+An automated **weekly memory-research routine** (Claude.ai Routine `Quest Forge weekly memory
+research`, Fable 5.1, Wednesdays 15:00 Finnish time; sibling of `SCHEDULED_STRENGTHENING.md` and
+`SCHEDULED_WOW.md`). Where strengthening asks *"is this code correct?"* and the wow audit asks
+*"does this moment land?"*, this one asks *"is the DESIGN of our memory still the best thing we
+could be shipping, given what the field and the enthusiast community have found this week?"*
+Each run searches, examines, and evaluates memory systems against the **"Currently best for us"
+doctrine** below, then edits this file **in place**: contenders are added, removed, or re-verdicted;
+the doctrine moves only on evidence; at most two one-session proposals land in the Adoption Queue.
+
+_Created 2026-09-17 on Vesa's call: "the memory is crucial to our game, most central part."
+Ruling: `DECISIONS.md` 2026-09-17._
+
+## Why this shape (read once)
+
+The two existing routines work because each has a **registry** (bounded scope), a **rotation**
+(no repeats), a **fixed output shape**, and a **consumer** who ticks items off. A research routine
+without a written doctrine degenerates into a reading list: every week something new "looks
+better" because nothing states what *better* would have to beat. So the doctrine below is written
+as **numbered, testable claims with the evidence each rests on**. A contender is evaluated
+against a claim, not against a mood. The registry is edited in place — this file describes the
+present; the Verdict Log keeps the history — so it never becomes a 2,000-line scroll.
+
+## Currently best for us — the doctrine
+
+The memory stack is what the CLAUDE.md "Layered memory" bullet, `docs/LLM_WOW_LAYER.md`, and the
+code ship today. Each claim names its evidence (`E:`), the settled decision behind it (`D:`), and
+the honest gap (`Gap:`) the routine should look for answers to. **Update a claim only when a
+contender's evidence beats the claim's own evidence** — and say so in the Verdict Log.
+
+**Architecture constraints every contender is measured against**
+
+- **C1 — Browser-only, no backend.** Everything runs in the player's browser: IndexedDB for
+  vectors and saves, direct provider calls, optional bring-your-own Firebase. A contender that
+  needs a server (a graph DB, a vector service, a memory API) is a *rewrite* for the BYOK tier
+  and at best a candidate for the hosted tier (`PRODUCTIZATION.md`) — tag it `hosted-only`.
+- **C2 — The engine owns truth; the LLM writes into typed, clamped, ledgered slots.** Every
+  memory write from any LLM lane crosses a trust boundary (`sanitizeNpcLanePayload`,
+  `normalizeStoryMemoryCard`, `normalizeLocationRecord`, the replay ledgers). A contender whose
+  value depends on letting the model write free-form memory it later reads back verbatim starts
+  at a disadvantage: that is how laundering and self-priming happen (D: 2026-09-05 raw-JSON leak,
+  2026-09-16 roster trust boundary).
+- **C3 — Gemini machinery is mandatory and the only embedding provider** (D: 2026-07-08).
+  Extraction, summaries, embeddings, audits run on `gemini-3.7-flash` / `gemini-embedding-2`
+  regardless of the DM provider. A contender that needs a second embedding model or a local
+  model download must clear the cost of that change explicitly.
+- **C4 — The cached prefix is sacred** (D: 2026-07-18). Static blocks are byte-stable ahead of all
+  dynamic state; ~6k tokens clear the 4,096-token implicit-cache floor every Gemini 3.x model
+  has (https://ai.google.dev/gemini-api/docs/caching). Any memory block is dynamic by nature and
+  rides AFTER the prefix; a contender that wants per-turn text in the prefix breaks caching and
+  is rejected on that alone. **Gap (2026-09-17, G2):** implicit caching is best-effort — field
+  reports show 42–77% hit rates on stable prefixes (https://github.com/googleapis/python-genai/issues/1880,
+  https://github.com/OpenHands/software-agent-sdk/issues/2919) and we do not log
+  `usageMetadata.cachedContentTokenCount`; explicit `cachedContents` is browser-callable with a
+  plain key (1-h default TTL, $4.50/M/h storage on Pro ≈ $0.027/h for our prefix).
+- **C5 — Ordinary turns are brief** (PRODUCT.md pillar 4). Memory earns its tokens by precision:
+  one right callback beats five, and the DM prompt has a 160k-char tripwire
+  (`PROMPT_CHAR_BUDGET`). "Inject more" is never the answer; "inject the right thing" is.
+- **C6 — Conversational distance, never wall-clock** (D: 2026-07-30, 2026-08-04, 2026-09-06). Every
+  window, cooldown, decay, and ledger in the memory layer counts narrative-eligible messages. A
+  player who returns after a month must find the campaign exactly as warm as they left it.
+
+**Tier claims — what we ship and why we think it is right**
+
+| # | Tier | What we ship (code) | Evidence / decision | Honest gap (what a contender could beat) |
+|---|---|---|---|---|
+| D1 | **World facts** | Canonical truths, never compressed; `ADD_WORLD_FACT(S)` rejects near-duplicate restatements by stopword-stripped token containment; ≤3 per Scribe turn, ≤5 per journal batch; `knownBy` epistemics (`[SECRET — known only to …]`); a resolved front mints a title-revealing fact. `handlers/shared.js`, `engine/textMatch.js` | D: 2026-07-03 (over-extraction was the top playtest finding), 2026-08-05 (epistemics) | **No temporal validity.** A fact is true forever: "the mill turns" and "the mill burned" coexist as two facts with no supersession edge. Bi-temporal fact graphs (Zep/Graphiti) solve exactly this; the question is whether a browser-side `supersedes` link on the fact record is enough. |
+| D2 | **Journal** | Every 10 NARRATIVE-ELIGIBLE messages Flash summarizes the batch to `{summary, key decisions, consequences, facts}` and prunes those messages from the DM window; error lines and OOC pairs never reach it; `fallback` entries never embed. `engine/worldJournal.js` (`SUMMARIZE_EVERY` 10, `MAX_BATCH_MESSAGES` 40, summary clamp 2,000) | D: 2026-09-06 (journal reads the narrative transcript); LLM_WOW_LAYER "compact durable state beats raw transcript length" | **Drift is unmeasured.** Nothing scores how much a 40-cadence-old summary still matches what happened; there is no held-out "was this detail preserved?" probe. Hierarchical summaries (RAPTOR-style tree over journal entries) would give the DM an act-level view we do not have. |
+| D3 | **Story-memory cards** | Typed callback cards (`callback / promise / wound / relationship / mystery / playerCanon / foreshadow / npcAgenda`, text ≤260) scored `salience×2 + emotionalCharge + tokenOverlap×3 + location(+4) + presentNPC(+5) + recency(3→0 over 20 msgs) + type(+2 promise/mystery/foreshadow)`, cooldown 8 conversational messages after use, ≤5 injected as `## DRAMATIC CALLBACK OPPORTUNITIES`; containment merge of reworded restatements; `resolved` terminal; dormancy after 3 silent cadences for salience 1–2 (promise/playerCanon exempt); curation is SCENE-driven (present NPCs only). `engine/storyMemory.js` | D: 2026-06-17 (v1), 2026-07-14 (merge), 2026-08-07 (dormancy), 2026-09-06 (terminal + scene-driven + conversational cooldown); `eval:memory` first keyed pass | **Scoring weights are hand-set and never fitted.** No reflection step links cards into higher-order insights (Generative Agents' reflection tree; A-MEM's note linking) — a promise, its wound, and its mystery stay three flat cards. No offline retrieval set on our own transcripts to tune against. |
+| D4 | **RAG** | Facts / journal / NPC dossiers / story cards / player lines / narrative embedded with `gemini-embedding-2` at 768 dims in Google's asymmetric document/query formats; cosine in the browser over an IndexedDB cache keyed by campaign; query = player line + location + combat foes; `topN` 8, `minScore` 0.55; presence-aware gate (a row whose `subjects` are absent from the scene pays −0.12 BEFORE the gate — "dormant, not deleted"); rank-only category boosts; MMR-lite dedupe at ≥0.9 mutual cosine; 1,500-row cap evicting transient rows only, durable canon never evicted. `engine/vectorMemory.js`, `providers/gemini.js` | D: 2026-08-06 (boost is order, never the gate), 2026-08-28 (presence + diversity, the refusal-cascade entry), 2026-09-06 (scene presence, no durable eviction) | **Pure dense retrieval.** No lexical (BM25) leg, so a rare proper noun depends on the embedder; no query rewriting (the player's line is embedded raw); no reranker; 768 vs 3,072 dims never measured; `topN`/`minScore` never fitted. Client-side hybrid stacks exist — the question is whether they beat cosine on OUR transcripts. |
+| D5 | **NPC dossiers** | Roster records with clause-level containment merges for `personality/goals/secrets/stanceToPlayer` (fragment appends novel clauses, restatement drops, rewrite replaces, 600-char cap, oldest clauses fall first); three engine-owned shelves (fragments land on `recentImpressions` and graduate only when a LATER scene restates them; graded `bondMoments` `{kind, salience}` collapsing per scene with key/recent split; a decaying "lately"); DERIVED relationship stage + open thread; presence-first `## KNOWN NPCs` curation; the roster is a trust boundary for every lane. `engine/npcRoster.js`, `engine/relationshipArc.js` | D: 2026-07-05, 2026-07-09, 2026-08-28, 2026-09-06, 2026-09-12 ×3, 2026-09-13, 2026-09-14, 2026-09-16 | Merges are lexical (token containment), so a semantic restatement with no shared tokens can still accrete. No contender is known to do per-entity dossiers this carefully for fiction; watch for entity-memory work that does. |
+| D6 | **The window** | The DM sees the last 20 raw rows (`MESSAGE_WINDOW`); coin/item receipt lines ride it; combat-exchange result lines do not (RESOLVED EVENTS is their carrier); deleted/hidden rows are honored everywhere. `llm/turnOrchestrator.js` | D: 2026-08-04, 2026-08-31; 2026-09-17 (G2): ≤128k is the safe long-context regime — Gemini 3.1 Pro scores 84.9% on MRCR v2 at 128k but 26.3% at 1M (https://deepmind.google/models/model-cards/gemini-3-1-pro/), and Chroma's context-rot report shows every model degrading with length and coherent haystacks hurting MORE (https://www.trychroma.com/research/context-rot) | The window is a count, not a token budget: 20 rows of long narration vs 20 dice rows are very different sizes. "Just send 200 messages" is answered by C4/C5 and the MRCR numbers — re-check when a model card shows ≥80% at 1M. |
+| D7 | **The Scribe** | One thinking-free Flash call per ordinary turn (8k output cap) extracts ≤2 facts + ≤2 cards (appearance / gender / species / bond moments / location profile / travel budget-exempt), updates NPCs by id against KNOWN blocks, runs the loot/payment/cast audits as observation-only; a cadence reflection proposes agendas, tempo directives, emergent fronts; the parse boundary anchors on every schema key and falls back to the whole object. `llm/scribe.js`, `llm/scribeAudits.js` | D: 2026-07-02 (no regex fallback), 2026-07-31 (observation-only audits), 2026-09-16 (trust boundary + parse fallback) | One extraction call per turn is the whole memory-write budget. "Sleep-time" consolidation (Letta) — an off-turn pass that re-reads the pool and merges/links/forgets — exists only as the cadence reflection and the containment merges. |
+| D8 | **Player-facing memory** | Journal tab, Chronicle (saga prose written from the actual messages, NEVER injected into any prompt or RAG), Places gazetteer, character cards, the return card, the Memory Inspector (flag-gated dev panel showing curated cards, RAG hits, injections). | D: 2026-07-26 (chronicle strictly player-facing), 2026-09-16 (return card, zero LLM) | The inspector is dev-only; the player cannot correct a wrong memory except by editing looks (`SET_NPC_LOOK`) or deleting a message. Enthusiast tools (lorebooks) give the player direct memory authorship — the doctrine says player-authored canon rides the premise + backstop, not free edits (D: 2026-06-14/17); re-examine only with a concrete design. |
+
+**Standing beliefs (the "why" behind the table)**
+
+1. **Compact durable state beats raw transcript length.** Managed tiers, not a bigger window
+   (`LLM_WOW_LAYER.md`, the MemGPT / Generative Agents / A-MEM lineage we started from).
+2. **Retrieval is scene-driven and presence-aware.** Who is in the room decides what surfaces;
+   absent people's memories go dormant, never deleted.
+3. **Sparse callbacks.** The DM is told to use at most one, naturally, never to explain the
+   memory system.
+4. **Every LLM write is typed, clamped, deduped, and ledgered.** The 2026-07-21 one-shot invariant
+   and the 2026-09-16 trust-boundary rule are memory rules as much as economy rules.
+5. **Measure on our own transcripts before adopting.** `npm run eval:memory` (20-turn keyed
+   playtest) and the golden fixtures are the proof; a benchmark score is a reason to trial, never
+   to adopt.
+
+**Outside evidence that validates the doctrine** (so runs do not re-litigate it; add a line when a
+new result confirms a claim):
+
+- *Facts never compressed, episodes summarized* (D1/D2) — "The Compaction Cliff" (CIKM'26): constraint
+  recall under a production compaction prompt is 53% after ONE cycle and 10% by cycle five;
+  type-aware compaction that pins constraints verbatim holds 1.00/0.95/0.80 at 50/25/10% budgets
+  (https://arxiv.org/html/2608.22752v1). Our split IS that design; the missing piece is its
+  deterministic post-compaction verifier (queued).
+- *Engine-owned ledgers, player lines never summarized away* (C2, D4 player rows) — NCP-Bench: a
+  memory-augmented agent cut commitment violations 26→4% but RAISED player-input conflicts 13→38%
+  because compression loses player intent (https://arxiv.org/html/2608.08160).
+- *Raw transcript kept, conservative merges, no rewrite passes* (belief 4, D: 2026-07-14) — "Useful
+  Memories Become Faulty When Continuously Updated": consolidated memory utility rises then falls
+  below no-memory; agents keeping raw episodes doubled accuracy (https://arxiv.org/abs/2605.12978).
+- *`knownBy` epistemics* (D1) — perspective-bounded memory: visibility-tagged facts per character
+  give +34.6 pp knowledge-boundary fidelity (https://arxiv.org/abs/2606.25632).
+- *Player RAG rows labeled non-canonical* (D4) — MemSyco-Bench: retrieved memories make agents adopt
+  false user claims as evidence (https://arxiv.org/abs/2607.01071).
+- *Retrieval over a bigger window for dialogue* (D4/D6) — the LC-vs-RAG revisit: long context wins on
+  novel-style narrative questions, RAG wins on dialogue-based queries (https://arxiv.org/html/2501.01880v1);
+  our transcript is dialogue.
+- *Our embedding call matches Google's own contract* (D4, C3) — `providers/gemini.js` already sends
+  embedding-2's instruction prefixes, one part per request, `output_dimensionality: 768` (one of the
+  two MRL-optimized sizes; 8,192-token inputs) (https://ai.google.dev/gemini-api/docs/embeddings).
+
+## Rules the routine follows
+
+- **Three lanes, one deep pass per week, rotating** (the lane is named in the entry heading;
+  determine the next from the Verdict Log's headings, union of local and `origin/master`):
+  - **Lane A — enthusiast practice.** SillyTavern and its extensions, RisuAI, AI Dungeon, NovelAI,
+    KoboldCPP, Talemate, Backyard, Character.AI; r/SillyTavernAI, r/LocalLLaMA, r/AIDungeon,
+    r/NovelAi, Hacker News, the extension repos' issues and Discord digests. What do people who run
+    1,000-message campaigns say works, fails, and why.
+  - **Lane B — systems and papers.** Agent-memory frameworks (Mem0, Zep/Graphiti, Letta, LangMem,
+    A-MEM, MemoryOS/MemOS, HippoRAG, GraphRAG/LazyGraphRAG, RAPTOR, Cognee, Supermemory, Honcho …),
+    memory/consolidation/forgetting papers, and benchmarks (LoCoMo, LongMemEval, MemBench,
+    NarrativeQA-style long-fiction sets).
+  - **Lane C — provider primitives and the client-side stack.** Gemini context caching and
+    embedding models, long-context recall evidence, OpenAI/Anthropic/xAI memory or cache features
+    as reference, and browser-side retrieval stacks (hybrid BM25 + dense, wasm vector stores,
+    local embedders, cheap-LLM reranking).
+  - The other two lanes get a light **"anything new this week?"** scan (registry rows re-dated
+    only when something changed).
+- **Evidence grades**, stated on every verdict: **G1** our own eval/playtest on our transcripts ·
+  **G2** independent benchmark or replication · **G3** vendor benchmark · **G4** enthusiast
+  consensus with specifics (versions, message counts, failure modes) · **G5** anecdote / marketing.
+  Nothing moves the doctrine below G2; nothing enters the Adoption Queue as `adopt` below G1 (a
+  `trial` names the G1 step that would earn it).
+- **Four verdicts** on every registry row, each dated with a URL: **adopt** (queued or built),
+  **trial** (promising; names the eval that decides), **watch** (immature, server-only, or
+  unproven; carries a re-check date), **rejected** (reason; stays listed compactly so it is not
+  re-proposed). A `watch` row untouched for 8 weeks is re-checked or dropped.
+- **Registry is edited in place; caps:** ≤ 24 active rows (adopt / trial / watch) and a compact
+  Rejected table. The Source Shelf lists recurring places to look, not one-off links.
+- **Doctrine moves only on evidence that beats the claim's own evidence.** The Verdict Log entry
+  states the claim replaced, the evidence grade, the cost, and flags any `DECISIONS.md` entry it
+  would reverse (never silently).
+- **At most two proposals per run**, tagged **M0** (a memory failure a player would notice:
+  a forgotten promise, laundered canon, NPC drift, a secret that leaked), **M1** (measurably
+  better recall or a cheaper turn at equal recall), **M2** (hygiene, tooling, evals). Each must be
+  buildable in one normal session; bigger visions are split and only the first slice proposed.
+- **Adoption Queue cap 6.** When full, the run re-ranks and merges instead of adding.
+- **Retire-as-you-add against `docs/IDEAS.md`:** a run adds at most as many new IDEAS entries
+  as it retires (tag `[memory-research]`); an M0 is exempt.
+- **Never propose a backend for the BYOK tier.** Server-side contenders are evaluated for the
+  hosted tier only and tagged `hosted-only`.
+- **Report-only, self-committing:** no production code or tests change. This file (and
+  `docs/IDEAS.md` when amended) go straight to `origin master` at the end of the run.
+- **Tick what shipped:** if a queue item has landed (`git log`, `STATUS.md`), tick it `[x]` with
+  the date and the proof result.
+- **Newest entry first**, dated `YYYY-MM-DD`, lane in the heading, entry under ~50 lines.
+
+### Proposal shape (copy exactly)
+
+```
+**M1 · <doctrine claim id, e.g. D4> · <short title>**
+- Today: <the claim as shipped — cite file:line or block name>
+- Contender: <system / practice, URL, evidence grade G1–G5>
+- Proposal: <the one-session slice>
+- Cost: <calls / tokens per turn; prefix-stable?; machinery or DM lane; storage; per-campaign embeds>
+- Pillar check: <PRODUCT.md pillar served; any pillar strained; any DECISIONS entry touched>
+- Proof: <the eval:memory probe / fixture / playtest that would show it worked, with the baseline>
+- IDEAS.md: <extends entry "…" | new entry (retired "…" to make room)>
+```
+
+## Contender Registry
+
+Edited **in place** every run. `Targets` names the doctrine claim a contender would change.
+`Grade` is the best evidence seen (G1–G5). `Last reviewed` is the date the row was last judged,
+not the date it was added. Rows leave when superseded or rejected (rejected rows move to the
+compact table below).
+
+| Contender | Lane | Targets | Mechanism in one line | Verdict | Grade | Why (dated) | Last reviewed |
+|---|---|---|---|---|---|---|---|
+| **Bi-temporal validity on facts / cards** (Zep · Graphiti) | B | D1, D3 | Every fact edge carries `t_valid`/`t_invalid`; a contradiction INVALIDATES rather than deletes, retrieval prefers live facts, history stays for recall — https://arxiv.org/abs/2501.13956 | **trial** → queued as M0 below | G3 (vendor DMR/LongMemEval numbers) + architectural fit | 2026-09-17: our world facts have NO supersession — "the bridge is out" is canon forever; the mechanism is one stamp + one Scribe field, no server needed | 2026-09-17 |
+| **Commitment-preservation benchmarking on our own transcripts** (NCP-Bench · MemGround) | B | D2, D3, belief 5 | Interactive narratives with structured commitments/facts; GPT-5.2 kept only 42% of commitments alive at 20 turns; fact-conflict 40–68% across models — https://arxiv.org/abs/2608.08160, https://arxiv.org/abs/2604.14158 | **adopt** (tooling) → queued as M2 below | G2 (independent, narrative-specific) | 2026-09-17: the honest yardstick for a game; `eval:memory` measures callbacks but not commitment survival or fact conflicts — every later trial needs this G1 step | 2026-09-17 |
+| **Heat / usage-weighted salience with slow decay** (MemoryOS · FadeMem · Cognee "memify") | B | D3 | A card's importance rises when retrieved/used and decays by distance with slower decay for high-importance rows; promote/demote on hysteresis — https://arxiv.org/abs/2506.06326, https://arxiv.org/html/2601.18642v2 | **trial** | G3 (authors' LoCoMo/30-day-sim numbers) | 2026-09-17: our salience is Scribe-declared once and never learns from play; zero-LLM to add; decide after the M2 probe exists | 2026-09-17 |
+| **Importance-triggered reflection with question generation** (Generative Agents) | B | D3, D7 | When summed importance of recent events crosses a threshold, generate 3 questions, retrieve, write 5 cited insights; ablation: −3 TrueSkill without reflection — https://ar5iv.labs.arxiv.org/html/2304.03442 | **trial** | G2 (academic ablation) | 2026-09-17: our reflection is cadence-bound (a huge scene and a quiet stroll get the same pass); an importance accumulator would fire it when it matters and stay quiet in slow-burn | 2026-09-17 |
+| **Explicit ADD / UPDATE / DELETE verdict per candidate** (Mem0) | B | D3, D7 | Each extracted candidate is adjudicated against similar existing memories; DELETE-on-contradiction closes a healed wound / paid debt without waiting for the DM — https://arxiv.org/abs/2504.19413 | **trial** | G3 (vendor; own paper had Mem0 66.9 vs full-context 72.9) | 2026-09-17: we dedupe and merge but only the DM's `memory_updates` resolves; a Scribe `resolves: <id>` field is one enum away, and `resolved` stays terminal | 2026-09-17 |
+| **In-fiction time stamps** (Mastra Observational Memory's three dates) | B | D2, D3 | Each observation carries creation date + referenced date + relative offset; temporal-reasoning was the largest measured category gain — https://mastra.ai/research/observational-memory | **watch** (re-check 2026-11-11) | G3 (vendor-run, published methodology) | 2026-09-17: we measure conversational distance only; "three days ago in-world" needs a DM-declared calendar we do not have — a bigger design than one field | 2026-09-17 |
+| **Link-time evolution of related cards** (A-MEM) | B | D3 | A new note can rewrite the context/tags of linked old notes (a betrayal recolors the promise) — https://arxiv.org/abs/2502.12110 | **watch** (re-check 2026-11-11) | G3 (48.4 in an independent re-run) | 2026-09-17: tempting, but "Useful Memories Become Faulty When Continuously Updated" (https://arxiv.org/abs/2605.12978) shows consolidated memory utility FALLS with rewrites; if ever, append a `now:` clause, never rewrite | 2026-09-17 |
+| **Theory-of-mind pairs** (Honcho) | B | D5 | Separate models of what each peer believes about the other — "what Saima thinks the hero knows" — https://github.com/plastic-labs/honcho | **watch** (re-check 2026-11-11) | G3 (vendor 90.4 LongMemEval-S) | 2026-09-17: our `stanceToPlayer` is one direction and `knownBy` is on facts, not on NPC beliefs; the ingredient of dramatic irony and NPC lies — needs a design pass, not a field | 2026-09-17 |
+| **Per-faction / per-front digests** (GraphRAG community summaries · RAPTOR tree) | B | D2, D4 | A maintained summary node per entity cluster answers "global" questions from one hit — https://arxiv.org/abs/2401.18059, https://www.microsoft.com/en-us/research/blog/lazygraphrag-setting-a-new-standard-for-quality-and-cost/ | **watch** (re-check 2026-11-11) | G3 | 2026-09-17: our journal is one flat time-keyed level; a 400-char "what the world knows about <front>" per active front (≤4) at cadence is one Flash call each — wait for the M2 probe to show whether arc-level recall is actually missing | 2026-09-17 |
+| **Sleep-time compute** (Letta) | B | D7 | A separate background agent rewrites memory blocks between turns, pre-computing what the next turn needs — https://arxiv.org/abs/2504.13171 | **watch** (re-check 2026-11-11) | G2/G3 (paper on math tasks; LoCoMo vendor) | 2026-09-17: our Scribe already runs in the gap and the cadence reflection is this in embryo; the transferable part is the ANYTIME property (pre-render the open thread / the NPC who will speak) | 2026-09-17 |
+| **Spreading activation from scene entities** (HippoRAG 2) | B | D4 | Seed retrieval from the scene's entity nodes and spread one hop (present NPC → linked cards) instead of pure cosine — https://arxiv.org/abs/2502.14802 | **watch** (re-check 2026-11-11) | G2 (academic, +7 F1 on multi-hop) | 2026-09-17: our `subjects` tagging + presence gate is half of this; the other half needs per-turn triple extraction (a Scribe field) — cost vs the M2 probe's verdict | 2026-09-17 |
+| **Per-source confidence on facts** (Supermemory) | B | D1 | Rank a fact by source: DM-narrated > NPC hearsay > player claim; expire low-confidence rows — https://supermemory.ai/blog/what-is-long-term-memory-ai/ | **watch** (re-check 2026-11-11) | G5 (self-reported) | 2026-09-17: `knownBy` epistemics + the player-claim non-canonical labeling already cover the two ends; a middle tier is not yet a felt failure | 2026-09-17 |
+| **Lexical channel + RRF fusion in `retrieveRelevant`** (VectFox · KoboldCpp TextDB · Orama) | A, C | D4 | A BM25 / token-overlap score for proper nouns fused with cosine by reciprocal-rank so a rare name never depends on the top-K dense window — https://github.com/KritBlade/VectFox, https://github.com/oramasearch/orama, https://nearform.com/digital-community/browser-based-vector-search-fast-private-and-no-backend-required/ | **trial** → queued as M1 below | G4 (extension authors' reasoning) + G2 for browser feasibility (Orama 5–10 ms queries); the recall gains cited are generic-IR blog numbers | 2026-09-17: our `textMatch` tokenizer already exists; MMR-lite fixes redundancy, not recall of rare keys; adopt only if the M2 probe's callback hit-rate rises | 2026-09-17 |
+| **Source-stamped retraction** (Qvink per-message summaries · Smart-Memory's admitted gap) | A | D3, D4, D1 | Stamp what a turn minted with its source message index; deleting/hiding that message retracts (dormants) what it minted — https://github.com/qvink/SillyTavern-MessageSummarize, https://github.com/senjinthedragon/Smart-Memory | **adopt** → queued as M0 below | G4 (a failure every enthusiast stack admits: "edits/hides/branches do NOT retract extracted memories") | 2026-09-17: `DELETE_MESSAGE` was built to scrub refusals (2026-08-28) but the refusal's Scribe facts/cards and its RAG rows stay live — poisoned canon survives the scrub | 2026-09-17 |
+| **Deterministic post-journal verifier** ("The Compaction Cliff", CIKM'26) | C | D2 | After each compaction, assert every constraint-class item is still reachable outside the summary; TypeCompact + verifier held recall the plain prompt lost — https://arxiv.org/html/2608.22752v1 | **adopt** → queued as M1 below | G2 (peer-reviewed) | 2026-09-17: our tiers are TypeCompact by construction; nothing checks that an active quest, a resolved-front epitaph, or a pinned fact survived a cadence outside the summary text — engine-only, zero tokens | 2026-09-17 |
+| **Explicit context cache + hit telemetry** (Gemini `cachedContents`) | C | C4 | Log `cachedContentTokenCount` per turn; if implicit hits fall short, create an explicit 1-h cache for the byte-stable prefix per session — https://ai.google.dev/gemini-api/docs/caching, https://ai.google.dev/gemini-api/docs/generate-content/caching | **trial** (measure first) | G2 (docs + two field reports of 42–77% implicit hits) | 2026-09-17: cost, not recall — but the cached prefix is the doctrine's C4 and nobody has measured whether it caches; the inspector should show the number before an adapter branch is written | 2026-09-17 |
+| **Sticky / delay / probability for callback cards** (ST World Info timed effects · ReMemory pop-ups) | A | D3 | Once a card surfaces keep it "on the DM's mind" for N messages; delay a freshly minted card so payoff is never same-scene; give dormant cards a small crypto-rolled chance to resurface — https://docs.sillytavern.app/usage/core-concepts/worldinfo/, https://github.com/InspectorCaracal/SillyTavern-ReMemory/blob/main/README.md | **trial** | G4/G5 (anecdotal; the fronts' timing dice are the same instinct, D: 2026-07-14) | 2026-09-17: cooldown-only scoring drops a card the turn after it fires; sticky + delay are two constants in `scoreStoryMemory`; judge on the M2 probe | 2026-09-17 |
+| **Use-count eviction + retrieval hit telemetry** (AI Dungeon Memory Bank "Forgotten Memories") | A | D4, D8 | Count retrievals per RAG row; evict never-retrieved transient rows first; show hit rates in the inspector — https://help.aidungeon.com/faq/the-memory-system | **trial** (zero LLM) | G4 | 2026-09-17: the 1,500-row cap evicts transients by age (D: 2026-09-06); a use count is a few reducer lines and gives the inspector its first retrieval statistic | 2026-09-17 |
+| **Player pin / edit on memories** (Qvink brain icon · HypaMemory V3 "Important" · Character.AI pins · AI Dungeon bank editing) | A | D8 | Pin = salience floor + never-evict; edit = the `LookEditor` pattern on facts and cards — https://blog.character.ai/memory/, https://deepwiki.com/kwaroran/RisuAI/5.1.2-hypamemory-v2-and-v3 | **watch** (re-check 2026-11-11; touches D: 2026-06-14/17 player-canon rules — flag before proposing) | G4 | 2026-09-17: every enthusiast stack ends at "correct it manually"; our player-authored canon rides the premise + backstop by decision, so this needs a design pass on what the player may overwrite | 2026-09-17 |
+| **A second summary layer over old journal entries** (Talemate layered history · Summaryception · RAPTOR) | A, B | D2 | Arc-level summaries of journal entries older than N cadences replace them in the prompt while raw entries stay in RAG; deltas not restatements; useful compression tops out at ~3 layers — https://vegu-ai.github.io/talemate/user-guide/world-editor/history/layered-history/, https://github.com/Lodactio/Extension-Summaryception | **watch** (re-check 2026-11-11) | G4 + G3 (RAPTOR +2% on QuALITY) | 2026-09-17: HN's recursive-summary fixation failure (survivors survive forever, https://news.ycombinator.com/item?id=37363362) is the risk; the M2 probe must first show arc-level recall is missing | 2026-09-17 |
+| **Player-facing "what the DM remembers"** (Character.AI Memory Usage · Talemate context review) | A | D8 | A compact panel of the facts / cards / NPC lines injected THIS turn — https://weavai.app/blog/en/2026/08/13/character-ais-new-3-layer-memory-system-explained/ | **watch** (re-check 2026-11-11) | G4 | 2026-09-17: `memoryInspectorStore` already captures it behind a dev flag; a player surface is a UI slice for the WOW audit's `memory-callbacks` moment, not a memory change | 2026-09-17 |
+| **Cheap-LLM reranking of callback candidates** (Flash over the last ~60 narrative rows) | C | D3, D4 | A Flash pass ranks retrieved rows for the scene; one small bake-off: LLM rerank Hit@1 66% vs none 45% vs MiniLM cross-encoder 50% (n=38) — https://github.com/PreetMax85/lecturelens/pull/10 | **watch** (re-check 2026-11-11) | G5 (n=38, not significant) | 2026-09-17: +1 call and ~1 s latency per turn against a 3.7 Flash that is 97% on MRCR at 128k; only worth it if the probe shows curation, not extraction, is the weak link | 2026-09-17 |
+| **In-fiction "last stated intent" line beside THE ASK** (NCP-Bench's player-input-conflict finding) | C | D6 | Pin the player's last stated goal verbatim in the dynamic block so compression never loses it — https://arxiv.org/html/2608.08160 | **watch** (re-check 2026-11-11) | G2 for the failure, G5 for the fix | 2026-09-17: the player's line is already the newest row in the window and the ordinary-turn grammar answers it first; re-judge if the probe shows player-intent conflicts | 2026-09-17 |
+| **embedding-2 at 1,536 dims** | C | D4 | The other MRL-optimized size; no per-dimension quality table is published for embedding-2 (the circulating 768≈3072 numbers are embedding-001's) — https://arxiv.org/abs/2605.27295 | **watch** (re-check 2026-11-11) | G3 | 2026-09-17: doubling vector storage for an unmeasured gain on <2k-row campaign corpora; the M2 probe could A/B it in one afternoon | 2026-09-17 |
+
+### Rejected (compact — so they are not re-proposed)
+
+| Contender | Why rejected (dated) |
+|---|---|
+| Full GraphRAG / Neo4j-style entity graphs (Microsoft GraphRAG, LightRAG, Cognee, Graphiti as a product) | 2026-09-17: server-side (C1 → `hosted-only` at best); index cost $50–200 per corpus; at matched token budgets plain RAG ties it on MultiHop-RAG (https://www.paperclipped.de/en/blog/graph-rag-production/); the bi-temporal PRINCIPLE is taken as its own row instead |
+| MemOS parametric / activation tiers | 2026-09-17: needs model-side weights; not a browser concern |
+| Per-turn consolidation rewrites of stored memory | 2026-09-17: https://arxiv.org/abs/2605.12978 — continuously updated memories fall below no-memory; agents that kept raw episodes doubled accuracy. Our undeleted transcript + containment merges are the right side of this; do not add rewrite passes |
+| LoCoMo as a target | 2026-09-17: ~16–26k-token conversations fit in any context; scoring choice alone flips rankings on 83–94% of queries (https://arxiv.org/abs/2605.24060); vendor wars (Mem0 vs Zep) over its numbers. Use NCP-Bench / MemGround shapes on our own transcripts instead |
+| Mem0 / Zep / Supermemory / Honcho as hosted memory SERVICES | 2026-09-17: C1 — a memory API is a backend; evaluate for the hosted tier only if PRODUCTIZATION.md ever needs one |
+| MVU-style variable frameworks (MVU Game Maker, BetterSimTracker) | 2026-09-17: our typed reducer + validated event contract IS the engine-owned version, without the ~75k-token prompts (https://github.com/KritBlade/MVU_Game_Maker) |
+| Whole-chat rolling summaries / re-summarize-the-summary (ST Summarize, RisuAI SupaMemory, AI Dungeon auto-summary) | 2026-09-17: blur, fixation on survivors, and overwriting player text are the universal complaints (https://docs.sillytavern.app/extensions/summarize/, https://news.ycombinator.com/item?id=37363362); our cadence journal + never-compressed facts are the answer already |
+| Agentic re-reading of old history at query time (Talemate "context investigation") | 2026-09-17: the tool's own docs call it "hit and miss" (https://vegu-ai.github.io/talemate/user-guide/agents/summarizer/); cost per turn unbounded |
+| Gemini File Search / Interactions API server-stored turns / Vertex Memory Bank as our memory | 2026-09-17: File Search is document-oriented (upload + re-index, not incremental per-turn memory); Interactions keeps state server-side for 55 days with no explicit cache; Memory Bank needs GCP auth — all contradict C1/C2 (https://ai.google.dev/gemini-api/docs/file-search, https://ai.google.dev/gemini-api/docs/interactions-overview) |
+| Local transformers.js embeddings (gte-small 384-d) | 2026-09-17: a 30 MB download to save $0.20/M tokens; C3 keeps one embedding model (https://nearform.com/digital-community/browser-based-vector-search-fast-private-and-no-backend-required/) |
+| Batch API for cold RAG seeding | 2026-09-17: half price, but retrieval AWAITS the cold seed (D: 2026-09-06) and batch turnaround is hours |
+| Chasing the 1M context window | 2026-09-17: 26.3% MRCR at 1M on 3.1 Pro vs 84.9% at 128k (model card) — the window is not a memory |
+
+## Adoption Queue
+
+The memory build backlog for normal sessions. **Cap 6 open items.** Vesa picks; a session builds,
+runs the named proof, ticks `[x]` with the date and the result.
+
+Format: `- [ ] **M1** (claim-id, YYYY-MM-DD): one-line title — entry date below`
+
+- [ ] **M0** (D1, 2026-09-17): Bi-temporal world facts — `supersededBy` / `invalidatedAtMessage` stamps, a Scribe `supersedes` field, live facts in the prompt, invalidated ones kept for callbacks — entry 2026-09-17
+- [ ] **M2** (D2/D3, 2026-09-17): Commitment-preservation probe in `eval:memory` — NCP-Bench-shaped structured commitments seeded into a fixed starter premise, scored for survival and fact conflicts at turns 10/20/30 — entry 2026-09-17
+- [ ] **M0** (D3/D4, 2026-09-17): Source-stamped retraction — `sourceMessage` on facts, cards, impressions, and RAG rows; `DELETE_MESSAGE` dormants what that message minted, so scrubbing a refusal scrubs its canon — entry 2026-09-17 (Lane A)
+- [ ] **M1** (D2, 2026-09-17): The post-journal verifier — after each cadence, assert every active quest, resolved-front epitaph, open thread, and pinned fact is still reachable outside the summary; visible line on a miss; zero tokens — entry 2026-09-17 (Lane C)
+- [ ] **M1** (D4, 2026-09-17): Lexical channel + RRF in `retrieveRelevant` — token-overlap score for proper nouns fused with cosine; judged by the commitment probe's callback hit-rate — entry 2026-09-17 (Lane A)
+
+## Source Shelf
+
+Recurring places to look (not one-off links). Add a row when a source proves useful twice.
+
+| Lane | Source | What it is good for |
+|---|---|---|
+| B | arXiv cs.CL / cs.AI weekly search: "agent memory", "long-term memory LLM", "memory consolidation" | New papers; read the ablation, not the abstract |
+| B | LongMemEval repo (https://github.com/xiaowu0162/LongMemEval), MemBench (https://arxiv.org/html/2506.21605), NCP-Bench (https://arxiv.org/abs/2608.08160), MemGround (https://arxiv.org/abs/2604.14158) | Independent yardsticks; NCP-Bench and MemGround are the narrative-shaped ones |
+| B | Mem0 / Zep / Letta / Mastra / Cognee engineering blogs | Vendor claims (G3) — useful for mechanisms, never for numbers without a second source |
+| B | Generative Agents (https://ar5iv.labs.arxiv.org/html/2304.03442), MemGPT, A-MEM originals | The lineage our doctrine came from; re-read when a "new" idea looks familiar |
+| A | SillyTavern extension READMEs + issues (Qvink MessageSummarize, Summaryception, Memory Books, ReMemory, Vectors Enhanced, CharMemory, VectFox, Smart-Memory, MVU); the ST World Info docs; the rentry World Info encyclopedia; the HF "lorebooks as ACTIVE guidance" guide | The mechanisms and the authors' own failure lists (G4). NOTE: reddit.com blocks the crawler — r/SillyTavernAI / r/AIDungeon threads must be reached through rentry mirrors, HF guides, HN, or roundup blogs (tavernsprite.com, tavernstudio.com) |
+| A | RisuAI wiki + deepwiki (SupaMemory / HypaMemory), AI Dungeon help center (Memory System, Story Cards) + arcanumrpgs.com guides, NovelAI Lorebook docs, Talemate docs (layered history, summarizer), Backyard AI docs, KoboldCpp wiki, Character.AI blog | Product-level memory designs and their documented pain |
+| C | Gemini API docs: models, pricing (dated page), caching, embeddings, file-search, interactions; DeepMind model cards (MRCR v2 per length) | The cost and capability math behind C3/C4/D4/D6; the 3.7 Flash promo price ends 2026-12-31 |
+| C | Chroma "context rot" report; the LC-vs-RAG revisit (2501.01880); OpenAI / Anthropic caching + memory docs as reference; Orama / MiniSearch / transformers.js for the browser stack | Long-context evidence and what a client-side hybrid actually costs |
+
+## Scheduler prompt (the Routine's stored prompt — keep this copy in sync)
+
+> Run the Quest Forge weekly MEMORY RESEARCH routine following docs/MEMORY_RESEARCH.md exactly.
+> 1. `git fetch origin master` and read `docs/MEMORY_RESEARCH.md` (the doctrine, the rules, the
+> Contender Registry, the Source Shelf, the Verdict Log). Then read CLAUDE.md's "Layered memory"
+> bullet, `docs/LLM_WOW_LAYER.md`, the memory-related entries of `docs/DECISIONS.md`, and the
+> current code for the memory tiers (`src/engine/vectorMemory.js`, `src/engine/storyMemory.js`,
+> `src/engine/worldJournal.js`, `src/llm/scribe.js`, `src/engine/npcRoster.js`, the retrieval site
+> in `src/llm/turnOrchestrator.js`) so you evaluate against what we ACTUALLY ship today.
+> 2. Research online with WebSearch/WebFetch, newest first: (a) enthusiast and hobbyist discussions
+> of long-term memory for LLM roleplay and interactive fiction; (b) new or updated agent-memory
+> systems and papers and benchmark results; (c) provider primitives that change the cost or
+> capability math for a browser-only client. Follow the rotation rule in the doc for which lane
+> gets the deep pass this week; do a light "anything new?" scan across the rest.
+> 3. Evaluate every candidate against the doc's "Currently best for us" doctrine and its rubric.
+> Be skeptical: separate vendor benchmarks from independent ones, and anecdote from measurement.
+> 4. Update `docs/MEMORY_RESEARCH.md` in place: add, remove, or amend Contender Registry rows and
+> their verdicts (adopt / trial / watch / rejected, each dated with a URL); amend the doctrine ONLY
+> when evidence beats what we ship, and say why; append a dated Verdict Log entry (newest first,
+> under ~50 lines) with at most TWO proposals in the fixed shape, each buildable in one session
+> with its per-turn cost. Obey the caps and the retire-as-you-add rule for `docs/IDEAS.md` (tag
+> `[memory-research]`). Never propose reversing a `docs/DECISIONS.md` entry without flagging it.
+> 5. Change NO production code or tests. Commit `docs/MEMORY_RESEARCH.md` (and `docs/IDEAS.md` if
+> amended) and push to `origin master`; if the session started on a working branch, push
+> `HEAD:master` per CLAUDE.md. Confirm the push succeeded. Do not post or send it anywhere else.
+
+**Schedule:** Routine `Quest Forge weekly memory research`, cron `0 12 * * 3` (UTC) = Wednesday
+15:00 Finnish summer time. Routine crons are UTC, so after the clock change on 2026-10-25 it fires
+at 14:00 Finnish time until the cron is re-set to `0 13 * * 3`. Model pinned to `claude-fable-5-1`;
+a fresh session per firing; push notification on completion.
+
+## Process notes
+
+- **2026-09-17 — created.** Doctrine written from the CLAUDE.md "Layered memory" bullet,
+  `LLM_WOW_LAYER.md`, the memory entries of `DECISIONS.md`, and the code as of commit `1c76eca`.
+  The registry was seeded in the creating session by a three-lane survey (Lane B first; Lanes A
+  and C fold in below as they land). The Routine was created through the Routines API from the
+  session; the API cannot attach a repository source or the WebSearch/WebFetch tool set, so the
+  stored config shows none — **Vesa must select the Quest-Forge repository (and the WOW audit's
+  tool set) in the claude.ai Routines UI before the first firing on 2026-09-23**, or that firing
+  will clone by hand and be refused at push (the WOW audit's 2026-09-08/09 failure mode).
+  Rotation: the seeding run counts as all three lanes deep (three entries below); the first
+  scheduled run takes **Lane A** deep (the enthusiast lane is where reddit is hardest to reach and
+  the most changes week to week), then B, then C.
+
+---
+
+## Verdict Log
+
+### 2026-09-17 — Lane C (provider primitives and the client-side stack) — seeding run
+
+**What changed the math.** (1) **Prices** (https://ai.google.dev/gemini-api/docs/pricing, page dated 2026-09-16): 3.1 Pro $2.00 in / $0.20 cached / $12.00 out (≤200k); 3.7 Flash $0.75 / $0.075 / $3.75 on a promo that ENDS 2026-12-31 — from 2027-01-01 the machinery model costs $1.50 / $0.15 / $7.50; gemini-embedding-2 $0.20/M ($0.10 batch). (2) **Caching**: every 3.x model has a 4,096-token implicit floor; our ~6k prefix clears it, but two field reports put implicit hit rates at 42% (https://github.com/googleapis/python-genai/issues/1880) and 77% (https://github.com/OpenHands/software-agent-sdk/issues/2919), and we never read `cachedContentTokenCount`; explicit `cachedContents` works with a plain key from the browser at ~$0.027/h for our prefix on Pro. (3) **Long context**: 3.1 Pro MRCR v2 84.9% at 128k vs 26.3% at 1M; 3.7 Flash 97.0% at 128k (model cards); Chroma's context-rot report shows coherent haystacks hurt more than shuffled ones. ≤128k is the regime; the 1M window is not a memory. (4) **Embeddings**: embedding-2's contract (instruction prefixes, one part per request, 768/1,536 MRL-optimized, 8,192-token inputs) is exactly what `providers/gemini.js` sends — nothing to change; no per-dimension quality table exists for embedding-2. (5) **Browser hybrid retrieval**: Orama queries in 5–10 ms in-browser (Nearform, measured); the recall gains for hybrid are generic-IR blog numbers, untested on <2k-row campaign corpora where names are the lexical signal. (6) **Peer-reviewed validations** of the doctrine landed in the table above: the Compaction Cliff (facts pinned verbatim, episodes summarized — ours), NCP-Bench (engine ledgers; never summarize the player's lines), perspective-bounded memory (`knownBy`), MemSyco-Bench (non-canonical player rows). (7) Anthropic's memory tool is client-side file ops the model chooses to write; OpenAI has no API memory primitive; xAI documents cached-input pricing with no cache mechanics — none change our shape.
+
+**Held against the doctrine.** C3 stands with a cost note (the Flash step-up is a `PRODUCTIZATION.md` fact, restated here because the Scribe is our memory-write budget). C4 gains a measured gap: the prefix is sacred and unmeasured. D6 gains its numbers. D2 gains the one thing the Compaction Cliff says our design still lacks — the verifier — proposed below. Doctrine unchanged otherwise.
+
+**M1 · D2 · The post-journal verifier: prove nothing fell off the cliff**
+- Today: `maybeAutoSummarize` (`engine/worldJournal.js`) summarizes the batch, dispatches facts (≤5) and the entry, and prunes the messages from the window; nothing afterwards checks that the things a compaction must never lose are still reachable OUTSIDE the summary text.
+- Contender: "The Compaction Cliff" (CIKM'26, https://arxiv.org/html/2608.22752v1) — type-aware compaction plus a deterministic post-compaction verifier held constraint recall at 1.00/0.95/0.80 where the production prompt fell to 53% after one cycle; G2.
+- Proposal: a pure `verifyJournalCadence(stateBefore, stateAfter)` in `engine/worldJournal.js` run after the cadence dispatches: for each active quest, each resolved front's epitaph, each NPC `openThread`, each active `promise` / `playerCanon` card, and each world fact — assert it is still present in its own tier (not merely mentioned in the new summary) and that no pruned message was the ONLY carrier of an unresolved proposal (`pendingRoleplayCheck`) or an unclaimed loot source. A miss posts one visible system line (`kind: 'error'`, never narrative-eligible) naming the tier and the item, and records to the inspector. No LLM call; no new state.
+- Cost: 0 tokens, 0 calls; a few ms per cadence.
+- Pillar check: 1 (persistence gets a tripwire at the one moment it can silently fail), 2 (engine-owned). No DECISIONS entry touched.
+- Proof: a reducer test feeds a cadence whose summary swallows a promise card and asserts the line fires; on the M2 probe, the verifier's miss count is a column beside commitment survival.
+- IDEAS.md: extends "LLM WOW Layer / dramatic story memory" (remaining ideas) — no new entry.
+
+Second proposal withheld: explicit caching is a `trial` row until `cachedContentTokenCount` is logged (the inspector extension is an IDEAS sub-item under "Memory debug inspector"). Rejected this lane: File Search / Interactions / Memory Bank as memory, local embeddings, batch seeding, the 1M window. Registry +5 active rows.
+
+### 2026-09-17 — Lane A (enthusiast practice) — seeding run
+
+**Evidence caveat first.** reddit.com blocks the crawler; the lane read extension READMEs, GitHub issues, official docs, rentry/HF guides, one HN thread, and 2026 roundup blogs. No community-run controlled comparison of lorebook vs RAG vs rolling summary exists; the closest are architectural critiques by extension authors selling the alternative. Everything below is G4 at best.
+
+**What the enthusiasts converge on.** Three families: (1) **summaries** — SillyTavern's built-in Summarize warns "always keep track of the summary state and correct it manually" (https://docs.sillytavern.app/extensions/summarize/); Qvink MessageSummarize is the 2026 roundups' pick because it summarizes EACH message into 1–3 sentences attached to that message (edit/delete a message → only its memory changes) with a player "brain" pin to a long-term tier (https://github.com/qvink/SillyTavern-MessageSummarize); Summaryception and Talemate layer summaries with a detail gradient and both report compression stops paying past ~3 layers; HN's recursive-summary failure — "certain bits would survive all summarization rounds" (https://news.ycombinator.com/item?id=37363362); AI Dungeon's auto-summary "will update itself over time and possibly erase or change what you wrote" (https://arcanumrpgs.com/blog/ai-dungeon-not-working/). (2) **keyword lorebooks** — ST World Info has recursion, sticky/cooldown/delay timed effects, probability, and inclusion groups (https://docs.sillytavern.app/usage/core-concepts/worldinfo/); the HF guide uses lorebooks as ACTIVE directives (weighted random weather/state rolls, sticky ≥4 to hold a scene) while warning that unspecific triggers "cause repeated unintended activations" (https://huggingface.co/sphiratrioth666/Lorebooks_as_ACTIVE_scenario_and_character_guidance_tool); ReMemory fires memories at 50% "to mimic authentic human recall" with 10% keyword-free pop-ups (https://github.com/InspectorCaracal/SillyTavern-ReMemory); AI Dungeon Story Cards fail on unattributable entries, trigger mismatch, and being evicted first (https://arcanumrpgs.com/blog/ai-dungeon-story-cards/). (3) **vectors** — ST Vector Storage issues are silent non-retrieval (https://github.com/SillyTavern/SillyTavern/issues/4772); VectFox (2026, the "heavy-duty" pick) replaces chunk vectors with LLM-extracted EVENT records, hybrid dense + BM25 fused by RRF "because if the event with the perfect keyword wasn't in the first batch of 100 dense candidates, it never gets looked at", a re-ranker of cosine + importance + persistence + recency, and a pinned "most recent N events, chronological" so continuity never depends on similarity (https://github.com/KritBlade/VectFox); the distractor failure — "retrieving the wrong emotional residue with impressive confidence" (https://abolitus.com/blog/fix-ai-amnesia-how-to-setup-vector-db-rag-long-memory-ai-roleplay) — is the one our presence gate was built against (D: 2026-08-28). A fourth, **state tracking** (MVU, BetterSimTracker, Smart-Memory's knows / suspects / believes-falsely / conceals maps and supersession via "no longer / became / left" patterns), is the enthusiast version of engine-owns-state, at ~75k tokens per reply; Smart-Memory admits "edits/hides/branches do NOT retract extracted memories" (https://github.com/senjinthedragon/Smart-Memory). Character.AI's May 2026 memory (pins, auto-extracted editable Facts, a usage bar) is reported to "misinterpret roleplay as reality" (https://weavai.app/blog/en/2026/08/13/character-ais-new-3-layer-memory-system-explained/).
+
+**Held against the doctrine.** The enthusiast consensus on failure modes — summaries blur and fixate, keywords misfire or never fire, dense retrieval misses rare names and pulls confident look-alikes, extracted memories outlive deleted messages, extraction misreads fiction as fact, nothing scores itself — reads as a checklist our stack already answers (cadence journal, no keywords, presence gate, typed extraction, `eval:memory`) with TWO exceptions: extracted memories outliving a deleted message (ours do — the refusal scrub is per message, not per memory) and no lexical channel for rare proper nouns. Both proposed. Doctrine unchanged.
+
+**M0 · D3/D4 · Source-stamped retraction: scrubbing a message scrubs its canon**
+- Today: `DELETE_MESSAGE` soft-deletes a row (`state/handlers/messages.js:104`) and every reader honors `deleted` — but the Scribe's facts, cards, NPC impressions, and the `narrative`/`player` RAG rows that turn minted stay live; a scrubbed refusal or a scrubbed derailed turn keeps priming from memory. Cards carry `firstSeenMessage`/`lastSeenMessage` (engine stamps) but no source index; facts and RAG rows carry none.
+- Contender: Qvink's per-message summaries (delete the message, its memory goes) and the gap every state-tracking extension admits (Smart-Memory); G4.
+- Proposal: an engine-stamped `sourceMessage` (the DM message index the Scribe pass ran on) on world facts, story cards, `recentImpressions`, `bondMoments`, and RAG rows added live; `DELETE_MESSAGE` then dispatches the retraction — cards → `dormant` (revivable by a later Scribe re-report, as the merge already allows), facts → `retracted: true` (hidden from the prompt and the RAG seed, never deleted — pillar 1), impressions/moments minted by that message removed, RAG rows from that message pruned from the cache (the stale-row prune path exists). Never touches engine-owned ledgers or mechanics. Load heal types the stamp.
+- Cost: 0 tokens; one integer per record; the delete path does one filter pass.
+- Pillar check: 1 (nothing vanishes — retracted, not deleted), 3 (the player's one memory-editing tool becomes whole). Touches DECISIONS 2026-08-28 (message removal) by completing it, not reversing it.
+- Proof: a reducer test mints a fact + card + impression from message N, deletes N, and asserts the prompt block and RAG seed no longer carry them; in the M2 probe, a scrubbed turn's detail must not resurface by turn +10.
+- IDEAS.md: new entry "[memory-research] Source-stamped retraction" (M0 — exempt).
+
+**M1 · D4 · A lexical channel for rare names: RRF-fuse token overlap with cosine**
+- Today: `retrieveRelevant` (`engine/vectorMemory.js:475`) is pure cosine over the scene query with a presence penalty, rank-only category boosts, and MMR-lite; a rare proper noun the embedder does not weight ("Aallotar") reaches the DM only if its row is in the dense top-K.
+- Contender: VectFox's hybrid dense + BM25 with RRF (https://github.com/KritBlade/VectFox), KoboldCpp's browser-side minisearch TextDB, Orama's measured 5–10 ms in-browser hybrid (https://nearform.com/digital-community/browser-based-vector-search-fast-private-and-no-backend-required/); G4 for the gain, G2 for feasibility.
+- Proposal: a second ranked list from `textMatch`'s tokenizer (proper-noun and rare-token overlap between the query + presence text and each row's text, IDF-weighted over the campaign's rows — no new library); fuse with the cosine list by reciprocal rank (k=60); the presence gate and `minScore` still apply to the dense score, so the lexical leg can only PROMOTE a row already above the gate or admit a row whose exact rare token the scene names — never a sub-threshold look-alike. Behind a flag for the A/B; inspector shows which leg surfaced each hit.
+- Cost: 0 calls, 0 tokens; a few ms over ≤1,500 rows; no storage.
+- Pillar check: 1 (a name said in the scene finds its row), 2. Touches DECISIONS 2026-08-06 ("boost is order, never the gate") — the lexical leg respects it by construction; say so in the entry if built.
+- Proof: the M2 probe's callback hit-rate with the flag on vs off on the same seeded campaign; adopt only on a rise.
+- IDEAS.md: extends "LLM WOW Layer / dramatic story memory" (remaining ideas) — no new entry.
+
+Not proposed, noted: sticky/delay for cards and use-count eviction are `trial` rows (small, wait for the probe); player pin/edit and a player-facing "what the DM remembers" are `watch` (design passes on D8; the pin/edit one touches the 2026-06-14/17 player-canon rules). Rejected this lane: MVU-style frameworks, whole-chat rolling summaries, agentic history re-reading. Registry +7 active rows.
+
+### 2026-09-17 — Lane B (systems and papers) — seeding run
+
+**Calibration first.** The benchmark field is vendor-driven and unstable: Mem0's own paper put Mem0 at 66.9 and Mem0-graph at 68.4 on LoCoMo while FULL CONTEXT scored 72.9 (https://arxiv.org/html/2504.19413); the 2026 "92.5 / 94.4" figures are self-reported (https://mem0.ai/blog/state-of-ai-agent-memory-2026); Zep showed three implementation errors in Mem0's evaluation of Zep and re-measured itself at 75.1 (https://blog.getzep.com/lies-damn-lies-statistics-is-mem0-really-sota-in-agent-memory/), and a GitHub issue disputes Zep's own 84% (https://github.com/getzep/zep-papers/issues/5). LoCoMo conversations are ~16–26k tokens; scoring-target choice alone flips Mem0 vs MemoryOS on 83–94% of queries (https://arxiv.org/abs/2605.24060). Letta reached 74.0 on LoCoMo with gpt-4o-mini and a plain filesystem the agent greps (https://www.letta.com/blog/benchmarking-ai-agent-memory/). MemBench (ACL 2025) found plain retrieval memory beating GenerativeAgent / MemGPT / MemoryBank on factual questions at 10k tokens while all tied on reflective ones (https://arxiv.org/html/2506.21605). **Reading:** retrieval architecture matters less than (a) what is extracted and how it is kept from rotting, (b) temporal structure, (c) letting the model iterate. Our stack — typed extraction + hybrid scoring + presence gating + containment merges — already sits at that frontier; the transferable gains are consolidation hygiene, temporal validity, and reflection timing.
+
+**Held against the doctrine.** C1 removes every graph/vector SERVICE as a BYOK contender (Graphiti, Mem0 cloud, Supermemory, Honcho, Cognee, GraphRAG at $50–200 per corpus index). C2 + the 2026 "Useful Memories Become Faulty When Continuously Updated" result (https://arxiv.org/abs/2605.12978 — consolidated memory utility rises then FALLS below no-memory; agents that kept raw episodes doubled accuracy) VALIDATE belief 4 and the 2026-07-14 containment-merge decision: keep the raw transcript, merge conservatively, never add rewrite passes. What the doctrine lacks and the field has: **temporal validity** (D1 has no supersession — Graphiti's bi-temporal edges), **reflection that fires on importance rather than cadence** (Generative Agents' ablation is the one G2 result here), **salience that learns from use** (MemoryOS heat / FadeMem decay), and above all **a narrative-shaped measurement** — NCP-Bench's 42% commitment survival at 20 turns for GPT-5.2 (https://arxiv.org/abs/2608.08160) is the honest yardstick, and `eval:memory` does not measure it. Doctrine unchanged (no G1/G2 evidence beats a shipped claim); one gap sharpened on D1.
+
+**M0 · D1 · Bi-temporal world facts: a fact can stop being true**
+- Today: `ADD_WORLD_FACT(S)` dedupes by token containment and stores forever (`state/handlers/shared.js`); the prompt's WORLD FACTS block and the RAG seed carry every fact at equal standing — "the mill wheel turns" and "the mill burned" coexist with no ordering.
+- Contender: Zep/Graphiti bi-temporal edges (https://arxiv.org/abs/2501.13956), G3 numbers but an architectural principle; Mem0's DELETE-on-contradiction verdict (https://arxiv.org/abs/2504.19413).
+- Proposal: engine-owned `invalidatedAtMessage` + `supersededBy` on the fact record; the Scribe's `world_facts` entries gain an optional `supersedes: "<verbatim old fact or its id>"` (matched by the same containment rule, never minted); `SUPERSEDE_WORLD_FACT` stamps the old row (never deletes — pillar 1); the WORLD FACTS block renders live facts and folds superseded ones into a one-line `(formerly: …)` tail on their successor; RAG re-tags the superseded row's category to `world_fact_past` (rank-only boost 0) so callbacks can still find "when the bridge was out". Load heal types the stamps.
+- Cost: 0 extra calls; one optional Scribe output field; the WORLD FACTS block shrinks slightly (dead facts leave the live list); prefix untouched.
+- Pillar check: 1 (nothing vanishes — history is kept, only its standing changes), 2 (the engine decides supersession by its own match rule). DECISIONS 2026-07-03 (near-duplicate rejection) untouched: a supersession is a contradiction, not a restatement.
+- Proof: `eval:memory` gains a probe — a premise-established fact overturned on turn N (the bridge falls); at N+15 the DM's narration and the WORLD FACTS block both carry the new state, the old one only as history; baseline measured first on the current build (expected: both facts injected, DM picks either).
+- IDEAS.md: new entry "[memory-research] Bi-temporal world facts" (M0 — exempt from retire-as-you-add; cross-links the Geography-as-canon `lastState` replace, which is this idea for places).
+
+**M2 · D2/D3 · The commitment probe: measure what the memory keeps alive**
+- Today: `npm run eval:memory` (`scripts/memoryTuningPlaytest.cjs`) is a 20-turn keyed playtest watching callback naturalness, front symptom frequency, and location recall; nothing scores whether a promise, debt, wound, or overturned fact SURVIVES to turn 30 or gets contradicted.
+- Contender: NCP-Bench's structured commitments/facts with survival + conflict scoring (https://arxiv.org/abs/2608.08160), MemGround's dynamic-state tracking (https://arxiv.org/abs/2604.14158) — G2, narrative-specific.
+- Proposal: a fixed starter premise (`saltmere-debt`) seeded with 8 explicit commitments (a promise, a debt with an amount, a wound, a secret with one knower, a fact later overturned, an NPC's stated want, a named object, a player-authored backstory detail); scripted player turns that revisit each at turns 10 / 20 / 30 without naming it outright; a Flash judge scoring survival (recalled correctly / laundered / forgotten / contradicted) per commitment; JSON report beside the existing one. Same harness, same keys, Gemini Pro + GPT Terra (never Grok — DECISIONS 2026-09-14).
+- Cost: 0 per turn in the game; ~30 DM calls + ~30 judge calls per run, keys required.
+- Pillar check: 1 (persistence gets a number), belief 5 (every trial row above needs this G1 step before it can become `adopt`). Strains nothing.
+- Proof: the first run produces a baseline table; the M0 build above and the heat / reflection / verdict trials are then judged by their delta on it.
+- IDEAS.md: extends "Experience scorecard: shift directed playtests from defense to offense" (its memory row becomes this probe; no new entry).
+
+Not proposed, noted: A-MEM link-time evolution (append-only if ever — the 2605.12978 caution), Honcho's theory-of-mind pairs (a design pass for `npc-relationships`, not a field), per-front digests (wait for the probe to show arc-level recall missing). Registry after all three lanes: 24 active rows (at cap), 12 rejected. Queue 5/6. IDEAS.md: +2 (both M0, exempt), 3 extended.

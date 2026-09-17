@@ -131,6 +131,40 @@ flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NP
   relationship pressure, front symptoms, and future callback hooks without per-turn cost.
 - Remaining ideas: real-provider eval for "natural old detail recall without exposition",
   salience tuning after real play, and the memory debug inspector (below).
+- **[memory-research] 2026-09-17 (`docs/MEMORY_RESEARCH.md`, seeding run):** two queued slices —
+  (a) **the post-journal verifier** (M1, Lane C): after each cadence assert every active quest,
+  resolved-front epitaph, open thread, and pinned fact is still reachable OUTSIDE the summary,
+  zero tokens — "The Compaction Cliff" (CIKM'26) measured constraint recall at 53% after one
+  compaction cycle without such a verifier; (b) **a lexical channel in `retrieveRelevant`** (M1,
+  Lane A): IDF-weighted rare-token overlap RRF-fused with cosine so a name said in the scene finds
+  its row without a dense top-K miss — behind a flag, judged by the commitment probe. Trial rows
+  (not queued): sticky/delay for cards, use-count eviction, heat-weighted salience,
+  importance-triggered reflection, a Scribe `resolves:` verdict.
+
+### [memory-research] Bi-temporal world facts: a fact can stop being true — status: `idea` (M0, memory research 2026-09-17, Lane B)
+`ADD_WORLD_FACT(S)` dedupes restatements by containment and stores forever, so "the mill wheel
+turns" and "the mill burned" coexist at equal standing in WORLD FACTS and RAG. Zep/Graphiti's
+bi-temporal edges (a contradiction INVALIDATES, never deletes; retrieval prefers live facts,
+history stays) is the principle; the slice is engine-owned `invalidatedAtMessage` + `supersededBy`
+on the fact record, an optional Scribe `supersedes` ref matched by the same containment rule
+(never minted), a `SUPERSEDE_WORLD_FACT` stamp, live facts in the block with a one-line
+`(formerly: …)` tail, superseded RAG rows re-tagged `world_fact_past`. Pillar 1 holds: nothing
+vanishes. Proof: an `eval:memory` probe overturning a premise fact on turn N and checking N+15.
+Cross-link: the place card's `lastState` replace (2026-09-16) is this idea for places. Full shape
+in `docs/MEMORY_RESEARCH.md` Verdict Log 2026-09-17 (Lane B).
+
+### [memory-research] Source-stamped retraction: scrubbing a message scrubs its canon — status: `idea` (M0, memory research 2026-09-17, Lane A)
+`DELETE_MESSAGE` (2026-08-28, built to scrub refusals) soft-deletes the row and every reader
+honors it — but the Scribe facts, cards, NPC impressions, and the `narrative`/`player` RAG rows
+that turn minted stay live, so a scrubbed refusal keeps priming from memory. Every enthusiast
+state-tracking stack admits the same gap ("edits/hides/branches do NOT retract extracted
+memories" — Smart-Memory); Qvink's per-message summaries are the fix in miniature. Slice: an
+engine-stamped `sourceMessage` on facts, cards, `recentImpressions`, `bondMoments`, and live RAG
+rows; on delete, cards → `dormant`, facts → `retracted` (hidden from prompt + seed, never
+deleted), impressions/moments removed, RAG rows pruned. Completes DECISIONS 2026-08-28, reverses
+nothing. Proof: reducer test + the commitment probe (a scrubbed detail must not resurface by turn
++10). Full shape in `docs/MEMORY_RESEARCH.md` Verdict Log 2026-09-17 (Lane A).
+
 
 ### Story-memory pool dormancy/pruning for high-churn campaigns — status: `shipped` (2026-08-07)
 Shipped as sketched below (minus healed-wound auto-dormancy, folded into the general
@@ -555,7 +589,14 @@ and Grok (echo / particular / motion / ask-shape / word count). Full shape in
 checks-and-consequence Lap 1):** score ten failed out-of-combat checks per provider for
 "narrated consequence matches the card's stated failure stakes" and "no second check for the
 same objective" — the proof step of "[wow] Checks: the odds on the card, the promise in the
-outcome".
+outcome". **[memory-research] Commitment-preservation row (memory research 2026-09-17, Lane B,
+M2 — queued in `docs/MEMORY_RESEARCH.md`):** NCP-Bench (https://arxiv.org/abs/2608.08160) found
+GPT-5.2 keeps its commitments intact in only 42% of interactive stories by turn 20; seed the
+`saltmere-debt` starter with 8 explicit commitments (a promise, a debt with an amount, a wound, a
+one-knower secret, a fact later overturned, an NPC's stated want, a named object, a
+player-authored backstory detail), revisit each at turns 10 / 20 / 30 without naming it, and let a
+Flash judge score survival (recalled / laundered / forgotten / contradicted) — the G1 baseline
+every memory trial row is judged by.
 
 ## Gameplay & Mechanics
 
@@ -1192,7 +1233,11 @@ discarded; the Scribe captures its extraction and reflection passes. Gated by Se
 toggle (`settings.memoryInspector`) or `?debugMemory=1`. Live-verified same day: fresh campaign
 showed 2 generated fronts (the race fix working), curation scores, RAG similarities, and the
 Scribe pass. Original design below; remaining ideas: token-size estimates per prompt block, and
-the world-tempo directive/heat/timing-die readouts once that system exists.
+the world-tempo directive/heat/timing-die readouts once that system exists. **[memory-research]
+2026-09-17:** two readouts the research routine wants before it can judge its `trial` rows —
+`usageMetadata.cachedContentTokenCount` per DM turn (implicit caching is best-effort; field reports
+put hits at 42–77%, and an explicit `cachedContents` is browser-callable if ours are low) and a
+per-RAG-row retrieval hit count (AI Dungeon's Memory Bank evicts by use; ours by age).
 Dev/settings panel to make the invisible memory stack inspectable during real-play tuning.
 Motivation: callbacks, RAG hits, and front symptoms are engine-curated but player-invisible —
 hard to tune salience without seeing what the DM actually received.
