@@ -2127,6 +2127,24 @@ player, and the settings blob is the one persisted input with no field heal (a n
 `geminiApiKey` takes the app shell down in render). From the 2026-09-16 strengthening audit
 (scribe + providers-adapter, Lap 2).
 
+### [strengthening] `null` is not `undefined`; a list element is a text field too; a batch is a blast radius — status: `idea` (2026-09-17)
+Three rules from one Lap-2 run (2026-09-17, story-memory + vector-memory-rag). **(1)** A default
+parameter (`card = {}`) heals `undefined` only — `null` walks past it into the first property
+read, and one null element takes down a whole `.map` (a `null` in a save's `storyMemory` makes
+LOAD_GAME throw and the campaign un-loadable) or a whole dispatch loop (a `null` in the Scribe's
+`story_memory` list loses every card after it AND everything queued behind that dispatch for the
+turn). The 09-08 fronts fix, the 09-11 turn-order fix, and the cards are the same bug three times:
+grep every `function x(payload = {})` at a lane or load boundary and feed it `null`. **(2)**
+`normalizeTextArray`-style helpers cap the COUNT and forget the element length (one 100k `knownBy`
+name = a 263k prompt, a 300k save row, a 100k RAG text), and a scalar where a list was expected
+reads as "no list" — for `knownBy: "the hero"` that turns a one-knower secret into common
+knowledge that then travels as hearsay. Every list-typed lane field needs a per-element clamp and
+scalar-to-list folding, and `witnessed`/flags go through `toFlag`, not `!!`. **(3)** `embedTexts`
+sends 100 texts per call and nulls all 100 on one rejection; the seed stores nothing for a null and
+re-forms the SAME batch next mount — one over-long journal summary silently costs up to 99 healthy
+neighbours forever. A batched call must degrade per item (per-item retry or bisect on a chunk
+failure) and its input must be bounded at the boundary. From the 2026-09-17 strengthening audit.
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
