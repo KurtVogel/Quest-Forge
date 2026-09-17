@@ -286,6 +286,103 @@ only unprovoked intrusions; side quests get NO new machinery (quiet tempo + "loc
 welcome" line; quest tracker already round-trips them; the promotion path gives the good ones
 teeth). Build after the memory debug inspector — every component here is a tuning problem.
 
+### [wow] The wonder die: when nothing is happening, something strange arrives — status: `idea` (Vesa, 2026-09-17), priority: HIGH
+**The complaint, verbatim in spirit (Vesa, live play 2026-09-17):** "eventless boring wagon
+guarding trips from one generic town to another. I want to be surprised, intrigued by — a
+vampire countess taking a liking to me, a dead empire sending a magical signal in the ruins
+deep in the hills, a flying ship traveling to a forbidden continent." If there's nothing
+going on, the DM should come up with wild new plotlines that **may or may not fit the larger
+story**.
+
+**Why the shipped machinery can't produce this.** Every pacing system we have is a *pressure*
+system, and it was built to stop the opposite failure (DECISIONS.md 2026-07-14: every campaign
+turned violent by ~turn 7). It succeeded — and exposed the other cliff:
+- Fronts are slow clocks: whispers → indirect → presence → confrontation, one front gains
+  clock per cadence, never the same front twice in a row, slow-burn forces a quiet cadence
+  after every window. They are *threats*, so even when one surfaces it surfaces as danger.
+- The thermostat's cool line (`worldTempo.js`, "The last stretch has been quiet…") offers the
+  DM "a small hook or complication… **if the fiction offers one naturally**" — small, and
+  optional. A Gemini DM reads "small hook" as another caravan contract. Nothing on the
+  permitted-content side is allowed to be *big, strange, or off-plot*.
+- Emergent fronts need the player to have already engaged a threat; regional seeding needs a
+  genuinely new region; absence drift needs a return; NPC initiative needs an existing bond.
+  Every entry point assumes something already happened. A campaign in a lull satisfies none of
+  them, so the lull is self-sustaining.
+- THE ORDINARY TURN's MOTION clause carries an anti-escalation guard (never a new threat
+  unless WORLD TEMPO grants one) — correct for threats, but it also reads as "never a new
+  *anything*" when nothing grants anything.
+The missing category is **wonder / intrigue / invitation** — not danger. A world that is bigger
+than its plot: a person who takes an interest, a relic of a dead age that wakes, a way to
+somewhere forbidden, a bargain from something old, a sight that shouldn't exist. Reference:
+BG1's wilderness set-pieces (Drizzt by the river, the Cloakwood), Fallout's special encounters,
+King of Dragon Pass's out-of-nowhere events, Sunless Sea's "something on the horizon" stories —
+all of them *arrive*, none of them are on the quest log, and half of them never connect to the
+main plot. That is the feature, not a bug.
+
+**Design — the engine decides WHEN, the LLM decides WHAT, the player decides whether to bite
+(the timing-die shape that worked for tempo, drift, hearsay, and `## SOMEONE REACHES OUT`):**
+1. **Eventlessness detector** (deterministic, `engine/worldTempo.js` sibling): conversational
+   distance since the last *event* — the newest of: an encounter-ledger fight, a landed tempo
+   symptom, a quest opened or closed, a story card of salience ≥4, a roster NPC of importance
+   ≥3 first seen, a new region. Lull ≥ `WONDER_MIN_LULL` (~20 conversational messages ≈ 10
+   scenes; breakneck lowers it, slow-burn raises it but **never disables it** — slow-burn means
+   unhurried, not eventless) raises the one-shot `session.pendingWonder` marker (typed
+   complete-or-null like the other `pending*` markers in `livingWorldSession.js`).
+2. **The wonder director** (`llm/wonderDirector.js`, background DM-model call, the
+   `frontAftermath` pattern — creative work stays on the DM model): fed the premise, the custom
+   DM prompt's tone, the hero sheet, known regions/places, the roster's important names, and the
+   active front stubs (id + faction only). It proposes 2–3 candidate hooks in **distinct
+   registers** — a person who takes an interest (the countess), a signal/relic of a dead age
+   (the empire's beacon in the hills), a passage to somewhere forbidden (the flying ship), a
+   bargain from something old, an impossible sight — each strange, specific, *invitational*, and
+   stamped `fits: 'front:<id>' | 'standalone'`. **At least one must be standalone.** "May or
+   may not fit the larger story" is the point; a world where every strange thing turns out to be
+   the plot feels small. Premise sovereignty: a low-magic premise gets low-magic wonders (the
+   director sees the premise and tone; the engine never invents content).
+3. **The die.** The engine picks ONE candidate with a crypto die (arc reasoning nominates, dice
+   choose — the hidden-front rule) and rolls a 0–3-scene delay before the window opens, so
+   the arrival is genuinely unpredictable. LLMs surface permitted content immediately and
+   predictably; only the engine can wait.
+4. **Delivery:** a windowed `## SOMETHING STRANGE ARRIVES — PRIVATE` block (the
+   `buildRelationshipBeatBlock` pattern, ~150 tokens in the dynamic tail, zero prefix impact,
+   ~12 conversational messages, never in combat): the DM must land the hook **on screen** in the
+   next scene or two, as an invitation, not an attack — the carriage that stops beside the
+   wagon at dusk; the light over the hills that the whole camp sees and the old drover names;
+   the ship's shadow crossing the road and a dockhand saying where it's bound. THE ORDINARY
+   TURN stays sovereign (MOTION: someone present acts on their own want; THE ASK: the hook IS
+   the live question). The hook must be **refusable, and a refusal leaves a residue**: the
+   Scribe mints a `mystery`/`foreshadowing` story card for it (`knownBy` as witnessed — a public
+   marvel travels as hearsay through the existing ledger); a refused countess remembers.
+5. **Consequence:** if the player bites (the Scribe sees the hero engaging the hook's subject
+   across ≥2 scenes), the existing promotion path takes over — `normalizeEmergentFront`
+   (max 4 active, born at clock 0) gives the wonder a faction, a theater, and a clock, or the
+   DM's own `quest_updates` opens the arc. If ignored, it stays a dormant card the world can
+   call back later (the beacon keeps pulsing for anyone who asks in a tavern). No new
+   DM event channel, no reducer-owned numeric state the DM can write.
+6. **Guardrails:** one wonder per `WONDER_COOLDOWN` (~60 conversational messages); never inside
+   the opening (BG1 rule, first ~20 messages); never while any front stands at
+   `confrontation`; heat above the setpoint keeps it waiting (a wonder is not a threat, but it
+   is an event and the thermostat is the thermostat); the arrival is never *hostile* on
+   arrival (the anti-escalation guard is untouched — a vampire countess who takes a liking is
+   an invitation; whether she is a threat is the story). **Player-sought, always exempt:**
+   `OOC: surprise me` / `OOC: give me something wild` fires the director on demand through the
+   table-talk lane (the "Ask the DM for a recap" button pattern) — the player asking for wonder
+   is the one case where waiting is wrong.
+
+**Player-facing:** the landed hook is visible as a story card in the Journal, so a player who
+walked past it can find it again. Optional (later): a "wonder" line on the pace dial in
+Settings → Game (off / rare / often) — but ship the dial-independent version first and tune
+`WONDER_MIN_LULL` from Vesa's live play. **Cost:** one background DM-model call per lull (rare),
+~150 dynamic-tail tokens while the window is open, no cache-prefix change.
+
+**Why not "just tell the DM to be more surprising":** a standing "be wild" rule makes every
+scene wild — the pre-tempo violence failure with the sign flipped. A bounded, engine-timed,
+one-shot injection with a residue is the shape that has worked four times now. **Proof plan:**
+a 30-turn `eval:memory`-style playtest on a deliberately generic caravan premise, scoring turns
+until the first *strange arrival*, whether it was invitational, and whether it was standalone
+or front-tied (the eval must seed a lull, not a front). Touches: `hidden-fronts-payoff` and
+`living-world` in `docs/SCHEDULED_WOW.md`'s registry; extends the world-tempo entry above.
+
 ### Location registry granularity: rooms are not places — status: partially `shipped` (2026-07-15)
 **Shipped from playtest #3**: sentence-length scene descriptions (>48 chars / >5 meaningful
 tokens) never mint registry records (they still match existing ones); the load heal folds
