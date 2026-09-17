@@ -292,12 +292,16 @@ export default function ChatPanel() {
                 if (primingAttemptsRef.current < MAX_PRIMING_ATTEMPTS) {
                     setPrimingRetryToken(t => t + 1);
                 } else {
+                    // Carry the provider's own diagnosis (a rejected key, a
+                    // hidden OpenAI rejection, a stall) — the generic line used
+                    // to hide the one fact the player needed (2026-09-17).
+                    const cause = (e?.name === 'AbortError' || e?.code === 20 || !e?.message) ? '' : ` ${String(e.message).trim()}`;
                     dispatch({
                         type: 'ADD_MESSAGE',
                         payload: {
                             role: 'system',
                             kind: 'error',
-                            content: '**The opening scene could not be generated.** Check your AI provider settings, then reload to retry — or simply describe your first action to begin.',
+                            content: `**The opening scene could not be generated.**${cause} Check your AI provider settings, then reload to retry — or simply describe your first action to begin.`,
                         },
                     });
                 }

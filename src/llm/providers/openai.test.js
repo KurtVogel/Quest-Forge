@@ -287,3 +287,114 @@ describe('non-string content on both lanes (2026-09-16 providers-adapter P2)', (
         await expect(sendOpenAIMessage(SEND_ARGS)).rejects.toThrow('No response generated');
     });
 });
+
+describe('CORS-hidden OpenAI error replies (2026-09-17 "Failed to fetch" playtest)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    const failedToFetch = () => new TypeError('Failed to fetch');
+    const probeMatches = (call) => call[0] === 'https://api.openai.com/v1/models';
+
+    it('a rejected key (chat POST CORS-blocked, probe 401) names the key rejection with its status on the non-streaming lane', async () => {
+        const fetchMock = vi.fn()
+            .mockRejectedValueOnce(failedToFetch())
+            .mockResolvedValueOnce(jsonResponse({ error: { message: 'Incorrect API key provided: sk-pr*ogus.' } }, { ok: false, status: 401, statusText: 'Unauthorized' }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const error = await sendOpenAIMessage(SEND_ARGS).catch((e) => e);
+
+        expect(error).toBeInstanceOf(Error);
+        expect(error).not.toBeInstanceOf(TypeError);
+        expect(error.message).toMatch(/OpenAI rejected your API key — OpenAI API error \(401\): Incorrect API key provided/);
+        expect(error.message).toMatch(/Settings → AI Provider/);
+        expect(error.status).toBe(401);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        const probe = fetchMock.mock.calls[1];
+        expect(probeMatches(probe)).toBe(true);
+        expect(probe[1].method).toBe('GET');
+        expect(probe[1].headers.Authorization).toBe('Bearer sk-test');
+    });
+
+    it('the streaming lane gets the same diagnosis when no byte ever arrived', async () => {
+        const fetchMock = vi.fn()
+            .mockRejectedValueOnce(failedToFetch())
+            .mockResolvedValueOnce(jsonResponse({ error: { message: 'Incorrect API key provided.' } }, { ok: false, status: 401 }));
+        vi.stubGlobal('fetch', fetchMock);
+        const onChunk = vi.fn();
+
+        const error = await streamOpenAIMessage({ ...SEND_ARGS, onChunk }).catch((e) => e);
+
+        expect(error.message).toMatch(/OpenAI rejected your API key/);
+        expect(error.status).toBe(401);
+        expect(onChunk).not.toHaveBeenCalled();
+    });
+
+    it('an accepted key (probe 200) reports the hidden rejection, names the model, and is never retried as a network failure', async () => {
+        const fetchMock = vi.fn()
+            .mockRejectedValueOnce(failedToFetch())
+            .mockResolvedValueOnce(jsonResponse({ data: [] }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const error = await sendOpenAIMessage({ ...SEND_ARGS, model: 'gpt-5.6-terra' }).catch((e) => e);
+
+        expect(error).not.toBeInstanceOf(TypeError);
+        expect(error.message).toMatch(/hid the reason from the browser/);
+        expect(error.message).toContain('"gpt-5.6-terra"');
+        expect(error.status).toBeUndefined();
+    });
+
+    it('a probe that cannot reach OpenAI either stays a "Failed to fetch" TypeError (the adapter keeps retrying it)', async () => {
+        const fetchMock = vi.fn()
+            .mockRejectedValueOnce(failedToFetch())
+            .mockRejectedValueOnce(failedToFetch());
+        vi.stubGlobal('fetch', fetchMock);
+
+        const error = await sendOpenAIMessage(SEND_ARGS).catch((e) => e);
+
+        expect(error).toBeInstanceOf(TypeError);
+        expect(error.message).toMatch(/^Failed to fetch — the browser could not reach OpenAI/);
+    });
+
+    it('a network failure AFTER the first streamed chunk is a dropped connection: rethrown as is, no probe', async () => {
+        const encoder = new TextEncoder();
+        let reads = 0;
+        const body = {
+            getReader: () => ({
+                read: async () => {
+                    reads += 1;
+                    if (reads === 1) return { done: false, value: encoder.encode('data: {"choices":[{"delta":{"content":"The door"}}]}\n') };
+                    throw new TypeError('Failed to fetch');
+                },
+            }),
+        };
+        const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, body });
+        vi.stubGlobal('fetch', fetchMock);
+        const onChunk = vi.fn();
+
+        const error = await streamOpenAIMessage({ ...SEND_ARGS, onChunk }).catch((e) => e);
+
+        expect(onChunk).toHaveBeenCalledWith('The door');
+        expect(error).toBeInstanceOf(TypeError);
+        expect(error.message).toBe('Failed to fetch');
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('a readable HTTP error never probes, and a caller abort passes through untouched', async () => {
+        const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ error: { message: 'bad request' } }, { ok: false, status: 400 }));
+        vi.stubGlobal('fetch', fetchMock);
+        await expect(sendOpenAIMessage(SEND_ARGS)).rejects.toThrow('OpenAI API error (400): bad request');
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        const controller = new AbortController();
+        const abortMock = vi.fn().mockImplementation(async () => {
+            controller.abort();
+            throw new TypeError('Failed to fetch');
+        });
+        vi.stubGlobal('fetch', abortMock);
+        const error = await sendOpenAIMessage({ ...SEND_ARGS, signal: controller.signal }).catch((e) => e);
+        expect(error.message).toBe('Failed to fetch');
+        expect(abortMock).toHaveBeenCalledTimes(1);
+    });
+});

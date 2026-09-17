@@ -5,6 +5,7 @@
 import { sendGeminiMessage, streamGeminiMessage } from './providers/gemini.js';
 import { sendOpenAIMessage, streamOpenAIMessage } from './providers/openai.js';
 import { sendXaiMessage, streamXaiMessage } from './providers/xai.js';
+import { isNetworkFailure } from './providers/sse.js';
 
 const providers = {
     gemini: { send: sendGeminiMessage, stream: streamGeminiMessage },
@@ -17,12 +18,11 @@ const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
 // fetch() rejects with a TypeError on network failure (no HTTP status at all), but
 // so does any programming bug inside a provider — retrying those only masks the bug
-// behind ~3s of pointless backoff. Match the browsers' network-failure messages.
-const NETWORK_FAILURE_RE = /failed to fetch|networkerror|load failed|network request failed/i;
-
+// behind ~3s of pointless backoff. isNetworkFailure matches only the browsers'
+// network-failure messages.
 function isRetryableError(error) {
     if (RETRYABLE_STATUS.has(error?.status)) return true;
-    return error instanceof TypeError && NETWORK_FAILURE_RE.test(error?.message || '');
+    return isNetworkFailure(error);
 }
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));

@@ -66,6 +66,19 @@ export async function readSseStream(response, onEvent) {
 }
 
 /**
+ * fetch() rejects with a TypeError on a network failure (no HTTP status at
+ * all), but so does any programming bug inside a provider — this matches the
+ * browsers' own network-failure messages (Chrome "Failed to fetch", Firefox
+ * "NetworkError when attempting to fetch resource.", Safari "Load failed",
+ * React Native "Network request failed") and nothing else. Shared by the
+ * adapter's retry classifier and the OpenAI provider's CORS diagnosis.
+ */
+const NETWORK_FAILURE_RE = /failed to fetch|networkerror|load failed|network request failed/i;
+export function isNetworkFailure(error) {
+    return error instanceof TypeError && NETWORK_FAILURE_RE.test(error?.message || '');
+}
+
+/**
  * Turn an in-band stream error payload into a thrown Error that names the
  * cause. OpenAI-compatible: `{ error: { message, type, code } }`; Gemini:
  * `{ error: { code, message, status } }`; some proxies send a bare string.
