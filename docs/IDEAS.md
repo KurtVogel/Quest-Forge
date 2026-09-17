@@ -141,6 +141,105 @@ flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NP
   (not queued): sticky/delay for cards, use-count eviction, heat-weighted salience,
   importance-triggered reflection, a Scribe `resolves:` verdict.
 
+### [wow] "Remember when…": the engine and the DM conspire to answer from the record — status: `idea` (Vesa, 2026-09-17), priority: **HIGHEST — "THAT'S the moneyshot"**
+**Vesa (live play 2026-09-17):** when the player asks a character about past events —
+"remember when…", "what happened at…", "what did she say…", "who was it that…" — the engine
+and the DM should conspire to bring back the **actual, factual past** as accurately as
+possible. Not a plausible memory. The real one. This is the moment that proves the memory
+layer exists: the whole layered-memory investment (CLAUDE.md, `docs/MEMORY_RESEARCH.md`
+doctrine) pays out in one line of dialogue, and a *wrong* answer here costs more trust than
+any other failure in the game.
+
+**Why today's turn can get it wrong.** A "remember when" line is an ordinary turn: the player
+message is the RAG query, `retrieveRelevant(…, 8, 0.55)` returns the top-8 rows above cosine
+0.55, story cards are curated by SCENE presence, and the DM answers from whatever landed in
+the 20-message window plus those rows. Three structural holes:
+- **Retrieval is presence-aware against the question.** The absent-subject penalty (0.12,
+  gate-affecting — DECISIONS.md 2026-08-28) docks every row ABOUT a person who is not in the
+  scene. A "remember when we met Saima at the bridge?" asked while Saima is absent is exactly
+  the case the penalty was built to suppress (dormant-not-deleted dark canon). Right design
+  for ambient recall, wrong design for a direct question: the person asked about is the
+  subject, so their rows must count as present *for this turn*.
+- **Top-8 by cosine is a lottery for a specific fact.** A name said once in the journal may
+  sit at rank 12; the DM then fills the gap with a plausible fabrication — and the Scribe may
+  extract the fabrication as canon. The lexical channel queued as M1 in `MEMORY_RESEARCH.md`
+  (rare-token overlap RRF-fused with cosine) is *this* feature's dependency, not a nicety.
+- **The most accurate memory in the game is never consulted.** The verbatim transcript is
+  never deleted (only journal-pruned from the DM window; `DELETE_MESSAGE` is soft), and the
+  engine-owned ledgers are FACTS with message stamps — journal entries (`fromIndex`/`toIndex`,
+  `keyDecisions`, `consequences`), `recentEncounters` (foes, place, outcome), quests
+  (completed/failed, `openedAtMessage`), resolved fronts (`resolvedAtMessage`, `resolution`,
+  the minted title fact), `rollHistory` (the actual dice), bond moments and
+  `relationshipHistory` (`atMessage`), story cards (`firstSeenMessage`), location visits and
+  travel links, the coin ledgers. Nothing renders any of it *as an answer* to a question.
+
+**Design — "the record" is engine-assembled, the DM voices it, the character only knows what
+they could know:**
+1. **Recall-intent detector** (`llm/recallIntent.js`, deterministic, the `tableTalk.js`
+   pattern — zero calls): "(do you|you) remember (when|how|that|the)", "remember when",
+   "what happened (when|at|in|to|with)", "back when", "(the )?last time (we|you|I)", "the time
+   (we|you)", "tell me (again )?about", "what did <name> say", "who was (it|the one)", "where
+   did we", "how did we", "didn't (we|you)", "wasn't it you who", "what was the name of". It
+   also extracts the **subjects**: proper-noun tokens matched against the roster
+   (`namePresenceIn`), the location registry (`findLocationRecord`), quest names, and the
+   addressed character (a present NPC/companion via `findPresentNpcs`, else the narrator).
+   Sync regex is the floor; a Flash arbiter (the `outOfCombatRollPolicy` shape) can widen it
+   later for unprefixed questions. Never fires in combat.
+2. **The recall dossier** (`engine/recallDossier.js`, pure, zero LLM): from the subject tokens,
+   gather in ORDER OF AUTHORITY and render each line with its distance ("11 scenes ago, at
+   Rimehollow"): (a) **engine ledgers** — encounter-ledger fights, quest records, resolved
+   fronts with their epitaph, the actual rolls that decided it, coin that changed hands;
+   (b) **journal entries** whose summary / key decisions / consequences contain the subject
+   tokens (shared `textMatch` containment), with their message span; (c) **story cards + world
+   facts**, honoring `knownBy`; (d) the addressed NPC's own record — key moments, relationship
+   history, open thread; (e) **verbatim transcript lines** — token-match over `messages`
+   (never deleted; skip hidden / deleted / `kind: 'error'` / OOC), top N by match density,
+   clipped ~240 chars, each with its stamp: *as it was actually said*. Hard budget ~1,500
+   chars under the `PROMPT_CHAR_BUDGET` tripwire; the dossier displaces part of the ordinary
+   RETRIEVED MEMORIES allowance on a recall turn rather than stacking on it.
+3. **Retrieval boost on a recall turn:** `retrieveRelevant` runs wider (topN 16, minScore
+   0.45), the query is the subject tokens + the player line, and `presenceText` is extended
+   with the subjects so the absent-subject penalty does not fire against the very person asked
+   about; the M1 lexical channel, when it lands, is fused in. Story-card curation likewise
+   treats the subjects as present.
+4. **The prompt:** a dynamic-tail block `## THE RECORD — ANSWER FROM THIS, NEVER INVENT`, only
+   on recall turns (prefix untouched): the dossier as dated fact lines, then the rules — the
+   answering character speaks from the record IN CHARACTER (a companion remembers the way a
+   person does: with feeling, with their own angle, with what it meant to them — but every
+   name, number, place, and outcome comes from the record); if the record has nothing, the
+   character **does not remember / was not there** — an honest "I don't recall that" beats a
+   confident fabrication, always; a line marked SECRET or not witnessed by the speaker can be
+   relayed only as hearsay ("I heard…") or not at all (CRITICAL RULE 9 — characters know only
+   what they could know; the hero's unspoken thoughts are known to no one); when the player
+   asks what someone *said*, the DM may quote the verbatim line. THE ORDINARY TURN stays
+   sovereign — the answer is a scene beat with MOTION and THE ASK, not a report — but the
+   3-paragraph ceiling yields to the record when the player asked for the record.
+5. **No new canon from an answer:** the Scribe receives a `RECALL TURN` hint — extract nothing
+   new from the DM's answer except a `bondMoment` if the remembering itself moves someone (the
+   containment dedupe is the belt against re-minting what the record already holds); a recall
+   turn requests no rolls and its events are force-nulled like table talk (remembering is
+   never a mechanic). The OOC lane gets the same dossier: "OOC: what happened with the
+   countess?" and the return card's "Ask the DM for a recap" answer from the record too, not
+   from the 20-message window.
+6. **Player-facing:** a small engine line under the answer — `📜 From the record: 3 journal
+   entries · 1 fight · 2 lines as said · 11–4 scenes ago` (dmVisible false; the inspector
+   shows the full dossier) — so the player can SEE the game looked it up, and an honest
+   `📜 Nothing on record` when it didn't. That line is the trust signal: the memory is real,
+   and when it says "I don't remember" that is real too.
+
+**Proof:** this is what the queued commitment-preservation probe (M2, `MEMORY_RESEARCH.md`,
+NCP-Bench: GPT-5.2 keeps 42% of commitments alive by turn 20) is FOR — seed the
+`saltmere-debt` starter with 8 explicit commitments, then at turns 10/20/30 ask a present
+character "remember when…" about each, and let the Flash judge score recalled / laundered /
+forgotten / contradicted, before/after the dossier. Target: zero contradicted, zero
+fabricated-when-empty. **Cost:** zero extra LLM calls on the deterministic path, ~1,500
+dynamic-tail chars on recall turns only, no cache-prefix change. **Dependencies:** M1 lexical
+channel (recall of a rare name), M2 probe (the yardstick); both already queued. Extends the
+LLM WOW Layer entry above (its open "natural old detail recall" eval becomes this proof) and
+the `memory-callbacks` moment in `docs/SCHEDULED_WOW.md`; the Chronicle stays strictly
+player-facing (DECISIONS.md 2026-07-26) — the dossier reads the journal and the transcript,
+never the saga.
+
 ### [memory-research] Bi-temporal world facts: a fact can stop being true — status: `idea` (M0, memory research 2026-09-17, Lane B)
 `ADD_WORLD_FACT(S)` dedupes restatements by containment and stores forever, so "the mill wheel
 turns" and "the mill burned" coexist at equal standing in WORLD FACTS and RAG. Zep/Graphiti's
