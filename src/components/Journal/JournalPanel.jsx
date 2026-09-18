@@ -850,8 +850,8 @@ function NPCTab({
                             <details className="journal-npc-arc-details">
                                 <summary className="journal-npc-arc" title="How this relationship last shifted — expand for the full history">
                                     <span className="journal-npc-arc-label">Arc:</span>
-                                    <span className={`journal-npc-arc-step ${npc.relationshipHistory[npc.relationshipHistory.length - 1].from}`}>
-                                        {npc.relationshipHistory[npc.relationshipHistory.length - 1].from}
+                                    <span className={`journal-npc-arc-step ${npc.relationshipHistory[npc.relationshipHistory.length - 1]?.from}`}>
+                                        {npc.relationshipHistory[npc.relationshipHistory.length - 1]?.from}
                                     </span>
                                     <span className="journal-npc-arc-seg">
                                         <span className="journal-npc-arc-sep">→</span>

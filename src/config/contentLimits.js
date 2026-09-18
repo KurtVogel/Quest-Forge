@@ -72,5 +72,6 @@ export function cleanTextField(value, max = Infinity) {
 }
 
 export function normalizeCampaignPremise(value) {
-    return String(value || '').trim().slice(0, CAMPAIGN_PREMISE_MAX_LENGTH);
+    // Type-strict (2026-09-18 P2): String(object) minted "[object Object]" canon.
+    return cleanTextField(value, CAMPAIGN_PREMISE_MAX_LENGTH);
 }

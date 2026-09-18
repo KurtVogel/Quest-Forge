@@ -11,7 +11,7 @@ import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
 import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
 import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
 import { sanitizeQuestRecords } from './quests.js';
-import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX } from '../../config/contentLimits.js';
+import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { canonicalEnemyId, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES, normalizeCombatExchange } from '../../engine/combatExchange.js';
@@ -41,6 +41,24 @@ function toFlag(value) {
     if (typeof value === 'string') return value.trim().toLowerCase() === 'true';
     return value === true;
 }
+
+const MESSAGE_ROLES = new Set(['user', 'assistant', 'system']);
+
+const JOURNAL_LIST_MAX_ITEMS = 8;
+const JOURNAL_LIST_ITEM_MAX = 300;
+/** The load twin of normalizeJournalSummary's list clamp: string elements, 8 × 300. */
+const typeJournalList = (value) => (Array.isArray(value) ? value : [])
+    .map(item => cleanTextField(item, JOURNAL_LIST_ITEM_MAX))
+    .filter(Boolean)
+    .slice(0, JOURNAL_LIST_MAX_ITEMS);
+
+/** A journal entry's [from, to] message span: two integers inside the transcript, else dropped. */
+const typeMessageRange = (range, messageCount) => {
+    if (!Array.isArray(range) || range.length !== 2 || !range.every(Number.isInteger)) return undefined;
+    const from = Math.max(0, Math.min(messageCount, range[0]));
+    const to = Math.max(from, Math.min(messageCount, range[1]));
+    return [from, to];
+};
 
 const finiteOr = (value, fallback) => {
     const n = Number(value);
@@ -260,8 +278,12 @@ function validateSaveState(payload) {
             ? payload.messages
                 .filter(message => message && typeof message === 'object')
                 .map(message => {
-                    if (!message.narrationCue) return message;
-                    const { narrationCue: _consumedCue, ...restoredMessage } = message;
+                    // A role-less / non-string role threw out of the journal
+                    // batch label and archived 40 messages unsummarized
+                    // (2026-09-18 P2) — an unknown role is an engine line.
+                    const typed = MESSAGE_ROLES.has(message.role) ? message : { ...message, role: 'system' };
+                    if (!typed.narrationCue) return typed;
+                    const { narrationCue: _consumedCue, ...restoredMessage } = typed;
                     return restoredMessage;
                 })
             : [],
@@ -286,15 +308,24 @@ function validateSaveState(payload) {
                 .filter(e => e && typeof e === 'object')
                 // Heal entries persisted before normalizeJournalSummary: a string-valued
                 // consequences/keyDecisions crashed the prompt build / Journal panel.
-                .map(e => ({
+                // …and since 2026-09-18 every field the prompt, the Journal panel,
+                // dormancy, and the RAG seed read is typed like the live write
+                // (normalizeJournalSummary clamps 8 × 300): one object/100k list
+                // element used to mint a 167k system prompt from ONE entry.
+                .map((e, index) => ({
                     ...e,
+                    id: cleanTextField(e.id, 120) || `journal-loaded-${index}`,
+                    timestamp: Number.isFinite(e.timestamp) ? e.timestamp : Date.now(),
+                    location: cleanTextField(e.location, LOCATION_NAME_MAX) || null,
+                    ...(e.fallback !== undefined && { fallback: toFlag(e.fallback) }),
+                    ...(e.messageRange !== undefined && { messageRange: typeMessageRange(e.messageRange, messageCount) }),
                     // The live write clamps at JOURNAL_SUMMARY_MAX (normalizeJournalSummary);
                     // the load twin types it too (2026-09-17 vector-memory P1: a
                     // 100k summary reached the RAG seed unbounded and cost its whole
                     // embed chunk on every mount).
                     summary: cleanTextField(e.summary, JOURNAL_SUMMARY_MAX),
-                    keyDecisions: Array.isArray(e.keyDecisions) ? e.keyDecisions : [],
-                    consequences: Array.isArray(e.consequences) ? e.consequences : [],
+                    keyDecisions: typeJournalList(e.keyDecisions),
+                    consequences: typeJournalList(e.consequences),
                 }))
             : [],
         npcs,
@@ -475,6 +506,10 @@ function validateSaveState(payload) {
         session: {
             ...session,
             name: cleanTextField(session?.name, SESSION_NAME_MAX),
+            // The premise is string-or-empty at its own clamp (2026-09-18 P2):
+            // an object rendered "[object Object]" into the CACHED prefix and a
+            // 100k premise rode every save (only the render clamped).
+            ...(session?.premise !== undefined && { premise: normalizeCampaignPremise(session.premise) }),
             // The return card (2026-09-16): a pre-stamp campaign heals its
             // last-played time from the payload's own save stamp, so the gap
             // Continue measures is real on the first load after the upgrade.

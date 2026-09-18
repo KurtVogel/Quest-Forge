@@ -15,7 +15,7 @@ export function shouldPrimeCampaignOpening(state) {
         state.character
         && state.settings?.apiKey
         && state.session?.openingScenePending === true
-        && state.session?.premise?.trim()
+        && typeof state.session?.premise === 'string' && state.session.premise.trim()
         && visibleAssistantMessages.length === 0
     );
 }

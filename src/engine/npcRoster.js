@@ -924,8 +924,32 @@ function clampImportance(value, fallback = 3) {
  */
 const ARC_SAME_SITTING_MS = 30 * 60 * 1000;
 
+/**
+ * The arc history loads TYPED whatever the record's age (2026-09-18 P1): a
+ * `null` entry on an arc-stamped record used to skip the compaction below and
+ * throw out of the KNOWN NPCs arc line on every prompt build; an object `from`
+ * rendered "relationship: [object Object] → wary". Plain-object entries only,
+ * `from`/`to` from NPC_DISPOSITIONS, a finite `at`, a clamped string note.
+ */
+const ARC_HISTORY_LOAD_CAP = 24;
+
+export function typeRelationshipHistory(history) {
+    const out = [];
+    for (const entry of Array.isArray(history) ? history : []) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+        const from = typeof entry.from === 'string' ? entry.from.trim().toLowerCase() : '';
+        const to = typeof entry.to === 'string' ? entry.to.trim().toLowerCase() : '';
+        if (!NPC_DISPOSITIONS.has(from) || !NPC_DISPOSITIONS.has(to)) continue;
+        const typed = { from, to };
+        if (Number.isFinite(entry.at)) typed.at = entry.at;
+        if (typeof entry.note === 'string') typed.note = entry.note.slice(0, 600);
+        out.push(typed);
+    }
+    return out.slice(-ARC_HISTORY_LOAD_CAP);
+}
+
 export function compactRelationshipHistory(history = []) {
-    const entries = (Array.isArray(history) ? history : []).filter(e => e && e.from && e.to);
+    const entries = typeRelationshipHistory(history);
     if (entries.length <= 1) return entries;
     const compacted = [];
     let run = null;
@@ -980,9 +1004,9 @@ export function migrateLegacyNpc(npc = {}) {
         if (impressions.length > 0) merged.recentImpressions = impressions;
         else delete merged.recentImpressions;
     }
-    if (!merged.arcDisposition) {
-        merged.relationshipHistory = compactRelationshipHistory(merged.relationshipHistory);
-    }
+    merged.relationshipHistory = merged.arcDisposition
+        ? typeRelationshipHistory(merged.relationshipHistory)
+        : compactRelationshipHistory(merged.relationshipHistory);
     if (merged.portraitUrl !== undefined) {
         const safeUrl = sanitizePortraitUrl(merged.portraitUrl);
         if (safeUrl) merged.portraitUrl = safeUrl;

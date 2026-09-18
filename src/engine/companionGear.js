@@ -39,7 +39,9 @@ export function deriveGiftAC(item, currentAc = 12) {
  */
 export function appendKeepsakes(existing = [], additions = []) {
     const clean = list => (Array.isArray(list) ? list : [])
-        .map(entry => String(typeof entry === 'string' ? entry : entry?.text || '').trim().slice(0, KEEPSAKE_MAX_LENGTH))
+        // String-or-drop (2026-09-18 P2): an object `text` used to persist as "[object Object]".
+        .map(entry => (typeof entry === 'string' ? entry : entry?.text))
+        .map(entry => (typeof entry === 'string' ? entry.trim().slice(0, KEEPSAKE_MAX_LENGTH) : ''))
         .filter(Boolean);
     let next = clean(existing);
     for (const keepsake of clean(additions)) {

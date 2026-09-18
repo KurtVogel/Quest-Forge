@@ -323,7 +323,8 @@ describe('scene-driven curation and conversational windows (2026-09-06 audit)', 
     it('the linked-NPC bonus fires only for NPCs PRESENT in the scene — an absent person earns nothing', () => {
         const absent = scoreStoryMemory(smuggler, { ...scene, npcs: [] });
         // Celeste is present; Vasko is two towns away: no bonus for his card.
-        expect(scoreStoryMemory(smuggler, { ...scene, npcs: [{ name: 'Celeste' }] })).toBe(absent);
+        // toBeCloseTo: the wall-clock recency term drifts between two calls across a ms boundary.
+        expect(scoreStoryMemory(smuggler, { ...scene, npcs: [{ name: 'Celeste' }] })).toBeCloseTo(absent, 5);
         // Present: +5 for the linked person, and his name joins the query tokens (+3 overlap).
         expect(scoreStoryMemory(smuggler, { ...scene, npcs: [{ name: 'Vasko' }] })).toBeCloseTo(absent + 8, 5);
         // And the person the hero is talking to outscores the absent smuggler.
