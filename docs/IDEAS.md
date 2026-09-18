@@ -2390,6 +2390,29 @@ re-forms the SAME batch next mount — one over-long journal summary silently co
 neighbours forever. A batched call must degrade per item (per-item retry or bisect on a chunk
 failure) and its input must be bounded at the boundary. From the 2026-09-17 strengthening audit.
 
+### [strengthening] Commit order is a hostile-input surface; a typed container is not a typed field; the load heal's spread is the un-audited half — status: `idea` (2026-09-18)
+Three rules from one Lap-2 run (2026-09-18, memory-journal + prompt-building). **(1)** A pipeline
+that dispatches its durable record first and its side effects after, under one catch, turns any
+throw in the side effects into a REPLAY of the record — `maybeAutoSummarize` dispatches
+`ADD_JOURNAL_ENTRY`, then reads `npc.name` on a `null` in the Flash reply's `npcs_encountered`,
+throws, never marks the messages, and (because the failure streak was reset on the successful
+parse) re-summarizes the same batch every turn forever: one Flash call and one duplicate entry per
+turn, and on the third duplicate every low-salience story card goes dormant because the dormancy
+cutoff is now "seconds ago". Rule: validate everything, commit the record and its boundary advance
+TOGETHER, run side effects after, and count failures after the commit — and for every LLM-lane
+pipeline, throw at each dispatch in turn and ask what the retry does. **(2)** `Array.isArray(x) ?
+x : []` heals the LIST, not its elements: a journal row's `consequences: [{…}, <100k>]` renders
+"[object Object]" into SESSION HISTORY and a 167k prompt from one entry, an object `keyDecisions`
+element is a React-child crash in the Journal panel, a junk `timestamp` silently switches dormancy
+off. Every load heal that stops at the container needs the 09-17 per-element rule. **(3)** The
+explicit fields in `healLoadedCharacter` / `migrateLegacyNpc` / the session heal are the audited
+half; everything a prompt block reads that rides the `...spread` is a raw save value — a string
+`traits` (`.join` throws every turn), a `null` `relationshipHistory` entry behind the
+`arcDisposition` gate (throws every turn), an object `premise` ("[object Object]" in the cached
+prefix), an object ruling `objective` / companion `weapon` / keepsake text (`String()` lanes). A
+cheap standing check: diff the fields each builder renders against the fields each heal names.
+From the 2026-09-18 strengthening audit.
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
