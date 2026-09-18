@@ -1,6 +1,9 @@
 import { normalizeRequestedRoll, MAX_ROLL_DC } from '../llm/eventChannels.js';
 
-const text = (value, max = 500) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+// String-or-empty (2026-09-18 P2): String(object) persisted "[object Object]" as a
+// ruling objective and RECENT TABLE RULINGS bound the DM to it. A finite number reads.
+const asText = (value) => (typeof value === 'string' ? value : (typeof value === 'number' && Number.isFinite(value) ? String(value) : ''));
+const text = (value, max = 500) => asText(value).replace(/\s+/g, ' ').trim().slice(0, max);
 
 /**
  * One typed roll for the proposal store. The parser's `normalizeRequestedRoll`

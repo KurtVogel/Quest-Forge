@@ -42,6 +42,7 @@ import {
     ABILITY_NAMES,
     buildClassResources,
     buildDerivedCharacterFields,
+    getAllFeaturesUpToLevel,
     isKnownClass,
     isKnownRace,
     normalizeAbilityScoreImprovementState,
@@ -291,6 +292,17 @@ function healUnknownClassRace(save) {
  * style, martial archetype, pending-ASI accounting = earned − applied, which
  * also grants ASIs the save's era never offered).
  */
+const DISPLAY_LIST_MAX_ITEMS = 40;
+const DISPLAY_LIST_ITEM_MAX = 120;
+/** A hero display list (traits/features): string elements, clamped, capped; a non-list rebuilds. */
+function typeDisplayList(value, rebuild) {
+    const source = Array.isArray(value) ? value : rebuild();
+    return (Array.isArray(source) ? source : [])
+        .map(item => cleanTextField(item, DISPLAY_LIST_ITEM_MAX))
+        .filter(Boolean)
+        .slice(0, DISPLAY_LIST_MAX_ITEMS);
+}
+
 function backfillCharacterShape(save) {
     const character = save.character;
     if (!character) return save;
@@ -382,6 +394,17 @@ function healLoadedCharacter(character) {
         portraitUrl: sanitizePortraitUrl(character.portraitUrl),
         portraitPrompt: cleanTextField(character.portraitPrompt, 2000),
         portraitProvider: cleanTextField(character.portraitProvider, 40),
+        // The race/class display lists and speed are typed too (2026-09-18 P1):
+        // a STRING `traits` passed `?.length` and threw `.join is not a
+        // function` out of every prompt build; an object element printed
+        // "[object Object]" and a 50k element rode whole. A non-list rebuilds
+        // from the catalogs, exactly as healUnknownClassRace would.
+        traits: typeDisplayList(character.traits, () => RACES[character.race]?.traits || []),
+        features: typeDisplayList(character.features, () => getAllFeaturesUpToLevel(character.class, level)),
+        speed: (() => {
+            const speed = Number(character.speed);
+            return Number.isFinite(speed) && speed >= 0 && speed <= 120 ? Math.trunc(speed) : (RACES[character.race]?.speed || 30);
+        })(),
         level,
         exp: Math.max(0, toInt(character.exp, 0)),
         // The purse is typed like every other numeric field (2026-09-11

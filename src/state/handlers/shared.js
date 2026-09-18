@@ -576,7 +576,14 @@ export function normalizeCompanion(payload = {}, existing = {}) {
     const level = clampNumber(merged.level, 1, MAX_CHARACTER_LEVEL, existing.level || 1);
     const maxHp = clampNumber(merged.maxHp ?? merged.maxHP, 1, 999, existing.maxHp || 20);
     const hp = clampNumber(merged.hp, 0, maxHp, existing.hp ?? maxHp);
-    const weapon = String(merged.weapon || existing.weapon || 'Dagger').trim().slice(0, 60) || 'Dagger';
+    // String-or-fallback (2026-09-18 P2): String({ name }) minted an
+    // "[object Object]" weapon onto the party line. A { name } object folds to
+    // its name, like the location wire.
+    const weaponText = (value) => {
+        const raw = value && typeof value === 'object' && !Array.isArray(value) ? value.name : value;
+        return typeof raw === 'string' ? raw.trim().slice(0, 60) : '';
+    };
+    const weapon = weaponText(merged.weapon) || weaponText(existing.weapon) || 'Dagger';
     const attackBonus = clampNumber(
         merged.attackBonus ?? merged.modifier,
         -5,

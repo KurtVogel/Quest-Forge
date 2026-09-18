@@ -9,7 +9,7 @@
  * extraction task that doesn't need the full DM model.
  */
 
-import { JOURNAL_SUMMARY_MAX } from '../config/contentLimits.js';
+import { JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX } from '../config/contentLimits.js';
 import { sendMessage } from '../llm/adapter.js';
 import { getBackgroundConfig } from '../llm/machinery.js';
 import { parseJsonObjectLoose } from '../llm/utils/jsonExtractor.js';
@@ -98,6 +98,10 @@ export function resetSummarizeFailureTracker() {
 
 const clampText = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
+// A role-less / non-string role in the batch used to throw before any call —
+// three cadences later 40 messages were archived unsummarized (2026-09-18 P2).
+const roleLabel = (role) => (typeof role === 'string' && role.trim() ? role.trim().toUpperCase().slice(0, 20) : 'SYSTEM');
+
 const toStringList = (value, maxItems, maxLen) => (Array.isArray(value) ? value : [])
     .map(item => clampText(item, maxLen))
     .filter(Boolean)
@@ -119,7 +123,7 @@ export function normalizeJournalSummary(summary) {
         summary: text,
         keyDecisions: toStringList(summary.key_decisions, 8, 300),
         consequences: toStringList(summary.consequences, 8, 300),
-        location: sanitizeExtractedLocation(summary.location),
+        location: clampText(sanitizeExtractedLocation(summary.location), LOCATION_NAME_MAX) || null,
     };
 }
 // One journal batch may not flood the never-pruned world-facts store. The per-turn
@@ -241,7 +245,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         // contract says the exchange is kept out of memory. Engine roll-result
         // system lines pass the predicate and still ride the transcript.
         const recentMessages = collectNarrativeMessages(state.messages, lastSummarizedIndex, batchEnd - 1)
-            .map(m => `[${m.role.toUpperCase()}]: ${clampText(m.content, MAX_MESSAGE_CHARS)}`)
+            .map(m => `[${roleLabel(m.role)}]: ${clampText(m.content, MAX_MESSAGE_CHARS)}`)
             .join('\n\n');
 
         // An all-hidden batch (e.g. withheld roll-setup narration) would send the LLM
@@ -283,8 +287,6 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             return recordFailure();
         }
 
-        resetSummarizeFailureTracker();
-
         const journalId = `journal-${Date.now()}`;
         const journalTimestamp = Date.now();
         const journalEntry = {
@@ -297,17 +299,37 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
             location: normalized.location || state.currentLocation || null,
         };
 
-        // Add journal entry
+        // COMMIT ORDER (2026-09-18 P1): the entry and its summarized mark land
+        // together, before any secondary dispatch. The mark used to sit at the
+        // end of this block, so one throw in the NPC loop (a null
+        // npcs_encountered element) left a committed entry un-marked — the same
+        // batch re-summarized and re-entered EVERY turn, and the failure streak
+        // (reset on the parse, not the commit) could never reach its escape.
         dispatch({
             type: 'ADD_JOURNAL_ENTRY',
             payload: journalEntry,
         });
+        // Mark these messages as summarized — they will be excluded from future LLM history
+        dispatch({ type: 'MARK_MESSAGES_SUMMARIZED', payload: batchEnd });
+        resetSummarizeFailureTracker();
+
+        // Everything below is secondary to the committed entry: a throw in one
+        // lane costs that lane only, never the entry/mark pairing.
+        const secondary = (label, run) => {
+            try {
+                run();
+            } catch (e) {
+                console.warn(`[Journal] ${label} dispatch failed — entry already committed:`, e);
+            }
+        };
 
         // Update NPCs with richer data. The reducer upserts by name — creating any the
         // per-turn Scribe hasn't recorded yet and stamping lastSeen — so we just hand it
         // each NPC the summary surfaced; no manual existing-record lookup needed.
-        if (Array.isArray(summary.npcs_encountered)) {
-            for (const npc of summary.npcs_encountered) {
+        const encountered = (Array.isArray(summary.npcs_encountered) ? summary.npcs_encountered : [])
+            .filter(npc => npc && typeof npc === 'object' && !Array.isArray(npc));
+        secondary('NPC', () => {
+            for (const npc of encountered) {
                 if (!npc.name) continue;
                 // Journal schema → roster schema mapped ONCE (notes → lastNotes);
                 // the shared helper classifies and dispatches, so a roster-field
@@ -328,13 +350,13 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
                     ...(npc.basedIn && { basedIn: npc.basedIn }),
                 });
             }
-        }
+        });
 
         // Add world facts extracted from this batch, capped like the Scribe's budget —
         // the world-facts block is never pruned, so an over-eager summary must not
         // quietly bloat every future prompt.
         if (Array.isArray(summary.world_facts) && summary.world_facts.length > 0) {
-            dispatch({ type: 'ADD_WORLD_FACTS', payload: summary.world_facts.slice(0, MAX_FACTS_PER_BATCH) });
+            secondary('World-fact', () => dispatch({ type: 'ADD_WORLD_FACTS', payload: summary.world_facts.slice(0, MAX_FACTS_PER_BATCH) }));
         }
 
         // Update location — the journal prompt itself invites a literal "null" for
@@ -346,11 +368,8 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         // journal may fill an empty location or re-affirm the current one, never
         // relocate; the per-turn Scribe owns live position.
         if (normalized.location) {
-            dispatch({ type: 'SET_LOCATION', payload: { name: normalized.location, fillOnly: true } });
+            secondary('Location', () => dispatch({ type: 'SET_LOCATION', payload: { name: normalized.location, fillOnly: true } }));
         }
-
-        // Mark these messages as summarized — they will be excluded from future LLM history
-        dispatch({ type: 'MARK_MESSAGES_SUMMARIZED', payload: batchEnd });
 
         // Cadenced private reflection: keep NPC intent, relationship pressure, hidden
         // front symptoms, and future callback hooks alive without adding per-turn cost.
@@ -456,7 +475,8 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
             const lines = [];
             if (prevEntry) {
                 const prevIdx = transitionIdx - 1;
-                const at = prevEntry.location ? ` at ${prevEntry.location}` : '';
+                const prevPlace = clampText(prevEntry.location, LOCATION_NAME_MAX);
+                const at = prevPlace ? ` at ${prevPlace}` : '';
                 lines.push(prevIdx >= shownFloor
                     ? `- **Right before entering:** Entry ${prevIdx + 1}${at ? ` (${at.trim()})` : ''} in SESSION HISTORY above.`
                     : `- **Right before entering:** [Entry ${prevIdx + 1}${at}] ${clampText(prevEntry.summary, TRANSITION_SUMMARY_CHARS)}`);
@@ -486,8 +506,9 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
             // consistent — a friend who turned on the player should stay turned.
             // Only previous → current: the full chain burned tokens/card space
             // without adding play value (Vesa, 2026-07-23); data keeps every step.
-            const arc = Array.isArray(n.relationshipHistory) && n.relationshipHistory.length > 0
-                ? `relationship: ${n.relationshipHistory[n.relationshipHistory.length - 1].from} → ${n.disposition}`
+            const lastArcFrom = Array.isArray(n.relationshipHistory) ? n.relationshipHistory[n.relationshipHistory.length - 1]?.from : null;
+            const arc = typeof lastArcFrom === 'string' && lastArcFrom
+                ? `relationship: ${lastArcFrom} → ${n.disposition}`
                 : '';
             const extras = [
                 n.pinned && 'pinned',
