@@ -16,6 +16,15 @@ import { isStaleCampaignAction, sanitizeWorldFactPayload, stampNpcRelationshipAr
 import { CHRONICLE_CHAPTER_TEXT_MAX } from '../../config/contentLimits.js';
 import { rollDie } from '../../engine/dice.ts';
 import {
+    WONDER_TIMING_DIE_SIDES,
+    buildWonderResidueCard,
+    mintPendingWonder,
+    normalizeWonderHooks,
+    sanitizePendingWonder,
+    selectWonder,
+    shouldRequestWonder,
+} from '../../engine/wonder.js';
+import {
     BEAT_COOLDOWN_MESSAGES,
     BEAT_TIMING_DIE_SIDES,
     isRelationshipBeatExpired,
@@ -49,6 +58,19 @@ export function rollRelationshipBeat(state, { roll = () => rollDie(BEAT_TIMING_D
     const beat = mintRelationshipBeat(candidate, { messageCount, delayScenes: roll() });
     if (!beat) return session;
     return { ...session, relationshipBeat: beat, lastRelationshipBeatMessage: messageCount };
+}
+
+/**
+ * The wonder die's request tick (WOW 2026-09-18): on the journal cadence (and
+ * on the player's own OOC ask), if the campaign has gone eventless past the
+ * pace dial's lull threshold and every guard in shouldRequestWonder holds,
+ * raise the one-shot `session.pendingWonder` marker the background director
+ * answers. The engine decides WHEN; the director decides WHAT.
+ */
+export function rollWonderRequest(state, { onDemand = false } = {}) {
+    const session = state.session || {};
+    if (!shouldRequestWonder(state, { onDemand })) return session;
+    return { ...session, pendingWonder: mintPendingWonder(state, { onDemand }) };
 }
 
 // --- World-fact near-duplicate detection (Scribe over-extraction guard) ---
@@ -244,8 +266,50 @@ export const handlers = {
             // ...and as the NPC-initiative tick (2026-09-13 overhaul): if no
             // beat is pending and the cooldown has passed, the one bonded NPC
             // with the most pull may reach out — the engine rolls WHEN.
-            session: rollRelationshipBeat(state),
+            // ...and as the wonder die's request tick (2026-09-18): a long
+            // eventless stretch asks the director for something strange.
+            session: rollWonderRequest({ ...state, session: rollRelationshipBeat(state) }),
         };
+    },
+
+    /** The player asked the DM for wonder out of character (the one exempt case). */
+    REQUEST_WONDER(state, action) {
+        const session = rollWonderRequest(state, { onDemand: action.payload?.onDemand !== false });
+        return session === state.session ? state : { ...state, session };
+    },
+
+    /**
+     * One-shot install of the director's hooks (the INSTALL_AFTERMATH_FRONTS
+     * pattern): only the pending request's own generation may land, once.
+     * The engine re-validates every hook, picks ONE with a crypto die, delays
+     * its window by 0–3 scenes (at once when the player asked), stamps the
+     * cooldown, and mints the residue story card so even a refused wonder is
+     * remembered. Private: no system line — the player only ever feels it.
+     */
+    INSTALL_WONDER(state, action) {
+        const payload = action.payload || {};
+        const pending = sanitizePendingWonder(state.session?.pendingWonder);
+        if (!pending || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
+        const messageCount = (state.messages || []).length;
+        const hooks = normalizeWonderHooks(payload.hooks, { fronts: state.fronts || [] });
+        const wonder = selectWonder(hooks, {
+            messageCount,
+            pick: rollDie(Math.max(1, hooks.length)) - 1,
+            delayScenes: rollDie(WONDER_TIMING_DIE_SIDES) - 1,
+            onDemand: pending.onDemand,
+            key: pending.key,
+        });
+        const session = {
+            ...state.session,
+            pendingWonder: null,
+            // An empty or all-invalid answer still spends the request: the
+            // cooldown keeps a chatty lull from re-asking every cadence.
+            lastWonderMessage: messageCount,
+            ...(wonder && { wonder }),
+        };
+        const next = { ...state, session };
+        const residue = wonder ? buildWonderResidueCard(wonder) : null;
+        return residue ? gameReducer(next, { type: 'ADD_STORY_MEMORY_CARD', payload: residue }) : next;
     },
 
     ADD_CHRONICLE_CHAPTER(state, action) {

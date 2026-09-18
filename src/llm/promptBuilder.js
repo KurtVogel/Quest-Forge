@@ -8,6 +8,7 @@ import { formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifie
 import { getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock, findSubjectsInText } from '../engine/vectorMemory.js';
+import { buildWonderBlock } from '../engine/wonder.js';
 import { buildPresenceText } from './narrativeMessages.js';
 import { buildStoryMemoryPromptBlock, formatSecrecyTag } from '../engine/storyMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
@@ -39,7 +40,7 @@ export const PROMPT_CHAR_BUDGET = 160000;
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder }) {
     /** Named [{name, text}] parts — joined in push order; names feed the DEV size log only. */
     const namedParts = [];
     const parts = {
@@ -148,6 +149,17 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
     if (awayBlock) {
         parts.push(awayBlock, 'absenceDrift');
+    }
+    // The wonder die (2026-09-18): while the engine-rolled window is open, the
+    // DM must land ONE strange invitation on screen; re-judged at render.
+    const wonderBlock = buildWonderBlock(wonder, {
+        messageCount: messageCount || 0,
+        messages: messages || null,
+        combatActive: !!combat?.active,
+        fronts: fronts || [],
+    });
+    if (wonderBlock) {
+        parts.push(wonderBlock, 'wonder');
     }
     const hearsayBlock = buildRegionalHearsayBlock(regionalHearsay, {
         currentLocation,

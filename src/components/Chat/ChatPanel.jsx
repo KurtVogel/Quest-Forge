@@ -13,6 +13,8 @@ import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/
 import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/frontAftermath.js';
 import { generateAbsenceDrift, shouldGenerateAbsenceDrift } from '../../llm/absenceDrift.js';
 import { generateRegionalFronts, shouldGenerateRegionalFronts } from '../../llm/regionalFronts.js';
+import { generateWonder, shouldGenerateWonder } from '../../llm/wonderDirector.js';
+import { isWonderRequest } from '../../engine/wonder.js';
 import { formatSecrecyTag } from '../../engine/storyMemory.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
@@ -89,6 +91,15 @@ const BACKGROUND_DIRECTORS = [
         install: (sessionId, key, fronts) => ({ type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId, key, fronts } }),
         logSuccess: (s, key, fronts) => `[LivingWorld] Native pressures for ${s.session.pendingRegionalFronts?.region}: ${fronts.length} proposed.`,
         failureNote: '[LivingWorld] Regional front seeding failed; will retry:',
+    },
+    {
+        // The wonder die (WOW 2026-09-18): something strange for a long lull.
+        name: 'wonder',
+        getKey: (s) => (shouldGenerateWonder(s) ? s.session.pendingWonder.key : null),
+        generate: generateWonder,
+        install: (sessionId, key, hooks) => ({ type: 'INSTALL_WONDER', payload: { sessionId, key, hooks } }),
+        logSuccess: (s, key, hooks) => `[Wonder] ${hooks.length} hook(s) proposed for ${key}; the die picks one.`,
+        failureNote: '[Wonder] Wonder generation failed; will retry:',
     },
 ];
 
@@ -349,6 +360,7 @@ export default function ChatPanel() {
         state.session?.pendingFrontAftermath?.frontId,
         state.session?.pendingAbsenceDrift?.key,
         state.session?.pendingRegionalFronts?.key,
+        state.session?.pendingWonder?.key,
         state.settings.apiKey,
         state.messages.length,
         state.combat?.active,
@@ -642,6 +654,9 @@ export default function ChatPanel() {
         // never a character action: it must not enter the combat-intent machine,
         // seed memory, or run the Scribe — the world is paused for one exchange.
         const tableTalkTurn = isTableTalkMessage(trimmed);
+        // "OOC: surprise me" — the player asking for wonder is the one case
+        // where the lull detector's waiting is wrong (WOW 2026-09-18).
+        if (tableTalkTurn && isWonderRequest(trimmed)) dispatch({ type: 'REQUEST_WONDER', payload: { onDemand: true } });
         const startedCombatIntent = !tableTalkTurn
             && stateRef.current.combat?.active
             && stateRef.current.combat.phase === COMBAT_PHASES.AWAITING_PLAYER;

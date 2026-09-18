@@ -223,6 +223,7 @@ export function createTurnRunner({
             regionalHearsay: s.session?.regionalHearsay || null,
             absenceDrift: s.session?.absenceDrift || null,
             relationshipBeat: s.session?.relationshipBeat || null,
+            wonder: s.session?.wonder || null,
             recentRulings: pruneRecentRulings(s.recentRulings, {
                 messageCount: (s.messages || []).length,
                 location: s.currentLocation,

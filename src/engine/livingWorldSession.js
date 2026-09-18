@@ -16,6 +16,7 @@
  */
 import { INTENSITY_LEVELS } from './worldTempo.js';
 import { sanitizeRelationshipBeat } from './relationshipArc.js';
+import { sanitizePendingWonder, sanitizeWonder } from './wonder.js';
 
 const HEARSAY_GRADES = ['firsthand', 'secondhand', 'legend'];
 
@@ -143,7 +144,14 @@ export function sanitizeLivingWorldSession(session) {
         ['chapterCloseSuggested', sanitizeChapterCloseSuggested],
         // NPC initiative window (2026-09-13 overhaul): complete-or-null.
         ['relationshipBeat', sanitizeRelationshipBeat],
+        // The wonder die (2026-09-18): the request marker and the chosen hook.
+        ['pendingWonder', sanitizePendingWonder],
+        ['wonder', sanitizeWonder],
     ];
+    if (session.lastWonderMessage !== undefined) {
+        const n = Number(session.lastWonderMessage);
+        next.lastWonderMessage = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+    }
     if (session.lastRelationshipBeatMessage !== undefined) {
         const n = Number(session.lastRelationshipBeatMessage);
         next.lastRelationshipBeatMessage = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
