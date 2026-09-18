@@ -141,7 +141,7 @@ flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NP
   (not queued): sticky/delay for cards, use-count eviction, heat-weighted salience,
   importance-triggered reflection, a Scribe `resolves:` verdict.
 
-### [wow] "Remember when…": the engine and the DM conspire to answer from the record — status: `idea` (Vesa, 2026-09-17), priority: **HIGHEST — "THAT'S the moneyshot"**
+### [wow] "Remember when…": the engine and the DM conspire to answer from the record — status: `shipped` (2026-09-18, one day after proposed — `llm/recallIntent.js` + `engine/recallDossier.js` + the orchestrator's record lane + `## THE RECORD`; DECISIONS.md 2026-09-18; the real-provider commitment probe asked as "remember when…" is still owed) (Vesa, 2026-09-17), priority: **HIGHEST — "THAT'S the moneyshot"**
 **Vesa (live play 2026-09-17):** when the player asks a character about past events —
 "remember when…", "what happened at…", "what did she say…", "who was it that…" — the engine
 and the DM should conspire to bring back the **actual, factual past** as accurately as
@@ -385,7 +385,7 @@ only unprovoked intrusions; side quests get NO new machinery (quiet tempo + "loc
 welcome" line; quest tracker already round-trips them; the promotion path gives the good ones
 teeth). Build after the memory debug inspector — every component here is a tuning problem.
 
-### [wow] The wonder die: when nothing is happening, something strange arrives — status: `idea` (Vesa, 2026-09-17), priority: HIGH
+### [wow] The wonder die: when nothing is happening, something strange arrives — status: `shipped` (2026-09-18, one day after proposed — `engine/wonder.js` + `llm/wonderDirector.js` + `INSTALL_WONDER` / `REQUEST_WONDER` + `## SOMETHING STRANGE ARRIVES — PRIVATE`; DECISIONS.md 2026-09-18; the caravan-premise playtest and the Settings wonder dial remain open) (Vesa, 2026-09-17), priority: HIGH
 **The complaint, verbatim in spirit (Vesa, live play 2026-09-17):** "eventless boring wagon
 guarding trips from one generic town to another. I want to be surprised, intrigued by — a
 vampire countess taking a liking to me, a dead empire sending a magical signal in the ruins
