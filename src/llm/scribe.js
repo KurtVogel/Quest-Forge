@@ -327,7 +327,15 @@ export const SCRIBE_ANCHORS = [
 /** The reflection schema's keys — a quiet cadence honestly answers with the tempo directive alone. */
 export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'story_memory', 'tempo_directive', 'front_proposals'];
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownLocations = null, dmLocationEvent = null }) {
+/**
+ * The Scribe's contract on a "remember when…" turn (2026-09-18): the DM's
+ * answer is the engine's own record read back in character, so re-extracting
+ * it would mint duplicates of canon that already exists — or worse, canonize
+ * a paraphrase drift. Only a moved heart is new.
+ */
+export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST and the DM answered from the engine\'s own record of this campaign. Extract NOTHING new from the answer — no world_facts, no story cards, no location change, no loot, no payment, no appearance — everything it recounts is already on record. The ONE exception: if the remembering itself visibly moved someone (warmth, grief, a grudge surfacing), report that as an npc_updates bondMoment or stanceToPlayer for that person. Emit "world_facts": [] and leave every other field empty.';
+
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownLocations = null, dmLocationEvent = null, recallTurn = false }) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
 
@@ -357,6 +365,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             userMessage: [
                 `Player action: ${playerMessage}`,
                 `DM narrative: ${dmNarrative}`,
+                recallTurn ? RECALL_TURN_RULE : null,
                 authoritativeContext
                     ? `AUTHORITATIVE ENGINE STATE (prose cannot override this): ${JSON.stringify(authoritativeContext)}`
                     : null,

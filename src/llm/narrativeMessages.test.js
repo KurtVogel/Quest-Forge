@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectNarrativeEntries, collectNarrativeMessages, findLatestNarration } from './narrativeMessages.js';
+import { buildPresenceText, collectNarrativeEntries, collectNarrativeMessages, findLatestNarration } from './narrativeMessages.js';
 
 const messages = [
     { id: 'a', role: 'system', content: 'Your tale begins.' },
@@ -54,5 +54,20 @@ describe('THE narrative-eligibility predicate (2026-09-01 P1)', () => {
         ];
         expect(collectNarrativeMessages(span, 1).map(m => m.id)).toEqual(['act']);
         expect(collectNarrativeEntries(span, 1, 2).map(e => e.index)).toEqual([2]);
+    });
+});
+
+describe('kind: "record" receipt lines (recall dossier, 2026-09-18)', () => {
+    it('are bookkeeping, never story: excluded like error lines', () => {
+        const messages = [
+            { role: 'user', content: 'Saima, remember the ghouls?' },
+            { role: 'system', kind: 'record', content: '📜 From the record for Saima Aallotar: 1 journal entry.' },
+            { role: 'assistant', content: '"I remember," she says.' },
+        ];
+        expect(collectNarrativeMessages(messages).map(m => m.content)).toEqual([
+            'Saima, remember the ghouls?',
+            '"I remember," she says.',
+        ]);
+        expect(buildPresenceText(messages)).not.toContain('📜');
     });
 });

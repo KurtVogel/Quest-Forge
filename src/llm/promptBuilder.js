@@ -39,7 +39,7 @@ export const PROMPT_CHAR_BUDGET = 160000;
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord }) {
     /** Named [{name, text}] parts — joined in push order; names feed the DEV size log only. */
     const namedParts = [];
     const parts = {
@@ -233,6 +233,13 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories);
     if (ragBlock) {
         parts.push(ragBlock, 'retrievedMemories');
+    }
+
+    // "Remember when…" (WOW 2026-09-18): on a recall turn the engine's dossier
+    // of what ACTUALLY happened rides the tail, after the ambient memories, so
+    // the answer comes from the record and never from a plausible fabrication.
+    if (recallRecord && typeof recallRecord === 'string' && recallRecord.trim()) {
+        parts.push(recallRecord, 'recallRecord');
     }
 
     // Combat state

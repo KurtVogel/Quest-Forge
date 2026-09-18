@@ -33,7 +33,10 @@ export function collectNarrativeEntries(messages = [], fromIndex = 0, toIndex = 
     let skipNextAssistant = false;
     (messages || []).forEach((m, index) => {
         if (index > toIndex) return;
-        if (!m || m.hidden || m.deleted || m.kind === 'error' || typeof m.content !== 'string' || !m.content.trim()) return;
+        // `kind: 'record'` is an engine receipt about the TABLE (the recall
+        // dossier's "📜 From the record" line, 2026-09-18) — bookkeeping the
+        // chronicler and the scene painter must never retell as story.
+        if (!m || m.hidden || m.deleted || m.kind === 'error' || m.kind === 'record' || typeof m.content !== 'string' || !m.content.trim()) return;
         // The table-talk pairing is tracked from the start of the transcript,
         // not from the span: a journal batch or chapter that opens on the DM's
         // at-the-table reply must still know the OOC line just before it

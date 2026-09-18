@@ -89,6 +89,18 @@ export default function MemoryInspector({ isOpen, onClose }) {
                                     <span>Player message:</span> {lastInjection.playerMessage || '—'}
                                 </div>
                                 <div className="mi-kv"><span>Location:</span> {lastInjection.location || '—'}</div>
+                                {Array.isArray(lastInjection.record) && (
+                                    <>
+                                        <h4>The record (recall turn, {lastInjection.record.length} lines)</h4>
+                                        {lastInjection.record.length > 0 ? (
+                                            <ul className="mi-list">
+                                                {lastInjection.record.map((line, i) => (
+                                                    <li key={i} className="mi-row"><span className="mi-text">{line}</span></li>
+                                                ))}
+                                            </ul>
+                                        ) : <p className="mi-empty">Nothing on record — the DM was told not to invent.</p>}
+                                    </>
+                                )}
                                 <h4>Curated callback cards ({lastInjection.curated.length})</h4>
                                 {lastInjection.curated.length > 0 ? (
                                     <ul className="mi-list">

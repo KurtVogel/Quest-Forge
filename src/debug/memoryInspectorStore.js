@@ -37,12 +37,14 @@ function round(score) {
 }
 
 /** What the DM received this turn: RAG hits + curated callback cards, with scores. */
-export function captureInjection({ playerMessage, location, retrieved = [], curated = [] } = {}) {
+export function captureInjection({ playerMessage, location, retrieved = [], curated = [], record = null } = {}) {
     publish({
         lastInjection: {
             at: Date.now(),
             playerMessage: clip(playerMessage),
             location: clip(location, 120),
+            // The recall dossier's lines on a "remember when…" turn (2026-09-18).
+            record: Array.isArray(record) ? record.slice(0, 16).map(line => clip(line, 400)) : null,
             retrieved: (retrieved || []).slice(0, 12).map(memory => ({
                 text: clip(memory.text),
                 category: memory.category || 'unknown',

@@ -40,6 +40,8 @@ import { captureInjection } from '../debug/memoryInspectorStore.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from '../components/Chat/turnVisibility.js';
 import { buildNudgePrompt, detectMissingEventsCue, extractNudgeEventFields } from '../components/Chat/missingEventsNudge.js';
 import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../engine/roleplayCheck.js';
+import { detectRecallIntent } from './recallIntent.js';
+import { buildRecallDossier, buildRecallRecordBlock, describeRecallReceipt } from '../engine/recallDossier.js';
 
 /** How many recent (un-summarized) messages to send as LLM history. */
 export const MESSAGE_WINDOW = 20;
@@ -51,6 +53,54 @@ export { buildPresenceText, PRESENCE_MESSAGE_COUNT };
 
 /** Roster NPCs judged present in the scene, at most this many by name hit. */
 export const PRESENT_NPC_CAP = 8;
+
+/**
+ * Retrieval on a "remember when…" turn (WOW 2026-09-18): wider and looser
+ * than the ordinary scene query (8 @ 0.55), because the question is about ONE
+ * specific past thing and a rank-12 row is the difference between the true
+ * memory and a plausible fabrication.
+ */
+export const RECALL_RETRIEVAL_TOP_N = 16;
+export const RECALL_RETRIEVAL_MIN_SCORE = 0.45;
+
+/**
+ * DM channels a recall answer may not move (2026-09-18): a recap of an old
+ * reward ("you found fifty gold that day") re-emitted as an event would pay
+ * it again — the gain ledger's 4-message window is long expired by the time
+ * anyone asks. Remembering is never a mechanic.
+ */
+export const RECALL_STRIPPED_EVENT_KEYS = [
+    'requestedRolls', 'damageTaken', 'healing', 'itemsFound', 'itemsLost', 'startingItems',
+    'purchases', 'sells', 'goldFound', 'goldLost', 'silverFound', 'silverLost',
+    'copperFound', 'copperLost', 'expAwarded', 'levelUp', 'restTaken', 'spellCasts',
+    'combatStart', 'playerDeath',
+];
+
+/**
+ * The recall intent of a player line against the campaign's known entities,
+ * or null. Exposed for ChatPanel's status label and for tests.
+ */
+export function findRecallIntent(state, playerMessage) {
+    if (!playerMessage || state?.combat?.active) return null;
+    return detectRecallIntent(playerMessage, {
+        npcNames: (Array.isArray(state?.npcs) ? state.npcs : []).map(n => n?.name),
+        partyNames: (Array.isArray(state?.party) ? state.party : []).map(c => c?.name),
+        locationNames: (Array.isArray(state?.locations) ? state.locations : []).flatMap(l => [l?.name, ...(Array.isArray(l?.aliases) ? l.aliases : [])]),
+        questNames: (Array.isArray(state?.quests) ? state.quests : []).map(q => q?.name),
+    });
+}
+
+/** Strip the mechanical channels from a recall turn's events (null-safe, non-mutating). */
+export function stripRecallEvents(events) {
+    if (!events || typeof events !== 'object') return events;
+    const next = { ...events };
+    for (const key of RECALL_STRIPPED_EVENT_KEYS) {
+        if (key in next) {
+            next[key] = Array.isArray(next[key]) ? [] : (typeof next[key] === 'number' ? 0 : (typeof next[key] === 'boolean' ? false : null));
+        }
+    }
+    return next;
+}
 
 /**
  * The roster records PRESENT in the scene, for dramatic-callback curation
@@ -142,9 +192,10 @@ export function createTurnRunner({
     /**
      * Build the system prompt from current state, with optional RAG memories injected.
      */
-    const buildCurrentSystemPrompt = (retrievedMemories = [], storyMemory = []) => {
+    const buildCurrentSystemPrompt = (retrievedMemories = [], storyMemory = [], recallRecord = '') => {
         const s = getState();
         return buildSystemPrompt({
+            recallRecord,
             character: s.character,
             inventory: s.inventory,
             quests: s.quests,
@@ -243,14 +294,34 @@ export function createTurnRunner({
             npcs: findPresentNpcs(s, originalPlayerMessage),
             messages: s.messages || [],
         });
+        // "Remember when…" (WOW 2026-09-18): a question about the past gets
+        // the engine's dossier of what actually happened, wider retrieval with
+        // the asked-about people counted as present, and a no-invention block.
+        const recallIntent = (wantsMemories || opts.tableTalk) && !opts.combatIntentOnly
+            ? findRecallIntent(s, originalPlayerMessage)
+            : null;
+        const recallDossier = recallIntent ? buildRecallDossier(s, recallIntent) : null;
+        if (recallDossier) {
+            onStatus('Consulting the record');
+            dispatch({
+                type: 'ADD_MESSAGE',
+                payload: { role: 'system', kind: 'record', content: describeRecallReceipt(recallDossier, s.messages) },
+            });
+        }
         if (wantsMemories && machineryKey) {
             const sceneContext = [
+                recallIntent?.subjects?.length ? `About: ${recallIntent.subjects.join(', ')}` : null,
                 originalPlayerMessage,
                 s.currentLocation && `Location: ${s.currentLocation}`,
                 s.combat?.active && `In combat with: ${s.combat.enemies.map(e => e.name).join(', ')}`,
             ].filter(Boolean).join('. ');
-            retrievedMemories = await retrieveRelevant(machineryKey, sceneContext, 8, 0.55, {
-                presenceText: buildPresenceText(s.messages),
+            const topN = recallIntent ? RECALL_RETRIEVAL_TOP_N : 8;
+            const minScore = recallIntent ? RECALL_RETRIEVAL_MIN_SCORE : 0.55;
+            const presenceText = recallIntent?.subjects?.length
+                ? `${buildPresenceText(s.messages)} ${recallIntent.subjects.join(' ')}`
+                : buildPresenceText(s.messages);
+            retrievedMemories = await retrieveRelevant(machineryKey, sceneContext, topN, minScore, {
+                presenceText,
                 // A failed query embed is a memory-LESS turn, said out loud
                 // (2026-09-17 vector-memory P2): infrastructure line, so the
                 // chronicler never retells it and the DM window never sees it.
@@ -271,10 +342,12 @@ export function createTurnRunner({
                 location: s.currentLocation,
                 retrieved: retrievedMemories,
                 curated: dramaticMemories,
+                record: recallDossier ? recallDossier.lines : null,
             });
         }
 
-        const baseSystemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories);
+        const recallRecord = recallDossier ? buildRecallRecordBlock(recallDossier, recallIntent.question) : '';
+        const baseSystemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories, recallRecord);
         let systemPrompt = baseSystemPrompt;
         if (opts.combatIntentOnly) {
             systemPrompt = `${baseSystemPrompt}\n\n## CURRENT RESPONSE MODE — COMBAT INTENT ONLY
@@ -356,6 +429,9 @@ Translate the player's committed action into the single bounded combat_exchange 
             throw new Error('The DM returned only a data block and no prose on a narration-only turn — nothing was narrated and no game state changed. Retry the narration.');
         }
         let events = discardsEvents ? null : parsed.events;
+        // Remembering is never a mechanic: no dice, no coin, no loot, no XP
+        // from an answer about the past (RECALL_STRIPPED_EVENT_KEYS).
+        if (recallDossier && events) events = stripRecallEvents(events);
         opts.onNarrative?.(narrative);
 
         // A combat_exchange with no live combat has no machine to resolve it; left in
@@ -449,7 +525,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 type: 'ADD_MESSAGE',
                 payload: { id: msgId, role: 'assistant', content: narrative, events, hidden: hideSetup },
             });
-            lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup };
+            lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup, recall: !!recallDossier };
         }
 
         // Apply game events (damage, items, etc.)
@@ -582,11 +658,18 @@ Translate the player's committed action into the single bounded combat_exchange 
         const turnLocation = (finalNarration.events?.location && !latest.combat?.active && !finalNarration.events?.combatExchange)
             ? finalNarration.events.location
             : latest.currentLocation;
+        // A recall answer is the record read back, not new fiction (2026-09-18):
+        // the Scribe gets a RECALL TURN hint (extract nothing new but a moved
+        // heart), the loot/payment audit is OFF (a recounted reward is not a
+        // missing grant), and the answer is not embedded as narrative memory
+        // (it would rank above the original rows it paraphrases).
+        const recallTurn = !!finalNarration.recall;
         runScribe({
             playerMessage,
             dmNarrative: finalNarration.content,
             settings: latest.settings,
             dispatch,
+            recallTurn,
             knownAppearances: buildKnownAppearances(latest, playerMessage, finalNarration.content),
             knownStances: buildKnownStances(latest, playerMessage, finalNarration.content),
             knownStoryCards: buildKnownStoryCards(latest, playerMessage, finalNarration.content),
@@ -602,7 +685,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             // retries/reloads cannot double-grant. The narrated-cast backstop
             // rides these ordinary turns only — the victory-narration audit
             // (ChatPanel) recaps in-fight casts without the flag.
-            lootAudit: (!latest.combat?.active && finalNarration.id) ? {
+            lootAudit: (!latest.combat?.active && finalNarration.id && !recallTurn) ? {
                 sourceId: `${finalNarration.id}:scribe-loot`,
                 appliedEvents: finalNarration.events || null,
                 getState,
@@ -610,7 +693,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             } : null,
         }).catch(() => {});
         const machineryKey = getMachineryGeminiKey(latest.settings);
-        if (machineryKey) {
+        if (machineryKey && !recallTurn) {
             const loc = turnLocation;
             const narrativeText = loc
                 ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
