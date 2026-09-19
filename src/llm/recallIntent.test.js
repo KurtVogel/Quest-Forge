@@ -44,6 +44,35 @@ describe('isRecallQuestion — "remember when…" (WOW 2026-09-18)', () => {
     });
 });
 
+describe('isRecallQuestion — natural variants missed by the first floor (live playtest 2026-09-19)', () => {
+    it.each([
+        'Tammo, what was it you confided in me — the thing you told nobody else?',
+        'What was the thing I dug out of the Kittiwake\'s bilge? What is it called again?',
+        'What was that reef called again, the one north of the pier?',
+        'Orsa, how much do I owe you?',
+        'How much did I promise the ferryman?',
+        'What do I owe the harbormaster, exactly?',
+        'That scuffle on the quay — where was I wounded?',
+        'How did that fight on the quay end?',
+        'Who did I fight on the pier?',
+        'What was the promise I made to you, Tammo?',
+    ])('detects: %s', (message) => {
+        expect(isRecallQuestion(message)).toBe(true);
+    });
+
+    it.each([
+        'How much does the ferry cost?',
+        'What was the weather like this morning?',
+        'How did you sleep last night?',
+        'What is the toll to cross the bridge?',
+        'Who is the harbormaster?',
+        'I pay the ferryman what I owe.',
+        'Where is the reef?',
+    ])('still ignores: %s', (message) => {
+        expect(isRecallQuestion(message)).toBe(false);
+    });
+});
+
 describe('detectRecallIntent — subjects and query tokens', () => {
     const known = {
         npcNames: ['Saima Aallotar', 'Orzo', 'Captain Vell'],

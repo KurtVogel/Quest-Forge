@@ -151,7 +151,69 @@ describe('buildRecallDossier — order of authority', () => {
         expect(() => buildRecallDossier(hostile, INTENT)).not.toThrow();
         expect(buildRecallDossier(hostile, INTENT).empty).toBe(true);
         expect(buildRecallDossier(null, INTENT).empty).toBe(true);
-        expect(RECALL_DOSSIER_CHAR_BUDGET).toBe(1500);
+        expect(RECALL_DOSSIER_CHAR_BUDGET).toBe(2400);
+    });
+});
+
+describe('buildRecallDossier — the budget is shared out by tier (live playtest 2026-09-19)', () => {
+    /** The shape that starved the answer: fat quest + journal rows about the same person, the particulars only in a card, a fact, and the transcript. */
+    function starvedState() {
+        const state = makeState();
+        state.quests = Array.from({ length: 3 }, (_, i) => ({
+            id: `q${i}`, name: `Saima errand ${i}`, status: 'active', openedAtMessage: 3,
+            description: `Saima asked the hero to run errand ${i} about the ghouls. ${'y'.repeat(400)}`,
+        }));
+        state.journal = Array.from({ length: 4 }, (_, i) => ({
+            id: `jj${i}`, summary: `Journal ${i}: Saima Aallotar and the ghouls and the ferryman ${'z'.repeat(400)}`,
+            keyDecisions: ['Decided something about Saima ' + 'd'.repeat(180)], consequences: ['A consequence ' + 'c'.repeat(180)], messageRange: [0, 4],
+        }));
+        state.storyMemory.push({ id: 'm9', type: 'promise', text: 'Saima swore the ferryman lantern was his father\'s, carved with a heron.', subject: 'Saima', status: 'active', firstSeenMessage: 3, linkedNpcNames: ['Saima Aallotar'] });
+        state.worldFacts.push({ fact: 'The ferryman lantern is carved with a heron.', category: 'item', knownBy: [] });
+        return state;
+    }
+
+    it('long ledger and journal rows can no longer starve the cards, facts, and verbatim lines', () => {
+        const dossier = buildRecallDossier(starvedState(), { subjects: ['Saima Aallotar'], queryTokens: ['ferryman', 'lantern'] });
+        expect(dossier.text.length).toBeLessThanOrEqual(RECALL_DOSSIER_CHAR_BUDGET);
+        expect(dossier.text).toContain('a heron');
+        expect(dossier.text).toContain('- AS SAID');
+        expect(dossier.stats.cards + dossier.stats.facts).toBeGreaterThan(0);
+        expect(dossier.stats.verbatim).toBeGreaterThan(0);
+        expect(dossier.stats.quests).toBeGreaterThan(0);
+        expect(dossier.stats.journal).toBeGreaterThan(0);
+    });
+
+    it('the stats behind the receipt count only the rows the DM actually receives', () => {
+        for (const maxChars of [400, 900, RECALL_DOSSIER_CHAR_BUDGET]) {
+            const dossier = buildRecallDossier(starvedState(), { subjects: ['Saima Aallotar'], queryTokens: ['ferryman', 'lantern'] }, { maxChars });
+            const counted = Object.values(dossier.stats).reduce((a, b) => a + b, 0);
+            expect(counted).toBe(dossier.lines.length);
+            expect(dossier.text.length).toBeLessThanOrEqual(maxChars);
+        }
+        // The receipt line renders the delivered counts (a tiny budget names fewer things than a roomy one).
+        const tiny = buildRecallDossier(starvedState(), { subjects: ['Saima Aallotar'], queryTokens: ['ferryman'] }, { maxChars: 300 });
+        const roomy = buildRecallDossier(starvedState(), { subjects: ['Saima Aallotar'], queryTokens: ['ferryman'] });
+        const total = d => Object.values(d.stats).reduce((a, b) => a + b, 0);
+        expect(total(tiny)).toBeLessThan(total(roomy));
+    });
+
+    it('a row that does not fit is clipped or skipped, never a reason to stop', () => {
+        const state = makeState();
+        state.recentEncounters = [];
+        state.quests = [];
+        state.journal = [{ id: 'huge', summary: `Saima and the ghouls ${'w'.repeat(2000)}`, keyDecisions: [], consequences: [], messageRange: [0, 4] }];
+        state.storyMemory = [{ id: 'short', type: 'promise', text: 'Saima promised the lantern.', subject: 'Saima', status: 'active', firstSeenMessage: 3 }];
+        const dossier = buildRecallDossier(state, { subjects: ['Saima Aallotar'], queryTokens: ['ghouls'] }, { maxChars: 700 });
+        expect(dossier.text).toContain('- PROMISE on record');
+        expect(dossier.text.length).toBeLessThanOrEqual(700);
+    });
+
+    it('the receipt span covers only delivered rows', () => {
+        const state = makeState();
+        const full = buildRecallDossier(state, { subjects: ['Saima Aallotar'], queryTokens: ['ghouls'] });
+        expect(full.span).not.toBeNull();
+        const clipped = buildRecallDossier(state, { subjects: ['Saima Aallotar'], queryTokens: ['ghouls'] }, { maxChars: 160 });
+        if (clipped.span) expect(clipped.span.oldest).toBeGreaterThanOrEqual(full.span.oldest);
     });
 });
 

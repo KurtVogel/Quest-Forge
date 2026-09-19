@@ -28,7 +28,13 @@ import { conversationalDistance } from './replayLedger.js';
 import { formatSecrecyTag } from './storyMemory.js';
 import { splitBondMoments } from './npcRoster.js';
 
-export const RECALL_DOSSIER_CHAR_BUDGET = 1500;
+/**
+ * 2,400 (was 1,500, 2026-09-19): the live playtest showed 1,500 could not hold
+ * a fight + two quests + a journal row AND the cards / facts / verbatim lines
+ * that carry the particulars; ~600 tokens on a recall turn only is noise beside
+ * a 100k+ prompt. The per-tier shares (TIER_SHARES) decide who gets it.
+ */
+export const RECALL_DOSSIER_CHAR_BUDGET = 2400;
 /** Verbatim excerpt width around the first hit. */
 export const RECALL_EXCERPT_CHARS = 240;
 
@@ -143,93 +149,137 @@ function excerptAround(content, scorer) {
 }
 
 /**
+ * The tiers of the record and each one's SHARE of the character budget. The
+ * order is the order of authority; the shares exist because the old single
+ * pass filled the budget from the top and `break`-ed on the first line that
+ * did not fit — in the 2026-09-19 live playtest two quest descriptions and
+ * one journal row ate the whole 1,500 characters, so the cards, facts, people
+ * and verbatim lines that carried the actual particulars were dropped while
+ * the receipt (counted BEFORE trimming) still claimed them.
+ */
+const TIER_SHARES = [
+    { id: 'ledgers', share: 0.25 },
+    { id: 'journal', share: 0.20 },
+    { id: 'cards', share: 0.22 },
+    { id: 'people', share: 0.10 },
+    { id: 'verbatim', share: 0.23 },
+];
+/** A row is clipped to fit only when at least this much room remains; smaller gaps are skipped. */
+const MIN_CLIPPED_ROW_CHARS = 120;
+
+/**
+ * Fill the budget tier by tier. A tier spends its own share plus whatever the
+ * tiers above it left unused; a row that does not fit is clipped (when the
+ * room is worth it) or skipped — never a reason to stop, since a shorter row
+ * behind it may fit. A second pass re-offers dropped rows with any leftover.
+ * Returns the chosen rows in authority order.
+ */
+function fitToBudget(tiers, maxChars) {
+    const chosen = new Map(); // row -> final line
+    let used = 0;
+    const tryAdd = (row, room) => {
+        const need = row.line.length + 1;
+        if (need <= room) { chosen.set(row, row.line); used += need; return true; }
+        if (room - 1 >= MIN_CLIPPED_ROW_CHARS) {
+            const clipped = clip(row.line, room - 1);
+            chosen.set(row, clipped);
+            used += clipped.length + 1;
+            return true;
+        }
+        return false;
+    };
+    let carry = 0;
+    for (const tier of tiers) {
+        const shareChars = Math.floor(maxChars * (TIER_SHARES.find(t => t.id === tier.id)?.share ?? 0));
+        const room = shareChars + carry;
+        let spent = 0;
+        for (const row of tier.rows) {
+            const before = used;
+            if (!tryAdd(row, Math.min(room - spent, maxChars - used))) continue;
+            spent += used - before;
+        }
+        carry = Math.max(0, room - spent);
+    }
+    for (const tier of tiers) {
+        for (const row of tier.rows) {
+            if (chosen.has(row)) continue;
+            tryAdd(row, maxChars - used);
+        }
+    }
+    return tiers.flatMap(tier => tier.rows.filter(row => chosen.has(row)).map(row => ({ row, line: chosen.get(row) })));
+}
+
+/**
  * Assemble the dossier.
  *
  * @param {object} state - live game state
  * @param {{ subjects?: string[], queryTokens?: string[], question?: string }} intent
- * @param {{ maxChars?: number, heroName?: string }} [options]
- * @returns {{ lines: string[], text: string, stats: object, empty: boolean, subjects: string[] }}
+ * @param {{ maxChars?: number }} [options]
+ * @returns {{ lines: string[], text: string, stats: object, empty: boolean, subjects: string[], span: ({oldest:number,newest:number}|null) }}
  */
 export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CHAR_BUDGET } = {}) {
     const scorer = makeScorer(intent);
     const messages = Array.isArray(state?.messages) ? state.messages : [];
     const heroName = typeof state?.character?.name === 'string' && state.character.name.trim() ? state.character.name.trim() : 'the hero';
     const stats = { fights: 0, quests: 0, fronts: 0, rolls: 0, journal: 0, cards: 0, facts: 0, people: 0, verbatim: 0 };
-    const sections = [];
-    let oldest = null;
-    let newest = null;
-    const noteDistance = (atIndex) => {
-        if (!Number.isFinite(atIndex)) return;
-        oldest = oldest === null ? atIndex : Math.min(oldest, atIndex);
-        newest = newest === null ? atIndex : Math.max(newest, atIndex);
-    };
-    const when = (atIndex) => {
-        const label = describeScenesAgo(messages, atIndex);
-        if (label) noteDistance(atIndex);
-        return label;
-    };
+    // A row = one candidate line: `key` is its stats bucket, `at` the message index it points at.
+    const row = (key, line, at = null) => ({ key, line, at: Number.isFinite(at) ? at : null });
+    const when = (atIndex) => describeScenesAgo(messages, atIndex);
 
     if (!scorer.hasQuery) {
-        return { lines: [], text: '', stats, empty: true, subjects: [] };
+        return { lines: [], text: '', stats, empty: true, subjects: [], span: null };
     }
 
     // 1. Engine ledgers.
-    const fights = pick(
+    const ledgers = [];
+    pick(
         (Array.isArray(state?.recentEncounters) ? state.recentEncounters : []).filter(e => e && typeof e === 'object'),
         scorer,
         e => `${e.enemies || ''} ${e.location || ''} ${e.outcome || ''}`,
         CAPS.fights,
-    ).map(({ item }) => {
+    ).forEach(({ item }) => {
         const where = typeof item.location === 'string' && item.location ? ` at ${clip(item.location, 60)}` : '';
         const ago = when(item.messageIndex);
         const outcome = item.outcome === 'defeat' ? 'the party was beaten' : item.outcome === 'escaped' ? 'the party escaped' : 'the party won';
-        return `- FIGHT${ago ? ` (${ago}${where})` : where ? ` (${where.trim()})` : ''}: fought ${clip(item.enemies, 120)} — ${outcome}.`;
+        ledgers.push(row('fights', `- FIGHT${ago ? ` (${ago}${where})` : where ? ` (${where.trim()})` : ''}: fought ${clip(item.enemies, 120)} — ${outcome}.`, item.messageIndex));
     });
-    stats.fights = fights.length;
-    sections.push(...fights);
 
-    const quests = pick(
+    pick(
         (Array.isArray(state?.quests) ? state.quests : []).filter(q => q && typeof q === 'object' && typeof q.name === 'string'),
         scorer,
         q => `${q.name} ${q.description || ''}`,
         CAPS.quests,
-    ).map(({ item }) => {
+    ).forEach(({ item }) => {
         const status = typeof item.status === 'string' ? item.status : 'active';
         const ago = Number.isFinite(item.openedAtMessage) ? when(item.openedAtMessage) : '';
         const opened = ago ? `, taken up ${ago}` : '';
         const description = typeof item.description === 'string' && item.description.trim() ? `: ${clip(item.description, 160)}` : '';
-        return `- QUEST "${clip(item.name, 80)}" (${status}${opened})${description}`;
+        ledgers.push(row('quests', `- QUEST "${clip(item.name, 80)}" (${status}${opened})${description}`, item.openedAtMessage));
     });
-    stats.quests = quests.length;
-    sections.push(...quests);
 
     // Only RESOLVED fronts: a live front is hidden campaign state and never
     // enters any prompt as a dossier (DECISIONS.md 2026-07-14 / 2026-08-03).
-    const fronts = pick(
+    pick(
         (Array.isArray(state?.fronts) ? state.fronts : []).filter(f => f && typeof f === 'object' && f.status === 'resolved'),
         scorer,
         f => `${f.title || ''} ${f.faction || ''} ${f.resolution || ''} ${f.notes || ''}`,
         CAPS.fronts,
-    ).map(({ item }) => {
+    ).forEach(({ item }) => {
         const ago = when(item.resolvedAtMessage);
         const epitaph = typeof item.resolution === 'string' && item.resolution.trim() ? ` — ${clip(item.resolution, 200)}` : '';
-        return `- ENDED${ago ? ` (${ago})` : ''}: the matter of ${clip(item.title || item.faction || 'a pressure', 80)} is finished${epitaph}`;
+        ledgers.push(row('fronts', `- ENDED${ago ? ` (${ago})` : ''}: the matter of ${clip(item.title || item.faction || 'a pressure', 80)} is finished${epitaph}`, item.resolvedAtMessage));
     });
-    stats.fronts = fronts.length;
-    sections.push(...fronts);
 
-    const rolls = pick(
+    pick(
         (Array.isArray(state?.rollHistory) ? state.rollHistory : []).filter(r => r && typeof r === 'object' && typeof r.description === 'string' && r.description.trim()),
         scorer,
         r => r.description,
         CAPS.rolls,
-    ).map(({ item }) => {
+    ).forEach(({ item }) => {
         const total = Number.isFinite(item.total) ? ` rolled ${item.total}` : '';
         const crit = item.isCritical ? ' (a natural 20)' : item.isCritFail ? ' (a natural 1)' : '';
-        return `- DICE: ${clip(item.description, 120)}${total}${crit}.`;
+        ledgers.push(row('rolls', `- DICE: ${clip(item.description, 120)}${total}${crit}.`));
     });
-    stats.rolls = rolls.length;
-    sections.push(...rolls);
 
     // 2. Journal — the chronicle of what happened, never a fallback stub.
     const journal = pick(
@@ -246,13 +296,11 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
         const parts = [clip(item.summary, 320)];
         if (decisions.length) parts.push(`Decisions: ${clip(decisions.join('; '), 200)}`);
         if (consequences.length) parts.push(`Consequences: ${clip(consequences.join('; '), 200)}`);
-        return `- JOURNAL${ago ? ` (${ago}${where})` : where ? ` (${where.slice(2)})` : ''}: ${parts.join(' ')}`;
+        return row('journal', `- JOURNAL${ago ? ` (${ago}${where})` : where ? ` (${where.slice(2)})` : ''}: ${parts.join(' ')}`, end);
     });
-    stats.journal = journal.length;
-    sections.push(...journal);
 
     // 3. Story cards + world facts, secrecy tags intact.
-    const cards = pick(
+    const cardRows = pick(
         (Array.isArray(state?.storyMemory) ? state.storyMemory : []).filter(c => c && typeof c === 'object' && typeof c.text === 'string' && c.text.trim()),
         scorer,
         c => `${c.subject || ''} ${c.text} ${(Array.isArray(c.linkedNpcNames) ? c.linkedNpcNames : []).join(' ')}`,
@@ -260,19 +308,14 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
     ).map(({ item }) => {
         const ago = when(item.firstSeenMessage);
         const status = typeof item.status === 'string' ? item.status : 'active';
-        return `- ${String(item.type || 'callback').toUpperCase()} on record${ago ? ` (${ago})` : ''}${status !== 'active' ? ` [${status}]` : ''}: ${formatSecrecyTag(item.knownBy)}${clip(item.text, 240)}`;
+        return row('cards', `- ${String(item.type || 'callback').toUpperCase()} on record${ago ? ` (${ago})` : ''}${status !== 'active' ? ` [${status}]` : ''}: ${formatSecrecyTag(item.knownBy)}${clip(item.text, 240)}`, item.firstSeenMessage);
     });
-    stats.cards = cards.length;
-    sections.push(...cards);
-
-    const facts = pick(
+    const factRows = pick(
         (Array.isArray(state?.worldFacts) ? state.worldFacts : []).filter(f => f && typeof f === 'object' && typeof f.fact === 'string' && f.fact.trim()),
         scorer,
         f => f.fact,
         CAPS.facts,
-    ).map(({ item }) => `- FACT: ${formatSecrecyTag(item.knownBy)}${clip(item.fact, 240)}`);
-    stats.facts = facts.length;
-    sections.push(...facts);
+    ).map(({ item }) => row('facts', `- FACT: ${formatSecrecyTag(item.knownBy)}${clip(item.fact, 240)}`));
 
     // 4. The asked-about people: their key moments with the hero, the open thread.
     const roster = (Array.isArray(state?.npcs) ? state.npcs : []).filter(n => n && typeof n === 'object' && typeof n.name === 'string' && n.name.trim());
@@ -280,7 +323,7 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
         ? roster.filter(n => (findSubjectsInText(n.name, scorer.subjects, 1) || []).length > 0
             || (findSubjectsInText(scorer.subjects.join(' '), [n.name], 1) || []).length > 0)
         : [];
-    const people = [];
+    const peopleRows = [];
     for (const npc of namedPeople.slice(0, CAPS.people)) {
         const { key, recent } = splitBondMoments(npc.bondMoments || []);
         const moments = [...key, ...recent.slice(0, 2)]
@@ -291,38 +334,42 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
         const thread = typeof npc.openThread === 'string' && npc.openThread.trim() ? ` Between ${npc.name} and ${heroName} now: ${sentence(clip(npc.openThread, 160))}.` : '';
         if (moments.length === 0 && !thread) continue;
         const history = moments.length > 0 ? ` Moments with ${heroName}: ${sentence(clip(moments.join(' | '), 400))}.` : '';
-        people.push(`- ${clip(npc.name, 60)}'s record:${history}${thread}`);
+        peopleRows.push(row('people', `- ${clip(npc.name, 60)}'s record:${history}${thread}`));
     }
-    stats.people = people.length;
-    sections.push(...people);
 
     // 5. Verbatim lines — visible play only, and never the question being asked.
     const entries = collectNarrativeEntries(messages).filter(({ message, index }) =>
         index < messages.length - 1
         && (message.role === 'assistant' || message.role === 'user'));
-    const verbatim = pick(entries, scorer, ({ message }) => message.content, CAPS.verbatim)
+    const verbatimRows = pick(entries, scorer, ({ message }) => message.content, CAPS.verbatim)
         .sort((a, b) => a.item.index - b.item.index)
         .map(({ item }) => {
             const ago = when(item.index);
             const who = item.message.role === 'user' ? `${heroName} said` : 'the DM narrated';
-            return `- AS SAID${ago ? ` (${ago}` : '('}, ${who}): "${excerptAround(item.message.content, scorer)}"`;
+            return row('verbatim', `- AS SAID${ago ? ` (${ago}` : '('}, ${who}): "${excerptAround(item.message.content, scorer)}"`, item.index);
         });
-    stats.verbatim = verbatim.length;
-    sections.push(...verbatim);
 
-    // Budget: order of authority is push order, so the tail (verbatim) yields first.
-    const lines = [];
-    let used = 0;
-    for (const line of sections) {
-        if (used + line.length + 1 > maxChars) {
-            if (lines.length === 0) {
-                lines.push(clip(line, maxChars));
-            }
-            break;
+    const chosen = fitToBudget([
+        { id: 'ledgers', rows: ledgers },
+        { id: 'journal', rows: journal },
+        { id: 'cards', rows: [...cardRows, ...factRows] },
+        { id: 'people', rows: peopleRows },
+        { id: 'verbatim', rows: verbatimRows },
+    ], maxChars);
+
+    // Stats and the span describe what the DM actually RECEIVES — the receipt
+    // is the trust signal that the game looked, so it may not count rows the
+    // budget dropped.
+    let oldest = null;
+    let newest = null;
+    for (const { row: r } of chosen) {
+        stats[r.key] += 1;
+        if (r.at !== null) {
+            oldest = oldest === null ? r.at : Math.min(oldest, r.at);
+            newest = newest === null ? r.at : Math.max(newest, r.at);
         }
-        lines.push(line);
-        used += line.length + 1;
     }
+    const lines = chosen.map(c => c.line);
 
     return {
         lines,

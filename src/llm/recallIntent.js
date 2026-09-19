@@ -45,6 +45,18 @@ const RECALL_PATTERNS = [
     /\byou\s+(?:once\s+)?(?:told|promised|swore|mentioned|warned)\s+(?:me|us)\b/i,
     /\byou\s+said\s+(?:that|you|we|it|he|she|they|the)\b/i,
     /\bwhatever\s+(?:happened|became)\s+(?:to|of)\b/i,
+    // Added 2026-09-19 from live play: natural variants the first floor missed —
+    // "what was it you confided in me", "what was the thing I dug out" (a
+    // what-was-NOUN-SUBJECT-past-verb shape), "what is it called again", "how
+    // much do I owe", "where was I wounded", "how did that fight end", "who
+    // did I fight".
+    /\bwhat\s+(?:was|were)\s+(?:it|that|the\s+\w+|those\s+\w+)(?:\s+\w+){0,3}?\s+(?:you|i|we|he|she|they)\s+(?:\w+\s+){0,2}?(?:told|confided|said|promised|swore|gave|showed|mentioned|found|dug|carried|offered|asked|took|bought|paid|saw|heard|owed|made)\b/i,
+    /\bcalled\s+again\b/i,
+    /\bhow\s+much\s+(?:do|did|does|have)\s+(?:i|we|you|he|she|they)\s+(?:still\s+)?(?:owe|owed|pay|paid|promise|promised|give|gave)\b/i,
+    /\bwhat\s+(?:do|did)\s+(?:i|we)\s+owe\b/i,
+    /\bwhere\s+(?:was|were)\s+(?:i|we|he|she|they)\s+(?:hurt|wounded|injured|struck|hit|cut|stabbed|bitten)\b/i,
+    /\bhow\s+did\s+(?:that|the|our|my|your)\s+(?:\w+\s+){1,4}?(?:end|go|turn\s+out)\b/i,
+    /\bwho\s+(?:did|was)\s+(?:i|we)\s+(?:fight|fought|fighting|meet|kill|face|save|rescue)\b/i,
 ];
 
 /** Words that belong to the recall phrasing, not to the thing recalled. */
