@@ -129,6 +129,11 @@ export const handlers = {
     },
 
     END_COMBAT(state, action) {
+        // No fight, nothing to end (2026-09-19 audit P1): on an idle envelope
+        // this used to clear the hero's sustained spell with a false "fades as
+        // the fight ends" line — reachable through the (now retired) DM
+        // `combat_end` wire. REJECT_COMBAT_EXCHANGE carries the same guard.
+        if (!state.combat?.active) return state;
         const llmAwardedXp = action.payload?.llmAwardedXp || false;
         // Lost/abandoned fights still earn XP, but only for foes genuinely slain
         // before the end — never for enemies who fled or accepted a surrender

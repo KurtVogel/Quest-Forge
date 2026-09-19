@@ -11,7 +11,7 @@ import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
 import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
 import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
 import { sanitizeQuestRecords } from './quests.js';
-import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
+import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX, MESSAGE_CONTENT_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { canonicalEnemyId, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES, normalizeCombatExchange } from '../../engine/combatExchange.js';
@@ -43,6 +43,32 @@ function toFlag(value) {
 }
 
 const MESSAGE_ROLES = new Set(['user', 'assistant', 'system']);
+const MESSAGE_FLAGS = ['hidden', 'deleted', 'summarized'];
+
+/**
+ * A chat row at the load boundary (2026-09-19 audit P2 — the 09-18 heal typed
+ * `role` only). `content` is string-or-empty and clamped (an object content
+ * reached the DM as a "[object Object]" user line; a 300k one rode the window
+ * whole), the three visibility flags read through toFlag (`hidden: "false"` is
+ * a truthy string — the row silently vanished from the chat and the window),
+ * and a non-string `id` — a React key and a DELETE_MESSAGE target — is
+ * re-minted. A well-formed row passes through untouched.
+ */
+function typeLoadedMessage(message, index) {
+    let typed = MESSAGE_ROLES.has(message.role) ? message : { ...message, role: 'system' };
+    // Never trimmed: a well-formed row must round-trip byte-identical.
+    const content = typeof typed.content === 'string' ? typed.content.slice(0, MESSAGE_CONTENT_MAX) : '';
+    if (content !== typed.content) typed = { ...typed, content };
+    for (const flag of MESSAGE_FLAGS) {
+        if (typed[flag] !== undefined && typeof typed[flag] !== 'boolean') {
+            typed = { ...typed, [flag]: toFlag(typed[flag]) };
+        }
+    }
+    if (typeof typed.id !== 'string' || !typed.id) {
+        typed = { ...typed, id: `msg-loaded-${index}-${Math.random().toString(36).slice(2, 7)}` };
+    }
+    return typed;
+}
 
 const JOURNAL_LIST_MAX_ITEMS = 8;
 const JOURNAL_LIST_ITEM_MAX = 300;
@@ -276,12 +302,12 @@ function validateSaveState(payload) {
         // un-loadable campaign (2026-07-25 audit).
         messages: Array.isArray(payload.messages)
             ? payload.messages
-                .filter(message => message && typeof message === 'object')
-                .map(message => {
+                .filter(message => message && typeof message === 'object' && !Array.isArray(message))
+                .map((message, index) => {
                     // A role-less / non-string role threw out of the journal
                     // batch label and archived 40 messages unsummarized
                     // (2026-09-18 P2) — an unknown role is an engine line.
-                    const typed = MESSAGE_ROLES.has(message.role) ? message : { ...message, role: 'system' };
+                    const typed = typeLoadedMessage(message, index);
                     if (!typed.narrationCue) return typed;
                     const { narrationCue: _consumedCue, ...restoredMessage } = typed;
                     return restoredMessage;

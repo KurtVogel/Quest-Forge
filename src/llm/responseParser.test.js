@@ -179,7 +179,7 @@ describe('defenses against LLM misbehavior', () => {
         const dispatch = action => { state = gameReducer(state, action); };
 
         expect(events.startingItems[1]).toEqual({ name: "Mother's old lute", description: 'Carried from Tanelorn' });
-        applyEvents(events, dispatch, () => state);
+        applyEvents(events, dispatch, () => state, { openingScene: true });
 
         expect(state.inventory.filter(item => item.itemKey === 'longsword')).toHaveLength(1);
         const lutes = state.inventory.filter(item => item.name === "Mother's old lute");
@@ -1021,9 +1021,68 @@ describe('applyEvents dispatch coverage', () => {
         });
     });
 
-    it('dispatches END_COMBAT with whether the DM already awarded XP', () => {
-        const dispatch = run({ combat_end: true, exp_awarded: 40 });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'END_COMBAT', payload: { llmAwardedXp: true } });
+    it('combat_end is a retired wire: it never dispatches END_COMBAT (2026-09-19 audit P1)', () => {
+        // The combat lockout drops every event during a fight, so the wire
+        // could only ever end a fight that does not exist — clearing the
+        // hero's sustained spell with a false "fades as the fight ends" line.
+        for (const value of [true, 'false', 'true']) {
+            const dispatch = run({ combat_end: value, exp_awarded: 40 });
+            expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'END_COMBAT' }));
+            expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_EXP' }));
+        }
+    });
+
+    it('starting_items is honored on the opening lane only (2026-09-19 audit P2)', () => {
+        const payload = { starting_items: [{ name: 'Potion of Healing', quantity: 5 }, { name: 'Plate Armor', equipped: true }] };
+        const ordinary = run(payload);
+        expect(ordinary).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ITEM' }));
+        const { events } = parseResponse(fence(payload));
+        const opening = vi.fn();
+        applyEvents(events, opening, () => ({ character: {}, party: [], inventory: [] }), { openingScene: true });
+        expect(opening.mock.calls.filter(([a]) => a.type === 'ADD_ITEM')).toHaveLength(2);
+    });
+
+    it('a fight-starting setup with a queued exchange applies its structural channels, never its outcomes (2026-09-19 audit P1)', () => {
+        const { events } = parseResponse(fence({
+            quest_updates: [{ status: 'new', name: 'Save the merchant daughter' }, { status: 'completed', name: 'Old debt' }],
+            gold_found: 25,
+            damage_taken: 4,
+            exp_awarded: 50,
+            world_facts: ['Bandits hold the east road.'],
+            npc_updates: [{ name: 'Orvo the merchant' }],
+            starting_items: [{ name: 'Silver locket' }],
+            spell_cast: { spell: 'Mage Armor' },
+            combat_start: { enemies: [{ name: 'Bandit', hp: 11, ac: 12 }] },
+            combat_exchange: { player_slots: [{ action: 'attack', strikes: [{ target: 'bandit-1' }] }] },
+        }));
+        expect(events.combatExchange).toBeTruthy();
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({ character: {}, party: [], inventory: [] }), { setupPhase: true, openingScene: true, lootSourceId: 'msg-1' });
+        const types = dispatch.mock.calls.map(([a]) => a.type);
+        expect(types).toEqual(['ADD_ITEM', 'CAST_SPELL', 'ADD_QUEST', 'ADD_WORLD_FACTS', 'UPDATE_NPC', 'START_COMBAT']);
+        expect(dispatch.mock.calls.at(-1)[0].payload.queuedExchange).toBe(events.combatExchange);
+    });
+
+    it('the queued exchange owns a cast it carries: the paired spell_cast is not applied twice', () => {
+        const { events } = parseResponse(fence({
+            spell_cast: { spell: 'Magic Missile' },
+            combat_start: { enemies: [{ name: 'Bandit', hp: 11, ac: 12 }] },
+            combat_exchange: { player_slots: [{ action: 'cast', spell: 'magicMissile', target: 'bandit-1' }] },
+        }));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({ character: {}, party: [], inventory: [] }), { setupPhase: true });
+        expect(dispatch.mock.calls.map(([a]) => a.type)).toEqual(['START_COMBAT']);
+    });
+
+    it('a requested_rolls setup stays on the pure defer even beside a combat_start', () => {
+        const { events } = parseResponse(fence({
+            quest_updates: [{ status: 'new', name: 'Hold the gate' }],
+            requested_rolls: [{ type: 'skill_check', skill: 'perception', dc: 12, description: 'Spot them' }],
+            combat_start: { enemies: [{ name: 'Bandit', hp: 11, ac: 12 }] },
+        }));
+        const dispatch = vi.fn();
+        applyEvents(events, dispatch, () => ({ character: {}, party: [], inventory: [] }), { setupPhase: true });
+        expect(dispatch.mock.calls.map(([a]) => a.type)).toEqual(['START_COMBAT']);
     });
 
     it('normalizes string world facts into fact/category objects and dispatches them', () => {

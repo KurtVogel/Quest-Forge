@@ -294,6 +294,23 @@ describe('hostile wire shapes (2026-09-15 audit, Lap 2)', () => {
         expect(events.resourcesUsed).toEqual(['secondWind', 'actionSurge', 'x'.repeat(40)]);
     });
 
+    it('combat_end is retired: not a wire key, no events key (2026-09-19)', () => {
+        expect(KNOWN_WIRE_KEYS.has('combat_end')).toBe(false);
+        expect(normalizeEvents({ combat_end: true })).not.toHaveProperty('combatEnd');
+    });
+
+    it('level_up is a toFlag wire: the string "false" is false (2026-09-19 audit P1)', () => {
+        expect(normalizeEvents({ level_up: 'false' }).levelUp).toBe(false);
+        expect(normalizeEvents({ level_up: 'no' }).levelUp).toBe(false);
+        expect(normalizeEvents({ level_up: true }).levelUp).toBe(true);
+        expect(normalizeEvents({ level_up: 'true' }).levelUp).toBe(true);
+    });
+
+    it('the integer wires floor fractions at the boundary (2026-09-19 audit P2)', () => {
+        const events = normalizeEvents({ damage_taken: 0.5, healing: 7.9, exp_awarded: '12.7', gold_found: 3.99, silver_lost: 0.2 });
+        expect(events).toMatchObject({ damageTaken: 0, healing: 7, expAwarded: 12, goldFound: 3, silverLost: 0 });
+    });
+
     it('enemy_updates is retired: not a wire key, no events key, an unknown key on the wire', () => {
         expect(KNOWN_WIRE_KEYS.has('enemy_updates')).toBe(false);
         const events = normalizeEvents({ enemy_updates: [{ id: 'enemy-1', hp: 0 }] });

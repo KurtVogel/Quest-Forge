@@ -15,6 +15,112 @@ import { CLASSES } from '../data/classes.js';
 import { normalizeItem, toFlag } from '../data/items.js';
 import { isLowLevelSolo } from '../engine/combatExchange.js';
 
+const withMeta = (entry, meta) => {
+    if (Object.keys(meta).length === 0) return entry;
+    return entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? { ...entry, _meta: meta }
+        : { name: String(entry || ''), _meta: meta };
+};
+
+function buildTransactionMeta(events, opts) {
+    return {
+        ...(opts?.lootSourceId && { sourceId: opts.lootSourceId }),
+        ...(opts?.playerMessage && { playerMessage: opts.playerMessage }),
+        // A response that completes a quest is the canonical replay moment for
+        // its already-banked reward (2026-08-31 P1: handover pays, completion
+        // recap re-emits >4 messages later) — coin/item grants riding it dedupe
+        // across the wide window. The player-phrasing bypass still applies.
+        ...((events.questUpdates || []).some(q => q.status === 'completed') && { questCompletionAdjacent: true }),
+    };
+}
+
+/**
+ * Premise reconciliation has distinct semantics from ordinary loot: starting
+ * belongings must not duplicate class gear or each other. Normalize through the
+ * catalog first so aliases such as "massive warhammer" share the catalog identity.
+ *
+ * The channel exists for the ONE-TIME opening only (2026-09-19 audit P2): it
+ * sits outside the loot claim and the grant ledger and owns the equip-on-add
+ * lane, so honored on an ordinary turn it minted five potions and EQUIPPED
+ * plate armor with no guard in its way. Off the opening lane it is dropped
+ * with a warning — ordinary acquisitions ride items_found.
+ */
+function applyStartingItems(events, dispatch, state, opts) {
+    const startingItems = events.startingItems || [];
+    if (startingItems.length === 0) return;
+    if (!opts?.openingScene) {
+        console.warn("[applyEvents] Ignored starting_items outside the opening scene — the channel is the premise opening's alone.");
+        return;
+    }
+    const itemIdentityTokens = item => {
+        const normalized = normalizeItem(typeof item === 'string' ? { name: item } : item);
+        return [normalized.itemKey, normalized.name]
+            .filter(Boolean)
+            .map(value => String(value).toLowerCase().replace(/[^a-z0-9]/g, ''));
+    };
+    const startingInventoryTokens = new Set((state?.inventory || []).flatMap(itemIdentityTokens));
+    for (const item of startingItems) {
+        const normalized = normalizeItem(item);
+        const tokens = itemIdentityTokens(normalized);
+        if (tokens.some(token => startingInventoryTokens.has(token))) {
+            console.warn(`[applyEvents] Ignored duplicate premise starting item "${normalized.name}".`);
+            continue;
+        }
+        // ADD_ITEM strips a raw `equipped` at the reducer boundary; premise items
+        // that begin worn/wielded are the one sanctioned equip-on-add channel and
+        // declare that intent explicitly.
+        const { equipped: premiseEquipped, ...payload } = normalized;
+        dispatch({ type: 'ADD_ITEM', payload: { ...payload, ...(premiseEquipped === true && { equipOnAdd: true }) } });
+        tokens.forEach(token => startingInventoryTokens.add(token));
+    }
+}
+
+function applyQuestUpdates(events, dispatch, { openOnly = false } = {}) {
+    for (const quest of events.questUpdates || []) {
+        // Every branch requires an identity — a malformed update with neither id nor
+        // name would otherwise create a permanent nameless "ghost" quest row.
+        if (!quest || (!quest.id && !String(quest.name || '').trim())) continue;
+        if (quest.status === 'new' || quest.status === 'updated') {
+            // ADD_QUEST upserts by id/name, so "updated" refreshes the existing entry
+            // (or self-heals into a new one if the DM never opened it).
+            dispatch({ type: 'ADD_QUEST', payload: { ...(quest.id && { id: quest.id }), name: quest.name, description: quest.description } });
+        } else if (openOnly) {
+            continue;
+        } else if (quest.status === 'completed' && (quest.id || quest.name)) {
+            dispatch({ type: 'COMPLETE_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description } });
+        } else if (quest.status === 'failed' && (quest.id || quest.name)) {
+            dispatch({ type: 'FAIL_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description } });
+        }
+    }
+}
+
+/**
+ * The structural channels of a fight-starting response that carries a queued
+ * combat_exchange, applied BEFORE initiative. Nothing here is an outcome of the
+ * fight: quests OPENED (never closed), the opening's starting_items, world
+ * facts, NPC records, and the documented combat_start + spell_cast pairing —
+ * skipped when the queued exchange itself carries a cast slot, because then the
+ * exchange machine spends that slot (the engine may refuse to take on
+ * suspicion). `location` rides the orchestrator's own SET_LOCATION.
+ */
+function applyFightOpeningChannels(events, dispatch, getState, opts) {
+    const meta = buildTransactionMeta(events, opts);
+    applyStartingItems(events, dispatch, getState?.(), opts);
+    const exchangeOwnsCast = (events.combatExchange?.playerSlots || []).some(slot => slot?.action === 'cast');
+    if (!exchangeOwnsCast) {
+        for (const cast of events.spellCasts || []) {
+            dispatch({ type: 'CAST_SPELL', payload: withMeta(cast, meta) });
+        }
+    }
+    applyQuestUpdates(events, dispatch, { openOnly: true });
+    if ((events.worldFacts || []).length > 0) {
+        dispatch({ type: 'ADD_WORLD_FACTS', payload: events.worldFacts });
+    }
+    for (const npc of events.npcUpdates || []) {
+        dispatch({ type: 'UPDATE_NPC', payload: npc });
+    }
+}
+
 /**
  * Apply parsed events to dispatch game state changes.
  * @param {object} events - Normalized events from parseResponse/normalizeEvents
@@ -31,6 +137,17 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     // double-counting of gold, items, XP, and conditions.
     if (opts.setupPhase) {
         if (events.combatStart) {
+            // A deferral must name its replay lane (2026-09-19 audit P1). The
+            // post-roll narration replays a requested_rolls setup; a queued
+            // combat_exchange has NO such lane — its narration is narrationOnly
+            // and discards events — so "deferred" meant "dropped": the quest the
+            // merchant shouted as the bandits charged, the opening's one-time
+            // starting_items, facts, NPCs, the paired cast. Apply those
+            // structural channels now; outcome deltas (HP, coin, loot, XP,
+            // completions) stay off — the exchange machine owns the fight.
+            if (!(events.requestedRolls?.length > 0)) {
+                applyFightOpeningChannels(events, dispatch, getState, opts);
+            }
             dispatch({
                 type: 'START_COMBAT',
                 payload: {
@@ -68,30 +185,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     }
     const suppressResourceHealing = uiOwnedResources.length > 0 && events.healing > 0;
 
-    // Premise reconciliation has distinct semantics from ordinary loot: starting
-    // belongings must not duplicate class gear or each other. Normalize through the
-    // catalog first so aliases such as "massive warhammer" share the catalog identity.
-    const itemIdentityTokens = item => {
-        const normalized = normalizeItem(typeof item === 'string' ? { name: item } : item);
-        return [normalized.itemKey, normalized.name]
-            .filter(Boolean)
-            .map(value => String(value).toLowerCase().replace(/[^a-z0-9]/g, ''));
-    };
-    const startingInventoryTokens = new Set((state?.inventory || []).flatMap(itemIdentityTokens));
-    for (const item of events.startingItems || []) {
-        const normalized = normalizeItem(item);
-        const tokens = itemIdentityTokens(normalized);
-        if (tokens.some(token => startingInventoryTokens.has(token))) {
-            console.warn(`[applyEvents] Ignored duplicate premise starting item "${normalized.name}".`);
-            continue;
-        }
-        // ADD_ITEM strips a raw `equipped` at the reducer boundary; premise items
-        // that begin worn/wielded are the one sanctioned equip-on-add channel and
-        // declare that intent explicitly.
-        const { equipped: premiseEquipped, ...payload } = normalized;
-        dispatch({ type: 'ADD_ITEM', payload: { ...payload, ...(premiseEquipped === true && { equipOnAdd: true }) } });
-        tokens.forEach(token => startingInventoryTokens.add(token));
-    }
+    applyStartingItems(events, dispatch, state, opts);
 
     if (events.damageTaken > 0) {
         dispatch({ type: 'TAKE_DAMAGE', payload: events.damageTaken });
@@ -181,21 +275,8 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         }
     }
 
-    const transactionMeta = {
-        ...(lootSourceId && { sourceId: lootSourceId }),
-        ...(opts?.playerMessage && { playerMessage: opts.playerMessage }),
-        // A response that completes a quest is the canonical replay moment for
-        // its already-banked reward (2026-08-31 P1: handover pays, completion
-        // recap re-emits >4 messages later) — coin/item grants riding it dedupe
-        // across the wide window. The player-phrasing bypass still applies.
-        ...(events.questUpdates.some(q => q.status === 'completed') && { questCompletionAdjacent: true }),
-    };
-    const withTransactionMeta = (entry) => {
-        if (Object.keys(transactionMeta).length === 0) return entry;
-        return entry && typeof entry === 'object' && !Array.isArray(entry)
-            ? { ...entry, _meta: transactionMeta }
-            : { name: String(entry || ''), _meta: transactionMeta };
-    };
+    const transactionMeta = buildTransactionMeta(events, opts);
+    const withTransactionMeta = (entry) => withMeta(entry, transactionMeta);
 
     for (const item of itemsFound) {
         if (lootAlreadyClaimed) break;
@@ -359,20 +440,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         dispatch({ type: 'REMOVE_CONDITION', payload: condition });
     }
 
-    for (const quest of events.questUpdates) {
-        // Every branch requires an identity — a malformed update with neither id nor
-        // name would otherwise create a permanent nameless "ghost" quest row.
-        if (!quest || (!quest.id && !String(quest.name || '').trim())) continue;
-        if (quest.status === 'new' || quest.status === 'updated') {
-            // ADD_QUEST upserts by id/name, so "updated" refreshes the existing entry
-            // (or self-heals into a new one if the DM never opened it).
-            dispatch({ type: 'ADD_QUEST', payload: { ...(quest.id && { id: quest.id }), name: quest.name, description: quest.description } });
-        } else if (quest.status === 'completed' && (quest.id || quest.name)) {
-            dispatch({ type: 'COMPLETE_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description } });
-        } else if (quest.status === 'failed' && (quest.id || quest.name)) {
-            dispatch({ type: 'FAIL_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description } });
-        }
-    }
+    applyQuestUpdates(events, dispatch);
 
     if (events.combatStart) {
         dispatch({
@@ -384,10 +452,8 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         });
     }
 
-    if (events.combatEnd) {
-        // Pass whether the LLM awarded XP so the reducer can apply a fallback
-        dispatch({ type: 'END_COMBAT', payload: { llmAwardedXp: events.expAwarded > 0 } });
-    }
+    // `combat_end` is a retired wire (2026-09-19 audit P1): the combat lockout
+    // above means its END_COMBAT could only ever land where no fight exists.
 
     for (const comp of events.addCompanions) {
         dispatch({ type: 'ADD_COMPANION', payload: comp });

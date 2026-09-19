@@ -77,7 +77,7 @@ function createSystemMessage(kind, content) {
 }
 
 /** Is this (living) hero down — 0 HP, dying, defeated, or unconscious? */
-function isHeroDown(character) {
+export function isHeroDown(character) {
     return !!character.dying
         || !!character.lowLevelDefeat
         || (Number(character.currentHP) || 0) <= 0

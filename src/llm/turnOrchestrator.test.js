@@ -649,3 +649,68 @@ describe('turn runner — the post-stream helpers ride the turn abort signal (20
         expect(call.signal.aborted).toBe(false);
     });
 });
+
+describe('turn runner — fight-starting response shapes (2026-09-19 P1 ×2)', () => {
+    const ENEMIES = '"combat_start": {"enemies": [{"name": "Bandit", "hp": 11, "ac": 12}]}';
+
+    it('combat_start + a queued combat_exchange keeps the quest, facts, and location it carries', async () => {
+        const response = 'The merchant shoves a pouch at you — "save my daughter!" — as the bandits charge.\n'
+            + '```json\n{' + ENEMIES + ','
+            + ' "combat_exchange": {"player_slots": [{"action": "attack", "strikes": [{"target": "bandit-1"}]}]},'
+            + ' "quest_updates": [{"id": "daughter", "name": "Save the merchant daughter", "status": "new", "description": "Taken east."}],'
+            + ' "world_facts": ["Bandits hold the east road."],'
+            + ' "gold_found": 25, "location": "East Road"}\n```';
+        const { runner, getState, dispatched } = createHarness({ streamMessage: scriptedStream([response]) });
+        const goldBefore = getState().character.gold;
+
+        const events = await runner.sendToLLM('I draw steel.', 'I draw steel.');
+
+        expect(events.combatExchange).toBeTruthy();
+        expect(getState().combat.active).toBe(true);
+        expect(getState().quests.some(q => /merchant daughter/.test(q.name))).toBe(true);
+        expect(getState().worldFacts.some(f => /east road/i.test(f.fact || f))).toBe(true);
+        expect(getState().currentLocation).toBe('East Road');
+        // Outcome deltas stay off the setup — the exchange machine owns the fight.
+        expect(getState().character.gold).toBe(goldBefore);
+        expect(dispatched.some(a => a.type === 'ADD_COIN_GRANT')).toBe(false);
+    });
+
+    it('the OPENING lane: starting_items and the quest survive a mid-action premise with a queued exchange', async () => {
+        const response = 'Steel rings in the alley before you can think.\n'
+            + '```json\n{' + ENEMIES + ','
+            + ' "combat_exchange": {"player_slots": [{"action": "attack", "strikes": [{"target": "bandit-1"}]}]},'
+            + ' "starting_items": [{"name": "Silver Locket", "description": "Your sister\'s", "quantity": 1}],'
+            + ' "quest_updates": [{"id": "sister", "name": "Find your sister", "status": "new", "description": "Gone a week."}]}\n```';
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream([response]) });
+        const inventoryBefore = getState().inventory.length;
+
+        await runner.sendToLLM('[SYSTEM: open the campaign]', null, { openingScene: true });
+
+        expect(getState().combat.active).toBe(true);
+        expect(getState().inventory.length).toBe(inventoryBefore + 1);
+        expect(getState().quests.some(q => /Find your sister/.test(q.name))).toBe(true);
+    });
+
+    it('combat_start + requested_rolls: the rolls are stripped and the ambush narration stands visible', async () => {
+        const response = 'Shapes rise from the ditch on both sides of the road.\n'
+            + '```json\n{' + ENEMIES + ','
+            + ' "requested_rolls": [{"type": "skill", "skill": "perception", "dc": 12, "description": "Spot them"}]}\n```';
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream([response]) });
+
+        const events = await runner.sendToLLM('I keep walking.', 'I keep walking.');
+
+        expect(events.requestedRolls).toEqual([]);
+        expect(runner.getLastCommittedTurn().hidden).toBe(false);
+        expect(getState().messages.filter(m => m.role === 'assistant')[0].hidden).toBe(false);
+        expect(getState().combat.active).toBe(true);
+        expect(getState().pendingRoleplayCheck).toBeFalsy();
+    });
+
+    it('starting_items on an ordinary turn mints nothing', async () => {
+        const response = 'The quartermaster shrugs.\n```json\n{"starting_items": [{"name": "Plate Armor", "equipped": true}]}\n```';
+        const { runner, getState } = createHarness({ streamMessage: scriptedStream([response]) });
+        const inventoryBefore = getState().inventory.length;
+        await runner.sendToLLM('I ask for armor.', 'I ask for armor.');
+        expect(getState().inventory.length).toBe(inventoryBefore);
+    });
+});

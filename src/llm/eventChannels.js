@@ -41,6 +41,15 @@ export function clamp(value, min, max, fallback = 0) {
     return Number.isFinite(num) ? Math.max(min, Math.min(max, num)) : fallback;
 }
 
+/**
+ * The integer wires (HP deltas, XP, coin): `clamp` never floored, so a DM
+ * `damage_taken: 0.5` wrote `currentHP: 11.5` onto the sheet until the next
+ * load truncated it (2026-09-19 audit P2). Whole numbers at the wire.
+ */
+export function clampInt(value, min, max, fallback = 0) {
+    return Math.floor(clamp(value, min, max, fallback));
+}
+
 const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /**
@@ -391,8 +400,8 @@ export const EVENT_CHANNELS = [
         wire: 'requested_rolls', key: 'requestedRolls',
         read: raw => guardedList(raw.requested_rolls, { map: normalizeRequestedRoll }),
     },
-    { wire: 'damage_taken', key: 'damageTaken', read: raw => clamp(raw.damage_taken, 0, 999) },
-    { wire: 'healing', key: 'healing', read: raw => clamp(raw.healing, 0, 999) },
+    { wire: 'damage_taken', key: 'damageTaken', read: raw => clampInt(raw.damage_taken, 0, 999) },
+    { wire: 'healing', key: 'healing', read: raw => clampInt(raw.healing, 0, 999) },
     {
         wire: 'starting_items', key: 'startingItems',
         read: raw => guardedList(raw.starting_items, { allowStrings: true, cap: 12, map: normalizeStartingItem }),
@@ -431,14 +440,16 @@ export const EVENT_CHANNELS = [
         wire: 'sell', aliases: ['sells'], key: 'sells',
         read: raw => guardedList(Array.isArray(raw.sells) ? raw.sells : (raw.sell ? [raw.sell] : []), { cap: 6 }),
     },
-    { wire: 'gold_found', key: 'goldFound', read: raw => clamp(raw.gold_found, 0, MAX_COIN_EVENT) },
-    { wire: 'gold_lost', key: 'goldLost', read: raw => clamp(raw.gold_lost, 0, MAX_COIN_EVENT) },
-    { wire: 'silver_found', key: 'silverFound', read: raw => clamp(raw.silver_found, 0, MAX_COIN_EVENT) },
-    { wire: 'silver_lost', key: 'silverLost', read: raw => clamp(raw.silver_lost, 0, MAX_COIN_EVENT) },
-    { wire: 'copper_found', key: 'copperFound', read: raw => clamp(raw.copper_found, 0, MAX_COIN_EVENT) },
-    { wire: 'copper_lost', key: 'copperLost', read: raw => clamp(raw.copper_lost, 0, MAX_COIN_EVENT) },
-    { wire: 'exp_awarded', key: 'expAwarded', read: raw => clamp(raw.exp_awarded, 0, 10000) },
-    { wire: 'level_up', key: 'levelUp', read: raw => !!raw.level_up },
+    { wire: 'gold_found', key: 'goldFound', read: raw => clampInt(raw.gold_found, 0, MAX_COIN_EVENT) },
+    { wire: 'gold_lost', key: 'goldLost', read: raw => clampInt(raw.gold_lost, 0, MAX_COIN_EVENT) },
+    { wire: 'silver_found', key: 'silverFound', read: raw => clampInt(raw.silver_found, 0, MAX_COIN_EVENT) },
+    { wire: 'silver_lost', key: 'silverLost', read: raw => clampInt(raw.silver_lost, 0, MAX_COIN_EVENT) },
+    { wire: 'copper_found', key: 'copperFound', read: raw => clampInt(raw.copper_found, 0, MAX_COIN_EVENT) },
+    { wire: 'copper_lost', key: 'copperLost', read: raw => clampInt(raw.copper_lost, 0, MAX_COIN_EVENT) },
+    { wire: 'exp_awarded', key: 'expAwarded', read: raw => clampInt(raw.exp_awarded, 0, 10000) },
+    // A flag wire is a toFlag wire (2026-09-19 audit P1): `!!` read the string
+    // `"false"` most models emit for "no" as true and PAID the story milestone.
+    { wire: 'level_up', key: 'levelUp', read: raw => toFlag(raw.level_up) },
     { wire: 'rest_taken', key: 'restTaken', read: raw => (typeof raw.rest_taken === 'string' ? raw.rest_taken : null) },
     // Out-of-combat casting: the engine validates the spell and spends the slot.
     { wire: 'spell_cast', aliases: ['spells_cast', 'spell_casts'], key: 'spellCasts', read: raw => normalizeSpellCasts(raw.spell_cast ?? raw.spells_cast ?? raw.spell_casts) },
@@ -452,7 +463,11 @@ export const EVENT_CHANNELS = [
     { wire: 'quest_updates', key: 'questUpdates', read: raw => guardedList(raw.quest_updates, { cap: 8, map: normalizeQuestUpdate }) },
     { wire: 'location', key: 'location', read: raw => normalizeLocationWire(raw.location) },
     { wire: 'combat_start', key: 'combatStart', read: raw => validateCombatStart(raw.combat_start) },
-    { wire: 'combat_end', key: 'combatEnd', read: raw => !!raw.combat_end },
+    // `combat_end` was RETIRED 2026-09-19 (audit P1), the enemy_updates
+    // precedent: applyEvents drops every event during active combat, so its
+    // END_COMBAT could only ever land on an IDLE envelope — where it cleared
+    // the hero's sustained spell with a false "fades as the fight ends" line.
+    // The exchange machine's terminal path owns END_COMBAT.
     // `enemy_updates` was RETIRED 2026-09-15 (audit P2): applyEvents drops
     // every event during active combat and `combat.enemies` is empty outside
     // it, so UPDATE_ENEMY from the DM was a structural no-op that still cost

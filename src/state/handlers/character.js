@@ -4,7 +4,7 @@
  */
 import { computeACFromInventory, getModifier, normalizeConditionName, normalizeDeathSaves, CONDITION_LIST_CAP } from '../../engine/rules.js';
 import { ABILITY_NAMES, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../../engine/characterUtils.js';
-import { awardExperience, getDmBonusXpCap, getStoryMilestoneXp, isMaxLevel } from '../../engine/progression.js';
+import { awardExperience, getDmBonusXpCap, getStoryMilestoneXp, isHeroDown, isMaxLevel } from '../../engine/progression.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import { mergeNpcAppearance } from '../../engine/npcRoster.js';
 import { CHARACTER_APPEARANCE_MAX, cleanTextField } from '../../config/contentLimits.js';
@@ -172,7 +172,11 @@ export const handlers = {
         // must never nudge a 0-HP hero into a not-dying-yet-not-conscious limbo
         // or write HP onto a corpse (2026-08-30 audit; the level-up heal owns
         // revive semantics, an ability-point spend does not).
-        const heroDown = state.character.isDead || state.character.dying || state.character.lowLevelDefeat;
+        // ONE downed predicate with the level-up heal (2026-09-19 audit P2): the
+        // narrow dying/defeated test let a STABILIZED hero (0 HP, not dying,
+        // Unconscious) gain HP here and stay Unconscious — the same limbo,
+        // reached through the ability-point lane.
+        const heroDown = state.character.isDead || isHeroDown(state.character);
         const improvedCharacter = {
             ...state.character,
             abilityScores,
@@ -343,6 +347,11 @@ export const handlers = {
         }
         const result = awardExperience(state.character, amount, {
             reason: action.reason,
+            // No DM channel ends a death-save clock (2026-09-19 ruling, the
+            // 09-04 "gasped prayer" class through the XP door): a DM award
+            // that crosses a level while the hero is DYING grows the sheet and
+            // leaves the clock running. Engine-computed XP keeps the revive.
+            keepDowned: !!meta && !!state.character?.dying,
         });
         return {
             ...state,
@@ -444,6 +453,8 @@ export const handlers = {
             const atCap = isMaxLevel(level);
             const result = awardExperience(state.character, milestoneXp + bonusExp, {
                 reason: atCap ? 'story milestone — max level reached, no level gained' : 'story milestone',
+                // A DM-declared milestone never ends a death-save clock (see ADD_EXP).
+                keepDowned: !!state.character?.dying,
             });
             return {
                 ...state,

@@ -8,6 +8,8 @@
  * - setupPhase: should outcome mutations be deferred until dice resolve?
  */
 
+import { MESSAGE_CONTENT_MAX } from '../../config/contentLimits.js';
+
 /**
  * Derive the withheld-setup flags for a parsed DM response.
  *
@@ -94,6 +96,8 @@ export function buildMessageWindow(messages, windowSize) {
     });
     return unsummarized.slice(-windowSize).map(m => ({
         role: m.role === 'system' ? 'user' : m.role,
-        content: m.content,
+        // The belt behind the LOAD_GAME row heal: the window never carries a
+        // non-string or an unbounded row to a provider (2026-09-19 audit P2).
+        content: typeof m.content === 'string' ? m.content.slice(0, MESSAGE_CONTENT_MAX) : '',
     }));
 }

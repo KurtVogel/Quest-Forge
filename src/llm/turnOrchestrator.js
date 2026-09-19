@@ -453,9 +453,19 @@ Translate the player's committed action into the single bounded combat_exchange 
             console.warn('[ChatPanel] Dropped requested_rolls from the opening scene — there is no player action to adjudicate yet.');
             events = { ...events, requestedRolls: [] };
         }
+        // The same strip, keyed on combat_start (2026-09-19 audit P1): an ambush
+        // with "Perception to spot them" hid the fight's opening narration
+        // FOREVER — a hidden setup, START_COMBAT, then the in-combat roll
+        // rejection with no proposal and no reveal path, while the engine played
+        // the opening volley against prose nobody saw. A fight has the exchange
+        // machine, not dice: drop the rolls and let the narration stand.
+        if (events?.combatStart && events.requestedRolls?.length > 0) {
+            console.warn('[ChatPanel] Dropped requested_rolls riding a combat_start — the fight resolves through the exchange machine.');
+            events = { ...events, requestedRolls: [] };
+        }
 
         // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text
-        if (!opts.narrationOnly && !opts.tableTalk && (!events || !events.requestedRolls?.length) && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
+        if (!opts.narrationOnly && !opts.tableTalk && (!events || !events.requestedRolls?.length) && !events?.combatStart && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
             const semanticRolls = await detectSemanticTextRolls(narrative, s.settings, { signal: abortController.signal });
             if (semanticRolls && semanticRolls.length > 0) {
                 console.warn('[ChatPanel] Scribe detected text-based rolls semantically:', semanticRolls);
@@ -539,10 +549,16 @@ Translate the player's committed action into the single bounded combat_exchange 
             // "I buy another one" when the purchase lands after dice.
             applyEvents(events, dispatch, getState, {
                 setupPhase,
+                // starting_items is the one-time opening's channel alone.
+                openingScene: !!opts.openingScene,
                 lootSourceId: msgId,
                 playerMessage: originalPlayerMessage || opts.playerActionContext,
             });
-            if (events.location && !s.combat?.active && !events.combatExchange) {
+            // A fight-starting response's queued exchange never blocks its
+            // location: with no live combat, an exchange here always rides a
+            // combat_start (orphans were dropped above), and the narration-only
+            // lane that follows cannot replay it.
+            if (events.location && !s.combat?.active) {
                 dispatch({ type: 'SET_LOCATION', payload: events.location });
             }
         }
@@ -551,7 +567,8 @@ Translate the player's committed action into the single bounded combat_exchange 
         // The per-turn Scribe + narrative embedding run once in handleSend on the FINAL
         // narrated outcome, so they capture results rather than withheld setup text.
         // Skip on a setup turn (pending rolls) — those facts ride on the outcome narration.
-        if (!setupPhase && !s.combat?.active && events?.worldFacts?.length > 0 && machineryKey) {
+        // A fight-starting setup applied its facts already (applyEvents) — embed them too.
+        if ((!setupPhase || events?.combatStart) && !s.combat?.active && events?.worldFacts?.length > 0 && machineryKey) {
             for (const f of events.worldFacts) {
                 // Same secrecy-tagged text the mount seed builds — an untagged
                 // live embed of a secret fact was a mismatched duplicate row
@@ -605,6 +622,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             const synthetic = parseResponse('```json\n' + JSON.stringify(rawFields) + '\n```');
             if (!synthetic.events) return;
             applyEvents(synthetic.events, dispatch, getState, {
+                openingScene: cue.reason === 'opening',
                 lootSourceId: `${lootSourceId}:nudge`,
             });
             console.warn(`[ChatPanel] Missing-events nudge recovered ${Object.keys(rawFields).join(' + ')} (${cue.reason} cue).`);

@@ -66,6 +66,14 @@ export const LOCATION_NAME_MAX = 200;
  */
 export const JOURNAL_SUMMARY_MAX = 2000;
 
+/**
+ * One chat message's content ceiling (2026-09-19 audit P2). The composer caps
+ * the player at 4,000 and a DM turn runs a few thousand; a loaded 300,000-char
+ * row used to ride the DM's 20-message window WHOLE on every turn (~75k tokens
+ * per call). Shared by the LOAD_GAME row heal and buildMessageWindow's belt.
+ */
+export const MESSAGE_CONTENT_MAX = 20000;
+
 export function cleanTextField(value, max = Infinity) {
     if (typeof value !== 'string') return '';
     return value.trim().slice(0, max);
