@@ -227,7 +227,7 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
     const when = (atIndex) => describeScenesAgo(messages, atIndex);
 
     if (!scorer.hasQuery) {
-        return { lines: [], text: '', stats, empty: true, subjects: [], span: null };
+        return { lines: [], text: '', stats, empty: true, subjects: [], unknownSubjects: [], span: null };
     }
 
     // 1. Engine ledgers.
@@ -371,12 +371,31 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
     }
     const lines = chosen.map(c => c.line);
 
+    // A subject the WHOLE record never names (a fabricated cartographer, an invented
+    // night) — the receipt and the prompt say so out loud. Live playtest 2026-09-19:
+    // asked about "Isolde Vane" of a real person, the dossier held rows about the
+    // PERSON, so the receipt read "From the record for Old Tammo, Isolde, Vane…" — the
+    // trust line implied the record knew her while the honest answer came from luck.
+    const corpus = [
+        ...entries.map(({ message }) => message.content),
+        ...(Array.isArray(state?.journal) ? state.journal : []).flatMap(j => (j && typeof j === 'object'
+            ? [j.summary, ...(Array.isArray(j.keyDecisions) ? j.keyDecisions : []), ...(Array.isArray(j.consequences) ? j.consequences : [])] : [])),
+        ...(Array.isArray(state?.storyMemory) ? state.storyMemory : []).flatMap(c => (c && typeof c === 'object' ? [c.text, c.subject, ...(Array.isArray(c.linkedNpcNames) ? c.linkedNpcNames : [])] : [])),
+        ...(Array.isArray(state?.worldFacts) ? state.worldFacts : []).map(f => f?.fact),
+        ...(Array.isArray(state?.quests) ? state.quests : []).flatMap(q => (q && typeof q === 'object' ? [q.name, q.description] : [])),
+        ...(Array.isArray(state?.recentEncounters) ? state.recentEncounters : []).flatMap(e => (e && typeof e === 'object' ? [e.enemies, e.location] : [])),
+        ...roster.flatMap(n => [n.name, n.basedIn, n.lastLocation, n.openThread, ...(Array.isArray(n.bondMoments) ? n.bondMoments.map(m => m?.text) : [])]),
+        ...(Array.isArray(state?.locations) ? state.locations : []).flatMap(l => (l && typeof l === 'object' ? [l.name, ...(Array.isArray(l.aliases) ? l.aliases : [])] : [])),
+    ].filter(t => typeof t === 'string' && t);
+    const unknownSubjects = scorer.subjects.filter(subject => !corpus.some(text => (findSubjectsInText(text, [subject], 1) || []).length > 0));
+
     return {
         lines,
         text: lines.join('\n'),
         stats,
         empty: lines.length === 0,
         subjects: scorer.subjects,
+        unknownSubjects,
         span: oldest !== null ? { oldest, newest } : null,
     };
 }
@@ -397,6 +416,8 @@ export function buildRecallRecordBlock(dossier, question = '') {
     if (!dossier) return '';
     const asked = clip(question, 160);
     const about = dossier.subjects?.length ? dossier.subjects.map(s => clip(s, 40)).join(', ') : '';
+    const unknown = (dossier.unknownSubjects || []).map(s => clip(s, 40));
+    const unknownRule = unknown.length ? `\n- The record holds NOTHING about ${unknown.join(', ')} — no such person, place, or event appears anywhere in this campaign. The answering character has never met, heard of, or seen ${unknown.length === 1 ? 'it' : 'them'}: say so plainly in their own voice and never invent a memory of ${unknown.length === 1 ? 'it' : 'them'}.` : '';
     if (dossier.empty) {
         return `## THE RECORD — NOTHING FOUND, DO NOT INVENT
 The player is asking about the PAST${asked ? ` ("${asked}")` : ''}. The engine searched this campaign's whole record${about ? ` for ${about}` : ''} — journal, facts, story cards, fights, quests, the transcript itself — and found NOTHING. That is the truth of the table: it did not happen on record, or nobody present could know it.
@@ -406,7 +427,7 @@ The player is asking about the PAST${asked ? ` ("${asked}")` : ''}. The engine s
     }
     return `## THE RECORD — ANSWER FROM THIS, NEVER INVENT
 The player is asking about the PAST${asked ? ` ("${asked}")` : ''}. The engine looked it up. Below is the actual record of this campaign${about ? ` concerning ${about}` : ''}, most authoritative first (ledgers, then the journal, then cards and facts, then the people's own records, then lines quoted as said).
-${RECORD_RULES}
+${RECORD_RULES}${unknownRule}
 ${dossier.text}`;
 }
 
@@ -417,7 +438,10 @@ ${dossier.text}`;
  */
 export function describeRecallReceipt(dossier, messages = []) {
     if (!dossier) return '';
-    const about = dossier.subjects?.length ? ` for ${dossier.subjects.map(s => clip(s, 40)).join(', ')}` : '';
+    const unknown = new Set((dossier.unknownSubjects || []).map(s => clip(s, 40)));
+    const aboutNames = (dossier.subjects || []).map(s => clip(s, 40));
+    const known = aboutNames.filter(name => !unknown.has(name));
+    const about = dossier.subjects?.length ? ` for ${(dossier.empty ? aboutNames : known).join(', ')}`.replace(/ for $/, '') : '';
     if (dossier.empty) {
         return `📜 Nothing on record${about} — the character answers only from what they could honestly know.`;
     }
@@ -439,5 +463,6 @@ export function describeRecallReceipt(dossier, messages = []) {
         const newest = describeScenesAgo(messages, dossier.span.newest);
         span = oldest && newest ? (oldest === newest ? ` · ${oldest}` : ` · ${oldest} to ${newest}`) : '';
     }
-    return `📜 From the record${about}: ${parts.join(' · ')}${span}.`;
+    const nothing = unknown.size ? ` Nothing on record about ${[...unknown].join(', ')}.` : '';
+    return `📜 From the record${about}: ${parts.join(' · ')}${span}.${nothing}`;
 }

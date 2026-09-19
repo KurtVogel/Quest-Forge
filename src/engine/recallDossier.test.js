@@ -217,6 +217,60 @@ describe('buildRecallDossier — the budget is shared out by tier (live playtest
     });
 });
 
+describe('subjects the record has NOTHING about (live playtest 2026-09-19)', () => {
+    // Asked of a REAL person about a name that never appeared, the dossier holds rows about the
+    // person — the receipt used to read "From the record for Saima Aallotar, Zorbulax: …" as if
+    // the record knew Zorbulax, and the prompt never said the name was unknown.
+    const mixed = { subjects: ['Saima Aallotar', 'Zorbulax'], queryTokens: ['ghouls'] };
+
+    it('flags a subject that appears nowhere in the record, and only that one', () => {
+        const dossier = buildRecallDossier(makeState(), mixed);
+        expect(dossier.empty).toBe(false);
+        expect(dossier.unknownSubjects).toEqual(['Zorbulax']);
+        expect(buildRecallDossier(makeState(), { subjects: ['Saima Aallotar'], queryTokens: ['ghouls'] }).unknownSubjects).toEqual([]);
+    });
+
+    it('a name that appears only in the transcript, a quest, a fact, or a place record is known', () => {
+        const state = makeState();
+        state.messages.push(msg('assistant', 'A stranger called Vexley Orne watches from the bar.'));
+        state.messages.push(msg('user', 'Remember Vexley?'));
+        expect(buildRecallDossier(state, { subjects: ['Vexley'], queryTokens: [] }).unknownSubjects).toEqual([]);
+        expect(buildRecallDossier(state, { subjects: ['Broken Ford'], queryTokens: [] }).unknownSubjects).toEqual([]);
+        expect(buildRecallDossier(state, { subjects: ['Ashford'], queryTokens: [] }).unknownSubjects).toEqual([]);
+    });
+
+    it('the current question never makes its own subject known', () => {
+        const state = makeState();
+        state.messages.push(msg('user', 'Remember Zorbulax, the cartographer?'));
+        expect(buildRecallDossier(state, mixed).unknownSubjects).toEqual(['Zorbulax']);
+    });
+
+    it('the receipt keeps the found rows under the real person and says what has no record', () => {
+        const dossier = buildRecallDossier(makeState(), mixed);
+        const receipt = describeRecallReceipt(dossier, makeState().messages);
+        expect(receipt).toMatch(/^📜 From the record for Saima Aallotar:/);
+        expect(receipt).not.toMatch(/for Saima Aallotar, Zorbulax/);
+        expect(receipt).toContain('Nothing on record about Zorbulax.');
+        // Nothing unknown → no trailing claim.
+        const plain = describeRecallReceipt(buildRecallDossier(makeState(), { subjects: ['Saima Aallotar'], queryTokens: ['ghouls'] }), makeState().messages);
+        expect(plain).not.toContain('Nothing on record about');
+    });
+
+    it('the prompt block tells the DM the name never appeared, in a rule of its own', () => {
+        const block = buildRecallRecordBlock(buildRecallDossier(makeState(), mixed), 'Remember Zorbulax?');
+        expect(block).toContain('The record holds NOTHING about Zorbulax');
+        expect(block).toContain('never invent a memory of it');
+        const plain = buildRecallRecordBlock(buildRecallDossier(makeState(), { subjects: ['Saima Aallotar'], queryTokens: ['ghouls'] }), 'Remember Saima?');
+        expect(plain).not.toContain('The record holds NOTHING about');
+    });
+
+    it('an empty dossier keeps its own honest variant and lists every asked-about name', () => {
+        const empty = buildRecallDossier(makeState(), { subjects: ['Zorbulax'], queryTokens: [] });
+        expect(empty.empty).toBe(true);
+        expect(describeRecallReceipt(empty)).toBe('📜 Nothing on record for Zorbulax — the character answers only from what they could honestly know.');
+    });
+});
+
 describe('buildRecallRecordBlock + describeRecallReceipt', () => {
     it('renders the no-invention rules and the dossier lines', () => {
         const dossier = buildRecallDossier(makeState(), INTENT);
