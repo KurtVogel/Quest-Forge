@@ -141,7 +141,7 @@ flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NP
   (not queued): sticky/delay for cards, use-count eviction, heat-weighted salience,
   importance-triggered reflection, a Scribe `resolves:` verdict.
 
-### [wow] "Remember when…": the engine and the DM conspire to answer from the record — status: `shipped` (2026-09-18, one day after proposed — `llm/recallIntent.js` + `engine/recallDossier.js` + the orchestrator's record lane + `## THE RECORD`; DECISIONS.md 2026-09-18; the real-provider commitment probe asked as "remember when…" is still owed) (Vesa, 2026-09-17), priority: **HIGHEST — "THAT'S the moneyshot"**
+### [wow] "Remember when…": the engine and the DM conspire to answer from the record — status: `shipped` (2026-09-18, one day after proposed — `llm/recallIntent.js` + `engine/recallDossier.js` + the orchestrator's record lane + `## THE RECORD`; DECISIONS.md 2026-09-18; **live-verified 2026-09-19 on Gemini Pro** — `docs/RECALL_WONDER_PLAYTEST_2026-09-19.md`: 0 contradicted / 0 laundered / 0 fabricated after three fixes; a calmer-premise rerun and the M1 lexical channel remain) (Vesa, 2026-09-17), priority: **HIGHEST — "THAT'S the moneyshot"**
 **Vesa (live play 2026-09-17):** when the player asks a character about past events —
 "remember when…", "what happened at…", "what did she say…", "who was it that…" — the engine
 and the DM should conspire to bring back the **actual, factual past** as accurately as
@@ -232,7 +232,7 @@ NCP-Bench: GPT-5.2 keeps 42% of commitments alive by turn 20) is FOR — seed th
 `saltmere-debt` starter with 8 explicit commitments, then at turns 10/20/30 ask a present
 character "remember when…" about each, and let the Flash judge score recalled / laundered /
 forgotten / contradicted, before/after the dossier. Target: zero contradicted, zero
-fabricated-when-empty. **Cost:** zero extra LLM calls on the deterministic path, ~1,500
+fabricated-when-empty. **RAN 2026-09-19 (real Gemini Pro, `saltmere-debt`; `docs/RECALL_WONDER_PLAYTEST_2026-09-19.md`):** post-fix 16 exact / 8 in-fiction / 3 honest-none / 2 scene-swallowed, **0 contradicted, 0 laundered, 0 fabricated**; the pre-fix run had shown the budget starving the answer tiers and a receipt that overstated delivery — both fixed. Follow-ups: [x] receipt/counts honest, [x] detector floor, [x] `Nothing on record about X`; [ ] a calm-premise rerun (`kettle-inn-winter`) so the post-30-filler checkpoint is not confounded by a hostile DM arc; [ ] merge adjacent capitalized free names into one subject ("Isolde Vane"); [ ] injury vocabulary ("hurt" vs "cudgel cracked the shoulder") via the M1 lexical channel. **Cost:** zero extra LLM calls on the deterministic path, ~1,500
 dynamic-tail chars on recall turns only, no cache-prefix change. **Dependencies:** M1 lexical
 channel (recall of a rare name), M2 probe (the yardstick); both already queued. Extends the
 LLM WOW Layer entry above (its open "natural old detail recall" eval becomes this proof) and
@@ -385,7 +385,7 @@ only unprovoked intrusions; side quests get NO new machinery (quiet tempo + "loc
 welcome" line; quest tracker already round-trips them; the promotion path gives the good ones
 teeth). Build after the memory debug inspector — every component here is a tuning problem.
 
-### [wow] The wonder die: when nothing is happening, something strange arrives — status: `shipped` (2026-09-18, one day after proposed — `engine/wonder.js` + `llm/wonderDirector.js` + `INSTALL_WONDER` / `REQUEST_WONDER` + `## SOMETHING STRANGE ARRIVES — PRIVATE`; DECISIONS.md 2026-09-18; the caravan-premise playtest and the Settings wonder dial remain open) (Vesa, 2026-09-17), priority: HIGH
+### [wow] The wonder die: when nothing is happening, something strange arrives — status: `shipped` (2026-09-18, one day after proposed — `engine/wonder.js` + `llm/wonderDirector.js` + `INSTALL_WONDER` / `REQUEST_WONDER` + `## SOMETHING STRANGE ARRIVES — PRIVATE`; DECISIONS.md 2026-09-18; **live-verified 2026-09-19 on Gemini Pro and GPT Terra** (`docs/RECALL_WONDER_PLAYTEST_2026-09-19.md`: caravan premise, first wonder at turn 13–19, three bugs fixed); the Settings wonder dial and the standalone-weighted die remain open) (Vesa, 2026-09-17), priority: HIGH
 **The complaint, verbatim in spirit (Vesa, live play 2026-09-17):** "eventless boring wagon
 guarding trips from one generic town to another. I want to be surprised, intrigued by — a
 vampire countess taking a liking to me, a dead empire sending a magical signal in the ruins
@@ -481,6 +481,14 @@ a 30-turn `eval:memory`-style playtest on a deliberately generic caravan premise
 until the first *strange arrival*, whether it was invitational, and whether it was standalone
 or front-tied (the eval must seed a lull, not a front). Touches: `hidden-fronts-payoff` and
 `living-world` in `docs/SCHEDULED_WOW.md`'s registry; extends the world-tempo entry above.
+
+### [playtest] Wonder die + recall lane follow-ups from the 2026-09-19 real-provider run — status: `idea` (playtest 2026-09-19; `docs/RECALL_WONDER_PLAYTEST_2026-09-19.md`)
+- **Weight the wonder die toward standalone.** 3 of 6 installed wonders (2 of 4 natural, 1 of 2 on-demand) were front-tied plot hooks (a clerk with a receipt, a broker with a ledger) while the director had offered a free-standing antlered mare; Vesa's brief is "may or may not fit the larger story". A standalone floor (~50 %) in `selectWonder` — a DECISIONS call.
+- **Expose the wonder guard.** One Gemini run waited 20 turns after the lull was met (turn 20 → 40) and the harness could not name the guard (heat above the setpoint? a front at confrontation? the DM's own arrest arc). Show the holding guard in the Memory Inspector.
+- **The DM improvises drama on a "boring" premise** (Gemini Pro turned an Ashford↔Dunmere wagon run into a hallucination/arrest arc unprompted in at least two Gemini runs) — those improvised events leave no ledger row, so the lull detector counts them as quiet and the guard set (heat / fronts) is the only brake. Consider a small "DM-improvised drama" signal (a high-salience Scribe card counts today; a hero condition or a location change to a jail/cellar does not).
+- **The cue stays rendered for the whole window after landing** (5–6 turns in every run). No repeats observed, but the engine cannot tell it landed; a Scribe/DM landing signal could close the window early.
+- **Recall detector:** merge adjacent capitalized free names into one subject; injury vocabulary needs the M1 lexical channel; a Flash recall widener stays the sanctioned upgrade if the sync floor keeps missing phrasings (four misses in 25 live turns before the nine new patterns).
+- **Harness:** the recall probe should ask at checkpoints in a calm scene (or OOC-sweep all eight at C) — a hostile DM arc made the addressee unreachable in both runs.
 
 ### Location registry granularity: rooms are not places — status: partially `shipped` (2026-07-15)
 **Shipped from playtest #3**: sentence-length scene descriptions (>48 chars / >5 meaningful
