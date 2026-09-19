@@ -17,6 +17,7 @@ import { CHRONICLE_CHAPTER_TEXT_MAX } from '../../config/contentLimits.js';
 import { rollDie } from '../../engine/dice.ts';
 import {
     WONDER_TIMING_DIE_SIDES,
+    WONDER_WINDOW_MESSAGES,
     buildWonderResidueCard,
     mintPendingWonder,
     normalizeWonderHooks,
@@ -309,7 +310,24 @@ export const handlers = {
         };
         const next = { ...state, session };
         const residue = wonder ? buildWonderResidueCard(wonder) : null;
-        return residue ? gameReducer(next, { type: 'ADD_STORY_MEMORY_CARD', payload: residue }) : next;
+        if (!residue) return next;
+        const withCard = gameReducer(next, { type: 'ADD_STORY_MEMORY_CARD', payload: residue });
+        // The residue must not out-run the die (live playtest 2026-09-19): a
+        // salience-4 foreshadow card scores ~13 and rode the very next turn's
+        // DRAMATIC CALLBACK OPPORTUNITIES, so the hook landed one to two scenes
+        // BEFORE its rolled window opened — the timing die was decoration. The
+        // card's callback cooldown (lastUsedMessage, an engine stamp a lane card
+        // cannot carry) is set to the window's END, so the CUE alone lands the
+        // wonder and the card resurfaces only afterwards, as residue.
+        const holdUntil = wonder.openAtMessage + WONDER_WINDOW_MESSAGES;
+        return {
+            ...withCard,
+            storyMemory: (withCard.storyMemory || []).map(card => (
+                card && card.subject === residue.subject && Array.isArray(card.tags) && card.tags.includes('wonder')
+                    ? { ...card, lastUsedMessage: holdUntil }
+                    : card
+            )),
+        };
     },
 
     ADD_CHRONICLE_CHAPTER(state, action) {

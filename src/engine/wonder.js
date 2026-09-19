@@ -21,7 +21,7 @@
  * install so even a refused wonder is remembered.
  */
 
-import { computeRecentHeat, distanceSince, getFrontIntensityBand, normalizePaceDial } from './worldTempo.js';
+import { computeRecentHeat, distanceSince, getFrontIntensityBand, normalizePaceDial, tempoDirectiveDistances } from './worldTempo.js';
 
 /** Conversational messages of eventlessness before a wonder may be requested, by pace dial. */
 export const WONDER_MIN_LULL = { 'slow-burn': 30, standard: 20, breakneck: 14 };
@@ -50,6 +50,16 @@ const finiteIndex = (value) => {
 };
 
 /**
+ * A card the ENGINE promoted from an NPC's dossier (`npcBondCard`: tags
+ * npc + roster, source npc_roster) restates who someone is, not that something
+ * happened — meeting a farmwife minted a salience-4 "relationship" card that
+ * reset the lull like a fight would.
+ */
+function isRosterPromotion(card) {
+    return card?.source === 'npc_roster' || (Array.isArray(card?.tags) && card.tags.includes('roster'));
+}
+
+/**
  * The newest message index at which something HAPPENED: a fight, a quest
  * opened, a salient story card born, a front resolved, a permitted pressure
  * symptom, or a previous wonder. Null when the campaign has no events yet.
@@ -63,12 +73,21 @@ export function lastEventMessage(state) {
     for (const entry of (Array.isArray(state?.recentEncounters) ? state.recentEncounters : [])) note(entry?.messageIndex);
     for (const quest of (Array.isArray(state?.quests) ? state.quests : [])) note(quest?.openedAtMessage);
     for (const card of (Array.isArray(state?.storyMemory) ? state.storyMemory : [])) {
-        if (Number(card?.salience) >= WONDER_EVENT_SALIENCE) note(card?.firstSeenMessage);
+        if (Number(card?.salience) >= WONDER_EVENT_SALIENCE && !isRosterPromotion(card)) note(card?.firstSeenMessage);
     }
     for (const front of (Array.isArray(state?.fronts) ? state.fronts : [])) {
         if (front?.status === 'resolved') note(front.resolvedAtMessage);
     }
-    note(state?.worldTempo?.directive?.grantedAtMessage);
+    // A tempo directive is an EVENT only when it granted a front a window — the
+    // quiet directive every journal cadence issues (frontId null, still stamped
+    // with the cadence's message index) is the ABSENCE of one. Counting it
+    // reset the lull every ~10 messages, so the wonder die could never reach
+    // its threshold in the campaign it exists for (live playtest 2026-09-19).
+    const directive = state?.worldTempo?.directive;
+    if (directive?.frontId) {
+        const granted = finiteIndex(directive.grantedAtMessage);
+        if (granted !== null) note(granted + tempoDirectiveDistances(directive).activation);
+    }
     note(state?.session?.wonder?.openAtMessage);
     note(state?.session?.lastWonderMessage);
     return newest;
@@ -94,7 +113,9 @@ const HEAT_IDX = { calm: 0, lively: 1, high: 2 };
  * never while a front stands at confrontation, never while measured heat is
  * above the pace setpoint (a wonder is not a threat, but it is an event and
  * the thermostat is the thermostat) — and only after a real lull.
- * `onDemand` (the player asked for it) skips the lull and the cooldown only.
+ * `onDemand` (the player asked for it) skips the lull, the cooldown, and an
+ * already-open wonder (the new one replaces it); a pending request, combat, and
+ * the opening still hold.
  */
 export function shouldRequestWonder(state, { onDemand = false } = {}) {
     if (!state || state.combat?.active) return false;
@@ -102,8 +123,12 @@ export function shouldRequestWonder(state, { onDemand = false } = {}) {
     if (messages.length < WONDER_OPENING_MIN_MESSAGES) return false;
     const session = isRecord(state.session) ? state.session : {};
     if (sanitizePendingWonder(session.pendingWonder)) return false;
+    // An OPEN wonder blocks an ordinary lull request, never a player's own ask:
+    // in both 2026-09-19 playtest runs "OOC: surprise me" arrived while the
+    // first wonder's window was still open, was silently dropped, and the DM
+    // had already promised "I'll introduce a fitting opportunity".
     const current = sanitizeWonder(session.wonder);
-    if (current && !isWonderExpired(current, messages.length, messages)) return false;
+    if (!onDemand && current && !isWonderExpired(current, messages.length, messages)) return false;
     const fronts = Array.isArray(state.fronts) ? state.fronts : [];
     if (fronts.some(front => (front?.status || 'active') === 'active' && getFrontIntensityBand(front) === 'confrontation')) return false;
     const dial = normalizePaceDial(state.settings?.paceDial);

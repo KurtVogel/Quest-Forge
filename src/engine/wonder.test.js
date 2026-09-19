@@ -65,10 +65,27 @@ describe('lastEventMessage + measureLull', () => {
     });
 
     it('a permitted symptom, an open wonder, and the cooldown stamp are events too', () => {
-        expect(lastEventMessage(quietState(60, { worldTempo: { directive: { grantedAtMessage: 30 } } }))).toBe(30);
+        expect(lastEventMessage(quietState(60, { worldTempo: { directive: { frontId: 'f', grantedAtMessage: 30, activationDistance: 4 } } }))).toBe(34);
         expect(lastEventMessage(quietState(60, { session: { id: 's1', wonder: { ...HOOK, chosenAtMessage: 40, openAtMessage: 42 } } }))).toBe(42);
         expect(lastEventMessage(quietState(60, { session: { id: 's1', lastWonderMessage: 44 } }))).toBe(44);
         expect(lastEventMessage(quietState(60, { recentEncounters: [null, { messageIndex: 'junk' }, { messageIndex: true }] }))).toBeNull();
+    });
+
+    it('a QUIET tempo directive (no front) is the absence of an event, however recently the cadence stamped it', () => {
+        // Live playtest 2026-09-19: every journal cadence issues a quiet directive
+        // stamped with its own message index; counting it reset the lull to 0
+        // every ~10 messages and the wonder die could never fire.
+        const quiet = { frontId: null, maxIntensity: 'whispers', grantedAtMessage: 58, activationDistance: 0, expiryDistance: 12 };
+        expect(lastEventMessage(quietState(60, { worldTempo: { directive: quiet } }))).toBeNull();
+        expect(measureLull(quietState(60, { worldTempo: { directive: quiet } }))).toBe(60);
+    });
+
+    it('engine-promoted NPC roster cards are not events, but a salient Scribe/DM card still is', () => {
+        const rosterCard = { text: 'Toward the hero: appreciates steady work.', salience: 4, firstSeenMessage: 58, tags: ['npc', 'roster'], source: 'npc_roster' };
+        const taggedOnly = { text: 'x', salience: 5, firstSeenMessage: 57, tags: ['roster'] };
+        const realCard = { text: 'The drover swore a blood oath.', salience: 4, firstSeenMessage: 40, tags: ['oath'] };
+        expect(lastEventMessage(quietState(60, { storyMemory: [rosterCard, taggedOnly] }))).toBeNull();
+        expect(lastEventMessage(quietState(60, { storyMemory: [rosterCard, taggedOnly, realCard] }))).toBe(40);
     });
 
     it('thresholds follow the pace dial and never disable', () => {
@@ -100,6 +117,14 @@ describe('shouldRequestWonder — the guards', () => {
         expect(shouldRequestWonder(hot)).toBe(false); // also: the fight is the event, lull = 6
         expect(shouldRequestWonder(quietState(60, { recentEncounters: [{ messageIndex: 45, enemies: 'wolf', outcome: 'victory' }] }))).toBe(false);
         expect(shouldRequestWonder(quietState(60, { settings: { paceDial: 'breakneck' }, recentEncounters: [{ messageIndex: 44, enemies: 'wolf', outcome: 'victory' }] }))).toBe(true);
+    });
+
+    it('on demand also supersedes an OPEN wonder, but never a pending request (playtest 2026-09-19)', () => {
+        const open = { id: 's1', wonder: { ...HOOK, chosenAtMessage: 55, openAtMessage: 57 } };
+        expect(shouldRequestWonder(quietState(60, { session: open }))).toBe(false);
+        expect(shouldRequestWonder(quietState(60, { session: open }), { onDemand: true })).toBe(true);
+        const pending = { id: 's1', wonder: open.wonder, pendingWonder: { key: 'k', requestedAtMessage: 58 } };
+        expect(shouldRequestWonder(quietState(60, { session: pending }), { onDemand: true })).toBe(false);
     });
 
     it('on demand skips the lull and the cooldown only', () => {

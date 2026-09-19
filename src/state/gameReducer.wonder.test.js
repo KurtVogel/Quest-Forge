@@ -5,7 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
-import { WONDER_OPENING_MIN_MESSAGES } from '../engine/wonder.js';
+import { WONDER_OPENING_MIN_MESSAGES, WONDER_WINDOW_MESSAGES } from '../engine/wonder.js';
+import { scoreStoryMemory } from '../engine/storyMemory.js';
 
 const msgs = n => Array.from({ length: n }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: `m${i}`, timestamp: 1 }));
 
@@ -40,6 +41,30 @@ describe('the request tick', () => {
         expect(state.session.pendingWonder).toEqual({ key: 'wonder-30-asked', requestedAtMessage: 30, onDemand: true });
         const fighting = { ...quiet(30), combat: { ...initialGameState.combat, active: true } };
         expect(gameReducer(fighting, { type: 'REQUEST_WONDER', payload: { onDemand: true } })).toBe(fighting);
+    });
+});
+
+describe('INSTALL_WONDER — the residue card never out-runs the die (live playtest 2026-09-19)', () => {
+    it('holds the residue out of the callback lane until after the wonder window, then lets it resurface', () => {
+        const pending = gameReducer(quiet(60), { type: 'ADD_JOURNAL_ENTRY', payload: journalEntry });
+        const installed = gameReducer(pending, { type: 'INSTALL_WONDER', payload: { sessionId: 's1', key: 'wonder-60-lull', hooks: [HOOKS[0]] } });
+        const card = installed.storyMemory.find(c => (c.tags || []).includes('wonder'));
+        expect(card).toBeTruthy();
+        expect(card.lastUsedMessage).toBe(installed.session.wonder.openAtMessage + WONDER_WINDOW_MESSAGES);
+        const scene = (count) => ({ query: 'the countess carriage supper manor', messages: msgs(count), messageCount: count });
+        // Install turn, the delay scenes, and the whole window: invisible to the callback lane.
+        expect(scoreStoryMemory(card, scene(61))).toBe(0);
+        expect(scoreStoryMemory(card, scene(installed.session.wonder.openAtMessage + 2))).toBe(0);
+        expect(scoreStoryMemory(card, scene(installed.session.wonder.openAtMessage + WONDER_WINDOW_MESSAGES))).toBe(0);
+        // ...and back as residue once the cooldown after the window has passed.
+        expect(scoreStoryMemory(card, scene(installed.session.wonder.openAtMessage + WONDER_WINDOW_MESSAGES + 12))).toBeGreaterThan(0);
+    });
+
+    it('an on-demand wonder (window open at once) holds the residue the same way', () => {
+        const asked = gameReducer(quiet(30), { type: 'REQUEST_WONDER', payload: { onDemand: true } });
+        const installed = gameReducer(asked, { type: 'INSTALL_WONDER', payload: { sessionId: 's1', key: 'wonder-30-asked', hooks: [HOOKS[0]] } });
+        const card = installed.storyMemory.find(c => (c.tags || []).includes('wonder'));
+        expect(card.lastUsedMessage).toBe(30 + WONDER_WINDOW_MESSAGES);
     });
 });
 
