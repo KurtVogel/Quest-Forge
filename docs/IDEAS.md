@@ -2413,6 +2413,28 @@ prefix), an object ruling `objective` / companion `weapon` / keepsake text (`Str
 cheap standing check: diff the fields each builder renders against the fields each heal names.
 From the 2026-09-18 strengthening audit.
 
+### [strengthening] A deferral must name its replay lane; a wire whose only reachable effect is harm is a retired wire; a flag wire is a `toFlag` wire — status: `idea` (2026-09-19)
+Three rules from the run that closed Lap 2 (2026-09-19, progression + chat-orchestration).
+**(1)** `applyEvents`' `setupPhase` branch dispatches `START_COMBAT` and returns, "deferring outcome
+mutations to the post-roll narration" — but that lane exists only on the `requested_rolls` path.
+Its other two triggers (`combatExchange`, the rejected-roll flags) hand the response to lanes that
+DISCARD events (`narrationOnly`), so a fight-starting response with a queued exchange silently drops
+the quest the merchant just opened, the coin he pressed into the hero's hand, the world fact, the
+NPC update, the location, and — on the opening lane — the premise's one-time `starting_items`,
+while the 09-07 belt consumes `openingScenePending` as if the opening had landed. Rule: for every
+defer/skip branch in a pipeline, name the lane that replays it and prove that lane keeps events;
+if none does, apply the structural channels now (quests new/updated, starting items, facts, NPCs,
+location, the paired cast) and defer only the true outcome channels. A channel table in
+`applyEvents` (structural / outcome / never-in-combat) would make the policy readable instead of
+implicit in one early `return`. **(2)** `applyEvents` returns before any dispatch while combat is
+active, so its `combat_end` → `END_COMBAT` can reach the reducer ONLY when no engine fight exists —
+where the unguarded handler strips the hero's sustained ward with "fades as the fight ends". The
+09-15 `enemy_updates` retirement was the same trace. Standing check: for each DM wire, list the
+guards between the parser and the reducer and ask what state survives them; a wire that can only
+land where it does harm is retired or guarded. **(3)** `level_up` and `combat_end` were the last
+two `!!raw.` reads in `eventChannels.js`; `"false"` paid half a level. Every boolean wire reads
+through `toFlag`, no exceptions. From the 2026-09-19 strengthening audit.
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
