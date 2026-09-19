@@ -350,3 +350,9 @@
     flex-shrink: 0;
     margin-left: 0.75rem;
 }
+
+/* A key whose shape belongs to another vendor (Settings → AI Provider). */
+.setting-hint-warning {
+    color: var(--warning, #e0a54a);
+    margin-top: 0.25rem;
+}

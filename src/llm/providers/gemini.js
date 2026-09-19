@@ -201,14 +201,26 @@ export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHi
 /**
  * Generate a text embedding vector using Gemini's embedding model.
  * Returns a number[] (768 dimensions) or null on failure.
+ *
+ * `onError` (2026-09-19): the null return stays the contract for every caller,
+ * but a failed QUERY embed is said out loud to the player, and "the embedding
+ * call failed" told them nothing — a vendor switch that left the wrong key in
+ * the machinery slot reads identically to a rate limit or a dropped network.
+ * The callback receives `{ status, message, timedOut }` (the API's own error
+ * message when the body carries one) so the caller can name the cause and
+ * the remedy. It is invoked at most once per call and its throws are ignored.
  * @param {string} apiKey
  * @param {string} text - Text to embed
- * @param {{inputType?: 'document'|'query'}} [options]
+ * @param {{inputType?: 'document'|'query', onError?: (reason: EmbedFailure) => void}} [options]
  * @returns {Promise<number[]|null>}
  */
-export async function embedText(apiKey, text, { inputType = 'document' } = {}) {
+export async function embedText(apiKey, text, { inputType = 'document', onError = null } = {}) {
     if (!apiKey || !String(text || '').trim()) return null;
 
+    const report = (reason) => {
+        if (typeof onError !== 'function') return;
+        try { onError(reason); } catch { /* a diagnostic must never break the null path */ }
+    };
     const url = `${GEMINI_EMBED_BASE}/${GEMINI_EMBED_MODEL}:embedContent`;
     try {
         const formattedText = formatEmbeddingInput(text, inputType);
@@ -230,6 +242,7 @@ export async function embedText(apiKey, text, { inputType = 'document' } = {}) {
                 `[Gemini embed] HTTP ${response.status} ${response.statusText} from ${GEMINI_EMBED_MODEL}:`,
                 body.slice(0, 500),
             );
+            report({ status: response.status, message: apiErrorMessage(body) || response.statusText || '', timedOut: false });
             return null;
         }
         const data = asObject(await response.json());
@@ -239,12 +252,33 @@ export async function embedText(apiKey, text, { inputType = 'document' } = {}) {
                 `[Gemini embed] Expected ${GEMINI_EMBED_DIMENSIONS} values from ${GEMINI_EMBED_MODEL}, received ${values?.length || 0}:`,
                 data,
             );
+            report({ status: response.status, message: `Gemini returned no ${GEMINI_EMBED_DIMENSIONS}-value vector`, timedOut: false });
             return null;
         }
         return values;
     } catch (err) {
         console.error('[Gemini embed] Request failed:', err);
+        const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+        report({ status: null, message: typeof err?.message === 'string' ? err.message : '', timedOut });
         return null;
+    }
+}
+
+/**
+ * @typedef {{ status: number|null, message: string, timedOut: boolean }} EmbedFailure
+ * `status` is the HTTP status (null when no response arrived), `message` the
+ * API's own error text when the body carried one (else the status text or the
+ * exception message), `timedOut` true when the 30s stall guard fired.
+ */
+
+/** The `error.message` of a Google API error body, or '' (string-typed, clamped). */
+function apiErrorMessage(body) {
+    try {
+        const parsed = asObject(JSON.parse(body));
+        const message = asObject(parsed.error).message;
+        return typeof message === 'string' ? message.trim().slice(0, 300) : '';
+    } catch {
+        return '';
     }
 }
 

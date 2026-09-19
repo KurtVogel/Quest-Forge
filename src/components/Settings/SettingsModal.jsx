@@ -10,6 +10,7 @@ import { getFirebaseConfigError, initializeFirebase } from '../../config/firebas
 import { signInWithGoogle, logOut } from '../../state/auth.js';
 import { upgradeCampaignFrontsV2 } from '../../llm/frontUpgrade.js';
 import { clearImageCache } from '../../llm/providers/imageGen.js';
+import { describeKeyVendorMismatch } from '../../llm/machinery.js';
 import './Settings.css';
 
 export default function SettingsModal() {
@@ -355,6 +356,13 @@ export default function SettingsModal() {
     };
 
     const selectedProvider = PROVIDERS[state.settings.llmProvider];
+    // Key-shape warnings (2026-09-19): after a vendor switch two key fields
+    // share the screen, and a key in the wrong slot used to surface only as an
+    // unexplained memory outage on the first turn. Hints, never gates.
+    const dmKeyMismatch = describeKeyVendorMismatch(state.settings.apiKey, state.settings.llmProvider);
+    const memoryKeyMismatch = state.settings.llmProvider !== 'gemini'
+        ? describeKeyVendorMismatch(state.settings.geminiApiKey, 'gemini')
+        : '';
 
     return (
         <div className="settings-overlay" onClick={handleClose}>
@@ -430,6 +438,9 @@ export default function SettingsModal() {
                                             ? 'Get a key at console.x.ai — the same kind of key as scene art below. Keys pasted without the xai- prefix are normalized automatically.'
                                             : 'Get a key at platform.openai.com'}
                                 </p>
+                                {dmKeyMismatch && (
+                                    <p className="setting-hint setting-hint-warning" role="alert">{dmKeyMismatch}</p>
+                                )}
                             </div>
 
                             {state.settings.llmProvider !== 'gemini' && (
@@ -449,6 +460,9 @@ export default function SettingsModal() {
                                         break long campaigns, so the game will not start until this key is set. Get a
                                         free key at aistudio.google.com.
                                     </p>
+                                    {memoryKeyMismatch && (
+                                        <p className="setting-hint setting-hint-warning" role="alert">{memoryKeyMismatch}</p>
+                                    )}
                                 </div>
                             )}
 

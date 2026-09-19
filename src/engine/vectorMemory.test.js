@@ -105,7 +105,7 @@ describe('VectorMemory embedding roles', () => {
             2,
             'test-key',
             'What happened to Kraul?',
-            { inputType: 'query' },
+            expect.objectContaining({ inputType: 'query' }),
         );
         expect(matches).toEqual([expect.objectContaining({
             text: 'Kraul was defeated in the cavern.',
@@ -875,7 +875,7 @@ describe('2026-09-06 audit: presence from the scene, seed-wins tags, durable cap
             'Lady Celeste Jewelglade (wary): keeps the family accounts.',
         ]);
         // The embed query is untouched: presenceText is never embedded.
-        expect(embedTextMock).toHaveBeenLastCalledWith('key', 'What do you know about the ledger?', { inputType: 'query' });
+        expect(embedTextMock).toHaveBeenLastCalledWith('key', 'What do you know about the ledger?', expect.objectContaining({ inputType: 'query' }));
     });
 
     it('presenceText is presence-only: it cannot admit a row the query does not semantically reach', async () => {
@@ -1150,6 +1150,8 @@ describe('2026-09-17 audit: over-long texts, memory-less turns said out loud, ty
         embedTextMock.mockResolvedValueOnce(null);
         expect(await retrieveRelevant('key', 'bridge', 8, 0.55, { onUnavailable })).toEqual([]);
         expect(onUnavailable).toHaveBeenCalledTimes(1);
+        // No reason reported by the provider: the notice still fires, with null.
+        expect(onUnavailable).toHaveBeenCalledWith(null);
 
         embedTextMock.mockResolvedValueOnce(unitVector(5));
         expect(await retrieveRelevant('key', 'unrelated', 8, 0.55, { onUnavailable })).toEqual([]);
@@ -1158,6 +1160,22 @@ describe('2026-09-17 audit: over-long texts, memory-less turns said out loud, ty
         // A throwing notice never breaks retrieval.
         embedTextMock.mockResolvedValueOnce(null);
         await expect(retrieveRelevant('key', 'bridge', 8, 0.55, { onUnavailable: () => { throw new Error('ui'); } })).resolves.toEqual([]);
+    });
+
+    it('forwards the query embed\'s failure reason to onUnavailable (2026-09-19 — a rejected key names itself)', async () => {
+        embedTextMock.mockResolvedValue(unitVector(0));
+        await addMemory('key', 'The bridge fell last spring.', 'world_fact');
+
+        const rejected = { status: 400, message: 'API key not valid. Please pass a valid API key.', timedOut: false };
+        embedTextMock.mockImplementationOnce(async (apiKey, text, options) => {
+            expect(options.inputType).toBe('query');
+            options.onError(rejected);
+            return null;
+        });
+        const onUnavailable = vi.fn();
+        expect(await retrieveRelevant('key', 'bridge', 8, 0.55, { onUnavailable })).toEqual([]);
+        expect(onUnavailable).toHaveBeenCalledTimes(1);
+        expect(onUnavailable).toHaveBeenCalledWith(rejected);
     });
 
     it('P2: a cached row with junk category / location / subjects / text loads typed or is dropped', async () => {

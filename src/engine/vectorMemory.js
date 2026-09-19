@@ -502,8 +502,11 @@ export const CATEGORY_BOOST = {
  * @param {string} query - embedded as the search query (unchanged by presenceText)
  * @param {number} [topN]
  * @param {number} [minScore]
- * @param {{ presenceText?: string }} [options] - extra scene text (the last
- *   narrative turns) consulted ONLY for who is present; never embedded.
+ * @param {{ presenceText?: string, onUnavailable?: (reason: object|null) => void }} [options] -
+ *   `presenceText`: extra scene text (the last narrative turns) consulted ONLY
+ *   for who is present; never embedded. `onUnavailable`: called once when the
+ *   QUERY embed fails (a memory-less turn) with the provider's failure reason
+ *   (`{ status, message, timedOut }`) or null.
  */
 export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55, { presenceText = '', onUnavailable = null } = {}) {
     if (!apiKey || !query) return [];
@@ -512,13 +515,16 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55,
     if (seedInFlight) await seedInFlight.catch(() => {});
     if (memoryStore.length === 0) return [];
 
-    const queryVector = await embedText(apiKey, query, { inputType: 'query' });
+    let failure = null;
+    const queryVector = await embedText(apiKey, query, { inputType: 'query', onError: (reason) => { failure = reason; } });
     if (!queryVector) {
         // Distinct from "nothing matched" (2026-09-17 P2): a failed query
         // embed means the turn runs memory-LESS, which the caller should say
         // out loud — a console line alone hid the class from the player.
+        // The provider's reason rides along (2026-09-19): a rejected key after
+        // a vendor switch and a rate limit need different remedies.
         if (typeof onUnavailable === 'function') {
-            try { onUnavailable(); } catch { /* a notice must never break retrieval */ }
+            try { onUnavailable(failure); } catch { /* a notice must never break retrieval */ }
         }
         return [];
     }

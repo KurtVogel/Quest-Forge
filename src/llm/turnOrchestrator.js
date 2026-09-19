@@ -34,7 +34,7 @@ import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKno
 import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { addMemory, findSubjectsInText, retrieveRelevant } from '../engine/vectorMemory.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
-import { getMachineryGeminiKey } from './machinery.js';
+import { describeMemoryUnavailable, getMachineryGeminiKey } from './machinery.js';
 import { curateStoryMemory, formatSecrecyTag } from '../engine/storyMemory.js';
 import { captureInjection } from '../debug/memoryInspectorStore.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from '../components/Chat/turnVisibility.js';
@@ -326,9 +326,12 @@ export function createTurnRunner({
                 // A failed query embed is a memory-LESS turn, said out loud
                 // (2026-09-17 vector-memory P2): infrastructure line, so the
                 // chronicler never retells it and the DM window never sees it.
-                onUnavailable: () => dispatch({
+                // The line names the cause (2026-09-19): a key rejected after
+                // a vendor switch is a standing outage with a Settings remedy;
+                // a rate limit or a stall is transient.
+                onUnavailable: (reason) => dispatch({
                     type: 'ADD_MESSAGE',
-                    payload: { role: 'system', kind: 'error', content: 'Long-term memory could not be consulted this turn (the embedding call failed) — the DM answers from the recent conversation only. Nothing is lost; retrieval resumes next turn.' },
+                    payload: { role: 'system', kind: 'error', content: describeMemoryUnavailable(reason, s.settings) },
                 }),
             }).catch(() => []);
             dramaticMemories = curateDramaticMemories(sceneContext);

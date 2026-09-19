@@ -523,3 +523,67 @@ describe('embed input cap + rejected-chunk bisect (2026-09-17 vector-memory P1)'
         expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 });
+
+describe('embedText onError (2026-09-19 — the memory-less turn names its cause)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    it('reports the HTTP status and the API error message of a rejected key', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+            ok: false,
+            status: 400,
+            statusText: 'Bad Request',
+            text: async () => JSON.stringify({ error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT' } }),
+        }));
+        const onError = vi.fn();
+        expect(await embedText('sk-not-a-gemini-key', 'Who holds the bridge?', { inputType: 'query', onError })).toBeNull();
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledWith({ status: 400, message: 'API key not valid. Please pass a valid API key.', timedOut: false });
+    });
+
+    it('falls back to the status text when the error body is not JSON, and clamps a long message', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable', text: async () => '<html>oops</html>' }));
+        const onError = vi.fn();
+        await embedText('test-key', 'anything', { onError });
+        expect(onError).toHaveBeenCalledWith({ status: 503, message: 'Service Unavailable', timedOut: false });
+
+        const long = 'x'.repeat(1000);
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests', text: async () => JSON.stringify({ error: { message: long } }) }));
+        await embedText('test-key', 'anything', { onError });
+        expect(onError).toHaveBeenLastCalledWith({ status: 429, message: 'x'.repeat(300), timedOut: false });
+    });
+
+    it('marks the stall guard as timedOut and a network failure as status null', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const timeout = new Error('The operation was aborted due to timeout');
+        timeout.name = 'TimeoutError';
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(timeout));
+        const onError = vi.fn();
+        expect(await embedText('test-key', 'anything', { onError })).toBeNull();
+        expect(onError).toHaveBeenCalledWith({ status: null, message: 'The operation was aborted due to timeout', timedOut: true });
+
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+        await embedText('test-key', 'anything', { onError });
+        expect(onError).toHaveBeenLastCalledWith({ status: null, message: 'Failed to fetch', timedOut: false });
+    });
+
+    it('reports a malformed vector, ignores a throwing callback, and never calls it on success or an empty input', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ embedding: { values: [1, 2, 3] } }) }));
+        const onError = vi.fn(() => { throw new Error('ui'); });
+        await expect(embedText('test-key', 'anything', { onError })).resolves.toBeNull();
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError.mock.calls[0][0]).toMatchObject({ status: 200, timedOut: false });
+
+        const quiet = vi.fn();
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(embeddingResponse()));
+        expect(await embedText('test-key', 'anything', { onError: quiet })).toHaveLength(GEMINI_EMBED_DIMENSIONS);
+        expect(await embedText('', 'anything', { onError: quiet })).toBeNull();
+        expect(await embedText('test-key', '   ', { onError: quiet })).toBeNull();
+        expect(quiet).not.toHaveBeenCalled();
+    });
+});
