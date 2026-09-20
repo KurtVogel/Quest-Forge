@@ -34,6 +34,10 @@ export const HEARSAY_LEGEND_DISTANCE = 60;
 /** How long (conversational messages after arrival) the prompt line stays up. */
 export const HEARSAY_WINDOW_MESSAGES = 10;
 export const RECENT_HEARSAY_LIMIT = 30;
+/** A deed stops TRAVELING after this many tellings (its own ground still tells it). */
+export const HEARSAY_MAX_TELLINGS = 3;
+/** …or once it is this old in conversational messages — stale news is no news. */
+export const HEARSAY_RETIRE_DISTANCE = 200;
 
 const GRADE_GUIDANCE = {
     firsthand: 'locals witnessed it themselves or heard it first-hand — the details they repeat are accurate',
@@ -94,6 +98,11 @@ function ledgerHas(recentHearsay, deedKey, locKey, locations) {
     });
 }
 
+function countTellings(recentHearsay, deedKey) {
+    return (Array.isArray(recentHearsay) ? recentHearsay : [])
+        .filter(entry => typeof entry === 'string' && entry.startsWith(`${deedKey}|`)).length;
+}
+
 /**
  * Deterministically pick ≤2 deeds that could plausibly be tavern talk at the
  * place the hero just arrived. Pure; the SET_LOCATION handler wires it.
@@ -115,17 +124,25 @@ export function selectRegionalHearsay({
     const here = cleanText(locationName, 120);
     if (!here) return { items: [], ledgerEntries: [] };
     const locKey = locationKey(locations, here);
-    const items = [];
-    const ledgerEntries = [];
+    const hereRecord = keyToRecord(locations, locKey);
 
-    const consider = (deedKey, item) => {
-        if (items.length >= HEARSAY_MAX_ITEMS || ledgerHas(recentHearsay, deedKey, locKey, locations)) return;
-        items.push(item);
-        ledgerEntries.push(`${deedKey}|${locKey}|${messageIndex}`);
+    // Candidates from every source are gathered FIRST and ranked together
+    // (2026-09-20 audit P1): the old walk filled the two slots in source
+    // order — resolved fronts first, in array order — and a resolved front
+    // never aged out, so every new town was offered the campaign's two OLDEST
+    // victories as legend forever while the fresh victory, a salience-5
+    // witnessed moment, and last week's fight never traveled anywhere.
+    const candidates = [];
+    const consider = (source, deedKey, { local, age, text }) => {
+        // A deed retires as a TRAVELING source once it has been told enough
+        // or grown old; its own ground keeps telling it firsthand.
+        const tellings = countTellings(recentHearsay, deedKey);
+        if (!local && (age > HEARSAY_RETIRE_DISTANCE || tellings >= HEARSAY_MAX_TELLINGS)) return;
+        if (ledgerHas(recentHearsay, deedKey, locKey, locations)) return;
+        candidates.push({ source, deedKey, age, tellings, item: { text, grade: gradeFor({ local, age }) } });
     };
 
-    // Campaign-scale deeds first: a front the player ENDED is region-wide news.
-    const hereRecord = keyToRecord(locations, locKey);
+    // Campaign-scale deeds: a front the player ENDED is region-wide news.
     for (const front of Array.isArray(fronts) ? fronts : []) {
         if (front?.status !== 'resolved' || !Number.isFinite(front.resolvedAtMessage)) continue;
         // At the front's own retired theater the locals WITNESSED the ending
@@ -137,13 +154,14 @@ export function selectRegionalHearsay({
         const local = !!hereRecord && (front.resolvedTheaterIds || []).includes(hereRecord.id);
         const age = distanceSince(messages, front.resolvedAtMessage, messageIndex);
         if (!local && age < HEARSAY_MIN_TRAVEL_DISTANCE) continue;
-        consider(`front:${front.id}`, {
+        consider('front', `front:${front.id}`, {
+            local,
+            age,
             text: `the hero ending the pressure known as "${cleanText(front.title, 90)}"${front.resolution ? ` (${cleanText(front.resolution, 160)})` : ''}`,
-            grade: gradeFor({ local, age }),
         });
     }
 
-    // Witnessed story moments next (DECISIONS.md 2026-08-05 ×2): a public
+    // Witnessed story moments (DECISIONS.md 2026-08-05 ×2): a public
     // accusation, a wedding vow, a market-square humiliation — the Scribe marks
     // `witnessed` at extraction, so non-combat deeds travel too. Secrets
     // (knownBy) never do, whatever their salience.
@@ -152,25 +170,20 @@ export function selectRegionalHearsay({
             && !(Array.isArray(card.knownBy) && card.knownBy.length > 0)
             && (card.salience || 0) >= HEARSAY_MIN_CARD_SALIENCE
             && card.status !== 'dormant'
-            && Number.isFinite(card.firstSeenMessage))
-        .reverse();
+            && Number.isFinite(card.firstSeenMessage));
     for (const card of publicMoments) {
         const local = card.location ? sameSpot(locations, card.location, here) : false;
         const age = distanceSince(messages, card.firstSeenMessage, messageIndex);
         if (!local && age < HEARSAY_MIN_TRAVEL_DISTANCE) continue;
-        consider(`card:${card.id}`, {
-            text: cleanText(card.text, 220),
-            grade: gradeFor({ local, age }),
-        });
+        consider('card', `card:${card.id}`, { local, age, text: cleanText(card.text, 220) });
     }
 
-    // Then fights, newest first — a battle in a market square travels; a deal
-    // in a crypt does not (hostile sites have no gossiping witnesses).
+    // Fights — a battle in a market square travels; a deal in a crypt does
+    // not (hostile sites have no gossiping witnesses).
     const fights = (Array.isArray(recentEncounters) ? recentEncounters : [])
         .filter(entry => entry && entry.enemies && entry.location
             && Number.isFinite(entry.messageIndex)
-            && ['victory', 'defeat'].includes(entry.outcome))
-        .reverse();
+            && ['victory', 'defeat'].includes(entry.outcome));
     for (const fight of fights) {
         const originIdx = findLocationRecord(locations || [], fight.location);
         if (originIdx !== -1 && locations[originIdx].type === 'hostile_site') continue;
@@ -180,8 +193,27 @@ export function selectRegionalHearsay({
         const deed = fight.outcome === 'victory'
             ? `the hero cutting down ${cleanText(fight.enemies, 120)} at ${cleanText(fight.location, 90)}`
             : `the hero being beaten and driven off by ${cleanText(fight.enemies, 120)} at ${cleanText(fight.location, 90)}`;
-        consider(`fight:${fight.messageIndex}`, { text: deed, grade: gradeFor({ local, age }) });
+        consider('fight', `fight:${fight.messageIndex}`, { local, age, text: deed });
     }
+
+    // Untold news first, then freshest (stable sort: ties keep front → card →
+    // fight) — so consecutive towns rotate through everything worth telling
+    // instead of hearing the same two deeds. A resolved front holds at most
+    // ONE slot while anything else could be told; a second front fills the
+    // line only when nothing else is waiting.
+    candidates.sort((a, b) => (a.tellings - b.tellings) || (a.age - b.age));
+    const picked = [];
+    for (const candidate of candidates) {
+        if (picked.length >= HEARSAY_MAX_ITEMS) break;
+        if (candidate.source === 'front' && picked.some(entry => entry.source === 'front')) continue;
+        picked.push(candidate);
+    }
+    for (const candidate of candidates) {
+        if (picked.length >= HEARSAY_MAX_ITEMS) break;
+        if (!picked.includes(candidate)) picked.push(candidate);
+    }
+    const items = picked.map(candidate => candidate.item);
+    const ledgerEntries = picked.map(candidate => `${candidate.deedKey}|${locKey}|${messageIndex}`);
 
     return { items, ledgerEntries };
 }

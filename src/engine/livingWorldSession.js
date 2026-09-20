@@ -17,6 +17,7 @@
 import { INTENSITY_LEVELS } from './worldTempo.js';
 import { sanitizeRelationshipBeat } from './relationshipArc.js';
 import { sanitizePendingWonder, sanitizeWonder } from './wonder.js';
+import { sanitizeDirectorFailures } from './directorRetry.js';
 
 const HEARSAY_GRADES = ['firsthand', 'secondhand', 'legend'];
 
@@ -132,7 +133,7 @@ export function sanitizePendingFrontAftermath(raw) {
  * never carried stay absent (no `null` is minted for a field that was
  * undefined) so healthy legacy saves round-trip byte-identically.
  */
-export function sanitizeLivingWorldSession(session) {
+export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
     if (!isRecord(session)) return session;
     const next = { ...session };
     const fields = [
@@ -155,6 +156,10 @@ export function sanitizeLivingWorldSession(session) {
     if (session.lastRelationshipBeatMessage !== undefined) {
         const n = Number(session.lastRelationshipBeatMessage);
         next.lastRelationshipBeatMessage = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+    }
+    // The directors' give-up tally (2026-09-20): known names, typed entries.
+    if (session.directorFailures !== undefined) {
+        next.directorFailures = sanitizeDirectorFailures(session.directorFailures, { maxMessageCount });
     }
     for (const [field, sanitize] of fields) {
         if (session[field] === undefined) continue;

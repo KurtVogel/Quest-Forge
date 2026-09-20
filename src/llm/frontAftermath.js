@@ -87,7 +87,14 @@ export function buildFrontAftermathContext(state) {
         remainingActiveFronts: (state.fronts || [])
             .filter(front => front.id !== pending.frontId && (front.status || 'active') === 'active')
             .slice(0, 3)
-            .map(compactFront),
+            // The divergence rule needs who / what / whose — not three full
+            // dossiers (17 KB at the ceiling, 2026-09-20 audit P2). The same
+            // projection regionalFronts.js uses for the same rule.
+            .map(front => ({
+                title: cleanText(front.title, 100),
+                goal: cleanText(front.goal, 240),
+                faction: cleanText(front.faction?.name, 100),
+            })),
         campaignPremise: cleanText(state.session?.premise, CAMPAIGN_PREMISE_MAX_LENGTH),
         currentLocation: cleanText(state.currentLocation, 160),
         hero: {

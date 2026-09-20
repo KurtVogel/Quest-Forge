@@ -2443,7 +2443,7 @@ land where it does harm is retired or guarded. **(3)** `level_up` and `combat_en
 two `!!raw.` reads in `eventChannels.js`; `"false"` paid half a level. Every boolean wire reads
 through `toFlag`, no exceptions. From the 2026-09-19 strengthening audit.
 
-### [strengthening] A one-shot marker needs a give-up rule; a slot budget ranks by freshness; a "cheap" block is re-measured at its ceiling — status: `idea` (2026-09-20)
+### [strengthening] A one-shot marker needs a give-up rule; a slot budget ranks by freshness; a "cheap" block is re-measured at its ceiling — status: `done` (2026-09-20, same-day queue sweep — DECISIONS.md 2026-09-20; ranking shipped as untold-first then freshest)
 Three rules from the run that opened Lap 3 (2026-09-20, hidden-fronts + living-world).
 **(1)** Every fire-and-forget director (aftermath, absence drift, regional fronts, wonder) is keyed
 on a persisted `session.pending*` marker that only its INSTALL consumes, and ChatPanel's effect

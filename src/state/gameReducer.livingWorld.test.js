@@ -62,7 +62,10 @@ describe('absence-drift pending marker', () => {
 
         const withPending = {
             ...travel(),
-            session: { ...travel().session, pendingAbsenceDrift: { key: 'other|1', locationName: 'Elsewhere', awayDistance: 50, returnMessage: 1 } },
+            // Pending for THIS place (a related spelling): kept, never doubled.
+            // A marker for a place the hero has left is cancelled instead
+            // (2026-09-20 — gameReducer.directorRetry.test.js).
+            session: { ...travel().session, pendingAbsenceDrift: { key: 'other|1', locationName: 'Aldermill', awayDistance: 50, returnMessage: 1 } },
         };
         const kept = gameReducer(atMessages(withPending, 60), { type: 'SET_LOCATION', payload: 'Aldermill' });
         expect(kept.session.pendingAbsenceDrift.key).toBe('other|1');

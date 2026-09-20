@@ -390,8 +390,17 @@ export const handlers = {
             && Number.isFinite(record.lastVisitedMessage)
             && distanceSince(state.messages, record.lastVisitedMessage, messageIndex) < ABSENCE_DRIFT_MIN_AWAY
             && areRelatedPlaces(record, targetRecord));
+        // A drift still pending for a place the hero has LEFT is cancelled
+        // (2026-09-20 audit P2): the call would still fire and install
+        // agenda/lastNotes + a world fact under a stale awayDistance while the
+        // away block (location-gated) never renders — canon without payoff.
+        // The hearsay rule decides "left": only an UNRELATED arrival drops it.
+        const pendingDrift = state.session?.pendingAbsenceDrift;
+        const pendingDriftStale = !!pendingDrift
+            && !hearsayOfferSurvivesArrival({ locationName: pendingDrift.locationName }, locations, name);
+        if (pendingDriftStale) next.session = { ...next.session, pendingAbsenceDrift: null };
         if (awayDistance !== null && awayDistance >= ABSENCE_DRIFT_MIN_AWAY
-            && !state.session?.pendingAbsenceDrift && !driftCoolingDown && !lingeredNearby) {
+            && (!pendingDrift || pendingDriftStale) && !driftCoolingDown && !lingeredNearby) {
             next.session = {
                 ...next.session,
                 pendingAbsenceDrift: {

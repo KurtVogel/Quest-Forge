@@ -7,7 +7,9 @@ import {
     appendHearsayLedger,
     buildRegionalHearsayBlock,
     HEARSAY_LEGEND_DISTANCE,
+    HEARSAY_MAX_TELLINGS,
     HEARSAY_MIN_TRAVEL_DISTANCE,
+    HEARSAY_RETIRE_DISTANCE,
     HEARSAY_WINDOW_MESSAGES,
     RECENT_HEARSAY_LIMIT,
     sanitizeRecentHearsay,
@@ -145,14 +147,87 @@ describe('selectRegionalHearsay', () => {
             messageIndex: at,
         };
         const first = selectRegionalHearsay(base);
-        expect(first.items).toHaveLength(2); // front + newest eligible fight
+        // Freshest first (2026-09-20): the two fights are newer than the front.
+        expect(first.items).toHaveLength(2);
+        expect(first.items.map(item => item.text).join(' ')).toContain('river raiders');
+        expect(first.items.map(item => item.text).join(' ')).toContain('bandit chief');
         const again = selectRegionalHearsay({
             ...base,
             recentHearsay: appendHearsayLedger([], first.ledgerEntries),
         });
-        // The two offered deeds are blocked; the remaining fight still surfaces.
+        // The two offered deeds are blocked; the remaining deed still surfaces.
         expect(again.items).toHaveLength(1);
-        expect(again.items[0].text).toContain('bandit chief');
+        expect(again.items[0].text).toContain('The Mill Brood');
+    });
+
+    // 2026-09-20 audit P1: the slots went to the two OLDEST resolved fronts at
+    // every new place forever; a fresh victory, a witnessed card and a recent
+    // fight never traveled anywhere.
+    describe('slot ranking across sources', () => {
+        const world = (at) => ({
+            fronts: [
+                resolvedFront({ id: 'front-old-a', title: 'The Ash Tithe', resolvedAtMessage: 20 }),
+                resolvedFront({ id: 'front-old-b', title: 'The Salt Debt', resolvedAtMessage: 40 }),
+                resolvedFront({ id: 'front-fresh', title: 'The Lantern Court', resolvedAtMessage: at - 20 }),
+            ],
+            storyMemory: [{
+                id: 'card-1', text: 'The hero shamed the reeve before the whole market.', witnessed: true,
+                salience: 5, status: 'active', firstSeenMessage: at - 30, location: 'Mill Row',
+            }],
+            recentEncounters: [{ enemies: 'toll thugs', location: 'Mill Row', outcome: 'victory', messageIndex: at - 16 }],
+            messages: msgs(at),
+            messageIndex: at,
+        });
+
+        it('gives a front at most one slot while another source has news, and picks the FRESHEST front', () => {
+            const { items } = selectRegionalHearsay({ ...world(400), locationName: 'Saltmarsh' });
+            expect(items).toHaveLength(2);
+            expect(items[0].text).toContain('toll thugs');
+            expect(items[1].text).toContain('The Lantern Court');
+        });
+
+        it('rotates through every source across consecutive towns instead of repeating two ancient victories', () => {
+            let recentHearsay = [];
+            const told = [];
+            for (const town of ['Saltmarsh', 'Greyford', 'Pikehold']) {
+                const result = selectRegionalHearsay({ ...world(400), recentHearsay, locationName: town });
+                recentHearsay = appendHearsayLedger(recentHearsay, result.ledgerEntries);
+                told.push(...result.items.map(item => item.text));
+            }
+            const all = told.join(' | ');
+            expect(all).toContain('toll thugs');
+            expect(all).toContain('shamed the reeve');
+            expect(all).toContain('The Lantern Court');
+        });
+
+        it('retires a deed as a traveling source after HEARSAY_MAX_TELLINGS tellings', () => {
+            const recentHearsay = ['Aford', 'Bford', 'Cford'].map(town => `front:front-brood|${town}|50`);
+            const { items } = selectRegionalHearsay({
+                fronts: [resolvedFront()], recentHearsay, locationName: 'Saltmarsh', messages: msgs(60), messageIndex: 60,
+            });
+            expect(HEARSAY_MAX_TELLINGS).toBe(3);
+            expect(items).toHaveLength(0);
+        });
+
+        it('retires a distant deed past HEARSAY_RETIRE_DISTANCE but keeps telling it on its own ground', () => {
+            const at = HEARSAY_RETIRE_DISTANCE + 40;
+            const front = resolvedFront({ resolvedTheaterIds: ['loc-mill'] });
+            const locations = [{ id: 'loc-mill', name: 'Mill Row', aliases: [], theaterFrontIds: [] }];
+            const away = selectRegionalHearsay({ fronts: [front], locations, locationName: 'Saltmarsh', messages: msgs(at), messageIndex: at });
+            expect(away.items).toHaveLength(0);
+            const home = selectRegionalHearsay({ fronts: [front], locations, locationName: 'Mill Row', messages: msgs(at), messageIndex: at });
+            expect(home.items).toHaveLength(1);
+            expect(home.items[0].grade).toBe('firsthand');
+        });
+
+        it('lets a second front fill the line when nothing else is waiting', () => {
+            const { items } = selectRegionalHearsay({
+                fronts: [resolvedFront({ id: 'a', title: 'The Ash Tithe' }), resolvedFront({ id: 'b', title: 'The Salt Debt', resolvedAtMessage: 10 })],
+                locationName: 'Saltmarsh', messages: msgs(60), messageIndex: 60,
+            });
+            expect(items).toHaveLength(2);
+            expect(items[0].text).toContain('The Salt Debt');
+        });
     });
 
     it('returns nothing without a location name', () => {

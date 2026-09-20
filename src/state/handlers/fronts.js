@@ -13,6 +13,7 @@ import {
 } from '../../engine/fronts.js';
 import { DM_CLOCK_GAIN_WINDOW, MAX_ACTIVE_FRONTS, normalizeTempoDirective, WEB_TARGET_FRONTS } from '../../engine/worldTempo.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
+import { DIRECTOR_MAX_ATTEMPTS, getDirectorFailure, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
 import { awardExperience, getFrontResolutionMilestoneXp } from '../../engine/progression.js';
 import { upsertLocation } from '../../engine/locationRegistry.js';
 import { gameReducer } from '../gameReducer.js';
@@ -370,6 +371,37 @@ export const handlers = {
         }
         // Private like every front: no system line, the player only ever feels it.
         return { ...state, session, fronts: [...fronts, ...additions], locations };
+    },
+
+    /**
+     * A background director's call failed (2026-09-20 audit P1). The tally is
+     * reducer-owned so it survives reloads: ChatPanel holds a failed key back
+     * for DIRECTOR_RETRY_MIN_DISTANCE conversational messages, and the third
+     * failure CONSUMES the marker through the director's own installer with
+     * an empty result — the quiet answer ("clean victory", "nothing changed",
+     * "no natives", "no wonder") every installer already treats as
+     * first-class. A failure for a marker that is no longer pending (a late
+     * rejection, another campaign) is dropped.
+     */
+    DIRECTOR_ATTEMPT_FAILED(state, action) {
+        const payload = action.payload && typeof action.payload === 'object' ? action.payload : {};
+        const { name, key } = payload;
+        if (typeof name !== 'string' || !Object.hasOwn(RETRYABLE_DIRECTORS, name)) return state;
+        if (typeof key !== 'string' || !key || payload.sessionId !== state.session?.id) return state;
+        const director = RETRYABLE_DIRECTORS[name];
+        if (director.pendingKey(state.session) !== key) return state;
+        const attempts = (getDirectorFailure(state.session, name, key)?.attempts || 0) + 1;
+        const failures = { ...(state.session?.directorFailures || {}) };
+        if (attempts < DIRECTOR_MAX_ATTEMPTS) {
+            failures[name] = { key, attempts, atMessage: (state.messages || []).length };
+            return { ...state, session: { ...state.session, directorFailures: failures } };
+        }
+        delete failures[name];
+        console.warn(`[LivingWorld] ${name} failed ${attempts} times for ${key}; giving up — the quiet answer stands.`);
+        return gameReducer(
+            { ...state, session: { ...state.session, directorFailures: failures } },
+            director.giveUp(state.session.id, key)
+        );
     },
 
     APPLY_FRONT_ADVANCE_BATCH(state, action) {

@@ -481,6 +481,49 @@ describe('resolved-front victory echo', () => {
         expect(block).not.toContain('front-brood (');
     });
 
+    // 2026-09-20 audit P2: the block measured 7,422 chars at its ceiling — the
+    // heat reasons rendered twice, every echo repeated the ~390-char
+    // instruction, and "Recent fights" rendered 200-char enemies unclamped.
+    it('stays bounded at its everything-at-once ceiling: reasons once, one echo instruction, clamped fight lines', () => {
+        const reasons = [
+            '5 fights in the last scenes, including hard ones',
+            'the hero is badly wounded and has not recovered',
+            '4 checks under pressure in the last scenes, some against strong opposition',
+            'a pressure symptom was recently permitted',
+        ];
+        const bigFront = (id, extra = {}) => front({
+            id,
+            faction: { name: `Faction ${id} `.padEnd(100, 'f'), goal: 'g'.repeat(300) },
+            publicHints: Array.from({ length: 6 }, (_, i) => `hint ${i} `.padEnd(240, 'h')),
+            clock: 7, stage: 3,
+            ...extra,
+        });
+        const echo = (id) => ({
+            ...resolvedFront, id, title: `Ended ${id} `.padEnd(160, 't'), resolution: 'r'.repeat(240), resolvedAtMessage: 95,
+        });
+        const block = buildWorldTempoBlock({
+            fronts: [bigFront('front-a'), bigFront('front-b'), bigFront('front-c'), bigFront('front-d'), echo('front-x'), echo('front-y')],
+            worldTempo: { directive: {
+                frontId: 'front-a', maxIntensity: 'confrontation', where: 'w'.repeat(200), suggestedSymptom: 's'.repeat(300),
+                grantedAtMessage: 90, activatesAtMessage: 90, expiresAtMessage: 130,
+            } },
+            heat: { level: 'high', reasons },
+            paceDial: 'slow-burn',
+            messageCount: 100,
+            solo: true,
+            recentEncounters: Array.from({ length: 10 }, (_, i) => ({
+                enemies: `${i + 2}× marsh ghoul `.padEnd(200, 'e'), location: `Place ${i} `.padEnd(120, 'l'), outcome: 'victory', messageIndex: 50 + i * 4,
+            })),
+        });
+        expect(block).toContain("THIS SCENE'S PERMISSION");
+        expect(block.split(reasons[0]).length - 1).toBe(1);
+        expect(block.split('Never resurrect it').length - 1).toBe(1);
+        expect(block.match(/RECENT VICTORY/g)).toHaveLength(2);
+        // Everything-at-once ceiling measures 4,925 (was 7,422); ~2.6 KB of it is
+        // instruction prose the DM needs. A typical quiet turn is ~1 KB.
+        expect(block.length).toBeLessThan(5200);
+    });
+
     it('renders the echo even when the resolved front was the only front and there are no encounters', () => {
         const block = buildWorldTempoBlock({
             fronts: [resolvedFront],

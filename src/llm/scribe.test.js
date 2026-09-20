@@ -555,6 +555,75 @@ describe('cadenced living-world reflection', () => {
         // not hundreds — the regression net the portrait dump lacked.
         expect(payload.length).toBeLessThan(30000);
     });
+
+    // 2026-09-20 audit P2: state.fronts shipped RAW — 3 active + 20 resolved
+    // MAX records measured 151 KB, growing ~1 KB per front ever resolved.
+    it('projects fronts into the reflection payload — resolved never, dormant as a stub, bounded size', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({ npc_updates: [], front_advances: [], story_memory: [] }));
+        const maxFront = (id, status) => ({
+            id,
+            status,
+            title: `Pressure ${id} `.padEnd(100, 't'),
+            goal: 'g'.repeat(300),
+            stakes: 's'.repeat(300),
+            grimPortents: Array.from({ length: 6 }, (_, i) => `portent ${i} `.padEnd(240, 'p')),
+            publicHints: Array.from({ length: 6 }, (_, i) => `hint ${i} `.padEnd(240, 'h')),
+            notes: 'n'.repeat(500),
+            stage: 2, clock: 3, maxClock: 8,
+            faction: {
+                name: 'The Tallow Guild', goal: 'f'.repeat(300), stance: 'x'.repeat(200),
+                relationships: Array.from({ length: 4 }, (_, i) => ({ frontId: `front-${i}`, stance: 'rival', note: 'r'.repeat(200) })),
+            },
+            lastAdvanceId: 'journal-campaign-30', lastDmClockGainMessage: 12,
+            resolution: 'e'.repeat(240), resolvedAtMessage: 90, resolvedTheaterIds: ['loc-1', 'loc-2'],
+        });
+        const fronts = [
+            ...Array.from({ length: 20 }, (_, i) => maxFront(`front-done-${i}`, 'resolved')),
+            maxFront('front-a', 'active'), maxFront('front-b', 'active'), maxFront('front-c', 'active'),
+            maxFront('front-sleep', 'dormant'),
+            null, 'junk',
+        ];
+        await runNpcFrontReflection({
+            state: {
+                settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+                session: { id: 'campaign' },
+                fronts, npcs: [], journal: [], worldFacts: [], party: [],
+            },
+            dispatch: vi.fn(),
+            cadence: { id: 'journal-campaign-40', journalEnd: 40, summary: 'Politics simmer.' },
+        });
+
+        const context = JSON.parse(sendMessage.mock.calls[0][0].userMessage);
+        expect(context.fronts.map(front => front.id)).toEqual(['front-a', 'front-b', 'front-c', 'front-sleep']);
+        expect(context.fronts[3]).toEqual({ id: 'front-sleep', title: expect.any(String), status: 'dormant' });
+        const ALLOWED_FRONT_KEYS = new Set([
+            'id', 'title', 'status', 'goal', 'stakes', 'grimPortents', 'stage', 'clock', 'maxClock',
+            'recentHints', 'notes', 'faction',
+        ]);
+        for (const front of context.fronts) {
+            for (const key of Object.keys(front)) {
+                expect(ALLOWED_FRONT_KEYS.has(key), `unexpected reflection front field: ${key}`).toBe(true);
+            }
+        }
+        expect(context.fronts[0].recentHints).toHaveLength(3);
+        expect(Object.keys(context.fronts[0].faction).sort()).toEqual(['goal', 'name', 'stance']);
+        // Worst case measures ~12.4 KB (was 151 KB raw); resolved fronts add nothing.
+        expect(JSON.stringify(context.fronts).length).toBeLessThan(14000);
+    });
+
+    it('skips the call when every front is resolved and no NPC is in scope', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({ npc_updates: [], front_advances: [], story_memory: [] }));
+        await runNpcFrontReflection({
+            state: {
+                settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+                session: { id: 'campaign' },
+                fronts: [{ id: 'front-done', status: 'resolved', title: 'Over' }],
+                npcs: [], journal: [], worldFacts: [], party: [],
+            },
+            dispatch: vi.fn(),
+        });
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
 });
 
 describe('scene-art prompt composition', () => {

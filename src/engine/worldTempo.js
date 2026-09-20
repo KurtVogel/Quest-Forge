@@ -377,12 +377,12 @@ export function computeRecentHeat(state, { window = 15 } = {}) {
 const PACE_TARGET = { 'slow-burn': 'calm', standard: 'lively', breakneck: 'high' };
 
 /** The thermostat line: player's setpoint vs measured heat → one guidance sentence. */
-export function buildPaceGuidance(paceDial, heat) {
+export function buildPaceGuidance(paceDial, heat, { showReasons = true } = {}) {
     const dial = normalizePaceDial(paceDial);
     const target = PACE_TARGET[dial];
     const targetIdx = HEAT_LEVELS.indexOf(target);
     const actualIdx = HEAT_LEVELS.indexOf(heat?.level || 'calm');
-    const why = heat?.reasons?.length ? ` (${heat.reasons.join('; ')})` : '';
+    const why = showReasons && heat?.reasons?.length ? ` (${heat.reasons.join('; ')})` : '';
 
     if (actualIdx > targetIdx) {
         return `Recent scenes ran hotter than this campaign's ${dial} pace${why}. Give the player breathing room: quiet character beats, recovery, daily life, local color. Introduce NO new unprovoked threats; let earned tension settle.`;
@@ -528,12 +528,14 @@ export function buildWorldTempoBlock({
 
     if (heat) {
         lines.push(`Pace target: ${dial}. Recent heat: ${heat.level}${heat.reasons.length ? ` (${heat.reasons.join('; ')})` : ''}.`);
-        lines.push(buildPaceGuidance(dial, heat));
+        // The reasons render ONCE, on the line above (2026-09-20 audit P2: the
+        // same ~200-400 chars rode the block twice every turn).
+        lines.push(buildPaceGuidance(dial, heat, { showReasons: false }));
     }
 
     if (activeFronts.length > 0) {
         const stubs = activeFronts
-            .map(front => `${front.id}${front.faction?.name ? ` (${front.faction.name})` : ''}`)
+            .map(front => `${front.id}${front.faction?.name ? ` (${cleanText(front.faction.name, 60)})` : ''}`)
             .join(', ');
         lines.push(`Off-screen pressures exist: ${stubs}. Their details are private engine state. Use front_updates with these ids ONLY for direct player interference or a symptom established in this response.`);
     }
@@ -544,8 +546,8 @@ export function buildWorldTempoBlock({
 
     if (permittedFront) {
         const faction = permittedFront.faction?.name
-            ? `${permittedFront.faction.name} — ${permittedFront.faction.goal || permittedFront.goal}`
-            : permittedFront.goal;
+            ? `${cleanText(permittedFront.faction.name, 60)} — ${cleanText(permittedFront.faction.goal || permittedFront.goal, 160)}`
+            : cleanText(permittedFront.goal, 160);
         // Re-clamp against the LIVE band at render (2026-09-08 P2): the band
         // was decided at grant time only, so a `presence` window granted at
         // clock 4 stayed `presence` after the player softened the clock to 1,
@@ -559,7 +561,7 @@ export function buildWorldTempoBlock({
         // Spend the accrued symptom ledger as anti-repeat guidance (2026-08-02
         // audit: publicHints rode every save but nothing re-injected it since
         // the tempo redesign).
-        const surfaced = (permittedFront.publicHints || []).slice(-3).filter(Boolean);
+        const surfaced = (permittedFront.publicHints || []).slice(-3).map(hint => cleanText(hint, 140)).filter(Boolean);
         if (surfaced.length > 0) {
             lines.push(`Symptoms of this pressure ALREADY shown: ${surfaced.map(hint => `"${hint}"`).join('; ')}. Never re-run these beats — a new symptom must bring new information, escalation, or a different face of the same pressure.`);
         }
@@ -574,14 +576,20 @@ export function buildWorldTempoBlock({
         // The persistent-world payoff: a won front's absence must be FELT, not
         // merely stop being mentioned. Titles are already table canon here —
         // resolution minted a world fact revealing them.
+        // One instruction however many echoes are live (2026-09-20 audit P2:
+        // each echo repeated the same ~390-char sentence).
         for (const front of resolvedEchoes) {
-            lines.push(`RECENT VICTORY: the pressure "${front.title}" has been ENDED${front.resolution ? ` (${front.resolution})` : ''}. Show its absence concretely wherever the fiction touches what it threatened — relief, reopened roads, easing prices, rebuilding, talk of who moves into the vacuum. Never resurrect it, never field a lookalike threat with the same creatures or imagery, and let places it haunted stay free unless a NEW, distinct pressure claims them on-screen.`);
+            const resolution = cleanText(front.resolution, 160);
+            lines.push(`RECENT VICTORY: the pressure "${cleanText(front.title, 100)}" has been ENDED${resolution ? ` (${resolution})` : ''}.`);
         }
+        lines.push(`Show ${resolvedEchoes.length > 1 ? 'the absence of each ended pressure' : 'its absence'} concretely wherever the fiction touches what it threatened — relief, reopened roads, easing prices, rebuilding, talk of who moves into the vacuum. Never resurrect it, never field a lookalike threat with the same creatures or imagery, and let places it haunted stay free unless a NEW, distinct pressure claims them on-screen.`);
     }
 
     if (encounters.length > 0) {
         const recent = encounters.slice(-4)
-            .map(entry => `${entry.enemies} (${entry.location ? `${entry.location}, ` : ''}${entry.outcome})`)
+            // The ledger keeps 200/120 chars for the hearsay lane; a variety
+            // reminder needs the gist (2026-09-20 audit P2: 1,445 chars here).
+            .map(entry => `${cleanText(entry.enemies, 60)} (${entry.location ? `${cleanText(entry.location, 40)}, ` : ''}${entry.outcome})`)
             .join('; ');
         lines.push(`Recent fights: ${recent}. Do not repeat near-identical encounters — vary, escalate, or let places stay cleared once won.`);
         const fatigue = computeFoeFatigue(encounters);

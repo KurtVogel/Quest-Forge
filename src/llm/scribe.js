@@ -656,6 +656,47 @@ function projectNpcForReflection(npc = {}) {
     return projected;
 }
 
+// The fronts half of the same payload (2026-09-20 audit P2): `state.fronts` went
+// out RAW every cadence — every field and engine stamp of every front the
+// campaign has ever had (3 active + 20 resolved measured 151 KB, unbounded).
+// The lane cannot act on a resolved front (the prompt forbids reviving one,
+// applyFrontAdvanceBatch skips non-active ids), so resolved fronts never ship;
+// a dormant front ships as a stub; an active front ships the fields the
+// advance / tempo / proposal rules actually reason over.
+export function projectFrontForReflection(front) {
+    if (!front || typeof front !== 'object' || Array.isArray(front)) return null;
+    const status = front.status || 'active';
+    if (status === 'resolved') return null;
+    const id = reflectionText(typeof front.id === 'string' ? front.id : '', 120);
+    const title = reflectionText(typeof front.title === 'string' ? front.title : '', 100);
+    if (!id) return null;
+    if (status !== 'active') return { id, title, status: 'dormant' };
+    const texts = (list, count, max, fromEnd = false) => (Array.isArray(list) ? list : [])
+        .filter(entry => typeof entry === 'string')
+        .slice(...(fromEnd ? [-count] : [0, count]))
+        .map(entry => reflectionText(entry, max))
+        .filter(Boolean);
+    const str = (value, max) => reflectionText(typeof value === 'string' ? value : '', max);
+    const num = value => (Number.isFinite(value) ? value : 0);
+    const faction = front.faction && typeof front.faction === 'object'
+        ? { name: str(front.faction.name, 100), goal: str(front.faction.goal, 300), stance: str(front.faction.stance, 200) }
+        : null;
+    return {
+        id,
+        title,
+        status: 'active',
+        goal: str(front.goal, 300),
+        stakes: str(front.stakes, 300),
+        grimPortents: texts(front.grimPortents, 6, 240),
+        stage: num(front.stage),
+        clock: num(front.clock),
+        maxClock: num(front.maxClock),
+        recentHints: texts(front.publicHints, 3, 240, true),
+        notes: str(front.notes, 500),
+        ...(faction && faction.name && { faction }),
+    };
+}
+
 export async function runNpcFrontReflection({ state, dispatch, cadence = null }) {
     const background = getBackgroundConfig(state?.settings);
     if (!background.apiKey) return;
@@ -663,7 +704,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         location: state.currentLocation,
         limit: 12,
     }).map(projectNpcForReflection);
-    const fronts = state.fronts || [];
+    const fronts = (Array.isArray(state.fronts) ? state.fronts : []).map(projectFrontForReflection).filter(Boolean);
     if (npcs.length === 0 && fronts.length === 0) return;
 
     const heat = computeRecentHeat(state);

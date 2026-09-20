@@ -283,7 +283,7 @@ function validateSaveState(payload) {
     const rawSession = payload.session && typeof payload.session === 'object' && !Array.isArray(payload.session)
         ? payload.session
         : initialGameState.session;
-    const session = sanitizeLivingWorldSession(rawSession);
+    const session = sanitizeLivingWorldSession(rawSession, { maxMessageCount: messageCount });
     return {
         ...payload,
         // Entries are object-filtered like every sibling list (2026-09-11

@@ -14,6 +14,7 @@ import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/
 import { generateAbsenceDrift, shouldGenerateAbsenceDrift } from '../../llm/absenceDrift.js';
 import { generateRegionalFronts, shouldGenerateRegionalFronts } from '../../llm/regionalFronts.js';
 import { generateWonder, shouldGenerateWonder } from '../../llm/wonderDirector.js';
+import { isDirectorBackingOff } from '../../engine/directorRetry.js';
 import { isWonderRequest } from '../../engine/wonder.js';
 import { formatSecrecyTag } from '../../engine/storyMemory.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
@@ -45,7 +46,8 @@ function cleanDisplayText(text) {
  * (DECISIONS.md 2026-08-03/05): a one-shot trigger in session state, a private
  * DM-model call while play continues, and an INSTALL_* reducer action that
  * re-validates everything — so a late, duplicate, or hostile result is
- * harmless, and a failed call retries on the next dependency change. The four
+ * harmless, and a failed call retries after a backoff, at most three times
+ * (engine/directorRetry.js — the third failure consumes the marker). The four
  * effects that carried this contract were structurally identical (~90 lines;
  * 2026-08-19 audit), so one table + one effect serves them all — a new
  * director is a row here, not a fifth copy.
@@ -53,7 +55,7 @@ function cleanDisplayText(text) {
  * `getKey(state)` returns the identity of the currently requested generation
  * (null when nothing is pending): one key fires at most one call; success
  * parks the key so the result installs at most once per mount, failure clears
- * the slot so the next dependency change retries.
+ * the slot so a later dependency change retries once the backoff has passed.
  */
 const BACKGROUND_DIRECTORS = [
     {
@@ -341,6 +343,9 @@ export default function ChatPanel() {
         for (const director of BACKGROUND_DIRECTORS) {
             const key = director.getKey(s);
             if (!key || directorKeysRef.current[director.name] === key) continue;
+            // Give-up rule (2026-09-20 audit P1): a failed key waits out its
+            // backoff; the reducer consumes the marker on the third failure.
+            if (isDirectorBackingOff(s.session, director.name, key, s.messages)) continue;
             directorKeysRef.current[director.name] = key;
             director.generate(s)
                 .then(result => {
@@ -352,6 +357,7 @@ export default function ChatPanel() {
                     if (directorKeysRef.current[director.name] === key) {
                         directorKeysRef.current[director.name] = null;
                     }
+                    dispatch({ type: 'DIRECTOR_ATTEMPT_FAILED', payload: { sessionId, name: director.name, key } });
                 });
         }
     }, [
