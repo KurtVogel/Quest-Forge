@@ -8,6 +8,7 @@
  *   node scripts/playtest_recall_wonder.cjs recall gemini gemini gemini-3.1-pro-preview
  *   node scripts/playtest_recall_wonder.cjs wonder gemini gemini gemini-3.1-pro-preview
  *   node scripts/playtest_recall_wonder.cjs wonder terra  openai gpt-5.6-terra
+ *   node scripts/playtest_recall_wonder.cjs full flash gemini gemini-3.8-flash   (PROBE 3: a general ordinary-play run)
  *
  * Never the xAI/Grok DM (Vesa, 2026-09-14) — Gemini Pro and GPT Terra only.
  * The Gemini Flash machinery (Scribe, journal, embeddings) is identical in every
@@ -49,8 +50,8 @@ const PROBE = process.argv[2];
 const runLabel = process.argv[3];
 const provider = process.argv[4];
 const model = process.argv[5];
-if (!['recall', 'wonder'].includes(PROBE) || !runLabel || !provider || !model) {
-    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder> <label> <provider> <model>');
+if (!['recall', 'wonder', 'full'].includes(PROBE) || !runLabel || !provider || !model) {
+    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full> <label> <provider> <model>');
     process.exit(1);
 }
 if (provider === 'xai') {
@@ -1155,6 +1156,215 @@ async function runWonderProbe(page) {
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// PROBE 3 — the full run: ordinary play with every shipped system in the loop.
+//   Buying, a skill check, a quest, rest, travel, an ambush fight, loot, OOC,
+//   "remember when…", journal cadence, save → reload → keep playing, chapter close.
+//   Per turn: a fresh DM message, no JSON/placeholder leaks, turn-grammar size,
+//   state lint (NaN / [object Object] / negative purse / HP out of range), prompt
+//   size, console errors. After the run a Flash judge reads the transcript with
+//   each turn's mechanical delta beside it.
+// ---------------------------------------------------------------------------
+const FULL_PLAN = [
+    ['ordinary', 'I stamp the snow off my boots and look around the common room, taking in who is here and what they are doing.'],
+    ['ordinary', 'I go to the bar and ask the innkeeper what is on the fire tonight, and what a bed costs.'],
+    ['purchase', 'I buy a bowl of stew and a room for the night from the innkeeper, and pay in coin.'],
+    ['purchase', 'I ask whether anyone here sells rope and a lantern, and I buy one of each.'],
+    ['rumor', 'I sit with the locals by the hearth and listen for news or trouble that someone needs help with.'],
+    ['quest', 'If there is honest work on offer, I take it. I tell them plainly I will do it, and ask what the pay is.'],
+    ['check', 'I study the person who gave me the job and try to work out whether they are telling me everything.'],
+    ['ordinary', 'I ask them straight what they are not telling me.'],
+    ['rest', 'I go up to my room, bar the door, and take a long rest until morning.'],
+    ['travel', 'In the morning I set out along the road toward wherever the job takes me, taking in the way as I go.'],
+    ['travel', 'I keep to the road and ask the first traveller I meet what lies ahead.'],
+    ['travel', 'I press on toward the place the job named.'],
+    ['fight', 'I move off the road to hunt for whatever is threatening this stretch, sword drawn, looking for a fight.'],
+    ['fight', 'I attack whoever or whatever stands in my way with my longsword.'],
+    ['loot', 'When it is over I catch my breath and search what is left for anything worth taking.'],
+    ['ordinary', 'I tend my wounds and take stock of what I have.'],
+    ['ooc', 'OOC: quick table check — what am I carrying, roughly how much coin do I have left, and what job am I on?'],
+    ['recall', 'Remember when I bought the lantern? Who did I buy it from, and what did I pay?'],
+    ['ordinary', 'I get my bearings and continue on toward the job.'],
+    ['ordinary', 'I keep going and look for a place to ask about the way.'],
+    ['ordinary', 'I speak to whoever I find there and offer some help if they need it.'],
+    ['ordinary', 'I settle in for a while and ask about the place and the people.'],
+    ['ordinary', 'I look for the person who can tell me what I came to learn.'],
+    ['ordinary', 'I press them for what they know.'],
+    ['ordinary', 'I think about what I have learned and decide my next step.'],
+    ['ordinary', 'I follow that lead.'],
+    ['ordinary', 'I keep at it, one careful step at a time.'],
+    ['ordinary', 'I stop and consider whether anything in this place has changed since I arrived.'],
+];
+const FULL_AFTER_RELOAD = [
+    ['ordinary', 'I pick up where I left off and look around to see what has changed while I was resting.'],
+    ['ordinary', 'I ask the nearest person how things stand and whether anyone has been looking for me.'],
+];
+
+/** Walk a value and report NaN / undefined-strings / "[object Object]" / negative numbers where they can't be. */
+async function stateLint(page) {
+    return await page.evaluate(() => {
+        const s = window.__QF_STATE__;
+        if (!s) return ['state missing'];
+        const problems = [];
+        const walk = (v, p, depth) => {
+            if (depth > 6 || problems.length > 12) return;
+            if (typeof v === 'number' && Number.isNaN(v)) problems.push(`NaN at ${p}`);
+            else if (typeof v === 'string') {
+                if (/\[object Object\]/.test(v)) problems.push(`"[object Object]" at ${p}`);
+                else if (v.trim() === 'undefined' || v.trim() === 'null') problems.push(`"${v}" at ${p}`);
+            } else if (Array.isArray(v)) v.slice(0, 200).forEach((x, i) => walk(x, `${p}[${i}]`, depth + 1));
+            else if (v && typeof v === 'object') for (const k of Object.keys(v).slice(0, 80)) walk(v[k], `${p}.${k}`, depth + 1);
+        };
+        for (const k of ['character', 'inventory', 'quests', 'npcs', 'worldFacts', 'storyMemory', 'journal', 'party', 'combat', 'fronts', 'worldTempo', 'locations', 'session', 'currentLocation']) walk(s[k], k, 0);
+        const c = s.character || {};
+        for (const k of ['gold', 'silver', 'copper', 'exp']) if (typeof c[k] === 'number' && c[k] < 0) problems.push(`negative ${k}=${c[k]}`);
+        if (typeof c.currentHP === 'number' && typeof c.maxHP === 'number' && (c.currentHP > c.maxHP || c.currentHP < 0)) problems.push(`HP ${c.currentHP}/${c.maxHP} out of range`);
+        for (const i of (s.inventory || [])) if (typeof i?.quantity === 'number' && i.quantity < 1) problems.push(`inventory ${i.name} qty ${i.quantity}`);
+        return problems;
+    }).catch(() => ['lint failed']);
+}
+
+function grammar(text) {
+    const words = (String(text).match(/\S+/g) || []).length;
+    const paras = String(text).split(/\n\s*\n/).filter(p => p.trim()).length;
+    return { words, paras };
+}
+function leaks(text) {
+    const t = String(text);
+    const found = [];
+    if (/```/.test(t)) found.push('code fence');
+    if (/"(requested_rolls|items_gained|npc_updates|quest_updates|memory_updates|world_facts|combat_exchange|front_updates)"\s*:/.test(t)) found.push('event JSON');
+    if (/\[object Object\]|\bundefined\b|\bNaN\b/.test(t)) found.push('placeholder');
+    if (/^\s*[{[]/.test(t)) found.push('starts with JSON');
+    if (/## (CURRENT|WORLD TEMPO|SOMETHING|THE RECORD|WHILE YOU|REGIONAL)|hidden front|clock \d\/\d/i.test(t)) found.push('prompt/hidden-state text');
+    return found;
+}
+function errorConsole(from) {
+    return consoleLines.slice(from).map(c => c.text).filter(t => /error/i.test(t) && !/HTTP 429|status of 429|embed/i.test(t));
+}
+
+const fullTurns = [];
+async function fullTurn(page, kind, action) {
+    const consoleFrom = consoleLines.length;
+    const r = await playTurn(page, kind, action);
+    const g = grammar(r.dm);
+    const lint = await stateLint(page);
+    const delta = mechanicalDelta(r.before, r.after);
+    const sysErrors = (r.after?.messages || []).slice(r.before?.msgCount ?? 0).filter(m => m.kind === 'error').length;
+    const row = {
+        n: turnNo, kind, action, dmFresh: r.record.dmFresh, secs: r.record.secs,
+        words: g.words, paras: g.paras, leaks: leaks(r.dm), lint, sysErrors,
+        promptChars: r.record.promptChars, hasRecordBlock: r.record.hasRecordBlock, hasNothingFound: r.record.hasNothingFound,
+        consoleErrors: errorConsole(consoleFrom).slice(0, 4),
+        combatIters: r.record.combatIters,
+        delta: { purse: delta.purse, invDiff: delta.invDiff, expChanged: delta.expChanged, hpChanged: delta.hpChanged, rollsAdded: delta.rollsAdded, combatStarted: delta.combatStarted, newFacts: delta.newFacts, newCards: delta.newCards, newNpcs: delta.newNpcs },
+        location: r.after?.location, hp: r.after ? `${r.after.hp}/${r.after.maxHp}` : null, level: r.after?.level, exp: r.after?.exp,
+        counts: r.after?.counts, questRows: r.after?.questRows,
+        dm: r.dm,
+    };
+    fullTurns.push(row);
+    const flags = [];
+    if (!row.dmFresh) flags.push('NO FRESH DM');
+    if (row.leaks.length) flags.push(`LEAK ${row.leaks.join('/')}`);
+    if (row.lint.length) flags.push(`LINT ${row.lint.slice(0, 3).join('; ')}`);
+    if (row.sysErrors) flags.push(`${row.sysErrors} error line(s)`);
+    if (row.consoleErrors.length) flags.push(`console: ${row.consoleErrors[0].slice(0, 110)}`);
+    if (kind !== 'fight' && kind !== 'ooc' && kind !== 'recall' && (row.words > 230 || row.paras > 3)) flags.push(`long turn ${row.words}w/${row.paras}p`);
+    note('full', `#${row.n} ${kind} ${row.secs}s ${row.words}w/${row.paras}p @${row.location || '?'} hp ${row.hp} purse ${JSON.stringify(row.delta.purse?.after)}${row.delta.invDiff.added.length ? ' +' + row.delta.invDiff.added.join(',') : ''}${row.delta.invDiff.removed.length ? ' -' + row.delta.invDiff.removed.join(',') : ''}${row.combatIters ? ` combat×${row.combatIters}` : ''}${flags.length ? ' ⚠ ' + flags.join(' | ') : ''}`);
+    fs.writeFileSync(path.join(OUT_DIR, 'full-turns.json'), JSON.stringify(fullTurns, null, 2));
+    return { ...r, row };
+}
+
+async function reloadAndContinue(page) {
+    const beforeState = await snap(page);
+    await delay(4000); // debounced autosave (2 s) + settle
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide'))).catch(() => {});
+    await delay(1500);
+    await page.goto(APP_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+    await delay(2500);
+    const hasContinue = await page.evaluate(() => !!document.querySelector('.continue-btn'));
+    note('reload', `Start screen shows Continue: ${hasContinue}`);
+    if (!hasContinue) { results.push({ kind: 'reload', ok: false, why: 'no Continue button' }); return null; }
+    await page.click('.continue-btn');
+    await delay(3500);
+    const afterState = await snap(page);
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const cmp = {
+        msgCount: [beforeState?.msgCount, afterState?.msgCount],
+        location: [beforeState?.location, afterState?.location],
+        purse: same(beforeState?.purse, afterState?.purse),
+        inventory: same(beforeState?.inventory, afterState?.inventory),
+        hp: [beforeState?.hp, afterState?.hp], exp: [beforeState?.exp, afterState?.exp],
+        quests: same(beforeState?.questRows, afterState?.questRows),
+        counts: same(beforeState?.counts, afterState?.counts),
+    };
+    const ok = !!afterState && cmp.msgCount[0] === cmp.msgCount[1] && cmp.purse && cmp.inventory && cmp.quests && cmp.counts && cmp.location[0] === cmp.location[1];
+    const returnCard = await page.evaluate(() => !!document.querySelector('.return-card'));
+    const errorsOnLoad = await stateLint(page);
+    note('reload', `Reload roundtrip ok=${ok} ${JSON.stringify(cmp)} returnCardShown=${returnCard} lint=${JSON.stringify(errorsOnLoad)}`);
+    results.push({ kind: 'reload', ok, cmp, returnCard, lint: errorsOnLoad });
+    await shot(page, 'after-reload');
+    return afterState;
+}
+
+async function judgeFullRun() {
+    const batches = [];
+    for (let i = 0; i < fullTurns.length; i += 7) batches.push(fullTurns.slice(i, i + 7));
+    const issues = [];
+    let carry = '';
+    for (const batch of batches) {
+        const body = batch.map(t => `TURN ${t.n} [${t.kind}]\nPLAYER: ${t.action}\nENGINE DELTA: purse ${JSON.stringify(t.delta.purse?.before)} -> ${JSON.stringify(t.delta.purse?.after)}; items added ${JSON.stringify(t.delta.invDiff.added)} removed ${JSON.stringify(t.delta.invDiff.removed)}; xp/level changed ${t.delta.expChanged}; hp changed ${t.delta.hpChanged}; rolls ${t.delta.rollsAdded}; combat started ${t.delta.combatStarted}\nDM: ${String(t.dm).slice(0, 2600)}`).join('\n\n---\n\n');
+        const verdict = await flash(`You are auditing a solo tabletop-RPG session where an AI plays the Dungeon Master and a rules engine owns dice, coin, items, HP and XP. Below are consecutive turns (player line, the ENGINE DELTA that actually happened to state, and the DM's narration). Earlier context, if any: ${carry || 'none'}\n\nReport ONLY genuine problems, each tied to a turn number. Categories: "agency" (the DM decides the player character's actions, words, feelings or choices for them), "mismatch" (the narration says coin/items/HP/XP changed but ENGINE DELTA shows no matching change, or the reverse - a purchase or reward described but the purse/inventory did not move), "contradiction" (the DM contradicts something established earlier), "leak" (hidden state, JSON, prompt text, meta-mechanics spoken in-fiction), "dice" (the DM narrates a dice roll result itself, or an outcome of a check before any roll), "repetition" (near-verbatim reuse of a phrase or scene beat from an earlier turn), "pacing" (the turn ignores the player's action or stalls with no consequence), "other". Be strict about mismatch/agency/dice/leak; be lenient about style. Return JSON: {"issues":[{"turn":<n>,"category":"...","detail":"<one sentence>"}],"carry":"<=60 words summarizing established facts for the next batch"}.\n\n${body}`);
+        if (verdict?.issues) issues.push(...verdict.issues);
+        carry = verdict?.carry || carry;
+    }
+    return issues;
+}
+
+async function runFullProbe(page) {
+    await bootAndCreateHero(page, { premiseMode: 'starter', premiseText: 'Winter at the Kettle Inn' });
+    saveAll();
+    let combatSeen = false;
+    for (const [kind, action] of FULL_PLAN) {
+        if (kind === 'fight' && combatSeen) continue; // the fight already happened; skip the follow-up line
+        const r = await fullTurn(page, kind, action);
+        if (r.row.combatIters || r.row.delta.combatStarted) combatSeen = true;
+    }
+    const mid = await snap(page);
+    results.push({ kind: 'mid-run', counts: mid?.counts, questRows: mid?.questRows, location: mid?.location, level: mid?.level, exp: mid?.exp, combatSeen });
+    note('mid-run', `counts ${JSON.stringify(mid?.counts)}; combatSeen=${combatSeen}; quests ${JSON.stringify(mid?.questRows)}`);
+
+    const reloaded = await reloadAndContinue(page);
+    if (reloaded) for (const [kind, action] of FULL_AFTER_RELOAD) await fullTurn(page, kind, action);
+
+    await chapterCloseCheck(page);
+
+    note('judge', 'Flash judge over the transcript (agency / mismatch / contradiction / leak / dice / repetition).');
+    const issues = await judgeFullRun();
+    const summary = {
+        kind: 'full-summary',
+        turns: fullTurns.length,
+        freshDm: fullTurns.filter(t => t.dmFresh).length,
+        combatSeen,
+        leakTurns: fullTurns.filter(t => t.leaks.length).map(t => t.n),
+        lintTurns: fullTurns.filter(t => t.lint.length).map(t => ({ n: t.n, lint: t.lint })),
+        errorLineTurns: fullTurns.filter(t => t.sysErrors).map(t => t.n),
+        consoleErrorTurns: fullTurns.filter(t => t.consoleErrors.length).map(t => ({ n: t.n, e: t.consoleErrors })),
+        longTurns: fullTurns.filter(t => !['fight', 'ooc', 'recall'].includes(t.kind) && (t.words > 230 || t.paras > 3)).map(t => ({ n: t.n, w: t.words, p: t.paras })),
+        meanWords: Math.round(fullTurns.reduce((a, t) => a + t.words, 0) / Math.max(1, fullTurns.length)),
+        maxPromptChars: Math.max(...fullTurns.map(t => t.promptChars || 0)),
+        meanSecs: Math.round(fullTurns.reduce((a, t) => a + t.secs, 0) / Math.max(1, fullTurns.length)),
+        recallTurn: fullTurns.filter(t => t.kind === 'recall').map(t => ({ n: t.n, hasRecordBlock: t.hasRecordBlock, hasNothingFound: t.hasNothingFound, purseMoved: !!t.delta.purse && JSON.stringify(t.delta.purse.before) !== JSON.stringify(t.delta.purse.after), itemsMoved: t.delta.invDiff.added.length + t.delta.invDiff.removed.length })),
+        finalCounts: fullTurns[fullTurns.length - 1]?.counts,
+        judgeIssues: issues,
+    };
+    results.push(summary);
+    note('summary', JSON.stringify({ ...summary, judgeIssues: issues.length }));
+    for (const i of issues) note('judge-issue', `t${i.turn} ${i.category}: ${i.detail}`);
+    fs.writeFileSync(path.join(OUT_DIR, 'full-summary.json'), JSON.stringify(summary, null, 2));
+    saveAll();
+}
+
 async function run() {
     fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
     const browser = await puppeteer.launch({
@@ -1169,6 +1379,7 @@ async function run() {
     attachCapture(page);
     try {
         if (PROBE === 'recall') await runRecallProbe(page);
+        else if (PROBE === 'full') await runFullProbe(page);
         else await runWonderProbe(page);
     } finally {
         fs.writeFileSync(path.join(OUT_DIR, 'transcript.json'), JSON.stringify(await page.evaluate(() => (window.__QF_STATE__?.messages || []).map(m => ({ role: m.role, kind: m.kind || null, hidden: !!m.hidden, content: m.content }))).catch(() => []), null, 2));

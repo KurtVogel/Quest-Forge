@@ -7,7 +7,7 @@
  * report to runNarrationAudits.
  */
 import { conversationalDistance } from '../engine/replayLedger.js';
-import { itemIdentityMatches } from '../engine/textMatch.js';
+import { coverage, itemIdentityMatches, overlapCount, tokenSet } from '../engine/textMatch.js';
 import { isSpellcaster, resolveSpellForCharacter } from '../engine/spellcasting.js';
 import { MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
 export const LOOT_AUDIT_RULES = `
@@ -313,6 +313,40 @@ function appliedItemIdentities(events) {
     return identities;
 }
 
+/** Display names (no item keys) of the items the event path granted this narration. */
+function appliedItemNames(events) {
+    const names = [];
+    for (const list of [events?.itemsFound, events?.startingItems, events?.purchases]) {
+        for (const entry of list || []) {
+            const value = typeof entry === 'string' ? entry : (entry?.name || entry?.item?.name);
+            if (value && String(value).trim()) names.push(String(value));
+        }
+    }
+    return names;
+}
+
+/**
+ * Same-narration NAME DRIFT (live playtest 2026-09-20, Gemini 3.8 Flash: BOTH
+ * item rewards in a 30-turn run were granted twice). The DM emits the item under
+ * one name ("Brass toll-token", "Smoked salt-chine") and narrates it under
+ * another ("a heavy brass token stamped with the three-arched bridge of Merrow",
+ * "smoked pig chine"); strict containment fails on the one word that drifted, so
+ * the audit "recovered" a second row for the very same object. An event-granted
+ * item that no narrated item strictly matches may absorb ONE unmatched narrated
+ * item when the two share at least two tokens, cover >= 60% of the applied name,
+ * and the applied name's head noun (its last token) survives in the narration.
+ * A parenthetical size/count ("(50 ft)") never counts as the head. Over-matching
+ * only ever skips a grant — the documented safe direction for audits.
+ */
+function looseSameItem(appliedName, narratedName) {
+    const clean = value => String(value || '').replace(/\([^)]*\)/g, ' ');
+    const applied = tokenSet(clean(appliedName), { minLength: 2 });
+    const narrated = tokenSet(clean(narratedName), { minLength: 2 });
+    if (applied.size < 2 || narrated.size === 0) return false;
+    const head = [...applied].pop();
+    return narrated.has(head) && overlapCount(applied, narrated) >= 2 && coverage(applied, narrated) >= 0.6;
+}
+
 /**
  * Reconcile the Scribe's narrated-loot OBSERVATION against the events the engine
  * already applied for this narration. The Scribe reports full narrated totals;
@@ -387,9 +421,22 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
             if (value && String(value).trim()) recentGrantIdentities.push(String(value));
         }
     }
+    // Event-granted names no narrated item strictly matches: each may absorb ONE
+    // drifted-name narrated item (looseSameItem above), so one object never
+    // becomes two rows.
+    const unpairedAppliedNames = appliedItemNames(appliedEvents)
+        .filter(name => !items.some(item => itemIdentityMatches(item.name, name)));
     const missingItems = items.filter(item => {
         const alreadyApplied = matchesAnyItemIdentity(item, knownIdentities);
         const recentlyGranted = matchesAnyItemIdentity(item, recentGrantIdentities);
+        if (!alreadyApplied && !recentlyGranted) {
+            const twin = unpairedAppliedNames.findIndex(name => looseSameItem(name, item.name));
+            if (twin !== -1) {
+                console.warn(`[Scribe] Narrated item "${item.name}" is the event path's "${unpairedAppliedNames[twin]}" under a drifted name; skipping.`);
+                unpairedAppliedNames.splice(twin, 1);
+                return false;
+            }
+        }
         if (alreadyApplied) console.warn(`[Scribe] Narrated item "${item.name}" already granted by the event path; skipping.`);
         else if (recentlyGranted) console.warn(`[Scribe] Narrated item "${item.name}" was already granted moments ago (ledger); skipping.`);
         return !alreadyApplied && !recentlyGranted;

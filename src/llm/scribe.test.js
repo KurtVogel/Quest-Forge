@@ -1126,6 +1126,41 @@ describe('Scribe loot persistence audit', () => {
         expect(addItemCalls[0][0].payload.name).toBe('Silver ring');
     });
 
+    describe('same-narration item-name drift (live playtest 2026-09-20, Gemini 3.8 Flash)', () => {
+        async function auditWith(applied, narratedItems) {
+            sendMessage.mockResolvedValue(scribeResponse({ items: narratedItems.map(name => ({ name, quantity: 1 })) }));
+            const dispatch = vi.fn();
+            await runScribe({
+                playerMessage: 'I search the body.',
+                dmNarrative: 'narration',
+                settings,
+                dispatch,
+                lootAudit: makeLootAudit({
+                    appliedEvents: { itemsFound: applied.map(name => ({ name })), purchases: [], sells: [], startingItems: [] },
+                }),
+            });
+            return dispatch.mock.calls.map(([action]) => action).filter(action => action.type === 'ADD_ITEM').map(action => action.payload.name);
+        }
+
+        it('does not mint a second row when the DM narrates its evented item under a drifted name', async () => {
+            expect(await auditWith(['Brass toll-token'], ['heavy brass token stamped with the three-arched bridge of Merrow'])).toEqual([]);
+            expect(await auditWith(['Smoked salt-chine'], ['smoked pig chine'])).toEqual([]);
+        });
+
+        it('still grants a genuinely different item that only shares descriptive words', async () => {
+            expect(await auditWith(['Rusty iron dagger'], ['rusty iron key'])).toEqual(['rusty iron key']);
+            expect(await auditWith(['Hempen Rope (50 ft)'], ['iron ft ring'])).toEqual(['iron ft ring']);
+        });
+
+        it('pairs one event item with one narrated item — a second same-kind object is still granted', async () => {
+            const granted = await auditWith(
+                ['Brass toll-token'],
+                ['heavy brass token stamped with the bridge', 'brass token etched with a wolf'],
+            );
+            expect(granted).toEqual(['brass token etched with a wolf']);
+        });
+    });
+
     it('skips an already-claimed payment audit so retries cannot double-deduct', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             world_facts: [], npc_updates: [], story_memory: [], location: null,
