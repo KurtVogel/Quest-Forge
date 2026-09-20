@@ -2443,6 +2443,30 @@ land where it does harm is retired or guarded. **(3)** `level_up` and `combat_en
 two `!!raw.` reads in `eventChannels.js`; `"false"` paid half a level. Every boolean wire reads
 through `toFlag`, no exceptions. From the 2026-09-19 strengthening audit.
 
+### [strengthening] A one-shot marker needs a give-up rule; a slot budget ranks by freshness; a "cheap" block is re-measured at its ceiling — status: `idea` (2026-09-20)
+Three rules from the run that opened Lap 3 (2026-09-20, hidden-fronts + living-world).
+**(1)** Every fire-and-forget director (aftermath, absence drift, regional fronts, wonder) is keyed
+on a persisted `session.pending*` marker that only its INSTALL consumes, and ChatPanel's effect
+nulls the parked key on failure and re-fires on the next `messages.length` change — so a
+deterministic failure (a prompt-level block on the raw narrative the context ships, a
+prose-answering DM, a dead key) is one hidden DM-model call per turn for the rest of the
+campaign (the aftermath context is up to 85 KB with thinking), and because the markers are
+exclusive gates, no further drift or region seeding ever fires. Rule: a reducer-owned failure
+count per marker — re-fire only after N conversational messages, give up at 3 and consume the
+marker as the quiet answer with a console line — exactly the failure streak the journal cadence
+got on 2026-08-18. Cancel a drift marker on an unrelated arrival while at it. **(2)** A bounded
+block that picks N items from several sources must RANK them; walking sources in declaration or
+array order makes the oldest source the only one that ever renders. `selectRegionalHearsay`
+walks resolved fronts first, oldest first, and a resolved front never ages out, so every new town
+retells the same two ancient victories as legend while last week's fight never travels. Rule:
+newest-first across sources, one slot per source class, and a deed retires after ~3 tellings or
+~200 conversational messages unless it happened here. **(3)** A private block judged "cheap" is
+re-measured at its ceiling whenever a line is added: the tempo block went from 0.6–0.9 KB (08-02)
+to 7.4 KB through four good additions (echoes, fatigue, symptoms-shown, the solo line) plus a
+duplicated heat rationale and unclamped ledger text; pin a byte ceiling on every prompt block
+and every director context the way the hearsay block (1,500) and the reflection NPC payload
+(30 KB) already are. From the 2026-09-20 strengthening audit.
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
