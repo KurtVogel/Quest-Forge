@@ -302,6 +302,32 @@ describe('guards and failure surfacing', () => {
         expect(CLOUD_SAVE_BYTE_LIMIT).toBe(9 * 1024 * 1024);
     });
 
+    it('drops NPC portraits oldest-first to fit the cloud limit, keeps the hero portrait, and says so (2026-09-21 audit P1)', async () => {
+        // 100 portraits at ~100k chars each are ~10 MB on their own: the whole
+        // campaign used to be refused for its pictures.
+        const portrait = (seed) => `data:image/jpeg;base64,${String(seed % 10).repeat(100_000)}`;
+        const state = makeGameState({
+            character: { ...makeGameState().character, portraitUrl: portrait(0), portraitProvider: 'xai' },
+            npcs: Array.from({ length: 100 }, (_, i) => ({
+                id: `npc-${i}`, name: `Villager ${i}`, portraitUrl: portrait(i), portraitProvider: 'xai', portraitUpdatedAt: 1000 + i,
+            })),
+        });
+        const result = await saveGameToCloud('u1', 'slot-gallery', state);
+        expect(result.ok).toBe(true);
+        expect(result.droppedPortraits).toBeGreaterThan(0);
+        expect(result.note).toMatch(/oldest character portraits? to fit the 9\.0 MB cloud limit/);
+
+        const loaded = await loadGameFromCloud('u1', 'slot-gallery');
+        expect(loaded.character.portraitUrl).toBe(portrait(0));
+        const kept = loaded.npcs.filter(n => n.portraitUrl);
+        expect(kept.length).toBe(100 - result.droppedPortraits);
+        // Oldest went first; a dropped record loses its stamps with its picture.
+        expect(loaded.npcs[0]).toEqual({ id: 'npc-0', name: 'Villager 0' });
+        expect(loaded.npcs[99].portraitUrl).toBe(portrait(99));
+        // The live state was never mutated — the local save keeps them all.
+        expect(state.npcs.every(n => n.portraitUrl)).toBe(true);
+    });
+
     it('the size pre-flight counts UTF-8 bytes, so multi-byte prose is measured honestly', async () => {
         // 3.2M chars of a 3-byte CJK glyph ≈ 9.6 MiB of UTF-8 — under the limit
         // by char count, over it by bytes.

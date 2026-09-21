@@ -73,7 +73,6 @@ export function applyNpcPortrait(npcs = [], payload = {}) {
             ? normalizeNpcRecord({
                 ...npc,
                 portraitUrl,
-                portraitPrompt: String(payload.portraitPrompt || '').slice(0, 2000),
                 portraitProvider: String(payload.portraitProvider || '').slice(0, 40),
                 portraitUpdatedAt: Date.now(),
             })

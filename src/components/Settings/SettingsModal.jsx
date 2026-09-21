@@ -114,7 +114,7 @@ export default function SettingsModal() {
                 const cloud = await saveGameToCloud(state.user.uid, slotId, updatedState);
                 await loadSavesList(); // Reflect the cloud copy once it lands
                 setSyncStatus(cloud.ok
-                    ? '✓ Saved locally and to cloud'
+                    ? `✓ Saved locally and to cloud${cloud.note ? `. ${cloud.note}` : ''}`
                     : `Saved locally, but not to the cloud — this save will not appear on other devices. ${cloud.message}`);
             } else {
                 setSyncStatus('Saved locally only — sign in with Google for cloud sync');
@@ -219,7 +219,7 @@ export default function SettingsModal() {
             if (state.user?.uid) {
                 const cloud = await saveGameToCloud(state.user.uid, slotId, updatedState);
                 setSyncStatus(cloud.ok
-                    ? `✓ Overwrote "${name}" locally and in the cloud`
+                    ? `✓ Overwrote "${name}" locally and in the cloud${cloud.note ? `. ${cloud.note}` : ''}`
                     : `Overwrote "${name}" locally, but not in the cloud. ${cloud.message}`);
             } else {
                 setSyncStatus(`Overwrote "${name}" locally (sign in for cloud sync)`);

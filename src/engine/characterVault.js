@@ -33,7 +33,6 @@ const ROGUE_EXPERTISE_ALLOWANCE = 2;
 // Appearance shares the 600-char Scribe-merge clamp (contentLimits): the old
 // local 2000 cap silently truncated a long imported appearance on its FIRST
 // Scribe merge in play — the vault must not accept what the game cannot keep.
-const MAX_PORTRAIT_PROMPT_LENGTH = 2000;
 // Generated portraits are downscaled to 480×640 JPEG (~60-110k chars base64,
 // imageGen.js) before they ever reach a hero file; the old 2.5M ceiling let a
 // hand-bloated import ride every campaign autosave snapshot 2-4×/turn and
@@ -187,7 +186,6 @@ export function sanitizeCharacter(raw) {
         background: cleanTextField(raw.background, 2000),
         appearance: cleanTextField(raw.appearance, CHARACTER_APPEARANCE_MAX),
         portraitUrl: sanitizeImageUrl(raw.portraitUrl),
-        portraitPrompt: cleanTextField(raw.portraitPrompt, MAX_PORTRAIT_PROMPT_LENGTH),
         portraitUpdatedAt: Number.isFinite(raw.portraitUpdatedAt) ? raw.portraitUpdatedAt : null,
         notes: cleanTextField(raw.notes, 2000),
         createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),

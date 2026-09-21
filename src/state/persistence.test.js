@@ -3,7 +3,7 @@
  * Uses fake-indexeddb (real IndexedDB semantics, in-memory) and a minimal
  * localStorage stub since the vitest environment here is plain Node.
  */
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 
 function makeLocalStorageStub() {
@@ -86,6 +86,108 @@ function makeGameState(overrides = {}) {
     };
 }
 
+describe('portrait store — bytes that never change do not ride the record that changes every turn (2026-09-21 audit P1)', () => {
+    const portrait = (seed) => `data:image/jpeg;base64,${String(seed).repeat(3000)}`;
+    const withPortraits = (npcSeeds, overrides = {}) => makeGameState({
+        character: { ...makeGameState().character, portraitUrl: portrait('H'), portraitProvider: 'xai', portraitUpdatedAt: 5 },
+        npcs: npcSeeds.map(seed => ({ id: `npc-${seed}`, name: `NPC ${seed}`, portraitUrl: portrait(seed), portraitProvider: 'gemini', portraitUpdatedAt: 9 })),
+        ...overrides,
+    });
+    const readStore = (storeName, mode = 'all') => new Promise((resolve, reject) => {
+        const open = indexedDB.open('rpg-client-saves');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const db = open.result;
+            const store = db.transaction(storeName, 'readonly').objectStore(storeName);
+            const request = mode === 'keys' ? store.getAllKeys() : store.getAll();
+            request.onsuccess = () => { db.close(); resolve(request.result); };
+            request.onerror = () => { db.close(); reject(request.error); };
+        };
+    });
+
+    it('round-trips portraits while the stored payload carries refs, not bytes', async () => {
+        const state = withPortraits(['A', 'B']);
+        await saveGame('slot-p', state);
+
+        const [payload] = await readStore('savePayloads');
+        expect(JSON.stringify(payload)).not.toContain('data:image/');
+        expect(payload.state.npcs[0].portraitRef).toMatch(/^p-/);
+        expect(await readStore('portraits', 'keys')).toHaveLength(3);
+
+        const loaded = await loadGame('slot-p');
+        expect(loaded.character.portraitUrl).toBe(portrait('H'));
+        expect(loaded.npcs.map(n => n.portraitUrl)).toEqual([portrait('A'), portrait('B')]);
+        expect(loaded.npcs[0].portraitProvider).toBe('gemini');
+        // A ref never reaches live state.
+        expect(JSON.stringify(loaded)).not.toContain('portraitRef');
+    });
+
+    it('a steady-state resave writes no portrait bytes (the blob is put once)', async () => {
+        const state = withPortraits(['A']);
+        await saveGame('slot-p', state);
+        const putSpy = vi.spyOn(IDBObjectStore.prototype, 'put');
+        try {
+            await saveGame('slot-p', { ...state, currentLocation: 'Elsewhere' });
+            const portraitPuts = putSpy.mock.calls.filter(([value]) => typeof value === 'string');
+            expect(portraitPuts).toHaveLength(0);
+            expect(putSpy.mock.calls.length).toBe(2); // metadata + payload
+        } finally {
+            putSpy.mockRestore();
+        }
+    });
+
+    it('sweeps a rerolled portrait, but never one another slot still shows', async () => {
+        await saveGame('manual', withPortraits(['A']));
+        await saveGame('auto', withPortraits(['A']));
+        // Reroll in the live campaign: the autosave now points at A2.
+        await saveGame('auto', withPortraits(['A2']));
+        expect(await readStore('portraits', 'keys')).toHaveLength(3); // hero, A (manual), A2
+        expect((await loadGame('manual')).npcs[0].portraitUrl).toBe(portrait('A'));
+
+        await deleteSave('manual');
+        expect(await readStore('portraits', 'keys')).toHaveLength(2); // hero, A2
+        expect((await loadGame('auto')).npcs[0].portraitUrl).toBe(portrait('A2'));
+
+        await deleteSave('auto');
+        expect(await readStore('portraits', 'keys')).toHaveLength(0);
+    });
+
+    it('a pre-split payload with inline portraits still loads as-is, and a missing blob is a missing picture', async () => {
+        await saveGame('slot-seed', makeGameState());
+        await new Promise((resolve, reject) => {
+            const open = indexedDB.open('rpg-client-saves');
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+                const db = open.result;
+                const tx = db.transaction('savePayloads', 'readwrite');
+                tx.objectStore('savePayloads').put({ slotId: 'inline', state: { character: { name: 'Old', portraitUrl: portrait('Z') }, npcs: [] } });
+                tx.objectStore('savePayloads').put({ slotId: 'dangling', state: {
+                    character: { name: 'Lost', portraitRef: 'p-gone', portraitProvider: 'xai', portraitUpdatedAt: 3 },
+                    npcs: [{ id: 'n1', name: 'Ghost', portraitRef: 'p-gone-too', portraitProvider: 'xai' }],
+                } });
+                tx.oncomplete = () => { db.close(); resolve(); };
+                tx.onabort = () => { db.close(); reject(tx.error); };
+            };
+        });
+        expect((await loadGame('inline')).character.portraitUrl).toBe(portrait('Z'));
+        const dangling = await loadGame('dangling');
+        expect(dangling.character).toEqual({ name: 'Lost' });
+        expect(dangling.npcs[0]).toEqual({ id: 'n1', name: 'Ghost' });
+    });
+
+    it('portraits are no share of the autosave payload at 40 NPC portraits', async () => {
+        const big = (seed) => `data:image/jpeg;base64,${String(seed % 10).repeat(30_000)}${seed}`;
+        const state = makeGameState({
+            npcs: Array.from({ length: 40 }, (_, i) => ({ id: `npc-${i}`, name: `NPC ${i}`, portraitUrl: big(i) })),
+        });
+        await saveGame('slot-gallery', state);
+        const [payload] = await readStore('savePayloads');
+        // 40 × 30k = 1.2 MB of pictures; the record that changes every turn carries none of it.
+        expect(JSON.stringify(payload).length).toBeLessThan(20_000);
+        expect((await loadGame('slot-gallery')).npcs[39].portraitUrl).toBe(big(39));
+    });
+});
+
 describe('saveGame / loadGame (IndexedDB)', () => {
     it('round-trips the full state for a named slot', async () => {
         await saveGame('slot-1', makeGameState());
@@ -105,7 +207,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         // keys into live state with a null character — Load looked like a no-op.
         await saveGame('slot-seed', makeGameState());
         await new Promise((resolve, reject) => {
-            const open = indexedDB.open('rpg-client-saves', 3);
+            const open = indexedDB.open('rpg-client-saves');
             open.onerror = () => reject(open.error);
             open.onsuccess = () => {
                 const db = open.result;
@@ -127,7 +229,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         // whose payload never migrated/landed must still load through the belt.
         await saveGame('slot-seed', makeGameState()); // ensure the DB exists at v3
         await new Promise((resolve, reject) => {
-            const open = indexedDB.open('rpg-client-saves', 3);
+            const open = indexedDB.open('rpg-client-saves');
             open.onerror = () => reject(open.error);
             open.onsuccess = () => {
                 const db = open.result;
@@ -412,7 +514,7 @@ describe('character roster', () => {
     it('projects roster rows to typed render fields and drops unkeyed/non-object records (2026-09-11 persistence P2)', async () => {
         await saveRosterCharacter(makeHero(), []);
         await new Promise((resolve, reject) => {
-            const open = indexedDB.open('rpg-client-saves', 3);
+            const open = indexedDB.open('rpg-client-saves');
             open.onerror = () => reject(open.error);
             open.onsuccess = () => {
                 const db = open.result;

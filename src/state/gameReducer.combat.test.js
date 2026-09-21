@@ -390,6 +390,37 @@ describe('atomic combat exchange lifecycle', () => {
         };
     }
 
+    it('the roll ledger keeps the hero\u2019s own dice, not every actor\u2019s (2026-09-21 audit P2)', () => {
+        // One exchange rolls ~10 dice (each actor's attack AND damage): five
+        // exchanges used to evict every check the campaign ever rolled from the
+        // 50-row ledger the recall lane answers "what did I roll to…" from.
+        const stealth = { id: 'roll-stealth', total: 19, rolls: [14], modifier: 5, description: 'Stealth check' };
+        let state = activeState({ rollHistory: [stealth] });
+        for (let i = 1; i <= 6; i++) {
+            const heroRolls = [{ id: `h${i}a`, total: 17, rolls: [12] }, { id: `h${i}d`, total: 6, rolls: [4] }];
+            const others = Array.from({ length: 8 }, (_, n) => ({ id: `o${i}-${n}`, total: 9, rolls: [9] }));
+            state = gameReducer(state, {
+                type: 'APPLY_COMBAT_EXCHANGE',
+                payload: {
+                    exchangeId: `exchange-${i}`,
+                    enemies: state.combat.enemies,
+                    party: state.party,
+                    playerDamage: 0,
+                    deathSaveNatural: null,
+                    rolls: [...heroRolls, ...others],
+                    heroRolls,
+                    consumeActionSurge: false,
+                    result: { exchangeId: `exchange-${i}`, kind: 'exchange', round: i, terminal: null, summary: 'Hit.' },
+                },
+            });
+            state = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: `exchange-${i}` } });
+        }
+        // 60 dice were rolled; the ledger holds the check + the hero's 12.
+        expect(state.rollHistory).toHaveLength(13);
+        expect(state.rollHistory[0].id).toBe('roll-stealth');
+        expect(state.rollHistory.some(r => r.id.startsWith('o'))).toBe(false);
+    });
+
     it('commits HP, rolls, phase, and Action Surge once by exchangeId', () => {
         const payload = {
             exchangeId: 'exchange-1',

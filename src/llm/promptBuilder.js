@@ -197,7 +197,10 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Recent dice rolls (last 5)
-    if (rollHistory && rollHistory.length > 0) {
+    // Not in combat (2026-09-21 audit P2): the narration prompt's RESOLVED
+    // EVENTS is the one carrier of an exchange's dice, and the intent call
+    // needs none — the block only repeated engine internals there.
+    if (rollHistory && rollHistory.length > 0 && !combat?.active) {
         parts.push(buildRecentRollsBlock(rollHistory.slice(-5)), 'recentRolls');
     }
 

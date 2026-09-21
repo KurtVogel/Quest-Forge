@@ -23,6 +23,11 @@ import { initialGameState } from '../initialState.js';
 import { gameReducer } from '../gameReducer.js';
 import { appendRollHistory, clearSustainedSpellState, reviveCharacter, systemMessage } from './shared.js';
 
+const exchangeLedgerRolls = (payload) => {
+    if (Array.isArray(payload.heroRolls)) return payload.heroRolls;
+    return Array.isArray(payload.rolls) ? payload.rolls : [];
+};
+
 function normalizeCombatEnemy(enemy, index, usedIds) {
     const hp = clampEnemyHP(enemy?.hp);
     const ac = clampEnemyAC(enemy?.ac);
@@ -305,7 +310,10 @@ export const handlers = {
             ...next,
             character,
             party: next.party,
-            rollHistory: appendRollHistory(next.rollHistory, Array.isArray(payload.rolls) ? payload.rolls : []),
+            // The ledger is counted in the hero's MOMENTS, not in every actor's
+            // dice (2026-09-21 P2); a payload without `heroRolls` (planned before
+            // the split) keeps the old whole-exchange append.
+            rollHistory: appendRollHistory(next.rollHistory, exchangeLedgerRolls(payload)),
             messages: [...next.messages.slice(0, preExchangeMessageCount), ...resultMessages, ...statusMessages],
             combat: {
                 ...next.combat,

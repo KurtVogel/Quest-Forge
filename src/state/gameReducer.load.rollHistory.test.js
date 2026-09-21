@@ -18,6 +18,26 @@ const base = {
 };
 
 describe('LOAD_GAME rollHistory typing', () => {
+    it('projects a stored roll to the known ledger keys (2026-09-21 audit P2)', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...base,
+                rollHistory: [{
+                    id: 'r1', rolls: [19], total: 24, modifier: 5, description: 'Attack', notation: '1d20+5',
+                    timestamp: 1234, dice: { count: 1, sides: 20 }, kind: 'attack', isCritical: true,
+                    criticalThreshold: 'Champion 19-20',
+                    foo: 'x'.repeat(100_000), advantageDetail: ' (d20: 3, 19 → kept 19)',
+                }],
+            },
+        });
+        expect(Object.keys(next.rollHistory[0]).sort()).toEqual([
+            'criticalThreshold', 'description', 'dice', 'id', 'isCritFail', 'isCritical',
+            'kind', 'modifier', 'notation', 'rolls', 'subtotal', 'timestamp', 'total',
+        ]);
+        expect(JSON.stringify(next.rollHistory).length).toBeLessThan(400);
+    });
+
     it('types faces/total/modifier, clamps text, and drops entries with no finite faces', () => {
         const next = gameReducer(initialGameState, {
             type: 'LOAD_GAME',

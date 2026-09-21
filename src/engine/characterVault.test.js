@@ -141,7 +141,8 @@ describe('export round-trip', () => {
 
         expect(imported.character.appearance).toContain('black braided beard');
         expect(imported.character.portraitUrl).toBe(portraitUrl);
-        expect(imported.character.portraitPrompt).toBe('Waist-up dwarf fighter portrait.');
+        // Never read anywhere — not part of a hero any more (2026-09-21 audit P2).
+        expect(imported.character).not.toHaveProperty('portraitPrompt');
         expect(imported.character.portraitUpdatedAt).toBe(12345);
     });
 
@@ -512,7 +513,7 @@ describe('identity text is string-or-empty on import (2026-09-12 character-vault
         expect(imported.appearance).toBe('');
         expect(imported.background).toBe('');
         expect(imported.notes).toBe('');
-        expect(imported.portraitPrompt).toBe('');
+        expect(imported).not.toHaveProperty('portraitPrompt');
         expect(JSON.stringify(imported)).not.toContain('[object Object]');
     });
 

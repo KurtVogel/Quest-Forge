@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearImageCache, generateSceneImageDetailed, generatePortraitImageDetailed, IMAGE_FETCH_TIMEOUT_MS, peekCachedImage } from './imageGen.js';
+import { clearImageCache, generateSceneImageDetailed, generatePortraitImageDetailed, IMAGE_FETCH_TIMEOUT_MS, NPC_PORTRAIT_SIZE, peekCachedImage } from './imageGen.js';
 
 const xaiOk = (b64 = 'dGVzdA==') => ({
     ok: true,
@@ -305,12 +305,17 @@ describe('downscaleDataUrl portrait compaction (2026-07-06 queue P1)', () => {
         origImage = globalThis.Image;
         origDocument = globalThis.document;
         globalThis.Image = FakeImage;
+        const dom = { encodedUrl: 'data:image/jpeg;base64,c2NhbGVk', lastCanvas: null };
         globalThis.document = {
-            createElement: () => ({
-                getContext: () => ({ drawImage: vi.fn() }),
-                toDataURL: (mime) => `data:${mime};base64,c2NhbGVk`,
-            }),
+            createElement: () => {
+                dom.lastCanvas = {
+                    getContext: () => ({ drawImage: vi.fn() }),
+                    toDataURL: (mime) => `data:${mime};base64,c2NhbGVk`,
+                };
+                return dom.lastCanvas;
+            },
         };
+        return dom;
     }
 
     beforeEach(() => {
@@ -347,10 +352,34 @@ describe('downscaleDataUrl portrait compaction (2026-07-06 queue P1)', () => {
         expect(result.url).toBe('data:image/jpeg;base64,dGVzdA==');
     });
 
-    it('scene renders skip downscaling entirely (no maxWidth/maxHeight)', async () => {
+    it('the scene render handed back stays full-resolution (no maxWidth/maxHeight)', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
         const result = await generateSceneImageDetailed('A scene', 'xai-key');
         expect(result.url).toBe('data:image/jpeg;base64,dGVzdA==');
+    });
+
+    it('the CACHED scene copy is display-sized, never the full-resolution render (2026-09-21 audit P2)', async () => {
+        const dom = stubDom({ naturalWidth: 2560, naturalHeight: 1440 });
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
+
+        const first = await generateSceneImageDetailed('A wide scene', 'xai-key', { cacheKey: 'scene-1' });
+        expect(first.url).toBe('data:image/jpeg;base64,dGVzdA==');
+
+        const cached = peekCachedImage('scene-1', { imageApiKey: 'xai-key' });
+        expect(cached.url).toBe(dom.encodedUrl);
+        expect(dom.lastCanvas.width).toBe(1280);
+        expect(dom.lastCanvas.height).toBe(720);
+        expect(cached.provider).toBe('xai');
+    });
+
+    it('NPC portraits are stored at the size the card renders (2026-09-21 audit P2)', async () => {
+        const dom = stubDom({ naturalWidth: 768, naturalHeight: 1024 });
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
+
+        const result = await generatePortraitImageDetailed('An innkeeper', 'xai-key', { ...NPC_PORTRAIT_SIZE });
+        expect(result.url).toBe(dom.encodedUrl);
+        expect(dom.lastCanvas.width).toBe(256);
+        expect(dom.lastCanvas.height).toBe(341);
     });
 });
 

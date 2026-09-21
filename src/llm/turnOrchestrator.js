@@ -128,6 +128,17 @@ export function findPresentNpcs(state, playerMessage = '') {
 
 const noop = () => {};
 
+/**
+ * Identity of the newest ledger entry: its id (dice.ts mints a unique one per
+ * roll), or the row object itself for a legacy id-less entry. A capped
+ * collection's LENGTH is not a counter.
+ */
+function newestRollMarker(rollHistory) {
+    if (!Array.isArray(rollHistory) || rollHistory.length === 0) return null;
+    const newest = rollHistory[rollHistory.length - 1];
+    return typeof newest?.id === 'string' && newest.id ? newest.id : newest;
+}
+
 export function createTurnRunner({
     getState,
     dispatch,
@@ -743,7 +754,11 @@ Translate the player's committed action into the single bounded combat_exchange 
         // Failure recovery must know whether dice already landed: before dice,
         // the proposal can be restored intact; after dice, restoring it would
         // reopen the exact reroll-bargaining door the proposal system closes.
-        const rollCountBefore = getState().rollHistory?.length || 0;
+        // Compared by the newest roll's IDENTITY, never the ledger's length
+        // (2026-09-21 audit P1): rollHistory is capped at 50, so a full ledger
+        // — the normal state after one fight — never grows, and the old
+        // length probe read "no dice" forever.
+        const newestRollBefore = newestRollMarker(getState().rollHistory);
         try {
             await handleRequestedRolls(proposal.rolls, {
                 getState,
@@ -781,7 +796,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             });
             if (!stagedFollowUp) finalizeRoleplayTurn(proposal.playerAction);
         } catch (error) {
-            const diceRolled = (getState().rollHistory?.length || 0) > rollCountBefore;
+            const diceRolled = newestRollMarker(getState().rollHistory) !== newestRollBefore;
             if (error.name === 'AbortError') {
                 // A deliberate Stop before any dice landed must not discard the
                 // staged adjudication (2026-08-31 P2): restore the proposal —

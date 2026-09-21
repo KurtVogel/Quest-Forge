@@ -235,6 +235,16 @@ describe('engine-owned exchange resolution', () => {
         expect(plan.payload.result.postState.enemies[0]).toMatchObject({ name: 'Goblin', hp: 0, status: 'defeated' });
     });
 
+    it('hands the reducer the hero’s own dice apart from the whole exchange (2026-09-21 audit P2)', () => {
+        rollQueue.push(15, 5, 18, 4); // hero hits (attack + damage); the goblin hits back (attack + damage)
+        const plan = planCombatExchange(state(), exchange());
+
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.rolls).toHaveLength(4);
+        expect(plan.payload.heroRolls).toHaveLength(2);
+        expect(plan.payload.heroRolls).toEqual(plan.payload.rolls.slice(0, 2));
+    });
+
     it('tells narration that a heavily wounded foe remains alive and combat is ongoing', () => {
         rollQueue.push(15, 7, 1); // player hits for 10; Cave-Worg misses
         const intent = normalizeCombatExchange({

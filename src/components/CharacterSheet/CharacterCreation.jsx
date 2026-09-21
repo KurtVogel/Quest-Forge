@@ -59,7 +59,6 @@ export default function CharacterCreation() {
     const [rosterError, setRosterError] = useState(null);
     const [portraitUrl, setPortraitUrl] = useState('');
     const [portraitProvider, setPortraitProvider] = useState('');
-    const [portraitPromptUsed, setPortraitPromptUsed] = useState('');
     const [isGeneratingPortrait, setIsGeneratingPortrait] = useState(false);
     const [portraitError, setPortraitError] = useState('');
     const importInputRef = useRef(null);
@@ -69,7 +68,6 @@ export default function CharacterCreation() {
     useEffect(() => {
         setPortraitUrl('');
         setPortraitProvider('');
-        setPortraitPromptUsed('');
         setPortraitError('');
     }, [name, gender, appearance, race, charClass]);
 
@@ -189,7 +187,6 @@ export default function CharacterCreation() {
             if (!result?.url) throw new Error('No portrait returned.');
             setPortraitUrl(result.url);
             setPortraitProvider(result.provider || '');
-            setPortraitPromptUsed(prompt);
         } catch (e) {
             setPortraitError(e.message || 'Portrait failed.');
         } finally {
@@ -243,7 +240,6 @@ export default function CharacterCreation() {
             const character = { ...preview.character };
             if (portraitUrl) {
                 character.portraitUrl = portraitUrl;
-                character.portraitPrompt = portraitPromptUsed;
                 character.portraitUpdatedAt = Date.now();
             }
             beginAdventure(character, preview.inventory);
@@ -257,7 +253,6 @@ export default function CharacterCreation() {
         const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle, expertiseSkills, gender, appearance, background });
         if (portraitUrl) {
             character.portraitUrl = portraitUrl;
-            character.portraitPrompt = portraitPromptUsed;
             character.portraitUpdatedAt = Date.now();
         }
         const inventory = createStartingInventory(charClass);

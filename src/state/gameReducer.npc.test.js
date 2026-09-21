@@ -166,7 +166,7 @@ describe('gameReducer NPC portraits', () => {
     });
     const npcId = withNpc.npcs[0].id;
 
-    it('stores a generated portrait with prompt and provider on the record', () => {
+    it('stores a generated portrait with its provider — never the prompt (2026-09-21 audit P2)', () => {
         const next = gameReducer(withNpc, {
             type: 'SET_NPC_PORTRAIT',
             payload: {
@@ -177,7 +177,8 @@ describe('gameReducer NPC portraits', () => {
             },
         });
         expect(next.npcs[0].portraitUrl).toBe('data:image/jpeg;base64,abc123==');
-        expect(next.npcs[0].portraitPrompt).toContain('(woman)');
+        // ≤ 2,000 chars per portrait read only as a tooltip: write-only ballast.
+        expect(next.npcs[0]).not.toHaveProperty('portraitPrompt');
         expect(next.npcs[0].portraitProvider).toBe('xai');
         expect(next.npcs[0].portraitUpdatedAt).toBeGreaterThan(0);
     });

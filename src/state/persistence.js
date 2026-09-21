@@ -3,14 +3,20 @@
  */
 import { CURRENT_SAVE_VERSION } from './migrations.js';
 import { sanitizeSettings } from './settingsSchema.js';
+import { collectPortraitRefs, extractPortraits, restorePortraits } from './portraitStore.js';
 
 const SETTINGS_KEY = 'rpg-client-settings';
 const DB_NAME = 'rpg-client-saves';
 // v3 (2026-08-04): save payloads split out of the metadata records so listing
 // saves never materializes full campaign states (multi-MB on mature campaigns).
-const DB_VERSION = 3;
+// v4 (2026-09-21): portrait bytes split out of the payloads into a
+// content-addressed `portraits` store (state/portraitStore.js) — they were
+// ~96 % of every autosave and never change. No data migration: a payload that
+// still carries inline portraits loads as-is and is split on its next save.
+const DB_VERSION = 4;
 const STORE_NAME = 'saves';
 const PAYLOAD_STORE = 'savePayloads';
+const PORTRAIT_STORE = 'portraits';
 const ROSTER_STORE = 'characters';
 const AUTOSAVE_SLOT = '__autosave__';
 
@@ -81,6 +87,10 @@ function openDB() {
             if (!db.objectStoreNames.contains(PAYLOAD_STORE)) {
                 db.createObjectStore(PAYLOAD_STORE, { keyPath: 'slotId' });
                 migrateEmbeddedPayloads(event.target.transaction);
+            }
+            if (!db.objectStoreNames.contains(PORTRAIT_STORE)) {
+                // Out-of-line keys: the value IS the data URL string.
+                db.createObjectStore(PORTRAIT_STORE);
             }
         };
     });
@@ -287,6 +297,39 @@ export function projectSaveMetadata(data, fallbackSlotId = null) {
     };
 }
 
+const metadataPortraitRefs = (record) =>
+    (Array.isArray(record?.portraitRefs) ? record.portraitRefs.filter(ref => typeof ref === 'string') : []);
+
+/**
+ * Delete every portrait blob no slot references, inside the caller's
+ * readwrite transaction (scope: saves + portraits) — requests run in order, so
+ * the `getAll` below already sees the caller's own metadata put/delete, and
+ * overlapping readwrite transactions serialize, so a concurrent save can never
+ * have its fresh blob swept between its blob put and its metadata put. A
+ * legacy record with an embedded state is read for refs too (belt). Non-fatal:
+ * a failed sweep leaves orphans for the next one, never fails the save.
+ */
+function sweepOrphanPortraits(tx) {
+    const quiet = (event) => { event.preventDefault?.(); event.stopPropagation?.(); };
+    const allRequest = tx.objectStore(STORE_NAME).getAll();
+    allRequest.onerror = quiet;
+    allRequest.onsuccess = () => {
+        const live = new Set();
+        for (const record of allRequest.result || []) {
+            metadataPortraitRefs(record).forEach(ref => live.add(ref));
+            if (record?.state) collectPortraitRefs(record.state).forEach(ref => live.add(ref));
+        }
+        const portraits = tx.objectStore(PORTRAIT_STORE);
+        const keysRequest = portraits.getAllKeys();
+        keysRequest.onerror = quiet;
+        keysRequest.onsuccess = () => {
+            for (const key of keysRequest.result || []) {
+                if (!live.has(key)) portraits.delete(key).onerror = quiet;
+            }
+        };
+    };
+}
+
 /**
  * Save game state to a named slot: a metadata-only record in `saves` plus the
  * full state payload in `savePayloads`, committed in ONE transaction (listing
@@ -295,7 +338,7 @@ export function projectSaveMetadata(data, fallbackSlotId = null) {
  */
 export function saveGame(slotId, gameState) {
     return withDb((db, resolve, reject) => {
-        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE], 'readwrite');
+        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE, PORTRAIT_STORE], 'readwrite');
 
         const savedMessages = gameState.messages || [];
         // prunedMessageCount indexes into the array we actually persist. Summarized messages
@@ -303,19 +346,46 @@ export function saveGame(slotId, gameState) {
         // `m?.` belt: a null entry in live state must not brick every autosave.
         const prunedMessageCount = savedMessages.filter(m => m?.summarized).length;
 
-        const metadataRequest = tx.objectStore(STORE_NAME).put({
+        // Portrait bytes ride the `portraits` store, not the payload (see
+        // portraitStore.js): the payload carries refs, the metadata record
+        // lists them so the orphan sweep never opens a payload.
+        const { state: slimState, blobs, refs } = extractPortraits({
+            ...serializeGameState(gameState),
+            session: { ...gameState.session, prunedMessageCount },
+        });
+
+        const saves = tx.objectStore(STORE_NAME);
+        const portraits = tx.objectStore(PORTRAIT_STORE);
+
+        // A blob is immutable under its content key: write it only when absent
+        // (getKey reads no bytes), so a steady-state autosave moves zero
+        // portrait bytes. A failed put aborts the transaction — the save fails
+        // loudly rather than committing a payload whose picture never landed.
+        for (const [key, url] of blobs) {
+            const probe = portraits.getKey(key);
+            probe.onsuccess = () => { if (probe.result === undefined) portraits.put(url, key); };
+        }
+
+        // The slot's PREVIOUS refs decide whether anything can have been
+        // orphaned (a reroll, a removed NPC, a different campaign in the slot).
+        let released = false;
+        const previousRequest = saves.get(slotId);
+        previousRequest.onsuccess = () => {
+            const kept = new Set(refs);
+            released = metadataPortraitRefs(previousRequest.result).some(ref => !kept.has(ref));
+        };
+
+        const metadataRequest = saves.put({
             slotId,
             ...buildSaveMetadata(gameState),
             savedAt: Date.now(),
             messageCount: savedMessages.length,
+            portraitRefs: refs,
         });
-        const payloadRequest = tx.objectStore(PAYLOAD_STORE).put({
-            slotId,
-            state: {
-                ...serializeGameState(gameState),
-                session: { ...gameState.session, prunedMessageCount },
-            },
-        });
+        const payloadRequest = tx.objectStore(PAYLOAD_STORE).put({ slotId, state: slimState });
+        // Requests settle in order: the previous-record read has answered and
+        // the new metadata is in place by the time this fires.
+        payloadRequest.onsuccess = () => { if (released) sweepOrphanPortraits(tx); };
 
         // Resolve on COMMIT (tx.oncomplete), not on the puts' onsuccess. Otherwise a read
         // fired right after (e.g. the saves dialog refreshing itself) can race the
@@ -348,17 +418,33 @@ export function asSaveObject(parsed) {
  */
 export function loadGame(slotId) {
     return withDb((db, resolve, reject) => {
-        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE], 'readonly');
+        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE, PORTRAIT_STORE], 'readonly');
+        // Refs → inline data URLs before the state leaves this module: live
+        // state, the cloud upload loop, and LOAD_GAME never see a portraitRef.
+        // A blob that cannot be read is a missing picture, never a failed load.
+        const hydrate = (stored) => {
+            const state = asSaveObject(stored);
+            const refs = collectPortraitRefs(state);
+            if (refs.length === 0) { resolve(state); return; }
+            const found = new Map();
+            let pending = refs.length;
+            const settle = () => { if (--pending === 0) resolve(restorePortraits(state, key => found.get(key))); };
+            for (const ref of refs) {
+                const blobRequest = tx.objectStore(PORTRAIT_STORE).get(ref);
+                blobRequest.onsuccess = () => { found.set(ref, blobRequest.result); settle(); };
+                blobRequest.onerror = (event) => { event.preventDefault?.(); event.stopPropagation?.(); settle(); };
+            }
+        };
         const request = tx.objectStore(PAYLOAD_STORE).get(slotId);
         request.onsuccess = () => {
             if (request.result?.state) {
-                resolve(asSaveObject(request.result.state));
+                hydrate(request.result.state);
                 return;
             }
             // Belt: a record whose payload never migrated/landed still loads
             // from the legacy embedded-state metadata record.
             const legacyRequest = tx.objectStore(STORE_NAME).get(slotId);
-            legacyRequest.onsuccess = () => resolve(asSaveObject(legacyRequest.result?.state));
+            legacyRequest.onsuccess = () => hydrate(legacyRequest.result?.state);
             legacyRequest.onerror = () => reject(legacyRequest.error);
         };
         request.onerror = () => reject(request.error);
@@ -412,9 +498,11 @@ export function getSaveSessionId(slotId) {
  */
 export function deleteSave(slotId) {
     return withDb((db, resolve, reject) => {
-        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE], 'readwrite');
+        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE, PORTRAIT_STORE], 'readwrite');
         const request = tx.objectStore(STORE_NAME).delete(slotId);
         const payloadRequest = tx.objectStore(PAYLOAD_STORE).delete(slotId);
+        // The slot's pictures go with it unless another slot still shows them.
+        payloadRequest.onsuccess = () => sweepOrphanPortraits(tx);
         // Resolve on COMMIT (see saveGame) so a refresh read after a delete sees it gone.
         request.onerror = () => reject(request.error);
         payloadRequest.onerror = () => reject(payloadRequest.error);

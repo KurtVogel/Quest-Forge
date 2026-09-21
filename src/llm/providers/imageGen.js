@@ -19,6 +19,22 @@ import { normalizeXaiApiKey } from './xaiKey.js';
 const IMAGE_CACHE = new Map();
 const IMAGE_CACHE_MAX = 10;
 
+// Store at the size you render (2026-09-21 audit P2). The Journal/Companions
+// card draws an NPC portrait 84 px wide — 256×341 covers a 3× DPR phone at
+// ~1/3 of the 480×640 bytes (the hero's sheet + wizard reveal keep 480×640).
+export const NPC_PORTRAIT_SIZE = Object.freeze({ maxWidth: 256, maxHeight: 341 });
+
+// The scene cache holds up to 10 renders in tab memory; a Gemini inline PNG is
+// several MB of base64, so ten full-resolution entries could pin tens of MB on
+// the phone target. The render handed back to the caller (the CURRENT picture)
+// stays full-resolution; the CACHED copy is a display-sized JPEG re-encode.
+const SCENE_CACHE_MAX_WIDTH = 1280;
+const SCENE_CACHE_MAX_HEIGHT = 1280;
+const SCENE_CACHE_QUALITY = 0.85;
+// At or under the display size only a heavyweight (PNG-class) payload is worth
+// re-encoding; a 1k JPEG passes through untouched.
+const SCENE_CACHE_REENCODE_OVER_CHARS = 1_200_000;
+
 const XAI_IMAGE_ENDPOINT = 'https://api.x.ai/v1/images/generations';
 // Recommended model as of 2026 (grok-imagine-image-pro is deprecated May 2026).
 const XAI_IMAGE_MODEL = 'grok-imagine-image-quality';
@@ -92,6 +108,25 @@ function cacheSet(key, value) {
     IMAGE_CACHE.set(key, value);
 }
 
+/**
+ * Cache a finished render. Portraits were already downscaled by the caller's
+ * own maxWidth/maxHeight; a full-resolution scene render is cached as a
+ * display-sized copy (see SCENE_CACHE_*), never at full size.
+ */
+async function cacheRender(key, result, options) {
+    if (options.maxWidth || options.maxHeight || !result.url?.startsWith('data:image/')) {
+        cacheSet(key, result);
+        return;
+    }
+    const url = await downscaleDataUrl(result.url, {
+        maxWidth: SCENE_CACHE_MAX_WIDTH,
+        maxHeight: SCENE_CACHE_MAX_HEIGHT,
+        quality: SCENE_CACHE_QUALITY,
+        reencodeOverChars: SCENE_CACHE_REENCODE_OVER_CHARS,
+    });
+    cacheSet(key, url === result.url ? result : { ...result, url });
+}
+
 /** Guess the image MIME from the leading bytes of a base64 payload. */
 function mimeFromBase64(b64) {
     if (b64.startsWith('iVBOR')) return 'image/png';
@@ -126,7 +161,7 @@ function geminiInlineImage(parts) {
     return null;
 }
 
-async function downscaleDataUrl(dataUrl, { maxWidth, maxHeight, quality = 0.82 } = {}) {
+async function downscaleDataUrl(dataUrl, { maxWidth, maxHeight, quality = 0.82, reencodeOverChars = 0 } = {}) {
     if (!dataUrl?.startsWith('data:image/') || (!maxWidth && !maxHeight)) return dataUrl;
 
     try {
@@ -143,14 +178,17 @@ async function downscaleDataUrl(dataUrl, { maxWidth, maxHeight, quality = 0.82 }
             maxWidth ? maxWidth / img.naturalWidth : 1,
             maxHeight ? maxHeight / img.naturalHeight : 1
         );
-        if (scale >= 1) return dataUrl;
+        const heavy = reencodeOverChars > 0 && dataUrl.length > reencodeOverChars;
+        if (scale >= 1 && !heavy) return dataUrl;
 
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
         canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        return canvas.toDataURL('image/jpeg', quality);
+        const encoded = canvas.toDataURL('image/jpeg', quality);
+        // A re-encode that did not shrink anything is not worth the generation loss.
+        return scale >= 1 && encoded.length >= dataUrl.length ? dataUrl : encoded;
     } catch (e) {
         console.warn('[ImageGen] Portrait downscale failed:', e);
         return dataUrl;
@@ -221,7 +259,7 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                         quality: options.quality,
                     });
                     const result = { url: finalUrl, provider: 'xai', fallbackReason: null };
-                    cacheSet(`xai|${baseCacheKey}`, result);
+                    await cacheRender(`xai|${baseCacheKey}`, result, options);
                     return result;
                 }
                 // OK status but no image — most likely filtered by content moderation.
@@ -270,7 +308,7 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                         quality: options.quality,
                     });
                     const result = { url: finalUrl, provider: 'gemini', fallbackReason };
-                    cacheSet(`gemini|${baseCacheKey}`, result);
+                    await cacheRender(`gemini|${baseCacheKey}`, result, options);
                     return result;
                 }
                 const finish = data?.candidates?.[0]?.finishReason || 'no-image';

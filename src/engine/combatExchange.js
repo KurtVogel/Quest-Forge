@@ -1526,6 +1526,12 @@ export function planCombatExchange(state, exchange) {
         }
     }
     const player = resolvePlayerSlots({ state, exchange, enemies, companions, events, rolls, standingFlankIds });
+    // The roll LEDGER keeps the hero's own dice only (2026-09-21 audit P2): an
+    // exchange appends ~10 rolls (every actor's attack AND damage), so one
+    // five-exchange fight evicted every check the campaign ever rolled from the
+    // 50-row ledger the recall lane answers "what did I roll to…" from. The
+    // full set still rides `rolls` and the result lines show every die.
+    const heroRolls = rolls.slice();
     // Casting changes the character mid-exchange (AC buffs, invisibility, spent
     // slots); enemies acting later in this same exchange must see that state.
     const castCharacter = mergeCharacterUpdates(state.character, player.characterUpdates);
@@ -1552,6 +1558,7 @@ export function planCombatExchange(state, exchange) {
                 deathSaveNatural: player.deathSaveNatural,
                 deathSaveSkipped: player.deathSaveSkipped,
                 rolls,
+                heroRolls,
                 result,
                 flankedEnemyIds: [],
                 bonusActionUsed: usedBonusAction,
@@ -1640,6 +1647,7 @@ export function planCombatExchange(state, exchange) {
             deathSaveNatural: player.deathSaveNatural,
             deathSaveSkipped: player.deathSaveSkipped,
             rolls,
+            heroRolls,
             result,
             flankedEnemyIds,
             bonusActionUsed: usedBonusAction,
@@ -1722,6 +1730,8 @@ export function planOpeningExchange(state) {
             playerDamage,
             deathSaveNatural: null,
             rolls,
+            // The opening belongs to the initiative winners — no hero dice.
+            heroRolls: [],
             result,
             consumeActionSurge: false,
         },

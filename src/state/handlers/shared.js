@@ -48,6 +48,9 @@ const ROLL_HISTORY_TEXT_MAX = 120;
  * description rode the prompt unclamped. Faces must be finite numbers (at least
  * one), total is recomputed when the stored one is junk, modifier defaults to
  * 0, text fields are string-or-empty and clamped. Returns null to drop.
+ * Projected to the ledger's KNOWN keys since 2026-09-21 (audit P2, the 09-16
+ * rule): the old `...entry` spread let any unknown key on a stored roll — a
+ * 100 KB `foo` — ride every later save forever.
  */
 export function sanitizeRollHistoryEntry(entry) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
@@ -61,8 +64,10 @@ export function sanitizeRollHistoryEntry(entry) {
     const storedTotal = Number(entry.total);
     const total = Number.isFinite(storedTotal) && typeof entry.total !== 'boolean' ? storedTotal : subtotal + modifier;
     const text = value => (typeof value === 'string' ? value.trim().slice(0, ROLL_HISTORY_TEXT_MAX) : '');
+    const timestamp = Number(entry.timestamp);
+    const count = Number(entry.dice?.count);
+    const sides = Number(entry.dice?.sides);
     return {
-        ...entry,
         id: typeof entry.id === 'string' ? entry.id.slice(0, 80) : String(entry.id ?? `roll-${subtotal}-${rolls.length}`).slice(0, 80),
         rolls,
         subtotal,
@@ -72,6 +77,11 @@ export function sanitizeRollHistoryEntry(entry) {
         notation: text(entry.notation),
         isCritical: entry.isCritical === true,
         isCritFail: entry.isCritFail === true,
+        ...(Number.isFinite(timestamp) && typeof entry.timestamp !== 'boolean' ? { timestamp } : {}),
+        ...(Number.isInteger(count) && Number.isInteger(sides) ? { dice: { count, sides } } : {}),
+        // combatMath.stampCriticalRoll's two stamps — the prompt's crit label reads `kind`.
+        ...(entry.kind === 'attack' ? { kind: 'attack' } : {}),
+        ...(text(entry.criticalThreshold) ? { criticalThreshold: text(entry.criticalThreshold) } : {}),
     };
 }
 

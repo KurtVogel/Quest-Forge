@@ -54,7 +54,10 @@ export const NPC_RECORD_KEYS = new Set([
     'id', 'kind', 'rosterTier', 'pinned', 'importance', 'disposition', 'trust',
     'bondMoments', 'recentImpressions', 'openThread', 'openThreadMessage', 'callbackHooks',
     'knownFacts', 'relationshipHistory', 'arcDisposition', 'firstMet', 'lastSeen', 'lastSeenMessage',
-    'portraitUrl', 'portraitPrompt', 'portraitProvider', 'portraitUpdatedAt',
+    // `portraitPrompt` is deliberately NOT a record key (2026-09-21 audit P2):
+    // ≤ 2,000 chars per portrait, read only as an <img> tooltip — write-only
+    // ballast on every save. The load projection strips it from old saves.
+    'portraitUrl', 'portraitProvider', 'portraitUpdatedAt',
 ]);
 
 /**
@@ -1007,6 +1010,7 @@ export function migrateLegacyNpc(npc = {}) {
     merged.relationshipHistory = merged.arcDisposition
         ? typeRelationshipHistory(merged.relationshipHistory)
         : compactRelationshipHistory(merged.relationshipHistory);
+    delete merged.portraitPrompt;
     if (merged.portraitUrl !== undefined) {
         const safeUrl = sanitizePortraitUrl(merged.portraitUrl);
         if (safeUrl) merged.portraitUrl = safeUrl;

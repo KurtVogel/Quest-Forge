@@ -1,6 +1,7 @@
 import { collection, doc, getDoc, getDocs, runTransaction } from "firebase/firestore";
 import { db } from "../config/firebase.js";
 import { asSaveObject, serializeGameState, buildSaveMetadata, projectSaveMetadata } from "./persistence.js";
+import { fitPortraitsToBudget } from "./portraitStore.js";
 
 /**
  * Cloud save layer (bring-your-own Firebase, manual saves only).
@@ -95,7 +96,9 @@ function chunksCollection(uid, slotId) {
 }
 
 /**
- * Result shape: `{ ok: true }` or `{ ok: false, reason, message }`, where
+ * Result shape: `{ ok: true }` (plus `droppedPortraits` + `note` when the
+ * portrait budget had to drop NPC pictures to fit — 2026-09-21) or
+ * `{ ok: false, reason, message }`, where
  * `message` is player-readable and `reason` is one of
  * `unavailable` (no Firebase configured) · `signed-out` · `too-large`
  * (pre-flight, Firestore never called) · `permission-denied` · `error`.
@@ -135,11 +138,26 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // read never download payload bytes (2026-08-04; this also deleted the
         // old inline/chunked dual write path). Legacy inline docs still load
         // via the payload fallback in loadGameFromCloud until re-saved.
-        const payload = JSON.stringify(trimmedState);
+        let payload = JSON.stringify(trimmedState);
+        let byteLength = payloadByteLength(payload);
+
+        // Portrait budget (2026-09-21 P1): the cloud payload carries portraits
+        // inline (another device has no local blob store), and 100 of them
+        // alone exceeded the ceiling — the whole campaign was refused for its
+        // pictures. Drop NPC portraits oldest-first until it fits, and say so;
+        // the local save keeps every one of them.
+        let droppedPortraits = 0;
+        if (byteLength > CLOUD_SAVE_BYTE_LIMIT) {
+            const fitted = fitPortraitsToBudget(trimmedState, byteLength, CLOUD_SAVE_BYTE_LIMIT);
+            if (fitted.dropped > 0) {
+                droppedPortraits = fitted.dropped;
+                payload = JSON.stringify(fitted.state);
+                byteLength = payloadByteLength(payload);
+            }
+        }
 
         // Pre-flight: refuse before touching Firestore when the campaign has
         // outgrown one transaction request, with a message that says what to do.
-        const byteLength = payloadByteLength(payload);
         if (byteLength > CLOUD_SAVE_BYTE_LIMIT) {
             const message =
                 `This campaign's save is ${formatMiB(byteLength)}, above the cloud limit of ` +
@@ -171,6 +189,14 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         });
 
         console.log(`Cloud save successful: ${slotId} (${payload.length} chars, ${chunks.length} chunk${chunks.length === 1 ? '' : 's'})`);
+        if (droppedPortraits > 0) {
+            return {
+                ok: true,
+                droppedPortraits,
+                note: `The cloud copy left out the ${droppedPortraits} oldest character portrait${droppedPortraits === 1 ? '' : 's'} to fit the ` +
+                    `${formatMiB(CLOUD_SAVE_BYTE_LIMIT)} cloud limit — this device keeps them all.`,
+            };
+        }
         return { ok: true };
     } catch (e) {
         console.error("Cloud save failed:", e);

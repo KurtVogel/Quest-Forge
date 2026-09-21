@@ -106,6 +106,8 @@ export const handlers = {
         // chain returned. A URL that fails it never lands, and the portrait
         // metadata stamps only when the URL survived — "Rendered by gemini"
         // beside no picture was the NPC-side symptom of the same gap.
+        // Never stored: nothing reads it (2026-09-21 audit P2).
+        delete payload.portraitPrompt;
         if (Object.prototype.hasOwnProperty.call(payload, 'portraitUrl')) {
             const safeUrl = sanitizePortraitUrl(payload.portraitUrl);
             if (safeUrl) {
@@ -115,7 +117,6 @@ export const handlers = {
                 payload.portraitUrl = '';
             } else {
                 delete payload.portraitUrl;
-                delete payload.portraitPrompt;
                 delete payload.portraitProvider;
                 delete payload.portraitUpdatedAt;
             }

@@ -6,7 +6,7 @@ import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js'
 import { bondKindLabel, listNpcImpressions, scoreNpcForPrompt, splitBondMoments } from '../../engine/npcRoster.js';
 import { deriveRelationshipStage, describeAbsence, listKnownByNpc, resolveOpenThread } from '../../engine/relationshipArc.js';
 import { describeLastHere, describeTravelLink, groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
-import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
+import { generatePortraitImageDetailed, NPC_PORTRAIT_SIZE } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 import LookEditor from './LookEditor.jsx';
 import { writeChronicleChapters, chronicleToMarkdown, collectChapterMessages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNK_SIZE, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
@@ -200,6 +200,9 @@ export default function JournalPanel({ isOpen, onClose }) {
             const result = await generatePortraitImageDetailed(prompt, state.settings?.imageApiKey, {
                 geminiApiKey: getMachineryGeminiKey(state.settings),
                 bypassCache: !!npc.portraitUrl, // reroll must paint a genuinely new image
+                // Stored at the size it renders (2026-09-21 audit P2): the card
+                // draws it 84 px wide, so 256 covers a 3× DPR phone.
+                ...NPC_PORTRAIT_SIZE,
                 sessionScope: state.session?.id || '',
             });
             if (!result?.url) throw new Error('No portrait returned.');
@@ -210,7 +213,6 @@ export default function JournalPanel({ isOpen, onClose }) {
                 payload: {
                     id: npc.id,
                     portraitUrl: result.url,
-                    portraitPrompt: prompt,
                     portraitProvider: result.provider || '',
                 },
             };
@@ -718,7 +720,6 @@ function NPCTab({
                                 <img
                                     src={npc.portraitUrl}
                                     alt={`Portrait of ${npc.name}`}
-                                    title={npc.portraitPrompt || undefined}
                                 />
                                 {npc.portraitProvider && npc.portraitProvider !== 'xai' && (
                                     <span className="journal-npc-portrait-provider">

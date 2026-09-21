@@ -166,7 +166,6 @@ export default function CharacterSheet() {
                 payload: {
                     appearance,
                     portraitUrl: result.url,
-                    portraitPrompt,
                     portraitProvider: result.provider || '',
                     portraitUpdatedAt: Date.now(),
                 },

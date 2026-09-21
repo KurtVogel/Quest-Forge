@@ -19,6 +19,7 @@ vi.mock('./scribe.js', async (importOriginal) => ({
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 import { createCharacter } from '../engine/characterUtils.js';
 import { createTurnRunner } from './turnOrchestrator.js';
+import { ROLL_HISTORY_CAP } from '../state/handlers/shared.js';
 
 const ABILITY_SCORES = {
     strength: 15, dexterity: 13, constitution: 14,
@@ -31,11 +32,12 @@ function abortError() {
     return Object.assign(new Error('The user aborted a request.'), { name: 'AbortError' });
 }
 
-function createHarness({ streamMessage }) {
+function createHarness({ streamMessage, rollHistory = [], geminiApiKey = '' }) {
     let state = {
         ...initialGameState,
+        rollHistory,
         character: createCharacter('Testa', 'human', 'fighter', ABILITY_SCORES, ['athletics']),
-        settings: { ...initialGameState.settings, llmProvider: 'openai', apiKey: 'test-key', model: 'test-model' },
+        settings: { ...initialGameState.settings, llmProvider: 'openai', apiKey: 'test-key', model: 'test-model', geminiApiKey },
         session: { ...initialGameState.session, id: 'session-abort' },
     };
     const dispatch = (action) => { state = gameReducer(state, action); };
@@ -72,6 +74,37 @@ describe('acceptRoleplayCheck — Stop during the outcome narration (post-dice)'
         // engine's own roll-result lines.
         const newMessages = getState().messages.slice(messagesBefore);
         expect(newMessages.some(m => /Error|failed/i.test(m.content || ''))).toBe(false);
+    });
+
+    it('still reads "dice landed" when the capped ledger is FULL (2026-09-21 audit P1)', async () => {
+        // rollHistory is capped at ROLL_HISTORY_CAP: a full ledger — one fight
+        // fills it, and every save that ever held 50 loads full — never grows,
+        // so the old length probe read "no dice" and a post-dice Stop RESTORED
+        // the proposal: the player rolled again with the first die on the table.
+        const fullLedger = Array.from({ length: ROLL_HISTORY_CAP }, (_, i) => ({
+            id: `roll-old-${i}`, rolls: [10], subtotal: 10, modifier: 0, total: 10,
+            description: `Old roll ${i}`, notation: '1d20+0', isCritical: false, isCritFail: false,
+        }));
+        // rollResolver swallows its own follow-up failures, so the
+        // orchestrator's catch is reached post-dice by a throw AFTER the
+        // outcome landed — here the post-turn extraction.
+        runScribeMock.mockImplementationOnce(() => { throw new Error('extraction exploded'); });
+        const { runner, getState } = createHarness({
+            streamMessage: vi.fn(async ({ onChunk }) => { onChunk?.('You slip inside.'); return 'You slip inside.'; }),
+            rollHistory: fullLedger,
+            geminiApiKey: 'AIza-test',
+        });
+        runner.stageRoleplayCheck(CHECK, 'I sneak in.');
+
+        await runner.acceptRoleplayCheck();
+
+        // The cap held (length did not move) AND the new die is in the ledger.
+        expect(getState().rollHistory).toHaveLength(ROLL_HISTORY_CAP);
+        expect(getState().rollHistory.at(-1).id).not.toBe('roll-old-49');
+        // Post-dice: never re-proposed, and the line says the dice stand.
+        expect(getState().pendingRoleplayCheck).toBeNull();
+        expect(getState().messages.some(m => /The dice landed/.test(m.content || ''))).toBe(true);
+        expect(getState().messages.some(m => /Error resolving check/.test(m.content || ''))).toBe(false);
     });
 
     it('a non-abort failure after dice points at the "continue" retry path', async () => {

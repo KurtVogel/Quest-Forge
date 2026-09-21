@@ -2476,7 +2476,7 @@ duplicated heat rationale and unclamped ledger text; pin a byte ceiling on every
 and every director context the way the hearsay block (1,500) and the reflection NPC payload
 (30 KB) already are. From the 2026-09-20 strengthening audit.
 
-### [strengthening] A cap is a semantic change; bytes that never change must not ride the record that changes every turn; store at the size you render — status: `idea` (2026-09-21)
+### [strengthening] A cap is a semantic change; bytes that never change must not ride the record that changes every turn; store at the size you render — status: `shipped` (2026-09-21, same-day queue sweep: id-based dice probe, `portraits` IDB store + cloud portrait budget, 256×341 NPC tier, display-sized scene cache, `portraitPrompt` dropped). Open follow-up: existing 480×640 NPC portraits are not re-encoded — a lazy load-time downscale would reclaim ~2/3 of their bytes
 Three rules from the second Lap-3 pair (2026-09-21, dice-engine + scene-art).
 **(1)** The 2026-08-01 audit asked for `rollHistory` to be capped at the reducer, and it was
 (`ROLL_HISTORY_CAP` 50, load slice 50) — but `acceptRoleplayCheck` in `turnOrchestrator.js`

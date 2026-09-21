@@ -385,14 +385,16 @@ function healLoadedCharacter(character) {
     // sibling — always clamped these; the live save never did. The hero
     // portrait gets the shared allowlist (P2) — see engine/portraitUrl.js.
     const name = cleanTextField(character.name, 30) || 'Adventurer';
+    // The portrait PROMPT is never read anywhere (2026-09-21 audit P2) — up to
+    // 2,000 chars of write-only ballast on every autosave; stripped at load.
+    const { portraitPrompt: _portraitPrompt, ...kept } = character;
     const healed = {
-        ...character,
+        ...kept,
         name,
         gender: cleanTextField(character.gender, 60),
         appearance: cleanTextField(character.appearance, CHARACTER_APPEARANCE_MAX),
         background: cleanTextField(character.background, 2000),
         portraitUrl: sanitizePortraitUrl(character.portraitUrl),
-        portraitPrompt: cleanTextField(character.portraitPrompt, 2000),
         portraitProvider: cleanTextField(character.portraitProvider, 40),
         // The race/class display lists and speed are typed too (2026-09-18 P1):
         // a STRING `traits` passed `?.length` and threw `.join is not a

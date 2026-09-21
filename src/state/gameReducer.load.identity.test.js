@@ -34,7 +34,7 @@ describe('LOAD_GAME hero identity typing', () => {
     it('string-clamps name/gender/appearance/background and strips a non-allowlisted portrait URL', () => {
         const next = load(junkCharacter);
         expect(next.character).toMatchObject({
-            name: 'Adventurer', gender: '', appearance: '', background: '', portraitUrl: '', portraitPrompt: '', portraitProvider: '',
+            name: 'Adventurer', gender: '', appearance: '', background: '', portraitUrl: '', portraitProvider: '',
         });
     });
 

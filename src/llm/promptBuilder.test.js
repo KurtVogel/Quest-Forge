@@ -675,6 +675,14 @@ describe('recent rolls block', () => {
         expect(text).toContain('Death Saving Throw: **1** (1) (natural 1)');
     });
 
+    it('is omitted during combat — RESOLVED EVENTS is the one carrier of an exchange\u2019s dice (2026-09-21 audit P2)', () => {
+        const text = prompt({
+            rollHistory: [{ description: 'Goblin attacks Astra', notation: '1d20+4', total: 15, rolls: [11], modifier: 4, kind: 'attack' }],
+            combat: { active: true, phase: 'awaiting_player', round: 1, enemies: [{ id: 'e1', name: 'Goblin', hp: 7, maxHp: 7, ac: 12, condition: 'healthy', combatStatus: 'active' }], turnOrder: [] },
+        });
+        expect(text).not.toContain('## RECENT DICE ROLLS');
+    });
+
     it('is omitted when there is no roll history', () => {
         const text = prompt({ rollHistory: [] });
         expect(text).not.toContain('## RECENT DICE ROLLS');
