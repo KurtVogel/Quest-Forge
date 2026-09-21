@@ -5,6 +5,7 @@ import {
     blocksFodderArchive,
     briefNpcFieldForPrompt,
     buildStoryMemoryPromotion,
+    archiveDescriptiveLabels,
     classifyNpcCandidate,
     clampNpcDossierField,
     curateNpcsForPrompt,
@@ -12,7 +13,9 @@ import {
     formatNpcEmbeddingText,
     hasNpcNarrativeWeight,
     healPromotedStoryMemoryTwins,
+    isDescriptiveLabel,
     isGenericCreatureName,
+    isGenericNameToken,
     listArchivableFodder,
     locationMatchesPlace,
     MAX_NPC_BOND_MOMENTS,
@@ -353,6 +356,46 @@ describe('npcRoster classification', () => {
             lastNotes: 'Attacked in the corridor and was slain.',
         });
         expect(result.allowRoster).toBe(false);
+    });
+
+    it('a description is never a roster record, whatever tier the lane claims (2026-09-21)', () => {
+        for (const name of ['A guard sharpening a spear', 'Two other sickly-looking goblins', 'Some villagers with torches', 'The man who sold the mule']) {
+            expect(isDescriptiveLabel(name)).toBe(true);
+            expect(classifyNpcCandidate({ name, kind: 'character', rosterEligible: true, stanceToPlayer: 'Wary of the hero.' }).allowRoster).toBe(false);
+        }
+        for (const name of ["A'kath", 'Scarred Guard', 'Armory Guard (Spearman)', 'Captain Maren Voss', 'The Lady', 'Old Tammo']) {
+            expect(isDescriptiveLabel(name)).toBe(false);
+        }
+        // An existing character keeps its record even under a description.
+        expect(classifyNpcCandidate(
+            { name: 'A guard sharpening a spear', lastNotes: 'nods' },
+            { name: 'A guard sharpening a spear', rosterTier: 'character' },
+        ).allowRoster).toBe(true);
+    });
+
+    it('a generic name token identifies nobody on its own, plural folded', () => {
+        for (const token of ['guard', 'guards', 'goblin', 'goblins', 'spearman', 'man', 'woman', 'other', 'the', 'a']) {
+            expect(isGenericNameToken(token)).toBe(true);
+        }
+        for (const token of ['jewelglade', 'ketta', 'maren', 'tammo', 'armory']) {
+            expect(isGenericNameToken(token)).toBe(false);
+        }
+    });
+
+    it('archiveDescriptiveLabels retires description-named records without bond data at load', () => {
+        const npcs = archiveDescriptiveLabels([
+            { id: '1', name: 'A guard sharpening a spear', lastNotes: 'Sharpens a spear.' },
+            { id: '2', name: 'Two other sickly-looking goblins', stanceToPlayer: 'Fear the hero.' },
+            { id: '3', name: 'Ketta Mor', lastNotes: 'Companion.' },
+            { id: '4', name: 'Some pinned oddity', pinned: true },
+            null,
+        ]);
+        expect(npcs[0].rosterTier).toBe('archived_creature');
+        expect(npcs[1].rosterTier).toBeUndefined();
+        expect(npcs[2].rosterTier).toBeUndefined();
+        expect(npcs[3].rosterTier).toBeUndefined();
+        expect(npcs[4]).toBeNull();
+        expect(listArchivableFodder([{ id: '5', name: 'A hooded stranger', lastNotes: 'Watches.' }])).toHaveLength(1);
     });
 
     it('accepts named characters with narrative weight', () => {

@@ -49,11 +49,16 @@ const MAX_RESIDENTS = 8;
 const MAX_HAPPENED_HERE = 3;
 const HAPPENED_HERE_SUMMARY_MAX = 240;
 
-/** "last here 40 scenes ago" — in conversational messages, never wall-clock. */
+/**
+ * "last here 20 turns ago" — from CONVERSATIONAL distance (never wall-clock),
+ * one turn being the player's line plus the DM's answer. It used to count
+ * the same number as "scenes", which it never measured (2026-09-21).
+ */
 export function describeLastHere(messagesAgo) {
     if (!Number.isFinite(messagesAgo) || messagesAgo < 0) return '';
     if (messagesAgo === 0) return 'last here moments ago';
-    return `last here ${Math.round(messagesAgo)} scene${Math.round(messagesAgo) === 1 ? '' : 's'} ago`;
+    const turns = Math.max(1, Math.ceil(messagesAgo / 2));
+    return `last here ${turns} turn${turns === 1 ? '' : 's'} ago`;
 }
 
 /**

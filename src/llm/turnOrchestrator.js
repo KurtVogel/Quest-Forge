@@ -313,13 +313,7 @@ export function createTurnRunner({
             ? findRecallIntent(s, originalPlayerMessage)
             : null;
         const recallDossier = recallIntent ? buildRecallDossier(s, recallIntent) : null;
-        if (recallDossier) {
-            onStatus('Consulting the record');
-            dispatch({
-                type: 'ADD_MESSAGE',
-                payload: { role: 'system', kind: 'record', content: describeRecallReceipt(recallDossier, s.messages) },
-            });
-        }
+        if (recallDossier) onStatus('Consulting the record');
         if (wantsMemories && machineryKey) {
             const sceneContext = [
                 recallIntent?.subjects?.length ? `About: ${recallIntent.subjects.join(', ')}` : null,
@@ -349,15 +343,18 @@ export function createTurnRunner({
         } else if (wantsMemories) {
             dramaticMemories = curateDramaticMemories(originalPlayerMessage);
         }
-        if (wantsMemories) {
+        if (wantsMemories || recallDossier) {
             // Scores/similarities are dropped once the prompt string is built —
             // keep the latest copy for the read-only Memory Inspector panel.
+            // The recall receipt lives here too (2026-09-21): it used to post
+            // as a `kind: 'record'` chat line the player had no use for.
             captureInjection({
                 playerMessage: originalPlayerMessage,
                 location: s.currentLocation,
                 retrieved: retrievedMemories,
                 curated: dramaticMemories,
                 record: recallDossier ? recallDossier.lines : null,
+                receipt: recallDossier ? describeRecallReceipt(recallDossier, s.messages) : null,
             });
         }
 

@@ -92,6 +92,7 @@ export default function MemoryInspector({ isOpen, onClose }) {
                                 {Array.isArray(lastInjection.record) && (
                                     <>
                                         <h4>The record (recall turn, {lastInjection.record.length} lines)</h4>
+                                        {lastInjection.receipt && <div className="mi-kv"><span>Receipt:</span> {lastInjection.receipt}</div>}
                                         {lastInjection.record.length > 0 ? (
                                             <ul className="mi-list">
                                                 {lastInjection.record.map((line, i) => (

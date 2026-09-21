@@ -159,9 +159,10 @@ describe('listVisitedPlaces — the place card projections', () => {
 });
 
 describe('describeLastHere / describeCurrentPlace', () => {
-    it('renders scenes ago in conversational distance', () => {
-        expect(describeLastHere(40)).toBe('last here 40 scenes ago');
-        expect(describeLastHere(1)).toBe('last here 1 scene ago');
+    it('renders turns ago from conversational distance (a line and its answer)', () => {
+        expect(describeLastHere(40)).toBe('last here 20 turns ago');
+        expect(describeLastHere(1)).toBe('last here 1 turn ago');
+        expect(describeLastHere(3)).toBe('last here 2 turns ago');
         expect(describeLastHere(0)).toBe('last here moments ago');
         expect(describeLastHere(null)).toBe('');
         expect(describeLastHere(-3)).toBe('');

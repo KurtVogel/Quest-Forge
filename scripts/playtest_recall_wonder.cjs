@@ -740,7 +740,10 @@ async function readInspectorRecord(page) {
         const list = h4.nextElementSibling && h4.nextElementSibling.tagName === 'UL' ? h4.nextElementSibling : null;
         const lines = list ? Array.from(list.querySelectorAll('li .mi-text')).map(e => e.textContent.trim()) : [];
         const nothing = /Nothing on record/.test(sec.textContent);
-        return { section: true, header: h4.textContent, lines, nothing };
+        // The receipt is inspector-only since 2026-09-21 (no chat line).
+        const receiptRow = Array.from(sec.querySelectorAll('.mi-kv')).find(e => e.textContent.startsWith('Receipt:'));
+        const receipt = receiptRow ? receiptRow.textContent.replace(/^Receipt:\s*/, '').trim() : null;
+        return { section: true, header: h4.textContent, lines, nothing, receipt };
     });
     await page.evaluate(() => document.querySelector('.mi-modal .journal-close')?.click());
     await delay(400);
@@ -774,8 +777,11 @@ async function recallTurn(page, checkpoint, key, text, { kind, fact = null, desc
     const beforeReceipts = ((await snap(page))?.recordReceipts || []).length;
     const { before, after, dm, sys, record } = await playTurn(page, `recall:${checkpoint}:${key}`, text);
     const receiptsAll = after?.recordReceipts || [];
-    const newReceipts = receiptsAll.slice(beforeReceipts).map(r => r.content);
     const inspector = await readInspectorRecord(page);
+    // Receipts came as `kind: 'record'` chat rows before 2026-09-21; now the
+    // inspector's Receipt row is the one carrier (the chat rows stay empty).
+    const newReceipts = receiptsAll.slice(beforeReceipts).map(r => r.content);
+    if (newReceipts.length === 0 && inspector.receipt) newReceipts.push(inspector.receipt);
     const row = {
         checkpoint, key, kind, fact, style, ooc,
         question: text,

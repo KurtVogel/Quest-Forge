@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-    buildRecallDossier, buildRecallRecordBlock, describeRecallReceipt, describeScenesAgo,
+    buildRecallDossier, buildRecallRecordBlock, describeRecallReceipt, describeTurnsAgo,
     RECALL_DOSSIER_CHAR_BUDGET,
 } from './recallDossier.js';
 
@@ -107,7 +107,7 @@ describe('buildRecallDossier — order of authority', () => {
 
     it('renders conversational distance and the person\'s key moment + open thread', () => {
         const dossier = buildRecallDossier(makeState(), INTENT);
-        expect(dossier.text).toMatch(/JOURNAL \(\d+ scenes? ago, at The Broken Ford\)/);
+        expect(dossier.text).toMatch(/JOURNAL \(\d+ turns? ago, at The Broken Ford\)/);
         expect(dossier.text).toContain("Moments with Testa: Saima trusted the hero with the ferryman's lantern.");
         expect(dossier.text).toContain('Between Saima Aallotar and Testa now: The ghoul hunt the hero promised her.');
         expect(dossier.span).not.toBeNull();
@@ -299,20 +299,20 @@ describe('buildRecallRecordBlock + describeRecallReceipt', () => {
         const dossier = buildRecallDossier(state, INTENT);
         const receipt = describeRecallReceipt(dossier, state.messages);
         expect(receipt).toMatch(/^📜 From the record for Saima Aallotar: 1 journal entry · 1 fight · 1 quest · 1 ended matter · 2 story cards · 1 fact · 1 person's record · 1 roll · \d+ lines as said · /);
-        expect(receipt).toMatch(/scenes? ago\.$/);
+        expect(receipt).toMatch(/turns? ago\.$/);
         expect(describeRecallReceipt(null)).toBe('');
     });
 });
 
-describe('describeScenesAgo', () => {
-    it('measures conversational distance in scenes, ignoring system and hidden rows', () => {
+describe('describeTurnsAgo', () => {
+    it('measures conversational distance in turns (a line and its answer), ignoring system and hidden rows', () => {
         const messages = [
             msg('user', 'a'), msg('assistant', 'b'), msg('system', 's'), msg('system', 's2'),
             msg('user', 'c', { hidden: true }), msg('user', 'd'), msg('assistant', 'e'),
         ];
-        expect(describeScenesAgo(messages, 0)).toBe('2 scenes ago');
-        expect(describeScenesAgo(messages, 6)).toBe('1 scene ago');
-        expect(describeScenesAgo(messages, NaN)).toBe('');
-        expect(describeScenesAgo(null, 0)).toBe('');
+        expect(describeTurnsAgo(messages, 0)).toBe('2 turns ago');
+        expect(describeTurnsAgo(messages, 6)).toBe('1 turn ago');
+        expect(describeTurnsAgo(messages, NaN)).toBe('');
+        expect(describeTurnsAgo(null, 0)).toBe('');
     });
 });

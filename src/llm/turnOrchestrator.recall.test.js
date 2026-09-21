@@ -1,17 +1,24 @@
 /**
  * "Remember when…" — the record lane through the orchestrator (WOW
  * 2026-09-18): a recall question widens retrieval with the asked-about people
- * counted as present, posts a `📜 From the record` receipt, appends
+ * counted as present, keeps the `📜 From the record` receipt out of the chat
+ * (Memory Inspector only since 2026-09-21), appends
  * `## THE RECORD` to the prompt, strips every mechanical channel from the
  * answer, and hands the Scribe the RECALL TURN rule with the loot audit off.
  * Partial mocks: only the spy targets are replaced.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { retrieveRelevantMock, addMemoryMock, runScribeMock } = vi.hoisted(() => ({
+const { retrieveRelevantMock, addMemoryMock, runScribeMock, captureInjectionMock } = vi.hoisted(() => ({
     retrieveRelevantMock: vi.fn(async () => []),
     addMemoryMock: vi.fn(async () => {}),
     runScribeMock: vi.fn(async () => {}),
+    captureInjectionMock: vi.fn(),
+}));
+
+vi.mock('../debug/memoryInspectorStore.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    captureInjection: captureInjectionMock,
 }));
 
 vi.mock('../engine/vectorMemory.js', async (importOriginal) => ({
@@ -101,29 +108,30 @@ describe('a recall question through sendToLLM', () => {
         expect(statuses).toContain('Consulting the record');
     });
 
-    it('posts the receipt line as a record-kind system message BEFORE the answer, hidden from the DM window', async () => {
+    it('never posts the receipt as a chat line — it goes to the Memory Inspector (2026-09-21)', async () => {
         const { runner, getState } = createHarness('"I remember," Saima says quietly.');
         await runner.sendToLLM(QUESTION, QUESTION);
 
         const messages = getState().messages;
-        const receipt = messages.find(m => m.kind === 'record');
-        expect(receipt).toBeDefined();
-        expect(receipt.role).toBe('system');
-        expect(receipt.content).toMatch(/^📜 From the record for Saima Aallotar: 1 journal entry/);
-        expect(receipt.dmVisible).toBeUndefined();
+        expect(messages.find(m => m.kind === 'record')).toBeUndefined();
+        expect(messages.some(m => typeof m.content === 'string' && m.content.startsWith('📜'))).toBe(false);
         const answer = messages.findLast(m => m.role === 'assistant');
-        expect(messages.indexOf(receipt)).toBeLessThan(messages.indexOf(answer));
         expect(answer.content).toBe('"I remember," Saima says quietly.');
+        const capture = captureInjectionMock.mock.calls.at(-1)[0];
+        expect(capture.receipt).toMatch(/^📜 From the record for Saima Aallotar: 1 journal entry/);
+        expect(capture.record.length).toBeGreaterThan(0);
     });
 
     it('is honest when nothing is on record', async () => {
         const { runner, getState, streamMessage } = createHarness('"Zorbulax? Never heard the name," she says.');
         const question = 'Saima, remember Zorbulax?';
         await runner.sendToLLM(question, question);
-        const receipt = getState().messages.find(m => m.kind === 'record');
+        expect(getState().messages.find(m => m.kind === 'record')).toBeUndefined();
         // Saima is on record (her journal line), so the dossier is not empty —
         // but a wholly unknown subject alone is.
-        expect(receipt.content).toMatch(/^📜 /);
+        const capture = captureInjectionMock.mock.calls.at(-1)[0];
+        expect(capture.receipt).toMatch(/^📜 /);
+        expect(capture.receipt).toContain('Nothing on record about Zorbulax.');
         const { systemPrompt } = streamMessage.mock.calls[0][0];
         expect(systemPrompt).toContain('## THE RECORD');
     });

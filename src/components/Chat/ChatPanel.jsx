@@ -1122,6 +1122,9 @@ const ChatMessage = memo(function ChatMessage({ message, onDelete }) {
     };
 
     if (message.hidden || message.deleted) return null;
+    // Recall receipts posted before 2026-09-21 ("📜 From the record: …") stay
+    // in the save (message indexes never shift) but are not rendered.
+    if (message.kind === 'record') return null;
 
     return (
         <div className={`chat-message ${message.role}`}>

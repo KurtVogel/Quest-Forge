@@ -116,6 +116,35 @@ describe('detectRecallIntent — subjects and query tokens', () => {
         expect(detectRecallIntent('Remember the ghouls?').queryTokens).toEqual(['ghouls']);
     });
 
+    it('a common noun in the question names no roster record built on it (live play 2026-09-21)', () => {
+        // "guard jobs" put six "people" on the receipt: descriptive labels the
+        // Scribe minted as records and role-word names matched on "guard".
+        const roster = {
+            npcNames: [
+                'A guard sharpening a spear', 'Two other sickly-looking goblins', 'Jewelglade Guard',
+                'Scarred Guard', 'Armory Guard (Spearman)', 'Ketta Mor', 'The Lady',
+            ],
+        };
+        const intent = detectRecallIntent('Ketta, guard jobs are what I grew tired of on the other continent. What was it called again?', roster);
+        expect(intent).not.toBeNull();
+        expect(intent.subjects).toEqual(['Ketta Mor']);
+        // A role-word name still matches when the question names it whole.
+        expect(detectRecallIntent('Remember the scarred guard at the gate?', roster).subjects).toEqual(['Scarred Guard']);
+        expect(detectRecallIntent('Remember the guard from Jewelglade?', roster).subjects).toEqual(['Jewelglade Guard']);
+        // A description is never a subject, even named whole.
+        expect(detectRecallIntent('Remember a guard sharpening a spear?', roster).subjects).toEqual([]);
+        // Plural fold: "goblins" is the species word, not a name token.
+        expect(detectRecallIntent('Remember the goblins?', roster).subjects).toEqual([]);
+    });
+
+    it('a quest verb or a place head never matches on its own', () => {
+        const known = { questNames: ['Find the missing guard'], locationNames: ['Room four, Split Keel tavern', 'Rimehollow'] };
+        expect(detectRecallIntent('Remember what we need to find?', known).subjects).toEqual([]);
+        expect(detectRecallIntent('Remember the room we took?', known).subjects).toEqual([]);
+        expect(detectRecallIntent('Remember the Split Keel?', known).subjects).toEqual(['Room four, Split Keel tavern']);
+        expect(detectRecallIntent('Remember Rimehollow?', known).subjects).toEqual(['Rimehollow']);
+    });
+
     it('caps subjects and query tokens, and ignores non-string known names', () => {
         const junk = { npcNames: [null, 42, { name: 'x' }, 'Orzo'] };
         const intent = detectRecallIntent('Remember Orzo and Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel?', junk);

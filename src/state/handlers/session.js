@@ -15,7 +15,7 @@ import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX, MESSAGE_CONTENT
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { canonicalEnemyId, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES, normalizeCombatExchange } from '../../engine/combatExchange.js';
-import { dedupeNpcRoster, healPromotedStoryMemoryTwins, migrateLegacyNpc } from '../../engine/npcRoster.js';
+import { archiveDescriptiveLabels, dedupeNpcRoster, healPromotedStoryMemoryTwins, migrateLegacyNpc } from '../../engine/npcRoster.js';
 import {
     ensureCompanionRosterRecord,
     normalizeCompanion,
@@ -632,9 +632,12 @@ export const handlers = {
             // namesMatch containment rule ("Saima" vs "Saima Aallotar").
             // save.npcs comes through validateSaveState, so the entry-shape
             // guard (null entries, non-string names) is never bypassed here.
+            // archiveDescriptiveLabels retires pre-2026-09-21 records minted
+            // under a description ("A guard sharpening a spear") that carry
+            // no bond data — out of the prompt and the recall lane, never deleted.
             npcs: (save.party || []).reduce(
                 (npcs, companion) => ensureCompanionRosterRecord(npcs, companion),
-                dedupeNpcRoster(save.npcs.map(npc => migrateLegacyNpc(npc)))
+                archiveDescriptiveLabels(dedupeNpcRoster(save.npcs.map(npc => migrateLegacyNpc(npc))))
             ),
             ui: { ...initialGameState.ui },
         };

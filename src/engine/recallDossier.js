@@ -16,7 +16,7 @@
  *
  * Pure and zero-LLM. Everything is matched by the shared textMatch tokenizer
  * (subject names weigh 3, content words 1), rendered with conversational
- * distance ("11 scenes ago, at Rimehollow") under a hard character budget so
+ * distance ("11 turns ago, at Rimehollow") under a hard character budget so
  * the block never blows the prompt tripwire. The prompt block and the
  * player-facing receipt line render from the same dossier.
  */
@@ -76,13 +76,17 @@ const clip = (value, max) => {
     return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 };
 
-/** "just now" / "N scenes ago" in CONVERSATIONAL distance (one scene ≈ 2 lines). */
-export function describeScenesAgo(messages, atIndex) {
+/**
+ * "just now" / "N turns ago" in CONVERSATIONAL distance — one turn is the
+ * player's line plus the DM's answer. It used to say "scenes", which the
+ * number never measured (2026-09-21: "736 scenes ago" for last night).
+ */
+export function describeTurnsAgo(messages, atIndex) {
     if (!Array.isArray(messages) || !Number.isFinite(atIndex)) return '';
     const distance = conversationalDistance(messages, Math.max(0, Math.floor(atIndex)) - 1, messages.length - 1);
-    const scenes = Math.ceil(distance / 2);
-    if (scenes <= 0) return 'just now';
-    return `${scenes} scene${scenes === 1 ? '' : 's'} ago`;
+    const turns = Math.ceil(distance / 2);
+    if (turns <= 0) return 'just now';
+    return `${turns} turn${turns === 1 ? '' : 's'} ago`;
 }
 
 function makeScorer(intent) {
@@ -224,7 +228,7 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
     const stats = { fights: 0, quests: 0, fronts: 0, rolls: 0, journal: 0, cards: 0, facts: 0, people: 0, verbatim: 0 };
     // A row = one candidate line: `key` is its stats bucket, `at` the message index it points at.
     const row = (key, line, at = null) => ({ key, line, at: Number.isFinite(at) ? at : null });
-    const when = (atIndex) => describeScenesAgo(messages, atIndex);
+    const when = (atIndex) => describeTurnsAgo(messages, atIndex);
 
     if (!scorer.hasQuery) {
         return { lines: [], text: '', stats, empty: true, subjects: [], unknownSubjects: [], span: null };
@@ -432,7 +436,9 @@ ${dossier.text}`;
 }
 
 /**
- * The player-facing receipt line — the trust signal that the game LOOKED.
+ * The receipt line — what the record held for this question. Shown in the
+ * Memory Inspector only since 2026-09-21 (Vesa: the player does not need the
+ * retrieval card in the chat); it was a `kind: 'record'` system line before.
  * @param {ReturnType<typeof buildRecallDossier> | null} dossier
  * @param {object[]} [messages] - for the span description
  */
@@ -459,8 +465,8 @@ export function describeRecallReceipt(dossier, messages = []) {
     if (s.verbatim) parts.push(plural(s.verbatim, 'line as said', 'lines as said'));
     let span = '';
     if (dossier.span && Array.isArray(messages) && messages.length > 0) {
-        const oldest = describeScenesAgo(messages, dossier.span.oldest);
-        const newest = describeScenesAgo(messages, dossier.span.newest);
+        const oldest = describeTurnsAgo(messages, dossier.span.oldest);
+        const newest = describeTurnsAgo(messages, dossier.span.newest);
         span = oldest && newest ? (oldest === newest ? ` · ${oldest}` : ` · ${oldest} to ${newest}`) : '';
     }
     const nothing = unknown.size ? ` Nothing on record about ${[...unknown].join(', ')}.` : '';

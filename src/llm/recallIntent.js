@@ -18,7 +18,7 @@
  */
 
 import { tokenSet } from '../engine/textMatch.js';
-import { findSubjectsInText } from '../engine/vectorMemory.js';
+import { isDescriptiveLabel, isGenericNameToken } from '../engine/npcRoster.js';
 
 /** Recall phrasings, applied after any OOC prefix is stripped. */
 const RECALL_PATTERNS = [
@@ -123,6 +123,55 @@ function cleanNames(list) {
         .filter(Boolean);
 }
 
+// Name tokens that identify nobody on their own — the vectorMemory presence
+// tokenizer's list, plus the words a quest or place name is built from.
+const NAME_TOKEN_STOP_WORDS = new Set([
+    'the', 'and', 'of', 'von', 'van', 'der', 'den', 'del', 'della', 'for', 'from', 'into',
+    'lady', 'lord', 'sir', 'dame', 'master', 'mistress', 'miss', 'madam',
+    'captain', 'king', 'queen', 'prince', 'princess', 'mother', 'father',
+    'brother', 'sister', 'old', 'young', 'elder',
+    // Quest-name verbs and place-name heads: "Find the missing guard" must
+    // never match a question for the word "find".
+    'find', 'bring', 'kill', 'deliver', 'escort', 'help', 'rescue', 'return', 'clear',
+    'investigate', 'meet', 'talk', 'seek', 'recover', 'retrieve', 'stop', 'save', 'take',
+    'room', 'rooms', 'office', 'house', 'street', 'road', 'square', 'gate', 'hall',
+]);
+
+function nameTokens(name) {
+    return String(name || '').toLowerCase().split(/[^\p{L}\p{N}]+/u)
+        .filter(token => token.length >= 3 && !NAME_TOKEN_STOP_WORDS.has(token));
+}
+
+/**
+ * The known entities a question NAMES (2026-09-21). The presence tokenizer
+ * (`findSubjectsInText`) matches on ANY 3+-letter name token, which is right
+ * for tagging a memory's subjects but wrong for reading a question: "guard
+ * jobs" put "Jewelglade Guard", "Scarred Guard", "Armory Guard (Spearman)"
+ * and "A guard sharpening a spear" on the receipt and skewed the dossier
+ * toward random spearmen. Here a name qualifies only when the question holds
+ * one of its DISTINCTIVE tokens (not a species, epithet, role, or article —
+ * `isGenericNameToken`); a name with no distinctive token ("Scarred Guard")
+ * needs every token present; a description is never a subject.
+ */
+export function findNamedSubjects(text, names, cap = MAX_SUBJECTS) {
+    const words = new Set(String(text || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+    if (words.size === 0) return [];
+    const found = [];
+    for (const name of cleanNames(names)) {
+        if (isDescriptiveLabel(name)) continue;
+        const tokens = nameTokens(name);
+        if (tokens.length === 0) continue;
+        const distinctive = tokens.filter(token => !isGenericNameToken(token));
+        const hit = distinctive.length > 0
+            ? distinctive.some(token => words.has(token))
+            : tokens.every(token => words.has(token));
+        if (!hit) continue;
+        found.push(name);
+        if (found.length >= cap) break;
+    }
+    return found;
+}
+
 /**
  * Detect a recall question and extract what it is about.
  *
@@ -154,7 +203,7 @@ export function detectRecallIntent(text, known = {}) {
         ...cleanNames(known.locationNames),
         ...cleanNames(known.questNames),
     ];
-    for (const name of findSubjectsInText(body, knownNames, MAX_SUBJECTS) || []) addSubject(name);
+    for (const name of findNamedSubjects(body, knownNames, MAX_SUBJECTS)) addSubject(name);
     for (const name of freeProperNames(body)) {
         // A free name already covered by a known entity's tokens is that entity.
         const covered = subjects.some(subject => tokenSet(subject).has(name.toLowerCase()));

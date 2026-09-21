@@ -761,6 +761,47 @@ export function isGenericCreatureName(name) {
     return false;
 }
 
+// A DESCRIPTION is not a name (2026-09-21): "A guard sharpening a spear",
+// "Two other sickly-looking goblins" — records the Scribe minted under a
+// description put six "people" on a recall receipt for the word "guard".
+// A leading article / quantifier / count, a relative or participial
+// clause, or more than five name tokens marks a label the fiction has not
+// named yet; the person gets a record when the fiction names them.
+const DESCRIPTIVE_LEAD = /^(?:a|an|some|several|many|few|various|more|another|other|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+/i;
+const DESCRIPTIVE_CLAUSE = /\b(?:looking|wearing|carrying|holding|sharpening|standing|sitting|leaning|who|that|which|with)\s+/i;
+
+export function isDescriptiveLabel(name) {
+    const raw = cleanText(name);
+    if (!raw) return false;
+    if (DESCRIPTIVE_LEAD.test(raw)) return true;
+    if (DESCRIPTIVE_CLAUSE.test(raw)) return true;
+    return tokenizeCreatureName(raw).length > 5;
+}
+
+// Words that identify nobody on their own even when they are part of a
+// record's name ("Scarred Guard", "Jewelglade Guard"): a question containing
+// "guard" names none of them. Species and epithets are shared with the
+// creature classifier; the person words cover the labels the Scribe reaches
+// for before the fiction gives a name.
+const GENERIC_PERSON_WORDS = new Set([
+    'man', 'woman', 'boy', 'girl', 'person', 'people', 'folk', 'stranger', 'figure',
+    'unknown', 'unnamed', 'nameless', 'mysterious', 'hooded', 'cloaked', 'masked',
+    'other', 'another', 'some', 'several', 'many', 'few', 'with', 'and', 'looking',
+    'guardsman', 'townsfolk', 'merchant', 'innkeeper', 'barkeep', 'bartender', 'servant',
+    'child', 'children', 'elder', 'leader', 'crew', 'sailor', 'thief', 'noble', 'lady', 'lord',
+]);
+
+/** True when `token` cannot identify a person on its own (plural fold included). */
+export function isGenericNameToken(token) {
+    const t = cleanText(token).toLowerCase();
+    if (!t) return true;
+    const forms = [t];
+    if (t.endsWith('ies')) forms.push(`${t.slice(0, -3)}y`);
+    if (t.endsWith('es')) forms.push(t.slice(0, -2));
+    if (t.endsWith('s')) forms.push(t.slice(0, -1));
+    return forms.some(form => isGenericModifierToken(form) || GENERIC_PERSON_WORDS.has(form));
+}
+
 /** Bulk archive should ignore disposition arcs on obvious fodder names. */
 export function blocksFodderArchive(npc = {}) {
     if (npc.pinned) return true;
@@ -824,6 +865,12 @@ export function classifyNpcCandidate(payload = {}, existing = null) {
 
     if (explicitTier === 'archived_creature') {
         return { allowRoster: true, rosterTier: 'archived_creature', kind: kind || 'creature', importance: 1 };
+    }
+
+    // A description never mints a record, whatever tier the lane claims for
+    // it (2026-09-21): the person gets one when the fiction names them.
+    if (isDescriptiveLabel(name)) {
+        return { allowRoster: false, rosterTier: null, kind: kind || 'ephemeral', importance: 1 };
     }
 
     if (rosterEligible || kind === 'character' || explicitTier === 'character') {
@@ -1220,9 +1267,23 @@ export function formatNpcEmbeddingText(npc = {}) {
 export function listArchivableFodder(npcs = []) {
     return (npcs || []).filter(npc => {
         if (npc.rosterTier === 'archived_creature') return false;
-        if (!isGenericCreatureName(npc.name)) return false;
+        if (!isGenericCreatureName(npc.name) && !isDescriptiveLabel(npc.name)) return false;
         if (blocksFodderArchive(npc)) return false;
         return true;
+    });
+}
+
+/**
+ * LOAD_GAME twin of the classify gate (2026-09-21): a record minted under a
+ * description before the gate existed is archived unless it carries bond
+ * data (`blocksFodderArchive`) or is pinned — archived, never deleted.
+ */
+export function archiveDescriptiveLabels(npcs = []) {
+    return (Array.isArray(npcs) ? npcs : []).map(npc => {
+        if (!npc || typeof npc !== 'object') return npc;
+        if (npc.rosterTier === 'archived_creature' || npc.pinned) return npc;
+        if (!isDescriptiveLabel(npc.name) || blocksFodderArchive(npc)) return npc;
+        return normalizeNpcRecord({ ...npc, rosterTier: 'archived_creature', kind: 'creature', pinned: false });
     });
 }
 
