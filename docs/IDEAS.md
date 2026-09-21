@@ -2476,6 +2476,27 @@ duplicated heat rationale and unclamped ledger text; pin a byte ceiling on every
 and every director context the way the hearsay block (1,500) and the reflection NPC payload
 (30 KB) already are. From the 2026-09-20 strengthening audit.
 
+### [strengthening] A cap is a semantic change; bytes that never change must not ride the record that changes every turn; store at the size you render — status: `idea` (2026-09-21)
+Three rules from the second Lap-3 pair (2026-09-21, dice-engine + scene-art).
+**(1)** The 2026-08-01 audit asked for `rollHistory` to be capped at the reducer, and it was
+(`ROLL_HISTORY_CAP` 50, load slice 50) — but `acceptRoleplayCheck` in `turnOrchestrator.js`
+decides whether dice already landed by comparing `rollHistory.length` before and after the
+roll, and a full ledger's length never moves. Every established campaign is full (one fight of
+five exchanges at ~10 rolls each), so post-dice a Stop restores the proposal and an outcome
+failure re-proposes it — the reroll-bargaining door the proposal system exists to close. Rule:
+a cap changes the meaning of `.length`; when one lands, grep `.length` on the capped field and
+re-read every consumer that counts. Compare ids, not lengths. **(2)** Portraits are ~96 % of the
+bytes of every autosave (12 NPC portraits = 1.2 MB, 40 = 3.7 MB, 100 = 9.2 MB — over the cloud
+ceiling on portraits alone) and 0 % of what changes between turns, yet they are structured-cloned
+into `savePayloads` on every 2-second flush and stringified on every cloud save, for an 84-px
+card thumbnail. Rule: immutable blobs live in their own store (the DB-v3 messages/payload split
+is the pattern) and the mutable record carries a reference — or at least a per-campaign
+budget with a visible oldest-dropped line. `portraitPrompt` (≤ 2,000 chars per record, read only
+as a tooltip) goes the way of the embedded settings copy. **(3)** Store at the size you render:
+480×640 for an 84-px card is 5.7× the pixels a 3×-DPR phone draws; a 256×341 NPC tier cuts the
+portrait bytes ~3×, and the scene cache should hold a display-sized re-encode, not ten
+full-resolution renders. From the 2026-09-21 strengthening audit.
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
