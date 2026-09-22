@@ -2497,6 +2497,33 @@ as a tooltip) goes the way of the embedded settings copy. **(3)** Store at the s
 portrait bytes ~3×, and the scene cache should hold a display-sized re-encode, not ten
 full-resolution renders. From the 2026-09-21 strengthening audit.
 
+### [strengthening] A promoted lane repeats its sibling's calls; opt-in feature, opt-out bytes; a storage fix on one "same snapshot" path has a twin on the other — status: `idea` (2026-09-22)
+Three rules from the third Lap-3 pair (2026-09-22, roll-resolution + cloud-sync).
+**(1)** The post-roll outcome hop became a first-class turn on 2026-09-02 (correct: it needed
+memories, the arbiter, and the detectors) by running the whole `sendToLLM` pipeline again — and
+its `sceneContext` is the proposal's own `playerAction` + the same location, so `retrieveRelevant`
+embeds a byte-identical query on hop 1, on accept, and on a challenge: one blocking Gemini round
+trip per check turn (two on a challenged one) for a vector the previous hop already had. Rule:
+when a lane is promoted to the full pipeline, diff the calls it now makes against the hop before
+it and memoize what is identical — a per-session query-vector memo (text → vector, cap ~16,
+cleared with the store) in `engine/vectorMemory.js` is the fix. Same pair: the semantic roll
+detector ships the narration unclamped where the arbiter one call later clamps to 2k, and
+`## RECENT TABLE RULINGS` repeats its ~250-char rule text on every ruling line (+3.2k chars at
+the ceiling) — hoist the rules, render rulings as data lines. **(2)** The Firebase SDK
+(`vendor-firebase`, 330 KB / 102.5 KB gzip — 23 % of all shipped JS) is `modulepreload`ed on
+every boot for every player because `config/firebase.js`, `state/auth.js`, and
+`state/cloudSync.js` import it statically, while `initializeFirebase` is only CALLED with a
+config present. Rule: a bring-your-own integration's SDK loads when it is configured — a dynamic
+`import()` behind the config check, never a static import from a module the app always loads.
+**(3)** The 2026-09-21 local portrait split (content-addressed `portraits` store, refs in the
+payload, write-when-absent) stops at the cloud boundary: every manual cloud save still uploads
+every portrait byte and every chunk (12 NPC portraits → 2.38 MiB per save, 40 → 4.78 MiB, 100 →
+over the 9 MiB budget with a second stringify+encode pass). Rule: `serializeGameState`'s "both
+paths persist the SAME snapshot" cuts both ways — a byte fix on one path has a twin on the other.
+The cloud twin is a `users/{uid}/portraits/{key}` collection (the pure `extractPortraits` /
+`restorePortraits` helpers already exist), `portraitRefs` on the metadata doc, a rules match,
+and `fitPortraitsToBudget` retired. From the 2026-09-22 strengthening audit.
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
