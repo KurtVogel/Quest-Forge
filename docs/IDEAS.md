@@ -251,6 +251,13 @@ on the fact record, an optional Scribe `supersedes` ref matched by the same cont
 vanishes. Proof: an `eval:memory` probe overturning a premise fact on turn N and checking N+15.
 Cross-link: the place card's `lastState` replace (2026-09-16) is this idea for places. Full shape
 in `docs/MEMORY_RESEARCH.md` Verdict Log 2026-09-17 (Lane B).
+**2026-09-23 (memory research, Lane B, G1 — re-scoped, ranked first):** worse than coexistence —
+`isNearDuplicateFact` strips `not`/`no`/`now` as stop words before its ≥0.9 containment test, so
+"the bridge at Ashford is not passable" and "… is no longer passable" are DROPPED as duplicates of
+"the bridge at Ashford is passable" (scratch-reproduced against the handler); the newer truth is
+lost, not stored beside the old one. The FIRST slice is therefore a polarity-aware dedupe that turns
+that discard into the supersession stamp. MemStrata (https://arxiv.org/abs/2606.26511) shows cosine
+has the same blindness (contradiction vs duplicate AUROC 0.59) — no similarity rule can see a flip.
 
 ### [memory-research] Source-stamped retraction: scrubbing a message scrubs its canon — status: `idea` (M0, memory research 2026-09-17, Lane A)
 `DELETE_MESSAGE` (2026-08-28, built to scrub refusals) soft-deletes the row and every reader
@@ -809,7 +816,11 @@ GPT-5.2 keeps its commitments intact in only 42% of interactive stories by turn 
 one-knower secret, a fact later overturned, an NPC's stated want, a named object, a
 player-authored backstory detail), revisit each at turns 10 / 20 / 30 without naming it, and let a
 Flash judge score survival (recalled / laundered / forgotten / contradicted) — the G1 baseline
-every memory trial row is judged by.
+every memory trial row is judged by. **Amended 2026-09-23 (Lane B):** each commitment is a
+knowledge point (MemTrace, https://arxiv.org/abs/2606.17328: age × question type × evidence
+condition), every miss classified RETRIEVAL vs USE from the inspector's captured injection (MemTrace:
+the evidence was retrievable 10× more often than missing), seeded flips marker-free, and the
+768-vs-1,536-dim embedding A/B on the same run.
 
 ## Gameplay & Mechanics
 
