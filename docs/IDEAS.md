@@ -258,6 +258,13 @@ on the fact record, an optional Scribe `supersedes` ref matched by the same cont
 vanishes. Proof: an `eval:memory` probe overturning a premise fact on turn N and checking N+15.
 Cross-link: the place card's `lastState` replace (2026-09-16) is this idea for places. Full shape
 in `docs/MEMORY_RESEARCH.md` Verdict Log 2026-09-17 (Lane B).
+**2026-09-23 (memory research, Lane B, G1 — re-scoped, ranked first):** worse than coexistence —
+`isNearDuplicateFact` strips `not`/`no`/`now` as stop words before its ≥0.9 containment test, so
+"the bridge at Ashford is not passable" and "… is no longer passable" are DROPPED as duplicates of
+"the bridge at Ashford is passable" (scratch-reproduced against the handler); the newer truth is
+lost, not stored beside the old one. The FIRST slice is therefore a polarity-aware dedupe that turns
+that discard into the supersession stamp. MemStrata (https://arxiv.org/abs/2606.26511) shows cosine
+has the same blindness (contradiction vs duplicate AUROC 0.59) — no similarity rule can see a flip.
 
 ### [memory-research] Source-stamped retraction: scrubbing a message scrubs its canon — status: `idea` (M0, memory research 2026-09-17, Lane A)
 `DELETE_MESSAGE` (2026-08-28, built to scrub refusals) soft-deletes the row and every reader
@@ -816,7 +823,11 @@ GPT-5.2 keeps its commitments intact in only 42% of interactive stories by turn 
 one-knower secret, a fact later overturned, an NPC's stated want, a named object, a
 player-authored backstory detail), revisit each at turns 10 / 20 / 30 without naming it, and let a
 Flash judge score survival (recalled / laundered / forgotten / contradicted) — the G1 baseline
-every memory trial row is judged by.
+every memory trial row is judged by. **Amended 2026-09-23 (Lane B):** each commitment is a
+knowledge point (MemTrace, https://arxiv.org/abs/2606.17328: age × question type × evidence
+condition), every miss classified RETRIEVAL vs USE from the inspector's captured injection (MemTrace:
+the evidence was retrievable 10× more often than missing), seeded flips marker-free, and the
+768-vs-1,536-dim embedding A/B on the same run.
 
 ## Gameplay & Mechanics
 
@@ -1111,7 +1122,7 @@ Still open:
 - Downed/dead story arcs: rescue, injury, permanent death, memorial notes.
 - Companion roles/traits that affect narration and simple mechanics without full class sheets.
 
-### Combat intent profile expansion — status: `idea` after v2 (2026-06-20)
+### ~~Combat intent profile expansion~~ — status: `merged` (2026-09-23 wow audit [wow]): the spell half shipped 2026-07-17 (Spellcasting v1 — slots, save spells, healing, darts, sustained spells, Turn Undead; DECISIONS.md 2026-07-17), the "morale personalities" line lives on in "[wow] Combat drama: the foe's next move, and the fight leaves a mark" below, and the rest (shove/grapple/help profiles, range/cover/movement/opportunity attacks, enemy special profiles) are listed there as later slices — the visible-reject rule for unsupported specials already ships
 Combat v2 deliberately resolves only mechanics with canonical engine profiles. Current bounded
 intents cover standard weapon attacks, basic Wizard/Cleric attack spells, checks/saves,
 Dodge/Dash/Disengage/Interact/Pass/death saves, companion attack/defend/pass, and enemy
@@ -1122,6 +1133,57 @@ attack/defend/flee/surrender. Expand without returning dice authority to the LLM
 - Range, reach, cover, movement, opportunity attacks, target threat/taunt, and battlefield position.
 - Enemy spell/special profiles and morale personalities. Until a profile exists, reject visibly
   with no action committed rather than inventing numbers or granting a free hostile turn.
+
+### [wow] Combat drama: the foe's next move, and the fight leaves a mark — status: `proposed` (wow audit 2026-09-23, combat-drama Lap 1, two W1 slices)
+The exchange machine is genre-best at the DICE (engine initiative + Opening Initiative, guard
+interception, standing flanks, conditions, targeting from fiction — nothing can be cheated) and
+genre-weak at the three things a fight is FOR. (1) **The player commits blind and the foes never
+break.** Enemy intent is decided by the DM in the SAME envelope as the player's action, after the
+player commits (`enemy_intents`, COMBAT NOTES); the narration call's only ending rule is "the
+situation returned to the player"; the engine's health word (healthy/bloodied/critical) reaches
+the DM as data with no rule for what it means; `flee`/`surrender` are unprompted and "morale
+breaks" appears once, in the low-level safety block. So every fight is attack-attack-attack to
+0 HP on both sides — the D&D-video-game failure the tabletop morale rule exists to prevent.
+Into the Breach / Slay the Spire show every foe's next move BEFORE you act, and our exchange
+order (player → companions → enemies) is exactly the order that makes a telegraph playable.
+(2) **A fight leaves no mark the engine owns.** The committed exchange results know the hero's
+worst moment (`remainingHp`, `critical`, death-save events, the attacker's name) and END_COMBAT
+keeps only `recentEncounters` (enemies / location / outcome); HP refills on rest, the `wound`
+story card is minted only if the per-beat Scribe happens to extract one, and the terminal
+narration prompt asks for "consequences" with no idea what the fight cost. Blades in the Dark
+names harm ("Broken leg") and it lingers; XCOM's wounds cost weeks; Darkest Dungeon ends on
+"but at what cost".
+**Slice A — the foe's next move is on the page (~+60 dynamic tokens per non-terminal narration
+call, ~+70 cached prefix tokens, zero new calls):** `combatNarrationPrompt`'s non-terminal
+branch gains one rule — the passage's LAST beat is, for each ALIVE AND ACTIVE foe, its visible
+next move in fiction (circling to the companion's blind side, nocking another arrow, backing
+toward the door, dropping the blade), grounded in the post-state's health word: a bloodied foe
+shows it, a critical foe with no reason to die fighting is on the edge of flight or plea, the
+passage says which. One prefix-stable sentence in COMBAT NOTES: honor the telegraph from your
+own last narration unless the player's action changed it; bloodied foes without a reason to
+die fighting break (flee / surrender / one desperate attack) by the round after — fanatics,
+undead, beasts defending young are the named exceptions. No new channel, no engine morale
+table: intent stays the DM's, the dice the engine's. Proof: `eval:combat` gains a two-round
+scenario scored by a Flash judge (telegraph vs the next `enemy_intents`, honor ≥ 80 % on Gemini
++ GPT) and a three-bloodied-goblins scenario (≥ 1 flee/surrender in ≥ 3 of 5 runs).
+**Slice B — the fight leaves a mark (zero calls, ~+50 tokens on the terminal narration message
+once per fight, one card per MARKING fight):** a pure `summarizeFightCost(results, character,
+party)` derives the tally from the stored exchange results (rounds, hero HP from→to and the
+lowest point, crits taken with the attacker's name, a drop to 0 / a death save, companions
+downed, Second Wind / potions / slots spent, foes slain / fled / surrendered); the terminal
+narration prompt carries it as ONE `COST OF THIS FIGHT:` line plus "let the ending carry its
+cost — a wound the hero will feel tomorrow, named"; when the hero or a companion dropped to
+≤ 25 % or to 0, or took a critical hit, END_COMBAT mints ONE salience-4 `wound` card through
+`ADD_STORY_MEMORY_CARD` (subjects = hero + foe, location stamped, text from the tally) so it
+rides the callback block into later scenes, shows on the Journal, and ages out through the
+shipped dormancy pass; the Scribe's appearance merge can then make the scar canon. Narrative-only
+(DECISIONS.md 2026-06-17) — no mechanical harm track. Proof: five fights below 25 % → five
+Journal wound cards and ≥ 3 of 5 later ordinary scenes reference the wound unprompted.
+**Later slices (from the merged "Combat intent profile expansion"):** shove / grapple / help
+profiles with contested mechanics; range, cover, movement, opportunity attacks; enemy special
+profiles — each rejected visibly until its profile exists, never a free hostile turn. **Lap-3
+material, not here:** a round is two DM calls at ~33–36 s each on Flash 3.8 (2026-09-20 full
+run) — the strengthening queue's `narrationOnly` prompt slimming is the first slice.
 
 ## UX & Platform
 
@@ -2530,6 +2592,38 @@ paths persist the SAME snapshot" cuts both ways — a byte fix on one path has a
 The cloud twin is a `users/{uid}/portraits/{key}` collection (the pure `extractPortraits` /
 `restorePortraits` helpers already exist), `portraitRefs` on the metadata doc, a rules match,
 and `fitPortraitsToBudget` retired. From the 2026-09-22 strengthening audit.
+
+### [strengthening] One flag, one predicate; a debounce collapses bursts, not phases; after a split, the immutable share is the metric — status: `idea` (2026-09-23)
+Three rules from the fourth Lap-3 pair (2026-09-23, combat-exchange + persistence).
+**(1)** The `exchangeLine` tag (DECISIONS.md 2026-08-04) keeps a fight's dice lines out of the DM
+window — and out of nothing else: `collectNarrativeEntries` (the ONE "transcript as story"
+predicate since 2026-09-01) admits every `system` row that is not `error`/`record`, so a
+realistic 9-exchange fight's 64 dice lines are narrative to the journal cadence (measured: the
+first post-fight turn fires the cadence twice in a row — 40 rows / 34 dice lines, then 36 / 30 —
+two Flash calls and two journal entries for one fight), to `buildPresenceText` (scene presence is
+judged from `**Oda attacks Marsh bandit 4** — Rolled **20**…` for the whole fight and the turn
+after), and to the chronicler (`TABLE RECORD:` per line). Rule: when a project introduces THE
+predicate for a class of reads, grep every flag the rows carry and decide each one there; the fix
+is an `exchangeLine` exclusion in that predicate (out-of-combat roll lines keep their seat — no
+second carrier there; DECISIONS 2026-09-06's "engine lines still ride it" is narrowed, not
+reversed). Same pair: the narration-only call re-sends the whole ~20k-char dynamic half (quests,
+facts, session history, inventory) it cannot use — a 9-exchange fight is 19 DM calls ≈ 170k
+uncached tokens — and the Scribe runs on every beat (~10 Flash calls per fight on prose the
+engine snapshot owns and that is never embedded): a `narrationOnly` prompt variant and a
+terminal-or-named-NPC Scribe gate. **(2)** The autosave's 2 s debounce collapses a burst of
+dispatches, not a TURN: the real runtime under fake timers on a realistic timeline (player line,
+DM reply + events at 7 s, Scribe wave at 11.5 s, cadence at 15 s, reflection at 19 s) writes five
+full snapshots per ordinary turn and four per combat round — 7.8 MB per turn on a 1.56 MB mature
+campaign for a few KB of change. Rule: measure writes per turn on a dispatch timeline. A two-tier
+debounce (2 s for messages/character/combat/inventory, ~15 s for the background lanes, the hide
+flush still protecting) → 2 writes per turn. **(3)** With portraits gone (2026-09-21), 55–62 % of
+every write is bytes that never change: summarized messages (497 KB mature / 1.30 MB epic) and
+the chronicle (361 KB / 0.90 MB). Rule: after a byte fix, re-measure the payload's composition —
+the next immutable share is the next split. The chronicle is the portrait case exactly (immutable
+chapters, only the newest removable, never in a prompt): a `chronicleChapters` store with refs in
+the payload, the `extractPortraits` / `restorePortraits` / sweep trio generalized by field; the
+summarized prefix is the harder half ("Autosave write cost" above already holds the append-only
+messages idea). From the 2026-09-23 strengthening audit.
 
 ---
 
