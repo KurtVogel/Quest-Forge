@@ -47,6 +47,11 @@ export const HERO_TELL_REPORT_CAP = 2;
 /** Established tells the standing prompt line may carry. */
 export const HERO_TELL_PROMPT_CAP = 5;
 export const HERO_TELL_BEAT_COOLDOWN_MESSAGES = BEAT_COOLDOWN_MESSAGES;
+/** Names on record as having said a tell aloud (the sheet's "said by"). */
+export const MAX_HERO_TELL_VOICES = 6;
+/** Rows between two remarks on the ABSENCE of a faded habit. */
+export const HERO_TELL_ABSENCE_COOLDOWN_MESSAGES = 120;
+export const HERO_TELL_BEAT_MODES = new Set(['remark', 'absence']);
 
 const TELL_STOP_WORDS = new Set([
     'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'for', 'with', 'when', 'whenever',
@@ -125,11 +130,20 @@ export function normalizeHeroTell(raw, { maxMessageCount } = {}) {
     const last = finiteStamp(raw.lastSeenMessage, maxMessageCount);
     const voiced = finiteStamp(raw.lastVoicedMessage, maxMessageCount);
     const voicedCount = Number(raw.voicedCount);
+    const absence = finiteStamp(raw.lastAbsenceRemarkMessage, maxMessageCount);
+    const kind = normalizeHeroTellKind(raw.kind);
     return {
         id: text(raw.id, 80) || mintHeroTellId(),
         text: body,
-        kind: normalizeHeroTellKind(raw.kind),
+        kind,
         witnesses: normalizeWitnesses(raw.witnesses),
+        // Player-facing + travel flags (slices 2–4): who has SAID it aloud,
+        // whether a sighting happened before bystanders (an intimate tell is
+        // never public), whether the player struck it ("that's not me").
+        voicedBy: normalizeWitnesses(raw.voicedBy).slice(0, MAX_HERO_TELL_VOICES),
+        public: kind !== 'intimate' && raw.public === true,
+        dormant: raw.dormant === true,
+        lastAbsenceRemarkMessage: absence,
         sightings,
         firstSeenMessage: first ?? (sightings.length > 0 ? sightings[0] : null),
         lastSeenMessage: last ?? (sightings.length > 0 ? sightings[sightings.length - 1] : null),
@@ -195,31 +209,49 @@ export function recordHeroTells(existing = [], reports = [], { messageCount } = 
     const now = Number.isFinite(messageCount) ? Math.max(0, Math.floor(messageCount)) : 0;
     let tells = Array.isArray(existing) ? existing.filter(Boolean) : [];
     const accepted = (Array.isArray(reports) ? reports : [])
-        .map(report => normalizeHeroTell({
-            id: report?.id,
-            text: report?.text,
-            kind: report?.kind,
-            witnesses: report?.witnesses,
-        }))
+        .map(report => {
+            const tell = normalizeHeroTell({
+                id: report?.id,
+                text: report?.text,
+                kind: report?.kind,
+                witnesses: report?.witnesses,
+                public: report?.public,
+            });
+            if (!tell) return null;
+            // Voiced-by-the-fiction (slice 3): a character NAMED the pattern
+            // aloud this turn. That is not a sighting of the hero doing it —
+            // only `sighted: true` beside it adds one. `voicedBy` is the
+            // speaker; a bare `voiced: true` still stamps the time.
+            const voiced = report?.voiced === true;
+            const voicedBy = normalizeWitnesses(report?.voicedBy);
+            return { tell, voiced, voicedBy, sighted: !voiced || report?.sighted === true };
+        })
         .filter(Boolean)
         .slice(0, HERO_TELL_REPORT_CAP);
     let changed = false;
-    for (const report of accepted) {
+    for (const { tell: report, voiced, voicedBy, sighted } of accepted) {
         const idx = findHeroTellMatch(tells, report);
+        const voiceStamp = voiced
+            ? { lastVoicedMessage: now, voicedBy: normalizeWitnesses([...voicedBy]).slice(0, MAX_HERO_TELL_VOICES) }
+            : {};
         if (idx === -1) {
+            // A remark about a pattern nobody has recorded is still a first
+            // sighting: the character saw it before the Scribe did.
             tells = [...tells, {
                 ...report,
                 id: mintHeroTellId(),
                 sightings: [now],
                 firstSeenMessage: now,
                 lastSeenMessage: now,
+                ...voiceStamp,
+                voicedCount: voiced ? 1 : 0,
             }];
             changed = true;
             continue;
         }
         const held = tells[idx];
         const lastSeen = Number.isFinite(held.lastSeenMessage) ? held.lastSeenMessage : -Infinity;
-        const newScene = now - lastSeen > HERO_TELL_SCENE_MESSAGES;
+        const newScene = sighted && now - lastSeen > HERO_TELL_SCENE_MESSAGES;
         const witnesses = normalizeWitnesses([...(held.witnesses || []), ...report.witnesses]);
         const richer = report.text.length > (held.text || '').length && containment(tellTokens(held.text), tellTokens(report.text)) >= SAME_TELL_CONTAINMENT
             ? report.text
@@ -228,11 +260,17 @@ export function recordHeroTells(existing = [], reports = [], { messageCount } = 
             ...held,
             text: richer,
             witnesses,
+            public: held.public || report.public,
             sightings: newScene ? normalizeSightings([...(held.sightings || []), now]) : held.sightings,
-            lastSeenMessage: Math.max(lastSeen === -Infinity ? now : lastSeen, now),
+            lastSeenMessage: sighted ? Math.max(lastSeen === -Infinity ? now : lastSeen, now) : held.lastSeenMessage,
         };
-        if (next.text !== held.text || next.witnesses.length !== (held.witnesses || []).length
-            || next.sightings !== held.sightings || next.lastSeenMessage !== held.lastSeenMessage) {
+        if (voiced) {
+            next.lastVoicedMessage = now;
+            next.voicedCount = (held.voicedCount || 0) + 1;
+            next.voicedBy = normalizeWitnesses([...(held.voicedBy || []), ...voicedBy]).slice(0, MAX_HERO_TELL_VOICES);
+        }
+        if (voiced || next.text !== held.text || next.witnesses.length !== (held.witnesses || []).length
+            || next.public !== !!held.public || next.sightings !== held.sightings || next.lastSeenMessage !== held.lastSeenMessage) {
             tells = tells.map((t, i) => (i === idx ? next : t));
             changed = true;
         }
@@ -268,11 +306,63 @@ function distanceFrom(anchor, { messages, messageCount }) {
     return Math.max(0, end - anchor);
 }
 
-/** Established and seen recently enough that it still reads as the hero's way. */
+/** Established, not struck by the player, and seen recently enough that it still reads as the hero's way. */
 export function isHeroTellLive(tell, { messages = null, messageCount } = {}) {
-    if (!isHeroTellEstablished(tell)) return false;
+    if (!isHeroTellEstablished(tell) || tell.dormant) return false;
     const since = distanceFrom(tell.lastSeenMessage, { messages, messageCount });
     return since === null || since < HERO_TELL_FADE_MESSAGES;
+}
+
+/** Established once, not struck, but unseen long enough that its ABSENCE is noticeable. */
+export function isHeroTellFaded(tell, { messages = null, messageCount } = {}) {
+    if (!isHeroTellEstablished(tell) || tell.dormant) return false;
+    const since = distanceFrom(tell.lastSeenMessage, { messages, messageCount });
+    return since !== null && since >= HERO_TELL_FADE_MESSAGES;
+}
+
+/** The player struck (or restored) a tell: "that's not me". Dormant tells are never voiced, never travel. */
+export function setHeroTellDormant(tells = [], id, dormant = true) {
+    if (!Array.isArray(tells) || !id) return tells;
+    const idx = tells.findIndex(t => t && t.id === id);
+    if (idx === -1 || !!tells[idx].dormant === !!dormant) return tells;
+    return tells.map((t, i) => (i === idx ? { ...t, dormant: !!dormant } : t));
+}
+
+/**
+ * The sheet's "How others see you" (slice 1 of the follow-ups): only tells
+ * someone has actually SAID aloud — the player hears it first and reads it
+ * second — with who said it. Dormant (struck) tells stay listed so the
+ * player can restore them. Newest voice first.
+ */
+export function listVoicedTells(tells = []) {
+    return (Array.isArray(tells) ? tells : [])
+        .filter(t => t && typeof t === 'object' && text(t.text) && ((t.voicedCount || 0) > 0 || (Array.isArray(t.voicedBy) && t.voicedBy.length > 0)))
+        .map(t => ({
+            id: t.id,
+            text: t.text,
+            kind: normalizeHeroTellKind(t.kind),
+            intimate: isIntimateTell(t),
+            dormant: !!t.dormant,
+            saidBy: Array.isArray(t.voicedBy) && t.voicedBy.length > 0 ? t.voicedBy : (t.witnesses || []).slice(0, 1),
+            lastVoicedMessage: Number.isFinite(t.lastVoicedMessage) ? t.lastVoicedMessage : null,
+        }))
+        .sort((a, b) => (b.lastVoicedMessage || 0) - (a.lastVoicedMessage || 0));
+}
+
+/**
+ * Tells that may TRAVEL as hearsay (slice 2): a non-intimate, live pattern
+ * with at least one sighting before bystanders. `{ tell, age }` — age from
+ * the last sighting, the regional-hearsay selector grades the distortion.
+ * Intimate tells never travel: secrets never travel.
+ */
+export function listPublicTells(tells = [], { messages = null, messageCount } = {}) {
+    const out = [];
+    for (const tell of (Array.isArray(tells) ? tells : [])) {
+        if (!tell || !tell.public || isIntimateTell(tell) || !isHeroTellLive(tell, { messages, messageCount })) continue;
+        const age = distanceFrom(tell.lastSeenMessage, { messages, messageCount });
+        out.push({ tell, age: age === null ? 0 : age });
+    }
+    return out;
 }
 
 export function tellWitnessedBy(tell, name) {
@@ -326,12 +416,36 @@ export function selectHeroTellCandidate(tells = [], npcs = [], { messages = null
     return best;
 }
 
-/** `{ tellId, witnesses, mintedAtMessage, opensAtMessage, closesAtMessage }`. */
+/**
+ * The absence beat (slice 4): a habit the hero has visibly DROPPED — faded,
+ * once established, its witness still on the roster — may be remarked on
+ * once ("you noticed I stopped?"). Never voiced first, then the longest
+ * since the last absence remark. Only consulted when no live tell is due.
+ */
+export function selectAbsenceTellCandidate(tells = [], npcs = [], { messages = null, messageCount } = {}) {
+    const roster = (Array.isArray(npcs) ? npcs : []).filter(n => n && typeof n === 'object' && text(n.name)
+        && (!n.rosterTier || n.rosterTier === 'character'));
+    let best = null;
+    for (const tell of (Array.isArray(tells) ? tells : [])) {
+        if (!isHeroTellFaded(tell, { messages, messageCount })) continue;
+        if ((tell.voicedCount || 0) === 0) continue; // an absence is only noticeable of a habit someone once named
+        const witnesses = (tell.witnesses || []).filter(w => roster.some(n => namesMatch(n.name, w)));
+        if (witnesses.length === 0) continue;
+        const sinceRemark = distanceFrom(tell.lastAbsenceRemarkMessage, { messages, messageCount });
+        if (sinceRemark !== null && sinceRemark < HERO_TELL_ABSENCE_COOLDOWN_MESSAGES) continue;
+        const pull = (sinceRemark === null ? 10 : Math.min(6, sinceRemark / 60)) + Math.min(3, tell.sightings?.length || 0);
+        if (!best || pull > best.pull) best = { tell, witnesses, pull, mode: 'absence' };
+    }
+    return best;
+}
+
+/** `{ tellId, mode, witnesses, mintedAtMessage, opensAtMessage, closesAtMessage }`. */
 export function mintHeroTellBeat(candidate, { messageCount, delayScenes = 0 } = {}) {
     if (!candidate?.tell?.id || !Number.isFinite(messageCount)) return null;
     const opens = Math.floor(messageCount) + Math.max(0, Math.floor(delayScenes)) * BEAT_SCENE_MESSAGES;
     return {
         tellId: candidate.tell.id,
+        mode: HERO_TELL_BEAT_MODES.has(candidate.mode) ? candidate.mode : 'remark',
         witnesses: normalizeWitnesses(candidate.witnesses),
         mintedAtMessage: Math.floor(messageCount),
         opensAtMessage: opens,
@@ -349,6 +463,7 @@ export function sanitizeHeroTellBeat(raw) {
     const minted = Number(raw.mintedAtMessage);
     return {
         tellId,
+        mode: HERO_TELL_BEAT_MODES.has(raw.mode) ? raw.mode : 'remark',
         witnesses: normalizeWitnesses(raw.witnesses),
         mintedAtMessage: Number.isFinite(minted) ? Math.max(0, Math.floor(minted)) : Math.max(0, Math.floor(opens)),
         opensAtMessage: Math.max(0, Math.floor(opens)),
@@ -368,16 +483,34 @@ export function isHeroTellBeatExpired(beat, messageCount) {
     return Number.isFinite(messageCount) && messageCount > b.closesAtMessage;
 }
 
-/** Stamp a tell as voiced at the window's opening (the cadence's expiry stamp). */
+/**
+ * The cadence's expiry stamp at the window's opening. A remark window
+ * stamps the tell voiced ONLY when the fiction did not already (a Scribe
+ * `voiced` report inside the window stamps the exact turn and closes the
+ * beat; the assumption is the fallback). An absence window stamps
+ * `lastAbsenceRemarkMessage` and never counts as a voice.
+ */
 export function stampTellVoiced(tells = [], beat) {
     const b = sanitizeHeroTellBeat(beat);
     if (!b || !Array.isArray(tells)) return tells;
     const idx = tells.findIndex(t => t && t.id === b.tellId);
     if (idx === -1) return tells;
     const held = tells[idx];
+    if (b.mode === 'absence') {
+        return tells.map((t, i) => (i === idx ? { ...held, lastAbsenceRemarkMessage: b.opensAtMessage } : t));
+    }
+    if (Number.isFinite(held.lastVoicedMessage) && held.lastVoicedMessage >= b.opensAtMessage) return tells;
     return tells.map((t, i) => (i === idx
         ? { ...held, lastVoicedMessage: b.opensAtMessage, voicedCount: (held.voicedCount || 0) + 1 }
         : t));
+}
+
+/** Did the fiction voice this beat's tell since its window opened? (the reducer closes the beat) */
+export function beatVoicedByFiction(beat, tells = []) {
+    const b = sanitizeHeroTellBeat(beat);
+    if (!b || b.mode !== 'remark') return false;
+    const tell = (Array.isArray(tells) ? tells : []).find(t => t && t.id === b.tellId);
+    return !!tell && Number.isFinite(tell.lastVoicedMessage) && tell.lastVoicedMessage >= b.opensAtMessage;
 }
 
 const KIND_LABELS = {
@@ -419,12 +552,19 @@ export function buildHeroTellBeatBlock(beat, tells = [], { presentNames = [], me
     const b = sanitizeHeroTellBeat(beat);
     if (!b || combatActive || !isHeroTellBeatOpen(b, messageCount)) return '';
     const tell = (Array.isArray(tells) ? tells : []).find(t => t && t.id === b.tellId);
-    if (!tell || !isHeroTellLive(tell, { messages, messageCount })) return '';
+    if (!tell) return '';
+    const absence = b.mode === 'absence';
+    if (absence ? !isHeroTellFaded(tell, { messages, messageCount }) : !isHeroTellLive(tell, { messages, messageCount })) return '';
     const present = (Array.isArray(presentNames) ? presentNames : []).map(n => text(n)).filter(Boolean);
     const witnesses = b.witnesses.filter(w => present.some(name => namesMatch(name, w)));
     if (witnesses.length === 0) return '';
     const speaker = witnesses[0];
     const intimate = isIntimateTell(tell);
+    if (absence) {
+        const privately = intimate ? ' Intimate knowledge: only in private with the hero, never before others.' : '';
+        return `## SOMEONE NOTICES WHAT THE HERO STOPPED DOING — PRIVATE
+${speaker} once knew the hero for this: ${tell.text}. It has not happened in a long while, and ${speaker} has noticed the ABSENCE. In this scene or the next, ONCE, when the moment allows, let ${speaker} remark on it — "You haven't done that in a while", a question about what changed, a fond or wary observation — in ${speaker}'s own voice and at the register their bond has earned.${privately} It is ${speaker}'s reading, never narrator fact; the hero decides what it means. Never repeated once said.`;
+    }
     const register = intimate
         ? `This is intimate knowledge: ${speaker} may bring it up ONLY in private with the hero, or as a look or phrase only the two of them would understand — never before others, never crudely, and never to shame; it can be a tease, a fond certainty, or a real question about what the hero wants.`
         : `Let it be ${speaker}'s READING of the hero — a guess out loud ("Let me guess — the pipe, and off you went?"), a tease, or a real question ("You're never serious. What is it you're afraid of?") — in ${speaker}'s own voice and at the register their bond has earned. It may be wrong; the hero decides.`;

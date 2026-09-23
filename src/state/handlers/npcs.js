@@ -344,6 +344,7 @@ export const handlers = {
             recentEncounters: state.recentEncounters,
             recentHearsay: state.recentHearsay,
             storyMemory: state.storyMemory,
+            heroTells: state.heroTells,
             locations,
             locationName: name,
             messages: state.messages,

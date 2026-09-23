@@ -7,11 +7,14 @@ import { rollDie } from '../../engine/dice.ts';
 import { BEAT_TIMING_DIE_SIDES } from '../../engine/relationshipArc.js';
 import {
     HERO_TELL_BEAT_COOLDOWN_MESSAGES,
+    beatVoicedByFiction,
     isHeroTellBeatExpired,
     mintHeroTellBeat,
     recordHeroTells,
     sanitizeHeroTellBeat,
+    selectAbsenceTellCandidate,
     selectHeroTellCandidate,
+    setHeroTellDormant,
     stampTellVoiced,
 } from '../../engine/heroTells.js';
 
@@ -39,7 +42,10 @@ export function rollHeroTellBeat(state, { roll = () => rollDie(BEAT_TIMING_DIE_S
     }
     const last = Number.isFinite(session.lastHeroTellBeatMessage) ? session.lastHeroTellBeatMessage : null;
     if (last !== null && messageCount - last < HERO_TELL_BEAT_COOLDOWN_MESSAGES) return { session, heroTells };
-    const candidate = selectHeroTellCandidate(heroTells, state.npcs, { messages, messageCount });
+    // A live tell first; when none is due, a habit the hero visibly dropped
+    // may be remarked on instead (the absence beat, slice 4).
+    const candidate = selectHeroTellCandidate(heroTells, state.npcs, { messages, messageCount })
+        || selectAbsenceTellCandidate(heroTells, state.npcs, { messages, messageCount });
     if (!candidate) return { session, heroTells };
     const beat = mintHeroTellBeat(candidate, { messageCount, delayScenes: roll() });
     if (!beat) return { session, heroTells };
@@ -53,6 +59,18 @@ export const handlers = {
         if (reports.length === 0) return state;
         const existing = Array.isArray(state.heroTells) ? state.heroTells : [];
         const heroTells = recordHeroTells(existing, reports, { messageCount: (state.messages || []).length });
-        return heroTells === existing ? state : { ...state, heroTells };
+        if (heroTells === existing) return state;
+        // Voiced by the fiction (slice 3): a character said the open beat's
+        // tell aloud — the window is spent, the exact turn is stamped.
+        const session = beatVoicedByFiction(state.session?.heroTellBeat, heroTells)
+            ? { ...state.session, heroTellBeat: null }
+            : state.session;
+        return { ...state, heroTells, session };
+    },
+
+    /** The player struck a tell on the sheet ("that's not me") or restored it. */
+    SET_HERO_TELL_DORMANT(state, action) {
+        const heroTells = setHeroTellDormant(state.heroTells, action.payload?.id, action.payload?.dormant !== false);
+        return heroTells === state.heroTells ? state : { ...state, heroTells };
     },
 };

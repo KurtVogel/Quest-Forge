@@ -25,6 +25,7 @@
 
 import { areRelatedPlaces, findLocationRecord, isSameLocation } from './locationRegistry.js';
 import { distanceSince } from './worldTempo.js';
+import { listPublicTells } from './heroTells.js';
 
 export const HEARSAY_MAX_ITEMS = 2;
 /** A deed from ELSEWHERE needs this conversational age to have traveled here. */
@@ -116,6 +117,7 @@ export function selectRegionalHearsay({
     recentEncounters = [],
     recentHearsay = [],
     storyMemory = [],
+    heroTells = [],
     locations = [],
     locationName,
     messages = null,
@@ -194,6 +196,21 @@ export function selectRegionalHearsay({
             ? `the hero cutting down ${cleanText(fight.enemies, 120)} at ${cleanText(fight.location, 90)}`
             : `the hero being beaten and driven off by ${cleanText(fight.enemies, 120)} at ${cleanText(fight.location, 90)}`;
         consider('fight', `fight:${fight.messageIndex}`, { local, age, text: deed });
+    }
+
+    // The hero's MANNER travels too (hero tells, slice 2 — 2026-09-23): a
+    // pattern people watched form before bystanders ("never draws first")
+    // precedes the hero as reputation, distortion-graded like a deed. It is
+    // never local (a habit has no place) and never intimate (secrets never
+    // travel); its age is the last sighting, so a dropped habit stops
+    // traveling with the fade.
+    for (const { tell, age } of listPublicTells(heroTells, { messages, messageCount: messageIndex })) {
+        if (age < HEARSAY_MIN_TRAVEL_DISTANCE) continue;
+        consider('tell', `tell:${tell.id}`, {
+            local: false,
+            age,
+            text: `the hero's known manner — ${cleanText(tell.text, 160)} (a habit people have watched, not a single deed; a teller may have seen it or only heard of it)`,
+        });
     }
 
     // Untold news first, then freshest (stable sort: ties keep front → card →

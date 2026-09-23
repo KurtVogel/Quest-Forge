@@ -117,3 +117,41 @@ describe('hero tells — reducer, cadence tick, load, prompt (2026-09-23)', () =
         expect(buildKnownHeroTells({})).toBeNull();
     });
 });
+
+describe('hero tells — follow-up slices in the reducer (2026-09-23)', () => {
+    it('a voiced Scribe report closes the open beat; SET_HERO_TELL_DORMANT strikes and restores; the cadence falls back to the absence beat', () => {
+        const state = { ...sighted([10, 40, 70]), messages: messagesOf(100) };
+        const minted = rollHeroTellBeat(state, { roll: () => 0 });
+        const withBeat = { ...state, session: minted.session, messages: messagesOf(105) };
+        const voiced = gameReducer(withBeat, { type: 'ADD_HERO_TELLS', payload: [{ id: state.heroTells[0].id, text: 'the pipe', kind: 'habit', witnesses: ['Maren'], voiced: true, voicedBy: 'Maren' }] });
+        expect(voiced.session.heroTellBeat).toBeNull();
+        expect(voiced.heroTells[0]).toMatchObject({ lastVoicedMessage: 105, voicedCount: 1, voicedBy: ['Maren'] });
+        // A voiced report for ANOTHER tell leaves the beat open.
+        const other = gameReducer(withBeat, { type: 'ADD_HERO_TELLS', payload: [{ text: 'never draws first', kind: 'principle', witnesses: ['Maren'], voiced: true, voicedBy: 'Maren' }] });
+        expect(other.session.heroTellBeat).toEqual(minted.session.heroTellBeat);
+        // Strike / restore.
+        const struck = gameReducer(voiced, { type: 'SET_HERO_TELL_DORMANT', payload: { id: voiced.heroTells[0].id } });
+        expect(struck.heroTells[0].dormant).toBe(true);
+        expect(gameReducer(struck, { type: 'SET_HERO_TELL_DORMANT', payload: { id: 'nope' } })).toBe(struck);
+        expect(gameReducer(struck, { type: 'SET_HERO_TELL_DORMANT', payload: { id: struck.heroTells[0].id, dormant: false } }).heroTells[0].dormant).toBe(false);
+        // Absence fallback on the cadence: faded + once voiced → an absence window.
+        const late = { ...voiced, session: { ...voiced.session, lastHeroTellBeatMessage: 0 }, messages: messagesOf(105 + 200 + 10) };
+        const absence = rollHeroTellBeat(late, { roll: () => 0 });
+        expect(absence.session.heroTellBeat).toMatchObject({ mode: 'absence', tellId: voiced.heroTells[0].id });
+        // The LOAD twin keeps the mode.
+        const loaded = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: { ...late, session: { ...absence.session, id: 's' } } });
+        expect(loaded.session.heroTellBeat.mode).toBe('absence');
+        expect(loaded.heroTells[0]).toMatchObject({ voicedBy: ['Maren'], dormant: false, public: false });
+    });
+
+    it('a public tell reaches the traveling-rumor line on arrival at a new place', () => {
+        let state = { ...initialGameState, npcs: roster, locations: [] };
+        for (const at of [10, 40, 70]) {
+            state = gameReducer({ ...state, messages: messagesOf(at) }, { type: 'ADD_HERO_TELLS', payload: [{ ...PIPE, public: true }] });
+        }
+        const home = gameReducer({ ...state, messages: messagesOf(72) }, { type: 'SET_LOCATION', payload: { name: 'Rimehollow', profile: { type: 'settlement', danger: 'low' } } });
+        const away = gameReducer({ ...home, messages: messagesOf(120) }, { type: 'SET_LOCATION', payload: { name: 'Farport', profile: { type: 'settlement', danger: 'low' } } });
+        expect(away.session.regionalHearsay?.items?.[0]?.text).toContain(PIPE.text);
+        expect(away.recentHearsay.some(entry => entry.startsWith(`tell:${state.heroTells[0].id}|`))).toBe(true);
+    });
+});

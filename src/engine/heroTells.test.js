@@ -166,3 +166,96 @@ describe('hero tells — who may voice it', () => {
         expect(block).toContain('never before others');
     });
 });
+
+describe('hero tells — follow-up slices (2026-09-23): the sheet, hearsay, voiced-by-the-fiction, the absence beat', () => {
+    const roster = [{ id: 'npc-maren', name: 'Maren', rosterTier: 'character' }];
+
+    it('a voiced report stamps the voice without adding a sighting unless sighted; the sheet lists only voiced tells with who said it; the load twin types the new fields', async () => {
+        const { listVoicedTells, listPublicTells, setHeroTellDormant } = await import('./heroTells.js');
+        let tells = sightings([PIPE], [10, 40, 70]);
+        expect(listVoicedTells(tells)).toEqual([]);
+        tells = recordHeroTells(tells, [{ id: tells[0].id, text: 'the pipe', kind: 'habit', witnesses: ['Maren'], voiced: true, voicedBy: 'Maren' }], { messageCount: 100 });
+        expect(tells[0]).toMatchObject({ sightings: [10, 40, 70], lastSeenMessage: 70, lastVoicedMessage: 100, voicedCount: 1, voicedBy: ['Maren'] });
+        tells = recordHeroTells(tells, [{ id: tells[0].id, text: 'the pipe', kind: 'habit', witnesses: ['Bran'], voiced: true, voicedBy: 'Bran', sighted: true }], { messageCount: 130 });
+        expect(tells[0]).toMatchObject({ sightings: [10, 40, 70, 130], voicedCount: 2, voicedBy: ['Maren', 'Bran'], witnesses: ['Maren', 'Bran'] });
+        const sheet = listVoicedTells(tells);
+        expect(sheet).toHaveLength(1);
+        expect(sheet[0]).toMatchObject({ text: PIPE.text, saidBy: ['Maren', 'Bran'], dormant: false, intimate: false });
+        // Struck by the player: still listed (restorable), never live, never travels.
+        const struck = setHeroTellDormant(tells, tells[0].id, true);
+        expect(listVoicedTells(struck)[0].dormant).toBe(true);
+        expect(isHeroTellLive(struck[0], { messageCount: 140 })).toBe(false);
+        expect(setHeroTellDormant(struck, struck[0].id, true)).toBe(struck);
+        expect(isHeroTellLive(setHeroTellDormant(struck, struck[0].id, false)[0], { messageCount: 140 })).toBe(true);
+        // A remark about an unrecorded pattern is its first sighting AND its first voice.
+        const fresh = recordHeroTells([], [{ text: 'never draws first', kind: 'principle', witnesses: ['Maren'], voiced: true, voicedBy: 'Maren' }], { messageCount: 5 });
+        expect(fresh[0]).toMatchObject({ sightings: [5], voicedCount: 1, voicedBy: ['Maren'] });
+        // Load twin.
+        const loaded = sanitizeHeroTells([{ text: 'x', kind: 'intimate', public: true, dormant: 'yes', voicedBy: ['A', { name: 'B' }], lastAbsenceRemarkMessage: '900' }], { maxMessageCount: 50 });
+        expect(loaded[0]).toMatchObject({ public: false, dormant: false, voicedBy: ['A'], lastAbsenceRemarkMessage: 50 });
+        expect(listPublicTells(loaded, { messageCount: 60 })).toEqual([]);
+    });
+
+    it('a public non-intimate live tell travels as hearsay; intimate and dormant ones never do', async () => {
+        const { listPublicTells } = await import('./heroTells.js');
+        const { selectRegionalHearsay } = await import('./regionalHearsay.js');
+        let tells = sightings([{ ...PIPE, public: true }], [10, 40, 70]);
+        tells = recordHeroTells(tells, [{ text: 'takes her from behind by preference', kind: 'intimate', witnesses: ['Maren'], public: true }], { messageCount: 80 });
+        const travel = listPublicTells(tells, { messageCount: 100 });
+        expect(travel).toHaveLength(1);
+        expect(travel[0].tell.text).toBe(PIPE.text);
+        expect(tells[1].public).toBe(false);
+        const picked = selectRegionalHearsay({ heroTells: tells, locations: [], locationName: 'Farport', messageIndex: 100 });
+        expect(picked.items).toHaveLength(1);
+        expect(picked.items[0].text).toContain(PIPE.text);
+        expect(picked.items[0].grade).toBe('secondhand');
+        expect(picked.ledgerEntries[0]).toMatch(new RegExp(`^tell:${tells[0].id}\\|farport\\|100$`));
+        // Too fresh to have traveled; struck tells stay home; a faded one stops traveling.
+        expect(selectRegionalHearsay({ heroTells: tells, locations: [], locationName: 'Farport', messageIndex: 75 }).items).toEqual([]);
+        expect(selectRegionalHearsay({ heroTells: tells.map(t => ({ ...t, dormant: true })), locations: [], locationName: 'Farport', messageIndex: 100 }).items).toEqual([]);
+        expect(selectRegionalHearsay({ heroTells: tells, locations: [], locationName: 'Farport', messageIndex: 70 + HERO_TELL_FADE_MESSAGES + 5 }).items).toEqual([]);
+    });
+
+    it('a beat voiced by the fiction inside its window is spent and not double-stamped at expiry; an unvoiced window still falls back to the assumption', async () => {
+        const { beatVoicedByFiction } = await import('./heroTells.js');
+        let tells = sightings([PIPE], [10, 40, 70]);
+        const beat = mintHeroTellBeat(selectHeroTellCandidate(tells, roster, { messageCount: 100 }), { messageCount: 100, delayScenes: 0 });
+        expect(beatVoicedByFiction(beat, tells)).toBe(false);
+        tells = recordHeroTells(tells, [{ id: tells[0].id, text: 'the pipe', kind: 'habit', witnesses: ['Maren'], voiced: true, voicedBy: 'Maren' }], { messageCount: 110 });
+        expect(beatVoicedByFiction(beat, tells)).toBe(true);
+        const stamped = stampTellVoiced(tells, beat);
+        expect(stamped).toBe(tells);
+        expect(stamped[0]).toMatchObject({ lastVoicedMessage: 110, voicedCount: 1 });
+        const unvoiced = stampTellVoiced(tells.map(t => ({ ...t, lastVoicedMessage: null, voicedCount: 0 })), beat);
+        expect(unvoiced[0]).toMatchObject({ lastVoicedMessage: 100, voicedCount: 1 });
+    });
+
+    it('the absence beat: a faded, once-voiced habit with its witness on the roster gets an absence window, cooled by its own stamp', async () => {
+        const { selectAbsenceTellCandidate, beatVoicedByFiction } = await import('./heroTells.js');
+        let tells = sightings([PIPE], [10, 40, 70]);
+        const late = 70 + HERO_TELL_FADE_MESSAGES + 10;
+        // Never voiced → nobody knew it as the hero's habit → no absence to notice.
+        expect(selectAbsenceTellCandidate(tells, roster, { messageCount: late })).toBeNull();
+        tells = recordHeroTells(tells, [{ id: tells[0].id, text: 'the pipe', kind: 'habit', witnesses: ['Maren'], voiced: true, voicedBy: 'Maren' }], { messageCount: 75 });
+        // Still live → not an absence yet; the remark lane has the cooldown instead.
+        expect(selectAbsenceTellCandidate(tells, roster, { messageCount: 100 })).toBeNull();
+        const candidate = selectAbsenceTellCandidate(tells, roster, { messageCount: late });
+        expect(candidate).toMatchObject({ mode: 'absence', witnesses: ['Maren'] });
+        expect(selectHeroTellCandidate(tells, roster, { messageCount: late })).toBeNull();
+        const beat = mintHeroTellBeat(candidate, { messageCount: late, delayScenes: 1 });
+        expect(beat).toMatchObject({ mode: 'absence', opensAtMessage: late + 6 });
+        expect(sanitizeHeroTellBeat({ ...beat, mode: 'nonsense' }).mode).toBe('remark');
+        const block = buildHeroTellBeatBlock(beat, tells, { presentNames: ['Maren'], messageCount: late + 8 });
+        expect(block).toContain('SOMEONE NOTICES WHAT THE HERO STOPPED DOING');
+        expect(block).toContain("haven't done that in a while");
+        expect(buildHeroTellBeatBlock(beat, tells, { presentNames: ['Bran'], messageCount: late + 8 })).toBe('');
+        // The standing block never lists a faded tell.
+        expect(buildHeroTellsBlock(tells, { presentNames: ['Maren'], messageCount: late + 8 })).toBe('');
+        // Expiry stamps the absence remark, never a voice; the cooldown then holds.
+        const stamped = stampTellVoiced(tells, beat);
+        expect(stamped[0]).toMatchObject({ lastAbsenceRemarkMessage: late + 6, voicedCount: 1 });
+        expect(beatVoicedByFiction(beat, stamped)).toBe(false);
+        expect(selectAbsenceTellCandidate(stamped, roster, { messageCount: late + 50 })).toBeNull();
+        expect(selectAbsenceTellCandidate(stamped, roster, { messageCount: late + 6 + 120 })).not.toBeNull();
+    });
+});

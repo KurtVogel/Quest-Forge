@@ -12,10 +12,14 @@ import { CLASSES } from '../../data/classes.js';
 import { getKnownSpells, getSpellAttackBonus, getSpellSaveDC, isSpellcaster } from '../../engine/spellcasting.js';
 import CharacterScreen from './CharacterScreen.jsx';
 import { buildPortraitPrompt } from './portraitPrompt.js';
+import { listVoicedTells } from '../../engine/heroTells.js';
 import './CharacterSheet.css';
 
 export default function CharacterSheet() {
     const { state, dispatch } = useGame();
+    // "How others see you" (hero tells, 2026-09-23): only what someone has
+    // actually SAID about the hero — heard first, read second. Zero LLM.
+    const voicedTells = useMemo(() => listVoicedTells(state.heroTells), [state.heroTells]);
     const { character } = state;
     const [isExpanded, setIsExpanded] = useState(false);
     const [showSkills, setShowSkills] = useState(false);
@@ -562,6 +566,31 @@ export default function CharacterSheet() {
                                             : feature === 'Martial Archetype' && character.class === 'fighter' && character.martialArchetype
                                                 ? `Martial Archetype: ${CLASSES.fighter.martialArchetypes[character.martialArchetype]?.label || character.martialArchetype}`
                                                 : feature}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {voicedTells.length > 0 && (
+                        <div className="cs-section cs-tells-section">
+                            <h4 className="cs-section-title">How others see you</h4>
+                            <ul className="cs-list">
+                                {voicedTells.map(tell => (
+                                    <li key={tell.id} className={`cs-tell${tell.dormant ? ' cs-tell-dormant' : ''}`}>
+                                        <span className="cs-tell-text">{tell.text}</span>
+                                        <span className="cs-tell-meta">
+                                            {tell.intimate ? 'in confidence · ' : ''}
+                                            {tell.saidBy.length > 0 ? `said by ${tell.saidBy.join(', ')}` : 'said aloud'}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            className="btn btn-secondary btn-sm cs-tell-toggle"
+                                            title={tell.dormant ? 'Let people notice this again' : 'Strike it: nobody will bring this up again'}
+                                            onClick={() => dispatch({ type: 'SET_HERO_TELL_DORMANT', payload: { id: tell.id, dormant: !tell.dormant } })}
+                                        >
+                                            {tell.dormant ? 'Restore' : "That's not me"}
+                                        </button>
                                     </li>
                                 ))}
                             </ul>
