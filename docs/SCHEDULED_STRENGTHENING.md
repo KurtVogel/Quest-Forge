@@ -66,6 +66,7 @@ it under Process notes.
 | chat-orchestration | `components/Chat/ChatPanel.jsx`, `llm/turnOrchestrator.js` (turn pipeline, message window), `state/applyEvents.js` (the setupPhase deferral + every wire it dispatches), `turnVisibility.js`/`eventRouting.js`/`sessionPriming.js`/`missingEventsNudge.js`, the message rows' LOAD_GAME heal in `handlers/session.js` | 2026-09-19 |
 | spellcasting | `engine/spellcasting.js`, `data/spells.js`, `state/handlers/spellcasting.js`, rest/sustained interplay | 2026-09-13 |
 | chronicler | `llm/chronicler.js`, chronicle reducer paths + Journal Chronicle tab | 2026-09-13 |
+| hero-tells | `engine/heroTells.js`, `state/handlers/heroTells.js` (ADD_HERO_TELLS, SET_HERO_TELL_DORMANT, `rollHeroTellBeat` on the journal cadence), the Scribe's `hero_tells` schema + `buildKnownHeroTells` in `llm/scribe.js`, the two prompt blocks in `promptBuilder.js`, `listPublicTells` inside `selectRegionalHearsay`, the sheet's "How others see you", and the LOAD_GAME twins (`sanitizeHeroTells`, `sanitizeHeroTellBeat`). **Never played against a real provider (2026-09-23)** — the pending `[playtest]` item in IDEAS.md is the first thing to do here; the audit's hostile-input lap should walk the Scribe lane into the record (a `witnesses` object, a `voiced` string, an `id` from another tell) | — |
 
 ## Coverage Snapshot
 

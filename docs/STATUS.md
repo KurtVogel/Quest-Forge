@@ -19,7 +19,7 @@ public). The Scribe reports **`voiced` / `voicedBy`** when a character names a p
 stamps the exact turn without counting a sighting (unless `sighted`), and the open remark window closes
 at once — the cadence stamp is now the fallback only. And the **absence beat**: a faded, once-voiced
 habit whose witness is on the roster gets a `mode: 'absence'` window ("You haven't done that in a
-while"). 2,981 tests green, lint clean, built, **deployed**. Not live-verified (no keys here).
+while"). 2,981 tests green, lint clean, built, **deployed**. **NOT live-verified — Vesa: "this needs your testing too."** The whole feature (both entries) has only unit pins; the next session with keys should run the `[playtest] Hero tells` item in IDEAS.md (a `tells` probe on the `playtest_recall_wonder.cjs` pattern, Gemini Pro + GPT Terra, seven things to watch listed there) before anything else is built on it.
 
 ## 2026-09-23 — hero tells: the world notices the hero's MANNER, not only their deeds
 
