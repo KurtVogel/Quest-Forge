@@ -2524,6 +2524,38 @@ The cloud twin is a `users/{uid}/portraits/{key}` collection (the pure `extractP
 `restorePortraits` helpers already exist), `portraitRefs` on the metadata doc, a rules match,
 and `fitPortraitsToBudget` retired. From the 2026-09-22 strengthening audit.
 
+### [strengthening] One flag, one predicate; a debounce collapses bursts, not phases; after a split, the immutable share is the metric — status: `idea` (2026-09-23)
+Three rules from the fourth Lap-3 pair (2026-09-23, combat-exchange + persistence).
+**(1)** The `exchangeLine` tag (DECISIONS.md 2026-08-04) keeps a fight's dice lines out of the DM
+window — and out of nothing else: `collectNarrativeEntries` (the ONE "transcript as story"
+predicate since 2026-09-01) admits every `system` row that is not `error`/`record`, so a
+realistic 9-exchange fight's 64 dice lines are narrative to the journal cadence (measured: the
+first post-fight turn fires the cadence twice in a row — 40 rows / 34 dice lines, then 36 / 30 —
+two Flash calls and two journal entries for one fight), to `buildPresenceText` (scene presence is
+judged from `**Oda attacks Marsh bandit 4** — Rolled **20**…` for the whole fight and the turn
+after), and to the chronicler (`TABLE RECORD:` per line). Rule: when a project introduces THE
+predicate for a class of reads, grep every flag the rows carry and decide each one there; the fix
+is an `exchangeLine` exclusion in that predicate (out-of-combat roll lines keep their seat — no
+second carrier there; DECISIONS 2026-09-06's "engine lines still ride it" is narrowed, not
+reversed). Same pair: the narration-only call re-sends the whole ~20k-char dynamic half (quests,
+facts, session history, inventory) it cannot use — a 9-exchange fight is 19 DM calls ≈ 170k
+uncached tokens — and the Scribe runs on every beat (~10 Flash calls per fight on prose the
+engine snapshot owns and that is never embedded): a `narrationOnly` prompt variant and a
+terminal-or-named-NPC Scribe gate. **(2)** The autosave's 2 s debounce collapses a burst of
+dispatches, not a TURN: the real runtime under fake timers on a realistic timeline (player line,
+DM reply + events at 7 s, Scribe wave at 11.5 s, cadence at 15 s, reflection at 19 s) writes five
+full snapshots per ordinary turn and four per combat round — 7.8 MB per turn on a 1.56 MB mature
+campaign for a few KB of change. Rule: measure writes per turn on a dispatch timeline. A two-tier
+debounce (2 s for messages/character/combat/inventory, ~15 s for the background lanes, the hide
+flush still protecting) → 2 writes per turn. **(3)** With portraits gone (2026-09-21), 55–62 % of
+every write is bytes that never change: summarized messages (497 KB mature / 1.30 MB epic) and
+the chronicle (361 KB / 0.90 MB). Rule: after a byte fix, re-measure the payload's composition —
+the next immutable share is the next split. The chronicle is the portrait case exactly (immutable
+chapters, only the newest removable, never in a prompt): a `chronicleChapters` store with refs in
+the payload, the `extractPortraits` / `restorePortraits` / sweep trio generalized by field; the
+summarized prefix is the harder half ("Autosave write cost" above already holds the append-only
+messages idea). From the 2026-09-23 strengthening audit.
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
