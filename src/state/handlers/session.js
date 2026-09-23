@@ -10,6 +10,7 @@ import { dedupeLocationRecords, normalizeLocationRecord, seedTravelLinksFromTrai
 import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
 import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
 import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
+import { sanitizeHeroTells } from '../../engine/heroTells.js';
 import { sanitizeQuestRecords } from './quests.js';
 import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX, MESSAGE_CONTENT_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
@@ -370,6 +371,9 @@ function validateSaveState(payload) {
         // P1/P2): a `null` element threw out of normalizeStoryMemoryCard and
         // made the campaign un-loadable; a future `lastUsedMessage` kept a
         // promise out of DRAMATIC CALLBACKS for the campaign's life.
+        // Hero tells load typed (2026-09-23): plain objects, clamped text,
+        // stamps clamped to the transcript, duplicate ids re-minted.
+        heroTells: sanitizeHeroTells(payload.heroTells, { maxMessageCount: messageCount }),
         storyMemory: healPromotedStoryMemoryTwins(
             Array.isArray(payload.storyMemory)
                 ? payload.storyMemory

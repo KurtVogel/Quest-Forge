@@ -14,6 +14,7 @@ import {
 import { gameReducer } from '../gameReducer.js';
 import { isStaleCampaignAction, sanitizeWorldFactPayload, stampNpcRelationshipArcs, systemMessage } from './shared.js';
 import { CHRONICLE_CHAPTER_TEXT_MAX } from '../../config/contentLimits.js';
+import { rollHeroTellBeat } from './heroTells.js';
 import { rollDie } from '../../engine/dice.ts';
 import {
     WONDER_TIMING_DIE_SIDES,
@@ -254,6 +255,14 @@ export const handlers = {
             timestamp: action.payload.timestamp || Date.now(),
             ...action.payload,
         }];
+        // The cadence's engine ticks, in order: the NPC-initiative tick
+        // (2026-09-13 overhaul — if no beat is pending and the cooldown has
+        // passed, the one bonded NPC with the most pull may reach out; the
+        // engine rolls WHEN), the hero-tell tick (2026-09-23 — someone who
+        // watched a pattern in the hero form may get a window to say so),
+        // and the wonder die's request tick (2026-09-18 — a long eventless
+        // stretch asks the director for something strange).
+        const tells = rollHeroTellBeat({ ...state, session: rollRelationshipBeat(state) });
         return {
             ...state,
             journal,
@@ -264,12 +273,8 @@ export const handlers = {
             // ...and as the relationship-arc stamp: a disposition shift enters
             // an NPC's history only if it held until this cadence (2026-08-28).
             npcs: stampNpcRelationshipArcs(state.npcs),
-            // ...and as the NPC-initiative tick (2026-09-13 overhaul): if no
-            // beat is pending and the cooldown has passed, the one bonded NPC
-            // with the most pull may reach out — the engine rolls WHEN.
-            // ...and as the wonder die's request tick (2026-09-18): a long
-            // eventless stretch asks the director for something strange.
-            session: rollWonderRequest({ ...state, session: rollRelationshipBeat(state) }),
+            heroTells: tells.heroTells,
+            session: rollWonderRequest({ ...state, session: tells.session }),
         };
     },
 

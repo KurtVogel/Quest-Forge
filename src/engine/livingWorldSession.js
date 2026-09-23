@@ -16,6 +16,7 @@
  */
 import { INTENSITY_LEVELS } from './worldTempo.js';
 import { sanitizeRelationshipBeat } from './relationshipArc.js';
+import { sanitizeHeroTellBeat } from './heroTells.js';
 import { sanitizePendingWonder, sanitizeWonder } from './wonder.js';
 import { sanitizeDirectorFailures } from './directorRetry.js';
 
@@ -145,6 +146,8 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
         ['chapterCloseSuggested', sanitizeChapterCloseSuggested],
         // NPC initiative window (2026-09-13 overhaul): complete-or-null.
         ['relationshipBeat', sanitizeRelationshipBeat],
+        // The hero-tell window (2026-09-23): complete-or-null.
+        ['heroTellBeat', sanitizeHeroTellBeat],
         // The wonder die (2026-09-18): the request marker and the chosen hook.
         ['pendingWonder', sanitizePendingWonder],
         ['wonder', sanitizeWonder],
@@ -152,6 +155,10 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
     if (session.lastWonderMessage !== undefined) {
         const n = Number(session.lastWonderMessage);
         next.lastWonderMessage = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+    }
+    if (session.lastHeroTellBeatMessage !== undefined) {
+        const n = Number(session.lastHeroTellBeatMessage);
+        next.lastHeroTellBeatMessage = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
     }
     if (session.lastRelationshipBeatMessage !== undefined) {
         const n = Number(session.lastRelationshipBeatMessage);

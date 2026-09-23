@@ -24,6 +24,7 @@ import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
 import { isLowLevelSolo } from '../engine/combatExchange.js';
 import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock, describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
+import { buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
 
 /**
  * Tripwire against unbounded prompt growth, NOT a target. A deliberately
@@ -40,7 +41,7 @@ export const PROMPT_CHAR_BUDGET = 160000;
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat }) {
     /** Named [{name, text}] parts — joined in push order; names feed the DEV size log only. */
     const namedParts = [];
     const parts = {
@@ -231,6 +232,33 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     });
     if (journalContext) {
         parts.push(journalContext, 'journalAndNpcs');
+    }
+
+    // Hero tells (WOW 2026-09-23): what the people IN THIS SCENE have noticed
+    // of the hero's manner — standing knowledge for the witnesses present
+    // (party companions are always present), plus the engine-rolled window
+    // in which one of them may say it out loud; both re-judged at render.
+    const sceneNames = [
+        ...(presentNames || []),
+        ...(Array.isArray(party) ? party.map(c => c?.name).filter(Boolean) : []),
+    ];
+    const tellsBlock = buildHeroTellsBlock(heroTells || [], {
+        presentNames: sceneNames,
+        messages: Array.isArray(messages) ? messages : null,
+        messageCount: messageCount || 0,
+        combatActive: !!combat?.active,
+    });
+    if (tellsBlock) {
+        parts.push(tellsBlock, 'heroTells');
+    }
+    const tellBeatBlock = buildHeroTellBeatBlock(heroTellBeat, heroTells || [], {
+        presentNames: sceneNames,
+        messages: Array.isArray(messages) ? messages : null,
+        messageCount: messageCount || 0,
+        combatActive: !!combat?.active,
+    });
+    if (tellBeatBlock) {
+        parts.push(tellBeatBlock, 'heroTellBeat');
     }
 
     // Active constraints — synthesized DM reminders from world state and threats

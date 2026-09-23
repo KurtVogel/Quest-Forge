@@ -14,6 +14,7 @@ export const initialGameState = {
     npcs: [],
     worldFacts: [], // Canonical world facts that never get compressed — [{id, fact, category, timestamp}]
     storyMemory: [], // Compact dramatic callback cards — narrative-only memory, never mechanics
+    heroTells: [], // What the world has noticed of the hero's MANNER — witnessed patterns, voiced only by those who saw them (2026-09-23)
     fronts: [], // Hidden campaign clocks/threats — injected into the DM prompt, never shown directly to the player
     party: [], // Companions currently traveling with the player
     currentLocation: null,

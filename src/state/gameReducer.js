@@ -23,6 +23,7 @@ import { handlers as companionHandlers } from './handlers/companions.js';
 import { handlers as frontHandlers } from './handlers/fronts.js';
 import { handlers as combatHandlers } from './handlers/combat.js';
 import { handlers as sessionHandlers } from './handlers/session.js';
+import { handlers as heroTellHandlers } from './handlers/heroTells.js';
 
 export { initialGameState };
 // Helpers that moved into domain modules but remain part of this module's
@@ -45,6 +46,7 @@ const HANDLERS = {
     ...frontHandlers,
     ...combatHandlers,
     ...sessionHandlers,
+    ...heroTellHandlers,
 };
 
 export function gameReducer(state, action) {

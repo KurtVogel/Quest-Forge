@@ -30,7 +30,7 @@ import { applyEvents } from '../state/applyEvents.js';
 import { handleRequestedRolls } from '../engine/rollResolver.js';
 import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../engine/outOfCombatRollPolicy.js';
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
-import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe } from './scribe.js';
+import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe } from './scribe.js';
 import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { addMemory, findSubjectsInText, retrieveRelevant } from '../engine/vectorMemory.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
@@ -235,6 +235,8 @@ export function createTurnRunner({
             absenceDrift: s.session?.absenceDrift || null,
             relationshipBeat: s.session?.relationshipBeat || null,
             wonder: s.session?.wonder || null,
+            heroTells: s.heroTells || [],
+            heroTellBeat: s.session?.heroTellBeat || null,
             recentRulings: pruneRecentRulings(s.recentRulings, {
                 messageCount: (s.messages || []).length,
                 location: s.currentLocation,
@@ -703,6 +705,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             knownAppearances: buildKnownAppearances(latest, playerMessage, finalNarration.content),
             knownStances: buildKnownStances(latest, playerMessage, finalNarration.content),
             knownStoryCards: buildKnownStoryCards(latest, playerMessage, finalNarration.content),
+            knownHeroTells: buildKnownHeroTells(latest),
             knownLocations: buildKnownLocations(latest),
             // The DM's own location event (already applied) outranks the async
             // Scribe for this turn: the Scribe's location downgrades to
