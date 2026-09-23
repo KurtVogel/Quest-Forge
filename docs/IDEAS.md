@@ -1104,7 +1104,7 @@ Still open:
 - Downed/dead story arcs: rescue, injury, permanent death, memorial notes.
 - Companion roles/traits that affect narration and simple mechanics without full class sheets.
 
-### Combat intent profile expansion — status: `idea` after v2 (2026-06-20)
+### ~~Combat intent profile expansion~~ — status: `merged` (2026-09-23 wow audit [wow]): the spell half shipped 2026-07-17 (Spellcasting v1 — slots, save spells, healing, darts, sustained spells, Turn Undead; DECISIONS.md 2026-07-17), the "morale personalities" line lives on in "[wow] Combat drama: the foe's next move, and the fight leaves a mark" below, and the rest (shove/grapple/help profiles, range/cover/movement/opportunity attacks, enemy special profiles) are listed there as later slices — the visible-reject rule for unsupported specials already ships
 Combat v2 deliberately resolves only mechanics with canonical engine profiles. Current bounded
 intents cover standard weapon attacks, basic Wizard/Cleric attack spells, checks/saves,
 Dodge/Dash/Disengage/Interact/Pass/death saves, companion attack/defend/pass, and enemy
@@ -1115,6 +1115,57 @@ attack/defend/flee/surrender. Expand without returning dice authority to the LLM
 - Range, reach, cover, movement, opportunity attacks, target threat/taunt, and battlefield position.
 - Enemy spell/special profiles and morale personalities. Until a profile exists, reject visibly
   with no action committed rather than inventing numbers or granting a free hostile turn.
+
+### [wow] Combat drama: the foe's next move, and the fight leaves a mark — status: `proposed` (wow audit 2026-09-23, combat-drama Lap 1, two W1 slices)
+The exchange machine is genre-best at the DICE (engine initiative + Opening Initiative, guard
+interception, standing flanks, conditions, targeting from fiction — nothing can be cheated) and
+genre-weak at the three things a fight is FOR. (1) **The player commits blind and the foes never
+break.** Enemy intent is decided by the DM in the SAME envelope as the player's action, after the
+player commits (`enemy_intents`, COMBAT NOTES); the narration call's only ending rule is "the
+situation returned to the player"; the engine's health word (healthy/bloodied/critical) reaches
+the DM as data with no rule for what it means; `flee`/`surrender` are unprompted and "morale
+breaks" appears once, in the low-level safety block. So every fight is attack-attack-attack to
+0 HP on both sides — the D&D-video-game failure the tabletop morale rule exists to prevent.
+Into the Breach / Slay the Spire show every foe's next move BEFORE you act, and our exchange
+order (player → companions → enemies) is exactly the order that makes a telegraph playable.
+(2) **A fight leaves no mark the engine owns.** The committed exchange results know the hero's
+worst moment (`remainingHp`, `critical`, death-save events, the attacker's name) and END_COMBAT
+keeps only `recentEncounters` (enemies / location / outcome); HP refills on rest, the `wound`
+story card is minted only if the per-beat Scribe happens to extract one, and the terminal
+narration prompt asks for "consequences" with no idea what the fight cost. Blades in the Dark
+names harm ("Broken leg") and it lingers; XCOM's wounds cost weeks; Darkest Dungeon ends on
+"but at what cost".
+**Slice A — the foe's next move is on the page (~+60 dynamic tokens per non-terminal narration
+call, ~+70 cached prefix tokens, zero new calls):** `combatNarrationPrompt`'s non-terminal
+branch gains one rule — the passage's LAST beat is, for each ALIVE AND ACTIVE foe, its visible
+next move in fiction (circling to the companion's blind side, nocking another arrow, backing
+toward the door, dropping the blade), grounded in the post-state's health word: a bloodied foe
+shows it, a critical foe with no reason to die fighting is on the edge of flight or plea, the
+passage says which. One prefix-stable sentence in COMBAT NOTES: honor the telegraph from your
+own last narration unless the player's action changed it; bloodied foes without a reason to
+die fighting break (flee / surrender / one desperate attack) by the round after — fanatics,
+undead, beasts defending young are the named exceptions. No new channel, no engine morale
+table: intent stays the DM's, the dice the engine's. Proof: `eval:combat` gains a two-round
+scenario scored by a Flash judge (telegraph vs the next `enemy_intents`, honor ≥ 80 % on Gemini
++ GPT) and a three-bloodied-goblins scenario (≥ 1 flee/surrender in ≥ 3 of 5 runs).
+**Slice B — the fight leaves a mark (zero calls, ~+50 tokens on the terminal narration message
+once per fight, one card per MARKING fight):** a pure `summarizeFightCost(results, character,
+party)` derives the tally from the stored exchange results (rounds, hero HP from→to and the
+lowest point, crits taken with the attacker's name, a drop to 0 / a death save, companions
+downed, Second Wind / potions / slots spent, foes slain / fled / surrendered); the terminal
+narration prompt carries it as ONE `COST OF THIS FIGHT:` line plus "let the ending carry its
+cost — a wound the hero will feel tomorrow, named"; when the hero or a companion dropped to
+≤ 25 % or to 0, or took a critical hit, END_COMBAT mints ONE salience-4 `wound` card through
+`ADD_STORY_MEMORY_CARD` (subjects = hero + foe, location stamped, text from the tally) so it
+rides the callback block into later scenes, shows on the Journal, and ages out through the
+shipped dormancy pass; the Scribe's appearance merge can then make the scar canon. Narrative-only
+(DECISIONS.md 2026-06-17) — no mechanical harm track. Proof: five fights below 25 % → five
+Journal wound cards and ≥ 3 of 5 later ordinary scenes reference the wound unprompted.
+**Later slices (from the merged "Combat intent profile expansion"):** shove / grapple / help
+profiles with contested mechanics; range, cover, movement, opportunity attacks; enemy special
+profiles — each rejected visibly until its profile exists, never a free hostile turn. **Lap-3
+material, not here:** a round is two DM calls at ~33–36 s each on Flash 3.8 (2026-09-20 full
+run) — the strengthening queue's `narrationOnly` prompt slimming is the first slice.
 
 ## UX & Platform
 
