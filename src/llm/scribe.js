@@ -163,6 +163,38 @@ function namePresenceIn(names, ...texts) {
     };
 }
 
+const TERMINAL_COMBAT_STATES = ['victory', 'defeat', 'escaped'];
+
+/**
+ * Whether a combat narration beat earns a Scribe pass (2026-09-23
+ * combat-exchange P2). The Scribe used to run after EVERY beat, the opening
+ * included — ~10 Flash calls per 9-exchange fight with the full system prompt,
+ * extracting facts and cards ("Marsh bandit 2 fell") from prose the engine
+ * snapshot owns and that is deliberately never embedded. Terminal narration
+ * always runs (victory keys the loot audit; a defeat or an escape is a durable
+ * outcome); a non-terminal beat runs only when the narrative names a
+ * character-tier roster NPC outside the party — someone whose stance, look,
+ * or bond the fight may have moved. Fodder tiers and companions never trigger
+ * it: companions are covered by the party block and the terminal pass.
+ * @param {object} result - the committed exchange result (`terminal`)
+ * @param {string} narrative - the DM's narration of that result
+ * @param {{ npcs?: object[], party?: object[] }} state
+ */
+export function shouldScribeCombatBeat(result, narrative, { npcs = [], party = [] } = {}) {
+    if (TERMINAL_COMBAT_STATES.includes(result?.terminal)) return true;
+    if (typeof narrative !== 'string' || !narrative.trim()) return false;
+    const partyNames = new Set((party || [])
+        .map(companion => String(companion?.name || '').trim().toLowerCase())
+        .filter(Boolean));
+    const rosterNames = (npcs || [])
+        .filter(npc => npc?.name && (npc.rosterTier === 'character' || !npc.rosterTier))
+        .map(npc => npc.name)
+        .filter(name => !partyNames.has(String(name).trim().toLowerCase()));
+    if (rosterNames.length === 0) return false;
+    const isPresent = namePresenceIn(rosterNames, narrative);
+    return rosterNames.some(isPresent);
+}
+
 export function buildKnownAppearances({ character, npcs = [] } = {}, ...texts) {
     const isPresent = namePresenceIn(npcs.map(n => n?.name), ...texts);
     const entries = [];

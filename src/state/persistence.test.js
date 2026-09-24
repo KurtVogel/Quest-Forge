@@ -32,11 +32,14 @@ const {
     getSaveSessionId,
     saveRosterCharacter,
     listRosterCharacters,
+    countRosterCharacters,
+    loadRosterCharacter,
     deleteRosterCharacter,
     autoSave,
     loadAutoSave,
     projectSaveMetadata,
     SAVE_VERSION,
+    serializeGameState,
 } = await import('./persistence.js');
 
 describe('settings (localStorage)', () => {
@@ -495,12 +498,17 @@ describe('character roster', () => {
         return { id: 'hero-1', name: 'Astra', race: 'human', class: 'fighter', level: 3, ...overrides };
     }
 
-    it('saves and lists a roster hero', async () => {
+    it('saves and lists a roster hero; the list row is metadata and the hero loads by id', async () => {
         await saveRosterCharacter(makeHero(), [{ id: 'i1', name: 'Dagger' }]);
         const roster = await listRosterCharacters();
         expect(roster).toHaveLength(1);
         expect(roster[0].name).toBe('Astra');
-        expect(roster[0].inventory).toEqual([{ id: 'i1', name: 'Dagger' }]);
+        expect(roster[0]).not.toHaveProperty('inventory');
+        expect(roster[0]).not.toHaveProperty('character');
+        const hero = await loadRosterCharacter('hero-1');
+        expect(hero.character.name).toBe('Astra');
+        expect(hero.inventory).toEqual([{ id: 'i1', name: 'Dagger' }]);
+        expect(await loadRosterCharacter('nobody')).toBeNull();
     });
 
     it('re-saving a hero with the same id updates the existing roster entry', async () => {
@@ -528,9 +536,11 @@ describe('character roster', () => {
         const roster = await listRosterCharacters();
         expect(roster.map(entry => entry.id)).toEqual(['hero-1', 'junk-2', 'junk-1']);
         const junk = roster.find(entry => entry.id === 'junk-1');
-        expect(junk).toEqual({ id: 'junk-1', name: 'Unnamed hero', race: '', class: '', level: 1, savedAt: 0, character: null, inventory: [] });
+        expect(junk).toEqual({ id: 'junk-1', name: 'Unnamed hero', race: '', class: '', level: 1, savedAt: 0 });
         expect(roster.find(entry => entry.id === 'junk-2').name).toBe('From Character');
-        expect(roster.find(entry => entry.id === 'hero-1').character.name).toBe('Astra');
+        // The hydrated row types the same way: a junk character is null, a junk inventory [].
+        expect(await loadRosterCharacter('junk-1')).toEqual({ id: 'junk-1', name: 'Unnamed hero', race: '', class: '', level: 1, savedAt: 0, character: null, inventory: [] });
+        expect((await loadRosterCharacter('hero-1')).character.name).toBe('Astra');
     });
 
     it('generates an id when the character has none', async () => {
@@ -551,6 +561,135 @@ describe('character roster', () => {
         await saveRosterCharacter(makeHero(), []);
         await deleteRosterCharacter('hero-1');
         expect(await listRosterCharacters()).toEqual([]);
+    });
+});
+
+describe('roster rows carry no portrait bytes — the last inline-portrait store is split (2026-09-24 character-vault P2)', () => {
+    const portrait = (seed) => `data:image/jpeg;base64,${String(seed).repeat(30_000)}`;
+    const hero = (overrides = {}) => ({
+        id: 'hero-1', name: 'Astra', race: 'human', class: 'fighter', level: 3,
+        gender: 'woman', background: 'A disgraced lamplighter.', appearance: 'Scarred.',
+        portraitUrl: portrait('H'), portraitProvider: 'gemini', portraitUpdatedAt: 5,
+        ...overrides,
+    });
+    const readStore = (storeName, mode = 'all') => new Promise((resolve, reject) => {
+        const open = indexedDB.open('rpg-client-saves');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const db = open.result;
+            const store = db.transaction(storeName, 'readonly').objectStore(storeName);
+            const request = mode === 'keys' ? store.getAllKeys() : store.getAll();
+            request.onsuccess = () => { db.close(); resolve(request.result); };
+            request.onerror = () => { db.close(); reject(request.error); };
+        };
+    });
+    const putRaw = (storeName, record) => new Promise((resolve, reject) => {
+        const open = indexedDB.open('rpg-client-saves');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const db = open.result;
+            const tx = db.transaction(storeName, 'readwrite');
+            tx.objectStore(storeName).put(record);
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onabort = () => { db.close(); reject(tx.error); };
+        };
+    });
+
+    it('the stored row is a ref plus ~6k of hero; the picture sits once in the portraits store', async () => {
+        await saveRosterCharacter(hero(), [{ id: 'i1', name: 'Dagger' }]);
+        const [row] = await readStore('characters');
+        const rowJson = JSON.stringify(row);
+        expect(rowJson).not.toContain('data:image/');
+        expect(rowJson.length).toBeLessThan(2_000); // was 97k on a live L5 wizard, 90k of it the portrait
+        expect(row.character.portraitRef).toMatch(/^p-/);
+        expect(row.portraitRefs).toEqual([row.character.portraitRef]);
+        expect(row.character.portraitProvider).toBe('gemini');
+        expect(await readStore('portraits', 'keys')).toEqual([row.character.portraitRef]);
+    });
+
+    it('the list is metadata with no portrait bytes; select / begin / export hydrate one row with the picture inline', async () => {
+        await saveRosterCharacter(hero(), [{ id: 'i1', name: 'Dagger' }]);
+        await saveRosterCharacter(hero({ id: 'hero-2', name: 'Borin', portraitUrl: portrait('B') }), []);
+        const list = await listRosterCharacters();
+        const listJson = JSON.stringify(list);
+        expect(list.map(row => Object.keys(row).sort())).toEqual([
+            ['class', 'id', 'level', 'name', 'race', 'savedAt'],
+            ['class', 'id', 'level', 'name', 'race', 'savedAt'],
+        ]);
+        expect(listJson).not.toContain('data:image/');
+        expect(listJson).not.toContain('portraitRef');
+
+        const loaded = await loadRosterCharacter('hero-1');
+        expect(loaded.character.portraitUrl).toBe(portrait('H'));
+        expect(loaded.character.portraitProvider).toBe('gemini');
+        expect(loaded.character.background).toBe('A disgraced lamplighter.');
+        expect(loaded.inventory).toEqual([{ id: 'i1', name: 'Dagger' }]);
+        // A ref never reaches the wizard.
+        expect(JSON.stringify(loaded)).not.toContain('portraitRef');
+    });
+
+    it('the forge path reads no roster row: the start card count deserializes nothing', async () => {
+        await saveRosterCharacter(hero(), []);
+        await saveRosterCharacter(hero({ id: 'hero-2', name: 'Borin', portraitUrl: portrait('B') }), []);
+        const spies = ['getAll', 'get', 'openCursor', 'getAllKeys'].map(method => vi.spyOn(IDBObjectStore.prototype, method));
+        try {
+            expect(await countRosterCharacters()).toBe(2);
+            for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+        } finally {
+            spies.forEach(spy => spy.mockRestore());
+        }
+    });
+
+    it('a hero in a save slot AND the roster shares one blob; each side keeps it live for the other', async () => {
+        const state = makeGameState({ character: hero() });
+        await saveGame('slot-a', state);
+        const putSpy = vi.spyOn(IDBObjectStore.prototype, 'put');
+        try {
+            await saveRosterCharacter(hero(), []);
+            // The roster save wrote the row only — the campaign already holds the blob.
+            expect(putSpy.mock.calls.filter(([value]) => typeof value === 'string')).toHaveLength(0);
+        } finally {
+            putSpy.mockRestore();
+        }
+        expect(await readStore('portraits', 'keys')).toHaveLength(1);
+
+        // The slot goes: the roster still shows the picture, so the sweep keeps it.
+        await deleteSave('slot-a');
+        expect(await readStore('portraits', 'keys')).toHaveLength(1);
+        expect((await loadRosterCharacter('hero-1')).character.portraitUrl).toBe(portrait('H'));
+
+        // The roster hero goes: nothing shows it any more.
+        await deleteRosterCharacter('hero-1');
+        expect(await readStore('portraits', 'keys')).toHaveLength(0);
+    });
+
+    it('deleting the roster hero keeps a blob a slot still shows; a roster reroll releases the old one', async () => {
+        await saveRosterCharacter(hero(), []);
+        await saveGame('slot-a', makeGameState({ character: hero() }));
+        await deleteRosterCharacter('hero-1');
+        expect(await readStore('portraits', 'keys')).toHaveLength(1);
+        expect((await loadGame('slot-a')).character.portraitUrl).toBe(portrait('H'));
+
+        await saveRosterCharacter(hero({ id: 'hero-9', portraitUrl: portrait('X') }), []);
+        await saveRosterCharacter(hero({ id: 'hero-9', portraitUrl: portrait('Y') }), []);
+        const keys = await readStore('portraits', 'keys');
+        expect(keys).toHaveLength(2); // H (slot-a) + Y; X was swept on the reroll
+        expect((await loadRosterCharacter('hero-9')).character.portraitUrl).toBe(portrait('Y'));
+    });
+
+    it('a pre-split row with an inline portrait lists and loads as-is and splits on its next save; a missing blob is a missing picture', async () => {
+        expect(await countRosterCharacters()).toBe(0); // creates the stores before the raw writes below
+        await putRaw('characters', { id: 'legacy', name: 'Old', race: 'elf', class: 'wizard', level: 2, savedAt: 1, character: { id: 'legacy', name: 'Old', portraitUrl: portrait('L'), portraitProvider: 'xai' }, inventory: [] });
+        await putRaw('characters', { id: 'dangling', name: 'Lost', race: 'elf', class: 'wizard', level: 2, savedAt: 1, portraitRefs: ['p-gone'], character: { id: 'dangling', name: 'Lost', portraitRef: 'p-gone', portraitProvider: 'xai', portraitUpdatedAt: 3 }, inventory: [] });
+        expect((await listRosterCharacters()).map(row => row.name).sort()).toEqual(['Lost', 'Old']);
+        const legacy = await loadRosterCharacter('legacy');
+        expect(legacy.character.portraitUrl).toBe(portrait('L'));
+        await saveRosterCharacter(legacy.character, legacy.inventory);
+        const stored = (await readStore('characters')).find(row => row.id === 'legacy');
+        expect(JSON.stringify(stored)).not.toContain('data:image/');
+        expect(await readStore('portraits', 'keys')).toEqual([stored.character.portraitRef]);
+
+        expect((await loadRosterCharacter('dangling')).character).toEqual({ id: 'dangling', name: 'Lost' });
     });
 });
 
@@ -777,5 +916,141 @@ describe('loadSettings types every field (2026-09-16 providers-adapter P2 — th
     it('an over-long custom prompt clamps instead of riding every DM call whole', () => {
         saveSettings({ customSystemPrompt: 'p'.repeat(30000) });
         expect(loadSettings().customSystemPrompt).toHaveLength(20000);
+    });
+});
+
+describe('chronicle store — chapter prose does not ride the record that changes every turn (2026-09-23 persistence P2)', () => {
+    const chapterText = (seed) => `The ${seed} chapter, retold. `.repeat(1800); // ~50k chars, the audit's 45k
+    const chapter = (seed, i) => ({ id: `chapter-${seed}`, title: `Chapter ${seed}`, text: chapterText(seed), fromIndex: i * 10, toIndex: i * 10 + 9, createdAt: 1000 + i });
+    const withChapters = (seeds, overrides = {}) => makeGameState({ chronicle: seeds.map((seed, i) => chapter(seed, i)), ...overrides });
+    const portrait = (seed) => `data:image/jpeg;base64,${String(seed).repeat(3000)}`;
+    const readStore = (storeName, mode = 'all') => new Promise((resolve, reject) => {
+        const open = indexedDB.open('rpg-client-saves');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const db = open.result;
+            const store = db.transaction(storeName, 'readonly').objectStore(storeName);
+            const request = mode === 'keys' ? store.getAllKeys() : store.getAll();
+            request.onsuccess = () => { db.close(); resolve(request.result); };
+            request.onerror = () => { db.close(); reject(request.error); };
+        };
+    });
+    const putPayload = (slotId, state) => new Promise((resolve, reject) => {
+        const open = indexedDB.open('rpg-client-saves');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+            const db = open.result;
+            const tx = db.transaction('savePayloads', 'readwrite');
+            tx.objectStore('savePayloads').put({ slotId, state });
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onabort = () => { db.close(); reject(tx.error); };
+        };
+    });
+
+    it('round-trips chapters while the stored payload carries refs (and the chapter\'s metadata), not prose', async () => {
+        const state = withChapters(['A', 'B']);
+        await saveGame('slot-c', state);
+
+        const [payload] = await readStore('savePayloads');
+        const stored = JSON.stringify(payload);
+        expect(stored).not.toContain(chapterText('A').slice(0, 200));
+        expect(payload.state.chronicle[0].chapterRef).toMatch(/^c-/);
+        expect(payload.state.chronicle[0]).toEqual({ id: 'chapter-A', title: 'Chapter A', fromIndex: 0, toIndex: 9, createdAt: 1000, chapterRef: payload.state.chronicle[0].chapterRef });
+        expect(await readStore('chronicleChapters', 'keys')).toHaveLength(2);
+        const [metadata] = await readStore('saves');
+        expect(metadata.chapterRefs).toEqual(payload.state.chronicle.map(c => c.chapterRef));
+
+        const loaded = await loadGame('slot-c');
+        expect(loaded.chronicle).toEqual(state.chronicle);
+        // A ref never reaches live state.
+        expect(JSON.stringify(loaded)).not.toContain('chapterRef');
+    });
+
+    it('a steady-state autosave moves zero chapter/portrait bytes and makes ZERO getKey probes (2026-09-23 P2 minor)', async () => {
+        const state = withChapters(['A', 'B'], {
+            character: { ...makeGameState().character, portraitUrl: portrait('H') },
+            npcs: [{ id: 'npc-1', name: 'One', portraitUrl: portrait('1') }, { id: 'npc-2', name: 'Two', portraitUrl: portrait('2') }],
+        });
+        await saveGame('__autosave__', state);
+        const getKeySpy = vi.spyOn(IDBObjectStore.prototype, 'getKey');
+        const putSpy = vi.spyOn(IDBObjectStore.prototype, 'put');
+        try {
+            // The turn's ordinary change: nothing immutable moved.
+            await saveGame('__autosave__', { ...state, currentLocation: 'Elsewhere' });
+            expect(getKeySpy).not.toHaveBeenCalled();
+            expect(putSpy.mock.calls.map(([value]) => typeof value)).toEqual(['object', 'object']); // metadata + payload
+
+            // One new chapter: exactly one probe, one blob put, nothing else re-probed.
+            getKeySpy.mockClear();
+            putSpy.mockClear();
+            await saveGame('__autosave__', { ...state, chronicle: [...state.chronicle, chapter('C', 2)] });
+            expect(getKeySpy).toHaveBeenCalledTimes(1);
+            expect(getKeySpy.mock.calls[0][0]).toMatch(/^c-/);
+            expect(putSpy.mock.calls.filter(([value]) => typeof value === 'string')).toHaveLength(1);
+        } finally {
+            getKeySpy.mockRestore();
+            putSpy.mockRestore();
+        }
+        expect(await readStore('chronicleChapters', 'keys')).toHaveLength(3);
+        expect((await loadAutoSave()).chronicle.map(c => c.id)).toEqual(['chapter-A', 'chapter-B', 'chapter-C']);
+    });
+
+    it('a removed newest chapter is swept, but never one another slot still holds', async () => {
+        await saveGame('manual', withChapters(['A', 'B']));
+        await saveGame('auto', withChapters(['A', 'B']));
+        // REMOVE_CHRONICLE_CHAPTER in the live campaign: the autosave drops B.
+        await saveGame('auto', withChapters(['A']));
+        expect(await readStore('chronicleChapters', 'keys')).toHaveLength(2); // A, B (manual)
+        expect((await loadGame('manual')).chronicle.map(c => c.id)).toEqual(['chapter-A', 'chapter-B']);
+
+        await deleteSave('manual');
+        expect(await readStore('chronicleChapters', 'keys')).toHaveLength(1); // A
+        expect((await loadGame('auto')).chronicle.map(c => c.id)).toEqual(['chapter-A']);
+
+        await deleteSave('auto');
+        expect(await readStore('chronicleChapters', 'keys')).toHaveLength(0);
+    });
+
+    it('a pre-split payload with inline chapters loads as-is, and a dangling chapter ref is a dropped chapter', async () => {
+        await saveGame('slot-seed', makeGameState());
+        await putPayload('inline', { character: { name: 'Old' }, npcs: [], chronicle: [chapter('Z', 0)] });
+        await putPayload('dangling', {
+            character: { name: 'Lost' },
+            npcs: [],
+            chronicle: [chapter('Y', 0), { id: 'chapter-gone', title: 'Gone', fromIndex: 10, toIndex: 19, createdAt: 2, chapterRef: 'c-gone' }],
+        });
+        expect((await loadGame('inline')).chronicle).toEqual([chapter('Z', 0)]);
+        // The prose IS the chapter: the newest one's span re-opens for a fresh close.
+        expect((await loadGame('dangling')).chronicle).toEqual([chapter('Y', 0)]);
+    });
+
+    it('payload composition: a mature payload carries zero portrait bytes and zero chapter bytes — the immutable share leaves the record', async () => {
+        const big = (seed) => `data:image/jpeg;base64,${String(seed % 10).repeat(30_000)}${seed}`;
+        const state = makeGameState({
+            chronicle: Array.from({ length: 8 }, (_, i) => chapter(`M${i}`, i)),
+            npcs: Array.from({ length: 40 }, (_, i) => ({ id: `npc-${i}`, name: `NPC ${i}`, portraitUrl: big(i) })),
+        });
+        const fullBytes = JSON.stringify(serializeGameState(state)).length;
+        const chapterBytes = state.chronicle.reduce((n, c) => n + c.text.length, 0);
+        const portraitBytes = state.npcs.reduce((n, npc) => n + npc.portraitUrl.length, 0);
+        await saveGame('slot-mature', state);
+        const [payload] = await readStore('savePayloads');
+        const stored = JSON.stringify(payload);
+        // 8 × 50k of prose + 40 × 30k of pictures; the record that changes every turn carries none of it.
+        // (the refs that replace them are ~45 bytes a record)
+        expect(fullBytes - stored.length).toBeGreaterThanOrEqual((chapterBytes + portraitBytes) * 0.99);
+        expect(stored.length).toBeLessThan(25_000);
+        expect(stored).not.toContain('data:image/');
+        expect(stored).not.toContain('retold.');
+        const loaded = await loadGame('slot-mature');
+        expect(loaded.chronicle[7].text).toBe(chapterText('M7'));
+        expect(loaded.npcs[39].portraitUrl).toBe(big(39));
+    });
+
+    it('the cloud path (serializeGameState) keeps chapters inline — only the local store splits them', () => {
+        const state = withChapters(['A']);
+        const serialized = serializeGameState(state);
+        expect(serialized.chronicle[0].text).toBe(chapterText('A'));
+        expect(serialized.chronicle[0]).not.toHaveProperty('chapterRef');
     });
 });

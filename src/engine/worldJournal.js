@@ -79,6 +79,40 @@ export const SUMMARIZE_EVERY = 10;
 // and one bloated message cannot dominate the payload (MAX_MESSAGE_CHARS).
 const MAX_BATCH_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 2000;
+
+/**
+ * Combat-exchange dice lines are weightless to the cadence (2026-09-23
+ * combat-exchange P1): they are not narrative (THE predicate excludes them)
+ * and they are not backlog either — a 9-exchange fight mints ~64 of them, so
+ * counting them as raw rows tripped the MAX_BATCH_MESSAGES escape and cut
+ * the fight into two batches (two Flash calls, two journal entries for one
+ * fight). The batch still archives them behind its boundary like any
+ * excluded row; they simply never consume the backlog cap or trigger it.
+ */
+const isWeightlessRow = m => m?.exchangeLine === true;
+
+/** Rows after `fromIndex` that count toward the raw backlog escape. */
+function countWeightedRows(messages, fromIndex) {
+    let count = 0;
+    for (let i = fromIndex; i < messages.length; i++) {
+        if (!isWeightlessRow(messages[i])) count += 1;
+    }
+    return count;
+}
+
+/**
+ * The raw index the next batch ends at: past the MAX_BATCH_MESSAGES-th
+ * weighted row after `fromIndex`, or the end of the transcript.
+ */
+function batchBoundary(messages, fromIndex) {
+    let weighted = 0;
+    for (let i = fromIndex; i < messages.length; i++) {
+        if (isWeightlessRow(messages[i])) continue;
+        weighted += 1;
+        if (weighted === MAX_BATCH_MESSAGES) return i + 1;
+    }
+    return messages.length;
+}
 // Escape hatch for a poison batch (realistic case: a provider safety block on
 // re-sent raw narration). Without it the same failing batch retries on EVERY
 // turn forever — recurring per-turn cost — while messages past the DM's window
@@ -178,7 +212,7 @@ Rules:
  */
 export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
     const messageCount = state.messages.length;
-    const newRawMessages = messageCount - lastSummarizedIndex;
+    const newRawMessages = countWeightedRows(state.messages, lastSummarizedIndex);
     const newNarrativeMessages = collectNarrativeMessages(state.messages, lastSummarizedIndex).length;
 
     // Narrative cadence, with the raw backlog cap as the escape: a stretch of
@@ -200,7 +234,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
     const background = getBackgroundConfig(state.settings);
     if (!background.apiKey) return { index: lastSummarizedIndex, journalEntry: null };
 
-    const batchEnd = Math.min(messageCount, lastSummarizedIndex + MAX_BATCH_MESSAGES);
+    const batchEnd = batchBoundary(state.messages, lastSummarizedIndex);
     const batchKey = `${state.session?.id || 'campaign'}:${lastSummarizedIndex}`;
 
     // A parse failure, an unusable summary, or a rejected call all land here.
@@ -242,8 +276,10 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         // AND the DM's at-the-table reply) used to reach the summarizer as
         // play — into the permanent tier that feeds SESSION HISTORY, the
         // journal RAG row, and the cadence reflection, while the table-talk
-        // contract says the exchange is kept out of memory. Engine roll-result
-        // system lines pass the predicate and still ride the transcript.
+        // contract says the exchange is kept out of memory. Out-of-combat
+        // engine roll-result system lines pass the predicate and still ride
+        // the transcript; combat-exchange dice lines do not (2026-09-23) — the
+        // narration prose and the END_COMBAT lines carry the fight's outcome.
         const recentMessages = collectNarrativeMessages(state.messages, lastSummarizedIndex, batchEnd - 1)
             .map(m => `[${roleLabel(m.role)}]: ${clampText(m.content, MAX_MESSAGE_CHARS)}`)
             .join('\n\n');

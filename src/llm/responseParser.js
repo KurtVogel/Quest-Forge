@@ -250,9 +250,20 @@ export function parseResponse(response) {
     return { narrative, events };
 }
 
+/**
+ * The detector's narrative payload, clamped from the END (2026-09-22
+ * roll-resolution P2): the arbiter one call later clamps action and narrative
+ * to 2k each, but this lane shipped the whole narration — up to
+ * MESSAGE_CONTENT_MAX (20,000) ≈ 5k tokens whenever the gate opened. A prose
+ * roll request sits in the narration's tail ("…now make a Perception check"),
+ * so the tail is what the gate and the detector see.
+ */
+export const SEMANTIC_ROLL_NARRATIVE_MAX = 4000;
+
 export async function detectSemanticTextRolls(narrative, settings, { signal } = {}) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !narrative) return null;
+    narrative = String(narrative).slice(-SEMANTIC_ROLL_NARRATIVE_MAX);
 
     // Cheap gate: prose that requests a roll essentially always looks request-
     // shaped. Without it, EVERY ordinary no-roll narration pays a blocking LLM

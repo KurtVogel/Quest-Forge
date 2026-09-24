@@ -33,6 +33,7 @@ import {
     getMemoryCount,
     getMemoryTexts,
     MAX_CAMPAIGN_MEMORIES,
+    QUERY_VECTOR_MEMO_CAP,
     retrieveRelevant,
     seedMemories,
     shouldPurgeCampaignEmbeddings,
@@ -1193,5 +1194,77 @@ describe('2026-09-17 audit: over-long texts, memory-less turns said out loud, ty
         expect(row.subjects).toBeUndefined();
         expect(buildRetrievedMemoriesBlock([row])).toContain('- [general] Kraul fell.');
         expect(buildRetrievedMemoriesBlock([{ text: 'x', category: { y: 1 }, location: ['z'] }])).not.toContain('[object Object]');
+    });
+});
+
+describe('query-vector memo (2026-09-22 roll-resolution P2)', () => {
+    beforeEach(() => {
+        clearMemories();
+        globalThis.indexedDB = new IDBFactory();
+        embedTextMock.mockReset();
+        embedTextMock.mockResolvedValue(unitVector(0));
+    });
+
+    const queryEmbeds = () => embedTextMock.mock.calls.filter(call => call[2]?.inputType === 'query');
+
+    it('embeds a byte-identical query once across repeated calls and still returns the matches', async () => {
+        // The post-roll outcome hop and the challenge hop build the same
+        // sceneContext as hop 1 — three retrievals, one network round trip.
+        await addMemory('key', 'The sergeant takes bribes at the gatehouse.', 'world_fact');
+        const query = 'I sneak past the sergeant.. Location: The gatehouse';
+        for (let i = 0; i < 3; i += 1) {
+            const matches = await retrieveRelevant('key', query, 8, 0.55);
+            expect(matches.map(m => m.text)).toEqual(['The sergeant takes bribes at the gatehouse.']);
+        }
+        expect(queryEmbeds()).toHaveLength(1);
+        // A different text is a different query.
+        await retrieveRelevant('key', `${query}.`, 8, 0.55);
+        expect(queryEmbeds()).toHaveLength(2);
+    });
+
+    it('re-runs the presence gate on a memo hit — only the vector is reused', async () => {
+        await addMemory('key', 'Marta hid the ledger under the ford stone.', 'npc', null, ['Marta']);
+        const query = 'What happened at the ford?';
+        // Marta present in the scene: full weight, 1.0 clears a 0.9 gate.
+        const present = await retrieveRelevant('key', query, 8, 0.9, { presenceText: 'Marta waits by the ford.' });
+        expect(present).toHaveLength(1);
+        // Same query text, nobody present: the 0.12 penalty drops it below the
+        // gate even though the vector came from the memo.
+        const absent = await retrieveRelevant('key', query, 8, 0.9, { presenceText: 'The ford is empty.' });
+        expect(absent).toEqual([]);
+        expect(queryEmbeds()).toHaveLength(1);
+    });
+
+    it('never memoizes a failed query embed', async () => {
+        await addMemory('key', 'Fact one.', 'world_fact');
+        embedTextMock.mockResolvedValueOnce(null);
+        expect(await retrieveRelevant('key', 'query')).toEqual([]);
+        expect(await retrieveRelevant('key', 'query')).toHaveLength(1);
+        expect(queryEmbeds()).toHaveLength(2);
+    });
+
+    it('holds at most QUERY_VECTOR_MEMO_CAP texts, evicting the oldest first', async () => {
+        await addMemory('key', 'Fact one.', 'world_fact');
+        for (let i = 0; i <= QUERY_VECTOR_MEMO_CAP; i += 1) {
+            await retrieveRelevant('key', `query ${i}`);
+        }
+        expect(queryEmbeds()).toHaveLength(QUERY_VECTOR_MEMO_CAP + 1);
+        await retrieveRelevant('key', `query ${QUERY_VECTOR_MEMO_CAP}`); // newest: still held
+        await retrieveRelevant('key', 'query 1'); // second-oldest: still held
+        expect(queryEmbeds()).toHaveLength(QUERY_VECTOR_MEMO_CAP + 1);
+        await retrieveRelevant('key', 'query 0'); // the evicted one embeds again
+        expect(queryEmbeds()).toHaveLength(QUERY_VECTOR_MEMO_CAP + 2);
+    });
+
+    it('is cleared with the store by clearMemories', async () => {
+        await addMemory('key', 'Fact one.', 'world_fact');
+        await retrieveRelevant('key', 'query');
+        expect(queryEmbeds()).toHaveLength(1);
+
+        clearMemories();
+        globalThis.indexedDB = new IDBFactory();
+        await addMemory('key', 'Fact one.', 'world_fact');
+        await retrieveRelevant('key', 'query');
+        expect(queryEmbeds()).toHaveLength(2);
     });
 });

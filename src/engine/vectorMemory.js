@@ -139,6 +139,28 @@ let memoryStore = [];
 /** Campaign whose memories are currently loaded; stamped onto every new entry. */
 let activeSessionId = null;
 
+/**
+ * Per-session QUERY-vector memo (2026-09-22 roll-resolution P2). The post-roll
+ * outcome hop and the challenge hop pass the proposal's own playerAction, so
+ * the orchestrator builds a byte-identical sceneContext and retrieveRelevant
+ * paid one blocking Gemini round trip per check turn (two on a challenged one)
+ * for the vector the previous hop already held. Keyed by the exact query text;
+ * the presence gate and scoring still run per call, only the network hop is
+ * skipped. A Map iterates in insertion order, so the cap evicts oldest-first.
+ * Cleared with the store (clearMemories); vectors are model-tagged, not
+ * campaign-tagged, so a campaign switch does not invalidate them.
+ */
+export const QUERY_VECTOR_MEMO_CAP = 16;
+const queryVectorMemo = new Map();
+
+function rememberQueryVector(query, vector) {
+    if (queryVectorMemo.has(query)) return;
+    if (queryVectorMemo.size >= QUERY_VECTOR_MEMO_CAP) {
+        queryVectorMemo.delete(queryVectorMemo.keys().next().value);
+    }
+    queryVectorMemo.set(query, vector);
+}
+
 // --- Lifecycle (2026-08-06 P1: the cache previously grew without bound) ---
 
 /**
@@ -516,7 +538,11 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55,
     if (memoryStore.length === 0) return [];
 
     let failure = null;
-    const queryVector = await embedText(apiKey, query, { inputType: 'query', onError: (reason) => { failure = reason; } });
+    let queryVector = queryVectorMemo.get(query) || null;
+    if (!queryVector) {
+        queryVector = await embedText(apiKey, query, { inputType: 'query', onError: (reason) => { failure = reason; } });
+        if (queryVector) rememberQueryVector(query, queryVector);
+    }
     if (!queryVector) {
         // Distinct from "nothing matched" (2026-09-17 P2): a failed query
         // embed means the turn runs memory-LESS, which the caller should say
@@ -588,6 +614,7 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55,
 export function clearMemories() {
     memoryStore = [];
     activeSessionId = null;
+    queryVectorMemo.clear();
     // Awaitable: resolves once the persisted clear actually commits.
     return clearPersistedEmbeddings();
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { createCharacter, createStartingInventory, STANDARD_ARRAY, ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
 import { sanitizeCharacter, sanitizeInventory, parseCharacterExport, downloadCharacterExport } from '../../engine/characterVault.js';
-import { listRosterCharacters, saveRosterCharacter, deleteRosterCharacter } from '../../state/persistence.js';
+import { countRosterCharacters, listRosterCharacters, loadRosterCharacter, saveRosterCharacter, deleteRosterCharacter } from '../../state/persistence.js';
 import { RACES, RACE_LIST } from '../../data/races.js';
 import { CLASSES, CLASS_LIST } from '../../data/classes.js';
 import { SKILL_ABILITIES, computeACFromInventory, getModifier, getProficiencyBonus, getSkillModifier } from '../../engine/rules.js';
@@ -54,8 +54,13 @@ export default function CharacterCreation() {
     // text). Begin Adventure re-checks the text is still verbatim before it
     // stamps `session.premiseStarterId` — an edited premise is the player's own.
     const [premiseStarterId, setPremiseStarterId] = useState(null);
+    // Metadata rows only (id / name / race / class / level / savedAt): a row's
+    // character + inventory (and its portrait) are hydrated on select / begin /
+    // export through loadRosterCharacter (2026-09-24 character-vault P2).
     const [roster, setRoster] = useState([]);
+    const [rosterCount, setRosterCount] = useState(0);
     const [selectedHeroId, setSelectedHeroId] = useState(null);
+    const [selectedHero, setSelectedHero] = useState(null);
     const [rosterError, setRosterError] = useState(null);
     const [portraitUrl, setPortraitUrl] = useState('');
     const [portraitProvider, setPortraitProvider] = useState('');
@@ -71,15 +76,39 @@ export default function CharacterCreation() {
         setPortraitError('');
     }, [name, gender, appearance, race, charClass]);
 
-    useEffect(() => {
+    const rosterReadFailed = (err) => {
         // A blocked/failed IndexedDB must not render as "0 in roster" (2026-09-03
         // P2, the boot-screen "no saves" class): say so, loudly.
-        listRosterCharacters().then(setRoster).catch(err => {
-            console.warn('Failed to read the character roster:', err);
-            setRoster([]);
-            setRosterError(`Could not read the character roster — browser storage failed (${err?.message || err?.name || 'unknown error'}). Import a character file, or reload and try again.`);
-        });
+        console.warn('Failed to read the character roster:', err);
+        setRosterError(`Could not read the character roster — browser storage failed (${err?.message || err?.name || 'unknown error'}). Import a character file, or reload and try again.`);
+    };
+
+    // The start card needs a COUNT, not rows: the Forge-a-New-Hero path reads
+    // no roster row at all (2026-09-24 — the mount used to getAll() every row).
+    useEffect(() => {
+        countRosterCharacters().then(setRosterCount).catch(err => { setRosterCount(0); rosterReadFailed(err); });
     }, []);
+
+    // The metadata list loads when the roster is opened.
+    useEffect(() => {
+        if (phase !== 'roster') return;
+        listRosterCharacters().then(setRoster).catch(err => { setRoster([]); rosterReadFailed(err); });
+    }, [phase]);
+
+    // Hydrate the picked hero (character + inventory + portrait) on select.
+    useEffect(() => {
+        if (!selectedHeroId) { setSelectedHero(null); return undefined; }
+        let cancelled = false;
+        loadRosterCharacter(selectedHeroId)
+            .then(hero => { if (!cancelled) setSelectedHero(hero); })
+            .catch(err => {
+                if (cancelled) return;
+                setSelectedHero(null);
+                console.warn('Failed to read the roster hero:', err);
+                setRosterError(`Could not read that hero — browser storage failed (${err?.message || err?.name || 'unknown error'}).`);
+            });
+        return () => { cancelled = true; };
+    }, [selectedHeroId]);
 
     const currentStep = STEPS[step];
 
@@ -240,6 +269,7 @@ export default function CharacterCreation() {
             const character = { ...preview.character };
             if (portraitUrl) {
                 character.portraitUrl = portraitUrl;
+                character.portraitProvider = portraitProvider;
                 character.portraitUpdatedAt = Date.now();
             }
             beginAdventure(character, preview.inventory);
@@ -253,6 +283,7 @@ export default function CharacterCreation() {
         const character = createCharacter(name, race, charClass, abilityScores, chosenSkills, { fightingStyle, expertiseSkills, gender, appearance, background });
         if (portraitUrl) {
             character.portraitUrl = portraitUrl;
+            character.portraitProvider = portraitProvider;
             character.portraitUpdatedAt = Date.now();
         }
         const inventory = createStartingInventory(charClass);
@@ -261,7 +292,10 @@ export default function CharacterCreation() {
 
     // === Roster (use an existing hero) ===
 
-    const selectedHero = roster.find(entry => entry.id === selectedHeroId) || null;
+    const refreshRoster = async () => {
+        setRoster(await listRosterCharacters());
+        setRosterCount(await countRosterCharacters());
+    };
 
     const handleBeginFromRoster = () => {
         if (!selectedHero) return;
@@ -286,15 +320,24 @@ export default function CharacterCreation() {
         try {
             const { character, inventory } = parseCharacterExport(await file.text());
             await saveRosterCharacter(character, inventory);
-            setRoster(await listRosterCharacters());
+            await refreshRoster();
             setSelectedHeroId(character.id);
         } catch (err) {
             setRosterError(err.message || 'Could not import this file.');
         }
     };
 
-    const handleExportHero = (entry) => {
-        downloadCharacterExport(entry.character, entry.inventory);
+    const handleExportHero = async (entry) => {
+        setRosterError(null);
+        try {
+            // The list row is metadata; the file needs the hero and their portrait.
+            const hero = await loadRosterCharacter(entry.id);
+            if (!hero?.character) throw new Error('This roster entry has no character data.');
+            downloadCharacterExport(hero.character, hero.inventory);
+        } catch (err) {
+            console.warn('Failed to export roster hero:', err);
+            setRosterError(`Could not export ${entry.name} — ${err?.message || err?.name || 'unknown error'}.`);
+        }
     };
 
     const handleDeleteHero = async (entry) => {
@@ -303,7 +346,7 @@ export default function CharacterCreation() {
         try {
             await deleteRosterCharacter(entry.id);
             if (selectedHeroId === entry.id) setSelectedHeroId(null);
-            setRoster(await listRosterCharacters());
+            await refreshRoster();
         } catch (err) {
             console.warn('Failed to delete roster hero:', err);
             setRosterError(`Could not remove ${entry.name} from the roster — browser storage failed (${err?.message || err?.name || 'unknown error'}).`);
@@ -326,7 +369,7 @@ export default function CharacterCreation() {
                         <button className="creation-card" onClick={() => setPhase('roster')}>
                             <div className="card-name">Use an Existing Hero</div>
                             <div className="card-desc">Pick a hero from your roster, or import a character file.</div>
-                            <div className="card-bonus">{roster.length} in roster</div>
+                            <div className="card-bonus">{rosterCount} in roster</div>
                         </button>
                     </div>
                 </div>
@@ -379,7 +422,7 @@ export default function CharacterCreation() {
                                 maxLength={60}
                             />
                             <PremiseStarters
-                                hero={selectedHero}
+                                hero={selectedHero.character}
                                 heroName={selectedHero.name}
                                 settings={state.settings}
                                 premise={premise}

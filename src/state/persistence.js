@@ -3,7 +3,14 @@
  */
 import { CURRENT_SAVE_VERSION } from './migrations.js';
 import { sanitizeSettings } from './settingsSchema.js';
-import { collectPortraitRefs, extractPortraits, restorePortraits } from './portraitStore.js';
+import {
+    collectChapterRefs,
+    collectPortraitRefs,
+    extractChapters,
+    extractPortraits,
+    restoreChapters,
+    restorePortraits,
+} from './portraitStore.js';
 
 const SETTINGS_KEY = 'rpg-client-settings';
 const DB_NAME = 'rpg-client-saves';
@@ -13,12 +20,28 @@ const DB_NAME = 'rpg-client-saves';
 // content-addressed `portraits` store (state/portraitStore.js) — they were
 // ~96 % of every autosave and never change. No data migration: a payload that
 // still carries inline portraits loads as-is and is split on its next save.
-const DB_VERSION = 4;
+// v5 (2026-09-24): chronicle chapter prose split the same way into a
+// content-addressed `chronicleChapters` store — chapters are immutable and
+// were 23–25 % of every autosave after the portrait split. Same no-migration
+// rule: inline chapters load as-is and split on the next save.
+const DB_VERSION = 5;
 const STORE_NAME = 'saves';
 const PAYLOAD_STORE = 'savePayloads';
 const PORTRAIT_STORE = 'portraits';
+const CHAPTER_STORE = 'chronicleChapters';
 const ROSTER_STORE = 'characters';
 const AUTOSAVE_SLOT = '__autosave__';
+
+/**
+ * The blob stores (the 09-21 portrait split, generalized by field name on
+ * 2026-09-24): bytes that never change live under a content key, the payload
+ * carries a ref, and the slot's metadata record lists its refs under
+ * `refsField` so the orphan sweep never opens a payload.
+ */
+const BLOB_STORES = [
+    { store: PORTRAIT_STORE, refsField: 'portraitRefs', extract: extractPortraits, collect: collectPortraitRefs, restore: restorePortraits },
+    { store: CHAPTER_STORE, refsField: 'chapterRefs', extract: extractChapters, collect: collectChapterRefs, restore: restoreChapters },
+];
 
 // === LocalStorage (Settings) ===
 
@@ -91,6 +114,10 @@ function openDB() {
             if (!db.objectStoreNames.contains(PORTRAIT_STORE)) {
                 // Out-of-line keys: the value IS the data URL string.
                 db.createObjectStore(PORTRAIT_STORE);
+            }
+            if (!db.objectStoreNames.contains(CHAPTER_STORE)) {
+                // Out-of-line keys: the value IS the chapter's prose.
+                db.createObjectStore(CHAPTER_STORE);
             }
         };
     });
@@ -301,31 +328,70 @@ const metadataPortraitRefs = (record) =>
     (Array.isArray(record?.portraitRefs) ? record.portraitRefs.filter(ref => typeof ref === 'string') : []);
 
 /**
- * Delete every portrait blob no slot references, inside the caller's
- * readwrite transaction (scope: saves + portraits) — requests run in order, so
- * the `getAll` below already sees the caller's own metadata put/delete, and
- * overlapping readwrite transactions serialize, so a concurrent save can never
- * have its fresh blob swept between its blob put and its metadata put. A
- * legacy record with an embedded state is read for refs too (belt). Non-fatal:
- * a failed sweep leaves orphans for the next one, never fails the save.
+ * Every store a transaction must include to sweep orphan PORTRAITS: the slot
+ * metadata records, the roster (its rows carry their hero's ref since
+ * 2026-09-24 — the roster was the last inline-portrait store, and a hero saved
+ * to the roster and to a slot shares ONE blob, so both sides are live sets),
+ * and the portraits themselves. Requests run in order, so the sweep's
+ * `getAll`s already see the caller's own put/delete, and overlapping
+ * readwrite transactions serialize, so a concurrent save can never have its
+ * fresh blob swept between its blob put and its metadata put.
  */
-function sweepOrphanPortraits(tx) {
+const PORTRAIT_SWEEP_STORES = [STORE_NAME, ROSTER_STORE, PORTRAIT_STORE];
+
+/**
+ * Every store a transaction must include to sweep ALL blob stores (a save
+ * slot's write/delete can orphan a portrait or a chapter). A transaction that
+ * carries only some of them sweeps only those — a roster save's scope is
+ * `PORTRAIT_SWEEP_STORES`, and a roster save cannot orphan a chapter.
+ */
+export const BLOB_SWEEP_STORES = [...PORTRAIT_SWEEP_STORES, CHAPTER_STORE];
+
+const metadataRefs = (record, refsField) =>
+    (Array.isArray(record?.[refsField]) ? record[refsField].filter(ref => typeof ref === 'string') : []);
+
+/**
+ * The 09-21 portrait sweep, generalized (2026-09-24) to every blob store the
+ * transaction has in scope: live sets are read from every slot's metadata
+ * record (+ a legacy embedded state) and, for portraits, every roster row.
+ */
+function sweepOrphanBlobs(tx) {
     const quiet = (event) => { event.preventDefault?.(); event.stopPropagation?.(); };
+    const lanes = BLOB_STORES
+        .filter(lane => tx.objectStoreNames.contains(lane.store))
+        .map(lane => ({ ...lane, live: new Set() }));
+    if (lanes.length === 0) return;
+    const sweepStores = () => {
+        for (const lane of lanes) {
+            const store = tx.objectStore(lane.store);
+            const keysRequest = store.getAllKeys();
+            keysRequest.onerror = quiet;
+            keysRequest.onsuccess = () => {
+                for (const key of keysRequest.result || []) {
+                    if (!lane.live.has(key)) store.delete(key).onerror = quiet;
+                }
+            };
+        }
+    };
     const allRequest = tx.objectStore(STORE_NAME).getAll();
     allRequest.onerror = quiet;
     allRequest.onsuccess = () => {
-        const live = new Set();
         for (const record of allRequest.result || []) {
-            metadataPortraitRefs(record).forEach(ref => live.add(ref));
-            if (record?.state) collectPortraitRefs(record.state).forEach(ref => live.add(ref));
-        }
-        const portraits = tx.objectStore(PORTRAIT_STORE);
-        const keysRequest = portraits.getAllKeys();
-        keysRequest.onerror = quiet;
-        keysRequest.onsuccess = () => {
-            for (const key of keysRequest.result || []) {
-                if (!live.has(key)) portraits.delete(key).onerror = quiet;
+            for (const lane of lanes) {
+                metadataRefs(record, lane.refsField).forEach(ref => lane.live.add(ref));
+                if (record?.state) lane.collect(record.state).forEach(ref => lane.live.add(ref));
             }
+        }
+        const portraitLane = lanes.find(lane => lane.store === PORTRAIT_STORE);
+        if (!portraitLane) { sweepStores(); return; }
+        const rosterRequest = tx.objectStore(ROSTER_STORE).getAll();
+        rosterRequest.onerror = quiet;
+        rosterRequest.onsuccess = () => {
+            for (const record of rosterRequest.result || []) {
+                metadataPortraitRefs(record).forEach(ref => portraitLane.live.add(ref));
+                collectPortraitRefs({ character: record?.character }).forEach(ref => portraitLane.live.add(ref));
+            }
+            sweepStores();
         };
     };
 }
@@ -338,7 +404,8 @@ function sweepOrphanPortraits(tx) {
  */
 export function saveGame(slotId, gameState) {
     return withDb((db, resolve, reject) => {
-        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE, PORTRAIT_STORE], 'readwrite');
+        // Roster rows are in scope only for the orphan sweep's live-ref read.
+        const tx = db.transaction([PAYLOAD_STORE, ...BLOB_SWEEP_STORES], 'readwrite');
 
         const savedMessages = gameState.messages || [];
         // prunedMessageCount indexes into the array we actually persist. Summarized messages
@@ -346,56 +413,75 @@ export function saveGame(slotId, gameState) {
         // `m?.` belt: a null entry in live state must not brick every autosave.
         const prunedMessageCount = savedMessages.filter(m => m?.summarized).length;
 
-        // Portrait bytes ride the `portraits` store, not the payload (see
-        // portraitStore.js): the payload carries refs, the metadata record
-        // lists them so the orphan sweep never opens a payload.
-        const { state: slimState, blobs, refs } = extractPortraits({
+        // Portrait bytes ride the `portraits` store and chapter prose the
+        // `chronicleChapters` store, not the payload (see portraitStore.js):
+        // the payload carries refs, the metadata record lists them so the
+        // orphan sweep never opens a payload.
+        let slimState = {
             ...serializeGameState(gameState),
             session: { ...gameState.session, prunedMessageCount },
+        };
+        const lanes = BLOB_STORES.map(lane => {
+            const extracted = lane.extract(slimState);
+            slimState = extracted.state;
+            return { ...lane, blobs: extracted.blobs, refs: extracted.refs };
         });
 
         const saves = tx.objectStore(STORE_NAME);
-        const portraits = tx.objectStore(PORTRAIT_STORE);
+        let metadataRequest = null;
+        let payloadRequest = null;
 
-        // A blob is immutable under its content key: write it only when absent
-        // (getKey reads no bytes), so a steady-state autosave moves zero
-        // portrait bytes. A failed put aborts the transaction — the save fails
-        // loudly rather than committing a payload whose picture never landed.
-        for (const [key, url] of blobs) {
-            const probe = portraits.getKey(key);
-            probe.onsuccess = () => { if (probe.result === undefined) portraits.put(url, key); };
-        }
-
-        // The slot's PREVIOUS refs decide whether anything can have been
-        // orphaned (a reroll, a removed NPC, a different campaign in the slot).
-        let released = false;
+        // The slot's PREVIOUS record is read FIRST (2026-09-23 audit P2, minor):
+        // a ref it lists is on disk and live (the sweep only ever deletes what
+        // no record lists, inside serialized transactions), so only refs it
+        // did NOT list are probed — a steady-state autosave makes zero
+        // `getKey` requests. Its refs also decide whether anything can have
+        // been orphaned (a reroll, a removed NPC, a dropped chapter, a
+        // different campaign in the slot).
         const previousRequest = saves.get(slotId);
+        previousRequest.onerror = () => reject(previousRequest.error);
         previousRequest.onsuccess = () => {
-            const kept = new Set(refs);
-            released = metadataPortraitRefs(previousRequest.result).some(ref => !kept.has(ref));
-        };
+            const previous = previousRequest.result;
+            let released = false;
+            for (const lane of lanes) {
+                const listed = new Set(metadataRefs(previous, lane.refsField));
+                const kept = new Set(lane.refs);
+                if ([...listed].some(ref => !kept.has(ref))) released = true;
+                // A blob is immutable under its content key: write it only when
+                // absent (getKey reads no bytes). A failed put aborts the
+                // transaction — the save fails loudly rather than committing a
+                // payload whose picture or chapter never landed.
+                const store = tx.objectStore(lane.store);
+                for (const [key, bytes] of lane.blobs) {
+                    if (listed.has(key)) continue;
+                    const probe = store.getKey(key);
+                    probe.onsuccess = () => { if (probe.result === undefined) store.put(bytes, key); };
+                }
+            }
 
-        const metadataRequest = saves.put({
-            slotId,
-            ...buildSaveMetadata(gameState),
-            savedAt: Date.now(),
-            messageCount: savedMessages.length,
-            portraitRefs: refs,
-        });
-        const payloadRequest = tx.objectStore(PAYLOAD_STORE).put({ slotId, state: slimState });
-        // Requests settle in order: the previous-record read has answered and
-        // the new metadata is in place by the time this fires.
-        payloadRequest.onsuccess = () => { if (released) sweepOrphanPortraits(tx); };
+            const metadata = {
+                slotId,
+                ...buildSaveMetadata(gameState),
+                savedAt: Date.now(),
+                messageCount: savedMessages.length,
+            };
+            for (const lane of lanes) metadata[lane.refsField] = lane.refs;
+            metadataRequest = saves.put(metadata);
+            payloadRequest = tx.objectStore(PAYLOAD_STORE).put({ slotId, state: slimState });
+            // Requests settle in order: the new metadata is in place by the
+            // time this fires, so the sweep sees this slot's current refs.
+            payloadRequest.onsuccess = () => { if (released) sweepOrphanBlobs(tx); };
+            metadataRequest.onerror = () => reject(metadataRequest.error);
+            payloadRequest.onerror = () => reject(payloadRequest.error);
+        };
 
         // Resolve on COMMIT (tx.oncomplete), not on the puts' onsuccess. Otherwise a read
         // fired right after (e.g. the saves dialog refreshing itself) can race the
         // not-yet-committed write and miss it — the list looks unchanged, so you click
         // Save again... and again. (See SettingsModal handleSave.)
         // withDb closes the connection once this settles, whichever way.
-        metadataRequest.onerror = () => reject(metadataRequest.error);
-        payloadRequest.onerror = () => reject(payloadRequest.error);
         tx.oncomplete = () => resolve();
-        tx.onabort = () => reject(tx.error || metadataRequest.error || payloadRequest.error);
+        tx.onabort = () => reject(tx.error || metadataRequest?.error || payloadRequest?.error || previousRequest.error);
     });
 }
 
@@ -418,21 +504,26 @@ export function asSaveObject(parsed) {
  */
 export function loadGame(slotId) {
     return withDb((db, resolve, reject) => {
-        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE, PORTRAIT_STORE], 'readonly');
-        // Refs → inline data URLs before the state leaves this module: live
-        // state, the cloud upload loop, and LOAD_GAME never see a portraitRef.
-        // A blob that cannot be read is a missing picture, never a failed load.
+        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE, ...BLOB_STORES.map(lane => lane.store)], 'readonly');
+        // Refs → inline bytes before the state leaves this module: live state,
+        // the cloud upload loop, and LOAD_GAME never see a portraitRef or a
+        // chapterRef. A blob that cannot be read is a missing picture / a
+        // dropped chapter, never a failed load.
         const hydrate = (stored) => {
             const state = asSaveObject(stored);
-            const refs = collectPortraitRefs(state);
-            if (refs.length === 0) { resolve(state); return; }
-            const found = new Map();
-            let pending = refs.length;
-            const settle = () => { if (--pending === 0) resolve(restorePortraits(state, key => found.get(key))); };
-            for (const ref of refs) {
-                const blobRequest = tx.objectStore(PORTRAIT_STORE).get(ref);
-                blobRequest.onsuccess = () => { found.set(ref, blobRequest.result); settle(); };
-                blobRequest.onerror = (event) => { event.preventDefault?.(); event.stopPropagation?.(); settle(); };
+            const lanes = BLOB_STORES.map(lane => ({ ...lane, refs: lane.collect(state), found: new Map() }));
+            let pending = lanes.reduce((count, lane) => count + lane.refs.length, 0);
+            if (pending === 0) { resolve(state); return; }
+            const settle = () => {
+                if (--pending > 0) return;
+                resolve(lanes.reduce((restored, lane) => lane.restore(restored, key => lane.found.get(key)), state));
+            };
+            for (const lane of lanes) {
+                for (const ref of lane.refs) {
+                    const blobRequest = tx.objectStore(lane.store).get(ref);
+                    blobRequest.onsuccess = () => { lane.found.set(ref, blobRequest.result); settle(); };
+                    blobRequest.onerror = (event) => { event.preventDefault?.(); event.stopPropagation?.(); settle(); };
+                }
             }
         };
         const request = tx.objectStore(PAYLOAD_STORE).get(slotId);
@@ -498,11 +589,11 @@ export function getSaveSessionId(slotId) {
  */
 export function deleteSave(slotId) {
     return withDb((db, resolve, reject) => {
-        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE, PORTRAIT_STORE], 'readwrite');
+        const tx = db.transaction([PAYLOAD_STORE, ...BLOB_SWEEP_STORES], 'readwrite');
         const request = tx.objectStore(STORE_NAME).delete(slotId);
         const payloadRequest = tx.objectStore(PAYLOAD_STORE).delete(slotId);
-        // The slot's pictures go with it unless another slot still shows them.
-        payloadRequest.onsuccess = () => sweepOrphanPortraits(tx);
+        // The slot's pictures and chapters go with it unless another slot still holds them.
+        payloadRequest.onsuccess = () => sweepOrphanBlobs(tx);
         // Resolve on COMMIT (see saveGame) so a refresh read after a delete sees it gone.
         request.onerror = () => reject(request.error);
         payloadRequest.onerror = () => reject(payloadRequest.error);
@@ -517,15 +608,25 @@ export function deleteSave(slotId) {
  * Save a hero snapshot (character + inventory) to the roster.
  * Keyed by character.id, so re-saving the same hero updates its entry;
  * imports get a fresh id and create a new entry.
+ *
+ * The hero's portrait rides the content-addressed `portraits` store, not the
+ * row (2026-09-24 character-vault P2): the roster was the LAST inline-portrait
+ * store — 93 % of a row was a second copy of the blob the campaign's save
+ * already held. The row carries `character.portraitRef` + `portraitRefs`
+ * (the sweep's metadata read, like a save slot); the blob is put only when
+ * its key is absent, so a hero already in a slot moves zero portrait bytes.
+ * Resolves the STORED row (slim); callers wanting the picture use
+ * `loadRosterCharacter`.
  */
 export function saveRosterCharacter(character, inventory) {
     return withDb((db, resolve, reject) => {
-        const tx = db.transaction(ROSTER_STORE, 'readwrite');
+        const tx = db.transaction(PORTRAIT_SWEEP_STORES, 'readwrite');
         const store = tx.objectStore(ROSTER_STORE);
         // A legacy pre-id-era hero gets an id minted here; the caller must write it
         // back into live state (see CharacterSheet.handleSaveToRoster) or every
         // later "Save to Roster" click mints a fresh id and duplicates the entry.
         const id = character.id || `char-${Date.now()}`;
+        const { state, blobs, refs } = extractPortraits({ character: character.id ? character : { ...character, id } });
         const entry = {
             id,
             name: character.name,
@@ -533,10 +634,25 @@ export function saveRosterCharacter(character, inventory) {
             class: character.class,
             level: character.level,
             savedAt: Date.now(),
-            character: character.id ? character : { ...character, id },
+            portraitRefs: refs,
+            character: state.character,
             inventory: inventory || [],
         };
+        const portraits = tx.objectStore(PORTRAIT_STORE);
+        for (const [key, url] of blobs) {
+            const probe = portraits.getKey(key);
+            probe.onsuccess = () => { if (probe.result === undefined) portraits.put(url, key); };
+        }
+        // A reroll since the last roster save releases the old blob — unless a
+        // slot still shows it, which the sweep checks.
+        let released = false;
+        const previousRequest = store.get(id);
+        previousRequest.onsuccess = () => {
+            const kept = new Set(refs);
+            released = metadataPortraitRefs(previousRequest.result).some(ref => !kept.has(ref));
+        };
         const request = store.put(entry);
+        request.onsuccess = () => { if (released) sweepOrphanBlobs(tx); };
         // Resolve on COMMIT (see saveGame) so a list refresh right after sees the entry.
         request.onerror = () => reject(request.error);
         tx.oncomplete = () => resolve(entry);
@@ -545,17 +661,14 @@ export function saveRosterCharacter(character, inventory) {
 }
 
 /**
- * List all roster heroes, newest first. Entries are small (no messages),
- * so this returns them whole — character and inventory included.
- */
-/**
- * ONE typed projection for a roster row (2026-09-11 persistence P2 — the
+ * ONE typed projection for a roster LIST row (2026-09-11 persistence P2 — the
  * 09-10 "a render is a trust boundary" class, one list over): the hero picker
  * renders `name` / `level` / race / class as React children with no boundary
  * of its own. Text is string-or-fallback, level finite, savedAt a number; a
  * record without a string id (the store's key) or a non-object record is
- * dropped. The embedded `character` is untouched — the picker runs it
- * through the vault's sanitizeCharacter, which is the real gate.
+ * dropped. Metadata ONLY (2026-09-24, the `saves`/`savePayloads` split's
+ * pattern): the list never hands out `character`/`inventory` — a row is
+ * hydrated on select / begin / export through `loadRosterCharacter`.
  */
 export function projectRosterEntry(record) {
     if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
@@ -571,11 +684,30 @@ export function projectRosterEntry(record) {
         class: metaText(record.class, ''),
         level: metaNumber(record.level, 1),
         savedAt: metaNumber(record.savedAt, 0),
-        character,
-        inventory: Array.isArray(record.inventory) ? record.inventory : [],
     };
 }
 
+/**
+ * The full roster hero: the list row plus the stored `character` (portrait
+ * restored inline) and `inventory`. The embedded `character` is otherwise
+ * untouched — the picker runs it through the vault's sanitizeCharacter,
+ * which is the real gate.
+ */
+export function projectRosterHero(record, lookup = () => undefined) {
+    const entry = projectRosterEntry(record);
+    if (!entry) return null;
+    const hydrated = restorePortraits({ character: record.character }, lookup);
+    const character = hydrated.character && typeof hydrated.character === 'object' && !Array.isArray(hydrated.character)
+        ? hydrated.character
+        : null;
+    return { ...entry, character, inventory: Array.isArray(record.inventory) ? record.inventory : [] };
+}
+
+/**
+ * List all roster heroes, newest first — metadata rows only. Reads no
+ * portrait blob: the wizard mounts this on every hero pick and a live roster
+ * row used to be 97k chars, 90k of it the picture.
+ */
 export function listRosterCharacters() {
     return withDb((db, resolve, reject) => {
         const tx = db.transaction(ROSTER_STORE, 'readonly');
@@ -593,13 +725,61 @@ export function listRosterCharacters() {
 }
 
 /**
- * Delete a roster hero.
+ * How many heroes the roster holds — the start card's "N in roster" — read
+ * through `count()`, which deserializes no row. The Forge-a-New-Hero path
+ * never needs a row (2026-09-24: the wizard `getAll()`ed the roster on mount
+ * on BOTH paths).
+ */
+export function countRosterCharacters() {
+    return withDb((db, resolve, reject) => {
+        const tx = db.transaction(ROSTER_STORE, 'readonly');
+        const request = tx.objectStore(ROSTER_STORE).count();
+        request.onsuccess = () => resolve(metaNumber(request.result, 0));
+        request.onerror = () => reject(request.error);
+        tx.onabort = () => reject(tx.error || request.error);
+    });
+}
+
+/**
+ * Load ONE roster hero with its portrait restored inline (the row carries a
+ * ref). Resolves null for an unknown id. A blob that cannot be read is a
+ * missing picture (stamps stripped, see portraitStore), never a failed load;
+ * a legacy row still carrying an inline portraitUrl loads as-is and is split
+ * on its next save.
+ */
+export function loadRosterCharacter(id) {
+    return withDb((db, resolve, reject) => {
+        const tx = db.transaction([ROSTER_STORE, PORTRAIT_STORE], 'readonly');
+        const request = tx.objectStore(ROSTER_STORE).get(id);
+        request.onsuccess = () => {
+            const record = request.result;
+            if (!record || typeof record !== 'object') { resolve(null); return; }
+            const refs = collectPortraitRefs({ character: record.character });
+            if (refs.length === 0) { resolve(projectRosterHero(record)); return; }
+            const found = new Map();
+            let pending = refs.length;
+            const settle = () => { if (--pending === 0) resolve(projectRosterHero(record, key => found.get(key))); };
+            for (const ref of refs) {
+                const blobRequest = tx.objectStore(PORTRAIT_STORE).get(ref);
+                blobRequest.onsuccess = () => { found.set(ref, blobRequest.result); settle(); };
+                blobRequest.onerror = (event) => { event.preventDefault?.(); event.stopPropagation?.(); settle(); };
+            }
+        };
+        request.onerror = () => reject(request.error);
+        tx.onabort = () => reject(tx.error || request.error);
+    });
+}
+
+/**
+ * Delete a roster hero. Its portrait goes with it unless a save slot (or
+ * another roster row) still shows it.
  */
 export function deleteRosterCharacter(id) {
     return withDb((db, resolve, reject) => {
-        const tx = db.transaction(ROSTER_STORE, 'readwrite');
+        const tx = db.transaction(PORTRAIT_SWEEP_STORES, 'readwrite');
         const store = tx.objectStore(ROSTER_STORE);
         const request = store.delete(id);
+        request.onsuccess = () => sweepOrphanBlobs(tx);
         request.onerror = () => reject(request.error);
         tx.oncomplete = () => resolve();
         tx.onabort = () => reject(tx.error || request.error);

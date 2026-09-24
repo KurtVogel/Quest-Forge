@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe } from './scribe.js';
+import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe, shouldScribeCombatBeat } from './scribe.js';
 import { sendMessage } from './adapter.js';
 
 vi.mock('./adapter.js', () => ({
@@ -2212,5 +2212,46 @@ describe('loot audit item identity is name-only (2026-09-16 scribe P2: itemKey m
         const add = dispatch.mock.calls.find(([a]) => a.type === 'ADD_ITEM')?.[0];
         expect(add?.payload.name).toBe('rusty nail');
         expect(add?.payload.itemKey).toBeUndefined();
+    });
+});
+
+describe('shouldScribeCombatBeat — the per-beat Scribe gate (2026-09-23 combat-exchange P2)', () => {
+    const state = {
+        npcs: [
+            { id: 'n1', name: 'Reeve Halvard', rosterTier: 'character' },
+            { id: 'n2', name: 'Marsh bandit 2', rosterTier: 'creature' },
+            { id: 'n3', name: 'Torvald', rosterTier: 'character' },
+        ],
+        party: [{ id: 'c1', name: 'Torvald' }],
+    };
+    const beat = (terminal, narrative) => shouldScribeCombatBeat({ terminal, kind: 'exchange' }, narrative, state);
+
+    it('always runs on terminal narration — victory keys the loot audit; defeat and escape are durable outcomes', () => {
+        expect(beat('victory', 'The last bandit drops.')).toBe(true);
+        expect(beat('defeat', 'Darkness takes you.')).toBe(true);
+        expect(beat('escaped', 'You break for the treeline.')).toBe(true);
+    });
+
+    it('skips an ordinary beat that names only fodder, a companion, or the hero — and a dying beat', () => {
+        expect(beat(null, 'Marsh bandit 2 falls; Torvald wipes his blade.')).toBe(false);
+        expect(beat(null, "Oda's blade bites deep.")).toBe(false);
+        expect(beat('dying', 'You are down and the reeds close over you.')).toBe(false);
+        expect(beat(null, '')).toBe(false);
+        expect(shouldScribeCombatBeat({ terminal: null }, 'Reeve Halvard wades in.', {})).toBe(false);
+    });
+
+    it('runs a non-terminal beat that names an out-of-party roster NPC, by short name too', () => {
+        expect(beat(null, 'Reeve Halvard wades in with a boat hook.')).toBe(true);
+        expect(beat(null, 'Halvard shouts from the bank.')).toBe(true);
+    });
+
+    it('a nine-exchange fight of nameless foes costs ONE Scribe call — the terminal beat (was ~10)', () => {
+        const beats = [
+            { terminal: null, kind: 'opening' },
+            ...Array.from({ length: 8 }, () => ({ terminal: null, kind: 'exchange' })),
+            { terminal: 'victory', kind: 'exchange' },
+        ];
+        const scribeCalls = beats.filter(result => shouldScribeCombatBeat(result, 'Marsh bandit 2 falls into the reeds.', state)).length;
+        expect(scribeCalls).toBe(1);
     });
 });

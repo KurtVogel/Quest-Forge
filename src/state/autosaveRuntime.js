@@ -30,9 +30,23 @@
  * state hasn't moved past the re-render) the flag goes clean; if it fails,
  * the skipped re-render gets the ordinary dirty + debounce it would have had.
  */
-import { buildAutosaveSnapshot, hasGameplayChange } from './autosavePolicy.js';
+import { buildAutosaveSnapshot, hasGameplayChange, isBackgroundOnlyChange } from './autosavePolicy.js';
 
 export const AUTOSAVE_DEBOUNCE_MS = 2000;
+
+/**
+ * Two-tier debounce (2026-09-23 audit P2): a turn is five phases seconds apart
+ * (the player's line, the DM reply + events, the Scribe wave, the journal
+ * cadence, the reflection pass), so a single 2 s window wrote the whole
+ * multi-MB snapshot five times per ordinary turn. A change the player would
+ * lose (`AUTOSAVE_FOREGROUND_FIELDS` in autosavePolicy.js) keeps the 2 s
+ * lane; a background-lane change waits this long, reset by further
+ * background changes, and a pending FOREGROUND timer is never delayed by it
+ * (that write carries the background change too). The next turn's own
+ * foreground write usually lands first, so steady play makes two writes per
+ * turn; the hide/unload flush protects the window when the tab goes away.
+ */
+export const AUTOSAVE_BACKGROUND_DEBOUNCE_MS = 15000;
 
 /**
  * Top-level persisted fields that differ between two states (by reference —
@@ -63,6 +77,10 @@ function sessionChanged(prev = {}, next = {}) {
 
 export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
     let timer = null;
+    // Which lane the pending timer serves: a foreground timer (2 s) is never
+    // pushed back by a background change; a background timer (15 s) is reset
+    // by another background change and superseded by a foreground one.
+    let timerBackground = false;
     let dirty = false;
     // The most recent action flush: the state it replayed from, the fields the
     // replay changed, and — once its re-render is recognized — that state.
@@ -73,12 +91,17 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
             clearTimeout(timer);
             timer = null;
         }
+        timerBackground = false;
     };
 
-    const scheduleDebounce = () => {
+    const scheduleDebounce = ({ background = false } = {}) => {
+        // A pending foreground write already covers a background change.
+        if (background && timer && !timerBackground) return;
         clearTimer();
+        timerBackground = background;
         timer = setTimeout(() => {
             timer = null;
+            timerBackground = false;
             // Save the LATEST state at fire time, stamped so cross-device sync
             // can pick the newest file.
             const source = getState();
@@ -93,7 +116,7 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
                 if (saved && getState() === source) dirty = false;
                 showSaveToast(saved ? 'local' : 'save-error');
             });
-        }, AUTOSAVE_DEBOUNCE_MS);
+        }, background ? AUTOSAVE_BACKGROUND_DEBOUNCE_MS : AUTOSAVE_DEBOUNCE_MS);
     };
 
     const flush = async ({ action = null } = {}) => {
@@ -131,6 +154,10 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
         if (!dirty) return;
         const snapshot = buildAutosaveSnapshot(getState());
         if (!snapshot) return;
+        // This write carries what the pending timer would have written (the
+        // slow lane especially — 15 s is a long time for a hidden tab's timer
+        // to duplicate a write that already landed).
+        clearTimer();
         dirty = false;
         // If the write fails (and the page survives), the state is still dirty.
         autoSave(snapshot).then(saved => { if (!saved) dirty = true; });
@@ -171,7 +198,7 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
         // keeps its own reference and settles the flag against the live state).
         cover = null;
         dirty = true;
-        scheduleDebounce();
+        scheduleDebounce({ background: isBackgroundOnlyChange(prev, state) });
     };
 
     return {
@@ -181,5 +208,7 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
         dispose: clearTimer,
         isDirty: () => dirty,
         hasPendingDebounce: () => timer !== null,
+        /** Is the pending debounce (if any) the slow background lane? */
+        hasPendingBackgroundDebounce: () => timer !== null && timerBackground,
     };
 }

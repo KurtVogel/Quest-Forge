@@ -5,7 +5,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../config/firebase.js', () => ({ db: { mock: true } }));
+// `firestoreSdk` is the module `initializeFirebase` loaded on demand
+// (2026-09-22): the mock hands cloudSync.js the mocked SDK the same way.
+vi.mock('../config/firebase.js', async () => ({ db: { mock: true }, firestoreSdk: await import('firebase/firestore') }));
 
 vi.mock('firebase/firestore', () => {
     const store = new Map(); // full doc path -> plain data object
@@ -282,6 +284,7 @@ describe('guards and failure surfacing', () => {
         expect(result).toMatchObject({ ok: false, reason: 'permission-denied' });
         expect(result.message).toContain('firestore.rules');
         expect(result.message).toContain('chunks/{chunkId}');
+        expect(result.message).toContain('portraits/{portraitId}');
     });
 
     it('saveGameToCloud refuses a payload over CLOUD_SAVE_BYTE_LIMIT before touching Firestore', async () => {
@@ -300,32 +303,6 @@ describe('guards and failure surfacing', () => {
         expect(firestore.__store.size).toBe(0);
         // Exactly at the ceiling is fine — 9 MiB is already headroom under 10 MiB.
         expect(CLOUD_SAVE_BYTE_LIMIT).toBe(9 * 1024 * 1024);
-    });
-
-    it('drops NPC portraits oldest-first to fit the cloud limit, keeps the hero portrait, and says so (2026-09-21 audit P1)', async () => {
-        // 100 portraits at ~100k chars each are ~10 MB on their own: the whole
-        // campaign used to be refused for its pictures.
-        const portrait = (seed) => `data:image/jpeg;base64,${String(seed % 10).repeat(100_000)}`;
-        const state = makeGameState({
-            character: { ...makeGameState().character, portraitUrl: portrait(0), portraitProvider: 'xai' },
-            npcs: Array.from({ length: 100 }, (_, i) => ({
-                id: `npc-${i}`, name: `Villager ${i}`, portraitUrl: portrait(i), portraitProvider: 'xai', portraitUpdatedAt: 1000 + i,
-            })),
-        });
-        const result = await saveGameToCloud('u1', 'slot-gallery', state);
-        expect(result.ok).toBe(true);
-        expect(result.droppedPortraits).toBeGreaterThan(0);
-        expect(result.note).toMatch(/oldest character portraits? to fit the 9\.0 MB cloud limit/);
-
-        const loaded = await loadGameFromCloud('u1', 'slot-gallery');
-        expect(loaded.character.portraitUrl).toBe(portrait(0));
-        const kept = loaded.npcs.filter(n => n.portraitUrl);
-        expect(kept.length).toBe(100 - result.droppedPortraits);
-        // Oldest went first; a dropped record loses its stamps with its picture.
-        expect(loaded.npcs[0]).toEqual({ id: 'npc-0', name: 'Villager 0' });
-        expect(loaded.npcs[99].portraitUrl).toBe(portrait(99));
-        // The live state was never mutated — the local save keeps them all.
-        expect(state.npcs.every(n => n.portraitUrl)).toBe(true);
     });
 
     it('the size pre-flight counts UTF-8 bytes, so multi-byte prose is measured honestly', async () => {
@@ -393,5 +370,207 @@ describe('hostile metadata docs (2026-09-10 audit)', () => {
         const [row] = await listCloudSaves('u1');
         expect(row.name).toBe('Unnamed Save');
         expect(row.location).toBeNull();
+    });
+});
+
+describe('cloud portrait collection (2026-09-22 audit P2)', () => {
+    // ~100k-char data URLs, distinct per seed (a real xAI portrait is 30–110k).
+    const portrait = (seed) => `data:image/jpeg;base64,${seed.toString(36).padStart(4, '0').repeat(25_000)}`;
+    const gallery = (count, { seedOffset = 0 } = {}) => makeGameState({
+        character: { ...makeGameState().character, portraitUrl: portrait(1000 + seedOffset), portraitProvider: 'xai', portraitUpdatedAt: 5 },
+        npcs: Array.from({ length: count }, (_, i) => ({
+            id: `npc-${i}`, name: `Villager ${i}`, portraitUrl: portrait(i + seedOffset), portraitProvider: 'xai', portraitUpdatedAt: 1000 + i,
+        })),
+    });
+    const portraitPaths = () => [...firestore.__store.keys()].filter(p => p.includes('/portraits/'));
+    const chunkData = () => chunkPaths().map(p => firestore.__store.get(p).data);
+    /** Run `fn` while recording every store write (path + JSON size). */
+    async function recordWrites(fn) {
+        const writes = [];
+        const origSet = firestore.__store.set.bind(firestore.__store);
+        firestore.__store.set = (key, value) => { writes.push({ key, chars: JSON.stringify(value).length }); return origSet(key, value); };
+        try { return { result: await fn(), writes }; } finally { firestore.__store.set = origSet; }
+    }
+
+    it('a save with N portraits carries ZERO portrait bytes in its chunks, one chunk, N blob docs, and portraitRefs on the metadata doc', async () => {
+        // Measured pre-fix: 12 NPC portraits = 2.38 MiB per save, 47 % portraits, 9 chunk docs.
+        const result = await saveGameToCloud('u1', 'slot-gallery', gallery(12));
+        expect(result).toEqual({ ok: true, portraitsUploaded: 13 });
+        const main = firestore.__store.get('users/u1/saves/slot-gallery');
+        expect(main.payloadChunks).toBe(1);
+        expect(main.portraitRefs).toHaveLength(13);
+        main.portraitRefs.forEach(ref => expect(ref).toMatch(/^p-[0-9a-z]+-[0-9a-z]+-[0-9a-z]+$/));
+        expect(portraitPaths()).toHaveLength(13);
+        for (const data of chunkData()) {
+            expect(data).not.toContain('data:image/');
+            expect(data).toContain('"portraitRef"');
+        }
+        // The whole chunked payload is a few KB — the pictures were ~1.3 MB.
+        expect(chunkData().reduce((n, d) => n + d.length, 0)).toBeLessThan(40_000);
+        // Every blob doc is one portrait, far under Firestore's 1 MiB document cap.
+        for (const path of portraitPaths()) {
+            const blob = firestore.__store.get(path);
+            expect(blob.data.startsWith('data:image/jpeg;base64,')).toBe(true);
+            expect(blob.chars).toBe(blob.data.length);
+        }
+    });
+
+    it('a steady-state re-save (same slot or a new one) writes ZERO portrait docs and re-uploads zero portrait bytes', async () => {
+        await saveGameToCloud('u1', 'slot-a', gallery(12));
+        const again = await recordWrites(() => saveGameToCloud('u1', 'slot-a', gallery(12)));
+        expect(again.result).toEqual({ ok: true, portraitsUploaded: 0 });
+        expect(again.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(0);
+        expect(again.writes.reduce((n, w) => n + w.chars, 0)).toBeLessThan(40_000);
+        // A second slot of the same campaign shares the blobs by content key.
+        const other = await recordWrites(() => saveGameToCloud('u1', 'slot-b', gallery(12)));
+        expect(other.result.portraitsUploaded).toBe(0);
+        expect(other.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(0);
+        expect(portraitPaths()).toHaveLength(13);
+        // Only the NEW picture is uploaded when one NPC gets a portrait.
+        const third = await recordWrites(() => saveGameToCloud('u1', 'slot-a', gallery(13)));
+        expect(third.result.portraitsUploaded).toBe(1);
+        expect(third.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(1);
+    });
+
+    it('the loader rehydrates every ref: portraitUrl on the hero and each NPC, no portraitRef in what LOAD_GAME receives', async () => {
+        const state = gallery(12);
+        await saveGameToCloud('u1', 'slot-gallery', state);
+        const loaded = await loadGameFromCloud('u1', 'slot-gallery');
+        expect(loaded.character.portraitUrl).toBe(state.character.portraitUrl);
+        expect(loaded.character.portraitProvider).toBe('xai');
+        loaded.npcs.forEach((npc, i) => {
+            expect(npc.portraitUrl).toBe(state.npcs[i].portraitUrl);
+            expect(npc.portraitUpdatedAt).toBe(1000 + i);
+        });
+        expect(JSON.stringify(loaded)).not.toContain('portraitRef');
+    });
+
+    it('a missing or corrupt blob doc is a missing picture (stamps stripped), never a failed load', async () => {
+        const state = gallery(3);
+        await saveGameToCloud('u1', 'slot-gallery', state);
+        const main = firestore.__store.get('users/u1/saves/slot-gallery');
+        // The first NPC's blob is gone; the second's is junk.
+        const keyOf = (url) => main.portraitRefs.find(ref => firestore.__store.get(`users/u1/portraits/${ref}`)?.data === url);
+        firestore.__store.delete(`users/u1/portraits/${keyOf(state.npcs[0].portraitUrl)}`);
+        firestore.__store.get(`users/u1/portraits/${keyOf(state.npcs[1].portraitUrl)}`).data = 42;
+        const loaded = await loadGameFromCloud('u1', 'slot-gallery');
+        expect(loaded).not.toBeNull();
+        expect(loaded.npcs[0]).toEqual({ id: 'npc-0', name: 'Villager 0' });
+        expect(loaded.npcs[1]).toEqual({ id: 'npc-1', name: 'Villager 1' });
+        expect(loaded.npcs[2].portraitUrl).toBe(state.npcs[2].portraitUrl);
+        expect(loaded.character.portraitUrl).toBe(state.character.portraitUrl);
+    });
+
+    it("delete sweeps the slot's portraitRefs but keeps every blob another slot still claims", async () => {
+        await saveGameToCloud('u1', 'slot-a', gallery(2)); // hero + npc-0 + npc-1
+        await saveGameToCloud('u1', 'slot-b', gallery(1)); // hero + npc-0
+        expect(portraitPaths()).toHaveLength(3);
+        expect(await deleteGameFromCloud('u1', 'slot-a')).toBe(true);
+        expect(portraitPaths()).toHaveLength(2);
+        const bRefs = firestore.__store.get('users/u1/saves/slot-b').portraitRefs;
+        expect(portraitPaths().map(p => p.split('/portraits/')[1]).sort()).toEqual([...bRefs].sort());
+        // slot-b still loads whole.
+        expect((await loadGameFromCloud('u1', 'slot-b')).npcs[0].portraitUrl).toBe(portrait(0));
+        expect(await deleteGameFromCloud('u1', 'slot-b')).toBe(true);
+        expect(firestore.__store.size).toBe(0);
+    });
+
+    it('an overwrite that releases a ref (a rerolled portrait) sweeps the old blob unless another slot claims it', async () => {
+        await saveGameToCloud('u1', 'slot-a', gallery(1));
+        const oldRefs = firestore.__store.get('users/u1/saves/slot-a').portraitRefs;
+        // Reroll: new pictures for the hero and the NPC.
+        const rerolled = await saveGameToCloud('u1', 'slot-a', gallery(1, { seedOffset: 50 }));
+        expect(rerolled.portraitsUploaded).toBe(2);
+        expect(portraitPaths()).toHaveLength(2);
+        oldRefs.forEach(ref => expect(firestore.__store.has(`users/u1/portraits/${ref}`)).toBe(false));
+        // With another slot still showing the old pictures, they stay.
+        await saveGameToCloud('u1', 'slot-b', gallery(1));
+        await saveGameToCloud('u1', 'slot-a', gallery(1));
+        await saveGameToCloud('u1', 'slot-a', gallery(1, { seedOffset: 50 }));
+        expect(portraitPaths()).toHaveLength(4);
+        expect((await loadGameFromCloud('u1', 'slot-b')).npcs[0].portraitUrl).toBe(portrait(0));
+    });
+
+    it('100 portraits fit under the cloud limit with nothing dropped (the 2026-09-21 budget dropper is retired)', async () => {
+        // ~10 MB of pictures used to be over the 9 MiB ceiling: 11 dropped and a second stringify.
+        const state = gallery(100);
+        const result = await saveGameToCloud('u1', 'slot-gallery', state);
+        expect(result).toEqual({ ok: true, portraitsUploaded: 101 });
+        expect(result.droppedPortraits).toBeUndefined();
+        expect(firestore.__store.get('users/u1/saves/slot-gallery').payloadChunks).toBe(1);
+        const loaded = await loadGameFromCloud('u1', 'slot-gallery');
+        expect(loaded.npcs.filter(n => n.portraitUrl)).toHaveLength(100);
+        expect(loaded.npcs[0].portraitUrl).toBe(portrait(0));
+        expect(loaded.character.portraitUrl).toBe(state.character.portraitUrl);
+    });
+
+    it('the same picture on two records is one blob doc (content-addressed)', async () => {
+        const state = gallery(2);
+        state.npcs[1].portraitUrl = state.npcs[0].portraitUrl;
+        const result = await saveGameToCloud('u1', 'slot-twins', state);
+        expect(result.portraitsUploaded).toBe(2); // hero + the shared picture
+        expect(firestore.__store.get('users/u1/saves/slot-twins').portraitRefs).toHaveLength(2);
+        const loaded = await loadGameFromCloud('u1', 'slot-twins');
+        expect(loaded.npcs[1].portraitUrl).toBe(loaded.npcs[0].portraitUrl);
+    });
+
+    it('a pre-split cloud doc with inline portraits loads as-is (no migration)', async () => {
+        const inline = gallery(1);
+        firestore.__store.set('users/u1/saves/legacy', { slotId: 'legacy', payloadChunks: 1, payload: null });
+        firestore.__store.set('users/u1/saves/legacy/chunks/0', { index: 0, data: JSON.stringify({ character: inline.character, npcs: inline.npcs }) });
+        const loaded = await loadGameFromCloud('u1', 'legacy');
+        expect(loaded.character.portraitUrl).toBe(inline.character.portraitUrl);
+        expect(loaded.npcs[0].portraitUrl).toBe(inline.npcs[0].portraitUrl);
+        // Re-saving splits it.
+        await saveGameToCloud('u1', 'legacy', { ...makeGameState(), character: loaded.character, npcs: loaded.npcs });
+        expect(portraitPaths()).toHaveLength(2);
+        expect(chunkData()[0]).not.toContain('data:image/');
+    });
+
+    it('a hostile portraitRefs on an existing doc never breaks a save or a delete, and the sweep is bounded', async () => {
+        const junk = [
+            ...Array.from({ length: 100_000 }, (_, i) => `p-${i.toString(36)}-abc-def`),
+            { ref: 'x' }, 42, null, '../saves/slot-1', 'p-' + 'x'.repeat(50), '', 'users/u1/saves/slot-1',
+        ];
+        for (const portraitRefs of [junk, 'p-1-2-3', { 0: 'p-1-2-3' }, null]) {
+            firestore.__store.clear();
+            firestore.__store.set('users/u1/saves/slot-1', { slotId: 'slot-1', name: 'Old', payloadChunks: 1, payload: null, portraitRefs });
+            const saved = await recordWrites(() => saveGameToCloud('u1', 'slot-1', makeGameState()));
+            expect(saved.result.ok).toBe(true);
+            expect(firestore.__store.get('users/u1/saves/slot-1').portraitRefs).toEqual([]);
+            expect(firestore.__store.has('users/u1/saves/slot-1/chunks/0')).toBe(true);
+
+            firestore.__store.get('users/u1/saves/slot-1').portraitRefs = portraitRefs;
+            const deletes = [];
+            const origDelete = firestore.__store.delete.bind(firestore.__store);
+            firestore.__store.delete = (key) => { deletes.push(key); return origDelete(key); };
+            expect(await deleteGameFromCloud('u1', 'slot-1')).toBe(true);
+            firestore.__store.delete = origDelete;
+            expect(deletes.filter(k => k.includes('/portraits/')).length).toBeLessThanOrEqual(512);
+            // Only well-formed keys are ever addressed — never a path-shaped string.
+            deletes.forEach(k => expect(k).toMatch(/^users\/u1\/(saves\/slot-1(\/chunks\/\d+)?|portraits\/p-[0-9a-z]{1,8}-[0-9a-z]{1,8}-[0-9a-z]{1,8})$/));
+            expect(firestore.__store.has('users/u1/saves/slot-1')).toBe(false);
+        }
+    });
+
+    it('a failed portrait sweep never fails the save or the delete that released the ref', async () => {
+        await saveGameToCloud('u1', 'slot-a', gallery(1));
+        // Overwriting with a portrait-less state releases both refs; the only
+        // getDocs that save makes is the sweep's claimed-refs read.
+        firestore.__fail.getDocs = new Error('unavailable');
+        expect(await saveGameToCloud('u1', 'slot-a', makeGameState())).toEqual({ ok: true, portraitsUploaded: 0 });
+        expect(portraitPaths()).toHaveLength(2); // orphans left behind, harmless
+        await saveGameToCloud('u1', 'slot-b', gallery(1, { seedOffset: 50 }));
+        firestore.__fail.getDocs = new Error('unavailable');
+        expect(await deleteGameFromCloud('u1', 'slot-b')).toBe(true);
+        expect(firestore.__store.has('users/u1/saves/slot-b')).toBe(false);
+        expect(portraitPaths()).toHaveLength(4);
+    });
+
+    it('the list never carries portraitRefs or blob bytes', async () => {
+        await saveGameToCloud('u1', 'slot-gallery', gallery(12));
+        const [row] = await listCloudSaves('u1');
+        expect(row.portraitRefs).toBeUndefined();
+        expect(JSON.stringify(row)).not.toContain('data:image/');
     });
 });

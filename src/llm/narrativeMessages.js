@@ -20,6 +20,19 @@
  * (the table-talk turn is already excluded from RAG, the Scribe, and the DM
  * window by design; nothing flags the reply on the stored message, so the
  * pairing is derived from the preceding user message).
+ *
+ * Combat-exchange dice lines (`exchangeLine`, DECISIONS.md 2026-08-04) are
+ * NOT narrative either (2026-09-23 combat-exchange P1): the tag was minted
+ * for the DM window alone, so a 9-exchange fight's ~64 roll lines counted as
+ * story here — the journal cadence fired twice for one fight, scene presence
+ * was judged from "**Oda attacks Marsh bandit 4** — Rolled **20**", and the
+ * chronicler retold each as a TABLE RECORD. The lines have exactly two
+ * readers that need them, the chat and the narration prompt's RESOLVED
+ * EVENTS, and the fight's outcome reaches the journal through the narration
+ * prose, the END_COMBAT lines, and `recentEncounters`. Out-of-combat
+ * roll-result lines keep their seat: nothing else carries them, so the
+ * 2026-09-06 "engine roll-result lines still ride it" rule is narrowed to
+ * them, not reversed.
  */
 import { isTableTalkMessage } from './tableTalk.js';
 
@@ -36,7 +49,7 @@ export function collectNarrativeEntries(messages = [], fromIndex = 0, toIndex = 
         // `kind: 'record'` is an engine receipt about the TABLE (the recall
         // dossier's "📜 From the record" line, 2026-09-18) — bookkeeping the
         // chronicler and the scene painter must never retell as story.
-        if (!m || m.hidden || m.deleted || m.kind === 'error' || m.kind === 'record' || typeof m.content !== 'string' || !m.content.trim()) return;
+        if (!m || m.hidden || m.deleted || m.kind === 'error' || m.kind === 'record' || m.exchangeLine || typeof m.content !== 'string' || !m.content.trim()) return;
         // The table-talk pairing is tracked from the start of the transcript,
         // not from the span: a journal batch or chapter that opens on the DM's
         // at-the-table reply must still know the OOC line just before it

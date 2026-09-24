@@ -5,7 +5,7 @@ import { createTurnRunner } from '../../llm/turnOrchestrator.js';
 import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
 import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
-import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe } from '../../llm/scribe.js';
+import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
 import { addMemory, findSubjectsInText, seedMemories } from '../../engine/vectorMemory.js';
 import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
@@ -559,12 +559,17 @@ export default function ChatPanel() {
         setLoadingStatus('Narrating combat outcome');
         runner.sendToLLM(narrationPrompt, null, {
             narrationOnly: true,
+            combatNarration: true,
             onNarrative: text => { narrative = text; },
         })
             .then(() => {
                 dispatch({ type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: result.exchangeId } });
                 const latest = stateRef.current;
-                if (narrative.trim()) {
+                // The Scribe runs on terminal narration and on beats that name
+                // an out-of-party roster NPC — not on every dice beat (2026-09-23
+                // combat-exchange P2: ~10 Flash calls per fight). Terminal RAG
+                // persistence below is a subset of that gate.
+                if (narrative.trim() && shouldScribeCombatBeat(result, narrative, latest)) {
                     runScribe({
                         playerMessage: result.kind === 'opening' ? 'Opening Initiative' : 'Combat exchange',
                         dmNarrative: narrative,

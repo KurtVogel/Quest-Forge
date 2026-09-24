@@ -349,3 +349,68 @@ describe('the journal batch is narrative-eligible play only (2026-09-06 memory-j
         expect(sendMessageMock).toHaveBeenCalledTimes(1);
     });
 });
+
+describe('combat-exchange dice lines are weightless to the cadence (2026-09-23 combat-exchange P1)', () => {
+    const diceLine = (i) => ({
+        id: `dice-${i}`,
+        role: 'system',
+        exchangeLine: true,
+        content: `**Oda attacks Marsh bandit ${(i % 4) + 1}** — Rolled **${10 + (i % 9)}** vs AC 13; **Hit for 7 damage.**`,
+    });
+
+    it('64 exchange lines neither count as narrative nor trip the raw backlog escape', async () => {
+        const messages = [...makeMessages(6), ...Array.from({ length: 64 }, (_, i) => diceLine(i))];
+        const dispatch = vi.fn();
+
+        const result = await maybeAutoSummarize(makeState(messages), dispatch, 0);
+
+        expect(result).toEqual({ index: 0, journalEntry: null });
+        expect(sendMessageMock).not.toHaveBeenCalled();
+        expect(dispatch).not.toHaveBeenCalled();
+    });
+
+    it('a fight whose raw rows exceed the batch cap summarizes in ONE batch — dice lines archived behind the boundary, out of the payload', async () => {
+        sendMessageMock.mockResolvedValue(validSummary());
+        // 12 prose rows interleaved with 63 dice lines plus one engine status
+        // line: 76 raw rows, past MAX_BATCH_MESSAGES — the raw cap used to cut
+        // this into two batches (two Flash calls, two journal entries, one fight).
+        const prose = makeMessages(12);
+        const messages = [];
+        prose.forEach((m, i) => {
+            messages.push(m);
+            if (i >= 2 && i < 11) {
+                for (let k = 0; k < 7; k++) messages.push(diceLine(i * 7 + k));
+            }
+        });
+        messages.push({ id: 'status', role: 'system', content: '**Marsh bandit 4** is defeated.' });
+        expect(messages).toHaveLength(76);
+        const dispatch = vi.fn();
+
+        const first = await maybeAutoSummarize(makeState(messages), dispatch, 0);
+
+        expect(sendMessageMock).toHaveBeenCalledTimes(1);
+        expect(first.index).toBe(messages.length);
+        expect(first.journalEntry.messageRange).toEqual([0, messages.length]);
+        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: messages.length });
+        const payload = sendMessageMock.mock.calls[0][0].userMessage;
+        expect(payload).not.toContain('Rolled **');
+        expect(payload).toContain('Message 11');
+        expect(payload).toContain('is defeated');
+
+        // Nothing is left for a second cadence.
+        const second = await maybeAutoSummarize(makeState(messages), dispatch, first.index);
+        expect(second).toEqual({ index: first.index, journalEntry: null });
+        expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('the batch cap still counts every non-exchange row, so a stalled prose backlog drains cap-by-cap', async () => {
+        sendMessageMock.mockResolvedValue(validSummary());
+        const messages = [...makeMessages(60), ...Array.from({ length: 5 }, (_, i) => diceLine(i))];
+        const dispatch = vi.fn();
+
+        const result = await maybeAutoSummarize(makeState(messages), dispatch, 0);
+
+        expect(result.index).toBe(40);
+        expect(result.journalEntry.messageRange).toEqual([0, 40]);
+    });
+});

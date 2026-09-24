@@ -1870,3 +1870,52 @@ describe('check-slot dc numeric-string parity (2026-09-15 audit P2)', () => {
         expect(dcOf(14)).toBe(14);
     });
 });
+
+describe('combatNarrationPrompt size at the 10-event ceiling (2026-09-23 combat-exchange test depth)', () => {
+    it('a full field — hero, two companions, four foes, a note, a death save — stays under 3,000 chars (2,531 measured)', () => {
+        const attack = (actor, target, hit, remainingHp, maxHp) => ({
+            type: 'attack', actor, target, rolled: 14, dc: 13, hit, damage: hit ? 9 : 0, remainingHp, maxHp,
+        });
+        const events = [
+            attack('Oda', 'Marsh bandit 1', true, 25, 34),
+            attack('Oda', 'Marsh bandit 1', true, 16, 34),
+            { type: 'note', text: "Torvald's target is down; retargeting to Marsh bandit 2." },
+            attack('Torvald', 'Marsh bandit 2', true, 27, 34),
+            attack('Mira', 'Marsh bandit 2', false, 27, 34),
+            attack('Marsh bandit 1', 'Oda', true, 31, 44),
+            attack('Marsh bandit 2', 'Torvald', false, 30, 30),
+            attack('Marsh bandit 3', 'Oda', true, 22, 44),
+            attack('Marsh bandit 4', 'Mira', true, 0, 24),
+            { type: 'death_save', natural: 12 },
+        ];
+        const result = {
+            exchangeId: 'exchange-ceiling',
+            kind: 'exchange',
+            round: 4,
+            terminal: null,
+            events,
+            postState: {
+                player: { name: 'Oda', hp: 22, maxHp: 44 },
+                companions: [
+                    { id: 'c1', name: 'Torvald', hp: 30, maxHp: 30, status: 'healthy' },
+                    { id: 'c2', name: 'Mira', hp: 0, maxHp: 24, status: 'downed' },
+                ],
+                enemies: [
+                    { name: 'Marsh bandit 1', hp: 16, maxHp: 34, condition: 'wounded', conditions: [], status: 'active' },
+                    { name: 'Marsh bandit 2', hp: 27, maxHp: 34, condition: 'healthy', conditions: ['prone'], status: 'active' },
+                    { name: 'Marsh bandit 3', hp: 34, maxHp: 34, condition: 'healthy', conditions: [], status: 'active' },
+                    { name: 'Marsh bandit 4', hp: 0, maxHp: 34, condition: 'dead', conditions: [], status: 'defeated' },
+                ],
+            },
+        };
+
+        const prompt = combatNarrationPrompt(result);
+
+        expect(exchangeEventLines(result)).toHaveLength(10);
+        expect(prompt).toContain('RESOLVED EVENTS:');
+        expect(prompt).toContain('COMPANION DOWN: Mira');
+        expect(prompt).toContain('DEFEATED: Marsh bandit 4');
+        expect(prompt.length).toBeGreaterThan(1500);
+        expect(prompt.length).toBeLessThan(3000);
+    });
+});

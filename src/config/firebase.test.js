@@ -8,11 +8,43 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('firebase/app', () => ({ initializeApp: vi.fn(), getApps: () => [], getApp: vi.fn(), deleteApp: vi.fn() }));
-vi.mock('firebase/auth', () => ({ getAuth: vi.fn(), GoogleAuthProvider: class { setCustomParameters() {} } }));
-vi.mock('firebase/firestore', () => ({ getFirestore: vi.fn() }));
+// Each SDK mock factory records when it first runs — a vi.mock factory is
+// evaluated on the module's FIRST import, so the flags say whether importing
+// firebase.js alone pulls the SDK in (2026-09-22 audit P2: it must not).
+const sdkLoaded = vi.hoisted(() => ({ app: false, auth: false, firestore: false }));
+vi.mock('firebase/app', () => { sdkLoaded.app = true; return { initializeApp: vi.fn(() => ({ options: {} })), getApps: () => [], getApp: vi.fn(), deleteApp: vi.fn() }; });
+vi.mock('firebase/auth', () => { sdkLoaded.auth = true; return { getAuth: vi.fn(() => ({ name: 'auth' })), GoogleAuthProvider: class { setCustomParameters() {} }, signInWithPopup: vi.fn(), signOut: vi.fn(), onAuthStateChanged: vi.fn() }; });
+vi.mock('firebase/firestore', () => { sdkLoaded.firestore = true; return { getFirestore: vi.fn(() => ({ name: 'db' })), collection: vi.fn(), doc: vi.fn(), getDoc: vi.fn(), getDocs: vi.fn(), setDoc: vi.fn(), deleteDoc: vi.fn(), runTransaction: vi.fn() }; });
 
-const { getFirebaseConfigError, initializeFirebase } = await import('./firebase.js');
+const firebase = await import('./firebase.js');
+const { getFirebaseConfigError, initializeFirebase } = firebase;
+
+describe('the Firebase SDK loads on demand, never with the module (2026-09-22 audit P2)', () => {
+    it('importing firebase.js and rejecting a junk config pull in NO SDK module', async () => {
+        expect(sdkLoaded).toEqual({ app: false, auth: false, firestore: false });
+        await expect(initializeFirebase({ apiKey: { k: 1 } })).resolves.toBe(false);
+        await expect(initializeFirebase(null)).resolves.toBe(false);
+        expect(sdkLoaded).toEqual({ app: false, auth: false, firestore: false });
+        expect(firebase.db).toBeNull();
+        expect(firebase.authSdk).toBeNull();
+        expect(firebase.firestoreSdk).toBeNull();
+    });
+
+    it('a valid config loads the SDK and publishes the modules beside the services, so auth.js / cloudSync.js never run ahead of the import', async () => {
+        await expect(initializeFirebase({ apiKey: 'k', authDomain: 'd', projectId: 'p' })).resolves.toBe(true);
+        expect(sdkLoaded).toEqual({ app: true, auth: true, firestore: true });
+        expect(firebase.db).toEqual({ name: 'db' });
+        expect(firebase.auth).toEqual({ name: 'auth' });
+        // The curated function sets the two consumers read (tree-shaken: the
+        // chunk carries these, not the whole SDK namespaces).
+        for (const name of ['collection', 'doc', 'getDoc', 'getDocs', 'setDoc', 'deleteDoc', 'runTransaction']) {
+            expect(typeof firebase.firestoreSdk[name]).toBe('function');
+        }
+        for (const name of ['signInWithPopup', 'signOut', 'onAuthStateChanged']) {
+            expect(typeof firebase.authSdk[name]).toBe('function');
+        }
+    });
+});
 
 describe('getFirebaseConfigError', () => {
     it('never throws on a non-string field — it reports the field as missing', () => {

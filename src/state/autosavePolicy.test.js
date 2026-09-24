@@ -4,7 +4,7 @@
  * nothing-to-save guards — GameContext's wiring was 0% covered before this.
  */
 import { describe, expect, it } from 'vitest';
-import { buildAutosaveSnapshot, hasGameplayChange, isAutosavableState } from './autosavePolicy.js';
+import { AUTOSAVE_FOREGROUND_FIELDS, buildAutosaveSnapshot, hasGameplayChange, isAutosavableState, isBackgroundOnlyChange } from './autosavePolicy.js';
 import { initialGameState } from './initialState.js';
 
 function liveState(overrides = {}) {
@@ -43,6 +43,45 @@ describe('hasGameplayChange (inverted trigger, DECISIONS.md 2026-07-30)', () => 
     it('reports no change for an identical state reference', () => {
         const prev = liveState();
         expect(hasGameplayChange(prev, prev)).toBe(false);
+    });
+});
+
+describe('isBackgroundOnlyChange (two-tier debounce, 2026-09-23 audit P2)', () => {
+    it('the four foreground fields are the turn the player would lose', () => {
+        expect([...AUTOSAVE_FOREGROUND_FIELDS].sort()).toEqual(['character', 'combat', 'inventory', 'messages']);
+        const prev = liveState();
+        expect(isBackgroundOnlyChange(prev, { ...prev, messages: [{ role: 'user', content: 'hi' }] })).toBe(false);
+        expect(isBackgroundOnlyChange(prev, { ...prev, character: { ...prev.character, currentHP: 3 } })).toBe(false);
+        expect(isBackgroundOnlyChange(prev, { ...prev, combat: { ...prev.combat, active: true } })).toBe(false);
+        expect(isBackgroundOnlyChange(prev, { ...prev, inventory: [{ id: 'i1' }] })).toBe(false);
+    });
+
+    it('the Scribe / cadence / reflection / ledger fields are background — and so is any field nobody listed', () => {
+        const prev = liveState();
+        for (const key of ['npcs', 'worldFacts', 'storyMemory', 'journal', 'locations', 'fronts', 'heroTells', 'recentCoinGrants', 'appliedLootSourceIds']) {
+            expect(isBackgroundOnlyChange(prev, { ...prev, [key]: [{ id: 'x' }] }), key).toBe(true);
+        }
+        expect(isBackgroundOnlyChange(prev, { ...prev, worldTempo: { directive: 'lull' } })).toBe(true);
+        expect(isBackgroundOnlyChange(prev, { ...prev, someFutureSubsystem: { enabled: true } })).toBe(true);
+    });
+
+    it('a first render / load (no prev) is foreground', () => {
+        expect(isBackgroundOnlyChange(null, liveState())).toBe(false);
+    });
+
+    it('MARK_MESSAGES_SUMMARIZED (rows re-minted with only the summarized flag flipped) stays background', () => {
+        const rows = [
+            { id: 'm1', role: 'user', content: 'a' },
+            { id: 'm2', role: 'assistant', content: 'b', summarized: false },
+            { id: 'm3', role: 'user', content: 'c' },
+        ];
+        const prev = liveState({ messages: rows });
+        const flagged = { ...prev, messages: rows.map((m, i) => (i < 2 ? { ...m, summarized: true } : m)), session: { ...prev.session, prunedMessageCount: 2 } };
+        expect(isBackgroundOnlyChange(prev, flagged)).toBe(true);
+        // A content edit on an existing row, a deleted row, or an appended row is foreground.
+        expect(isBackgroundOnlyChange(prev, { ...prev, messages: rows.map((m, i) => (i === 1 ? { ...m, content: 'edited' } : m)) })).toBe(false);
+        expect(isBackgroundOnlyChange(prev, { ...prev, messages: rows.slice(0, 2) })).toBe(false);
+        expect(isBackgroundOnlyChange(prev, { ...prev, messages: [...rows, { id: 'm4', role: 'user', content: 'd' }] })).toBe(false);
     });
 });
 

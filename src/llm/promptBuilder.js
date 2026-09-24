@@ -24,7 +24,7 @@ import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
 import { isLowLevelSolo } from '../engine/combatExchange.js';
 import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock, describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
-import { buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
+import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
 
 /**
  * Tripwire against unbounded prompt growth, NOT a target. A deliberately
@@ -41,7 +41,14 @@ export const PROMPT_CHAR_BUDGET = 160000;
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat }) {
+export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, narrationOnly = false }) {
+    // `narrationOnly` (2026-09-23 combat-exchange P2): the combat narration
+    // call retells RESOLVED EVENTS the engine already committed — it needs the
+    // combat block, the character/party, KNOWN NPCs present, and tone, and
+    // cannot use ACTIVE QUESTS / WORLD FACTS / SESSION HISTORY / LOCATION
+    // TRANSITION HISTORY / INVENTORY (10k+ chars of the dynamic half, re-sent
+    // on half of a fight's DM calls). Those blocks are skipped; the cached
+    // static prefix is untouched so the cache key holds.
     /** Named [{name, text}] parts — joined in push order; names feed the DEV size log only. */
     const namedParts = [];
     const parts = {
@@ -91,6 +98,17 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     const normalizedPremise = normalizeCampaignPremise(premise);
     if (normalizedPremise) {
         parts.push(buildPremiseBlock(normalizedPremise), 'premise');
+    }
+
+    // Hero identity — name / gender / background are campaign-constant
+    // (player-authored at creation, never merged by the Scribe), so they END
+    // the cached prefix like the premise instead of riding the live PLAYER
+    // CHARACTER block behind HP / XP / wealth (2026-09-24 character-vault P2:
+    // 2,605 chars re-billed on every DM call, two per combat round). Extends
+    // DECISIONS.md 2026-07-18; appearance stays live because the Scribe merges it.
+    const heroIdentity = buildHeroIdentityBlock(character);
+    if (heroIdentity) {
+        parts.push(heroIdentity, 'heroIdentity');
     }
 
     // ——— DYNAMIC STATE (changes turn to turn; nothing below is cacheable) ———
@@ -185,12 +203,12 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Inventory
-    if (inventory && inventory.length > 0) {
+    if (inventory && inventory.length > 0 && !narrationOnly) {
         parts.push(buildInventoryBlock(inventory, character), 'inventory');
     }
 
     // Active quests
-    if (quests && quests.length > 0) {
+    if (quests && quests.length > 0 && !narrationOnly) {
         const activeQuests = quests.filter(q => q.status === 'active');
         if (activeQuests.length > 0) {
             parts.push(buildQuestBlock(activeQuests), 'quests');
@@ -211,7 +229,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Canonical world facts — these NEVER get compressed or forgotten
-    if (worldFacts && worldFacts.length > 0) {
+    if (worldFacts && worldFacts.length > 0 && !narrationOnly) {
         parts.push(buildWorldFactsBlock(worldFacts), 'worldFacts');
     }
 
@@ -224,7 +242,9 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     const presentNames = rosterNames.length > 0 && Array.isArray(messages) && messages.length > 0
         ? findSubjectsInText(buildPresenceText(messages), rosterNames, 8)
         : null;
-    const journalContext = buildJournalContext(journal || [], npcs || [], currentLocation, {
+    // An empty journal skips SESSION HISTORY and LOCATION TRANSITION HISTORY
+    // (both derive from it) while the place card and KNOWN NPCs still render.
+    const journalContext = buildJournalContext(narrationOnly ? [] : (journal || []), npcs || [], currentLocation, {
         presentNames,
         messages: Array.isArray(messages) ? messages : null,
         storyMemory: storyMemory || [],
@@ -336,6 +356,8 @@ Your role is to create an immersive, reactive, and fair narrative experience.
 8. **HONOR THE CAMPAIGN PREMISE.** If a CAMPAIGN PREMISE section is present, it is the player's authored foundation for this story — the setting, the character's situation, and the proper nouns (places, names, factions) they brought to the table. Treat every detail in it as permanent canon, exactly as binding as the WORLD FACTS. Never forget, rename, or contradict a place or name the premise establishes (e.g. a home city the character was exiled from remains real for the whole campaign). Weave it into the world as the story unfolds.
 
 9. **INFORMATION HAS BOUNDARIES — CHARACTERS ONLY KNOW WHAT THEY COULD KNOW.** You, the narrator, see everything in this prompt; the characters do NOT. Anything tagged \`[SECRET — known only to: …]\`, an NPC's own \`secret:\`, \`agenda:\`, and private motives, hidden front state, and the hero's unspoken thoughts, feelings, and plans are unknown to every character not listed or present when they were established. A character who was not there and was never told must not reference such information, hint at it, or conveniently act around it. Knowledge spreads ONLY through the fiction: someone reveals it on-screen, it is overheard, or it plausibly traveled (a REGIONAL HEARSAY section shows what has). When in doubt, the character does not know — play the ignorance honestly, even when it would be dramatic for them to know.
+
+10. ${HERO_TELLS_STANDING_RULE}
 
 ${NPC_NAME_DIVERSITY_RULES}
 
@@ -775,21 +797,13 @@ function buildCharacterBlock(character, combat = null) {
         ? `${character.exp || 0} XP (max level reached)`
         : `${character.exp || 0} / ${getExperienceThreshold(character.level)} to next level`;
 
-    // String-or-empty belts (2026-09-09 audit P1): `x?.trim()` is a TYPE
+    // String-or-empty belt (2026-09-09 audit P1): `x?.trim()` is a TYPE
     // assumption, and an object here threw out of every prompt build.
-    const heroGender = cleanTextField(character.gender, 60);
+    // Gender and background moved to the cached HERO IDENTITY block (2026-09-24);
+    // appearance stays here because the Scribe merges it during play.
     const heroAppearance = cleanTextField(character.appearance, 300);
-    const heroBackground = cleanTextField(character.background);
-    const genderLine = heroGender
-        ? `\n- **Gender:** ${heroGender}`
-        : '';
     const appearanceLine = heroAppearance
         ? `\n- **Appearance (established canon — keep it exactly consistent in narration):** ${heroAppearance}`
-        : '';
-    // Player-authored personal history: canon like the campaign premise, but it
-    // travels WITH the hero (roster/exports) rather than belonging to one campaign.
-    const backgroundLine = heroBackground
-        ? `\n- **Background (player-authored personal canon — honor it and weave it into the world; it is established history, not a hook you may contradict):** ${heroBackground.slice(0, 2000)}`
         : '';
 
     const spellcasting = describeSpellcastingForPrompt(character);
@@ -798,7 +812,7 @@ function buildCharacterBlock(character, combat = null) {
         : '';
 
     return `## PLAYER CHARACTER
-- **Name:** ${character.name}${deathStatus}${genderLine}${appearanceLine}${backgroundLine}
+- **Name:** ${character.name}${deathStatus}${appearanceLine}
 - **Race:** ${raceDisplayName(character)}
 - **Class:** ${classDisplayName(character)} (Level ${character.level})
 - **HP:** ${character.currentHP}/${character.maxHP}
@@ -993,25 +1007,66 @@ function buildRecentRollsBlock(rolls) {
  * ordinary proposal demands consistency (same check, not a reworded/re-priced one)
  * if the player retries; a set-aside of an upheld FINAL ruling still stands as-is,
  * so a retry cannot farm a fresh challenge or a re-adjudicated DC.
+ *
+ * Each rule is stated ONCE in the header — and only for the outcomes actually
+ * present — and each ruling is a data line (2026-09-22 roll-resolution P2):
+ * repeating the ~250-char instruction per line cost +3,157 chars at the
+ * ceiling (5 rulings) in the dynamic prompt half. The record keeps its
+ * 300-char challenge; the prompt line shows its head only.
  */
+const RULING_CHALLENGE_PROMPT_MAX = 120;
+const RULING_KINDS = ['withdrawn', 'set_aside', 'final'];
+const RULING_LABELS = { withdrawn: 'WITHDRAWN', set_aside: 'SET ASIDE', final: 'FINAL, SET ASIDE' };
+const RULING_RULES = {
+    withdrawn: '- WITHDRAWN: you WITHDREW the check after the player\'s challenge; that approach succeeds through roleplay without dice. Do not re-propose a check for the same objective unless the situation has materially changed.',
+    set_aside: '- SET ASIDE: the player chose a different approach; no dice were rolled. If they retry essentially the same approach, re-propose that SAME check unchanged — do not reword, escalate, or re-price it without a material change in the fiction.',
+    final: '- FINAL, SET ASIDE: your FINAL post-challenge ruling was set aside unrolled. If they retry essentially the same approach, that exact final ruling still applies — same check, same DC, and their one challenge is already spent. Do not re-adjudicate, reword, or re-price it.',
+};
+const rulingKind = (r) => (r.outcome === 'withdrawn' ? 'withdrawn' : r.finalRuling ? 'final' : 'set_aside');
+
 function buildRecentRulingsBlock(recentRulings) {
+    const kinds = new Set(recentRulings.map(rulingKind));
+    const rules = RULING_KINDS.filter(kind => kinds.has(kind)).map(kind => RULING_RULES[kind]);
     const lines = recentRulings.map(r => {
         const check = `${r.skill || 'check'}${r.dc != null ? ` DC ${r.dc}` : ''}`;
-        if (r.outcome === 'withdrawn') {
-            return `- You WITHDREW the proposed ${check} for "${r.objective}" after the player's challenge${r.challenge ? ` ("${r.challenge}")` : ''}. That ruling stands: this approach succeeds through roleplay without dice. Do not re-propose a check for the same objective unless the situation has materially changed.`;
-        }
-        if (r.finalRuling) {
-            return `- Your FINAL post-challenge ruling (${check}) for "${r.objective}" was set aside unrolled; the player changed approach. If they retry essentially the same approach, that exact final ruling still applies — same check, same DC, and their one challenge is already spent. Do not re-adjudicate, reword, or re-price it.`;
-        }
-        return `- The player SET ASIDE your proposed ${check} for "${r.objective}" and chose a different approach; no dice were rolled. If they retry essentially the same approach, re-propose that SAME check unchanged — do not reword, escalate, or re-price it without a material change in the fiction.`;
+        const challenge = String(r.challenge || '');
+        const shownChallenge = challenge.length > RULING_CHALLENGE_PROMPT_MAX
+            ? `${challenge.slice(0, RULING_CHALLENGE_PROMPT_MAX).trimEnd()}…`
+            : challenge;
+        return `- ${RULING_LABELS[rulingKind(r)]} · ${check} · "${r.objective}"${shownChallenge ? ` · challenge: "${shownChallenge}"` : ''}`;
     });
     return `## RECENT TABLE RULINGS — BINDING
-These out-of-combat check rulings were settled at this table within the last few scenes. Honor them; do not quietly re-litigate.
+Settled at this table within the last few scenes. Honor them; do not quietly re-litigate. Each line: OUTCOME · check · "objective" · the player's challenge, if any.
+${rules.join('\n')}
 ${lines.join('\n')}`;
 }
 
 function buildPremiseBlock(premise) {
     return `## CAMPAIGN PREMISE (the player's authored foundation — permanent canon, never contradict)\n${premise}`;
+}
+
+/**
+ * The hero's campaign-constant identity: name, gender, and the player-authored
+ * background. Ends the cached prefix right after the premise (the same kind of
+ * per-campaign constant — DECISIONS.md 2026-07-18, extended 2026-09-24). NEVER
+ * add live state here: one changed byte re-bills the whole prefix. Appearance
+ * is deliberately absent — the Scribe merges it during play, so it stays in the
+ * live PLAYER CHARACTER block. Same clamps the character block used (60 / 2000).
+ */
+function buildHeroIdentityBlock(character) {
+    if (!character || typeof character !== 'object') return '';
+    const name = cleanTextField(character.name, 60);
+    if (!name) return '';
+    const gender = cleanTextField(character.gender, 60);
+    const background = cleanTextField(character.background, 2000);
+    const genderLine = gender ? `\n- **Gender:** ${gender}` : '';
+    // Player-authored personal history: canon like the campaign premise, but it
+    // travels WITH the hero (roster/exports) rather than belonging to one campaign.
+    const backgroundLine = background
+        ? `\n- **Background (player-authored personal canon — honor it and weave it into the world; it is established history, not a hook you may contradict):** ${background}`
+        : '';
+    return `## HERO IDENTITY (who the player character is — constant for this campaign)
+- **Name:** ${name}${genderLine}${backgroundLine}`;
 }
 
 // "Solo" = no battle-ready companion (engine-owned isLowLevelSolo — DECISIONS.md 2026-07-17).

@@ -64,6 +64,14 @@ describe('sanitizeLivingWorldSession', () => {
         expect(sanitizeLivingWorldSession(null)).toBeNull();
     });
 
+    it('clamps the three beat cooldowns to the transcript when it knows its length, and only types them otherwise (2026-09-24 sweep)', () => {
+        const session = { id: 's1', lastWonderMessage: 1e9, lastHeroTellBeatMessage: '900', lastRelationshipBeatMessage: -3 };
+        expect(sanitizeLivingWorldSession(session, { maxMessageCount: 50 })).toEqual({ id: 's1', lastWonderMessage: 50, lastHeroTellBeatMessage: 50, lastRelationshipBeatMessage: 0 });
+        expect(sanitizeLivingWorldSession(session)).toEqual({ id: 's1', lastWonderMessage: 1e9, lastHeroTellBeatMessage: 900, lastRelationshipBeatMessage: 0 });
+        expect(sanitizeLivingWorldSession({ id: 's1', lastWonderMessage: 'x' }, { maxMessageCount: 50 })).toEqual({ id: 's1', lastWonderMessage: null });
+        expect(sanitizeLivingWorldSession({ id: 's1' }, { maxMessageCount: 50 })).not.toHaveProperty('lastWonderMessage');
+    });
+
     it('round-trips a healthy session byte-identically', () => {
         const session = {
             id: 's1',

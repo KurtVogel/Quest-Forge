@@ -99,12 +99,20 @@ function normalizeWitnesses(value) {
     return out;
 }
 
+/**
+ * A sighting's COUNT is semantic (three scenes make a pattern), so an
+ * out-of-range stamp is dropped, never clamped (2026-09-24 sweep): `[900,
+ * -2]` at a 50-row transcript used to load as two scenes at 50 and 0.
+ */
 function normalizeSightings(value, { maxMessageCount } = {}) {
     const list = Array.isArray(value) ? value : [];
     const out = [];
+    const ceiling = Number.isFinite(maxMessageCount) ? Math.max(0, Math.floor(maxMessageCount)) : Infinity;
     for (const raw of list) {
-        const stamp = finiteStamp(raw, maxMessageCount);
-        if (stamp === null || out.includes(stamp)) continue;
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 0 || n > ceiling) continue;
+        const stamp = Math.floor(n);
+        if (out.includes(stamp)) continue;
         out.push(stamp);
     }
     out.sort((a, b) => a - b);
@@ -129,6 +137,7 @@ export function normalizeHeroTell(raw, { maxMessageCount } = {}) {
     const first = finiteStamp(raw.firstSeenMessage, maxMessageCount);
     const last = finiteStamp(raw.lastSeenMessage, maxMessageCount);
     const voiced = finiteStamp(raw.lastVoicedMessage, maxMessageCount);
+    const beat = finiteStamp(raw.lastBeatMessage, maxMessageCount);
     const voicedCount = Number(raw.voicedCount);
     const absence = finiteStamp(raw.lastAbsenceRemarkMessage, maxMessageCount);
     const kind = normalizeHeroTellKind(raw.kind);
@@ -147,7 +156,14 @@ export function normalizeHeroTell(raw, { maxMessageCount } = {}) {
         sightings,
         firstSeenMessage: first ?? (sightings.length > 0 ? sightings[0] : null),
         lastSeenMessage: last ?? (sightings.length > 0 ? sightings[sightings.length - 1] : null),
+        // Two stamps on two keys (2026-09-24 sweep): `lastVoicedMessage` /
+        // `voicedCount` / `voicedBy` are the FICTION's — a character said it,
+        // the Scribe reported it, the sheet reads them. `lastBeatMessage` is
+        // the ENGINE's — the last remark window closed on this tell, whether
+        // or not the DM took the cue; it rotates the next pick and runs the
+        // cooldown and never reaches the sheet.
         lastVoicedMessage: voiced,
+        lastBeatMessage: beat,
         voicedCount: Number.isFinite(voicedCount) ? Math.max(0, Math.floor(voicedCount)) : 0,
     };
 }
@@ -187,11 +203,29 @@ export function isSameTell(a, b) {
     return containment(setA, setB) >= SAME_TELL_CONTAINMENT;
 }
 
+/**
+ * An `id` on a report is the Scribe's CLAIM that this is a held tell, and
+ * the KNOWN HERO TELLS line invites id reuse — so the claim is checked
+ * (2026-09-24 sweep, the `findStoryMemoryMatch` same-type rule): the kinds
+ * must agree, and the text must be the same pattern (the 0.8 floor) or at
+ * least touch it (a shorthand re-report — "the pipe again" — shares a
+ * meaningful token with the held wording; a bare reference with no
+ * meaningful token is taken on the id alone). "Pays the poor double" under
+ * the jokes tell's id is a NEW tell, not a fourth scene for the jokes.
+ */
+function idClaimHolds(held, candidate) {
+    if (normalizeHeroTellKind(held?.kind) !== normalizeHeroTellKind(candidate?.kind)) return false;
+    if (isSameTell(held, candidate)) return true;
+    const reported = tellTokens(text(candidate?.text).toLowerCase());
+    if (reported.size === 0) return true;
+    return containment(tellTokens(text(held?.text).toLowerCase()), reported) > 0;
+}
+
 export function findHeroTellMatch(tells = [], candidate = {}) {
     if (!Array.isArray(tells)) return -1;
     if (candidate?.id) {
         const byId = tells.findIndex(t => t && t.id === candidate.id);
-        if (byId !== -1) return byId;
+        if (byId !== -1 && idClaimHolds(tells[byId], candidate)) return byId;
     }
     return tells.findIndex(t => isSameTell(t, candidate));
 }
@@ -251,7 +285,14 @@ export function recordHeroTells(existing = [], reports = [], { messageCount } = 
         }
         const held = tells[idx];
         const lastSeen = Number.isFinite(held.lastSeenMessage) ? held.lastSeenMessage : -Infinity;
-        const newScene = sighted && now - lastSeen > HERO_TELL_SCENE_MESSAGES;
+        // A new SCENE is measured from the last accepted SIGHTING, never from
+        // the last report (2026-09-24 sweep P1): `lastSeenMessage` slides
+        // with every report for the fade, and judged against it a habit the
+        // Scribe re-reports every turn never left scene one. The sibling
+        // rule (`appendBondMoments`) measures from the held moment the same way.
+        const heldSightings = Array.isArray(held.sightings) ? held.sightings : [];
+        const lastSighting = heldSightings.length > 0 ? heldSightings[heldSightings.length - 1] : -Infinity;
+        const newScene = sighted && now - lastSighting > HERO_TELL_SCENE_MESSAGES;
         const witnesses = normalizeWitnesses([...(held.witnesses || []), ...report.witnesses]);
         const richer = report.text.length > (held.text || '').length && containment(tellTokens(held.text), tellTokens(report.text)) >= SAME_TELL_CONTAINMENT
             ? report.text
@@ -286,6 +327,32 @@ export function recordHeroTells(existing = [], reports = [], { messageCount } = 
         tells = tells.filter((_, i) => !drop.has(i));
     }
     return tells;
+}
+
+/**
+ * The reducer's preparation of one Scribe pass (2026-09-24 sweep): party
+ * companions are present by the game's own rule, so they WITNESS every
+ * non-intimate sighting whether or not the Scribe named them (an intimate
+ * tell's witnesses stay exactly the partner(s)); whoever NAMED a pattern
+ * aloud has, by the fiction, seen it, so a `voicedBy` is a witness too. A
+ * report left with no witness at all is dropped — a witness-less tell
+ * could never render, mint, or travel and only spent a slot.
+ */
+export function prepareHeroTellReports(reports = [], { partyNames = [] } = {}) {
+    const party = normalizeWitnesses(partyNames);
+    const out = [];
+    for (const report of (Array.isArray(reports) ? reports : [])) {
+        if (!report || typeof report !== 'object' || Array.isArray(report)) continue;
+        const intimate = normalizeHeroTellKind(report.kind) === 'intimate';
+        const witnesses = normalizeWitnesses([
+            ...(Array.isArray(report.witnesses) ? report.witnesses : (typeof report.witnesses === 'string' ? [report.witnesses] : [])),
+            ...(report.voiced === true ? normalizeWitnesses(report.voicedBy) : []),
+            ...(intimate ? [] : party),
+        ]);
+        if (witnesses.length === 0) continue;
+        out.push({ ...report, witnesses });
+    }
+    return out;
 }
 
 export function establishScenesFor(tell) {
@@ -343,7 +410,9 @@ export function listVoicedTells(tells = []) {
             kind: normalizeHeroTellKind(t.kind),
             intimate: isIntimateTell(t),
             dormant: !!t.dormant,
-            saidBy: Array.isArray(t.voicedBy) && t.voicedBy.length > 0 ? t.voicedBy : (t.witnesses || []).slice(0, 1),
+            // The fiction's stamp only: a Scribe `voiced` report without a
+            // speaker reads "said aloud", never a guessed witness.
+            saidBy: Array.isArray(t.voicedBy) ? t.voicedBy : [],
             lastVoicedMessage: Number.isFinite(t.lastVoicedMessage) ? t.lastVoicedMessage : null,
         }))
         .sort((a, b) => (b.lastVoicedMessage || 0) - (a.lastVoicedMessage || 0));
@@ -393,10 +462,20 @@ export function listVoiceableTells(tells = [], { presentNames = [], messages = n
 // The pointed remark: an engine-rolled window (the relationship-beat pattern)
 // ---------------------------------------------------------------------------
 
+/** The later of the fiction's voice and the engine's last closed window: what the rotation and the cooldown key on. */
+export function lastRemarkMessage(tell) {
+    const voiced = Number.isFinite(tell?.lastVoicedMessage) ? tell.lastVoicedMessage : null;
+    const beat = Number.isFinite(tell?.lastBeatMessage) ? tell.lastBeatMessage : null;
+    if (voiced === null) return beat;
+    if (beat === null) return voiced;
+    return Math.max(voiced, beat);
+}
+
 /**
  * The one tell that may become a MOMENT next: live, witnessed by someone on
- * the roster, never voiced first, then the longest since it was voiced,
- * then the most-seen. Pure selection — the reducer rolls the timing.
+ * the roster, never remarked on first (no fiction voice, no closed window),
+ * then the longest since, then the most-seen. Pure selection — the reducer
+ * rolls the timing.
  */
 export function selectHeroTellCandidate(tells = [], npcs = [], { messages = null, messageCount } = {}) {
     const roster = (Array.isArray(npcs) ? npcs : []).filter(n => n && typeof n === 'object' && text(n.name)
@@ -406,7 +485,7 @@ export function selectHeroTellCandidate(tells = [], npcs = [], { messages = null
         if (!isHeroTellLive(tell, { messages, messageCount })) continue;
         const witnesses = (tell.witnesses || []).filter(w => roster.some(n => namesMatch(n.name, w)));
         if (witnesses.length === 0) continue;
-        const sinceVoiced = distanceFrom(tell.lastVoicedMessage, { messages, messageCount });
+        const sinceVoiced = distanceFrom(lastRemarkMessage(tell), { messages, messageCount });
         if (sinceVoiced !== null && sinceVoiced < HERO_TELL_BEAT_COOLDOWN_MESSAGES) continue;
         const pull = (sinceVoiced === null ? 10 : Math.min(6, sinceVoiced / 40))
             + Math.min(3, tell.sightings?.length || 0)
@@ -484,11 +563,13 @@ export function isHeroTellBeatExpired(beat, messageCount) {
 }
 
 /**
- * The cadence's expiry stamp at the window's opening. A remark window
- * stamps the tell voiced ONLY when the fiction did not already (a Scribe
- * `voiced` report inside the window stamps the exact turn and closes the
- * beat; the assumption is the fallback). An absence window stamps
- * `lastAbsenceRemarkMessage` and never counts as a voice.
+ * The cadence's expiry stamp at the window's CLOSE. A remark window that
+ * closed unvoiced stamps the ENGINE's key only (`lastBeatMessage`: the cue
+ * was on the DM's desk, so the pick rotates and the cooldown runs) and
+ * never the fiction's — nothing was said on record, so nothing reaches the
+ * sheet (2026-09-24 sweep). A window the fiction already spent (a Scribe
+ * `voiced` report at or after the mint) is left as it is. An absence
+ * window stamps `lastAbsenceRemarkMessage` and never counts as a voice.
  */
 export function stampTellVoiced(tells = [], beat) {
     const b = sanitizeHeroTellBeat(beat);
@@ -499,18 +580,21 @@ export function stampTellVoiced(tells = [], beat) {
     if (b.mode === 'absence') {
         return tells.map((t, i) => (i === idx ? { ...held, lastAbsenceRemarkMessage: b.opensAtMessage } : t));
     }
-    if (Number.isFinite(held.lastVoicedMessage) && held.lastVoicedMessage >= b.opensAtMessage) return tells;
-    return tells.map((t, i) => (i === idx
-        ? { ...held, lastVoicedMessage: b.opensAtMessage, voicedCount: (held.voicedCount || 0) + 1 }
-        : t));
+    if (beatVoicedByFiction(b, tells)) return tells;
+    return tells.map((t, i) => (i === idx ? { ...held, lastBeatMessage: b.closesAtMessage } : t));
 }
 
-/** Did the fiction voice this beat's tell since its window opened? (the reducer closes the beat) */
+/**
+ * Did the fiction voice this beat's tell since the beat was MINTED? (the
+ * reducer closes the beat, the render skips the cue). The mint, not the
+ * opening: a remark said during a delayed window's wait already spent it —
+ * cueing the same line again at the opening was the 2026-09-24 finding.
+ */
 export function beatVoicedByFiction(beat, tells = []) {
     const b = sanitizeHeroTellBeat(beat);
     if (!b || b.mode !== 'remark') return false;
     const tell = (Array.isArray(tells) ? tells : []).find(t => t && t.id === b.tellId);
-    return !!tell && Number.isFinite(tell.lastVoicedMessage) && tell.lastVoicedMessage >= b.opensAtMessage;
+    return !!tell && Number.isFinite(tell.lastVoicedMessage) && tell.lastVoicedMessage >= b.mintedAtMessage;
 }
 
 const KIND_LABELS = {
@@ -526,21 +610,30 @@ function describeTell(tell, witnesses) {
 }
 
 /**
- * The standing knowledge line: what the people in THIS scene have noticed
- * about the hero. Background the characters may draw on in their own
- * register — a tease, an aside, a worry — never narrator fact, never more
- * than a touch. Empty when nobody present has seen a pattern.
+ * The standing rule for the block below — STATIC, so the prompt builder
+ * puts it in the cached prefix beside CRITICAL RULE 9 (2026-09-24 sweep:
+ * the ~860-char paragraph used to ride the dynamic half on every turn a
+ * witness was present). The block itself carries lines only.
+ */
+export const HERO_TELLS_STANDING_RULE = `**WHAT THEY HAVE NOTICED ABOUT THE HERO.** When a section of that name is present, it lists patterns in the hero's MANNER that the characters in the scene have watched form, each with the witnesses who know it. This is what these people KNOW of the hero's ways. They may draw on it in their own register — an aside, a tease, an in-joke, a raised eyebrow, a serious question — sparingly, when the scene touches it, never as a list and never more than a touch per scene. It is always THEIR reading of the hero, said or shown in fiction; the narrator never states the hero's feelings or motives as fact, and the hero may confirm, deny, or laugh it off. A character who did not witness a pattern does not know it. A tell marked intimate is spoken of only by the partner who knows it and only where the two are private or in a look or phrase only they would understand — never before others, never crudely, and never to shame.`;
+
+/** The block's byte ceiling: header + intro + HERO_TELL_PROMPT_CAP lines at every cap (text, label, 8 witnesses). */
+export const HERO_TELLS_BLOCK_CHAR_CEILING = 4800;
+
+/**
+ * The standing knowledge lines: what the people in THIS scene have noticed
+ * about the hero, one line per tell with its present witnesses. The rule on
+ * how to use them lives in the cached prefix (HERO_TELLS_STANDING_RULE).
+ * Empty when nobody present has seen a pattern.
  */
 export function buildHeroTellsBlock(tells = [], { presentNames = [], messages = null, messageCount, combatActive = false } = {}) {
     if (combatActive) return '';
     const voiceable = listVoiceableTells(tells, { presentNames, messages, messageCount });
     if (voiceable.length === 0) return '';
     const lines = voiceable.map(({ tell, witnesses }) => describeTell(tell, witnesses));
-    const hasIntimate = voiceable.some(({ tell }) => isIntimateTell(tell));
     return `## WHAT THEY HAVE NOTICED ABOUT THE HERO — PRIVATE
-Patterns the characters present have watched form (only the named witnesses know each one):
-${lines.join('\n')}
-This is what these people KNOW of the hero's ways. They may draw on it in their own register — an aside, a tease, an in-joke, a raised eyebrow, a serious question — sparingly, when the scene touches it, never as a list and never more than a touch per scene. It is always THEIR reading of the hero, said or shown in fiction; the narrator never states the hero's feelings or motives as fact, and the hero may confirm, deny, or laugh it off. A character who did not witness a pattern does not know it.${hasIntimate ? ' An intimate tell is spoken of only by the partner who knows it and only where the two are private or in a look or phrase only they would understand — never before others, never crudely, and never to shame.' : ''}`;
+Patterns the characters present have watched form (only the named witnesses know each one; the standing rule applies):
+${lines.join('\n')}`;
 }
 
 /**
@@ -555,6 +648,9 @@ export function buildHeroTellBeatBlock(beat, tells = [], { presentNames = [], me
     if (!tell) return '';
     const absence = b.mode === 'absence';
     if (absence ? !isHeroTellFaded(tell, { messages, messageCount }) : !isHeroTellLive(tell, { messages, messageCount })) return '';
+    // Re-judged at render like the tempo card: a remark the fiction already
+    // said since the mint is spent even if the beat is still on the session.
+    if (!absence && beatVoicedByFiction(b, tells)) return '';
     const present = (Array.isArray(presentNames) ? presentNames : []).map(n => text(n)).filter(Boolean);
     const witnesses = b.witnesses.filter(w => present.some(name => namesMatch(name, w)));
     if (witnesses.length === 0) return '';

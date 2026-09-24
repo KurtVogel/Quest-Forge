@@ -203,9 +203,10 @@ export function createTurnRunner({
     /**
      * Build the system prompt from current state, with optional RAG memories injected.
      */
-    const buildCurrentSystemPrompt = (retrievedMemories = [], storyMemory = [], recallRecord = '') => {
+    const buildCurrentSystemPrompt = (retrievedMemories = [], storyMemory = [], recallRecord = '', { narrationOnly = false } = {}) => {
         const s = getState();
         return buildSystemPrompt({
+            narrationOnly,
             recallRecord,
             character: s.character,
             inventory: s.inventory,
@@ -279,6 +280,9 @@ export function createTurnRunner({
      * @param {object} [opts]
      * @param {boolean} [opts.skipMemories] - skip ONLY the retrieval stage (the
      *   blocking query-embed round-trip) while keeping the arbiter and detectors.
+     * @param {boolean} [opts.combatNarration] - the combat narration lane (with
+     *   `narrationOnly`): builds the system prompt without the quest / facts /
+     *   history / inventory blocks (2026-09-23 combat-exchange P2).
      */
     const sendToLLM = async (userMessage, originalPlayerMessage, opts = {}) => {
         // Per-call semantics: a call that commits nothing (combat intent,
@@ -361,7 +365,11 @@ export function createTurnRunner({
         }
 
         const recallRecord = recallDossier ? buildRecallRecordBlock(recallDossier, recallIntent.question) : '';
-        const baseSystemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories, recallRecord);
+        // Combat narration retells committed RESOLVED EVENTS: the quest / facts
+        // / history / inventory blocks are dead weight there (2026-09-23 P2).
+        const baseSystemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories, recallRecord, {
+            narrationOnly: !!opts.combatNarration,
+        });
         let systemPrompt = baseSystemPrompt;
         if (opts.combatIntentOnly) {
             systemPrompt = `${baseSystemPrompt}\n\n## CURRENT RESPONSE MODE — COMBAT INTENT ONLY

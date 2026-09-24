@@ -553,3 +553,23 @@ describe('inventory flags are typed on import (2026-09-12 character-vault + inve
         expect(inventory[2].damage).toBeUndefined();
     });
 });
+
+describe('portrait provider rides the hero file like portraitUpdatedAt (2026-09-24 character-vault Lap-1 spill)', () => {
+    it('a roster or imported hero keeps the non-xAI fallback label the sheet shows', () => {
+        const { character, inventory } = makeFighter();
+        const portraitUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+        const imported = parseCharacterExport(JSON.stringify(buildCharacterExport({
+            ...character, portraitUrl, portraitProvider: 'gemini', portraitUpdatedAt: 12345,
+        }, inventory)));
+        expect(imported.character.portraitProvider).toBe('gemini');
+        // The begin-from-roster path re-sanitizes the stored record: same allowlist.
+        expect(sanitizeCharacter(imported.character).portraitProvider).toBe('gemini');
+    });
+
+    it('types the label like the load heal: string-or-empty, 40 chars', () => {
+        const { character } = makeFighter();
+        expect(sanitizeCharacter({ ...character, portraitProvider: { name: 'gemini' } }).portraitProvider).toBe('');
+        expect(sanitizeCharacter({ ...character }).portraitProvider).toBe('');
+        expect(sanitizeCharacter({ ...character, portraitProvider: '  p'.repeat(40) }).portraitProvider).toHaveLength(40);
+    });
+});

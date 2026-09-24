@@ -1,13 +1,49 @@
-import { collection, doc, getDoc, getDocs, runTransaction } from "firebase/firestore";
-import { db } from "../config/firebase.js";
+import { db, firestoreSdk } from "../config/firebase.js";
 import { asSaveObject, serializeGameState, buildSaveMetadata, projectSaveMetadata } from "./persistence.js";
-import { fitPortraitsToBudget } from "./portraitStore.js";
+import { collectPortraitRefs, extractPortraits, restorePortraits } from "./portraitStore.js";
 
 /**
  * Cloud save layer (bring-your-own Firebase, manual saves only).
  * Mirrors persistence.js: both paths persist the SAME serialized state via
  * serializeGameState(), so a field cannot exist in one save format and not the other.
+ *
+ * No static `firebase/firestore` import (2026-09-22 audit P2): the SDK is
+ * loaded by `initializeFirebase` and read through `firestoreSdk`, which is
+ * non-null exactly when `db` is — the `!db` guard on every function therefore
+ * also guarantees the module is present.
  */
+
+/**
+ * Portrait bytes live in their own content-addressed collection,
+ * `users/{uid}/portraits/{key}` — the cloud twin of the DB-v4 local split
+ * (2026-09-22 audit P2). A manual save used to re-upload every portrait inline
+ * on every save (12 NPC portraits = 2.38 MiB per save, 47 % portraits, 9 chunk
+ * docs; 100 = over budget and dropped). Now the payload carries `portraitRef`s
+ * (`extractPortraits`), the metadata doc lists the slot's `portraitRefs`, a
+ * blob doc is written only when NO slot's metadata already claims its key
+ * (metadata is what the list reads anyway — a `getDoc` probe would download
+ * the blob just to learn it exists), and a load fetches one blob doc per ref
+ * (`restorePortraits`). A key released by an overwrite or a delete is swept
+ * after the commit when no other slot still claims it. Each blob doc holds one
+ * portrait (≤ `MAX_PORTRAIT_URL_LENGTH` 300k ASCII chars), far under the 1 MiB
+ * document cap, and blobs ride outside the save transaction so the 9 MiB
+ * request ceiling meters the campaign, never its pictures. A missing blob is a
+ * missing picture, never a failed load; a pre-split inline payload loads as-is.
+ */
+const PORTRAIT_KEY_PATTERN = /^p-[0-9a-z]{1,8}-[0-9a-z]{1,8}-[0-9a-z]{1,8}$/;
+/** Most refs a metadata doc is trusted for (a save is ≤ ~100 portraits in practice). */
+const MAX_PORTRAIT_REFS = 512;
+
+/** The refs a metadata doc claims, typed: well-formed keys only, deduped, bounded. */
+function typedPortraitRefs(value) {
+    if (!Array.isArray(value)) return [];
+    const refs = new Set();
+    for (const ref of value) {
+        if (refs.size >= MAX_PORTRAIT_REFS) break;
+        if (typeof ref === 'string' && PORTRAIT_KEY_PATTERN.test(ref)) refs.add(ref);
+    }
+    return [...refs];
+}
 
 /**
  * LEGACY-DATA GUARDS. Nothing writes the autosave slot to the cloud anymore
@@ -64,9 +100,10 @@ const CHUNK_CHAR_LIMIT = 300000;
 export const CLOUD_SAVE_BYTE_LIMIT = 9 * 1024 * 1024;
 
 const CLOUD_RULES_HINT =
-    "Every save's payload is stored in a `chunks` subcollection. If your Firebase " +
-    "project's firestore.rules predate that, redeploy the repo's firestore.rules " +
-    "(match /users/{userId}/saves/{saveId}/chunks/{chunkId}).";
+    "Every save's payload is stored in a `chunks` subcollection and its portraits in a " +
+    "`portraits` collection. If your Firebase project's firestore.rules predate that, " +
+    "redeploy the repo's firestore.rules (match /users/{userId}/saves/{saveId}/chunks/{chunkId} " +
+    "and match /users/{userId}/portraits/{portraitId}).";
 
 const formatMiB = (bytes) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
@@ -92,13 +129,62 @@ function splitPayload(payload) {
 }
 
 function chunksCollection(uid, slotId) {
-    return collection(db, `users/${uid}/saves/${cloudDocId(slotId)}/chunks`);
+    return firestoreSdk.collection(db, `users/${uid}/saves/${cloudDocId(slotId)}/chunks`);
+}
+
+function portraitDoc(uid, key) {
+    return firestoreSdk.doc(firestoreSdk.collection(db, `users/${uid}/portraits`), key);
+}
+
+/** Every portrait key some save slot's metadata still claims (metadata-only read). */
+async function claimedPortraitRefs(uid) {
+    const { collection, getDocs } = firestoreSdk;
+    const snapshot = await getDocs(collection(db, `users/${uid}/saves`));
+    const claimed = new Set();
+    snapshot.forEach((saveDoc) => {
+        typedPortraitRefs(saveDoc.data()?.portraitRefs).forEach(ref => claimed.add(ref));
+    });
+    return claimed;
 }
 
 /**
- * Result shape: `{ ok: true }` (plus `droppedPortraits` + `note` when the
- * portrait budget had to drop NPC pictures to fit — 2026-09-21) or
- * `{ ok: false, reason, message }`, where
+ * Write the blobs no slot's metadata claims yet. Runs BEFORE the save
+ * transaction so the metadata never names a blob that is not there; a blob
+ * left behind by a failed commit is content-addressed and simply reused.
+ * Returns the number of blob docs written.
+ */
+async function ensurePortraitBlobs(uid, blobs, claimed) {
+    const { setDoc } = firestoreSdk;
+    const missing = [...blobs].filter(([key]) => !claimed.has(key));
+    await Promise.all(missing.map(([key, data]) =>
+        setDoc(portraitDoc(uid, key), { data, chars: data.length, createdAt: new Date().toISOString() })));
+    return missing.length;
+}
+
+/**
+ * Delete the released blobs no slot claims any more. Best-effort and AFTER
+ * the commit that released them: a sweep failure leaves an orphan blob
+ * (harmless, reused if the picture returns), never a failed save or delete.
+ * Reads metadata only. Returns the number of blob docs removed.
+ */
+async function sweepReleasedPortraits(uid, releasedRefs) {
+    if (releasedRefs.length === 0) return 0;
+    try {
+        const claimed = await claimedPortraitRefs(uid);
+        const orphans = releasedRefs.filter(ref => !claimed.has(ref));
+        await Promise.all(orphans.map(ref => firestoreSdk.deleteDoc(portraitDoc(uid, ref))));
+        return orphans.length;
+    } catch (e) {
+        console.warn('Cloud portrait sweep skipped:', e);
+        return 0;
+    }
+}
+
+/**
+ * Result shape: `{ ok: true, portraitsUploaded }` (blob docs written this
+ * save — 0 on a steady-state save, since portraits ride their own collection
+ * since 2026-09-22; the 2026-09-21 `droppedPortraits` budget note is retired
+ * with the inline portraits it described) or `{ ok: false, reason, message }`, where
  * `message` is player-readable and `reason` is one of
  * `unavailable` (no Firebase configured) · `signed-out` · `too-large`
  * (pre-flight, Firestore never called) · `permission-denied` · `error`.
@@ -111,6 +197,7 @@ export async function saveGameToCloud(uid, slotId, gameState) {
     if (!uid) return { ok: false, reason: 'signed-out', message: 'Sign in with Google before saving to the cloud.' };
 
     try {
+        const { collection, doc, runTransaction } = firestoreSdk;
         const userSavesRef = collection(db, `users/${uid}/saves`);
         const saveDocRef = doc(userSavesRef, cloudDocId(slotId));
 
@@ -119,16 +206,19 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         const messages = gameState.messages || [];
         // `m?.` belt: a null entry in live state must not brick every cloud save.
         const prunedMessageCount = messages.filter(m => m?.summarized).length;
-        const trimmedState = {
+        // Portrait bytes leave the payload here (2026-09-22): refs in the
+        // state, blobs to their own collection, the ref list on the metadata.
+        const { state: trimmedState, blobs, refs } = extractPortraits({
             ...serializeGameState(gameState),
             session: { ...gameState.session, prunedMessageCount },
-        };
+        });
 
         const metadata = {
             slotId,
             ...buildSaveMetadata(gameState),
             savedAt: new Date().toISOString(),
             messageCount: messages.length,
+            portraitRefs: refs,
         };
 
         // The state is stored as a stringified JSON blob (avoids Firestore's
@@ -138,26 +228,12 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // read never download payload bytes (2026-08-04; this also deleted the
         // old inline/chunked dual write path). Legacy inline docs still load
         // via the payload fallback in loadGameFromCloud until re-saved.
-        let payload = JSON.stringify(trimmedState);
-        let byteLength = payloadByteLength(payload);
-
-        // Portrait budget (2026-09-21 P1): the cloud payload carries portraits
-        // inline (another device has no local blob store), and 100 of them
-        // alone exceeded the ceiling — the whole campaign was refused for its
-        // pictures. Drop NPC portraits oldest-first until it fits, and say so;
-        // the local save keeps every one of them.
-        let droppedPortraits = 0;
-        if (byteLength > CLOUD_SAVE_BYTE_LIMIT) {
-            const fitted = fitPortraitsToBudget(trimmedState, byteLength, CLOUD_SAVE_BYTE_LIMIT);
-            if (fitted.dropped > 0) {
-                droppedPortraits = fitted.dropped;
-                payload = JSON.stringify(fitted.state);
-                byteLength = payloadByteLength(payload);
-            }
-        }
+        const payload = JSON.stringify(trimmedState);
+        const byteLength = payloadByteLength(payload);
 
         // Pre-flight: refuse before touching Firestore when the campaign has
         // outgrown one transaction request, with a message that says what to do.
+        // Portraits no longer count: they ride their own collection.
         if (byteLength > CLOUD_SAVE_BYTE_LIMIT) {
             const message =
                 `This campaign's save is ${formatMiB(byteLength)}, above the cloud limit of ` +
@@ -169,6 +245,13 @@ export async function saveGameToCloud(uid, slotId, gameState) {
 
         const chunks = splitPayload(payload);
 
+        // Blobs first, only the ones no slot claims yet (a steady-state save
+        // uploads zero portrait bytes), so the metadata written below never
+        // names a blob that is not there.
+        const portraitsUploaded = blobs.size > 0
+            ? await ensurePortraitBlobs(uid, blobs, await claimedPortraitRefs(uid))
+            : 0;
+
         // The previous save's chunk count is read INSIDE the transaction: two
         // devices saving the same slot near-simultaneously (Vesa's multi-machine
         // workflow) could otherwise both read a stale payloadChunks and race on
@@ -176,9 +259,12 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // the transaction on contention, so the stale-chunk sweep always matches
         // the state actually being overwritten. (Size-wise a transaction carries
         // the same ~10 MiB request ceiling the previous writeBatch had.)
+        let previousRefs = [];
         await runTransaction(db, async (transaction) => {
             const existingSnap = await transaction.get(saveDocRef);
-            const previousChunkCount = existingSnap.exists() ? boundedChunkCount(existingSnap.data()?.payloadChunks) : 0;
+            const existing = existingSnap.exists() ? existingSnap.data() : null;
+            const previousChunkCount = boundedChunkCount(existing?.payloadChunks);
+            previousRefs = typedPortraitRefs(existing?.portraitRefs);
             transaction.set(saveDocRef, { ...metadata, payload: null, payloadChunks: chunks.length });
             chunks.forEach((data, index) => {
                 transaction.set(doc(chunksCollection(uid, slotId), String(index)), { index, data });
@@ -188,16 +274,13 @@ export async function saveGameToCloud(uid, slotId, gameState) {
             }
         });
 
-        console.log(`Cloud save successful: ${slotId} (${payload.length} chars, ${chunks.length} chunk${chunks.length === 1 ? '' : 's'})`);
-        if (droppedPortraits > 0) {
-            return {
-                ok: true,
-                droppedPortraits,
-                note: `The cloud copy left out the ${droppedPortraits} oldest character portrait${droppedPortraits === 1 ? '' : 's'} to fit the ` +
-                    `${formatMiB(CLOUD_SAVE_BYTE_LIMIT)} cloud limit — this device keeps them all.`,
-            };
-        }
-        return { ok: true };
+        // A ref this slot released (a rerolled or removed portrait) is swept
+        // once nothing else claims it — after the commit, never inside it.
+        const kept = new Set(refs);
+        await sweepReleasedPortraits(uid, previousRefs.filter(ref => !kept.has(ref)));
+
+        console.log(`Cloud save successful: ${slotId} (${payload.length} chars, ${chunks.length} chunk${chunks.length === 1 ? '' : 's'}, ${portraitsUploaded} portrait${portraitsUploaded === 1 ? '' : 's'} uploaded)`);
+        return { ok: true, portraitsUploaded };
     } catch (e) {
         console.error("Cloud save failed:", e);
         if (e?.code === 'permission-denied') {
@@ -216,10 +299,33 @@ export async function saveGameToCloud(uid, slotId, gameState) {
     }
 }
 
+/**
+ * Rehydrate every `portraitRef` from the blob collection — one `getDoc` per
+ * ref, in parallel — before the state leaves this module, so LOAD_GAME never
+ * sees a ref. A blob that is missing or unreadable is a missing picture
+ * (`restorePortraits` strips the stamps), never a failed load.
+ */
+async function rehydratePortraits(uid, state) {
+    const refs = collectPortraitRefs(state);
+    if (refs.length === 0) return state;
+    const found = new Map();
+    await Promise.all(refs.map(async (ref) => {
+        try {
+            const snap = await firestoreSdk.getDoc(portraitDoc(uid, ref));
+            const data = snap.exists() ? snap.data()?.data : null;
+            if (typeof data === 'string') found.set(ref, data);
+        } catch (e) {
+            console.warn(`Cloud portrait ${ref} could not be fetched:`, e);
+        }
+    }));
+    return restorePortraits(state, key => found.get(key));
+}
+
 export async function loadGameFromCloud(uid, slotId) {
     if (!db || !uid) return null;
 
     try {
+        const { collection, doc, getDoc, getDocs } = firestoreSdk;
         const userSavesRef = collection(db, `users/${uid}/saves`);
         const saveDocRef = doc(userSavesRef, cloudDocId(slotId));
 
@@ -244,12 +350,14 @@ export async function loadGameFromCloud(uid, slotId) {
                 }
             }
             console.log(`Cloud load successful: ${slotId} (${data.payloadChunks} chunks)`);
-            return asSaveObject(JSON.parse(chunks.slice(0, data.payloadChunks).join('')));
+            const saved = asSaveObject(JSON.parse(chunks.slice(0, data.payloadChunks).join('')));
+            return saved ? rehydratePortraits(uid, saved) : null;
         }
 
         if (data.payload) {
             console.log(`Cloud load successful: ${slotId}`);
-            return asSaveObject(JSON.parse(data.payload));
+            const saved = asSaveObject(JSON.parse(data.payload));
+            return saved ? rehydratePortraits(uid, saved) : null;
         }
         return null;
     } catch (e) {
@@ -262,6 +370,7 @@ export async function listCloudSaves(uid) {
     if (!db || !uid) return [];
 
     try {
+        const { collection, getDocs } = firestoreSdk;
         const userSavesRef = collection(db, `users/${uid}/saves`);
         const snapshot = await getDocs(userSavesRef);
         const saves = [];
@@ -289,6 +398,7 @@ export async function deleteGameFromCloud(uid, slotId) {
     if (!db || !uid || !slotId) return false;
 
     try {
+        const { collection, doc, runTransaction } = firestoreSdk;
         const userSavesRef = collection(db, `users/${uid}/saves`);
         const saveDocRef = doc(userSavesRef, cloudDocId(slotId));
 
@@ -297,16 +407,22 @@ export async function deleteGameFromCloud(uid, slotId) {
         // that reuses the slot with a smaller chunk count). Remove them explicitly,
         // reading the chunk count inside the transaction so a concurrent save from
         // another device cannot leave the sweep working from a stale count.
+        let releasedRefs = [];
         await runTransaction(db, async (transaction) => {
             const existingSnap = await transaction.get(saveDocRef);
-            const chunkCount = existingSnap.exists() ? boundedChunkCount(existingSnap.data()?.payloadChunks) : 0;
+            const existing = existingSnap.exists() ? existingSnap.data() : null;
+            const chunkCount = boundedChunkCount(existing?.payloadChunks);
+            releasedRefs = typedPortraitRefs(existing?.portraitRefs);
             for (let i = 0; i < chunkCount; i++) {
                 transaction.delete(doc(chunksCollection(uid, slotId), String(i)));
             }
             transaction.delete(saveDocRef);
         });
 
-        console.log(`Cloud delete successful: ${slotId}`);
+        // The slot's portraits go too, unless another slot still shows them.
+        const swept = await sweepReleasedPortraits(uid, releasedRefs);
+
+        console.log(`Cloud delete successful: ${slotId}${swept ? ` (${swept} portrait${swept === 1 ? '' : 's'} swept)` : ''}`);
         return true;
     } catch (e) {
         console.error("Cloud delete failed:", e);

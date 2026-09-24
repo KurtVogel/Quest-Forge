@@ -10,6 +10,7 @@ import {
     beatVoicedByFiction,
     isHeroTellBeatExpired,
     mintHeroTellBeat,
+    prepareHeroTellReports,
     recordHeroTells,
     sanitizeHeroTellBeat,
     selectAbsenceTellCandidate,
@@ -19,12 +20,15 @@ import {
 } from '../../engine/heroTells.js';
 
 /**
- * The cadence tick. An expired window stamps its tell as voiced (the cue
- * was on the DM's desk for the whole window — whether it landed is the
- * fiction's business; the stamp only rotates which tell comes next and
- * starts the cooldown). A pending unexpired beat blocks a new mint; so does
- * the cooldown since the last mint. The delay is an engine-rolled crypto
- * die of 0–4 scenes. Returns `{ session, heroTells }`.
+ * The cadence tick. An expired window stamps its tell's `lastBeatMessage`
+ * (the cue was on the DM's desk for the whole window — whether it landed
+ * is the fiction's business, reported by the Scribe on its own keys; the
+ * engine stamp only rotates which tell comes next). A pending unexpired
+ * beat blocks a new mint; so does the cooldown, which runs from the last
+ * window's CLOSE or the fiction's voice, never from the mint (2026-09-24
+ * sweep: a delayed window outlived a mint-stamped cooldown and the same
+ * tell was cued back to back). The delay is an engine-rolled crypto die of
+ * 0–4 scenes. Returns `{ session, heroTells }`.
  */
 export function rollHeroTellBeat(state, { roll = () => rollDie(BEAT_TIMING_DIE_SIDES) - 1 } = {}) {
     let session = state.session || {};
@@ -35,7 +39,7 @@ export function rollHeroTellBeat(state, { roll = () => rollDie(BEAT_TIMING_DIE_S
     if (current && !isHeroTellBeatExpired(current, messageCount)) return { session, heroTells };
     if (current) {
         heroTells = stampTellVoiced(heroTells, current);
-        session = { ...session, heroTellBeat: null };
+        session = { ...session, heroTellBeat: null, lastHeroTellBeatMessage: current.closesAtMessage };
     } else if (session.heroTellBeat) {
         // A malformed stored beat is junk: drop it rather than carry it.
         session = { ...session, heroTellBeat: null };
@@ -49,21 +53,29 @@ export function rollHeroTellBeat(state, { roll = () => rollDie(BEAT_TIMING_DIE_S
     if (!candidate) return { session, heroTells };
     const beat = mintHeroTellBeat(candidate, { messageCount, delayScenes: roll() });
     if (!beat) return { session, heroTells };
-    return { session: { ...session, heroTellBeat: beat, lastHeroTellBeatMessage: messageCount }, heroTells };
+    return { session: { ...session, heroTellBeat: beat }, heroTells };
 }
 
 export const handlers = {
-    /** The Scribe's sightings for this turn (capped and merged by the engine). */
+    /**
+     * The Scribe's sightings for this turn (capped and merged by the engine).
+     * Party companions witness every non-intimate sighting — present by the
+     * game's own rule, the same one that makes them "always present" for
+     * voicing — and a report with no witness at all is dropped.
+     */
     ADD_HERO_TELLS(state, action) {
-        const reports = Array.isArray(action.payload) ? action.payload : [];
+        const partyNames = (Array.isArray(state.party) ? state.party : []).map(c => c?.name).filter(Boolean);
+        const reports = prepareHeroTellReports(Array.isArray(action.payload) ? action.payload : [], { partyNames });
         if (reports.length === 0) return state;
         const existing = Array.isArray(state.heroTells) ? state.heroTells : [];
-        const heroTells = recordHeroTells(existing, reports, { messageCount: (state.messages || []).length });
+        const messageCount = (state.messages || []).length;
+        const heroTells = recordHeroTells(existing, reports, { messageCount });
         if (heroTells === existing) return state;
         // Voiced by the fiction (slice 3): a character said the open beat's
-        // tell aloud — the window is spent, the exact turn is stamped.
+        // tell aloud — the window is spent, the exact turn is stamped, and
+        // the cooldown runs from the voice.
         const session = beatVoicedByFiction(state.session?.heroTellBeat, heroTells)
-            ? { ...state.session, heroTellBeat: null }
+            ? { ...state.session, heroTellBeat: null, lastHeroTellBeatMessage: messageCount }
             : state.session;
         return { ...state, heroTells, session };
     },

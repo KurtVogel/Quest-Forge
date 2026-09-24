@@ -13,6 +13,13 @@ service cloud.firestore {
       }
     }
 
+    // Portrait blobs are content-addressed and shared by every save slot that
+    // shows them (one doc per portrait, written only when absent — see
+    // cloudSync.js, 2026-09-22). Each save's metadata lists its portraitRefs.
+    match /users/{userId}/portraits/{portraitId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
     // Deny everything else by default
     match /{document=**} {
       allow read, write: if false;

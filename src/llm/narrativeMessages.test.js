@@ -71,3 +71,25 @@ describe('kind: "record" receipt lines (recall dossier, 2026-09-18)', () => {
         expect(buildPresenceText(messages)).not.toContain('📜');
     });
 });
+
+describe('combat-exchange dice lines (`exchangeLine`, 2026-09-23 combat-exchange P1)', () => {
+    const fight = [
+        { id: 'u1', role: 'user', content: 'I attack the bandit.' },
+        { id: 'x1', role: 'system', exchangeLine: true, content: '**Oda attacks Marsh bandit 4** — Rolled **20** vs AC 13; **Hit for 9 damage.** Marsh bandit 4 remains alive at 25/34 HP.' },
+        { id: 'x2', role: 'system', exchangeLine: true, content: '**Marsh bandit 4 attacks Oda** — Rolled **7** vs AC 17; **Miss.**' },
+        { id: 'x3', role: 'system', exchangeLine: true, content: '**Torvald attacks Marsh bandit 4** — Rolled **12** vs AC 13; **Miss.**' },
+        { id: 'a1', role: 'assistant', content: 'Reeve Halvard shouts from the bank as steel rings in the reeds.' },
+    ];
+
+    it('are not narrative — out of collectNarrativeEntries — while an out-of-combat roll line keeps its seat', () => {
+        expect(collectNarrativeEntries(fight).map(e => [e.message.id, e.index])).toEqual([['u1', 0], ['a1', 4]]);
+        expect(collectNarrativeMessages([{ role: 'system', content: 'Stealth (DC 12): Rolled **14** — Success!' }])).toHaveLength(1);
+    });
+
+    it('never judge presence: after a commit the scene text is the prose around the dice, not the last three roll lines', () => {
+        // The player's line, then three dice lines — the commit, before narration.
+        expect(buildPresenceText(fight.slice(0, 4))).toBe('I attack the bandit.');
+        expect(buildPresenceText(fight)).not.toContain('Rolled **');
+        expect(buildPresenceText(fight)).toContain('Reeve Halvard');
+    });
+});

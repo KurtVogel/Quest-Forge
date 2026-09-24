@@ -32,6 +32,14 @@ function finiteIndex(value) {
     return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
 }
 
+/** A finite, floored, non-negative stamp, clamped to the transcript when the caller knows its length. */
+function finiteStamp(value, maxMessageCount) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    const floored = Math.max(0, Math.floor(n));
+    return Number.isFinite(maxMessageCount) ? Math.min(floored, Math.max(0, Math.floor(maxMessageCount))) : floored;
+}
+
 function isRecord(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -152,17 +160,13 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
         ['pendingWonder', sanitizePendingWonder],
         ['wonder', sanitizeWonder],
     ];
-    if (session.lastWonderMessage !== undefined) {
-        const n = Number(session.lastWonderMessage);
-        next.lastWonderMessage = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
-    }
-    if (session.lastHeroTellBeatMessage !== undefined) {
-        const n = Number(session.lastHeroTellBeatMessage);
-        next.lastHeroTellBeatMessage = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
-    }
-    if (session.lastRelationshipBeatMessage !== undefined) {
-        const n = Number(session.lastRelationshipBeatMessage);
-        next.lastRelationshipBeatMessage = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null;
+    // The three beat cooldowns clamp to the transcript (2026-09-24 sweep):
+    // a stamp past the end (`1e9`) used to survive LOAD_GAME and silence
+    // that beat forever, since `messageCount - last < cooldown` holds for
+    // any negative difference.
+    for (const field of ['lastWonderMessage', 'lastHeroTellBeatMessage', 'lastRelationshipBeatMessage']) {
+        if (session[field] === undefined) continue;
+        next[field] = finiteStamp(session[field], maxMessageCount);
     }
     // The directors' give-up tally (2026-09-20): known names, typed entries.
     if (session.directorFailures !== undefined) {

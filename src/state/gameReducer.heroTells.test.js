@@ -43,18 +43,20 @@ describe('hero tells — reducer, cadence tick, load, prompt (2026-09-23)', () =
         expect(gameReducer(state, { type: 'ADD_HERO_TELLS', payload: 'junk' })).toBe(state);
     });
 
-    it('the journal cadence mints a beat for an established tell with an on-roster witness, honors the cooldown, and stamps an expired window as voiced', () => {
+    it('the journal cadence mints a beat for an established tell with an on-roster witness, honors the cooldown from the CLOSE, and stamps an expired window on the engine key only', () => {
         const state = { ...sighted([10, 40, 70]), messages: messagesOf(100) };
         const minted = rollHeroTellBeat(state, { roll: () => 2 });
         expect(minted.session.heroTellBeat).toMatchObject({ tellId: state.heroTells[0].id, witnesses: ['Maren'], opensAtMessage: 112, closesAtMessage: 136 });
-        expect(minted.session.lastHeroTellBeatMessage).toBe(100);
+        // The cooldown starts when a window ENDS, never at the mint (the pending beat is the block until then).
+        expect(minted.session.lastHeroTellBeatMessage).toBeUndefined();
         // A pending beat blocks a new mint.
         const pending = rollHeroTellBeat({ ...state, session: minted.session }, { roll: () => 0 });
         expect(pending.session).toBe(minted.session);
-        // Expired → the tell is stamped voiced, the beat cleared, the cooldown holds.
+        // Expired → the tell's lastBeatMessage is stamped at the close, the beat cleared, the cooldown runs from the close.
         const after = rollHeroTellBeat({ ...state, messages: messagesOf(140), session: minted.session }, { roll: () => 0 });
         expect(after.session.heroTellBeat).toBeNull();
-        expect(after.heroTells[0]).toMatchObject({ lastVoicedMessage: 112, voicedCount: 1 });
+        expect(after.session.lastHeroTellBeatMessage).toBe(136);
+        expect(after.heroTells[0]).toMatchObject({ lastBeatMessage: 136, voicedCount: 0, lastVoicedMessage: null });
         // Unestablished tells never mint.
         const thin = { ...sighted([10, 40]), messages: messagesOf(100) };
         expect(rollHeroTellBeat(thin, { roll: () => 0 }).session.heroTellBeat).toBeUndefined();
@@ -76,7 +78,8 @@ describe('hero tells — reducer, cadence tick, load, prompt (2026-09-23)', () =
             },
         });
         expect(loaded.heroTells).toHaveLength(1);
-        expect(loaded.heroTells[0]).toMatchObject({ id: 't1', sightings: [5, 30], lastSeenMessage: 30 });
+        // The future sighting is dropped (a count is semantic); the fade stamp is clamped.
+        expect(loaded.heroTells[0]).toMatchObject({ id: 't1', sightings: [5], lastSeenMessage: 30 });
         expect(loaded.session.heroTellBeat).toBeNull();
         expect(loaded.session.lastHeroTellBeatMessage).toBe(12);
         const bare = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: { ...initialGameState, messages, session: { ...initialGameState.session, id: 's' } } });
@@ -85,24 +88,104 @@ describe('hero tells — reducer, cadence tick, load, prompt (2026-09-23)', () =
 
     it('the prompt carries the standing line only for present witnesses and the pointed remark only inside the window', () => {
         const state = { ...sighted([10, 40, 70]), messages: messagesOf(100) };
+        const BLOCK = 'WHAT THEY HAVE NOTICED ABOUT THE HERO — PRIVATE';
         // Nobody present who saw it: nothing.
-        expect(promptFor(state)).not.toContain('WHAT THEY HAVE NOTICED');
+        expect(promptFor(state)).not.toContain(BLOCK);
         // Maren in the party: always present.
         const withParty = { ...state, party: [{ id: 'c1', name: 'Maren' }] };
         const standing = promptFor(withParty);
-        expect(standing).toContain('WHAT THEY HAVE NOTICED ABOUT THE HERO');
+        expect(standing).toContain(BLOCK);
         expect(standing).toContain(PIPE.text);
         expect(standing).not.toContain("SOMEONE HAS THE HERO'S NUMBER");
         // Maren named in the recent narration: present through the scene text.
         const named = { ...state, messages: [...messagesOf(98), { id: 'a', role: 'assistant', content: 'Maren sets down the cup and watches you.' }, { id: 'b', role: 'user', content: 'I say nothing.' }] };
-        expect(promptFor(named)).toContain('WHAT THEY HAVE NOTICED ABOUT THE HERO');
+        expect(promptFor(named)).toContain(BLOCK);
         // The window open + witness present → the pointed remark.
         const minted = rollHeroTellBeat({ ...withParty, messages: messagesOf(100) }, { roll: () => 0 });
         const cued = promptFor({ ...withParty, session: minted.session, messages: messagesOf(105) });
         expect(cued).toContain("SOMEONE HAS THE HERO'S NUMBER");
         expect(cued).toContain('Maren has noticed a pattern in the hero');
         // In combat both blocks are silent.
-        expect(promptFor({ ...withParty, session: minted.session, messages: messagesOf(105) }, { combat: { active: true, enemies: [], turnOrder: [], round: 1 } })).not.toContain('NOTICED ABOUT THE HERO');
+        expect(promptFor({ ...withParty, session: minted.session, messages: messagesOf(105) }, { combat: { active: true, enemies: [], turnOrder: [], round: 1 } })).not.toContain(BLOCK);
+    });
+
+    it('the standing rule sits in the cached prefix (CRITICAL RULE 10, before the premise) and the dynamic block carries lines only (2026-09-24 sweep)', () => {
+        const state = { ...sighted([10, 40, 70]), messages: messagesOf(100), party: [{ id: 'c1', name: 'Maren' }] };
+        const premise = 'The barony of Kolkanmaa is starving.';
+        const text = promptFor(state, { premise });
+        const rule = text.indexOf('10. **WHAT THEY HAVE NOTICED ABOUT THE HERO.**');
+        expect(rule).toBeGreaterThan(text.indexOf('9. **INFORMATION HAS BOUNDARIES'));
+        expect(rule).toBeLessThan(text.indexOf('## CAMPAIGN PREMISE'));
+        expect(text.indexOf('They may draw on it in their own register')).toBe(text.lastIndexOf('They may draw on it in their own register'));
+        const block = text.slice(text.indexOf('WHAT THEY HAVE NOTICED ABOUT THE HERO — PRIVATE'));
+        expect(block.split('\n\n')[0]).not.toContain('They may draw on it');
+        // The rule is there even with no tell on record: a static prefix never varies with state.
+        expect(promptFor({ ...initialGameState, messages: [] }, { premise })).toContain('10. **WHAT THEY HAVE NOTICED ABOUT THE HERO.**');
+    });
+
+    it('P1 through the reducer: a habit the Scribe reports every 4 rows establishes after three scenes', () => {
+        const state = sighted(Array.from({ length: 11 }, (_, i) => 10 + i * 4));
+        expect(state.heroTells[0].sightings).toEqual([10, 30, 50]);
+        expect(state.heroTells[0].lastSeenMessage).toBe(50);
+        expect(rollHeroTellBeat({ ...state, messages: messagesOf(60) }, { roll: () => 0 }).session.heroTellBeat?.tellId).toBe(state.heroTells[0].id);
+    });
+
+    it('ADD_HERO_TELLS unions the party into every non-intimate sighting\'s witnesses and drops a witness-less report', () => {
+        const party = [{ id: 'c1', name: 'Osma' }];
+        const base = { ...initialGameState, npcs: roster, party, messages: messagesOf(10) };
+        const unnamed = gameReducer(base, { type: 'ADD_HERO_TELLS', payload: [{ text: 'never draws first', kind: 'principle', witnesses: [] }] });
+        expect(unnamed.heroTells[0].witnesses).toEqual(['Osma']);
+        const named = gameReducer(base, { type: 'ADD_HERO_TELLS', payload: [{ ...PIPE }] });
+        expect(named.heroTells[0].witnesses).toEqual(['Maren', 'Osma']);
+        const bed = gameReducer(base, { type: 'ADD_HERO_TELLS', payload: [{ text: 'likes to be held afterwards', kind: 'intimate', witnesses: ['Maren'] }] });
+        expect(bed.heroTells[0].witnesses).toEqual(['Maren']);
+        // No party, no witness: nothing recorded, the state is untouched.
+        const solo = { ...base, party: [] };
+        expect(gameReducer(solo, { type: 'ADD_HERO_TELLS', payload: [{ text: 'never draws first', kind: 'principle' }] })).toBe(solo);
+        // A companion-witnessed tell renders for the companion and can mint with the companion on the roster.
+        const three = [10, 40, 70].reduce((s, at) => gameReducer({ ...s, messages: messagesOf(at) }, { type: 'ADD_HERO_TELLS', payload: [{ text: 'never draws first', kind: 'principle' }] }), { ...base, npcs: [{ id: 'npc-osma', name: 'Osma', rosterTier: 'character' }] });
+        expect(promptFor({ ...three, messages: messagesOf(100) })).toContain('never draws first [principle (seen by Osma)]');
+        expect(rollHeroTellBeat({ ...three, messages: messagesOf(100) }, { roll: () => 0 }).session.heroTellBeat?.witnesses).toEqual(['Osma']);
+    });
+
+    it('a window never re-opens back to back: the cooldown runs from the close, and a voice before a delayed opening spends the beat', () => {
+        const state = { ...sighted([10, 40, 70]), messages: messagesOf(100), party: [{ id: 'c1', name: 'Maren' }] };
+        const minted = rollHeroTellBeat(state, { roll: () => 0 });
+        expect(minted.session.heroTellBeat).toMatchObject({ opensAtMessage: 100, closesAtMessage: 124 });
+        // Expired at 140: stamped, cleared, and NOT re-minted on the same tick (16 rows since the close).
+        const closed = rollHeroTellBeat({ ...state, messages: messagesOf(140), session: minted.session }, { roll: () => 0 });
+        expect(closed.session.heroTellBeat).toBeNull();
+        expect(closed.session.lastHeroTellBeatMessage).toBe(124);
+        const tooSoon = rollHeroTellBeat({ ...state, heroTells: closed.heroTells, messages: messagesOf(150), session: closed.session }, { roll: () => 0 });
+        expect(tooSoon.session.heroTellBeat).toBeNull();
+        const again = rollHeroTellBeat({ ...state, heroTells: closed.heroTells, messages: messagesOf(124 + 40), session: closed.session }, { roll: () => 0 });
+        expect(again.session.heroTellBeat?.tellId).toBe(state.heroTells[0].id);
+        // A delayed window (opens 124) voiced at 110: the beat closes, the cooldown starts at the voice, no cue at 126.
+        const delayed = rollHeroTellBeat(state, { roll: () => 4 });
+        expect(delayed.session.heroTellBeat).toMatchObject({ mintedAtMessage: 100, opensAtMessage: 124 });
+        const voiced = gameReducer({ ...state, session: delayed.session, messages: messagesOf(110) }, { type: 'ADD_HERO_TELLS', payload: [{ id: state.heroTells[0].id, text: 'the pipe', kind: 'habit', witnesses: ['Maren'], voiced: true, voicedBy: 'Maren' }] });
+        expect(voiced.session.heroTellBeat).toBeNull();
+        expect(voiced.session.lastHeroTellBeatMessage).toBe(110);
+        expect(voiced.heroTells[0]).toMatchObject({ voicedCount: 1, lastVoicedMessage: 110 });
+        // Even a stale copy of the beat on the session renders nothing once the fiction said it.
+        expect(promptFor({ ...voiced, session: delayed.session, messages: messagesOf(126) })).not.toContain("SOMEONE HAS THE HERO'S NUMBER");
+        // The expiry pass over that stale beat stamps nothing on the fiction's keys.
+        const expired = rollHeroTellBeat({ ...voiced, session: delayed.session, messages: messagesOf(160) }, { roll: () => 0 });
+        expect(expired.heroTells[0]).toMatchObject({ voicedCount: 1, lastVoicedMessage: 110, lastBeatMessage: null });
+    });
+
+    it('LOAD_GAME clamps the three beat cooldowns to the transcript, so a future stamp no longer silences a beat forever', () => {
+        const messages = messagesOf(60);
+        const loaded = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                ...sighted([5, 25, 45]),
+                messages,
+                session: { ...initialGameState.session, id: 's', lastHeroTellBeatMessage: 1e9, lastRelationshipBeatMessage: 1e9, lastWonderMessage: '1e9' },
+            },
+        });
+        expect(loaded.session).toMatchObject({ lastHeroTellBeatMessage: 60, lastRelationshipBeatMessage: 60, lastWonderMessage: 60 });
+        expect(rollHeroTellBeat({ ...loaded, messages: messagesOf(100) }, { roll: () => 0 }).session.heroTellBeat?.tellId).toBe(loaded.heroTells[0].id);
     });
 
     it('the Scribe context lists tells by id with scene counts and witnesses, established first', () => {

@@ -210,21 +210,63 @@ describe('recent table rulings block', () => {
         const text = prompt({ recentRulings: [{ ...baseRuling, outcome: 'withdrawn', challenge: 'No opposition here', finalRuling: false }] });
         expect(text).toContain('## RECENT TABLE RULINGS — BINDING');
         expect(text).toContain('WITHDREW');
-        expect(text).toContain('persuasion DC 12');
-        expect(text).toContain('Convince Maren to share gossip about Odo');
         expect(text).toContain('without dice');
+        expect(text).toContain('- WITHDRAWN · persuasion DC 12 · "Convince Maren to share gossip about Odo" · challenge: "No opposition here"');
     });
 
     it('demands the identical check when a set-aside proposal is retried', () => {
         const text = prompt({ recentRulings: [{ ...baseRuling, outcome: 'set_aside', finalRuling: false }] });
-        expect(text).toContain('SET ASIDE');
         expect(text).toContain('SAME check unchanged');
+        expect(text).toContain('- SET ASIDE · persuasion DC 12 · "Convince Maren to share gossip about Odo"');
+        expect(text).not.toContain('- FINAL, SET ASIDE · ');
+        // Only the rules for outcomes actually present ride the header.
+        expect(text).not.toContain('WITHDREW');
+        expect(text).not.toContain('challenge is already spent');
+    });
+
+    it('a single typical ruling costs no more than the per-line rendering did (2026-09-22 roll-resolution P2)', () => {
+        // The old per-line rendering measured 475 chars for this block; hoisting
+        // the rules must not make the common one-ruling case pay for all three
+        // (measured 556 on 2026-09-24 — one rule, one data line).
+        const text = prompt({ recentRulings: [{ ...baseRuling, outcome: 'withdrawn', challenge: 'No opposition here', finalRuling: false }] });
+        const start = text.indexOf('## RECENT TABLE RULINGS — BINDING');
+        const nextBlock = text.indexOf('\n## ', start + 1);
+        const block = text.slice(start, nextBlock === -1 ? undefined : nextBlock).trimEnd();
+        expect(block.length).toBeLessThan(600);
+        expect(block).not.toContain('SAME check unchanged');
+        expect(block).not.toContain('challenge is already spent');
     });
 
     it('keeps an upheld final ruling final after a set-aside', () => {
         const text = prompt({ recentRulings: [{ ...baseRuling, outcome: 'set_aside', finalRuling: true }] });
         expect(text).toContain('FINAL post-challenge ruling');
         expect(text).toContain('challenge is already spent');
+        expect(text).toContain('- FINAL, SET ASIDE · persuasion DC 12 · "Convince Maren to share gossip about Odo"');
+    });
+
+    it('states each binding rule once and holds the block under its ceiling (2026-09-22 roll-resolution P2)', () => {
+        // Five rulings at the record caps (normalizeRollRuling: objective 200,
+        // challenge 300). The per-line instruction used to cost +3,157 chars here.
+        const recentRulings = Array.from({ length: 5 }, (_, i) => ({
+            ...baseRuling,
+            objective: 'o'.repeat(200),
+            challenge: 'c'.repeat(300),
+            outcome: i % 2 === 0 ? 'withdrawn' : 'set_aside',
+            finalRuling: i === 3,
+        }));
+        const text = prompt({ recentRulings });
+        const start = text.indexOf('## RECENT TABLE RULINGS — BINDING');
+        const nextBlock = text.indexOf('\n## ', start + 1);
+        const block = text.slice(start, nextBlock === -1 ? undefined : nextBlock).trimEnd();
+
+        expect((block.match(/challenge is already spent/g) || []).length).toBe(1);
+        expect((block.match(/SAME check unchanged/g) || []).length).toBe(1);
+        expect((block.match(/without dice/g) || []).length).toBe(1);
+        expect((block.match(/^- (?:WITHDRAWN|SET ASIDE|FINAL, SET ASIDE) · persuasion DC 12 · "o{200}"/gm) || []).length).toBe(5);
+        // The record keeps its 300-char challenge; the prompt line shows the head.
+        expect(block).not.toContain('c'.repeat(121));
+        // Measured 2,828 on 2026-09-24 (the old per-line rendering: 3,415 here).
+        expect(block.length).toBeLessThan(2900);
     });
 });
 
@@ -1113,5 +1155,69 @@ describe('the place card rides the Current location line (WOW 2026-09-16, explor
         expect(prompt({ currentLocation: 'Rimehollow', locations }))
             .toContain('**Current location:** Rimehollow — the mill wheel that turns though the river is dry. Now: half-burned; the mill silent.');
         expect(prompt({ currentLocation: 'Jewelglade' })).toContain('**Current location:** Jewelglade\n');
+    });
+});
+
+describe('narrationOnly prompt variant — the combat narration call (2026-09-23 combat-exchange P2)', () => {
+    const premise = 'The barony of Kolkanmaa is starving and the toll-weirs keep failing.';
+    const filler = (seed, len) => seed.repeat(Math.ceil(len / seed.length)).slice(0, len);
+    const combatTurn = {
+        premise,
+        customSystemPrompt: 'Grim, grounded tone.',
+        currentLocation: 'Jewelglade',
+        party: [{ id: 'c1', name: 'Osma', hp: 9, maxHp: 18, ac: 16, level: 2, affinity: 60 }],
+        inventory: Array.from({ length: 25 }, (_, i) => ({ id: `item-${i}`, name: `Trade good ${i}`, type: 'misc', quantity: 1, description: filler('a bundle of marsh reeds tied with cord ', 80) })),
+        quests: Array.from({ length: 6 }, (_, i) => ({ id: `q-${i}`, name: `Errand ${i}`, status: 'active', description: filler('find the weir wardens before the flood ', 200) })),
+        worldFacts: Array.from({ length: 30 }, (_, i) => ({ id: `f-${i}`, fact: `Fact ${i}: ${filler('the Pike buys captives at the toll gate ', 80)}`, category: 'lore', timestamp: i })),
+        journal: Array.from({ length: 8 }, (_, i) => ({
+            id: `j-${i}`, timestamp: i, keyDecisions: [], consequences: [], messageRange: [i * 10, i * 10 + 10],
+            location: i < 6 ? 'Brackwater' : 'Jewelglade',
+            summary: filler(`Entry ${i}: the hero pressed on through the toll country. `, 1500),
+        })),
+        npcs: [{ id: 'n1', name: 'Reeve Halvard', rosterTier: 'character', disposition: 'hostile', importance: 4, gender: 'man' }],
+        messages: [{ role: 'assistant', content: 'Reeve Halvard draws steel as the goblins close.' }],
+        combat: { active: true, round: 2, enemies: [{ id: 'g1', name: 'Goblin', hp: 5, maxHp: 11, ac: 12 }], turnOrder: [] },
+    };
+    /** The shared `prompt()` helper plus the flag — the flag is the only difference. */
+    const build = (narrationOnly) => buildSystemPrompt({
+        character: makeCharacter(),
+        rollHistory: [],
+        preset: 'classicFantasy',
+        ruleset: 'simplified5e',
+        locations: [],
+        fronts: [],
+        storyMemory: [],
+        retrievedMemories: [],
+        recentRulings: [],
+        relationshipBeat: null,
+        messageCount: combatTurn.messages.length,
+        ...combatTurn,
+        narrationOnly,
+    });
+
+    it('drops ACTIVE QUESTS / WORLD FACTS / SESSION HISTORY / LOCATION TRANSITION HISTORY / INVENTORY and keeps combat, character, party, KNOWN NPCs present, and tone', () => {
+        const full = build(false);
+        const slim = build(true);
+        const skipped = ['## ACTIVE QUESTS', '## WORLD FACTS', '## SESSION HISTORY', '## LOCATION TRANSITION HISTORY', '## INVENTORY'];
+        const kept = ['## ACTIVE COMBAT', '## PLAYER CHARACTER', '## COMPANIONS (PARTY)', '## KNOWN NPCs', '## SETTING & TONE', '## CUSTOM DM INSTRUCTIONS', '**Current location:** Jewelglade'];
+        for (const heading of skipped) expect(full).toContain(heading);
+        for (const heading of skipped) expect(slim).not.toContain(heading);
+        for (const heading of kept) expect(slim).toContain(heading);
+        expect(slim).toContain('**Reeve Halvard**');
+        expect(slim).toContain('Osma');
+    });
+
+    it('keeps the cached static prefix byte-identical and is materially smaller (the skipped blocks measure 8,032 chars on this fixture)', () => {
+        const full = build(false);
+        const slim = build(true);
+        const prefixEnd = full.indexOf(premise) + premise.length;
+        expect(prefixEnd).toBeGreaterThan(1000);
+        expect(slim.slice(0, prefixEnd)).toBe(full.slice(0, prefixEnd));
+        // The prompt-side clamps (15 facts, 3 journal entries, 250-char quest
+        // descriptions, 25 carried items) bound what the flag can save; the
+        // audit's 10k+ came from a fatter fixture. Pin a floor, not the figure.
+        expect(full.length - slim.length).toBeGreaterThan(6000);
+        // The flag never touches the full prompt: false is the default.
+        expect(build(undefined)).toBe(full);
     });
 });

@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { sendMessage } = vi.hoisted(() => ({ sendMessage: vi.fn() }));
 vi.mock('./adapter.js', () => ({ sendMessage }));
 
-import { parseResponse, detectPreNarratedOutcome, detectSemanticTextRolls } from './responseParser.js';
+import { parseResponse, detectPreNarratedOutcome, detectSemanticTextRolls, SEMANTIC_ROLL_NARRATIVE_MAX } from './responseParser.js';
 import { applyEvents } from '../state/applyEvents.js';
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 
@@ -1203,6 +1203,30 @@ describe('detectSemanticTextRolls', () => {
             await detectSemanticTextRolls(prose, { apiKey: 'k', llmProvider: 'gemini' });
         }
         expect(sendMessage).toHaveBeenCalledTimes(4);
+    });
+
+    it('clamps the narrative payload from the END, keeping the request in the tail (2026-09-22 roll-resolution P2)', async () => {
+        // The arbiter clamps action and narrative to 2k each; this lane shipped
+        // the whole narration — up to MESSAGE_CONTENT_MAX (20,000) ≈ 5k tokens
+        // whenever the gate opened. A prose roll request sits in the tail.
+        sendMessage.mockResolvedValue(JSON.stringify({ requested_rolls: [] }));
+        const request = 'Now make a Perception check (DC 14) to spot the seam in the wall.';
+        const narrative = `${'The corridor runs on, torch after torch. '.repeat(600)}${request}`;
+        expect(narrative.length).toBeGreaterThan(20000);
+
+        await detectSemanticTextRolls(narrative, { apiKey: 'k', llmProvider: 'gemini' });
+
+        const { userMessage } = sendMessage.mock.calls[0][0];
+        expect(userMessage.startsWith('DM narrative: ')).toBe(true);
+        expect(userMessage.length).toBeLessThan(SEMANTIC_ROLL_NARRATIVE_MAX + 'DM narrative: '.length + 1);
+        expect(userMessage.endsWith(request)).toBe(true);
+    });
+
+    it('the gate judges the same clamped tail the detector sees — a request buried far ahead of it makes no call', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({ requested_rolls: [] }));
+        const narrative = `Roll a Wisdom saving throw. ${'The corridor runs on, torch after torch. '.repeat(600)}`;
+        expect(await detectSemanticTextRolls(narrative, { apiKey: 'k', llmProvider: 'gemini' })).toBeNull();
+        expect(sendMessage).not.toHaveBeenCalled();
     });
 });
 

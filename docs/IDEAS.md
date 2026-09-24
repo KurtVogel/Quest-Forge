@@ -1615,7 +1615,9 @@ remain worth doing, roughly in value order:
   already does it right).
 - **Autosave write cost:** the full message history is rewritten to IndexedDB every
   debounce tick — O(campaign) per turn, monotonically slower on phones. Consider an
-  append-only messages store keyed by session, or snapshot-plus-tail.
+  append-only messages store keyed by session, or snapshot-plus-tail. (2026-09-24: the
+  two-tier debounce cut the writes to 2 per turn and the chronicle left the record; the
+  summarized-message prefix is the remaining immutable share and this is still its fix.)
 - **Cloud chunked READ transaction:** the write path is transactional but load reads
   metadata + chunks in two steps; a concurrent save from another device presents as
   "no save exists" with only a console log. Retry-once on chunk mismatch + surface a
@@ -2569,7 +2571,7 @@ as a tooltip) goes the way of the embedded settings copy. **(3)** Store at the s
 portrait bytes ~3×, and the scene cache should hold a display-sized re-encode, not ten
 full-resolution renders. From the 2026-09-21 strengthening audit.
 
-### [strengthening] A promoted lane repeats its sibling's calls; opt-in feature, opt-out bytes; a storage fix on one "same snapshot" path has a twin on the other — status: `idea` (2026-09-22)
+### [strengthening] A promoted lane repeats its sibling's calls; opt-in feature, opt-out bytes; a storage fix on one "same snapshot" path has a twin on the other — status: `shipped` (2026-09-22 audit; cleared by the 2026-09-24 queue sweep — every queue line ticked, see SCHEDULED_STRENGTHENING.md)
 Three rules from the third Lap-3 pair (2026-09-22, roll-resolution + cloud-sync).
 **(1)** The post-roll outcome hop became a first-class turn on 2026-09-02 (correct: it needed
 memories, the arbiter, and the detectors) by running the whole `sendToLLM` pipeline again — and
@@ -2596,7 +2598,7 @@ The cloud twin is a `users/{uid}/portraits/{key}` collection (the pure `extractP
 `restorePortraits` helpers already exist), `portraitRefs` on the metadata doc, a rules match,
 and `fitPortraitsToBudget` retired. From the 2026-09-22 strengthening audit.
 
-### [strengthening] One flag, one predicate; a debounce collapses bursts, not phases; after a split, the immutable share is the metric — status: `idea` (2026-09-23)
+### [strengthening] One flag, one predicate; a debounce collapses bursts, not phases; after a split, the immutable share is the metric — status: `shipped` (2026-09-23 audit; cleared by the 2026-09-24 queue sweep — every queue line ticked, see SCHEDULED_STRENGTHENING.md)
 Three rules from the fourth Lap-3 pair (2026-09-23, combat-exchange + persistence).
 **(1)** The `exchangeLine` tag (DECISIONS.md 2026-08-04) keeps a fight's dice lines out of the DM
 window — and out of nothing else: `collectNarrativeEntries` (the ONE "transcript as story"
@@ -2628,7 +2630,7 @@ the payload, the `extractPortraits` / `restorePortraits` / sweep trio generalize
 summarized prefix is the harder half ("Autosave write cost" above already holds the append-only
 messages idea). From the 2026-09-23 strengthening audit.
 
-### [strengthening] A scene window measured from the last report never closes; an engine assumption never shares a key with a fiction fact; a cooldown starts when the window closes; "always present" means the same on both sides of a rule — status: `idea` (2026-09-24)
+### [strengthening] A scene window measured from the last report never closes; an engine assumption never shares a key with a fiction fact; a cooldown starts when the window closes; "always present" means the same on both sides of a rule — status: `shipped` (2026-09-24 audit; cleared by the 2026-09-24 queue sweep — every queue line ticked, see SCHEDULED_STRENGTHENING.md)
 Four rules from a NEW feature's first audit (2026-09-24, hero-tells Lap 1, before its first
 playtest), plus one from the vault's Lap 3. **(1)** `recordHeroTells` adds a sighting only when
 `now - lastSeenMessage > 16`, and `lastSeenMessage` advances on EVERY sighted report — measured:

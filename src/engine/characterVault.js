@@ -186,6 +186,11 @@ export function sanitizeCharacter(raw) {
         background: cleanTextField(raw.background, 2000),
         appearance: cleanTextField(raw.appearance, CHARACTER_APPEARANCE_MAX),
         portraitUrl: sanitizeImageUrl(raw.portraitUrl),
+        // The provider label rides with the picture like portraitUpdatedAt
+        // (2026-09-24 Lap-1 spill): dropping it lost the "Rendered by Gemini"
+        // fallback note on every roster or imported hero. Same 40-char type as
+        // the load heal (migrations.js).
+        portraitProvider: cleanTextField(raw.portraitProvider, 40),
         portraitUpdatedAt: Number.isFinite(raw.portraitUpdatedAt) ? raw.portraitUpdatedAt : null,
         notes: cleanTextField(raw.notes, 2000),
         createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),

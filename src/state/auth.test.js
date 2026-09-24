@@ -13,8 +13,10 @@ async function importAuth({ auth = null, googleProvider = null } = {}) {
     const onAuthStateChanged = vi.fn(() => () => {});
     const signOut = vi.fn(() => Promise.resolve());
     const signInWithPopup = vi.fn(() => Promise.resolve({ user: { uid: 'u1', email: 'v@example.com' } }));
-    vi.doMock('firebase/auth', () => ({ onAuthStateChanged, signOut, signInWithPopup }));
-    vi.doMock('../config/firebase.js', () => ({ auth, googleProvider }));
+    // Since 2026-09-22 auth.js reads the SDK through `authSdk` (the module
+    // initializeFirebase loaded on demand) — no static firebase/auth import.
+    const authSdk = { onAuthStateChanged, signOut, signInWithPopup };
+    vi.doMock('../config/firebase.js', () => ({ auth, googleProvider, authSdk: auth ? authSdk : null }));
     const mod = await import('./auth.js');
     return { mod, onAuthStateChanged, signOut, signInWithPopup };
 }
