@@ -497,7 +497,7 @@ or front-tied (the eval must seed a lull, not a front). Touches: `hidden-fronts-
 `living-world` in `docs/SCHEDULED_WOW.md`'s registry; extends the world-tempo entry above.
 
 ### [playtest] Hero tells need a REAL-PROVIDER playtest — status: `pending` (shipped 2026-09-23 unit-pinned only; no keys in the hosted session)
-Both hero-tells entries (DECISIONS.md 2026-09-23 ×2) are pinned end to end in vitest but have never been played against a real DM or a real Scribe. This is Claude's own testing job, the `scripts/playtest_recall_wonder.cjs` pattern (production build, Gemini 3.1 Pro + GPT Terra as DMs — never Grok — Flash as the game's machinery and as the judge): add a `tells` probe that plays ~30 turns with a companion in the party, repeats one visible habit in three different scenes (a pipe, a joke at every serious turn) and one intimate scene, then reads `state.heroTells` and the prompt captures from the Memory Inspector. **What to watch, in order of risk:** (1) does Gemini Flash report OBSERVABLE behavior or guesses about motive ("hides fear behind jokes") — the schema forbids it, prompt-only; (2) over-use — the standing `WHAT THEY HAVE NOTICED` block's "sparingly, never more than a touch per scene" is prompt-only, the pointed remark is the only engine-gated one; count remarks per scene on both DMs; (3) does the Scribe re-report by `id` from KNOWN HERO TELLS or mint twins (the 0.8 containment merge is the belt); (4) does `voiced`/`voicedBy` come back when the companion actually says it, and does the open window close (`session.heroTellBeat` null after the line); (5) the intimate tell: partner-only witnesses, neutral register, and the DM honoring the private-only rule before others; (6) `public: true` on a tavern sighting → the tell rides `## REGIONAL HEARSAY` at the next town; (7) the sheet's "How others see you" appears only after a line was said, and "That's not me" silences it. Fix what breaks with pins, write `docs/HERO_TELLS_PLAYTEST_<date>.md`, tick this.
+Both hero-tells entries (DECISIONS.md 2026-09-23 ×2) are pinned end to end in vitest but have never been played against a real DM or a real Scribe. This is Claude's own testing job, the `scripts/playtest_recall_wonder.cjs` pattern (production build, Gemini 3.1 Pro + GPT Terra as DMs — never Grok — Flash as the game's machinery and as the judge): add a `tells` probe that plays ~30 turns with a companion in the party, repeats one visible habit in three different scenes (a pipe, a joke at every serious turn) and one intimate scene, then reads `state.heroTells` and the prompt captures from the Memory Inspector. **What to watch, in order of risk:** (1) does Gemini Flash report OBSERVABLE behavior or guesses about motive ("hides fear behind jokes") — the schema forbids it, prompt-only; (2) over-use — the standing `WHAT THEY HAVE NOTICED` block's "sparingly, never more than a touch per scene" is prompt-only, the pointed remark is the only engine-gated one; count remarks per scene on both DMs; (3) does the Scribe re-report by `id` from KNOWN HERO TELLS or mint twins (the 0.8 containment merge is the belt); (4) does `voiced`/`voicedBy` come back when the companion actually says it, and does the open window close (`session.heroTellBeat` null after the line); (5) the intimate tell: partner-only witnesses, neutral register, and the DM honoring the private-only rule before others; (6) `public: true` on a tavern sighting → the tell rides `## REGIONAL HEARSAY` at the next town; (7) the sheet's "How others see you" appears only after a line was said, and "That's not me" silences it. Fix what breaks with pins, write `docs/HERO_TELLS_PLAYTEST_<date>.md`, tick this. *(Strengthening 2026-09-24: fix the queue's hero-tells P1 first — a habit the Scribe reports at ≤ 16-row spacing never gains a second sighting, so the pipe on consecutive turns would read as "the Scribe never re-reports"; until then space the three scenes > 16 rows apart.)*
 
 ### [playtest] Wonder die + recall lane follow-ups from the 2026-09-19 real-provider run — status: `idea` (playtest 2026-09-19; `docs/RECALL_WONDER_PLAYTEST_2026-09-19.md`)
 - **Weight the wonder die toward standalone.** 3 of 6 installed wonders (2 of 4 natural, 1 of 2 on-demand) were front-tied plot hooks (a clerk with a receipt, a broker with a ledger) while the director had offered a free-standing antlered mare; Vesa's brief is "may or may not fit the larger story". A standalone floor (~50 %) in `selectWonder` — a DECISIONS call.
@@ -2627,6 +2627,36 @@ chapters, only the newest removable, never in a prompt): a `chronicleChapters` s
 the payload, the `extractPortraits` / `restorePortraits` / sweep trio generalized by field; the
 summarized prefix is the harder half ("Autosave write cost" above already holds the append-only
 messages idea). From the 2026-09-23 strengthening audit.
+
+### [strengthening] A scene window measured from the last report never closes; an engine assumption never shares a key with a fiction fact; a cooldown starts when the window closes; "always present" means the same on both sides of a rule — status: `idea` (2026-09-24)
+Four rules from a NEW feature's first audit (2026-09-24, hero-tells Lap 1, before its first
+playtest), plus one from the vault's Lap 3. **(1)** `recordHeroTells` adds a sighting only when
+`now - lastSeenMessage > 16`, and `lastSeenMessage` advances on EVERY sighted report — measured:
+13 reports at any spacing ≤ 16 rows → one sighting, never established; a turn is 2–6 rows and the
+Scribe reports one sighting per scene per pattern, so the habit the DM shows every serious turn
+is exactly the one that never becomes a pattern, while one shown a fortnight apart does. Rule: a
+same-scene window is judged against the last accepted EVENT (`appendBondMoments` already does),
+never against a stamp the rejected report itself advances. The playtest would have read this as
+"the Scribe never re-reports by id" and cost a day — audit a new feature's engine before playing
+it. **(2)** The remark window's expiry stamp (`stampTellVoiced`, the rotation/cooldown
+assumption) and "who said it" (`voicedCount`/`voicedBy`) are one counter, so an unvoiced window
+puts "…pipe… — said by Maren" on the Character Sheet's "How others see you". Rule: an engine
+assumption and a fiction fact never share a key; a player-facing view reads only the fiction's.
+**(3)** The beat cooldown is stamped at the MINT while a delayed window can close after the
+cooldown expires — one tell on record was cued back to back — and a fiction voice before a
+delayed window opens does not spend the beat (cued again, stamped twice). Rule: a cooldown starts
+at the window's close (or the voice), and a voice at or after the mint spends the beat. **(4)**
+Party companions are "always present" for VOICING a tell but must be named per sighting to
+WITNESS one, so a witness-less tell establishes and then can never render, mint, or travel. Rule:
+a presence rule holds on both sides — union the party into every sighting's witnesses. Also from
+the pair: an `id` re-report is honored before any kind/text check (a sighting and a non-witness
+landed on another tell), the three beat cooldown stamps load unclamped (`1e9` silences every
+beat forever), and — the vault — the hero's campaign-constant identity text (background 2,000 /
+gender / appearance) is billed uncached on every DM call behind HP/XP while the premise, the same
+kind of constant, already ends the cached prefix: a `## HERO IDENTITY` block right after the
+premise (+~2.1k cached chars per call); and the roster row is 93 % portrait, the last
+inline-portrait store, read whole on the wizard's mount on both paths — `portraitRef` through
+the content-addressed store + a metadata list. From the 2026-09-24 strengthening audit.
 
 ---
 
