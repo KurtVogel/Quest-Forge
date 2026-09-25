@@ -2660,6 +2660,36 @@ premise (+~2.1k cached chars per call); and the roster row is 93 % portrait, the
 inline-portrait store, read whole on the wizard's mount on both paths — `portraitRef` through
 the content-addressed store + a metadata list. From the 2026-09-24 strengthening audit.
 
+### [strengthening] A campaign-constant text rendered beside live text is billed as live; a static block gated on a campaign constant is still prefix; a receipt that consumes a history slot is paid for twice — status: `open` (2026-09-25 audit, 7 P2s in the strengthening queue)
+Three rules from the inventory-economy + spellcasting Lap-3 pass (2026-09-25), every number
+measured against the real prompt builder, reducer, and window builder. **(1)** The spellbook —
+`describeSpellcastingForPrompt`'s catalog lines, 712 chars at L1 → 1,731 at L10 — changes only at
+level-up, yet it is composed inside PLAYER CHARACTER behind HP / XP / wealth, so it is re-billed on
+every DM call (two per combat round); only the "slots remaining / DC / attack" line (65–101 chars)
+is live. Third sighting of one shape: the premise (2026-07-18), the hero identity (2026-09-24),
+now the spellbook. Rule: when a block builder renders a rarely-changing text next to a
+per-turn one, split it at the prefix line — the test is "what EVENT changes this byte", not
+"which state field holds it". A `## SPELLBOOK` block ending the cached prefix after HERO IDENTITY,
+one cache miss per level-up, ~430 tokens saved per call at L10. **(2)** Its twin: the
+`SPELLCASTING INSTRUCTIONS (Wizard / Cleric only)` section is 12,373 chars (~3.1k tokens) of
+`CORE_INSTRUCTIONS` — 19 % of a Fighter's 65.7k-char prefix, cached but billed at the cached rate
+and walked before the first token on every call. Class never changes inside a campaign, so a
+class-gated static block keeps the prefix byte-stable per campaign: DECISIONS 2026-07-18 forbids
+LIVE state in the prefix, not campaign constants. **(3)** Receipts: a six-purchase + reward
+response posts seven `dmVisible` system lines and `buildMessageWindow(…, 20)` then holds seven
+receipts and thirteen rows of fiction for the next ~3 turns, each receipt a `user` turn (seven in
+a row between two assistant rows). The window rule counts rows, not bytes — 227 chars of receipts
+cost the DM as much history as seven turns of prose. Rule: one receipt line per response (the
+purse total once, at its end), or receipts that ride the window without consuming its slots. Also
+from the pair: CAST_SPELL's success and rejection lines are the one engine outcome the DM never
+sees (not `dmVisible` — the coin lane's rejections are, for exactly this reason: a "no slot
+remains" refusal after the DM narrated the cure leaves fiction and sheet disagreeing); an
+unrecognized `itemKey` with no `name` buys "Unknown item" at the DM's price (three of six purchases
+in one measured response — `potionHealing` / `ropeHempen` invert natural word order, the
+LLM-plausible typo); the INVENTORY block is 72 % stat/value annotations the DM does no math with;
+and the stack has no ceiling (`addOrStackItem` sums past `MAX_ITEM_QUANTITY`; the next load
+silently clamps 11,988 torches to 999). From the 2026-09-25 strengthening audit.
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
