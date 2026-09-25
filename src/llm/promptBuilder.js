@@ -20,7 +20,7 @@ import { TABLE_TALK_STANDING_RULE } from './tableTalk.js';
 import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js';
 import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
-import { describeSpellcastingForPrompt } from '../engine/spellcasting.js';
+import { describeSpellbookForPrompt, describeSpellSlotsForPrompt, isSpellcaster } from '../engine/spellcasting.js';
 import { isLowLevelSolo } from '../engine/combatExchange.js';
 import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock, describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
@@ -76,7 +76,12 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
 
     // Response format contract — static, so it lives in the cached prefix; a
     // short FORMAT_REMINDER at the very end keeps trailing-JSON compliance.
-    parts.push(RESPONSE_FORMAT, 'responseFormat');
+    // The caster rulebook inside it (SPELLCASTING INSTRUCTIONS) rides only a
+    // Wizard's / Cleric's prompt: class is a campaign constant, so each class's
+    // prefix stays byte-stable while a Fighter no longer pays for 2.8k chars of
+    // rules that cannot apply (2026-09-25 spellcasting Lap-3 P2). DECISIONS.md
+    // 2026-07-18 forbids LIVE state here, not campaign constants.
+    parts.push(responseFormatFor(character), 'responseFormat');
 
     // Item catalog — static app data.
     parts.push(ITEM_CATALOG_BLOCK, 'itemCatalog');
@@ -109,6 +114,17 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     const heroIdentity = buildHeroIdentityBlock(character);
     if (heroIdentity) {
         parts.push(heroIdentity, 'heroIdentity');
+    }
+
+    // Spellbook — the catalog lines of every spell this hero can cast are a
+    // function of class + level only, so they END the cached prefix after the
+    // identity (2026-09-25 spellcasting Lap-3 P2: 712 → 1,731 chars re-billed
+    // per call because they were composed beside the live slots line inside
+    // PLAYER CHARACTER). One cache miss per level-up. The slots / DC / attack
+    // line stays live in the character block. Extends DECISIONS.md 2026-07-18.
+    const spellbook = buildSpellbookBlock(character);
+    if (spellbook) {
+        parts.push(spellbook, 'spellbook');
     }
 
     // ——— DYNAMIC STATE (changes turn to turn; nothing below is cacheable) ———
@@ -462,7 +478,7 @@ const NARRATIVE_RULES = `## GAME MECHANICS (Narrative Mode)
 // Exported for the eventChannels registry agreement test: the JSON example
 // below and the registry must never drift apart (the damage_dealt lesson —
 // a channel the DM was instructed to emit while the engine silently ignored it).
-export const RESPONSE_FORMAT = `## RESPONSE FORMAT
+const RESPONSE_FORMAT_HEAD = `## RESPONSE FORMAT
 
 Respond with immersive narrative text, but keep turn cadence playable. Default to 1-2 short paragraphs per response. Use 3 paragraphs only for major scene openings, big consequences, intimate/important NPC moments, or climactic combat outcomes. Never use 4+ paragraphs unless the player explicitly asks for a longer passage.
 
@@ -608,26 +624,30 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - **FATAL ERROR AVOIDANCE**: NEVER ask the player to roll in narrative text. Outside combat, use \`requested_rolls\` for uncertain checks and saves.
 - During ACTIVE COMBAT, use \`combat_exchange\` instead. Never emit \`attack_roll\`, \`companion_attack\`, or \`npc_attack\`; the engine generates all standard combat dice from live state.
 - Outside combat, player checks use "skill_check" or "saving_throw" with a DC. Saving throws name the ability; the engine applies proficiency.
-- A response containing outside-combat \`requested_rolls\` carries no outcome mutations. The post-roll response narrates the result once.
+- A response containing outside-combat \`requested_rolls\` carries no outcome mutations. The post-roll response narrates the result once.`;
 
-## SPELLCASTING INSTRUCTIONS (Wizard / Cleric only)
-- The character block's SPELLCASTING section lists every spell that mechanically exists for this hero, with remaining slots. Spells not on that list have no engine support: when the player asks for one, offer the closest listed spell or adjudicate a purely narrative effect that changes no mechanics.
+// Class-gated static block (2026-09-25): rendered between RESPONSE_FORMAT_HEAD
+// and RESPONSE_FORMAT_TAIL for Wizards / Clerics only. Still prefix — a
+// campaign's class never changes (healUnknownClassRace's load-time fallback is
+// the one exception, and it is a one-time re-key, not live state).
+const SPELLCASTING_INSTRUCTIONS = `## SPELLCASTING INSTRUCTIONS (Wizard / Cleric only)
+- The SPELLBOOK section lists every spell that mechanically exists for this hero; the character block's SPELLCASTING line carries the remaining slots, save DC, and spell attack. Spells not in the SPELLBOOK have no engine support: when the player asks for one, offer the closest listed spell or adjudicate a purely narrative effect that changes no mechanics.
 - The ENGINE owns slots, dice, save DCs, and effects. You never report a slot as spent, roll spell damage, or decide a save — declare the cast and narrate from the engine's returned result.
 - IN COMBAT: cast through a \`combat_exchange\` player slot (\`"action":"cast"\`). Never use spell_cast during a fight. ONE exception: when the player casts an out-of-combat spell (Mage Armor, Cure Wounds) in the same message where the fight breaks out, emit \`spell_cast\` ALONGSIDE \`combat_start\` in that response — the engine applies the cast BEFORE initiative, so the ward or healing is real when the first blow lands. Narrating the cast without the event leaves it mechanically nonexistent.
 - OUT OF COMBAT: when the player casts a spell marked usable out of combat, emit \`spell_cast\` with the spell name, optional \`slot_level\` to upcast, and \`target\` ("self" or a companion's name); an up-to-3-allies spell (Mass Healing Word, Mass Cure Wounds) names all its recipients in a \`targets\` array instead. Unlike combat, there is NO second call: write the full prose narration of the casting and its effect in the SAME response that carries the event — a response that is only a JSON block leaves the player staring at silence. Don't state healing numbers (the engine's system line reports them); everything else about what the magic does, reveals, or feels like is yours to narrate now. Emit each casting exactly ONCE; never re-emit it while narrating the aftermath on a later turn.
 - Utility spells (Detect Magic, Knock, Guidance) are narrative-gated: the engine only spends the slot; you honestly adjudicate what the magic reveals, opens, or aids — magic succeeds at what the spell does, but only the fiction present can be revealed.
 - Control-spell conditions (unconscious from Sleep, paralyzed from Hold Person, frightened, prone) are not permanent: lift them through the existing \`remove_conditions\` / \`enemy_condition_updates\` channels when the fiction moves on — a sleeper wakes the moment it takes damage; a held foe shakes free after about a round of struggle.
 - A sustained spell (Mage Armor, Shield of Faith, Invisibility) lasts until the caster sustains a different spell, rests, or the fight ends — the engine tracks this; narrate accordingly.
-- Out-of-combat healing has no roll gate: casting Cure Wounds on a wounded ally simply works. Genuine uncertainty about ANOTHER objective still uses requested_rolls as usual.
+- Out-of-combat healing has no roll gate: casting Cure Wounds on a wounded ally simply works. Genuine uncertainty about ANOTHER objective still uses requested_rolls as usual.`;
 
-COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
+const RESPONSE_FORMAT_TAIL = `COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
 - Use "combat_start" when combat begins and list every foe 1:1 with a unique stable "id", plus "name", "hp", "ac", "attack_bonus", and "damage". Mark skeletons, zombies, ghouls, and other undead with "is_undead": true, and optionally give tough foes a flat "save_bonus" (-5..15, default +2) used for spell saving throws. Never silently add or drop combatants. If the same response also contains "combat_exchange", every player/companion/enemy reference must use one of those exact combat_start ids.
 - Set combat_start "surprise" to "player" only when the player is genuinely caught unaware, "enemies" only when the foes are caught unaware, otherwise "none". The engine converts this into Opening Initiative; never grant surprise attacks in narration yourself.
 - Mark a NAMED, narratively significant, notably tougher-than-mooks antagonist with "boss": true in combat_start — a campaign villain, a monstrous alpha, a duel-worthy champion. Not every elite, never generic guards or numbered minions. The engine independently verifies the foe's toughness before paying elevated XP, so inflating a fake boss's stats just makes an unusually hard ordinary fight; a decisive kill or surrender of a genuine boss pays a larger engine-computed reward automatically (a boss that flees does not).
 - Every committed player turn includes exactly one \`combat_exchange\`. A question or clarification includes none, so nobody acts.
 - \`player_slots\`: normally exactly one; when ACTION SURGE ACTIVE is shown, exactly two. Each slot is independently \`attack\`, \`cast\`, \`channel\`, \`check\`, \`save\`, \`dodge\`, \`dash\`, \`disengage\`, \`flee\`, \`interact\`, \`pass\`, \`death_save\`, or \`second_wind\`.
 - An Attack slot uses \`strikes: [{"target":"<living enemy id>"}]\`. A Fighter with Extra Attack may name two strikes in one Attack slot, including different targets. Action Surge grants another action slot, not automatically another attack.
-- A Cast slot uses \`{"action":"cast","spell":"<spell name from the SPELLCASTING list>","target":"<living enemy id, companion name, or self>","slot_level":<optional upcast level>}\`. Respect each spell's target count from its SPELLCASTING entry: a spell tagged "ONE foe/ally" takes a single \`target\` (never a \`targets\` array — the engine resolves only the first and ignores the rest); spells tagged "up to 3" may use \`"targets":["<id>", ...]\`, and a spell tagged "darts" (Magic Missile) may name several living foes in \`targets\` when the player splits the darts — the engine distributes darts round-robin in the declared order and rolls each foe's damage; never split, redirect, or pool the darts yourself. Only spells on the character's SPELLCASTING list exist; the engine owns every roll, save DC, slot cost, and effect. Unsupported spells must be clarified rather than assigned invented mechanics.
+- A Cast slot uses \`{"action":"cast","spell":"<spell name from the SPELLBOOK>","target":"<living enemy id, companion name, or self>","slot_level":<optional upcast level>}\`. Respect each spell's target count from its SPELLBOOK entry: a spell tagged "ONE foe/ally" takes a single \`target\` (never a \`targets\` array — the engine resolves only the first and ignores the rest); spells tagged "up to 3" may use \`"targets":["<id>", ...]\`, and a spell tagged "darts" (Magic Missile) may name several living foes in \`targets\` when the player splits the darts — the engine distributes darts round-robin in the declared order and rolls each foe's damage; never split, redirect, or pool the darts yourself. Only spells in the SPELLBOOK exist; the engine owns every roll, save DC, slot cost, and effect. Unsupported spells must be clarified rather than assigned invented mechanics.
 - A Wizard/Cleric may add ONE bonus-action spell (marked "bonus action" in their list, e.g. Healing Word) as a second player slot alongside one normal action — the caster's equivalent of Cunning Action. Never two bonus spells, never two action spells.
 - **A Fighter's Second Wind can ride the exchange.** When the player's own combat message explicitly uses Second Wind ("I use Second Wind and strike back"), declare \`{"action":"second_wind"}\` as an extra player slot beside their normal action (or alone, if catching their breath is the whole turn) — the engine validates availability, rolls 1d10 + level, spends the resource, and reports the recovery; it is a bonus action and never costs the action slot. Declare it ONLY on the player's explicit invocation — never on your own initiative or as a suggestion. If the sheet shows it spent or the bonus action already used, say so in narration instead of declaring the slot.
 - A \`channel\` slot is the Cleric's Turn Undead (level 2+): no target field; the engine rolls a save for every active undead foe. Declare it only when undead are actually present.
@@ -719,6 +739,17 @@ GOOD — DM proposes the roll with public adjudication; narrates the full scene 
 > \`\`\`json { "requested_rolls": [{"type":"skill_check","skill":"stealth","dc":12,"description":"Slip past the patrol using the route you observed","reason":"The patrol watches the only exit","opposition":"Alert guards and moving torchlight","failure_stakes":"The patrol notices the escape attempt","difficulty_reason":"Meaningful challenge reduced by the observed route","advantage":true,"disadvantage":false,"advantage_reason":"The player studied the patrol route first"}] }\`\`\`
 > *(The client withholds this pre-roll line. Once the dice return, narrate the whole beat in one vivid pass — the creep along the wall AND whether you're spotted — never split across two messages.)*`;
 
+// Two byte-stable variants, composed once at module load. RESPONSE_FORMAT (the
+// caster's, and the one the registry-agreement tests read) is byte-identical to
+// the pre-split single constant; the martial variant simply omits the rulebook.
+export const RESPONSE_FORMAT = [RESPONSE_FORMAT_HEAD, SPELLCASTING_INSTRUCTIONS, RESPONSE_FORMAT_TAIL].join('\n\n');
+const RESPONSE_FORMAT_MARTIAL = [RESPONSE_FORMAT_HEAD, RESPONSE_FORMAT_TAIL].join('\n\n');
+
+/** The response-format contract for this hero's class — one of two constants, never interpolated. */
+function responseFormatFor(character) {
+    return isSpellcaster(character?.class) ? RESPONSE_FORMAT : RESPONSE_FORMAT_MARTIAL;
+}
+
 // Static closing reminder. RESPONSE_FORMAT lives early in the prompt (inside the
 // cache-stable prefix); this tiny tail keeps the trailing-JSON habit anchored to
 // the end of the context, where format compliance actually lives.
@@ -806,9 +837,11 @@ function buildCharacterBlock(character, combat = null) {
         ? `\n- **Appearance (established canon — keep it exactly consistent in narration):** ${heroAppearance}`
         : '';
 
-    const spellcasting = describeSpellcastingForPrompt(character);
+    // The live half only: slots / DC / attack. The catalog lines are the
+    // cached `## SPELLBOOK` block (2026-09-25).
+    const spellcasting = describeSpellSlotsForPrompt(character);
     const spellcastingBlock = spellcasting
-        ? `\n- **SPELLCASTING (engine-owned — only these spells exist mechanically):**\n${spellcasting}${character.sustainedSpell ? `\n- **Sustained spell active:** ${character.sustainedSpell.name || character.sustainedSpell.key} on ${character.sustainedSpell.targetType === 'companion' ? (character.sustainedSpell.targetName || 'a companion') : 'the hero'} (ends on another sustained cast, any rest, or combat's end)` : ''}`
+        ? `\n- **SPELLCASTING (engine-owned — only the SPELLBOOK's spells exist mechanically):** ${spellcasting}${character.sustainedSpell ? `\n- **Sustained spell active:** ${character.sustainedSpell.name || character.sustainedSpell.key} on ${character.sustainedSpell.targetType === 'companion' ? (character.sustainedSpell.targetName || 'a companion') : 'the hero'} (ends on another sustained cast, any rest, or combat's end)` : ''}`
         : '';
 
     return `## PLAYER CHARACTER
@@ -905,22 +938,32 @@ function buildInventoryBlock(inventory, character) {
     const equipped = inventory.filter(i => i.equipped);
     const carried = inventory.filter(i => !i.equipped);
 
-    const formatItem = (i) => {
+    // Stat annotations (AC / dice / hit bonus) render on EQUIPPED rows only
+    // (2026-09-25 inventory-economy Lap-3 P2): the engine owns every lane's
+    // AC / attack / damage math and the prompt says so, so a carried row's
+    // stats were 72 % of the block's bytes for nothing the DM computes. Value
+    // stays on every row — the DM prices a sale from it. The proficiency note
+    // stays on every weapon: equipping one is a choice the DM narrates.
+    const formatItem = (i, { stats }) => {
         let desc = i.name;
         if (i.quantity > 1) desc += ` (x${i.quantity})`;
-        if (i.baseAC && !i.isShield) desc += ` [AC ${i.baseAC + (i.acBonus || 0)}, ${i.armorType || 'unknown'} armor]`;
-        if (i.isShield || i.type === 'shield') desc += ` [+${(i.shieldAC || 2) + (i.acBonus || 0)} AC shield]`;
-        if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}${i.attackBonus ? `, +${i.attackBonus} hit` : ''}${i.damageBonus ? `, +${i.damageBonus} dmg` : ''}]`;
+        if (stats) {
+            if (i.baseAC && !i.isShield) desc += ` [AC ${i.baseAC + (i.acBonus || 0)}, ${i.armorType || 'unknown'} armor]`;
+            if (i.isShield || i.type === 'shield') desc += ` [+${(i.shieldAC || 2) + (i.acBonus || 0)} AC shield]`;
+            if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}${i.attackBonus ? `, +${i.attackBonus} hit` : ''}${i.damageBonus ? `, +${i.damageBonus} dmg` : ''}]`;
+        }
         if (Number.isFinite(i.valueCp)) desc += ` [value ${formatCurrency(i.valueCp)}]`;
         if (i.type === 'weapon' && character && !isProficientWithWeapon(character, i)) {
             desc += ` [NOT proficient — attacks lack the proficiency bonus; narrate the unfamiliarity]`;
         }
         return desc;
     };
+    const formatEquipped = (i) => formatItem(i, { stats: true });
+    const formatCarried = (i) => formatItem(i, { stats: false });
 
-    let block = `## INVENTORY`;
+    let block = `## INVENTORY (carried rows list names and values only — the engine owns every item's stats)`;
     if (equipped.length) {
-        block += `\n**Equipped:** ${equipped.map(formatItem).join(', ')}`;
+        block += `\n**Equipped:** ${equipped.map(formatEquipped).join(', ')}`;
     }
     if (carried.length) {
         // Equipped stays complete; the Carried list is capped — a hoarder
@@ -936,7 +979,7 @@ function buildInventoryBlock(inventory, character) {
             shown = [...mechanical, ...minor.slice(-Math.max(0, CARRIED_PROMPT_CAP - mechanical.length))].slice(0, CARRIED_PROMPT_CAP);
             overflow = `, …and ${carried.length - shown.length} more minor items (still owned; full list in the Inventory panel)`;
         }
-        block += `\n**Carried:** ${shown.map(formatItem).join(', ')}${overflow}`;
+        block += `\n**Carried:** ${shown.map(formatCarried).join(', ')}${overflow}`;
     }
     return block;
 }
@@ -1067,6 +1110,19 @@ function buildHeroIdentityBlock(character) {
         : '';
     return `## HERO IDENTITY (who the player character is — constant for this campaign)
 - **Name:** ${name}${genderLine}${backgroundLine}`;
+}
+
+/**
+ * The hero's spellbook: every spell that mechanically exists for them, as a
+ * function of class + level ONLY (`getKnownSpells`). Ends the cached prefix
+ * after HERO IDENTITY; changes at level-up and never between. NEVER add live
+ * state here (slots, DC, the sustained spell) — those ride the character block.
+ */
+function buildSpellbookBlock(character) {
+    const lines = describeSpellbookForPrompt(character);
+    if (!lines) return '';
+    return `## SPELLBOOK (engine-owned — every spell that mechanically exists for this hero; constant until level-up)
+${lines}`;
 }
 
 // "Solo" = no battle-ready companion (engine-owned isLowLevelSolo — DECISIONS.md 2026-07-17).

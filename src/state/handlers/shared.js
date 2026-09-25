@@ -5,7 +5,7 @@
 import { computeACFromInventory, normalizeConditionList, normalizeConditionName } from '../../engine/rules.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
 import { itemIdentityMatches } from '../../engine/textMatch.js';
-import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName } from '../../data/items.js';
+import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName, MAX_ITEM_QUANTITY } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
@@ -421,9 +421,26 @@ export function addOrStackItem(inventory, newItem) {
     const target = identity ? inventory.find(row => stackIdentity(row) === identity) : null;
     if (!target) return [...inventory, newItem];
     const added = Math.max(1, Math.trunc(newItem.quantity || 1));
+    // The stack has a ceiling (2026-09-25 inventory-economy P2): summing past
+    // MAX_ITEM_QUANTITY minted a row of 11,988 torches that the NEXT load's
+    // normalizeItem clamped back to 999 — a silent loss in the other direction.
+    // Clamp here; callers post the visible line via stackOverflow().
     return inventory.map(row => (row === target
-        ? { ...row, quantity: Math.max(1, Math.trunc(row.quantity || 1)) + added }
+        ? { ...row, quantity: Math.min(MAX_ITEM_QUANTITY, Math.max(1, Math.trunc(row.quantity || 1)) + added) }
         : row));
+}
+
+/**
+ * How many units of `newItem` addOrStackItem would have to discard because
+ * its stack is already at MAX_ITEM_QUANTITY — 0 for a new row or a fitting add.
+ */
+export function stackOverflow(inventory, newItem) {
+    const identity = stackIdentity(newItem);
+    const target = identity ? inventory.find(row => stackIdentity(row) === identity) : null;
+    if (!target) return 0;
+    const held = Math.max(1, Math.trunc(target.quantity || 1));
+    const added = Math.max(1, Math.trunc(newItem.quantity || 1));
+    return Math.max(0, held + added - MAX_ITEM_QUANTITY);
 }
 
 /**

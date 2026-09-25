@@ -114,14 +114,84 @@ describe('buildMessageWindow', () => {
             msg('assistant', 'The merchant counts out your pay.'),
         ];
         const window = buildMessageWindow(history, 20);
+        // Two consecutive receipts fold into ONE row (2026-09-25) — same bytes, one slot.
         expect(window.map(m => m.content)).toEqual([
             'I hand over the caravan papers.',
-            '**+2 gp** received — purse: 25 gp.',
-            '**Loot recovered from narration:** Potion of Healing added to your possessions.',
+            '**+2 gp** received — purse: 25 gp.\n**Loot recovered from narration:** Potion of Healing added to your possessions.',
             'The merchant counts out your pay.',
         ]);
         // System lines still travel as user role.
         expect(window[1].role).toBe('user');
+    });
+
+    describe('consecutive receipts fold into one window row (2026-09-25 inventory-economy Lap-3 P2)', () => {
+        const receipt = (content) => msg('system', content, { dmVisible: true });
+
+        it('seven receipts from one response consume ONE slot and reach the provider as one user turn', () => {
+            const receipts = [
+                'Bought Dagger for 2 gp — purse: 98 gp.',
+                'Bought Torch for 1 cp — purse: 97 gp, 9 sp, 9 cp.',
+                'Bought Potion of Healing for 50 gp — purse: 47 gp, 9 sp, 9 cp.',
+                'Bought 3x Rations (1 day) for 1 gp, 5 sp — purse: 46 gp, 4 sp, 9 cp.',
+                'Bought Hempen Rope (50 ft) for 1 gp — purse: 45 gp, 4 sp, 9 cp.',
+                'Bought Shortsword for 10 gp — purse: 35 gp, 4 sp, 9 cp.',
+                '**+5 gp** received — purse: 40 gp, 4 sp, 9 cp.',
+            ];
+            const history = [
+                ...Array.from({ length: 16 }, (_, i) => msg(i % 2 ? 'assistant' : 'user', `fiction-${i}`)),
+                msg('user', 'I buy the lot and take the reward.'),
+                msg('assistant', 'The merchant tallies it up.'),
+                ...receipts.map(receipt),
+                msg('system', 'Autosave complete.'),
+            ];
+            const window = buildMessageWindow(history, 20);
+            // Every receipt line is present, in order, in one row...
+            const folded = window[window.length - 1];
+            expect(folded.role).toBe('user');
+            expect(folded.content).toBe(receipts.join('\n'));
+            // ...so the window still holds 18 rows of fiction, not 12.
+            expect(window).toHaveLength(19);
+            expect(window.filter(m => m.content.startsWith('fiction-'))).toHaveLength(16);
+            // The receipt row follows an assistant row: no run of consecutive user turns.
+            const consecutiveUsers = window.reduce((n, m, i) => (i > 0 && m.role === 'user' && window[i - 1].role === 'user' ? n + 1 : n), 0);
+            expect(consecutiveUsers).toBe(0);
+        });
+
+        it('a roll line or fiction between receipts breaks the run; dropped rows are transparent to it', () => {
+            const history = [
+                receipt('Bought Dagger for 2 gp — purse: 3 gp.'),
+                msg('system', 'Autosave complete.'),
+                receipt('**+1 gp** received — purse: 4 gp.'),
+                msg('system', 'Stealth (DC 12): Rolled **14** — Success!'),
+                receipt('Sold Dagger for 1 gp — purse: 5 gp.'),
+                msg('assistant', 'Done.'),
+                receipt('Bought Torch for 1 cp — purse: 4 gp, 9 sp, 9 cp.'),
+            ];
+            expect(buildMessageWindow(history, 20).map(m => m.content)).toEqual([
+                'Bought Dagger for 2 gp — purse: 3 gp.\n**+1 gp** received — purse: 4 gp.',
+                'Stealth (DC 12): Rolled **14** — Success!',
+                'Sold Dagger for 1 gp — purse: 5 gp.',
+                'Done.',
+                'Bought Torch for 1 cp — purse: 4 gp, 9 sp, 9 cp.',
+            ]);
+        });
+
+        it('the fold happens BEFORE the slice, so a receipt run never costs more than one slot', () => {
+            const history = [
+                msg('user', 'keep-1'),
+                msg('assistant', 'keep-2'),
+                ...Array.from({ length: 10 }, (_, i) => receipt(`receipt-${i}`)),
+            ];
+            const window = buildMessageWindow(history, 3);
+            expect(window.map(m => m.content.split('\n')[0])).toEqual(['keep-1', 'keep-2', 'receipt-0']);
+            expect(window[2].content.split('\n')).toHaveLength(10);
+        });
+
+        it('a folded row still respects the content belt', () => {
+            const history = Array.from({ length: 3 }, (_, i) => receipt('x'.repeat(9000) + i));
+            const [row] = buildMessageWindow(history, 5);
+            expect(row.content.length).toBeLessThanOrEqual(20000);
+        });
     });
 
     it('drops combat-exchange result lines even though they match the roll-line keep rule', () => {

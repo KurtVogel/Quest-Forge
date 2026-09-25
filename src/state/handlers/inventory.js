@@ -2,13 +2,14 @@
  * Inventory: add/remove items, consumable use (engine-rolled healing), and
  * equip/unequip including the by-ref resolution used by DM equipment_changes.
  */
-import { normalizeItem, normalizeItemKey } from '../../data/items.js';
+import { normalizeItem, normalizeItemKey, MAX_ITEM_QUANTITY } from '../../data/items.js';
 import { isEquippableItem, normalizeEquippedSlots } from '../../engine/equipment.js';
 import { itemIdentityMatches } from '../../engine/textMatch.js';
 import { rollNotation } from '../../engine/dice.ts';
 import { gameReducer } from '../gameReducer.js';
 import {
     addOrStackItem,
+    stackOverflow,
     companionStatus,
     consumeItem,
     appendRollHistory,
@@ -145,7 +146,19 @@ export const handlers = {
                 newItem.equipped = true;
             }
         }
-        const guarded = recentItemGrants === state.recentItemGrants ? state : { ...state, recentItemGrants };
+        let guarded = recentItemGrants === state.recentItemGrants ? state : { ...state, recentItemGrants };
+        // The stack ceiling is visible, never silent (2026-09-25): the DM and
+        // the player both learn that part of a grant did not land.
+        const overflow = stackOverflow(state.inventory, newItem);
+        if (overflow > 0) {
+            guarded = {
+                ...guarded,
+                messages: [
+                    ...guarded.messages,
+                    systemMessage(`${newItem.name} stack is full at ${MAX_ITEM_QUANTITY} — ${overflow} could not be carried.`, { dmVisible: true }),
+                ],
+            };
+        }
         // Same-identity non-equipment joins its existing stack (2026-09-03 P2:
         // buy 2 → buy 3 → find 1 minted three "Torch" rows, and a later loss
         // decremented whichever row resolved first).

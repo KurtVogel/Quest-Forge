@@ -66,6 +66,19 @@ function casterIncapacity(character) {
     return condition ? `is ${condition}` : null;
 }
 
+// Every line CAST_SPELL posts is a receipt the DM must see (2026-09-25
+// spellcasting Lap-3 P2): the success line carries the healing the DM narrates
+// around and the slots left, and each rejection ("no level N+ slot remains",
+// not on the list, combat-only, an incapacitated caster, no valid recipient)
+// is the one signal that the cure the DM already narrated did NOT happen.
+// Without `dmVisible` buildMessageWindow dropped all of them (measured), so a
+// refused cast left fiction and sheet disagreeing until the next HP line and a
+// re-emission failed again the same way, silently. The coin lane's rejections
+// are receipts for exactly this reason (2026-08-31).
+function spellLine(content) {
+    return systemMessage(content, { dmVisible: true });
+}
+
 export const handlers = {
     CAST_SPELL(state, action) {
         // Out-of-combat casting (DM-emitted spell_cast event). The engine
@@ -75,18 +88,18 @@ export const handlers = {
         const character = state.character;
         if (!character) return state;
         if (state.combat?.active) {
-            return { ...state, messages: [...state.messages, systemMessage('Combat spells are cast through the combat exchange — the spell_cast event is ignored during a fight.')] };
+            return { ...state, messages: [...state.messages, spellLine('Combat spells are cast through the combat exchange — the spell_cast event is ignored during a fight.')] };
         }
         const spell = resolveSpellForCharacter(character, payload.spell);
         if (!spell) {
-            return { ...state, messages: [...state.messages, systemMessage(`"${String(payload.spell || '').slice(0, 60)}" is not on ${character.name || 'the hero'}'s engine-owned spell list — nothing was spent or applied.`)] };
+            return { ...state, messages: [...state.messages, spellLine(`"${String(payload.spell || '').slice(0, 60)}" is not on ${character.name || 'the hero'}'s engine-owned spell list — nothing was spent or applied.`)] };
         }
         if (!spell.outOfCombatAvailable) {
-            return { ...state, messages: [...state.messages, systemMessage(`${spell.name} only has a combat effect; outside battle no slot was spent.`)] };
+            return { ...state, messages: [...state.messages, spellLine(`${spell.name} only has a combat effect; outside battle no slot was spent.`)] };
         }
         const incapacity = casterIncapacity(character);
         if (incapacity) {
-            return { ...state, messages: [...state.messages, systemMessage(`${character.name || 'The hero'} ${incapacity} and cannot cast ${spell.name} — an unconscious caster has no voice for it. Nothing was spent; a companion's healing potion is the rescue outside combat.`)] };
+            return { ...state, messages: [...state.messages, spellLine(`${character.name || 'The hero'} ${incapacity} and cannot cast ${spell.name} — an unconscious caster has no voice for it. Nothing was spent; a companion's healing potion is the rescue outside combat.`)] };
         }
         const meta = payload._meta || {};
         const sourceId = String(meta.sourceId || '').slice(0, 160);
@@ -114,7 +127,7 @@ export const handlers = {
         if (spell.level > 0) {
             slotLevel = chooseSlotLevel(spellSlots, spell, payload.slotLevel ?? payload.slot_level);
             if (slotLevel === null) {
-                return { ...state, messages: [...state.messages, systemMessage(`${spell.name} fails — no level ${spell.level}+ spell slot remains. Rest to recover slots.`)] };
+                return { ...state, messages: [...state.messages, spellLine(`${spell.name} fails — no level ${spell.level}+ spell slot remains. Rest to recover slots.`)] };
             }
             spellSlots = spendSpellSlot(spellSlots, slotLevel);
         }
@@ -151,7 +164,7 @@ export const handlers = {
             }
         }
         if (recipients.length === 0) {
-            return { ...state, messages: [...state.messages, systemMessage(`${spell.name} has no valid recipient "${invalidRefs.join('", "')}" — nothing was spent or applied.`)] };
+            return { ...state, messages: [...state.messages, spellLine(`${spell.name} has no valid recipient "${invalidRefs.join('", "')}" — nothing was spent or applied.`)] };
         }
         // The dead-hero heal guard that lived here (2026-08-29) is subsumed by
         // casterIncapacity above: a dead or dying hero never reaches this point,
@@ -253,7 +266,7 @@ export const handlers = {
                     cap: RECENT_SPELL_CAST_LIMIT,
                 }),
             }),
-            messages: [...state.messages, systemMessage(lines.join(' '))],
+            messages: [...state.messages, spellLine(lines.join(' '))],
         };
     },
 };

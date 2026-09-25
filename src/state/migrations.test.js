@@ -74,17 +74,19 @@ describe('healDuplicateInventoryRows (queue P2, live playtests #7-#8 stale-twin 
                 { id: 'w-2', name: 'Shortsword', type: 'weapon', damage: '1d6', quantity: 1 },
                 // A real stack beside a single: this heal leaves them alone —
                 // healStackedInventoryRows (2026-09-03) folds them instead.
-                { id: 'p-1', name: 'Healing Potion', type: 'consumable', quantity: 3 },
-                { id: 'p-2', name: 'Healing Potion', type: 'consumable', quantity: 1 },
+                // (A non-catalog name on purpose: "Healing Potion" resolves to
+                // the catalog Potion of Healing since 2026-09-25.)
+                { id: 'p-1', name: 'Tallow Candle', type: 'consumable', quantity: 3 },
+                { id: 'p-2', name: 'Tallow Candle', type: 'consumable', quantity: 1 },
                 // Near-name variants are different rows by design.
                 { id: 'b-1', name: 'Brick of raw bog-wax', quantity: 1 },
                 { id: 'b-2', name: 'brick of bog-wax', quantity: 1 },
             ],
         }));
         expect(save.inventory.filter(i => i.name === 'Shortsword')).toHaveLength(2);
-        const potions = save.inventory.filter(i => i.name === 'Healing Potion');
-        expect(potions).toHaveLength(1);
-        expect(potions[0]).toMatchObject({ id: 'p-1', quantity: 4 });
+        const candles = save.inventory.filter(i => i.name === 'Tallow Candle');
+        expect(candles).toHaveLength(1);
+        expect(candles[0]).toMatchObject({ id: 'p-1', quantity: 4 });
         expect(save.inventory.filter(i => /bog-wax/i.test(i.name))).toHaveLength(2);
     });
 

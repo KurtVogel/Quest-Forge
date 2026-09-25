@@ -106,6 +106,49 @@ const CATALOG_NAMES_BY_LENGTH = Object.entries(ITEM_CATALOG)
     .map(([key, item]) => [key, item.name.toLowerCase()])
     .sort((a, b) => b[1].length - a[1].length);
 
+// Word-order-blind identity (2026-09-25 inventory-economy P2): the catalog's
+// keys invert natural word order (`potionHealing`, `ropeHempen`), so the
+// LLM-plausible typo is the SAME words the other way round — "healingPotion",
+// "Healing Potion", "rope_hempen". A reference whose words (camelCase / snake /
+// spaces split, parentheticals and "of"/"the" dropped) are exactly one catalog
+// name's words resolves to it; a name that merely CONTAINS catalog words
+// ("Scroll of Shield") has a different word set and never matches. Built once.
+const NAME_STOPWORDS = new Set(['of', 'the', 'a', 'an']);
+function itemWordSet(value) {
+    const words = String(value || '')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(word => word && !NAME_STOPWORDS.has(word));
+    return words.length >= 2 ? [...new Set(words)].sort().join('|') : '';
+}
+const WORD_SET_TO_KEY = Object.entries(ITEM_CATALOG).reduce((acc, [key, item]) => {
+    const words = itemWordSet(item.name);
+    // Two catalog names with the same word set would be ambiguous — neither resolves.
+    if (words) acc[words] = Object.hasOwn(acc, words) ? null : key;
+    return acc;
+}, {});
+const catalogKeyForWordSet = (value) => {
+    const words = itemWordSet(value);
+    return words && Object.hasOwn(WORD_SET_TO_KEY, words) ? WORD_SET_TO_KEY[words] : null;
+};
+
+/**
+ * "healingPotion" → "Healing Potion": the display name for an unrecognized
+ * itemKey with no name, so the row the DM minted reads as what it meant instead
+ * of "Unknown item" (2026-09-25). Empty for anything that is not a key.
+ */
+export function humanizeItemKey(value) {
+    const words = String(value ?? '')
+        .trim()
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .split(/[^A-Za-z0-9]+/)
+        .filter(Boolean);
+    if (words.length === 0) return '';
+    return words.map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+}
+
 export function clampMagicBonus(value) {
     if (!Number.isFinite(value)) return 0;
     return Math.max(0, Math.min(MAGIC_BONUS_MAX, Math.trunc(value)));
@@ -135,6 +178,9 @@ export function normalizeItemKey(value = '') {
     const withoutBonus = lower.replace(/\s*\+[1-3]\b/g, '').trim();
     const compact = withoutBonus.replace(/[^a-z0-9]/g, '');
     if (catalogKeyForName(compact)) return catalogKeyForName(compact);
+    // Same words, another order — the inverted-key typo (2026-09-25).
+    const byWords = catalogKeyForWordSet(raw.replace(/\s*\+[1-3]\b/g, ''));
+    if (byWords) return byWords;
 
     // LLMs commonly add a bounded descriptive prefix to ordinary equipment
     // ("massive warhammer", "weathered leather armor"). Match only a complete
@@ -223,7 +269,7 @@ function applyMagicName(item) {
 // Hostile-input bounds at the DM-JSON trust boundary: a hallucinated event must not
 // mint an absurd stack or a fortune-valued trinket. The value ceiling mirrors the
 // coin-grant clamp (10,000 gp) so no single item outweighs the largest legal payout.
-const MAX_ITEM_QUANTITY = 999;
+export const MAX_ITEM_QUANTITY = 999;
 const MAX_ITEM_VALUE_CP = 1000000;
 // AC/attack stats on non-catalog gear are LLM- or import-authored; the hero is
 // the only combatant with no other ceiling (companions clamp at 21, enemies are
@@ -351,7 +397,9 @@ export function normalizeItem(raw = {}) {
             source.quantity = counted.quantity;
         }
     }
-    const itemKey = normalizeItemKey(source.itemKey || source.key || source.name);
+    // Each reference gets its own try (2026-09-25): an unknown `itemKey` beside
+    // a recognizable `name` used to block the name from ever being looked up.
+    const itemKey = normalizeItemKey(source.itemKey) || normalizeItemKey(source.key) || normalizeItemKey(source.name);
     const base = catalogEntry(itemKey) || {};
     const parsedBonus = parseMagicBonusFromName(source.name || base.name);
     const magicBonus = clampMagicBonus(source.magicBonus ?? source.enhancement ?? source.bonus ?? parsedBonus);
@@ -370,7 +418,10 @@ export function normalizeItem(raw = {}) {
         // the item, but it cannot override its mechanical type or statistics.
         ...(itemKey ? base : {}),
         itemKey: itemKey || source.itemKey || null,
-        name: itemKey ? base.name : (source.name || 'Unknown item'),
+        // An unrecognized key with no name reads as the key's words, never
+        // "Unknown item" (2026-09-25): the player can see, use by name, and
+        // sell what the DM meant.
+        name: itemKey ? base.name : (source.name || humanizeItemKey(source.itemKey || source.key) || 'Unknown item'),
         type: itemType,
         weight: itemKey ? (base.weight ?? 1) : (Number.isFinite(source.weight) ? source.weight : 1),
         magicBonus,

@@ -82,6 +82,14 @@ export function dropOrphanCombatExchange(events, combatActive) {
  * window (~8 of 20 slots per round with a full field).
  * System lines travel as `user` role — providers only accept user/assistant.
  *
+ * Consecutive receipts fold into ONE window row (2026-09-25 inventory-economy
+ * Lap-3 P2): a six-purchase + reward response posted seven `dmVisible` lines,
+ * and because the window counts ROWS, they held seven of the twenty slots for
+ * the next ~3 turns (a third of the DM's history displaced by 227 chars) and
+ * reached the provider as seven consecutive `user` turns. A run of receipts
+ * with no fiction between them is one receipt, joined by newlines — the same
+ * bytes, one slot, one turn. Roll lines and fiction break the run.
+ *
  * @param {Array<object>} messages - full chat history from state.
  * @param {number} windowSize - max messages to keep (MESSAGE_WINDOW).
  * @returns {Array<{role: string, content: string}>}
@@ -94,10 +102,21 @@ export function buildMessageWindow(messages, windowSize) {
         }
         return true;
     });
-    return unsummarized.slice(-windowSize).map(m => ({
+    // The belt behind the LOAD_GAME row heal: the window never carries a
+    // non-string or an unbounded row to a provider (2026-09-19 audit P2).
+    const text = m => (typeof m.content === 'string' ? m.content.slice(0, MESSAGE_CONTENT_MAX) : '');
+    const isReceipt = m => m.role === 'system' && m.dmVisible === true;
+    const rows = [];
+    for (const m of unsummarized) {
+        const last = rows[rows.length - 1];
+        if (isReceipt(m) && last?.receipt) {
+            last.content = `${last.content}\n${text(m)}`.slice(0, MESSAGE_CONTENT_MAX);
+            continue;
+        }
+        rows.push({ role: m.role, content: text(m), receipt: isReceipt(m) });
+    }
+    return rows.slice(-windowSize).map(m => ({
         role: m.role === 'system' ? 'user' : m.role,
-        // The belt behind the LOAD_GAME row heal: the window never carries a
-        // non-string or an unbounded row to a provider (2026-09-19 audit P2).
-        content: typeof m.content === 'string' ? m.content.slice(0, MESSAGE_CONTENT_MAX) : '',
+        content: m.content,
     }));
 }

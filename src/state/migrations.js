@@ -37,7 +37,7 @@
 import { computeACFromInventory, normalizeConditionList, normalizeDeathSaves, normalizeProficiencyLists } from '../engine/rules.js';
 import { CLASSES } from '../data/classes.js';
 import { RACES } from '../data/races.js';
-import { normalizeItem } from '../data/items.js';
+import { MAX_ITEM_QUANTITY, normalizeItem } from '../data/items.js';
 import {
     ABILITY_NAMES,
     buildClassResources,
@@ -549,11 +549,42 @@ function reseedMissingFronts(save) {
     return { ...save, fronts, session };
 }
 
+/**
+ * The stack ceiling at load, visibly (2026-09-25 inventory-economy P2): the
+ * three folds above sum quantities, and a pre-ceiling save (or a hand-edited
+ * one) can carry a row past MAX_ITEM_QUANTITY. healEquippedSlots' normalizeItem
+ * then clamped it back to 999 SILENTLY — the loss the player never learned of.
+ * Runs after the folds so their sums are clamped too, and posts one line
+ * naming every row it cut. addOrStackItem now clamps on the way in, so this is
+ * the belt for saves written before that.
+ */
+function healOverfullStacks(save) {
+    const inventory = save.inventory || [];
+    const cut = [];
+    const healed = inventory.map(row => {
+        const quantity = Number(row?.quantity);
+        if (!row || typeof row !== 'object' || !Number.isFinite(quantity) || quantity <= MAX_ITEM_QUANTITY) return row;
+        cut.push(`${String(row.name || 'item')} ${Math.trunc(quantity)} → ${MAX_ITEM_QUANTITY}`);
+        return { ...row, quantity: MAX_ITEM_QUANTITY };
+    });
+    if (cut.length === 0) return save;
+    console.log(`[Migrations] Clamped ${cut.length} over-full inventory stack(s) to ${MAX_ITEM_QUANTITY}.`);
+    return {
+        ...save,
+        inventory: healed,
+        messages: [
+            ...(save.messages || []),
+            systemMessage(`**Stack ceiling applied on load:** ${cut.join('; ')}. A stack holds at most ${MAX_ITEM_QUANTITY} of one item.`),
+        ],
+    };
+}
+
 const UNCONDITIONAL_HEALS = [
     healUnknownClassRace,
     healDuplicateInventoryRows,
     healShadowInventoryRows,
     healStackedInventoryRows,
+    healOverfullStacks,
     healEquippedSlots,
     backfillCharacterShape,
     healCharacterCoreFields,

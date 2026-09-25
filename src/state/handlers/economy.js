@@ -2,13 +2,14 @@
  * Coin and trade: replay-guarded coin grants/losses, the Scribe payment audit,
  * and one-shot purchase/sale transactions.
  */
-import { normalizeItem, normalizeItemKey, toFiniteNumber } from '../../data/items.js';
+import { MAX_ITEM_QUANTITY, normalizeItem, normalizeItemKey, toFiniteNumber } from '../../data/items.js';
 import { addCurrency, characterCurrencyToCopper, formatCurrency, spendCurrency } from '../../engine/currency.js';
 import { MAX_COIN_EVENT } from '../../config/contentLimits.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
 import {
     addOrStackItem,
     consumeItem,
+    stackOverflow,
     currentMessageIndex,
     findInventoryItemByRef,
     findRecentTransactionDuplicate,
@@ -66,13 +67,21 @@ function buildPurchaseTransaction(payload = {}) {
     const priceCp = Math.max(0, Math.trunc(rawPriceCp));
     const identity = normalizeItemKey(item.itemKey || item.key || item.name)
         || normalizeRefToken(item.itemKey || item.name);
+    // An itemKey the catalog does not know, after every fuzzy rung (the
+    // inverted-word-order typo now resolves). With no name beside it the DM
+    // named nothing the engine can sell back or the player can use — refused
+    // visibly, naming the key, so the DM re-emits with a name or a real key
+    // (2026-09-25 inventory-economy P2: three of six purchases in one measured
+    // response bought "Unknown item", two of them for 100 gp).
+    const unknownKey = itemKeyRef && !normalizeItemKey(itemKeyRef) ? itemKeyRef.slice(0, 60) : null;
     return {
         item,
         quantity,
         priceCp,
         // A purchase with no item name or key (`item: []` spread to `{}`) used
         // to buy "Unknown item" for the stated price — refused visibly instead.
-        nameless: !item.itemKey && !nameRef,
+        nameless: (!itemKeyRef || !!unknownKey) && !nameRef,
+        unknownKey,
         signature: `${identity || normalizeRefToken(item.name)}|${quantity}|${Math.max(0, Math.trunc(priceCp))}`,
     };
 }
@@ -790,7 +799,9 @@ export const handlers = {
                 ...state,
                 messages: [
                     ...state.messages,
-                    coinLine(`Purchase ignored — the DM named no item to buy (${formatCurrency(priceCp)} not charged).`),
+                    coinLine(transaction.unknownKey
+                        ? `Purchase ignored — "${transaction.unknownKey}" is not a catalog itemKey and no item name was given (${formatCurrency(priceCp)} not charged). Use a catalog key or a plain name.`
+                        : `Purchase ignored — the DM named no item to buy (${formatCurrency(priceCp)} not charged).`),
                 ],
             };
         }
@@ -837,6 +848,21 @@ export const handlers = {
             return withInventoryAndAC(coveredState, addOrStackItem(state.inventory, mintOwnedItem(item, { quantity })));
         }
 
+        const newItem = mintOwnedItem(item, { quantity });
+        // The stack ceiling (2026-09-25): a purchase none of which fits is
+        // refused before any coin moves; a partial fit is bought (the DM's
+        // priceCp is a flat total, not pro-rated) and the discard is visible.
+        const overflow = stackOverflow(state.inventory, newItem);
+        if (overflow >= quantity) {
+            return {
+                ...state,
+                messages: [
+                    ...state.messages,
+                    coinLine(`Cannot buy ${item.name} — the stack is full at ${MAX_ITEM_QUANTITY}; nothing charged.`),
+                ],
+            };
+        }
+
         const payment = spendCurrency(state.character, priceCp);
         if (!payment.paid) {
             return {
@@ -848,15 +874,16 @@ export const handlers = {
             };
         }
 
-        const newItem = mintOwnedItem(item, { quantity });
-
+        // The purchase receipt carries the purse like the coin lines do
+        // (2026-09-25): the DM reads what the hero has left from ONE line.
         const nextState = {
             ...state,
             character: payment.character,
             recentPurchases: rememberTransaction(state.recentPurchases, transaction, sourceId, currentMessageIndex(state)),
             messages: [
                 ...state.messages,
-                coinLine(`Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)}.`),
+                coinLine(`Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)} — purse: ${purseLine(payment.character)}.`),
+                ...(overflow > 0 ? [coinLine(`${item.name} stack is full at ${MAX_ITEM_QUANTITY} — ${overflow} of the ${quantity} bought could not be carried.`)] : []),
             ],
         };
         return withInventoryAndAC(nextState, addOrStackItem(state.inventory, newItem));
@@ -928,7 +955,7 @@ export const handlers = {
             recentSales: rememberTransaction(state.recentSales, saleTransaction, saleSourceId, currentMessageIndex(state)),
             messages: [
                 ...state.messages,
-                coinLine(`Sold ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(proceedsCp)}.`),
+                coinLine(`Sold ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(proceedsCp)} — purse: ${purseLine(addCurrency(state.character, { copper: proceedsCp }))}.`),
             ],
         };
         return withInventoryAndAC(nextState, consumeItem(state.inventory, item.id, quantity));

@@ -225,8 +225,26 @@ export function summarizeSpellSlots(spellSlots) {
         .join(' · ');
 }
 
-/** Compact spell catalog + slot state block for the DM prompt's character section. */
-export function describeSpellcastingForPrompt(character) {
+/**
+ * The LIVE half of the prompt's spellcasting text: slots remaining, save DC,
+ * spell attack. Changes turn to turn (a cast, a rest, an ASI), so it rides the
+ * PLAYER CHARACTER block. Empty for non-casters and slot-less characters.
+ */
+export function describeSpellSlotsForPrompt(character) {
+    if (!isSpellcaster(character?.class) || !character.spellSlots) return '';
+    return `Spell slots remaining: ${summarizeSpellSlots(character.spellSlots)}. Spell save DC ${getSpellSaveDC(character)}, spell attack +${getSpellAttackBonus(character)}.`;
+}
+
+/**
+ * The CONSTANT half: the catalog lines of every spell that mechanically exists
+ * for this hero. A function of class + level only (`getKnownSpells`), so it
+ * changes at level-up and never between — it ends the cached prefix as the
+ * `## SPELLBOOK` block (2026-09-25 spellcasting Lap-3 P2: 712 chars at L1 →
+ * 1,731 at L10 were re-billed on every DM call, two per combat round, because
+ * they were composed beside the live slots line). Same gate as the slots line
+ * so the two halves always appear together.
+ */
+export function describeSpellbookForPrompt(character) {
     if (!isSpellcaster(character?.class) || !character.spellSlots) return '';
     const known = getKnownSpells(character);
     const targetingTag = targeting => {
@@ -238,16 +256,23 @@ export function describeSpellcastingForPrompt(character) {
         if (targeting.mode === 'darts') return ', 3 darts (+1 per upcast level) — splittable among foes via "targets"';
         return `, ONE ${noun}`;
     };
-    const lines = known.map(spell => {
+    return known.map(spell => {
         const cost = spell.level === 0 ? 'cantrip, at will' : `level ${spell.level} slot`;
         const timing = spell.castTime === 'bonus' ? ', bonus action' : '';
         const scope = spell.combatAvailable && spell.outOfCombatAvailable
             ? ''
             : spell.combatAvailable ? ' [combat only]' : ' [out of combat only]';
         return `- ${spell.name} (${cost}${timing}${targetingTag(spell.targeting)})${scope}: ${spell.summary}`;
-    });
-    return [
-        `Spell slots remaining: ${summarizeSpellSlots(character.spellSlots)}. Spell save DC ${getSpellSaveDC(character)}, spell attack +${getSpellAttackBonus(character)}.`,
-        ...lines,
-    ].join('\n');
+    }).join('\n');
+}
+
+/**
+ * Compact spell catalog + slot state as ONE block (slots line first). The DM
+ * prompt now renders the two halves apart (prefix vs live); this composition
+ * remains for the sheet-style consumers and the older tests.
+ */
+export function describeSpellcastingForPrompt(character) {
+    const slots = describeSpellSlotsForPrompt(character);
+    if (!slots) return '';
+    return [slots, describeSpellbookForPrompt(character)].filter(Boolean).join('\n');
 }

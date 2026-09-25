@@ -2660,7 +2660,7 @@ premise (+~2.1k cached chars per call); and the roster row is 93 % portrait, the
 inline-portrait store, read whole on the wizard's mount on both paths — `portraitRef` through
 the content-addressed store + a metadata list. From the 2026-09-24 strengthening audit.
 
-### [strengthening] A campaign-constant text rendered beside live text is billed as live; a static block gated on a campaign constant is still prefix; a receipt that consumes a history slot is paid for twice — status: `open` (2026-09-25 audit, 7 P2s in the strengthening queue)
+### [strengthening] A campaign-constant text rendered beside live text is billed as live; a static block gated on a campaign constant is still prefix; a receipt that consumes a history slot is paid for twice — status: `shipped` (2026-09-25 audit; cleared by the 2026-09-25 queue sweep — every queue line ticked, see SCHEDULED_STRENGTHENING.md; one correction: the caster rulebook is 2,801 chars and lives in RESPONSE_FORMAT, not 12,373 in CORE_INSTRUCTIONS)
 Three rules from the inventory-economy + spellcasting Lap-3 pass (2026-09-25), every number
 measured against the real prompt builder, reducer, and window builder. **(1)** The spellbook —
 `describeSpellcastingForPrompt`'s catalog lines, 712 chars at L1 → 1,731 at L10 — changes only at
