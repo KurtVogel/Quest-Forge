@@ -74,14 +74,33 @@ function normalizeStrikes(slot) {
     return raw.slice(0, 4).map(strike => ({ target: ref(strike?.target || strike) })).filter(s => s.target);
 }
 
-/** Up to 3 deduped target refs for a cast slot ("targets" array or single "target"). */
+/** Most distinct cast targets the wire keeps; each resolver clamps to the SPELL's own limit with a visible note. */
+const MAX_CAST_TARGETS = 6;
+/** Raw wire entries scanned for those targets (a flooded list is not walked). */
+const MAX_CAST_TARGET_SCAN = 30;
+
+/**
+ * Deduped target refs for a cast slot ("targets" array or single "target").
+ * Dedupe BEFORE the cap (2026-09-26): the old `slice(0, 3)` ran first, so a
+ * repeated name or a junk entry among the first three ate a legitimate
+ * recipient's slot — `["self", "Jorun", "Jorun", "Mika"]` on Mass Healing
+ * Word healed two and dropped Mika without a word, and a level-2 Magic
+ * Missile (4 darts) could never name its fourth foe. The cap sits above every
+ * catalog limit so the resolvers' own clamp posts the "extra targets are
+ * unaffected" note instead of the wire silently losing them.
+ */
 function normalizeCastTargets(slot) {
     const raw = Array.isArray(slot?.targets)
         ? slot.targets
         : (slot?.target != null ? [slot.target] : []);
-    return [...new Set(raw.slice(0, 3)
-        .map(value => ref(value?.target ?? value))
-        .filter(Boolean))];
+    const unique = [];
+    for (const value of raw.slice(0, MAX_CAST_TARGET_SCAN)) {
+        const target = ref(value?.target ?? value);
+        if (!target || unique.includes(target)) continue;
+        unique.push(target);
+        if (unique.length >= MAX_CAST_TARGETS) break;
+    }
+    return unique;
 }
 
 function normalizeConditionDelta(raw, targetValue) {

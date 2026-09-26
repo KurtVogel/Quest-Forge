@@ -77,3 +77,25 @@ describe('logOut', () => {
         expect(signOut).toHaveBeenCalledExactlyOnceWith(authObj);
     });
 });
+
+describe('SDK failures are logged and rethrown, never swallowed (2026-09-26 coverage sweep)', () => {
+    it('signInWithGoogle rethrows the popup error after logging it', async () => {
+        const { mod, signInWithPopup } = await importAuth({ auth: { name: 'auth' }, googleProvider: { id: 'google' } });
+        const failure = Object.assign(new Error('auth/popup-closed-by-user'), { code: 'auth/popup-closed-by-user' });
+        signInWithPopup.mockRejectedValueOnce(failure);
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        await expect(mod.signInWithGoogle()).rejects.toBe(failure);
+        expect(errorSpy).toHaveBeenCalledWith('Error signing in with Google', failure);
+        errorSpy.mockRestore();
+    });
+
+    it('logOut rethrows the signOut error after logging it', async () => {
+        const { mod, signOut } = await importAuth({ auth: { name: 'auth' } });
+        const failure = new Error('network');
+        signOut.mockRejectedValueOnce(failure);
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        await expect(mod.logOut()).rejects.toBe(failure);
+        expect(errorSpy).toHaveBeenCalledWith('Error signing out', failure);
+        errorSpy.mockRestore();
+    });
+});

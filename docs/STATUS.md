@@ -22,8 +22,11 @@ chapter cards are memoized (a title keystroke re-renders none). Cloud saves gain
 features) ends the cached prefix after SPELLBOOK (~140–190 tokens per DM call for every class moved from uncached to cached;
 one miss per level-up or ASI), PLAYER CHARACTER is the live half only. `describeArmorAc` / `describeShieldAc` are the ONE AC
 read behind `getArmorClass` and the INVENTORY annotation (a non-catalog `magicBonus` armor showed two numbers in one prompt);
-the save star reads `hasListEntry`. 3,133 tests green (was 3,107), lint clean, built, **deployed** (hosting + Firestore
-rules). Not live-verified with a real provider or a real Firestore: the chapter docs and the prefix split are unit-pinned only —
+the save star reads `hasListEntry`. **Second pass (coverage-guided, same session):** the exchange's support-spell lane and the
+resolver's result-line renderer are pinned (they were the two largest unexercised blocks), which found and fixed a silent target
+loss on the cast wire (`normalizeCastTargets` capped at three BEFORE deduping — a repeated name ate a real recipient; now dedupe
+first, cap at 6, the spell's own clamp posts the note), plus the auth catch paths. 3,153 tests green (was 3,107), lint clean,
+built, **deployed** (hosting + Firestore rules). Not live-verified with a real provider or a real Firestore: the chapter docs and the prefix split are unit-pinned only —
 a signed-in cloud save of a campaign with chapters on the deployed site, and the DEV `[PromptBuilder]` size line showing a
 `heroSheet` block before the first dynamic block, are the smokes to run.
 
