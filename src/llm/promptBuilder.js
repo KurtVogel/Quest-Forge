@@ -4,7 +4,7 @@
  */
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT, classDisplayName, getFightingStyleLabel, getMartialArchetypeLabel, raceDisplayName } from '../engine/characterUtils.js';
-import { formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifier, isProficientWithWeapon } from '../engine/rules.js';
+import { describeArmorAc, describeShieldAc, formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifier, hasListEntry, isProficientWithWeapon } from '../engine/rules.js';
 import { getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock, findSubjectsInText } from '../engine/vectorMemory.js';
@@ -125,6 +125,19 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     const spellbook = buildSpellbookBlock(character);
     if (spellbook) {
         parts.push(spellbook, 'spellbook');
+    }
+
+    // Hero sheet — race / class / level / stats / saves / skills / speed /
+    // style / archetype / traits / features change at level-up or an ASI and
+    // never between (2026-09-26 rules-math Lap-3 P2: 57–75 % of PLAYER
+    // CHARACTER, ~140–190 tokens re-billed uncached on every DM call for
+    // every class — the fourth sighting of the pattern after the premise, the
+    // identity, and the spellbook). Split ONCE along its event lines: this
+    // block is the LAST of the cached prefix; HP / EXP / AC / wealth /
+    // conditions / resources / hit dice / appearance / slots stay live below.
+    const heroSheet = buildHeroSheetBlock(character);
+    if (heroSheet) {
+        parts.push(heroSheet, 'heroSheet');
     }
 
     // ——— DYNAMIC STATE (changes turn to turn; nothing below is cacheable) ———
@@ -757,18 +770,10 @@ const FORMAT_REMINDER = `## FINAL FORMAT REMINDER
 Follow the RESPONSE FORMAT contract above: immersive narrative prose first, then — whenever this turn carries events, requested rolls, or combat intent — exactly one fenced \`\`\`json event block as the very LAST thing in the response. Never narrate mechanics the engine owns, and never leave a required event out of the block.`;
 
 function buildCharacterBlock(character, combat = null) {
-    const stats = Object.entries(character.abilityScores)
-        .map(([ability, score]) => `${ABILITY_SHORT[ability]}: ${score} (${formatModifier(getModifier(score))})`)
-        .join(', ');
-
-    // Saving throws with proficiency markers (applied automatically by the system)
-    const saves = Object.keys(character.abilityScores)
-        .map(ability => {
-            const prof = character.savingThrowProficiencies?.includes(ability);
-            return `${ABILITY_SHORT[ability]} ${formatModifier(getSavingThrowModifier(character, ability))}${prof ? '*' : ''}`;
-        })
-        .join(', ');
-
+    // The level-constant lines (race, class, stats, saves, skills, speed,
+    // style, archetype, traits, features) render in the cached `## HERO
+    // SHEET` block that ends the prefix (2026-09-26); this block is the LIVE
+    // half only — every line here can change between two turns.
     let deathStatus = '';
     if (character.isDead) {
         deathStatus = '\n- **STATUS: DEAD** (spirit or successor active)';
@@ -785,11 +790,6 @@ function buildCharacterBlock(character, combat = null) {
             : 'Request { "type": "death_save" } as their roll each round.';
         deathStatus = `\n- **STATUS: DYING** — unconscious at 0 HP. Death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures. ${channel}`;
     }
-
-    // Skill proficiencies
-    const skillProfs = character.skillProficiencies?.length
-        ? character.skillProficiencies.join(', ')
-        : 'None';
 
     // Class resources status
     let resourceLines = '';
@@ -811,14 +811,6 @@ function buildCharacterBlock(character, combat = null) {
     const hitDice = character.hitDice;
     const hitDiceLine = hitDice
         ? `\n- **Hit Dice:** ${hitDice.remaining}/${hitDice.total} d${hitDice.die} (spend on short rest to heal)`
-        : '';
-    const fightingStyle = getFightingStyleLabel(character.class, character.fightingStyle);
-    const fightingStyleLine = fightingStyle
-        ? `\n- **Fighting Style:** ${fightingStyle} (applied automatically by the system — do NOT add this yourself)`
-        : '';
-    const martialArchetype = getMartialArchetypeLabel(character.class, character.level, character.martialArchetype);
-    const martialArchetypeLine = martialArchetype
-        ? `\n- **Martial Archetype:** ${martialArchetype} (applied automatically by the system — do NOT add this yourself)`
         : '';
     const asiLine = character.pendingAbilityScoreImprovements > 0
         ? `\n- **Pending Ability Score Improvement:** ${character.pendingAbilityScoreImprovements} (player applies this in the character sheet; do NOT change stats yourself)`
@@ -844,20 +836,59 @@ function buildCharacterBlock(character, combat = null) {
         ? `\n- **SPELLCASTING (engine-owned — only the SPELLBOOK's spells exist mechanically):** ${spellcasting}${character.sustainedSpell ? `\n- **Sustained spell active:** ${character.sustainedSpell.name || character.sustainedSpell.key} on ${character.sustainedSpell.targetType === 'companion' ? (character.sustainedSpell.targetName || 'a companion') : 'the hero'} (ends on another sustained cast, any rest, or combat's end)` : ''}`
         : '';
 
-    return `## PLAYER CHARACTER
+    return `## PLAYER CHARACTER (live state — the sheet's constants are in HERO SHEET above)
 - **Name:** ${character.name}${deathStatus}${appearanceLine}
-- **Race:** ${raceDisplayName(character)}
-- **Class:** ${classDisplayName(character)} (Level ${character.level})
 - **HP:** ${character.currentHP}/${character.maxHP}
 - **EXP:** ${expLine}
 - **AC:** ${character.armorClass}
 - **Wealth:** ${character.gold || 0} gp | ${character.silver || 0} sp | ${character.copper || 0} cp
+- **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}${asiLine}${resourceLines}${bonusActionLine}${hitDiceLine}${spellcastingBlock}`;
+}
+
+/**
+ * The hero's sheet constants — everything on the character that changes at a
+ * LEVEL-UP or an ASI and never between: race, class + level, proficiency
+ * bonus, ability scores, saving throws, skill proficiencies, speed, fighting
+ * style / archetype, traits, features. Ends the cached prefix after SPELLBOOK
+ * (2026-09-26); one cache miss per level-up or ASI. NEVER add live state here
+ * (HP, XP, AC, wealth, conditions, resources, hit dice, appearance, slots) —
+ * those ride PLAYER CHARACTER. The ability list follows the character's own
+ * `abilityScores` key order, as the old block did.
+ */
+function buildHeroSheetBlock(character) {
+    if (!character || typeof character !== 'object' || !character.abilityScores || typeof character.abilityScores !== 'object') return '';
+    const stats = Object.entries(character.abilityScores)
+        .map(([ability, score]) => `${ABILITY_SHORT[ability]}: ${score} (${formatModifier(getModifier(score))})`)
+        .join(', ');
+
+    // Saving throws with proficiency markers (applied automatically by the system)
+    const saves = Object.keys(character.abilityScores)
+        .map(ability => {
+            const prof = hasListEntry(character.savingThrowProficiencies, ability);
+            return `${ABILITY_SHORT[ability]} ${formatModifier(getSavingThrowModifier(character, ability))}${prof ? '*' : ''}`;
+        })
+        .join(', ');
+
+    const skillProfs = character.skillProficiencies?.length
+        ? character.skillProficiencies.join(', ')
+        : 'None';
+    const fightingStyle = getFightingStyleLabel(character.class, character.fightingStyle);
+    const fightingStyleLine = fightingStyle
+        ? `\n- **Fighting Style:** ${fightingStyle} (applied automatically by the system — do NOT add this yourself)`
+        : '';
+    const martialArchetype = getMartialArchetypeLabel(character.class, character.level, character.martialArchetype);
+    const martialArchetypeLine = martialArchetype
+        ? `\n- **Martial Archetype:** ${martialArchetype} (applied automatically by the system — do NOT add this yourself)`
+        : '';
+
+    return `## HERO SHEET (engine-owned — constant until level-up or an ability score improvement)
+- **Race:** ${raceDisplayName(character)}
+- **Class:** ${classDisplayName(character)} (Level ${character.level})
 - **Proficiency Bonus:** ${formatModifier(getProficiencyBonus(character.level))}
 - **Stats:** ${stats}
 - **Saving Throws:** ${saves} (* = proficient; applied automatically by the system)
 - **Skill Proficiencies:** ${skillProfs}${character.expertiseSkills?.length ? `\n- **Expertise Skills:** ${character.expertiseSkills.join(', ')} (applied automatically by the system)` : ''}
-- **Speed:** ${character.speed} ft
-- **Conditions:** ${character.conditions?.length ? character.conditions.join(', ') : 'None'}${fightingStyleLine}${martialArchetypeLine}${asiLine}${resourceLines}${bonusActionLine}${hitDiceLine}${spellcastingBlock}
+- **Speed:** ${character.speed} ft${fightingStyleLine}${martialArchetypeLine}
 ${character.traits?.length ? `- **Traits:** ${character.traits.join(', ')}` : ''}
 ${character.features?.length ? `- **Features:** ${character.features.map(f => {
         if (f === 'Fighting Style' && fightingStyle) return `Fighting Style: ${fightingStyle}`;
@@ -948,8 +979,14 @@ function buildInventoryBlock(inventory, character) {
         let desc = i.name;
         if (i.quantity > 1) desc += ` (x${i.quantity})`;
         if (stats) {
-            if (i.baseAC && !i.isShield) desc += ` [AC ${i.baseAC + (i.acBonus || 0)}, ${i.armorType || 'unknown'} armor]`;
-            if (i.isShield || i.type === 'shield') desc += ` [+${(i.shieldAC || 2) + (i.acBonus || 0)} AC shield]`;
+            // ONE AC read with the engine (2026-09-26 rules-math P2): the
+            // annotation used to skip the magicBonus fallback getArmorClass
+            // honors, so a non-catalog magic armor showed two numbers in one prompt.
+            if (i.baseAC && !i.isShield) {
+                const armorAc = describeArmorAc(i);
+                if (armorAc !== null) desc += ` [AC ${armorAc}, ${i.armorType || 'unknown'} armor]`;
+            }
+            if (i.isShield || i.type === 'shield') desc += ` [+${describeShieldAc(i)} AC shield]`;
             if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}${i.attackBonus ? `, +${i.attackBonus} hit` : ''}${i.damageBonus ? `, +${i.damageBonus} dmg` : ''}]`;
         }
         if (Number.isFinite(i.valueCp)) desc += ` [value ${formatCurrency(i.valueCp)}]`;

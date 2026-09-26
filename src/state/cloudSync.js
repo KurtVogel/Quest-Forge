@@ -1,6 +1,8 @@
 import { db, firestoreSdk } from "../config/firebase.js";
 import { asSaveObject, serializeGameState, buildSaveMetadata, projectSaveMetadata } from "./persistence.js";
-import { collectPortraitRefs, extractPortraits, restorePortraits } from "./portraitStore.js";
+import {
+    collectChapterRefs, collectPortraitRefs, extractChapters, extractPortraits, restoreChapters, restorePortraits,
+} from "./portraitStore.js";
 
 /**
  * Cloud save layer (bring-your-own Firebase, manual saves only).
@@ -29,20 +31,60 @@ import { collectPortraitRefs, extractPortraits, restorePortraits } from "./portr
  * document cap, and blobs ride outside the save transaction so the 9 MiB
  * request ceiling meters the campaign, never its pictures. A missing blob is a
  * missing picture, never a failed load; a pre-split inline payload loads as-is.
+ * Chronicle chapters take the same lane since 2026-09-26 (`chronicleChapters`,
+ * `chapterRefs`; a chapter is ≤ 60k chars, well under the 1 MiB doc cap).
  */
-const PORTRAIT_KEY_PATTERN = /^p-[0-9a-z]{1,8}-[0-9a-z]{1,8}-[0-9a-z]{1,8}$/;
-/** Most refs a metadata doc is trusted for (a save is ≤ ~100 portraits in practice). */
-const MAX_PORTRAIT_REFS = 512;
+/**
+ * The cloud BLOB LANES — the twin of `BLOB_STORES` in persistence.js
+ * (2026-09-26 chronicler Lap-3 P2: the IndexedDB v5 chapter split shipped
+ * without its cloud twin, so the chronicle — 18 % of a 1,000-message payload
+ * with 3 chapters, immutable by construction — was re-uploaded inline on
+ * every manual cloud save and counted against the 9 MiB pre-flight). Each
+ * lane: the collection its blob docs live in (`users/{uid}/<collection>/{key}`),
+ * the metadata field that lists a slot's refs, the key shape a metadata doc
+ * is trusted for, and the extract / collect / restore triple from
+ * portraitStore.js. `cloudSync.lanes.test.js` pins that this table and
+ * persistence's agree lane for lane.
+ */
+export const CLOUD_BLOB_LANES = [
+    {
+        collection: 'portraits',
+        refsField: 'portraitRefs',
+        keyPattern: /^p-[0-9a-z]{1,8}-[0-9a-z]{1,8}-[0-9a-z]{1,8}$/,
+        extract: extractPortraits,
+        collect: collectPortraitRefs,
+        restore: restorePortraits,
+        label: 'portrait',
+    },
+    {
+        collection: 'chronicleChapters',
+        refsField: 'chapterRefs',
+        keyPattern: /^c-[0-9a-z]{1,8}-[0-9a-z]{1,8}-[0-9a-z]{1,8}$/,
+        extract: extractChapters,
+        collect: collectChapterRefs,
+        restore: restoreChapters,
+        label: 'chapter',
+    },
+];
+/** Most refs a metadata doc is trusted for per lane (a save is ≤ ~100 portraits / ~50 chapters in practice). */
+const MAX_LANE_REFS = 512;
 
-/** The refs a metadata doc claims, typed: well-formed keys only, deduped, bounded. */
-function typedPortraitRefs(value) {
+/** The refs a metadata doc claims for one lane, typed: well-formed keys only, deduped, bounded. */
+function typedLaneRefs(value, lane) {
     if (!Array.isArray(value)) return [];
     const refs = new Set();
     for (const ref of value) {
-        if (refs.size >= MAX_PORTRAIT_REFS) break;
-        if (typeof ref === 'string' && PORTRAIT_KEY_PATTERN.test(ref)) refs.add(ref);
+        if (refs.size >= MAX_LANE_REFS) break;
+        if (typeof ref === 'string' && lane.keyPattern.test(ref)) refs.add(ref);
     }
     return [...refs];
+}
+
+/** `{ [lane.collection]: refs[] }` — every lane's typed refs from one metadata doc. */
+function typedRefsByLane(record) {
+    const out = {};
+    for (const lane of CLOUD_BLOB_LANES) out[lane.collection] = typedLaneRefs(record?.[lane.refsField], lane);
+    return out;
 }
 
 /**
@@ -100,10 +142,11 @@ const CHUNK_CHAR_LIMIT = 300000;
 export const CLOUD_SAVE_BYTE_LIMIT = 9 * 1024 * 1024;
 
 const CLOUD_RULES_HINT =
-    "Every save's payload is stored in a `chunks` subcollection and its portraits in a " +
-    "`portraits` collection. If your Firebase project's firestore.rules predate that, " +
-    "redeploy the repo's firestore.rules (match /users/{userId}/saves/{saveId}/chunks/{chunkId} " +
-    "and match /users/{userId}/portraits/{portraitId}).";
+    "Every save's payload is stored in a `chunks` subcollection, its portraits in a " +
+    "`portraits` collection, and its chronicle chapters in a `chronicleChapters` collection. " +
+    "If your Firebase project's firestore.rules predate that, redeploy the repo's firestore.rules " +
+    "(match /users/{userId}/saves/{saveId}/chunks/{chunkId}, match /users/{userId}/portraits/{portraitId}, " +
+    "and match /users/{userId}/chronicleChapters/{chapterId}).";
 
 const formatMiB = (bytes) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
@@ -132,17 +175,22 @@ function chunksCollection(uid, slotId) {
     return firestoreSdk.collection(db, `users/${uid}/saves/${cloudDocId(slotId)}/chunks`);
 }
 
-function portraitDoc(uid, key) {
-    return firestoreSdk.doc(firestoreSdk.collection(db, `users/${uid}/portraits`), key);
+function blobDoc(uid, lane, key) {
+    return firestoreSdk.doc(firestoreSdk.collection(db, `users/${uid}/${lane.collection}`), key);
 }
 
-/** Every portrait key some save slot's metadata still claims (metadata-only read). */
-async function claimedPortraitRefs(uid) {
+/**
+ * Every blob key some save slot's metadata still claims, per lane
+ * (`{ [collection]: Set }`) — ONE metadata-only read for all lanes.
+ */
+async function claimedRefsByLane(uid) {
     const { collection, getDocs } = firestoreSdk;
     const snapshot = await getDocs(collection(db, `users/${uid}/saves`));
-    const claimed = new Set();
+    const claimed = {};
+    for (const lane of CLOUD_BLOB_LANES) claimed[lane.collection] = new Set();
     snapshot.forEach((saveDoc) => {
-        typedPortraitRefs(saveDoc.data()?.portraitRefs).forEach(ref => claimed.add(ref));
+        const refs = typedRefsByLane(saveDoc.data());
+        for (const lane of CLOUD_BLOB_LANES) refs[lane.collection].forEach(ref => claimed[lane.collection].add(ref));
     });
     return claimed;
 }
@@ -153,38 +201,45 @@ async function claimedPortraitRefs(uid) {
  * left behind by a failed commit is content-addressed and simply reused.
  * Returns the number of blob docs written.
  */
-async function ensurePortraitBlobs(uid, blobs, claimed) {
+async function ensureLaneBlobs(uid, lane, blobs, claimed) {
     const { setDoc } = firestoreSdk;
     const missing = [...blobs].filter(([key]) => !claimed.has(key));
     await Promise.all(missing.map(([key, data]) =>
-        setDoc(portraitDoc(uid, key), { data, chars: data.length, createdAt: new Date().toISOString() })));
+        setDoc(blobDoc(uid, lane, key), { data, chars: data.length, createdAt: new Date().toISOString() })));
     return missing.length;
 }
 
 /**
- * Delete the released blobs no slot claims any more. Best-effort and AFTER
- * the commit that released them: a sweep failure leaves an orphan blob
- * (harmless, reused if the picture returns), never a failed save or delete.
- * Reads metadata only. Returns the number of blob docs removed.
+ * Delete the released blobs no slot claims any more, every lane at once.
+ * Best-effort and AFTER the commit that released them: a sweep failure
+ * leaves an orphan blob (harmless, reused if the picture / chapter returns),
+ * never a failed save or delete. Reads metadata only (one read for all
+ * lanes). Returns the number of blob docs removed.
  */
-async function sweepReleasedPortraits(uid, releasedRefs) {
-    if (releasedRefs.length === 0) return 0;
+async function sweepReleasedBlobs(uid, releasedByLane) {
+    const pending = CLOUD_BLOB_LANES.filter(lane => (releasedByLane[lane.collection] || []).length > 0);
+    if (pending.length === 0) return 0;
     try {
-        const claimed = await claimedPortraitRefs(uid);
-        const orphans = releasedRefs.filter(ref => !claimed.has(ref));
-        await Promise.all(orphans.map(ref => firestoreSdk.deleteDoc(portraitDoc(uid, ref))));
-        return orphans.length;
+        const claimed = await claimedRefsByLane(uid);
+        let swept = 0;
+        for (const lane of pending) {
+            const orphans = releasedByLane[lane.collection].filter(ref => !claimed[lane.collection].has(ref));
+            await Promise.all(orphans.map(ref => firestoreSdk.deleteDoc(blobDoc(uid, lane, ref))));
+            swept += orphans.length;
+        }
+        return swept;
     } catch (e) {
-        console.warn('Cloud portrait sweep skipped:', e);
+        console.warn('Cloud blob sweep skipped:', e);
         return 0;
     }
 }
 
 /**
- * Result shape: `{ ok: true, portraitsUploaded }` (blob docs written this
- * save — 0 on a steady-state save, since portraits ride their own collection
- * since 2026-09-22; the 2026-09-21 `droppedPortraits` budget note is retired
- * with the inline portraits it described) or `{ ok: false, reason, message }`, where
+ * Result shape: `{ ok: true, portraitsUploaded, chaptersUploaded }` (blob docs
+ * written this save per lane — 0 on a steady-state save, since portraits ride
+ * their own collection since 2026-09-22 and chapters since 2026-09-26; the
+ * 2026-09-21 `droppedPortraits` budget note is retired with the inline
+ * portraits it described) or `{ ok: false, reason, message }`, where
  * `message` is player-readable and `reason` is one of
  * `unavailable` (no Firebase configured) · `signed-out` · `too-large`
  * (pre-flight, Firestore never called) · `permission-denied` · `error`.
@@ -206,11 +261,17 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         const messages = gameState.messages || [];
         // `m?.` belt: a null entry in live state must not brick every cloud save.
         const prunedMessageCount = messages.filter(m => m?.summarized).length;
-        // Portrait bytes leave the payload here (2026-09-22): refs in the
-        // state, blobs to their own collection, the ref list on the metadata.
-        const { state: trimmedState, blobs, refs } = extractPortraits({
+        // Portrait bytes (2026-09-22) and chapter prose (2026-09-26) leave the
+        // payload here, lane by lane: refs in the state, blobs to their own
+        // collections, each lane's ref list on the metadata doc.
+        let trimmedState = {
             ...serializeGameState(gameState),
             session: { ...gameState.session, prunedMessageCount },
+        };
+        const lanes = CLOUD_BLOB_LANES.map(lane => {
+            const extracted = lane.extract(trimmedState);
+            trimmedState = extracted.state;
+            return { ...lane, blobs: extracted.blobs, refs: extracted.refs };
         });
 
         const metadata = {
@@ -218,7 +279,7 @@ export async function saveGameToCloud(uid, slotId, gameState) {
             ...buildSaveMetadata(gameState),
             savedAt: new Date().toISOString(),
             messageCount: messages.length,
-            portraitRefs: refs,
+            ...Object.fromEntries(lanes.map(lane => [lane.refsField, lane.refs])),
         };
 
         // The state is stored as a stringified JSON blob (avoids Firestore's
@@ -246,11 +307,18 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         const chunks = splitPayload(payload);
 
         // Blobs first, only the ones no slot claims yet (a steady-state save
-        // uploads zero portrait bytes), so the metadata written below never
-        // names a blob that is not there.
-        const portraitsUploaded = blobs.size > 0
-            ? await ensurePortraitBlobs(uid, blobs, await claimedPortraitRefs(uid))
-            : 0;
+        // uploads zero portrait or chapter bytes), so the metadata written
+        // below never names a blob that is not there. One claimed-refs read
+        // serves every lane; a save with nothing to store reads nothing.
+        const uploaded = {};
+        const claimed = lanes.some(lane => lane.blobs.size > 0) ? await claimedRefsByLane(uid) : null;
+        for (const lane of lanes) {
+            uploaded[lane.collection] = lane.blobs.size > 0
+                ? await ensureLaneBlobs(uid, lane, lane.blobs, claimed[lane.collection])
+                : 0;
+        }
+        const portraitsUploaded = uploaded.portraits;
+        const chaptersUploaded = uploaded.chronicleChapters;
 
         // The previous save's chunk count is read INSIDE the transaction: two
         // devices saving the same slot near-simultaneously (Vesa's multi-machine
@@ -259,12 +327,12 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // the transaction on contention, so the stale-chunk sweep always matches
         // the state actually being overwritten. (Size-wise a transaction carries
         // the same ~10 MiB request ceiling the previous writeBatch had.)
-        let previousRefs = [];
+        let previousRefs = typedRefsByLane(null);
         await runTransaction(db, async (transaction) => {
             const existingSnap = await transaction.get(saveDocRef);
             const existing = existingSnap.exists() ? existingSnap.data() : null;
             const previousChunkCount = boundedChunkCount(existing?.payloadChunks);
-            previousRefs = typedPortraitRefs(existing?.portraitRefs);
+            previousRefs = typedRefsByLane(existing);
             transaction.set(saveDocRef, { ...metadata, payload: null, payloadChunks: chunks.length });
             chunks.forEach((data, index) => {
                 transaction.set(doc(chunksCollection(uid, slotId), String(index)), { index, data });
@@ -274,13 +342,18 @@ export async function saveGameToCloud(uid, slotId, gameState) {
             }
         });
 
-        // A ref this slot released (a rerolled or removed portrait) is swept
-        // once nothing else claims it — after the commit, never inside it.
-        const kept = new Set(refs);
-        await sweepReleasedPortraits(uid, previousRefs.filter(ref => !kept.has(ref)));
+        // A ref this slot released (a rerolled or removed portrait, a removed
+        // chapter) is swept once nothing else claims it — after the commit,
+        // never inside it.
+        const released = {};
+        for (const lane of lanes) {
+            const kept = new Set(lane.refs);
+            released[lane.collection] = previousRefs[lane.collection].filter(ref => !kept.has(ref));
+        }
+        await sweepReleasedBlobs(uid, released);
 
-        console.log(`Cloud save successful: ${slotId} (${payload.length} chars, ${chunks.length} chunk${chunks.length === 1 ? '' : 's'}, ${portraitsUploaded} portrait${portraitsUploaded === 1 ? '' : 's'} uploaded)`);
-        return { ok: true, portraitsUploaded };
+        console.log(`Cloud save successful: ${slotId} (${payload.length} chars, ${chunks.length} chunk${chunks.length === 1 ? '' : 's'}, ${portraitsUploaded} portrait${portraitsUploaded === 1 ? '' : 's'} + ${chaptersUploaded} chapter${chaptersUploaded === 1 ? '' : 's'} uploaded)`);
+        return { ok: true, portraitsUploaded, chaptersUploaded };
     } catch (e) {
         console.error("Cloud save failed:", e);
         if (e?.code === 'permission-denied') {
@@ -300,25 +373,29 @@ export async function saveGameToCloud(uid, slotId, gameState) {
 }
 
 /**
- * Rehydrate every `portraitRef` from the blob collection — one `getDoc` per
- * ref, in parallel — before the state leaves this module, so LOAD_GAME never
- * sees a ref. A blob that is missing or unreadable is a missing picture
- * (`restorePortraits` strips the stamps), never a failed load.
+ * Rehydrate every lane's refs from its blob collection — one `getDoc` per
+ * ref, all lanes in parallel — before the state leaves this module, so
+ * LOAD_GAME never sees a ref. A blob that is missing or unreadable is a
+ * missing picture (`restorePortraits` strips the stamps) or a dropped chapter
+ * (`restoreChapters` — its span re-opens for the next close), never a failed
+ * load.
  */
-async function rehydratePortraits(uid, state) {
-    const refs = collectPortraitRefs(state);
-    if (refs.length === 0) return state;
-    const found = new Map();
-    await Promise.all(refs.map(async (ref) => {
+async function rehydrateBlobs(uid, state) {
+    const wanted = CLOUD_BLOB_LANES.map(lane => ({ lane, refs: lane.collect(state), found: new Map() }))
+        .filter(entry => entry.refs.length > 0);
+    if (wanted.length === 0) return state;
+    await Promise.all(wanted.flatMap(({ lane, refs, found }) => refs.map(async (ref) => {
         try {
-            const snap = await firestoreSdk.getDoc(portraitDoc(uid, ref));
+            const snap = await firestoreSdk.getDoc(blobDoc(uid, lane, ref));
             const data = snap.exists() ? snap.data()?.data : null;
             if (typeof data === 'string') found.set(ref, data);
         } catch (e) {
-            console.warn(`Cloud portrait ${ref} could not be fetched:`, e);
+            console.warn(`Cloud ${lane.label} ${ref} could not be fetched:`, e);
         }
-    }));
-    return restorePortraits(state, key => found.get(key));
+    })));
+    let restored = state;
+    for (const { lane, found } of wanted) restored = lane.restore(restored, key => found.get(key));
+    return restored;
 }
 
 export async function loadGameFromCloud(uid, slotId) {
@@ -351,13 +428,13 @@ export async function loadGameFromCloud(uid, slotId) {
             }
             console.log(`Cloud load successful: ${slotId} (${data.payloadChunks} chunks)`);
             const saved = asSaveObject(JSON.parse(chunks.slice(0, data.payloadChunks).join('')));
-            return saved ? rehydratePortraits(uid, saved) : null;
+            return saved ? rehydrateBlobs(uid, saved) : null;
         }
 
         if (data.payload) {
             console.log(`Cloud load successful: ${slotId}`);
             const saved = asSaveObject(JSON.parse(data.payload));
-            return saved ? rehydratePortraits(uid, saved) : null;
+            return saved ? rehydrateBlobs(uid, saved) : null;
         }
         return null;
     } catch (e) {
@@ -407,22 +484,22 @@ export async function deleteGameFromCloud(uid, slotId) {
         // that reuses the slot with a smaller chunk count). Remove them explicitly,
         // reading the chunk count inside the transaction so a concurrent save from
         // another device cannot leave the sweep working from a stale count.
-        let releasedRefs = [];
+        let releasedRefs = typedRefsByLane(null);
         await runTransaction(db, async (transaction) => {
             const existingSnap = await transaction.get(saveDocRef);
             const existing = existingSnap.exists() ? existingSnap.data() : null;
             const chunkCount = boundedChunkCount(existing?.payloadChunks);
-            releasedRefs = typedPortraitRefs(existing?.portraitRefs);
+            releasedRefs = typedRefsByLane(existing);
             for (let i = 0; i < chunkCount; i++) {
                 transaction.delete(doc(chunksCollection(uid, slotId), String(i)));
             }
             transaction.delete(saveDocRef);
         });
 
-        // The slot's portraits go too, unless another slot still shows them.
-        const swept = await sweepReleasedPortraits(uid, releasedRefs);
+        // The slot's portraits and chapters go too, unless another slot still claims them.
+        const swept = await sweepReleasedBlobs(uid, releasedRefs);
 
-        console.log(`Cloud delete successful: ${slotId}${swept ? ` (${swept} portrait${swept === 1 ? '' : 's'} swept)` : ''}`);
+        console.log(`Cloud delete successful: ${slotId}${swept ? ` (${swept} blob${swept === 1 ? '' : 's'} swept)` : ''}`);
         return true;
     } catch (e) {
         console.error("Cloud delete failed:", e);

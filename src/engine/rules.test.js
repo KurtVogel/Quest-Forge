@@ -14,6 +14,9 @@ import {
     getAllSkills,
     getWeaponAbilityModifier,
     getArmorClass,
+    describeArmorAc,
+    describeShieldAc,
+    hasListEntry,
     computeACFromInventory,
     getEquippedWeapon,
     getMaxHitPoints,
@@ -446,5 +449,35 @@ describe('findSkillInText (2026-09-10)', () => {
         expect(findSkillInText('swing at the goblin (attack)')).toBe('attack');
         expect(findSkillInText('Describe what you do')).toBeNull();
         expect(findSkillInText(42)).toBeNull();
+    });
+});
+
+describe('describeArmorAc / describeShieldAc — the annotation reads the engine (2026-09-26 rules-math P2)', () => {
+    it('credits magicBonus exactly as getArmorClass does, acBonus first, clamped to +3', () => {
+        expect(describeArmorAc({ baseAC: 15, armorType: 'medium', magicBonus: 2 })).toBe(17);
+        expect(describeArmorAc({ baseAC: 15, armorType: 'medium', acBonus: 1, magicBonus: 2 })).toBe(16);
+        expect(describeArmorAc({ baseAC: 30, armorType: 'heavy', acBonus: 10 })).toBe(21);
+        expect(describeArmorAc({ baseAC: '12', armorType: 'light' })).toBe(12);
+        expect(getArmorClass(0, { baseAC: 15, armorType: 'heavy', magicBonus: 2 })).toBe(17);
+    });
+
+    it('answers null for an item the engine would treat as unarmored', () => {
+        expect(describeArmorAc({ baseAC: 'lots' })).toBeNull();
+        expect(describeArmorAc({})).toBeNull();
+        expect(describeArmorAc(null)).toBeNull();
+    });
+
+    it('shields: base + bonus, junk base is the plain +2, bonus reads magicBonus too', () => {
+        expect(describeShieldAc({ shieldAC: 2 })).toBe(2);
+        expect(describeShieldAc({ shieldAC: 2, magicBonus: 1 })).toBe(3);
+        expect(describeShieldAc({ shieldAC: 9, acBonus: 8 })).toBe(6);
+        expect(describeShieldAc({ shieldAC: 'x' })).toBe(2);
+        expect(getArmorClass(0, null, { shieldAC: 2, magicBonus: 1 })).toBe(13);
+    });
+
+    it('hasListEntry is array-only: a string never substring-matches', () => {
+        expect(hasListEntry(['strength'], 'strength')).toBe(true);
+        expect(hasListEntry('strength and constitution', 'strength')).toBe(false);
+        expect(hasListEntry(null, 'strength')).toBe(false);
     });
 });

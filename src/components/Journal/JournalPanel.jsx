@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { enrichNpcProfile, needsNpcEnrichment, normalizeCallbackHook } from '../../llm/npcEnrichment.js';
 import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
@@ -9,7 +9,7 @@ import { describeLastHere, describeTravelLink, groupPlacesByRegion, listVisitedP
 import { generatePortraitImageDetailed, NPC_PORTRAIT_SIZE } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 import LookEditor from './LookEditor.jsx';
-import { writeChronicleChapters, chronicleToMarkdown, collectChapterMessages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNK_SIZE, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
+import { writeChronicleChapters, chronicleToMarkdown, collectChapterEntries, planChroniclePassages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
 import { campaignStamp } from '../../state/handlers/shared.js';
 import './Journal.css';
 
@@ -276,6 +276,7 @@ export default function JournalPanel({ isOpen, onClose }) {
                         <ChronicleTab
                             chapters={state.chronicle || []}
                             messages={state.messages || []}
+                            heroName={state.character?.name || 'the hero'}
                             chapterTitle={chapterTitle}
                             onChapterTitle={setChapterTitle}
                             writing={writingChapter}
@@ -363,14 +364,20 @@ export default function JournalPanel({ isOpen, onClose }) {
     );
 }
 
-function ChronicleTab({ chapters, messages, chapterTitle, onChapterTitle, writing, status, onWrite, onExport, onRemove, suggestedTitle }) {
+function ChronicleTab({ chapters, messages, heroName, chapterTitle, onChapterTitle, writing, status, onWrite, onExport, onRemove, suggestedTitle }) {
     const [removeArmed, setRemoveArmed] = useState(false);
     const lastChronicled = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) : -1;
-    const pendingCount = collectChapterMessages(messages, lastChronicled + 1).length;
+    // The pending walk and the passage plan are memoized on the transcript
+    // (2026-09-26 chronicler nit): they used to re-run on every keystroke of
+    // the title input and every progress tick of a write.
+    const { pendingCount, estPassages } = useMemo(() => {
+        const entries = collectChapterEntries(messages, lastChronicled + 1);
+        return { pendingCount: entries.length, estPassages: planChroniclePassages(entries, heroName).length };
+    }, [messages, lastChronicled, heroName]);
     const canWrite = pendingCount >= CHRONICLE_MIN_MESSAGES;
     // Sequential DM-model passages run ~25-40s each — a big backlog deserves an
-    // honest heads-up before the player commits to a long write.
-    const estPassages = Math.ceil(pendingCount / CHRONICLE_CHUNK_SIZE);
+    // honest heads-up before the player commits to a long write. The estimate
+    // is the chronicler's OWN plan (character-sized chunks), not a row count.
     const estMinutes = Math.max(1, Math.round(estPassages * 0.5));
 
     return (
@@ -429,59 +436,81 @@ function ChronicleTab({ chapters, messages, chapterTitle, onChapterTitle, writin
             ) : (
                 <div className="chronicle-chapters">
                     {[...chapters].reverse().map((chapter, idx) => (
-                        <details key={chapter.id} className="chronicle-chapter" open={idx === 0}>
-                            <summary className="chronicle-chapter-summary">
-                                <span className="chronicle-chapter-title">{chapter.title}</span>
-                                <span className="chronicle-chapter-when">
-                                    {chapter.createdAt ? new Date(chapter.createdAt).toLocaleDateString() : ''}
-                                </span>
-                            </summary>
-                            <div className="chronicle-chapter-text">
-                                {chapter.text.split(/\n{2,}/).map((para, i) => <p key={i}>{para}</p>)}
-                            </div>
-                            {idx === 0 && onRemove && (
-                                // Only the newest chapter is removable: its span
-                                // re-opens for the next close (the recovery path
-                                // for a bad or truncated retelling).
-                                <div className="chronicle-chapter-actions">
-                                    {removeArmed ? (
-                                        <>
-                                            <button
-                                                type="button"
-                                                className="chronicle-remove-btn confirm"
-                                                disabled={writing}
-                                                onClick={() => { setRemoveArmed(false); onRemove(chapter.id); }}
-                                            >
-                                                Really remove — its play re-opens for the next close
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="chronicle-remove-btn"
-                                                onClick={() => setRemoveArmed(false)}
-                                            >
-                                                Keep
-                                            </button>
-                                        </>
-                                    ) : (
-                                        <button
-                                            type="button"
-                                            className="chronicle-remove-btn"
-                                            disabled={writing}
-                                            title="Remove this chapter so its span can be retold — the messages themselves are never deleted"
-                                            onClick={() => setRemoveArmed(true)}
-                                        >
-                                            Remove chapter
-                                        </button>
-                                    )}
-                                </div>
-                            )}
-                        </details>
+                        <ChronicleChapterCard
+                            key={chapter.id}
+                            chapter={chapter}
+                            newest={idx === 0}
+                            writing={writing}
+                            removeArmed={idx === 0 && removeArmed}
+                            onArmRemove={setRemoveArmed}
+                            onRemove={idx === 0 ? onRemove : null}
+                        />
                     ))}
                 </div>
             )}
         </div>
     );
 }
+
+/**
+ * One chapter, memoized (2026-09-26 chronicler nit): every chapter's body
+ * used to be re-split and re-rendered on every keystroke of the title input
+ * and every progress tick of a write (2,400 `<p>` for 20 chapters), while
+ * only the newest `<details>` is open. A card re-renders only when ITS props
+ * change — the newest card on arm/disarm, none on a title keystroke.
+ */
+const ChronicleChapterCard = memo(function ChronicleChapterCard({ chapter, newest, writing, removeArmed, onArmRemove, onRemove }) {
+    const paragraphs = useMemo(() => String(chapter.text || '').split(/\n{2,}/), [chapter.text]);
+    return (
+        <details className="chronicle-chapter" open={newest}>
+            <summary className="chronicle-chapter-summary">
+                <span className="chronicle-chapter-title">{chapter.title}</span>
+                <span className="chronicle-chapter-when">
+                    {chapter.createdAt ? new Date(chapter.createdAt).toLocaleDateString() : ''}
+                </span>
+            </summary>
+            <div className="chronicle-chapter-text">
+                {paragraphs.map((para, i) => <p key={i}>{para}</p>)}
+            </div>
+            {newest && onRemove && (
+                // Only the newest chapter is removable: its span
+                // re-opens for the next close (the recovery path
+                // for a bad or truncated retelling).
+                <div className="chronicle-chapter-actions">
+                    {removeArmed ? (
+                        <>
+                            <button
+                                type="button"
+                                className="chronicle-remove-btn confirm"
+                                disabled={writing}
+                                onClick={() => { onArmRemove(false); onRemove(chapter.id); }}
+                            >
+                                Really remove — its play re-opens for the next close
+                            </button>
+                            <button
+                                type="button"
+                                className="chronicle-remove-btn"
+                                onClick={() => onArmRemove(false)}
+                            >
+                                Keep
+                            </button>
+                        </>
+                    ) : (
+                        <button
+                            type="button"
+                            className="chronicle-remove-btn"
+                            disabled={writing}
+                            title="Remove this chapter so its span can be retold — the messages themselves are never deleted"
+                            onClick={() => onArmRemove(true)}
+                        >
+                            Remove chapter
+                        </button>
+                    )}
+                </div>
+            )}
+        </details>
+    );
+});
 
 function JournalTab({ journal, location }) {
     if (journal.length === 0) {

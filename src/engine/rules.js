@@ -87,6 +87,48 @@ export function normalizeProficiencyLists(character) {
     };
 }
 
+/**
+ * The three item reads behind hero AC, shared by `getArmorClass` AND the DM
+ * prompt's INVENTORY annotation (2026-09-26 rules-math Lap-3 P2): the
+ * annotation used to print `baseAC + (acBonus || 0)` — a second formula that
+ * skipped the engine's `magicBonus` fallback, so a non-catalog "Elven mail
+ * +2" read `[AC 15]` on its row while the hero's AC line said 17. One read,
+ * one number (the 08-28 Lap-4 rule: never a second inline formula).
+ */
+function clampedArmorBase(armor) {
+    // Number() first: a string "12" from a hand-edited save string-concatenated
+    // straight through the old clamp into AC "122000" (2026-08-28 audit).
+    // Ceiling mirrors plate (18).
+    const rawBase = Number(armor?.baseAC);
+    return Number.isFinite(rawBase) ? Math.max(0, Math.min(18, Math.trunc(rawBase))) : null;
+}
+
+function clampedShieldBase(shield) {
+    // Junk degrades to the plain +2 shield instead of NaN-poisoning the AC.
+    const rawShield = Number(shield?.shieldAC);
+    return Number.isFinite(rawShield) && rawShield > 0 ? Math.min(3, Math.trunc(rawShield)) : 2;
+}
+
+/** The +1..+3 an armor-like item adds: `acBonus` first, the `magicBonus` channel as the fallback. */
+function itemAcBonus(item) {
+    return clampItemBonus(item?.acBonus) || clampItemBonus(item?.magicBonus);
+}
+
+/**
+ * The flat AC a piece of armor is worth before DEX — the number the INVENTORY
+ * row advertises as `[AC N]`. Null when the item carries no usable baseAC
+ * (the engine treats it as unarmored, so the row must not claim a number).
+ */
+export function describeArmorAc(armor) {
+    const baseAC = clampedArmorBase(armor);
+    return baseAC === null ? null : baseAC + itemAcBonus(armor);
+}
+
+/** The AC a shield adds (base + bonus) — the `[+N AC shield]` annotation, by the engine's own read. */
+export function describeShieldAc(shield) {
+    return clampedShieldBase(shield) + itemAcBonus(shield);
+}
+
 export function getArmorClass(dexMod, armor = null, shield = false) {
     let ac = 10 + dexMod; // Unarmored
 
@@ -94,12 +136,9 @@ export function getArmorClass(dexMod, armor = null, shield = false) {
         // normalizeItem clamps these at both trust boundaries (parser + load —
         // see clampItemBonus), so this is belt-and-braces: hero AC keeps a
         // floor and a ceiling on every path even if a future write skips the
-        // normalizer. Ceilings mirror plate (18) and +3 magic. Number() first:
-        // a string "12" from a hand-edited save string-concatenated straight
-        // through the old clamp into AC "122000" (2026-08-28 audit).
-        const rawBase = Number(armor.baseAC);
-        const baseAC = Number.isFinite(rawBase) ? Math.max(0, Math.min(18, Math.trunc(rawBase))) : null;
-        const armorBonus = clampItemBonus(armor.acBonus) || clampItemBonus(armor.magicBonus);
+        // normalizer. Ceilings mirror plate (18) and +3 magic.
+        const baseAC = clampedArmorBase(armor);
+        const armorBonus = itemAcBonus(armor);
         switch (baseAC === null ? 'unarmored' : armor.armorType) {
             case 'light':
                 ac = baseAC + dexMod + armorBonus;
@@ -123,11 +162,7 @@ export function getArmorClass(dexMod, armor = null, shield = false) {
 
     if (shield) {
         if (typeof shield === 'object') {
-            // Number() for the same reason as baseAC above — junk degrades to
-            // the plain +2 shield instead of NaN-poisoning the AC.
-            const rawShield = Number(shield.shieldAC);
-            const shieldAC = Number.isFinite(rawShield) && rawShield > 0 ? Math.min(3, Math.trunc(rawShield)) : 2;
-            ac += shieldAC + (clampItemBonus(shield.acBonus) || clampItemBonus(shield.magicBonus));
+            ac += describeShieldAc(shield);
         } else {
             ac += 2;
         }
@@ -298,7 +333,8 @@ export const SKILL_ABILITIES = {
 
 export const SKILL_KEY_SET = new Set(Object.keys(SKILL_ABILITIES));
 
-function hasListEntry(list, entry) {
+/** Array-only membership: the ONE read for every proficiency list (a string must never substring-match). */
+export function hasListEntry(list, entry) {
     return Array.isArray(list) && list.includes(entry);
 }
 

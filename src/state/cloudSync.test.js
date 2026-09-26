@@ -395,7 +395,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
     it('a save with N portraits carries ZERO portrait bytes in its chunks, one chunk, N blob docs, and portraitRefs on the metadata doc', async () => {
         // Measured pre-fix: 12 NPC portraits = 2.38 MiB per save, 47 % portraits, 9 chunk docs.
         const result = await saveGameToCloud('u1', 'slot-gallery', gallery(12));
-        expect(result).toEqual({ ok: true, portraitsUploaded: 13 });
+        expect(result).toEqual({ ok: true, portraitsUploaded: 13, chaptersUploaded: 0 });
         const main = firestore.__store.get('users/u1/saves/slot-gallery');
         expect(main.payloadChunks).toBe(1);
         expect(main.portraitRefs).toHaveLength(13);
@@ -418,7 +418,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
     it('a steady-state re-save (same slot or a new one) writes ZERO portrait docs and re-uploads zero portrait bytes', async () => {
         await saveGameToCloud('u1', 'slot-a', gallery(12));
         const again = await recordWrites(() => saveGameToCloud('u1', 'slot-a', gallery(12)));
-        expect(again.result).toEqual({ ok: true, portraitsUploaded: 0 });
+        expect(again.result).toEqual({ ok: true, portraitsUploaded: 0, chaptersUploaded: 0 });
         expect(again.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(0);
         expect(again.writes.reduce((n, w) => n + w.chars, 0)).toBeLessThan(40_000);
         // A second slot of the same campaign shares the blobs by content key.
@@ -495,7 +495,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         // ~10 MB of pictures used to be over the 9 MiB ceiling: 11 dropped and a second stringify.
         const state = gallery(100);
         const result = await saveGameToCloud('u1', 'slot-gallery', state);
-        expect(result).toEqual({ ok: true, portraitsUploaded: 101 });
+        expect(result).toEqual({ ok: true, portraitsUploaded: 101, chaptersUploaded: 0 });
         expect(result.droppedPortraits).toBeUndefined();
         expect(firestore.__store.get('users/u1/saves/slot-gallery').payloadChunks).toBe(1);
         const loaded = await loadGameFromCloud('u1', 'slot-gallery');
@@ -558,7 +558,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         // Overwriting with a portrait-less state releases both refs; the only
         // getDocs that save makes is the sweep's claimed-refs read.
         firestore.__fail.getDocs = new Error('unavailable');
-        expect(await saveGameToCloud('u1', 'slot-a', makeGameState())).toEqual({ ok: true, portraitsUploaded: 0 });
+        expect(await saveGameToCloud('u1', 'slot-a', makeGameState())).toEqual({ ok: true, portraitsUploaded: 0, chaptersUploaded: 0 });
         expect(portraitPaths()).toHaveLength(2); // orphans left behind, harmless
         await saveGameToCloud('u1', 'slot-b', gallery(1, { seedOffset: 50 }));
         firestore.__fail.getDocs = new Error('unavailable');

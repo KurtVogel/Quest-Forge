@@ -2690,7 +2690,7 @@ LLM-plausible typo); the INVENTORY block is 72 % stat/value annotations the DM d
 and the stack has no ceiling (`addOrStackItem` sums past `MAX_ITEM_QUANTITY`; the next load
 silently clamps 11,988 torches to 999). From the 2026-09-25 strengthening audit.
 
-### [strengthening] A chunk sized by count is a budget in the wrong unit; a storage split has two paths; split a mixed block once along its event lines — status: `idea` (2026-09-26 audit)
+### [strengthening] A chunk sized by count is a budget in the wrong unit; a storage split has two paths; split a mixed block once along its event lines — status: `shipped` (2026-09-26 audit; cleared by the 2026-09-26 queue sweep — every queue line ticked, DECISIONS.md 2026-09-26)
 Three rules from the chronicler + rules-math Lap-3 pass (2026-09-26), every number measured against
 the real chronicler (adapter mocked), prompt builder, rules, item normalizer, and serializer. **(1)**
 The chronicler's chunk is `CHUNK_SIZE` 30 messages with a 4,000-char clip per message, so one

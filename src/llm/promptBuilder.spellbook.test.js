@@ -151,7 +151,7 @@ describe('SPELLBOOK ends the cached prefix (2026-09-25 spellcasting P2, extends 
         const prefixEnd = a.indexOf(spellbook) + spellbook.length;
         expect(prefixEnd).toBeLessThan(a.indexOf('## PLAYER CHARACTER'));
         expect(b.slice(0, prefixEnd)).toBe(a.slice(0, prefixEnd));
-        // The next heading after the spellbook is already dynamic state.
+        // The next heading after the spellbook is HERO SHEET (2026-09-26), the last block of the prefix.
         expect(a.indexOf('\n## ', a.indexOf('## SPELLBOOK') + 1)).toBeGreaterThanOrEqual(prefixEnd);
         // The live line moved with the state; the sustained spell rides the live block.
         expect(block(b, '## PLAYER CHARACTER')).toContain('Spell slots remaining: L1 0/4 · L2 2/3 · L3 0/2.');

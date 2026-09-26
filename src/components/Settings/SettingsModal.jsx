@@ -13,12 +13,17 @@ import { clearImageCache } from '../../llm/providers/imageGen.js';
 import { describeKeyVendorMismatch } from '../../llm/machinery.js';
 import './Settings.css';
 
-// A cloud save reports how many portrait blobs it uploaded (the content-addressed
-// `portraits` collection writes a picture once, 2026-09-24); zero is the steady
+// A cloud save reports how many portrait / chapter blobs it uploaded (the
+// content-addressed `portraits` and `chronicleChapters` collections write a
+// picture or a chapter once, 2026-09-24 / 2026-09-26); zero is the steady
 // state and says nothing.
 function describePortraitsUploaded(cloud) {
-    const n = Number(cloud?.portraitsUploaded) || 0;
-    return n > 0 ? `. ${n} portrait${n === 1 ? "" : "s"} uploaded` : "";
+    const portraits = Number(cloud?.portraitsUploaded) || 0;
+    const chapters = Number(cloud?.chaptersUploaded) || 0;
+    const parts = [];
+    if (portraits > 0) parts.push(`${portraits} portrait${portraits === 1 ? "" : "s"}`);
+    if (chapters > 0) parts.push(`${chapters} chapter${chapters === 1 ? "" : "s"}`);
+    return parts.length > 0 ? `. ${parts.join(" and ")} uploaded` : "";
 }
 
 export default function SettingsModal() {

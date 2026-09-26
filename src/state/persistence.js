@@ -36,9 +36,12 @@ const AUTOSAVE_SLOT = '__autosave__';
  * The blob stores (the 09-21 portrait split, generalized by field name on
  * 2026-09-24): bytes that never change live under a content key, the payload
  * carries a ref, and the slot's metadata record lists its refs under
- * `refsField` so the orphan sweep never opens a payload.
+ * `refsField` so the orphan sweep never opens a payload. Exported because the
+ * cloud twin (`CLOUD_BLOB_LANES` in cloudSync.js) must list the same lanes —
+ * `cloudSync.lanes.test.js` pins it (2026-09-26: the chapter lane shipped
+ * locally on 09-24 without its cloud twin).
  */
-const BLOB_STORES = [
+export const BLOB_STORES = [
     { store: PORTRAIT_STORE, refsField: 'portraitRefs', extract: extractPortraits, collect: collectPortraitRefs, restore: restorePortraits },
     { store: CHAPTER_STORE, refsField: 'chapterRefs', extract: extractChapters, collect: collectChapterRefs, restore: restoreChapters },
 ];
