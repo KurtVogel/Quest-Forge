@@ -2690,6 +2690,37 @@ LLM-plausible typo); the INVENTORY block is 72 % stat/value annotations the DM d
 and the stack has no ceiling (`addOrStackItem` sums past `MAX_ITEM_QUANTITY`; the next load
 silently clamps 11,988 torches to 999). From the 2026-09-25 strengthening audit.
 
+### [strengthening] A chunk sized by count is a budget in the wrong unit; a storage split has two paths; split a mixed block once along its event lines — status: `idea` (2026-09-26 audit)
+Three rules from the chronicler + rules-math Lap-3 pass (2026-09-26), every number measured against
+the real chronicler (adapter mocked), prompt builder, rules, item normalizer, and serializer. **(1)**
+The chronicler's chunk is `CHUNK_SIZE` 30 messages with a 4,000-char clip per message, so one
+passage call carries anywhere from 740 chars (30 curt rows) to 122k chars (30 clipped narrations)
+— a 165× spread against ONE fixed ask ("300–700 words"): the curt chunk gets padded (the contract
+forbids invention), the fat one is compressed 40:1 at ~30k input tokens and is the app's largest
+non-streaming payload against the 90s stall guard, which re-sends the identical call twice more
+before salvage. The 09-13 rule ("a budget counted in one unit and a clamp in another is not a
+budget") holds for the INPUT side of a chunked pipeline: size chunks by characters (~20k, count as
+the belt) so the ask matches the material; the journal batch (`MAX_BATCH_MESSAGES` 40) is the
+sibling to check. **(2)** The IndexedDB v5 chapter split (`CHAPTER_FIELD` → `chronicleChapters`)
+has no cloud twin — `saveGameToCloud` extracts portraits only, so 18 % of a 1,000-message payload
+with 3 chapters (23–25 % of autosaves on 09-23) is re-uploaded on every manual cloud save and
+counted against the 9 MiB pre-flight although chapters never change. Rule: the `BLOB_STORES` lanes
+in `persistence.js` and the extract call in `cloudSync.js` list the same fields, pinned by a test
+that compares them — the 09-22 "a storage fix on one path has a twin on the other" note, missed
+once already. **(3)** PLAYER CHARACTER is 833–1,030 chars at L5 and 57–75 % of it (Race, Class,
+Proficiency Bonus, Stats, Saving Throws, Skill Proficiencies, Speed, Fighting Style / Martial
+Archetype, Traits, Features) changes only at level-up or an ASI, yet it opens the dynamic tail and
+is re-billed uncached on every DM call for every class (~140–190 tokens) — the fourth sighting
+after the premise (07-18), the identity (09-24), and the spellbook (09-25). Rule: a block builder's
+byte is either prefix (changes at a rare EVENT) or live (changes at a turn); a block that mixes
+them is split ONCE along its event lines (`## HERO SHEET` ending the prefix after SPELLBOOK; HP /
+EXP / AC / Wealth / Conditions / Resources / Hit Dice / Appearance / slots stay live), not one line
+per audit. Also from the pair: the INVENTORY annotation prints armor AC through a second formula
+(`baseAC + acBonus`) that skips `getArmorClass`'s magic-bonus read, so a non-catalog "+2 Elven
+mail" shows `[AC 15]` on the row and 17 + DEX on the hero's AC line in one prompt — the 08-28
+Lap-4 rule ("never a second inline formula") applied to AC. From the 2026-09-26 strengthening
+audit.
+
 ---
 
 ## Rejected (with reasons — don't re-propose without new arguments)
