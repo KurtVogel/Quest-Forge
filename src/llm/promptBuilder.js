@@ -336,7 +336,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
 
     // Combat state
     if (combat?.active) {
-        parts.push(buildCombatBlock(combat, character), 'combat');
+        parts.push(buildCombatBlock(combat, character, { narrationOnly }), 'combat');
     }
 
     // Tiny static tail: RESPONSE_FORMAT moved into the cached prefix, but the
@@ -656,6 +656,8 @@ const SPELLCASTING_INSTRUCTIONS = `## SPELLCASTING INSTRUCTIONS (Wizard / Cleric
 const RESPONSE_FORMAT_TAIL = `COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
 - Use "combat_start" when combat begins and list every foe 1:1 with a unique stable "id", plus "name", "hp", "ac", "attack_bonus", and "damage". Mark skeletons, zombies, ghouls, and other undead with "is_undead": true, and optionally give tough foes a flat "save_bonus" (-5..15, default +2) used for spell saving throws. Never silently add or drop combatants. If the same response also contains "combat_exchange", every player/companion/enemy reference must use one of those exact combat_start ids.
 - Set combat_start "surprise" to "player" only when the player is genuinely caught unaware, "enemies" only when the foes are caught unaware, otherwise "none". The engine converts this into Opening Initiative; never grant surprise attacks in narration yourself.
+- **The ACTIVE COMBAT block is the live truth.** LIVE COMBAT STATE OVERRIDES any contradictory earlier narration, journal entry, retrieved memory, or world fact about these combatants: a foe shown there with HP above 0 and active status is alive; never treat it as dead merely because earlier prose said so. The engine owns every combat die and state transition. A foe marked FLANKED is under a standing, engine-applied advantage — emit \`flank_broken\` only when the fiction ends it.
+- **Read the block's Phase.** \`awaiting_player\`: translate the committed player action into one combat_exchange intent envelope (the block's Action Surge line says whether one or two player_slots are required). \`opening\` or \`awaiting_narration\`: declare no actions — the engine is resolving, or you are narrating a result it already committed.
 - Mark a NAMED, narratively significant, notably tougher-than-mooks antagonist with "boss": true in combat_start — a campaign villain, a monstrous alpha, a duel-worthy champion. Not every elite, never generic guards or numbered minions. The engine independently verifies the foe's toughness before paying elevated XP, so inflating a fake boss's stats just makes an unusually hard ordinary fight; a decisive kill or surrender of a genuine boss pays a larger engine-computed reward automatically (a boss that flees does not).
 - Every committed player turn includes exactly one \`combat_exchange\`. A question or clarification includes none, so nobody acts.
 - \`player_slots\`: normally exactly one; when ACTION SURGE ACTIVE is shown, exactly two. Each slot is independently \`attack\`, \`cast\`, \`channel\`, \`check\`, \`save\`, \`dodge\`, \`dash\`, \`disengage\`, \`flee\`, \`interact\`, \`pass\`, \`death_save\`, or \`second_wind\`.
@@ -1041,6 +1043,13 @@ Magic equipment: add "magicBonus": 1, 2, or 3 only.`;
 const QUEST_PROMPT_CAP = 12;
 const QUEST_DESC_PROMPT_MAX = 250;
 const QUEST_NAME_PROMPT_MAX = 160;
+/**
+ * The overflow tail names at most this many omitted quests (2026-09-27 quests
+ * P2): the cap on described rows had moved the cost into the tail — 52 active
+ * quests rendered a 6,119-char name list on every turn. The NEWEST omitted
+ * names are kept (the likeliest to be closed or re-opened as a duplicate).
+ */
+const QUEST_OVERFLOW_NAMES = 8;
 
 function buildQuestBlock(quests) {
     const shown = quests.slice(-QUEST_PROMPT_CAP);
@@ -1055,8 +1064,10 @@ function buildQuestBlock(quests) {
     const lines = shown.map(q => `- **${clampName(q.name)}** [id: ${q.id}]: ${clampDesc(q.description)}`).join('\n');
     // Omitted quests keep their names in view so the DM can still close them
     // (and never re-opens a duplicate) without paying for their descriptions.
+    const named = omitted.slice(-QUEST_OVERFLOW_NAMES).map(q => clampName(q.name));
+    const unnamed = omitted.length - named.length;
     const overflow = omitted.length
-        ? `\n- …plus ${omitted.length} older active quest(s), tracked and still open: ${omitted.map(q => clampName(q.name)).join(', ')}`
+        ? `\n- …plus ${omitted.length} older active quest(s), tracked and still open: ${named.join(', ')}${unnamed > 0 ? `, and ${unnamed} more` : ''}`
         : '';
     return `## ACTIVE QUESTS\n${lines}${overflow}`;
 }
@@ -1263,17 +1274,39 @@ function buildActiveConstraints(worldFacts, character, party, combat = null) {
     return `## DM REMINDERS — MAINTAIN THESE PRESSURES\n${reminders.join('\n\n')}`;
 }
 
-function buildCombatBlock(combat, character) {
+/**
+ * The combat block is the one builder that renders on BOTH DM calls of a round
+ * (intent + narration), so its constant sentences were the priciest constant
+ * bytes in the app (2026-09-27 enemy-stats P2: 550 of 694 chars at 0 foes,
+ * ~140 tokens × 2 per round). They now live in COMBAT NOTES (cached prefix);
+ * this block is DATA plus the two live words the rules refer to (phase, surge).
+ * Under `narrationOnly` the user prompt (`combatNarrationPrompt`) already
+ * carries the AUTHORITATIVE post-exchange snapshot, so only what it lacks
+ * renders here: the header and the standing flanks.
+ */
+function buildCombatBlock(combat, character, { narrationOnly = false } = {}) {
     const enemies = combat.enemies || [];
     const turnOrder = combat.turnOrder || [];
-
     const flankedIds = new Set(combat.flankedEnemyIds || []);
+    const phase = combat.phase || 'awaiting_player';
+    const header = `## ACTIVE COMBAT — Round ${combat.round} | Phase: ${phase} | Surprise: ${combat.surprise || 'none'}`;
+    const flankedNames = enemies.filter(e => flankedIds.has(e.id)).map(e => e.name);
+
+    if (narrationOnly) {
+        const flanks = flankedNames.length > 0
+            ? `\n**Flanked (standing advantage, engine-applied):** ${flankedNames.join(', ')}`
+            : '';
+        return `${header}${flanks}`;
+    }
+
     const enemyList = enemies.map(e => {
         const atk = Number.isFinite(e.attackBonus) ? ` | Atk: +${e.attackBonus}` : '';
         const dmg = (typeof e.damage === 'string' && e.damage) ? ` | Dmg: ${e.damage}` : '';
         const status = e.combatStatus && e.combatStatus !== 'active' ? ` | Status: ${e.combatStatus}` : '';
         const defense = e.defending ? ' | DEFENDING' : '';
-        const flanked = flankedIds.has(e.id) ? ' | FLANKED (standing advantage — engine-applied; emit flank_broken only when the fiction ends it)' : '';
+        // The 97-char flank instruction used to repeat per flanked row (2026-09-27
+        // nit); the rule sits in COMBAT NOTES, the row carries the word.
+        const flanked = flankedIds.has(e.id) ? ' | FLANKED' : '';
         const conditions = e.conditions?.length ? ` | Conditions: ${e.conditions.join(', ')}` : '';
         return `- **${e.name}** (id: ${e.id}) | HP: ${e.hp}/${e.maxHp} | AC: ${e.ac}${atk}${dmg} | Health: ${e.condition}${conditions}${status}${defense}${flanked}`;
     }).join('\n') || '- No tracked enemies';
@@ -1284,11 +1317,8 @@ function buildCombatBlock(combat, character) {
         `${i === combat.currentTurn ? '→ ' : '  '}${t?.name || 'Unknown'} (init: ${t?.initiative ?? 0})`
     ).join('\n') || '- Turn order pending';
 
-    const phase = combat.phase || 'awaiting_player';
     const surge = character?.pendingActionSurge ? 'ACTIVE — exactly two player_slots required' : 'inactive — exactly one player_slot required';
-    return `## ACTIVE COMBAT — Round ${combat.round} | Phase: ${phase} | Surprise: ${combat.surprise || 'none'}
-
-LIVE COMBAT STATE OVERRIDES any contradictory earlier narration, journal entry, retrieved memory, or world fact about these combatants. A foe shown below with HP above 0 and active status is alive; never treat it as dead merely because earlier prose said so.
+    return `${header}
 
 **Enemies:**
 ${enemyList}
@@ -1296,5 +1326,5 @@ ${enemyList}
 **Turn Order:**
 ${turnList}
 
-The engine owns every combat die and state transition. If phase is awaiting_player, translate a committed player action into one combat_exchange intent envelope. Action Surge: ${surge}. If phase is opening or awaiting_narration, do not declare more actions.`;
+Action Surge: ${surge}.`;
 }

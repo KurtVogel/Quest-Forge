@@ -19,7 +19,10 @@ function campaign(overrides = {}) {
         journal: [{ title: 'The cavern', summary: 'Vesa defeated Kraul after a brutal duel.' }],
         npcs: [{ name: 'Mira', disposition: 'wary', agenda: 'Learn who now controls the goblin tunnels.' }],
         storyMemory: [{ status: 'active', type: 'playerCanon', subject: 'Goblin Slayer', text: 'Vesa claimed the title Goblin Slayer.' }],
-        quests: [{ name: 'Goblin chief', description: 'End Kraul’s raids.', status: 'completed' }],
+        quests: [
+            { name: 'Goblin chief', description: 'End Kraul’s raids.', status: 'completed' },
+            { name: 'The salt road', description: 'Find who bleeds the caravans.', status: 'active' },
+        ],
         inventory: [{ name: 'Longsword', equipped: true }],
         messages: [
             { role: 'user', content: 'I declare myself the new chief.' },
@@ -42,7 +45,10 @@ describe('contextual front migration', () => {
         ]));
         expect(context.knownNpcs[0]).toMatchObject({ name: 'Mira', agenda: expect.stringContaining('goblin tunnels') });
         expect(context.dramaticMemory[0].text).toContain('Goblin Slayer');
-        expect(context.quests[0]).toMatchObject({ name: 'Goblin chief', status: 'completed' });
+        // Active rows only, name + description, the live directors' projection
+        // (2026-09-27 quests P2): a completed quest is history the journal and
+        // world facts already carry.
+        expect(context.quests).toEqual([{ name: 'The salt road', description: 'Find who bleeds the caravans.' }]);
         expect(context.recentEvents).toHaveLength(2);
         expect(counts).toMatchObject({ facts: 2, journalEntries: 1, npcs: 1, memories: 1, recentEvents: 2 });
     });

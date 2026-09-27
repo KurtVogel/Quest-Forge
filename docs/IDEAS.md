@@ -1188,6 +1188,14 @@ profiles — each rejected visibly until its profile exists, never a free hostil
 material, not here:** a round is two DM calls at ~33–36 s each on Flash 3.8 (2026-09-20 full
 run) — the strengthening queue's `narrationOnly` prompt slimming is the first slice.
 
+### [strengthening] Quests panel "clear finished" / summarized quest history — status: `open` (strengthening audit 2026-09-27, quests Lap 3 metric)
+Terminal quest rows are forever by decision (DECISIONS.md 2026-09-27 (4)): they are the quest
+ledger's one-shot guard and the finished section is the player's. Measured share: 500 terminal
+rows ≈ 159 KB in every autosave / cloud save, typed at every load (3 ms) — cheap at a realistic
+100 rows (~30 KB). If the share ever matters: a Quests-panel "clear finished" that folds the
+terminal rows into one summarized history record (names + outcomes, no descriptions) while
+keeping the one-shot guard by name, never a silent prune.
+
 ## UX & Platform
 
 ### Character screen redesign — dedicated, "engine-y" sheet with legible skills — status: v1 `shipped` (2026-07-17)

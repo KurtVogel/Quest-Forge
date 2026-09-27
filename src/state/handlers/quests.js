@@ -31,14 +31,18 @@ const questTokens = (name) => tokenSet(String(name || ''), {
  * SECOND completed row via the fallback insert. Same shared textMatch core as
  * the loot audits: symmetric token containment over stopword-stripped names.
  */
-function questNamesFuzzyMatch(a, b) {
-    const setA = questTokens(a);
-    const setB = questTokens(b);
-    if (setA.size === 0 || setB.size === 0 || containment(setA, setB) < 0.99) return false;
-    // Near-equality, not bare subset: "The Relic of Kel" is "Find the Relic of
-    // Kel" (one dropped verb), but "The Cellar Rats" must NOT swallow "Rats in
-    // the Cellar Shrine" — a name twice as long is a different quest.
-    return Math.min(setA.size, setB.size) / Math.max(setA.size, setB.size) > 0.5;
+function questNameMatcher(refName) {
+    // The REF side is tokenized ONCE per dispatch (2026-09-27 audit nit): both
+    // `.filter` fallbacks used to re-tokenize it for every row.
+    const setB = questTokens(refName);
+    return (name) => {
+        const setA = questTokens(name);
+        if (setA.size === 0 || setB.size === 0 || containment(setA, setB) < 0.99) return false;
+        // Near-equality, not bare subset: "The Relic of Kel" is "Find the Relic of
+        // Kel" (one dropped verb), but "The Cellar Rats" must NOT swallow "Rats in
+        // the Cellar Shrine" — a name twice as long is a different quest.
+        return Math.min(setA.size, setB.size) / Math.max(setA.size, setB.size) > 0.5;
+    };
 }
 
 // Same caps as the parser boundary (normalizeQuestUpdate): the Quests panel's
@@ -136,8 +140,8 @@ export const handlers = {
         // Fuzzy fallback, unambiguous only: a re-phrased "updated" must refresh
         // the tracked arc, not mint a drifted twin beside it.
         if (!existing && nameToken) {
-            const fuzzy = state.quests.filter(quest =>
-                quest.status === 'active' && questNamesFuzzyMatch(quest.name, payload.name));
+            const fuzzyMatch = questNameMatcher(payload.name);
+            const fuzzy = state.quests.filter(quest => quest.status === 'active' && fuzzyMatch(quest.name));
             if (fuzzy.length === 1) existing = fuzzy[0];
         }
         if (existing) {
@@ -192,7 +196,8 @@ export const handlers = {
             // minting a phantom second terminal row. Unambiguous only — active
             // rows preferred, and 2+ candidates keep the exact-match behavior
             // (the insert), never a guess.
-            const fuzzy = state.quests.filter(q => questNamesFuzzyMatch(q.name, refName));
+            const fuzzyMatch = questNameMatcher(refName);
+            const fuzzy = state.quests.filter(q => fuzzyMatch(q.name));
             const pool = fuzzy.some(q => q.status === 'active')
                 ? fuzzy.filter(q => q.status === 'active')
                 : fuzzy;

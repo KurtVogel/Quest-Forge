@@ -15,6 +15,7 @@ const { buildAbsenceDriftContext } = await import('./absenceDrift.js');
 const { buildRegionalFrontsContext } = await import('./regionalFronts.js');
 const { buildWonderContext } = await import('./wonderDirector.js');
 const { generateCampaignFronts } = await import('./frontDirector.js');
+const { buildFrontMigrationContext } = await import('./frontMigration.js');
 
 const fill = (label, length) => `${label} `.padEnd(length, label[0]);
 
@@ -78,7 +79,14 @@ const worstCaseState = () => ({
         keyDecisions: Array.from({ length: 8 }, () => fill('decision', 300)),
         consequences: Array.from({ length: 8 }, () => fill('consequence', 300)),
     })),
-    quests: Array.from({ length: 12 }, (_, i) => ({ id: `q-${i}`, name: fill(`quest ${i}`, 160), description: fill('desc', 800), status: 'active' })),
+    quests: [
+        // Terminal rows first so they are the OLDEST: a `.slice(-N)` that forgot
+        // the status filter would still show them only if it kept them.
+        { id: 'q-done', name: 'TERMINAL-QUEST-DONE', description: fill('done', 800), status: 'completed' },
+        { id: 'q-failed', name: 'TERMINAL-QUEST-FAILED', description: fill('failed', 800), status: 'failed' },
+        ...Array.from({ length: 12 }, (_, i) => ({ id: `q-${i}`, name: fill(`quest ${i}`, 160), description: fill('desc', 800), status: 'active' })),
+        { id: 'q-done-new', name: 'TERMINAL-QUEST-DONE-NEWEST', description: fill('done', 800), status: 'completed' },
+    ],
     storyMemory: Array.from({ length: 40 }, (_, i) => ({
         id: `card-${i}`, type: 'promise', status: 'active', salience: 4,
         subject: fill(`subject ${i}`, 120), text: fill(`card ${i}`, 400),
@@ -126,6 +134,26 @@ describe('background director contexts — worst-case ceilings and key sets', ()
 
     it('wonder stays bounded', () => {
         expect(size(buildWonderContext(worstCaseState()))).toBeLessThan(27000);
+    });
+
+    it('a terminal quest row stays out of EVERY director lane, the Dynamic-World upgrade included (2026-09-27 quests P2)', () => {
+        const state = worstCaseState();
+        for (const build of [buildFrontAftermathContext, buildAbsenceDriftContext, buildRegionalFrontsContext, buildWonderContext, buildFrontMigrationContext]) {
+            const built = build(state);
+            const context = built?.context ?? built; // the upgrade returns { context, counts }
+            expect(context, `${build.name} built a context`).toBeTruthy();
+            expect(JSON.stringify(context), build.name).not.toContain('TERMINAL-QUEST');
+        }
+        // The upgrade's projection matches its live siblings: active only, the
+        // 10 newest, name + description, 120 / 400 clamps (was 20 rows × 600 with status).
+        const { context: migration } = buildFrontMigrationContext(state);
+        expect(migration.quests).toHaveLength(10);
+        for (const quest of migration.quests) {
+            expect(Object.keys(quest).sort()).toEqual(['description', 'name']);
+            expect(quest.name.length).toBeLessThanOrEqual(120);
+            expect(quest.description.length).toBeLessThanOrEqual(400);
+        }
+        expect(size(migration.quests)).toBeLessThan(5600);
     });
 
     it('campaign fronts: a fixed key set, bounded by the premise', async () => {

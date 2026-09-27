@@ -22,7 +22,19 @@ engine-owned salience-4 `wound` card for a MARKING fight (hero to 0 / ≤ 25 % f
 with a "The fight leaves a mark" line — plus a six-cadence dormancy of its own, since a salience-4 card was exempt from the
 age-out. 3,175 tests green (was 3,153), lint clean. `eval:combat` gained the two proof scenarios (telegraph honor per foe,
 judge-free; bloodied foes break) — BUILT, NOT RUN: no provider keys in this session; the five-fights wound-callback probe is a
-real-provider playtest still to run. Deployed at the end of the session (see the entry below for the same-session strengthening sweep).
+real-provider playtest still to run. Deployed at the end of the session with the strengthening sweep below.
+
+## 2026-09-27 — queue sweep: quests + enemy-stats-conditions (Lap 3, performance & token budget), 9 P2s — queue empty
+
+All nine lines of the 09-27 scheduled audit cleared and ticked (same session as the WOW build above). **Ruling: DECISIONS.md
+2026-09-27 (second entry).** The ACTIVE QUESTS overflow tail is capped in count (`QUEST_OVERFLOW_NAMES` 8 + "and K more";
+52 max-size quests 11,958 → < 7,000 chars with the tail, 500 quests cost the same block); the combat block is DATA — its two
+constant paragraphs are COMBAT NOTES bullets in the cached prefix (694 → 202 chars at 0 foes, on BOTH calls of every round),
+FLANKED is a row word with the rule said once, and under `narrationOnly` the block is the header + the standing flanks only
+(2,191 → 217 chars at 6 foes; the narration prompt's POST-EXCHANGE STATE is the authoritative copy); `frontMigration` projects
+quests like its live siblings (active, 10 newest, 120 / 400); `questNameMatcher` tokenizes the ref once; `on_success` is
+normalized once; terminal quest rows stay by decision (the ledger's one-shot guard; "clear finished" is an IDEAS item). Four
+new pin files. 3,185 tests green (was 3,175), lint clean, built, **deployed** (hosting).
 
 ## 2026-09-26 — queue sweep: chronicler + rules-math (Lap 3, performance & token budget), 6 P2s — queue empty
 

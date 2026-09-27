@@ -140,6 +140,8 @@ export function normalizeCombatExchange(raw) {
             const action = text(slot?.action, 30).toLowerCase().replace(/[\s-]+/g, '_').replace(/^secondwind$/, 'second_wind');
             if (!PLAYER_ACTIONS.has(action)) return null;
             const situationalRuling = normalizeSituationalRuling(slot);
+            // Normalized ONCE (2026-09-27 audit nit): the truthiness-then-value spread re-ran it.
+            const onSuccess = action === 'check' ? normalizeConditionDelta(slot.on_success || slot.onSuccess) : null;
             return {
                 id: ref(slot.id) || `player-slot-${index + 1}`,
                 action,
@@ -163,9 +165,7 @@ export function normalizeCombatExchange(raw) {
                     // slot_level / out-of-combat dc parity.
                     dc: Number.isFinite(toFiniteNumber(slot.dc)) ? Math.max(5, Math.min(30, Math.round(toFiniteNumber(slot.dc)))) : 10,
                 }),
-                ...(action === 'check' && normalizeConditionDelta(slot.on_success || slot.onSuccess) && {
-                    onSuccess: normalizeConditionDelta(slot.on_success || slot.onSuccess),
-                }),
+                ...(onSuccess && { onSuccess }),
                 ...(situationalRuling && { situationalRuling }),
             };
         }).filter(Boolean)

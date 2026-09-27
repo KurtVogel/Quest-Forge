@@ -82,11 +82,16 @@ export function buildFrontMigrationContext(state) {
             title: cleanText(entry.title, 120),
             summary: cleanText(entry.summary || entry.content, 1200),
         })),
-        quests: (state.quests || []).slice(-20).map(quest => ({
-            name: cleanText(quest.name, 120),
-            description: cleanText(quest.description, 600),
-            status: cleanText(quest.status, 40),
-        })),
+        // Parity with the three live director lanes (2026-09-27 quests P2): active
+        // rows only, the 10 newest, 120 / 400 clamps — this one-shot call used to
+        // ship 20 rows INCLUDING completed / failed ones at 600 chars each.
+        quests: (state.quests || [])
+            .filter(quest => !['completed', 'failed'].includes(quest.status))
+            .slice(-10)
+            .map(quest => ({
+                name: cleanText(quest.name, 120),
+                description: cleanText(quest.description, 400),
+            })),
         dramaticMemory: (state.storyMemory || []).filter(memory => memory.status !== 'resolved').slice(-24).map(memory => ({
             type: cleanText(memory.type, 40),
             subject: cleanText(memory.subject, 100),
