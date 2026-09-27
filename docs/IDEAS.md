@@ -2723,6 +2723,36 @@ audit.
 
 ---
 
+### [strengthening] An overflow tail is a cap on the described rows only; a block that renders on two calls per round pays its constants twice; a lane with its own authoritative prompt should read only what that prompt lacks — status: `idea` (2026-09-27 audit, quests + enemy-stats-conditions Lap 3; queue lines in SCHEDULED_STRENGTHENING.md)
+Three rules from the quests + enemy-stats-conditions Lap-3 pass (2026-09-27), every number measured
+against the real prompt builder, reducer, sanitizers, and narration prompt. **(1)** `buildQuestBlock`
+caps the DESCRIBED rows at `QUEST_PROMPT_CAP` 12, but its "…plus N older active quest(s), tracked and
+still open: …" tail names every omitted quest at 160 chars: 52 active quests render an 11,958-char
+block of which the tail is 6,119 chars (~1.5k tokens), live on every turn — and the prompt's own
+"open the quest the moment they act on it" rule plus a DM that rarely closes make stale open quests a
+long campaign's steady state, with nothing aging or pruning them. Rule: every `slice(-CAP)` block whose
+overflow line names the omitted rows needs a second cap on the names (~8 + "and K more", or an
+`openedAtMessage` age collapse), and the byte-ceiling pin covers the block WITH the tail. **(2)**
+`buildCombatBlock` at zero foes is 694 chars, 550 of them two paragraphs that never change (the LIVE
+COMBAT STATE OVERRIDES paragraph and the closing engine-owns-every-die paragraph; only the Action
+Surge / phase line is live) — and the combat block is the ONE builder rendered on both DM calls of a
+round (intent + narration), so those constants are the priciest constant bytes in the app per round
+(~140 tokens × 2). The 09-26 rule (a builder's byte is prefix or live) and DECISIONS 2026-09-26 (9)
+(a block's rules go in its header once) both say: COMBAT NOTES or a one-line header. **(3)** On
+`awaiting_narration` APPLY has already committed, so the narration call's `## ACTIVE COMBAT` (2,191
+chars at 6 foes) repeats the post-exchange HP / health / conditions that `combatNarrationPrompt`'s
+POST-EXCHANGE STATE (1,147 chars) already carries as the authoritative copy, plus AC / Atk / Dmg / turn
+order / the intent-envelope instruction the narration lane cannot act on — ~550 tokens per round. The
+09-23 `narrationOnly` pin deliberately "keeps combat" (DECISIONS 2026-09-26 (2)); the narrower shape is
+header + FLANKED state (the one thing the snapshot lacks). Rule: when a lane gets a purpose-built user
+prompt, the system prompt's matching block renders only what that prompt lacks — a flag to revisit,
+not a reversal. Also from the pair: `questNamesFuzzyMatch` re-tokenizes the ref per row, `frontMigration`
+ships 20 quests including finished ones at 600 chars where its live siblings filter and clamp, the
+FLANKED annotation repeats a 97-char instruction per flanked row, and terminal quest rows (never
+rendered to the DM) are 159 KB per 500 in every save. From the 2026-09-27 strengthening audit.
+
+---
+
 ## Rejected (with reasons — don't re-propose without new arguments)
 
 - **Shared cloud autosave slot** (one "Continue" synced across devices) — rejected
