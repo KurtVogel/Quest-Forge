@@ -49,6 +49,7 @@ export const initialGameState = {
         resolvedExchangeIds: [],
         surprise: 'none',
         flankedEnemyIds: [], // Enemy ids under a standing flank — the engine keeps applying attack advantage across exchanges until the flank breaks
+        fightTally: null, // The fight's cost ledger (WOW 2026-09-27): seeded by START_COMBAT, folded by APPLY_COMBAT_EXCHANGE, spent by the terminal narration + END_COMBAT's wound card
     },
     session: {
         id: null,

@@ -15,7 +15,10 @@ import {
     normalizeEnemyConditions,
     validateEnemySaveBonus,
 } from '../../engine/enemyStats.js';
-import { COMBAT_PHASES, exchangeEventLines, isEnemyActive, mergeCharacterUpdates, reconcileStartingCombatExchange } from '../../engine/combatExchange.js';
+import {
+    COMBAT_PHASES, buildFightWoundCard, exchangeEventLines, isEnemyActive, mergeCharacterUpdates,
+    reconcileStartingCombatExchange, recordExchangeCost, startFightTally,
+} from '../../engine/combatExchange.js';
 import { appendRecentEncounter, buildEncounterEntry, distanceSince } from '../../engine/worldTempo.js';
 import { HEARSAY_WINDOW_MESSAGES } from '../../engine/regionalHearsay.js';
 import { isSameLocation } from '../../engine/locationRegistry.js';
@@ -124,6 +127,7 @@ export const handlers = {
                 // ambush-on-arrival fight burns the offer's window through its
                 // rounds; this stamp proves the overlap.
                 startedAtMessage: (state.messages || []).length,
+                fightTally: startFightTally(state),
             },
             rollHistory: appendRollHistory(state.rollHistory, playerInitiativeRoll),
             messages: [
@@ -144,6 +148,12 @@ export const handlers = {
         // before the end — never for enemies who fled or accepted a surrender
         // while the player ultimately went down or ran.
         const slainXpOnly = !!action.payload?.slainXpOnly;
+        // The fight leaves a mark (WOW 2026-09-27, combat-drama slice B): ONE
+        // engine-minted salience-4 `wound` card when the fight marked the party
+        // (hero dropped / ≤ 25 % / crit taken / companion downed), from the
+        // tally the exchanges accumulated — read BEFORE the envelope resets.
+        const outcome = action.payload?.defeat ? 'defeat' : action.payload?.escaped ? 'escaped' : 'victory';
+        const woundCard = buildFightWoundCard(state.combat.fightTally, state, outcome);
         let newState = {
             ...state,
             combat: { ...initialGameState.combat },
@@ -200,6 +210,14 @@ export const handlers = {
                     ...newState.messages,
                     systemMessage(`${downedAtEnd.map(c => `**${c.name}**`).join(' and ')} ${downedAtEnd.length === 1 ? 'is' : 'are'} down but stable — a healing potion, healing magic, or a rest will bring them back.`),
                 ],
+            };
+        }
+
+        if (woundCard) {
+            newState = gameReducer(newState, { type: 'ADD_STORY_MEMORY_CARD', payload: woundCard });
+            newState = {
+                ...newState,
+                messages: [...newState.messages, systemMessage(`**The fight leaves a mark** — ${woundCard.text}`)],
             };
         }
 
@@ -333,6 +351,16 @@ export const handlers = {
                 flankedEnemyIds: Array.isArray(payload.flankedEnemyIds)
                     ? payload.flankedEnemyIds.slice(0, 30)
                     : (next.combat.flankedEnemyIds || []),
+                // The cost tally folds in what this commit did to the party
+                // (WOW 2026-09-27); a pre-tally save (null) stays null.
+                fightTally: recordExchangeCost(next.combat.fightTally, {
+                    result: payload.result,
+                    heroName: state.character?.name,
+                    hpBefore: state.character?.currentHP,
+                    hpAfter: character?.currentHP,
+                    partyBefore: state.party || [],
+                    partyAfter: next.party || [],
+                }),
             },
         };
     },

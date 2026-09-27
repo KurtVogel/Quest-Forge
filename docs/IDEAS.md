@@ -1137,7 +1137,7 @@ attack/defend/flee/surrender. Expand without returning dice authority to the LLM
 - Enemy spell/special profiles and morale personalities. Until a profile exists, reject visibly
   with no action committed rather than inventing numbers or granting a free hostile turn.
 
-### [wow] Combat drama: the foe's next move, and the fight leaves a mark — status: `proposed` (wow audit 2026-09-23, combat-drama Lap 1, two W1 slices)
+### [wow] Combat drama: the foe's next move, and the fight leaves a mark — status: `shipped` (both slices 2026-09-27 — the telegraph rule on every ongoing narration beat + the prefix "honor your own telegraph, and let foes break" bullet; `combat.fightTally` → the `COST OF THIS FIGHT:` line on the terminal beat + ONE engine-minted `wound` card per marking fight with a six-cadence dormancy of its own; DECISIONS.md 2026-09-27; the `eval:combat` proof scenarios are built but unrun, the five-fights callback probe still to run) (wow audit 2026-09-23, combat-drama Lap 1, two W1 slices)
 The exchange machine is genre-best at the DICE (engine initiative + Opening Initiative, guard
 interception, standing flanks, conditions, targeting from fiction — nothing can be cheated) and
 genre-weak at the three things a fight is FOR. (1) **The player commits blind and the foes never

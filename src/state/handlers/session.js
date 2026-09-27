@@ -15,7 +15,7 @@ import { sanitizeQuestRecords } from './quests.js';
 import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX, MESSAGE_CONTENT_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { canonicalEnemyId, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
-import { COMBAT_PHASES, normalizeCombatExchange } from '../../engine/combatExchange.js';
+import { COMBAT_PHASES, normalizeCombatExchange, sanitizeFightTally } from '../../engine/combatExchange.js';
 import { archiveDescriptiveLabels, dedupeNpcRoster, healPromotedStoryMemoryTwins, migrateLegacyNpc } from '../../engine/npcRoster.js';
 import {
     ensureCompanionRosterRecord,
@@ -524,6 +524,9 @@ function validateSaveState(payload) {
                     : [],
                 ...(Number.isInteger(merged.startedAtMessage) && merged.startedAtMessage >= 0
                     && { startedAtMessage: merged.startedAtMessage }),
+                // Complete-or-null (WOW 2026-09-27): a junk tally renders nothing
+                // rather than "undefined→3 HP" into the terminal prompt.
+                fightTally: sanitizeFightTally(merged.fightTally),
             };
         })(),
         // The living-world sub-objects (absenceDrift, regionalHearsay, the three

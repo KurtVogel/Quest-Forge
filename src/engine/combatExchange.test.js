@@ -1872,7 +1872,7 @@ describe('check-slot dc numeric-string parity (2026-09-15 audit P2)', () => {
 });
 
 describe('combatNarrationPrompt size at the 10-event ceiling (2026-09-23 combat-exchange test depth)', () => {
-    it('a full field — hero, two companions, four foes, a note, a death save — stays under 3,000 chars (2,531 measured)', () => {
+    it('a full field — hero, two companions, four foes, a note, a death save — stays under 3,000 chars (2,531 measured; 2,703 with the 2026-09-27 telegraph rule)', () => {
         const attack = (actor, target, hit, remainingHp, maxHp) => ({
             type: 'attack', actor, target, rolled: 14, dc: 13, hit, damage: hit ? 9 : 0, remainingHp, maxHp,
         });

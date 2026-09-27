@@ -1757,7 +1757,346 @@ export function planOpeningExchange(state) {
     };
 }
 
-export function combatNarrationPrompt(result) {
+// ─── The fight leaves a mark (WOW 2026-09-27, combat-drama slice B) ─────────
+/**
+ * The cost tally the reducer keeps on the combat envelope (`combat.fightTally`):
+ * START_COMBAT seeds it from the live hero, APPLY_COMBAT_EXCHANGE folds each
+ * committed result in through `recordExchangeCost`, the terminal narration
+ * prompt carries `describeFightCost`'s ONE line, and END_COMBAT mints ONE
+ * salience-4 `wound` story card through `buildFightWoundCard` when the fight
+ * MARKED the party. Zero LLM calls; every number is the engine's own. Resources
+ * are measured as a DIFF between the start snapshot and the live hero at the
+ * end (`snapshotHeroResources`), so a potion drunk from the Inventory panel
+ * and a Second Wind declared on the exchange wire count the same way without
+ * a hook in either handler.
+ */
+export const FIGHT_MARK_HP_RATIO = 0.25;
+const MAX_TALLY_CRITS = 6;
+const MAX_TALLY_NAMES = 6;
+const TALLY_NAME_MAX = 100;
+const TALLY_RESOURCE_KEY_MAX = 40;
+
+function tallyName(value) {
+    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, TALLY_NAME_MAX) : '';
+}
+
+function finiteInt(value, fallback) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
+function isHealingConsumable(item) {
+    return !!item && typeof item === 'object' && item.consumableType === 'healing';
+}
+
+/** `secondWind` → "Second Wind"; a key the class data never named still reads as words. */
+function humanizeResourceKey(key) {
+    return String(key)
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase())
+        .trim();
+}
+
+function joinNames(names) {
+    if (names.length <= 1) return names[0] || '';
+    return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/** The hero's spendable state at one moment: class resources used, spell slots used, healing potions carried. */
+export function snapshotHeroResources(character, inventory = []) {
+    const resources = {};
+    const classResources = character?.classResources;
+    if (classResources && typeof classResources === 'object' && !Array.isArray(classResources)) {
+        for (const [key, res] of Object.entries(classResources)) {
+            if (!res || typeof res !== 'object' || !key) continue;
+            resources[key.slice(0, TALLY_RESOURCE_KEY_MAX)] = Math.max(0, finiteInt(res.used, 0));
+        }
+    }
+    const slots = character?.spellSlots;
+    const slotsUsed = slots && typeof slots === 'object' && !Array.isArray(slots)
+        ? Object.values(slots).reduce((sum, slot) => sum + Math.max(0, finiteInt(slot?.used, 0)), 0)
+        : 0;
+    const potions = (Array.isArray(inventory) ? inventory : [])
+        .filter(isHealingConsumable)
+        .reduce((sum, item) => sum + Math.max(1, finiteInt(item.quantity, 1)), 0);
+    return { resources, slotsUsed, potions };
+}
+
+/**
+ * Complete-or-null (the 2026-09-08 living-world rule): a stored tally is
+ * untrusted input at load, and a half-typed one would render "undefined→3 HP"
+ * into the AUTHORITATIVE terminal prompt.
+ */
+export function sanitizeFightTally(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const heroMaxHp = finiteInt(value.heroMaxHp, NaN);
+    if (!Number.isFinite(heroMaxHp) || heroMaxHp < 1) return null;
+    const heroHpStart = Math.max(0, finiteInt(value.heroHpStart, 0));
+    const start = value.resourcesStart && typeof value.resourcesStart === 'object' && !Array.isArray(value.resourcesStart)
+        ? value.resourcesStart
+        : {};
+    const resources = {};
+    if (start.resources && typeof start.resources === 'object' && !Array.isArray(start.resources)) {
+        for (const [key, used] of Object.entries(start.resources)) {
+            if (!key || !Number.isFinite(Number(used))) continue;
+            resources[key.slice(0, TALLY_RESOURCE_KEY_MAX)] = Math.max(0, finiteInt(used, 0));
+        }
+    }
+    const critsTaken = (Array.isArray(value.critsTaken) ? value.critsTaken : [])
+        .filter(crit => crit && typeof crit === 'object' && !Array.isArray(crit))
+        .map(crit => ({
+            by: tallyName(crit.by) || 'a foe',
+            target: tallyName(crit.target) || 'the hero',
+            damage: Math.max(0, finiteInt(crit.damage, 0)),
+            round: Math.max(1, finiteInt(crit.round, 1)),
+        }))
+        .slice(0, MAX_TALLY_CRITS);
+    const companionsDowned = [...new Set((Array.isArray(value.companionsDowned) ? value.companionsDowned : [])
+        .map(tallyName).filter(Boolean))].slice(0, MAX_TALLY_NAMES);
+    return {
+        heroHpStart,
+        heroMaxHp,
+        heroLowestHp: Math.max(0, Math.min(heroHpStart, finiteInt(value.heroLowestHp, heroHpStart))),
+        heroDroppedRound: Number.isInteger(value.heroDroppedRound) && value.heroDroppedRound >= 1 ? value.heroDroppedRound : null,
+        deathSaves: Math.max(0, finiteInt(value.deathSaves, 0)),
+        critsTaken,
+        companionsDowned,
+        resourcesStart: {
+            resources,
+            slotsUsed: Math.max(0, finiteInt(start.slotsUsed, 0)),
+            potions: Math.max(0, finiteInt(start.potions, 0)),
+        },
+        rounds: Math.max(1, finiteInt(value.rounds, 1)),
+    };
+}
+
+/** START_COMBAT: the fight's opening ledger, from the live hero. */
+export function startFightTally(state) {
+    const character = state?.character || {};
+    const hp = Math.max(0, finiteInt(character.currentHP, 0));
+    return sanitizeFightTally({
+        heroHpStart: hp,
+        heroMaxHp: Math.max(1, finiteInt(character.maxHP, hp || 1)),
+        heroLowestHp: hp,
+        heroDroppedRound: null,
+        deathSaves: 0,
+        critsTaken: [],
+        companionsDowned: [],
+        resourcesStart: snapshotHeroResources(character, state?.inventory),
+        rounds: 1,
+    });
+}
+
+/**
+ * APPLY_COMBAT_EXCHANGE: fold one committed result into the tally. Pure —
+ * the caller passes the hero's HP and the party before and after the commit.
+ * A crit is counted on the hero or a companion (the guard's intercepted blow
+ * lands on the guardian and is theirs); a companion is "downed" when an attack
+ * event leaves them at 0 or the party snapshot does.
+ */
+export function recordExchangeCost(tally, { result, heroName, hpBefore, hpAfter, partyBefore = [], partyAfter = [] } = {}) {
+    const base = sanitizeFightTally(tally);
+    if (!base || !result || typeof result !== 'object') return base;
+    const hero = tallyName(heroName) || 'Player';
+    const round = Math.max(base.rounds, finiteInt(result.round, base.rounds));
+    const before = Array.isArray(partyBefore) ? partyBefore : [];
+    const after = Array.isArray(partyAfter) ? partyAfter : [];
+    const companionNames = new Set(before.map(c => tallyName(c?.name)).filter(Boolean));
+    let lowest = base.heroLowestHp;
+    if (Number.isFinite(hpAfter)) lowest = Math.min(lowest, Math.max(0, Math.trunc(hpAfter)));
+    let droppedRound = base.heroDroppedRound;
+    let deathSaves = base.deathSaves;
+    const crits = [...base.critsTaken];
+    const downed = [...base.companionsDowned];
+    const noteDowned = (name) => {
+        if (name && !downed.includes(name) && downed.length < MAX_TALLY_NAMES) downed.push(name);
+    };
+    for (const event of Array.isArray(result.events) ? result.events : []) {
+        if (!event || typeof event !== 'object') continue;
+        if (event.type === 'death_save') {
+            deathSaves += 1;
+            continue;
+        }
+        if (event.type !== 'attack' || !event.hit) continue;
+        const target = tallyName(event.target);
+        const onHero = target === hero;
+        const onCompanion = companionNames.has(target);
+        if (!onHero && !onCompanion) continue;
+        const remaining = finiteInt(event.remainingHp, NaN);
+        if (onHero && Number.isFinite(remaining)) {
+            lowest = Math.min(lowest, Math.max(0, remaining));
+            if (remaining <= 0 && droppedRound === null) droppedRound = round;
+        }
+        if (onCompanion && Number.isFinite(remaining) && remaining <= 0) noteDowned(target);
+        if (event.critical && crits.length < MAX_TALLY_CRITS) {
+            crits.push({
+                by: tallyName(event.actor) || 'a foe',
+                target,
+                damage: Math.max(0, finiteInt(event.damage, 0)),
+                round,
+            });
+        }
+    }
+    if (Number.isFinite(hpBefore) && Number.isFinite(hpAfter) && hpBefore > 0 && hpAfter <= 0 && droppedRound === null) {
+        droppedRound = round;
+    }
+    for (const companion of after) {
+        const name = tallyName(companion?.name);
+        if (!name || (companion?.hp ?? 0) > 0) continue;
+        const was = before.find(c => (companion.id != null && c?.id === companion.id) || tallyName(c?.name) === name);
+        if (was && (was.hp ?? 0) > 0) noteDowned(name);
+    }
+    return { ...base, heroLowestHp: lowest, heroDroppedRound: droppedRound, deathSaves, critsTaken: crits, companionsDowned: downed, rounds: round };
+}
+
+/** What the hero spent between the start snapshot and now, as short phrases. */
+export function spentFightResources(tally, character, inventory = []) {
+    const t = sanitizeFightTally(tally);
+    if (!t) return [];
+    const now = snapshotHeroResources(character, inventory);
+    const spent = [];
+    for (const [key, used] of Object.entries(now.resources)) {
+        const delta = used - (t.resourcesStart.resources[key] ?? used);
+        if (delta <= 0) continue;
+        spent.push(delta > 1 ? `${humanizeResourceKey(key)} ×${delta}` : `${humanizeResourceKey(key)} spent`);
+    }
+    const slots = now.slotsUsed - t.resourcesStart.slotsUsed;
+    if (slots > 0) spent.push(`${slots} spell slot${slots === 1 ? '' : 's'} spent`);
+    const potions = t.resourcesStart.potions - now.potions;
+    if (potions > 0) spent.push(`${potions} potion${potions === 1 ? '' : 's'} drunk`);
+    return spent;
+}
+
+function foeOutcomeCounts(enemies) {
+    const counts = { slain: 0, fled: 0, surrendered: 0, standing: 0 };
+    for (const enemy of Array.isArray(enemies) ? enemies : []) {
+        if (!enemy || typeof enemy !== 'object') continue;
+        if ((enemy.hp ?? 0) <= 0 || enemy.condition === 'dead') counts.slain += 1;
+        else if (enemy.combatStatus === 'fled') counts.fled += 1;
+        else if (enemy.combatStatus === 'surrendered') counts.surrendered += 1;
+        else counts.standing += 1;
+    }
+    return counts;
+}
+
+function summarizeFoeOutcomes(enemies) {
+    const counts = foeOutcomeCounts(enemies);
+    return ['slain', 'fled', 'surrendered', 'standing']
+        .filter(key => counts[key] > 0)
+        .map(key => `${counts[key]} ${key}`)
+        .join(', ');
+}
+
+/** "the Goblin Cutter", "the Goblin Cutter and Wolf", "the Goblin Cutter and 3 others". */
+function describeFoes(enemies) {
+    const names = [...new Set((Array.isArray(enemies) ? enemies : []).map(e => tallyName(e?.name)).filter(Boolean))];
+    if (names.length === 0) return 'the foes';
+    if (names.length <= 2) return joinNames(names);
+    return `${names[0]} and ${names.length - 1} others`;
+}
+
+/**
+ * The ONE line the terminal narration prompt carries. `state` is the live
+ * state at narration time (the exchange has committed; the hero's HP and
+ * resources are post-fight).
+ */
+export function describeFightCost(tally, state) {
+    const t = sanitizeFightTally(tally);
+    if (!t || !state?.character) return null;
+    const hero = tallyName(state.character.name) || 'The hero';
+    const hpNow = Math.max(0, finiteInt(state.character.currentHP, 0));
+    const notes = [];
+    if (t.heroLowestHp < Math.min(t.heroHpStart, hpNow)) notes.push(`lowest ${t.heroLowestHp}`);
+    if (t.heroDroppedRound !== null) {
+        const saves = t.deathSaves ? `, ${t.deathSaves} death save${t.deathSaves === 1 ? '' : 's'}` : '';
+        notes.push(`DOWN at 0 HP in round ${t.heroDroppedRound}${saves}`);
+    }
+    for (const crit of t.critsTaken) {
+        const on = crit.target !== hero ? ` on ${crit.target}` : '';
+        const dmg = crit.damage ? `, ${crit.damage} damage` : '';
+        notes.push(`${crit.by}'s critical blow${on} in round ${crit.round}${dmg}`);
+    }
+    const parts = [`${hero} ${t.heroHpStart}→${hpNow} HP${notes.length ? ` (${notes.join('; ')})` : ''}`];
+    if (t.companionsDowned.length > 0) parts.push(`${joinNames(t.companionsDowned)} downed`);
+    const spent = spentFightResources(t, state.character, state.inventory);
+    if (spent.length > 0) parts.push(spent.join(', '));
+    const foes = summarizeFoeOutcomes(state.combat?.enemies);
+    if (foes) parts.push(`foes: ${foes}`);
+    parts.push(`${t.rounds} round${t.rounds === 1 ? '' : 's'}`);
+    return `COST OF THIS FIGHT: ${parts.join('; ')}.`;
+}
+
+/**
+ * A fight MARKS the party when the hero was dropped to 0, brought to a quarter
+ * of their HP or less (from higher — a hero who walked in wounded and took
+ * nothing is not marked), took a critical hit, or a companion went down.
+ */
+export function isMarkingFight(tally) {
+    const t = sanitizeFightTally(tally);
+    if (!t) return false;
+    const heroDropped = t.heroDroppedRound !== null;
+    const heroLow = t.heroLowestHp < t.heroHpStart && t.heroLowestHp <= t.heroMaxHp * FIGHT_MARK_HP_RATIO;
+    return heroDropped || heroLow || t.critsTaken.length > 0 || t.companionsDowned.length > 0;
+}
+
+/**
+ * END_COMBAT's ONE engine-minted `wound` card for a marking fight — narrative-
+ * only by DECISIONS 2026-06-17 (no harm track): it rides DRAMATIC CALLBACK
+ * OPPORTUNITIES so a later scene can name the wound, and the Scribe's
+ * appearance merge can make the scar canon. `source: 'engine'` + the
+ * `fight-cost` tag are what the dormancy pass keys on.
+ */
+export function buildFightWoundCard(tally, state, outcome = 'victory') {
+    const t = sanitizeFightTally(tally);
+    if (!t || !isMarkingFight(t) || !state?.character) return null;
+    const hero = tallyName(state.character.name) || 'The hero';
+    const foes = describeFoes(state.combat?.enemies);
+    const place = tallyName(state.currentLocation);
+    const verb = outcome === 'defeat' ? 'fell to' : outcome === 'escaped' ? 'fled from' : 'beat';
+    const clauses = [];
+    if (t.heroDroppedRound !== null) {
+        clauses.push(`went down at 0 HP in round ${t.heroDroppedRound}${t.deathSaves ? ` and rolled ${t.deathSaves} death save${t.deathSaves === 1 ? '' : 's'}` : ''}`);
+    } else if (t.heroLowestHp < t.heroHpStart) {
+        clauses.push(`was cut down to ${t.heroLowestHp} of ${t.heroMaxHp} HP`);
+    }
+    const heroCrit = t.critsTaken.find(crit => crit.target === hero);
+    if (heroCrit) clauses.push(`took ${heroCrit.by}'s critical blow in round ${heroCrit.round}`);
+    const companionCrits = t.critsTaken.filter(crit => crit.target !== hero);
+    const sentences = [`${hero} ${verb} ${foes}${place ? ` at ${place}` : ''}${clauses.length ? `, ${joinNames(clauses)}` : ''}.`];
+    if (t.companionsDowned.length > 0) {
+        sentences.push(`${joinNames(t.companionsDowned)} went down in the fight.`);
+    } else if (companionCrits.length > 0) {
+        sentences.push(`${companionCrits[0].target} took ${companionCrits[0].by}'s critical blow.`);
+    }
+    const spent = spentFightResources(t, state.character, state.inventory);
+    if (spent.length > 0) sentences.push(`${spent.join(', ')}.`);
+    sentences.push('The wound is fresh and unnamed.');
+    return {
+        type: 'wound',
+        subject: `${hero}'s wound from ${foes}`.slice(0, 80),
+        text: sentences.join(' ').slice(0, 260),
+        salience: 4,
+        emotionalCharge: 3,
+        status: 'active',
+        source: 'engine',
+        tags: ['fight-cost', outcome],
+        linkedNpcNames: t.companionsDowned.slice(0, 6),
+        ...(place && { location: place }),
+    };
+}
+
+const TELEGRAPH_RULE = 'THE FOE\'S NEXT MOVE IS ON THE PAGE: the passage\'s LAST beat is, for each ALIVE AND ACTIVE foe, its visible next move in the fiction (circling to a companion\'s blind side, nocking another arrow, backing toward the door, lowering the blade), grounded in the health word beside it — a bloodied foe fights like it, a critical foe with no reason to die fighting is on the edge of flight or plea, and the passage says which. That telegraph IS the situation returned to the player.';
+const COST_RULE = 'Let the ending carry its cost: a wound the hero will feel tomorrow, named in the fiction; a companion\'s fall felt by those still standing; what was spent, remembered. Never add damage or alter the tally.';
+
+/**
+ * @param {object} result - the committed exchange result
+ * @param {{ cost?: string|null }} [options] - `cost` is `describeFightCost`'s
+ *   line; it rides only a TERMINAL prompt (victory / defeat / escaped).
+ */
+export function combatNarrationPrompt(result, { cost = null } = {}) {
+    const terminalEnd = ['victory', 'defeat', 'escaped'].includes(result.terminal);
+    const ongoing = !result.terminal;
     const ending = result.terminal === 'victory'
         ? 'The fight is mechanically won. Narrate the victory and its immediate fictional consequences.'
         : result.terminal === 'defeat'
@@ -1796,6 +2135,11 @@ export function combatNarrationPrompt(result) {
         'The POST-EXCHANGE STATE is absolute. Never describe an ALIVE AND ACTIVE combatant as dead, defeated, lifeless, finished, going slack, or collapsing permanently. Fled and surrendered foes may be overcome, but remain alive. Do not quote HP numbers in the prose.',
         'Do not introduce, remove, or imply a mechanical condition unless it appears in the POST-EXCHANGE STATE or resolved events.',
         ending,
+        // WOW 2026-09-27 (combat-drama): the telegraph rides every ongoing
+        // beat; the cost line rides the terminal one — both dynamic, once
+        // per call, no new channel.
+        ...(ongoing ? [TELEGRAPH_RULE] : []),
+        ...(terminalEnd && cost ? [cost, COST_RULE] : []),
         '',
         'POST-EXCHANGE STATE (AUTHORITATIVE):',
         postState || '- No combatant snapshot available; obey each event\'s remaining-HP statement exactly.',

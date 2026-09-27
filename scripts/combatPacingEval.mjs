@@ -58,7 +58,7 @@ function baseState(overrides = {}) {
         customSystemPrompt: '',
         journal: [],
         npcs: [],
-        party: [],
+        party: overrides.party || [],
         currentLocation: 'Old road',
         combat: overrides.combat ?? {
             active: true,
@@ -171,6 +171,79 @@ const scenarios = [
             lowLevelDoesNotStartDogpile,
         ],
     },
+    // WOW 2026-09-27 (combat-drama slice A) — the honor rate, scored without a
+    // judge: the previous narration ended on each foe's telegraph, and this
+    // round's enemy_intents must deliver it. Run several times for a rate.
+    {
+        id: 'telegraph-honored-by-next-intents',
+        state: baseState({
+            party: [{ id: 'companion-1', name: 'Torvald', hp: 18, maxHp: 18, ac: 15, level: 2, affinity: 60, status: 'healthy', weapon: 'Longsword', damage: '1d8+2', attackBonus: 4 }],
+            combat: {
+                active: true,
+                round: 2,
+                bonusActionUsed: false,
+                enemies: [
+                    { id: 'enemy-1', name: 'Goblin Archer', hp: 7, maxHp: 7, ac: 13, condition: 'healthy', combatStatus: 'active', conditions: [] },
+                    { id: 'enemy-2', name: 'Goblin Cutter', hp: 1, maxHp: 7, ac: 13, condition: 'critical', combatStatus: 'active', conditions: [] },
+                ],
+                turnOrder: [
+                    { type: 'player', name: 'Astra', initiative: 14 },
+                    { type: 'companion', id: 'companion-1', name: 'Torvald', initiative: 11 },
+                    { type: 'enemy', id: 'enemy-1', name: 'Goblin Archer', initiative: 9 },
+                    { type: 'enemy', id: 'enemy-2', name: 'Goblin Cutter', initiative: 6 },
+                ],
+                currentTurn: 0,
+                phase: 'awaiting_player',
+            },
+            messageHistory: [
+                { role: 'user', content: 'I drive my sword into the cutter.' },
+                { role: 'assistant', content: 'Your blade opens the cutter\'s thigh and it staggers, blood sheeting down its leg. Torvald\'s swing at the archer goes wide. The archer nocks another arrow, its yellow eye fixed on Torvald across the fire. The cutter, bleeding badly, lowers its blade and backs toward the open door, one hand already on the frame. What do you do?' },
+            ],
+        }),
+        userMessage: 'I leave the cutter to its retreat and charge the archer before it can loose.',
+        checks: [
+            hasCombatExchange,
+            enemyIntent('enemy-1', ['attack'], 'companion-1'),
+            enemyIntent('enemy-2', ['flee', 'surrender']),
+            noRollRequests,
+            noOutcomeFieldsWithExchange,
+        ],
+    },
+    // Bloodied foes break instead of dying in place (the DMG morale rule).
+    {
+        id: 'bloodied-foes-break',
+        state: baseState({
+            combat: {
+                active: true,
+                round: 3,
+                bonusActionUsed: false,
+                enemies: [
+                    { id: 'enemy-1', name: 'Goblin Raider', hp: 2, maxHp: 7, ac: 13, condition: 'critical', combatStatus: 'active', conditions: [] },
+                    { id: 'enemy-2', name: 'Goblin Raider 2', hp: 3, maxHp: 7, ac: 13, condition: 'bloodied', combatStatus: 'active', conditions: [] },
+                    { id: 'enemy-3', name: 'Goblin Raider 3', hp: 1, maxHp: 7, ac: 13, condition: 'critical', combatStatus: 'active', conditions: [] },
+                ],
+                turnOrder: [
+                    { type: 'player', name: 'Astra', initiative: 14 },
+                    { type: 'enemy', id: 'enemy-1', name: 'Goblin Raider', initiative: 9 },
+                    { type: 'enemy', id: 'enemy-2', name: 'Goblin Raider 2', initiative: 8 },
+                    { type: 'enemy', id: 'enemy-3', name: 'Goblin Raider 3', initiative: 6 },
+                ],
+                currentTurn: 0,
+                phase: 'awaiting_player',
+            },
+            messageHistory: [
+                { role: 'user', content: 'I cut down the nearest raider.' },
+                { role: 'assistant', content: 'Your longsword takes the first raider across the ribs and it drops to one knee. The other two are no better off — one clutches a gashed arm, the other drags a leg. Three raiders, all bleeding, their leader already dead in the ditch behind them; the one on its knee looks from you to the treeline and back. What do you do?' },
+            ],
+        }),
+        userMessage: 'I raise my sword and step toward the kneeling one.',
+        checks: [
+            hasCombatExchange,
+            someFoeBreaks(['enemy-1', 'enemy-2', 'enemy-3']),
+            noRollRequests,
+            noOutcomeFieldsWithExchange,
+        ],
+    },
     {
         id: 'combat-question-does-not-commit-an-action',
         state: baseState(),
@@ -227,6 +300,28 @@ function attackTargets(target) {
         ),
         message: `expected an engine-targeted attack against ${target}`,
     });
+}
+
+function enemyIntent(enemyId, actions, target = null) {
+    return events => {
+        const intent = (events?.combatExchange?.enemyIntents || []).find(i => i.enemyId === enemyId);
+        const actionOk = !!intent && actions.includes(intent.action);
+        const targetOk = target === null || intent?.target === target;
+        return {
+            pass: actionOk && targetOk,
+            message: `expected ${enemyId} to honor its telegraph (${actions.join('/')}${target ? ` → ${target}` : ''}); got ${intent ? `${intent.action} → ${intent.target}` : 'no intent (defaults to attack → player)'}`,
+        };
+    };
+}
+
+function someFoeBreaks(enemyIds) {
+    return events => {
+        const breaking = (events?.combatExchange?.enemyIntents || []).filter(i => enemyIds.includes(i.enemyId) && ['flee', 'surrender'].includes(i.action));
+        return {
+            pass: breaking.length > 0,
+            message: `expected at least one bloodied foe to flee or surrender; ${breaking.length} did`,
+        };
+    };
 }
 
 function noOutcomeFieldsWithExchange(events) {

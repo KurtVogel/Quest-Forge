@@ -3,7 +3,7 @@ import { useGame } from '../../state/GameContext.jsx';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { createTurnRunner } from '../../llm/turnOrchestrator.js';
 import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
-import { combatNarrationPrompt, COMBAT_PHASES, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
+import { combatNarrationPrompt, COMBAT_PHASES, describeFightCost, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
@@ -538,7 +538,9 @@ export default function ChatPanel() {
         // acknowledgment, so completing it with a visible line is the exit.
         let narrationPrompt;
         try {
-            narrationPrompt = combatNarrationPrompt(result);
+            // The cost line rides only a terminal prompt (the helper returns a
+            // line for any tally; combatNarrationPrompt drops it mid-fight).
+            narrationPrompt = combatNarrationPrompt(result, { cost: describeFightCost(state.combat.fightTally, state) });
         } catch (e) {
             console.error('[Combat] narration prompt build threw', e);
             dispatch({

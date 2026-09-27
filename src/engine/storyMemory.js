@@ -408,6 +408,16 @@ export function scoreStoryMemory(card, { query = '', location = '', npcs = [], m
 export const DORMANCY_JOURNAL_CYCLES = 3;
 /** Long-payoff card types that never decay — their moment may be far away. */
 const DORMANCY_EXEMPT_TYPES = new Set(['promise', 'playerCanon']);
+/**
+ * An ENGINE-minted `wound` card (END_COMBAT, WOW 2026-09-27) is salience 4 and
+ * would otherwise never age: a wound heals unless a later scene keeps touching
+ * it, so it goes dormant after this many untouched cadences whatever its
+ * salience. A Scribe-minted wound (source `scribe`) keeps the general rule.
+ */
+export const WOUND_DORMANCY_JOURNAL_CYCLES = 6;
+function isEngineWound(card) {
+    return card?.type === 'wound' && card?.source === 'engine';
+}
 
 /**
  * Journal-cadence age-out (IDEAS.md 2026-07-14; 2026-08-06 audit — the pool
@@ -426,14 +436,19 @@ export function applyStoryMemoryDormancy(cards = [], journal = []) {
     if (entries.length < DORMANCY_JOURNAL_CYCLES) return list;
     const cutoff = entries[entries.length - DORMANCY_JOURNAL_CYCLES]?.timestamp;
     if (!Number.isFinite(cutoff)) return list;
+    const woundCutoff = entries.length >= WOUND_DORMANCY_JOURNAL_CYCLES
+        ? entries[entries.length - WOUND_DORMANCY_JOURNAL_CYCLES]?.timestamp
+        : null;
 
     let changed = false;
     const next = list.map(card => {
         if (!card || (card.status || 'active') !== 'active') return card;
-        if ((card.salience || 0) > 2 || DORMANCY_EXEMPT_TYPES.has(card.type)) return card;
+        const engineWound = isEngineWound(card);
+        if (engineWound && !Number.isFinite(woundCutoff)) return card;
+        if (!engineWound && ((card.salience || 0) > 2 || DORMANCY_EXEMPT_TYPES.has(card.type))) return card;
         // Belt under the load typing: a non-finite stamp reads as "never", not NaN.
         const lastTouch = Math.max(finiteStamp(card.lastSeenAt, 0), finiteStamp(card.lastUsedAt, 0), finiteStamp(card.firstSeenAt, 0));
-        if (lastTouch >= cutoff) return card;
+        if (lastTouch >= (engineWound ? woundCutoff : cutoff)) return card;
         changed = true;
         return { ...card, status: 'dormant' };
     });
