@@ -1,3 +1,6 @@
+# The shared root guide exceeds Codex's default 32 KiB instruction budget.
+project_doc_max_bytes = 196608
+
 [shell_environment_policy]
 inherit = "core"
 

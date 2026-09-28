@@ -2,6 +2,29 @@
 
 Guidance for Claude Code (and humans) working in this repo. Read this first — it's the fast path to being productive here.
 
+## Quick start for Claude and Codex
+
+- Start with this guide, the current handoff at the top of [docs/STATUS.md](docs/STATUS.md),
+  and Git state/history. Fetch origin; on a clean master, pull with `git pull --ff-only origin master`.
+  Preserve existing work and investigate divergence. This project uses master, no feature
+  branches or PRs; sessions shipping code also build and deploy (details below).
+- Before proposing or redesigning, search [IDEAS](docs/IDEAS.md) and
+  [DECISIONS](docs/DECISIONS.md) for the task's terms and read matching entries.
+  The live work queues are [Strengthening](docs/SCHEDULED_STRENGTHENING.md#open-findings-queue)
+  (correctness), [WOW](docs/SCHEDULED_WOW.md#open-proposals) (player experience), and
+  [Memory research](docs/MEMORY_RESEARCH.md) (adoption). Historical "queue empty" notes
+  in STATUS are snapshots, not a replacement for checking the queue.
+- At handoff, update STATUS, relevant idea/queue statuses, and settled choices in DECISIONS.
+  Date completed queue items and distinguish built/tested from real-provider-playtested.
+  Mirror shared project guidance in AGENTS and CLAUDE.
+- Codex: read [.codex/README.md](.codex/README.md) for document routing, shared balance
+  memory, and session/tool conventions. Both tools use the same backlogs and decisions.
+  Claude schedules are not automatically Codex automations.
+- This guide exceeds Codex's default 32 KiB instruction budget. The project config raises
+  it to 192 KiB; if the supplied guide is truncated, explicitly read the relevant remaining
+  sections, especially Content model, Conventions & gotchas, and Session start & session end.
+  Keep this quick-start block first and synchronized in both twins.
+
 ## What Quest Forge is
 
 A single-player, browser-based tabletop RPG where an **LLM plays the Dungeon Master** and a **client-side engine owns all the hard mechanics** — dice, rules math, character state, and persistence. There is no backend of its own: the browser calls Gemini/OpenAI directly and (optionally) syncs saves to a *user-supplied* Firebase.
