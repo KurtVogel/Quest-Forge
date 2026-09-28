@@ -195,7 +195,11 @@ export function selectRegionalHearsay({
         const deed = fight.outcome === 'victory'
             ? `the hero cutting down ${cleanText(fight.enemies, 120)} at ${cleanText(fight.location, 90)}`
             : `the hero being beaten and driven off by ${cleanText(fight.enemies, 120)} at ${cleanText(fight.location, 90)}`;
-        consider('fight', `fight:${fight.messageIndex}`, { local, age, text: deed });
+        // The striking particular (fight memory, 2026-09-28) is what gets
+        // repeated — and what the grade garbles: a defeat's mark makes the
+        // better rumor.
+        const mark = cleanText(fight.mark, 160);
+        consider('fight', `fight:${fight.messageIndex}`, { local, age, text: mark ? `${deed} — the detail people repeat: ${mark}` : deed });
     }
 
     // The hero's MANNER travels too (hero tells, slice 2 — 2026-09-23): a

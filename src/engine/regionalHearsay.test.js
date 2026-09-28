@@ -31,6 +31,20 @@ const resolvedFront = (overrides = {}) => ({
 });
 
 describe('selectRegionalHearsay', () => {
+    it('a fight\'s striking mark is the detail people repeat — on a defeat too; a markless fight reads as before', () => {
+        const at = HEARSAY_MIN_TRAVEL_DISTANCE + 3;
+        const { items } = selectRegionalHearsay({
+            recentEncounters: [
+                { enemies: '2× ghoul', location: 'Saltmarsh', outcome: 'defeat', messageIndex: 0, mark: 'the hero went down and the dwarf fought on over the body' },
+                { enemies: 'a bandit', location: 'Saltmarsh', outcome: 'victory', messageIndex: 1 },
+            ],
+            locationName: 'Saltmarsh', messages: msgs(at), messageIndex: at,
+        });
+        const texts = items.map(item => item.text);
+        expect(texts).toContain('the hero being beaten and driven off by 2× ghoul at Saltmarsh — the detail people repeat: the hero went down and the dwarf fought on over the body');
+        expect(texts).toContain('the hero cutting down a bandit at Saltmarsh');
+    });
+
     it('offers an old-enough resolved front as region-wide news', () => {
         const at = HEARSAY_MIN_TRAVEL_DISTANCE + 3;
         const { items, ledgerEntries } = selectRegionalHearsay({

@@ -1137,6 +1137,26 @@ attack/defend/flee/surrender. Expand without returning dice authority to the LLM
 - Enemy spell/special profiles and morale personalities. Until a profile exists, reject visibly
   with no action committed rather than inventing numbers or granting a free hostile turn.
 
+### [wow] Fight memory: the companions remember the striking fight, the place keeps its mark, the echo lands in the next dangerous moment — status: `shipped` (2026-09-28, same day as proposed — `buildFightMemories` / `describeFightMark` / `describeFightResonance` in `engine/combatExchange.js`, END_COMBAT + the encounter `mark` + hearsay; DECISIONS.md 2026-09-28)
+**Vesa (2026-09-28):** the Scribe could judge whether a battle had something striking — a last-second
+clutch, an especially juicy critical hit, a heal that saved a companion — and the companions could
+remember it and surface it in dialogue much later; a locale could remember it too. **Argued into
+shape (the accepted counter-proposal):** the ENGINE judges from the fight tally it already keeps
+(three deterministic patterns; a Scribe opinion would cost a call and vary between runs — cut);
+the moment is a GRADED `bondMoment` on WITNESSES only (5 a life saved, 4 a save at the edge, 3
+"lately"; a flat 4 would fill the five-slot key cap with potions), its text says who saved whom
+in plain words so the Scribe's `voice` gets gratitude and pride the right way round, it is minted
+BEFORE the terminal Scribe so the Scribe's re-report only voices it, and "way later" is a
+TRIGGER, not the standing key-moments line (that already renders every scene the companion is
+present — the failure mode was a companion mentioning the ford at every campfire): a private
+`FIGHT MEMORY` cue at the next fight's first beat or the hero's next drop to a quarter. The place
+keeps the particular as the encounter entry's `mark`, which regional hearsay repeats and garbles
+by grade — defeats make the better rumor. **Open:** a real-provider probe (five fights, one old
+rescue) that the companion's line in the later fight actually voices the memory in ONE beat and
+not as a speech; a `wound` card's scar and a fight memory's text could cross-reference (the
+Scribe's appearance merge already makes the scar canon — the memory could name it once it has
+a name).
+
 ### [wow] Combat drama: the foe's next move, and the fight leaves a mark — status: `shipped` (both slices 2026-09-27 — the telegraph rule on every ongoing narration beat + the prefix "honor your own telegraph, and let foes break" bullet; `combat.fightTally` → the `COST OF THIS FIGHT:` line on the terminal beat + ONE engine-minted `wound` card per marking fight with a six-cadence dormancy of its own; DECISIONS.md 2026-09-27; the `eval:combat` proof scenarios are built but unrun, the five-fights callback probe still to run) (wow audit 2026-09-23, combat-drama Lap 1, two W1 slices)
 The exchange machine is genre-best at the DICE (engine initiative + Opening Initiative, guard
 interception, standing flanks, conditions, targeting from fiction — nothing can be cheated) and

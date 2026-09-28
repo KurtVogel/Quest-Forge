@@ -38,6 +38,8 @@ export const TEMPO_TIMING_DIE_SIDES = 5;
  */
 export const TEMPO_WINDOW_MESSAGES = 24;
 export const MAX_RECENT_ENCOUNTERS = 10;
+/** The encounter entry's `mark` — the fight's striking particular for hearsay. */
+export const ENCOUNTER_MARK_MAX = 160;
 export const MAX_ACTIVE_FRONTS = 4;
 /**
  * The creation/upgrade TARGET size of the front web (2–3 pressures), distinct
@@ -147,6 +149,7 @@ export function sanitizeRecentEncounters(list) {
                     .filter(Boolean)
                     .slice(0, 8),
                 outcome: entry.outcome,
+                ...(cleanText(entry.mark, ENCOUNTER_MARK_MAX) && { mark: cleanText(entry.mark, ENCOUNTER_MARK_MAX) }),
             };
         })
         .filter(Boolean)
@@ -257,6 +260,9 @@ export function buildEncounterEntry(state, payload = {}) {
         enemies: summarizeEncounterEnemies(enemies),
         foeFamilies: [...new Set(enemies.map(enemy => foeFamilyKey(enemy?.name)).filter(Boolean))].slice(0, 8),
         outcome,
+        // The striking particular a place keeps (fight memory, 2026-09-28) —
+        // hearsay's text, never the tempo block's; absent for a plain fight.
+        ...(cleanText(payload.mark, ENCOUNTER_MARK_MAX) && { mark: cleanText(payload.mark, ENCOUNTER_MARK_MAX) }),
     };
 }
 
