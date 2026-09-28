@@ -2768,3 +2768,27 @@ rendered to the DM) are 159 KB per 500 in every save. From the 2026-09-27 streng
   autosave = this device's session, cloud = deliberate manual saves. See DECISIONS.md.
 - **Generic LLM-generated three-act campaign structure** — rejected 2026-06-11 in favor of
   fronts (above): act structures produce railroady, beige plots.
+
+### [strengthening] A parsed object kept on its row is a persisted field; a context line that carries its rule is the overflow tail's sibling; a worst-case fixture is built at the caps — status: `idea` (2026-09-28 audit, response-parsing + scribe Lap 3; queue lines in SCHEDULED_STRENGTHENING.md)
+Three rules from the response-parsing + scribe Lap-3 pass (2026-09-28), every number measured against
+the real parser, the real `runScribe` / `runNpcFrontReflection` with the adapter mocked, and the real
+builders. **(1)** `normalizeEvents` materializes all 35 channel keys (621 bytes of JSON for an EMPTY
+reply) and the orchestrator commits that object on the assistant message row, where `serializeGameState`
+keeps it, the cloud path stringifies it and `typeLoadedMessage` spreads it back untyped — while both
+post-commit readers use the in-memory `lastCommittedTurn` and nothing reads `message.events`. 300
+assistant rows ≈ 190 KB per write in the save's immutable share, forever. Rule: when a transient result
+is attached to a persisted record, name its post-commit reader or leave it off. **(2)** The Scribe call
+has no byte ceiling (worst case 33,474 system + 29,677 user chars ≈ 16k tokens per ordinary turn on
+Flash) and its largest block, KNOWN PLAYER-RELATIONSHIP STANCES (14,233 chars for 8 present NPCs),
+repeats 355 chars of instruction on EVERY entry — the 2026-09-27 overflow-tail pattern one level down:
+per-row constant bytes that scale with N. Same family: the reflection context reaches 116,653 chars at
+a mature campaign with the last 3 journal rows shipped WHOLE (21k, engine stamps included), the premise
+at its 8k cap and the cadence block repeating the newest summary. Rule for every `buildKnown*` /
+director context: instruction in the block's header once, entries as data; project what a lane reasons
+over, never the row. **(3)** `scribe.test.js` pins the reflection's 12-NPC payload under 30,000 with a
+fixture whose fields sit under `projectNpcForReflection`'s own caps; 12 records AT the caps measure
+55,831 — a pin that certifies half the true ceiling and passes forever. Rule: a "worst-case" fixture is
+built at the projection's caps, sharing its constants, and the whole context gets its own ceiling pin
+(`directorContexts.size.test.js` covers neither machinery prompt today). Also from the pair: the text
+roll detector compiles up to 27 regexes per prose-only reply, and RESPONSE_FORMAT still names two
+non-channels (`combat_end`, `resources_used`) as "never emit". From the 2026-09-28 strengthening audit.
