@@ -108,6 +108,17 @@ describe('message rows at load (2026-09-19 P2)', () => {
         expect(window.every(m => typeof m.content === 'string')).toBe(true);
     });
 
+    it('drops a stored row\'s `events` blob — nothing reads it after the turn (2026-09-28 audit P2)', () => {
+        const next = load([
+            { id: 'm1', role: 'assistant', content: 'Narrated.', events: { goldFound: 999, requestedRolls: [{ hostile: true }] } },
+            { id: 'm2', role: 'assistant', content: 'Plain.' },
+        ]);
+        expect(next.messages[0]).not.toHaveProperty('events');
+        expect(next.messages[0].content).toBe('Narrated.');
+        expect(next.messages[1]).toEqual(expect.objectContaining({ id: 'm2', content: 'Plain.' }));
+        expect(next.messages[1]).not.toHaveProperty('events');
+    });
+
     it('a well-formed row round-trips untouched (same object, whitespace kept)', () => {
         const row = { id: 'm1', role: 'assistant', content: '  The rain eases.\n', hidden: false };
         const next = load([row]);

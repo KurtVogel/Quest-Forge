@@ -68,6 +68,13 @@ function typeLoadedMessage(message, index) {
     if (typeof typed.id !== 'string' || !typed.id) {
         typed = { ...typed, id: `msg-loaded-${index}-${Math.random().toString(36).slice(2, 7)}` };
     }
+    // Load twin of the orchestrator's row shape (2026-09-28 audit P2): pre-fix
+    // saves carry the DM's normalized `events` object on every assistant row
+    // and nothing reads it — a hostile blob loads whole otherwise.
+    if (typed.events !== undefined) {
+        const { events: _dropped, ...rest } = typed;
+        typed = rest;
+    }
     return typed;
 }
 

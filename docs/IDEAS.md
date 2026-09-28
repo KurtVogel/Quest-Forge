@@ -111,7 +111,19 @@ It excludes NPC possessions, scenery, wishes, future
 rewards, and non-portable assets, and may not invent mechanics. Why: asking players to establish
 rich backstory and then making its tangible belongings imaginary breaks the premise's canon promise.
 
-### Soft player narrative authority — status: `shipped` (2026-06-20)
+### Soft player narrative authority — status: `shipped` (2026-06-20; the Bram clause 2026-09-28)
+**2026-09-28 — the Bram clause (DECISIONS.md 2026-09-28):** the rule below had a gap the live runs found —
+a harmless NAMED addition ("a loudmouthed deckhand named Bram") fell between "welcome color" and
+"descriptions do not create creatures", and the decline examples handed the DM "a dream". Now:
+`HARMLESS ADDITIONS ARE COLOR, NOT CLAIMS` — played straight or plausibly absent by default; doubt of
+the hero's mind is EARNED by the fiction (a curse / fever / dream already in play, a fed pattern, a
+premise, the player leaning in) and voiced by NPCs, never the narrator. Proof: `npm run eval:authority`
+(`docs/PLAYER_AUTHORITY_EVAL_2026-09-28.md`) — hostile readings 6 → 2 of 24 across Gemini Pro + GPT
+Terra. **Open follow-up:** the plain bystander case played straight 12/12 on BOTH variants — the short
+fixture never reproduced the live trigger (a "shove" line in a long campaign with a companion present
+and combat context). Add a fifth case whose history is fight-adjacent (a brawl two turns earlier, the
+companion on edge) and rerun; if the narrator verdict recurs live, the Scribe belt (record the doubt
+as the NPC's stance, never as a world fact) is the next lever.
 Players own character intent, speech, inner life, and harmless compatible scene color; the DM owns
 external reality and uncertain outcomes. The prompt deliberately welcomes absurd or comedic play
 when choices and established fiction lead there, but unsupported assertions cannot conjure an escape,
@@ -509,7 +521,7 @@ Both hero-tells entries (DECISIONS.md 2026-09-23 ×2) are pinned end to end in v
 
 ### [playtest] Full-run findings on Gemini 3.8 Flash, 2026-09-20 — status: `idea` (`docs/FULL_RUN_PLAYTEST_2026-09-20.md`; the item-name-drift double grant is `shipped`, DECISIONS.md 2026-09-20)
 - **Narrow the bundled-charge strip** (2 of 2 live runs): a 1 gp coin paying a 2 sp room, then a 6 gp rope + lantern bundle — the engine carved the coincidental 1 gp out as a "replay" and charged 5 gp while the DM said six (the Flash judge flagged the 6-vs-5 mismatch both times). Candidate guard: skip the strip when the bundle equals the catalog/declared price sum of items delivered in the SAME response (that is a purchase, not a recap). Decided-on-purpose behavior (2026-08-22), so this is Vesa's call, and it needs the recap-bundle regression cases kept.
-- **A player-invented NPC becomes a hallucination arc.** "A loudmouthed deckhand named Bram has been swearing at Tammo" → "no man named Bram… you're swinging at ghosts", and NPCs treat the hero as unhinged for the rest of the campaign (it also confounded recall checkpoint C on both 2026-09-19 and 2026-09-20 runs). The prompt's "harmless compatible colour is welcome" rule is not holding: a background person the hero introduces should be accepted, or absent without an insanity verdict. Needs a turn-grammar-style eval case, then a one-line prompt rule ("a new background person the player names exists unless the fiction contradicts it; never explain a missing NPC as the hero's delusion").
+- ~~**A player-invented NPC becomes a hallucination arc.**~~ — **shipped 2026-09-28** as the Bram clause (see "Soft player narrative authority" above; DECISIONS.md 2026-09-28; `npm run eval:authority`). The live trigger itself (a fight line in a long campaign) is not yet reproduced by the eval fixture — the fight-adjacent fifth case is the open follow-up there.
 - **Flash 3.8 verbosity:** ordinary turns median 184 words / mean 186–193 (band 60–180), 15 of 30 turns over 3 blank-line blocks, max 299 words. Run `npm run eval:turns` on `gemini-3.8-flash` before deciding whether the Pro-tuned grammar needs a per-model word ceiling.
 - **Wonder refusal on Flash 3.8:** the DM dropped the refused wonder (`keptAlive: false`) where Pro and Terra kept the residue alive; the residue card exists but its callback cannot fire inside the cue window it was held to. Probably fine — a refused wonder should fade — but record it if wonders start feeling one-shot.
 - **Verify the drift pairing live:** the positive path (event `Brass toll-token` + prose "heavy brass token…" → no second row) is unit-tested only; grep a future run's transcript for "Loot recovered from narration" beside an evented twin.
@@ -1416,6 +1428,27 @@ Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md
   raw premise sentence.
 
 ## Tech & Infra
+
+### Agent dialogue 2026-09-28 (Claude ↔ Codex, the vision debate) — open calls — status: `open` (Vesa's picks)
+The first file dialogue under `docs/agent-dialogues/README.md` (the transcript is git-ignored; both
+sides' Close is the record). Agreed and BUILT the same day: the Bram clause (above). Agreed and not yet
+built: (a) **one targeted proof run with a pre-written rubric** — a smoke run's feature columns are
+NOT EXERCISED unless the trigger occurred; (b) wonder selection tuning waits for measured novelty;
+(c) campaign-wide memory correction is a research spike traced from each record's readers, not a
+button — a player-facing "this memory is wrong" strike can truthfully promise only "exclude this saved
+fact / card as a memory source; other records are not edited" (dormant is not invalidation — the recall
+dossier lists dormant cards; world facts are an immutable seed category; journal summaries reach the
+DM directly every turn). **Contested, for Vesa:** (1) the proof run's shape — depth (a NEW hero-tells
+probe: habit → recognition → "That's not me"; being personally known is the game's distinctive promise)
+vs breadth (the built `full` probe on Gemini Pro this week, NOT EXERCISED columns explicit) — both models
+lean depth after the close; (2) the third slot — polarity-aware changed-fact handling ("[memory-research]
+Bi-temporal world facts": `isNearDuplicateFact` strips not/no/now, so a flipped fact is DROPPED as a
+duplicate — scratch-proven, never seen in play) vs the memory-correction spike — both lean the fact fix.
+**Questions for Vesa:** (3) is an expert "exclude as memory source" control wanted at all, given its
+reach; (4) desired off-plot wonder frequency (the standalone weighting waits on it); (5) the process
+rule — the session after an experience feature ships runs its smallest live proof before unrelated
+hardening, and a strengthening finding earns a session on stated player harm with evidence, not on a
+severity label alone (no monthly embargo, no P2 veto). Tick and date each when decided.
 
 ### Compact agent onboarding and restore the one-screen status — status: `idea` (2026-09-28, Codex documentation review)
 

@@ -235,10 +235,22 @@ export function buildKnownLocations({ locations = [] } = {}) {
  * stance, so one turn's cold reply can't erase months of recorded warmth. The
  * already-recorded bond moments ride along so the Scribe never re-reports an old
  * beat in new words — the reducer's token dedupe can't catch paraphrases.
+ *
+ * Rules once, lines as data (2026-09-28 audit P2 — DECISIONS 2026-09-26 (9) /
+ * 2026-09-27 (2)): the three instruction clauses used to ride EVERY NPC entry
+ * (355 chars × 8 present NPCs = 2,840 of a 14k block). They now sit in ONE
+ * header line, rendered only when some entry carries the field they govern.
  */
+const STANCE_RULES = {
+    thread: 'thread = the open thread on record (emit openThread only if this exchange changes it; openThreadResolved: true only if it settles it)',
+    impressions: 'impressions = recent impressions (unconfirmed; carry one into the stance ONLY if this exchange bears it out again)',
+    moments: 'moments = moments already on record (do NOT re-report or paraphrase these; a same-kind moment from the same scene is already covered)',
+};
+
 export function buildKnownStances({ npcs = [] } = {}, ...texts) {
     const isPresent = namePresenceIn(npcs.map(n => n?.name), ...texts);
     const entries = [];
+    const rulesUsed = new Set();
     for (const npc of npcs) {
         if (entries.length >= 8) break;
         const name = String(npc?.name || '').trim();
@@ -254,21 +266,28 @@ export function buildKnownStances({ npcs = [] } = {}, ...texts) {
         if (!isPresent(name)) continue;
         const lines = [];
         if (stance) lines.push(`${name}: ${stance.slice(0, 240)}`);
+        const fields = [];
         if (thread) {
-            lines.push(`${name} — open thread on record (emit openThread only if this exchange changes it; openThreadResolved: true only if it settles it): "${thread.slice(0, 200)}"`);
+            rulesUsed.add('thread');
+            fields.push(`thread: "${thread.slice(0, 200)}"`);
         }
         if (impressions.length > 0) {
-            lines.push(`${name} — recent impressions (unconfirmed; carry one into the stance ONLY if this exchange bears it out again): ${impressions.slice(-3).map(text => `"${text.slice(0, 140)}"`).join('; ')}`);
+            rulesUsed.add('impressions');
+            fields.push(`impressions: ${impressions.slice(-3).map(text => `"${text.slice(0, 140)}"`).join('; ')}`);
         }
         if (onRecord.length > 0) {
-            lines.push(`${name} — moments already on record (do NOT re-report or paraphrase these; a same-kind moment from the same scene is already covered): ${onRecord.map(moment => {
+            rulesUsed.add('moments');
+            fields.push(`moments: ${onRecord.map(moment => {
                 const kind = bondKindLabel(moment.kind);
                 return `"${moment.text.slice(0, 140)}"${kind ? ` (${kind})` : ''}`;
             }).join('; ')}`);
         }
+        if (fields.length > 0) lines.push(`${name} — ${fields.join(' | ')}`);
         entries.push(lines.join('\n'));
     }
-    return entries.length > 0 ? entries.join('\n') : null;
+    if (entries.length === 0) return null;
+    const header = ['thread', 'impressions', 'moments'].filter(key => rulesUsed.has(key)).map(key => STANCE_RULES[key]);
+    return (header.length > 0 ? [`Rules: ${header.join('. ')}.`] : []).concat(entries).join('\n');
 }
 
 /**
@@ -691,6 +710,38 @@ Rules:
 function reflectionText(value, maxLength) {
     return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
+/** A bounded list of reflection strings: string elements only, each clamped, empties dropped. */
+function reflectionList(list, count, maxLength) {
+    return (Array.isArray(list) ? list : [])
+        .filter(entry => typeof entry === 'string')
+        .slice(0, count)
+        .map(entry => reflectionText(entry, maxLength))
+        .filter(Boolean);
+}
+
+// The reflection's journal rows (2026-09-28 audit P2): the last 3 rows shipped
+// WHOLE — summary 2,000 + 8 × 300 decisions + 8 × 300 consequences + the
+// engine's id / timestamp / messageRange / fallback stamps each, 21k chars at
+// a mature campaign. The lane reasons over what happened and what it cost;
+// three decisions and three consequences carry that, the stamps carry nothing.
+export const JOURNAL_SUMMARY_REFLECTION_MAX = 1200;
+export const REFLECTION_PREMISE_MAX = 2000;
+export function projectJournalForReflection(entry) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || entry.fallback === true) return null;
+    const summary = reflectionText(typeof entry.summary === 'string' ? entry.summary : '', JOURNAL_SUMMARY_REFLECTION_MAX);
+    if (!summary) return null;
+    const projected = {
+        summary,
+        location: reflectionText(typeof entry.location === 'string' ? entry.location : '', 120),
+        keyDecisions: reflectionList(entry.keyDecisions, 3, 300),
+        consequences: reflectionList(entry.consequences, 3, 300),
+    };
+    for (const key of Object.keys(projected)) {
+        const value = projected[key];
+        if (!value || (Array.isArray(value) && value.length === 0)) delete projected[key];
+    }
+    return projected;
+}
 
 // The reflection reasons about who an NPC is and where their bond is heading — it
 // never needs portraits, embeddings, or full histories. A raw roster entry carries
@@ -782,10 +833,13 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
     if (npcs.length === 0 && fronts.length === 0) return;
 
     const heat = computeRecentHeat(state);
+    const recentJournal = (state.journal || []).slice(-3).map(projectJournalForReflection).filter(Boolean);
     const context = {
         location: state.currentLocation,
-        premise: state.session?.premise,
-        recentJournal: (state.journal || []).slice(-3),
+        // The front proposal needs the premise's factions and stakes, not its
+        // whole 8k scaffolding on every cadence (2026-09-28 audit P2).
+        premise: reflectionText(typeof state.session?.premise === 'string' ? state.session.premise : '', REFLECTION_PREMISE_MAX) || undefined,
+        recentJournal,
         worldFacts: (state.worldFacts || []).slice(-12),
         npcs,
         fronts,
@@ -802,13 +856,23 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         previousTempoDirective: state.worldTempo?.directive
             ? { frontId: state.worldTempo.directive.frontId, maxIntensity: state.worldTempo.directive.maxIntensity }
             : null,
-        cadence: cadence ? {
-            id: cadence.id,
-            journalEnd: cadence.journalEnd,
-            latestSummary: cadence.summary,
-            keyDecisions: cadence.keyDecisions || [],
-            consequences: cadence.consequences || [],
-        } : null,
+        // The cadence is the trusted identity of THIS reflection plus the
+        // summary that triggered it. Its decisions / consequences are the
+        // newest journal row's own lists — already in recentJournal when that
+        // row is on record, so they ship there once, not twice.
+        cadence: cadence ? (() => {
+            const latestSummary = reflectionText(typeof cadence.summary === 'string' ? cadence.summary : '', JOURNAL_SUMMARY_REFLECTION_MAX);
+            const onRecord = recentJournal.some(row => row.summary === latestSummary);
+            return {
+                id: cadence.id,
+                journalEnd: cadence.journalEnd,
+                latestSummary,
+                ...(onRecord ? {} : {
+                    keyDecisions: reflectionList(cadence.keyDecisions, 3, 300),
+                    consequences: reflectionList(cadence.consequences, 3, 300),
+                }),
+            };
+        })() : null,
     };
 
     try {

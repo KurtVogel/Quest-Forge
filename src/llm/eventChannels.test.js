@@ -6,7 +6,7 @@
  * ignored every value it emitted. These tests make that class of drift fail CI.
  */
 import { describe, expect, it } from 'vitest';
-import { EVENT_CHANNELS, KNOWN_WIRE_KEYS, normalizeEvents, validateCombatStart } from './eventChannels.js';
+import { EVENT_CHANNELS, KNOWN_WIRE_KEYS, RETIRED_WIRE_KEYS, normalizeEvents, validateCombatStart } from './eventChannels.js';
 import { RESPONSE_FORMAT } from './promptBuilder.js';
 
 function exampleJson() {
@@ -35,6 +35,19 @@ describe('event-channel registry agreement', () => {
         // A wire here means the engine supports a channel the DM is never told
         // about — dead capability, or a channel that lost its documentation.
         expect(undocumented).toEqual([]);
+    });
+
+    it('the DM-facing prompt never names a RETIRED wire, and names the suppression-only signal once (2026-09-28 audit P2)', () => {
+        // A "never emit X" line for a wire the registry no longer carries is a
+        // rule about nothing that still costs cached-prefix bytes every call.
+        for (const wire of RETIRED_WIRE_KEYS) {
+            expect(KNOWN_WIRE_KEYS.has(wire), `${wire} must stay retired`).toBe(false);
+            expect(RESPONSE_FORMAT.includes(wire), `RESPONSE_FORMAT still names retired wire ${wire}`).toBe(false);
+        }
+        // `resources_used` is read only as a healing-suppression signal; the
+        // format documents it exactly once (its meaning), never as a repeated
+        // "do not emit" refrain.
+        expect(RESPONSE_FORMAT.split('resources_used').length - 1).toBe(1);
     });
 
     it('normalizeEvents produces exactly the registry keys (plus the reconciliation flag)', () => {

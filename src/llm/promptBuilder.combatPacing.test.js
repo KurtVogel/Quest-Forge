@@ -74,7 +74,9 @@ describe('combat pacing prompt contract', () => {
         const text = prompt();
 
         expect(text).toContain('HP, criticals, victory/defeat, XP, Action Surge consumption, and round advancement are engine-owned');
-        expect(text).toContain('Never emit `combat_end`, `exp_awarded`, or `damage_taken`');
+        // `combat_end` is a retired wire (2026-09-19); a rule about it is a rule about nothing (2026-09-28 audit P2).
+        expect(text).toContain('Never emit `exp_awarded` or `damage_taken`');
+        expect(text).not.toContain('combat_end');
         expect(text).toContain('Never invent a retaliation, counterattack, extra hit');
     });
 

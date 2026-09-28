@@ -519,6 +519,14 @@ export const EVENT_CHANNELS = [
 
 /** Every wire key (primary + alias) the engine recognizes. */
 export const KNOWN_WIRE_KEYS = new Set(EVENT_CHANNELS.flatMap(c => [c.wire, ...(c.aliases || [])]));
+/**
+ * Wires the DM once had and the engine no longer reads (see the comments in
+ * the registry above). A prompt line about one of these is a rule about
+ * nothing that still costs cached-prefix bytes — the agreement test asserts
+ * the DM-facing prompt never names them (2026-09-28 audit P2).
+ */
+export const RETIRED_WIRE_KEYS = Object.freeze(['combat_end', 'enemy_updates']);
+
 
 /**
  * Normalize and validate event data from the LLM.

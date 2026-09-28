@@ -28,6 +28,21 @@ describe('player narrative authority guidance', () => {
         expect(prompt).toContain('does not automatically create external creatures, objects, exits');
         expect(prompt).toContain('treat it as a wish, joke, or attempted idea — not established reality');
         expect(prompt).toContain('without scolding the player');
+        // The Bram clause (2026-09-28): a harmless named addition defaults to
+        // played-straight or quietly-absent; doubt of the hero's mind must be
+        // EARNED by the fiction and voiced by NPCs, never by the narrator.
+        expect(prompt).toContain('HARMLESS ADDITIONS ARE COLOR, NOT CLAIMS');
+        expect(prompt).toContain('play it straight — the person or thing is simply there — or to let it be plausibly absent without comment');
+        expect(prompt).toContain('Never read an ambiguous harmless addition as evidence that the hero is mad, drunk, dreaming, or seeing things');
+        expect(prompt).toContain('only when the fiction has EARNED it');
+        expect(prompt).toContain('it is NPCs who doubt, in their own voice; the narrator never diagnoses the hero');
+        // The decline examples no longer hand the DM the delusion reading.
+        expect(prompt).not.toContain('(the grasp that finds nothing, a dream, an NPC\'s reaction)');
+        expect(prompt).toContain('an NPC who does not go along with it');
+        // The clause sits INSIDE the block, after the "does not automatically create" rule.
+        const block = prompt.slice(prompt.indexOf('## PLAYER AUTHORITY'), prompt.indexOf('## CHECK DISCIPLINE'));
+        expect(block.indexOf('does not automatically create external creatures')).toBeLessThan(block.indexOf('HARMLESS ADDITIONS ARE COLOR'));
+        expect(block.indexOf('HARMLESS ADDITIONS ARE COLOR')).toBeLessThan(block.indexOf('Treat declared outcomes'));
         expect(prompt).toContain('## NAME DIVERSITY — AVOID LLM FANTASY DEFAULTS');
         expect(prompt).toContain('Elara, Elora, Elyra, Silas, Sylas, Thorne');
         expect(prompt).toContain('Never rename or erase an established name');

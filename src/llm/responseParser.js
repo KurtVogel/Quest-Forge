@@ -50,6 +50,17 @@ const KNOWN_SKILLS = [
     'attack',
 ];
 
+// Pattern 2 of detectTextRollRequests, compiled ONCE (2026-09-28 audit P2: it
+// built one RegExp per known skill on every prose-only reply). Non-global, so
+// `.test` carries no lastIndex state between calls.
+const SKILL_REQUEST_PATTERNS = KNOWN_SKILLS.map(skill => ({
+    skill,
+    pattern: new RegExp(
+        `\\b(?:rolls?|makes?|attempts?|gives? me|need)\\b[\\s\\S]{0,40}?\\b${skill.replace(/['"]/g, '.')}\\s+(?:check|save|saving throw)`,
+        'i',
+    ),
+}));
+
 // Outcome language that should never appear BEFORE dice are rolled
 const OUTCOME_KEYWORDS = [
     'you succeed', 'you fail', 'you hit', 'you miss', 'misses you',
@@ -93,11 +104,7 @@ export function detectTextRollRequests(narrative) {
     // minted a phantom DC-10 proposal (2026-08-29 audit). Genuinely verb-less
     // prose requests stay covered by the semantic detector + arbiter.
     if (rolls.length === 0) {
-        for (const skill of KNOWN_SKILLS) {
-            const skillPattern = new RegExp(
-                `\\b(?:rolls?|makes?|attempts?|gives? me|need)\\b[\\s\\S]{0,40}?\\b${skill.replace(/['"]/g, ".")}\\s+(?:check|save|saving throw)`,
-                'i'
-            );
+        for (const { skill, pattern: skillPattern } of SKILL_REQUEST_PATTERNS) {
             if (skillPattern.test(narrative)) {
                 const type = /save|saving throw/i.test(narrative.match(skillPattern)?.[0] || '') ? 'saving_throw' : 'skill_check';
                 rolls.push({ type, skill, dc, description: `${skill} check (DC ${dc})` });

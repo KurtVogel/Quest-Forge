@@ -553,9 +553,14 @@ Translate the player's committed action into the single bounded combat_exchange 
         // and through applyEvents below (condition syncs ride intent turns);
         // the committed-turn record stays null, matching "nothing narrated".
         if (!(opts.combatIntentOnly && !narrative.trim())) {
+            // The row carries NO `events` (2026-09-28 audit P2): the normalized
+            // object materializes every channel key (~620 bytes for an EMPTY
+            // reply), rode every assistant row into the save and the cloud
+            // payload forever, and nothing read it back — both post-commit
+            // readers take the in-memory lastCommittedTurn below.
             dispatch({
                 type: 'ADD_MESSAGE',
-                payload: { id: msgId, role: 'assistant', content: narrative, events, hidden: hideSetup },
+                payload: { id: msgId, role: 'assistant', content: narrative, hidden: hideSetup },
             });
             lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup, recall: !!recallDossier };
         }

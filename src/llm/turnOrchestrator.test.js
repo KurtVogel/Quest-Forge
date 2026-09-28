@@ -66,8 +66,10 @@ describe('turn runner — plain narrative turn', () => {
         expect(assistants).toHaveLength(1);
         expect(assistants[0].content).toBe('You enter the tavern. The barkeep nods.');
         expect(assistants[0].hidden).toBe(false);
-        // The stored-events object identity flows from ADD_MESSAGE into applyEvents.
-        expect(assistants[0].events).toBe(events);
+        // The stored row carries NO events (2026-09-28 audit P2): the in-memory
+        // committed-turn record is the one carrier for both post-commit readers.
+        expect(assistants[0]).not.toHaveProperty('events');
+        expect(runner.getLastCommittedTurn().events).toBe(events);
         expect(getState().character.gold).toBe(goldBefore + 5);
         expect(dispatched.filter(a => a.type === 'ADD_COIN_GRANT')).toHaveLength(1);
         // An event-carrying turn never fires the missing-events nudge.
@@ -271,7 +273,8 @@ describe('turn runner — table-talk world pause (security-shaped: OOC can never
         // The OOC answer itself is committed, visible, and event-free.
         const assistant = getState().messages.findLast(m => m.role === 'assistant');
         expect(assistant.hidden).toBe(false);
-        expect(assistant.events).toBeNull();
+        expect(assistant).not.toHaveProperty('events');
+        expect(runner.getLastCommittedTurn().events).toBeNull();
         // No dropped-events notice, no semantic-roll detection turn, no nudge call.
         expect(getState().messages.some(m => m.role === 'system')).toBe(false);
         expect(sendMessage).not.toHaveBeenCalled();
@@ -307,7 +310,8 @@ describe('turn runner — table-talk world pause (security-shaped: OOC can never
         expect(getState().pendingRoleplayCheck).toBeNull();
         const assistant = getState().messages.findLast(m => m.role === 'assistant');
         expect(assistant.content).toContain('Last time you left Hesper');
-        expect(assistant.events).toBeNull();
+        expect(assistant).not.toHaveProperty('events');
+        expect(runner.getLastCommittedTurn().events).toBeNull();
         expect(sendMessage).not.toHaveBeenCalled();
     });
 });
@@ -325,8 +329,10 @@ describe('turn runner — suppressHpEvents (batched-round HP already applied)', 
         expect(events.damageTaken).toBe(0);
         expect(events).not.toHaveProperty('enemyUpdates');
         expect(getState().character.currentHP).toBe(hpBefore);
-        // The stored message carries the SAME finalized object — never mutated post-dispatch.
-        expect(getState().messages.findLast(m => m.role === 'assistant').events).toBe(events);
+        // The committed-turn record carries the SAME finalized object — never mutated post-dispatch;
+        // the stored row carries none (2026-09-28 audit P2).
+        expect(runner.getLastCommittedTurn().events).toBe(events);
+        expect(getState().messages.findLast(m => m.role === 'assistant')).not.toHaveProperty('events');
     });
 
     it('control: the same response without the flag applies the narrated damage', async () => {
