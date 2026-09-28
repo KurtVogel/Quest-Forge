@@ -16,7 +16,7 @@ import {
     validateEnemySaveBonus,
 } from '../../engine/enemyStats.js';
 import {
-    COMBAT_PHASES, buildFightWoundCard, exchangeEventLines, isEnemyActive, mergeCharacterUpdates,
+    COMBAT_PHASES, buildFightMemories, buildFightWoundCard, describeFightMark, exchangeEventLines, isEnemyActive, mergeCharacterUpdates,
     reconcileStartingCombatExchange, recordExchangeCost, startFightTally,
 } from '../../engine/combatExchange.js';
 import { appendRecentEncounter, buildEncounterEntry, distanceSince } from '../../engine/worldTempo.js';
@@ -154,13 +154,20 @@ export const handlers = {
         // tally the exchanges accumulated — read BEFORE the envelope resets.
         const outcome = action.payload?.defeat ? 'defeat' : action.payload?.escaped ? 'escaped' : 'victory';
         const woundCard = buildFightWoundCard(state.combat.fightTally, state, outcome);
+        // The fight is remembered (WOW 2026-09-28): the companions who stood
+        // here remember what was striking (one graded bond moment each, who
+        // saved whom in plain words) and the place keeps its particular as the
+        // encounter entry's `mark` for regional hearsay — both from the same
+        // tally, both read BEFORE the envelope resets, zero calls.
+        const fightMemories = buildFightMemories(state.combat.fightTally, state, outcome);
+        const fightMark = describeFightMark(state.combat.fightTally, state, outcome);
         let newState = {
             ...state,
             combat: { ...initialGameState.combat },
             // Variety-fatigue ledger: what was fought, where, and how it ended.
             recentEncounters: appendRecentEncounter(
                 state.recentEncounters,
-                buildEncounterEntry(state, action.payload || {}),
+                buildEncounterEntry(state, { ...(action.payload || {}), mark: fightMark }),
             ),
         };
         // Ambush-on-arrival (2026-08-31 P2): a fight that started while a live
@@ -219,6 +226,13 @@ export const handlers = {
                 ...newState,
                 messages: [...newState.messages, systemMessage(`**The fight leaves a mark** — ${woundCard.text}`)],
             };
+        }
+        // Minted BEFORE the terminal Scribe runs: its same-scene re-report of
+        // the beat folds into this row (appendBondMoments' scene collapse) and
+        // can only add a voice; the ✦ tell on the narration is the player's
+        // free notice, so no extra line here.
+        for (const { name, moment } of fightMemories) {
+            newState = gameReducer(newState, { type: 'UPDATE_NPC', payload: { name, kind: 'character', bondMoment: moment } });
         }
 
         // Client-side XP fallback — only when NO XP was earned for this fight at all:

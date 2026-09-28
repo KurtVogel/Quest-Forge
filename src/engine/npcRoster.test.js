@@ -79,6 +79,18 @@ describe('formatNpcEmbeddingText', () => {
 });
 
 describe('player-relationship memory (stanceToPlayer + bondMoments)', () => {
+    it('a same-scene same-kind restatement that is NOT more salient still lands its voice where the held row has none (fight memory 2026-09-28)', () => {
+        const engine = appendBondMoments([], [{ text: 'Maren cut down the wolf while the hero lay at 0 HP at the ford — Maren kept the hero alive.', kind: 'rescue', salience: 5, atMessage: 40 }]);
+        const voiced = appendBondMoments(engine, [{ text: 'Maren dragged the hero clear of the wolf at the ford.', kind: 'rescue', salience: 4, atMessage: 44, voice: 'You owe me a drink for the ford. Two.' }]);
+        expect(voiced).toHaveLength(1);
+        expect(voiced[0].text).toBe(engine[0].text);
+        expect(voiced[0].voice).toBe('You owe me a drink for the ford. Two.');
+        // A held voice is never overwritten by a fold.
+        const again = appendBondMoments(voiced, [{ text: 'Maren pulled the hero from the wolf at the ford.', kind: 'rescue', salience: 4, atMessage: 45, voice: 'Different words.' }]);
+        expect(again[0].voice).toBe('You owe me a drink for the ford. Two.');
+    });
+
+
     it('appends new bond moments and rejects near-duplicate restatements', () => {
         const first = appendBondMoments([], ['The hero flirted with Maren over the map table; she laughed and let her hand linger.']);
         expect(first).toHaveLength(1);

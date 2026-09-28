@@ -78,6 +78,7 @@ describe('the fight leaves a mark — reducer flow', () => {
         const state = startFight();
         expect(state.combat.fightTally).toEqual({
             heroHpStart: 12, heroMaxHp: 12, heroLowestHp: 12, heroDroppedRound: null, deathSaves: 0, critsTaken: [], companionsDowned: [],
+            witnesses: ['Garrick'], saves: [], heroKillingCrits: [], heroLowExchangeId: null,
             resourcesStart: { resources: { secondWind: 0, actionSurge: 0 }, slotsUsed: 0, potions: 2 }, rounds: 1,
         });
     });
@@ -179,6 +180,82 @@ describe('the fight leaves a mark — reducer flow', () => {
     });
 });
 
+describe('the fight is remembered (2026-09-28) — witnesses, the encounter mark, the ✦ tell', () => {
+    const rosterGarrick = { id: 'npc-g', name: 'Garrick', kind: 'character', rosterTier: 'character', disposition: 'friendly', bondMoments: [] };
+
+    it('END_COMBAT mints ONE graded bond moment on the witness companion (a companion who joined mid-fight gets none), stamps the encounter mark, and the ✦ tell lands on the narration', () => {
+        let state = startFight({ ...makeState(), npcs: [rosterGarrick] });
+        const goblin = state.combat.enemies[0];
+        // Mid-fight, a second companion joins (add_companions in a narration) — no witness.
+        state = { ...state, party: [...state.party, { id: 'companion-2', name: 'Sela', hp: 8, maxHp: 8, status: 'healthy' }], npcs: [...state.npcs, { ...rosterGarrick, id: 'npc-s', name: 'Sela' }] };
+        state = exchange(state, {
+            id: 'x1', round: 1, playerDamage: 12,
+            events: [attack('Goblin Cutter', 'Astra', { damage: 12, remainingHp: 0 })],
+            enemies: [{ ...goblin }], party: state.party,
+        });
+        state = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'x1' } });
+        state = gameReducer(state, { type: 'ADD_MESSAGE', payload: { role: 'assistant', content: 'Garrick roars and cuts the goblin down over your body.' } });
+        state = exchange(state, {
+            id: 'x2', round: 2, terminal: 'victory',
+            events: [{ type: 'death_save', natural: 9 }, attack('Garrick', 'Goblin Cutter', { damage: 8, remainingHp: 0, maxHp: 7 })],
+            enemies: [{ ...goblin, hp: 0, condition: 'dead' }], party: state.party,
+        });
+        expect(state.combat.fightTally.saves).toEqual([{ how: 'felled', by: 'Garrick', saved: 'Astra', detail: 'Goblin Cutter', round: 2 }]);
+        state = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'x2' } });
+        expect(state.combat.active).toBe(false);
+        const garrick = state.npcs.find(n => n.name === 'Garrick');
+        expect(garrick.bondMoments).toHaveLength(1);
+        expect(garrick.bondMoments[0]).toMatchObject({
+            kind: 'rescue', salience: 5,
+            text: 'Garrick cut down Goblin Cutter while Astra lay at 0 HP against Goblin Cutter at Old road — Garrick kept Astra alive until it was won.',
+        });
+        expect(Number.isFinite(garrick.bondMoments[0].atMessage)).toBe(true);
+        expect(state.npcs.find(n => n.name === 'Sela').bondMoments).toEqual([]);
+        // The place keeps the particular; the ledger entry is typed like any other.
+        expect(state.recentEncounters.at(-1)).toMatchObject({ outcome: 'victory', location: 'Old road', mark: 'Astra went down and Garrick fought on over the body until it was won' });
+        // The quiet tell: the narration message carries the ✦ mark for the new key moment.
+        const narration = [...state.messages].reverse().find(m => m.role === 'assistant');
+        expect(narration.bondMarks.some(mark => mark.name === 'Garrick' && mark.kind === 'moment')).toBe(true);
+    });
+
+    it('the Scribe\'s same-scene re-report folds into the engine row and only lands a voice; a clean fight writes nothing and no mark', () => {
+        let state = startFight({ ...makeState(), npcs: [rosterGarrick] });
+        const goblin = state.combat.enemies[0];
+        state = exchange(state, {
+            id: 'x1', round: 1, terminal: 'victory',
+            events: [attack('Astra', 'Goblin Cutter', { critical: true, damage: 9, remainingHp: 0, maxHp: 7 })],
+            enemies: [{ ...goblin, hp: 0, condition: 'dead' }], party: state.party,
+        });
+        state = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'x1' } });
+        expect(state.npcs[0].bondMoments).toHaveLength(1);
+        expect(state.npcs[0].bondMoments[0]).toMatchObject({ kind: 'shared_danger', salience: 4 });
+        state = gameReducer(state, { type: 'UPDATE_NPC', payload: { name: 'Garrick', bondMoment: { text: 'Garrick saw Astra split the goblin in one stroke on the old road.', kind: 'shared_danger', salience: 4, voice: 'One swing. I have never seen the like.' } } });
+        expect(state.npcs[0].bondMoments).toHaveLength(1);
+        expect(state.npcs[0].bondMoments[0].text).toMatch(/^Astra's critical blow felled Goblin Cutter and ended the fight/);
+        expect(state.npcs[0].bondMoments[0].voice).toBe('One swing. I have never seen the like.');
+
+        let clean = startFight({ ...makeState(), npcs: [rosterGarrick] });
+        clean = exchange(clean, {
+            id: 'y1', round: 1, terminal: 'victory',
+            events: [attack('Astra', 'Goblin Cutter', { damage: 8, remainingHp: 0, maxHp: 7 })],
+            enemies: [{ ...clean.combat.enemies[0], hp: 0, condition: 'dead' }], party: clean.party,
+        });
+        clean = gameReducer(clean, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'y1' } });
+        expect(clean.npcs[0].bondMoments).toEqual([]);
+        expect(clean.recentEncounters.at(-1).mark).toBeUndefined();
+    });
+
+    it('LOAD_GAME keeps a typed encounter mark and drops a junk one', () => {
+        const load = (mark) => gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: { character: makeState().character, inventory: [], messages: [], recentEncounters: [{ enemies: 'goblin', location: 'Old road', outcome: 'victory', messageIndex: 2, mark }] },
+        }).recentEncounters[0];
+        expect(load('the hero went down and the dwarf fought on').mark).toBe('the hero went down and the dwarf fought on');
+        expect(load({ text: 'x' }).mark).toBeUndefined();
+        expect(load('m'.repeat(400)).mark).toHaveLength(160);
+    });
+});
+
 describe('LOAD_GAME types combat.fightTally complete-or-null', () => {
     const load = (fightTally) => gameReducer(initialGameState, {
         type: 'LOAD_GAME',
@@ -194,6 +271,8 @@ describe('LOAD_GAME types combat.fightTally complete-or-null', () => {
         expect(typed).toEqual({
             heroHpStart: 12, heroMaxHp: 12, heroLowestHp: 3, heroDroppedRound: null, deathSaves: 0,
             critsTaken: [{ by: 'Goblin', target: 'Astra', damage: 9, round: 1 }], companionsDowned: ['Garrick'],
+            // A pre-fix tally loads with the fight-memory fields EMPTY, not null.
+            witnesses: [], saves: [], heroKillingCrits: [], heroLowExchangeId: null,
             resourcesStart: { resources: { secondWind: 1 }, slotsUsed: 0, potions: 2 }, rounds: 2,
         });
         expect(new Set(Object.keys(load(null).combat))).toEqual(new Set(Object.keys(initialGameState.combat)));

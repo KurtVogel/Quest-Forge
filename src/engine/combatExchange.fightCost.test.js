@@ -31,6 +31,7 @@ describe('startFightTally / snapshotHeroResources', () => {
         expect(tally).toEqual({
             heroHpStart: 17, heroMaxHp: 20, heroLowestHp: 17, heroDroppedRound: null, deathSaves: 0,
             critsTaken: [], companionsDowned: [],
+            witnesses: [], saves: [], heroKillingCrits: [], heroLowExchangeId: null,
             resourcesStart: { resources: { secondWind: 0, actionSurge: 0 }, slotsUsed: 0, potions: 2 },
             rounds: 1,
         });

@@ -299,6 +299,11 @@ export function appendBondMoments(existing = [], additions = [], { messageCount 
                 next = next.map((moment, i) => (i === sceneIdx
                     ? { ...held, text: addition.text, salience: addition.salience, ...(addition.voice && { voice: addition.voice }) }
                     : moment));
+            } else if (addition.voice && !held.voice) {
+                // A folded restatement still lands its VOICE where none is
+                // (fight memory, 2026-09-28): the engine mints the moment
+                // first, the Scribe's same-scene re-report only voices it.
+                next = next.map((moment, i) => (i === sceneIdx ? { ...held, voice: addition.voice } : moment));
             }
             continue;
         }
