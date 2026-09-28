@@ -1397,6 +1397,20 @@ Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md
 
 ## Tech & Infra
 
+### Compact agent onboarding and restore the one-screen status — status: `idea` (2026-09-28, Codex documentation review)
+
+Why: AGENTS/CLAUDE are each about 145 KB, STATUS about 172 KB, and the strengthening
+log exceeds 1 MB. The structure is useful, but routine full-file reads truncate and
+STATUS no longer fulfills its one-screen contract. This session moved essential
+navigation first and raised Codex's instruction allowance as an interim fix.
+A focused documentation pass should retain a short shared root guide, move detailed
+subsystem history to linked references, and reduce STATUS to current focus, recent
+results, outstanding validation, and next steps. Preserve displaced history in an
+archive (and existing Git history), repair links, keep both guide bodies aligned,
+and retain audit rotation/queue semantics. Success: either agent can orient from
+small bounded reads, with every older ruling still discoverable.
+
+
 ### xAI (Grok) as a DM provider — status: `shipped` (2026-07-08)
 Shipped same-day with one design change from the notes below: no graceful degradation —
 the Gemini machinery key is a **hard requirement** for play (see DECISIONS.md 2026-07-08).

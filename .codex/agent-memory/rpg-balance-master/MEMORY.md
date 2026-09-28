@@ -14,5 +14,5 @@
   `lowLevelDefeat` setbacks instead of death-save spirals, with a hard prompt constraint and
   no enemy trimming.
 
-Record new Codex-side balance findings as their own files in this directory and link them above.
+Read the complete shared index at `../../../.claude/agent-memory/rpg-balance-master/MEMORY.md` for later rulings too. Record new shared balance findings there and link them from that index; retain this directory as a bridge to existing Codex notes rather than a separate body of rulings.
 See `AGENTS.md` / `CLAUDE.md` at the repo root for the full project picture.
