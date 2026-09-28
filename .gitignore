@@ -53,3 +53,10 @@ coverage/
 
 # real-provider eval transcripts (scripts/turnGrammarEval.mjs)
 scripts/.eval-out/
+
+# Agent dialogues (Claude <-> Codex debates through a file, docs/agent-dialogues/README.md).
+# Active dialogues are arguments, not decisions: keep them out of the audits' and future
+# sessions' grep. The protocol README and any deliberately kept *.closed.md transcript are tracked.
+docs/agent-dialogues/*
+!docs/agent-dialogues/README.md
+!docs/agent-dialogues/*.closed.md
