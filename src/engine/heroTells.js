@@ -92,7 +92,15 @@ function normalizeWitnesses(value) {
     for (const raw of list) {
         const name = text(raw, HERO_TELL_NAME_MAX);
         if (!name) continue;
-        if (out.some(known => known.toLowerCase() === name.toLowerCase())) continue;
+        // One person, one witness (2026-09-29 playtest): the Scribe named the
+        // same net-mender "Tammo" and "Old Tammo" across scenes and the record
+        // listed two people. A short/long form of a held name folds into it,
+        // and the fuller form is kept.
+        const held = out.findIndex(known => known.toLowerCase() === name.toLowerCase() || namesMatch(known, name));
+        if (held !== -1) {
+            if (name.length > out[held].length) out[held] = name;
+            continue;
+        }
         out.push(name);
         if (out.length >= MAX_HERO_TELL_WITNESSES) break;
     }
@@ -293,7 +301,11 @@ export function recordHeroTells(existing = [], reports = [], { messageCount } = 
         const heldSightings = Array.isArray(held.sightings) ? held.sightings : [];
         const lastSighting = heldSightings.length > 0 ? heldSightings[heldSightings.length - 1] : -Infinity;
         const newScene = sighted && now - lastSighting > HERO_TELL_SCENE_MESSAGES;
-        const witnesses = normalizeWitnesses([...(held.witnesses || []), ...report.witnesses]);
+        // A remark is not a sighting (2026-09-29 playtest): a dockhand who had
+        // only HEARD of the habit voiced it, the Scribe listed him, and the
+        // record gained a witness who never saw the hero do it. Witnesses are
+        // who SAW; a voiced-only report stamps the speaker on `voicedBy` alone.
+        const witnesses = normalizeWitnesses([...(held.witnesses || []), ...(sighted ? report.witnesses : [])]);
         const richer = report.text.length > (held.text || '').length && containment(tellTokens(held.text), tellTokens(report.text)) >= SAME_TELL_CONTAINMENT
             ? report.text
             : held.text;

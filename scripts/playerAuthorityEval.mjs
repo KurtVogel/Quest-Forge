@@ -130,7 +130,10 @@ const EARNED_EXCHANGE = [
 const FIGHT_OPENING = `${OPENING} Last night ended with ${heroName} breaking a Dunmere sailor's nose in the harbor tavern over a spilled cup, and by the seventh bell the whole pier had heard about it.`;
 const FIGHT_EXCHANGE = [
     { role: 'user', content: 'I climb down to the Kittiwake and start hauling the last of the herring crates up onto the pier.' },
-    { role: 'assistant', content: 'The first crate comes up slick and heavy and you get it onto the boards before the second one tries to slide back off the gunwale. Two deckhands off the Dunmere boat are working the next berth, and one of them — thick-necked, a rope burn across his jaw — keeps looking over and saying something to the other that makes him laugh. Tammo does not look up from his net. "You made friends last night," he says. "They\'ve been at it since the bell."' },
+    // NOBODY on the pier to hang the name on: run A of 2026-09-29 offered two
+    // unnamed deckhands at the next berth and the DM simply named one of them
+    // (12/12 straight, both variants) — the live failure had no such body.
+    { role: 'assistant', content: 'The first crate comes up slick and heavy and you get it onto the boards before the second one tries to slide back off the gunwale. The next berth is empty; the Dunmere boat put out at dawn. Tammo does not look up from his net. "You made friends last night," he says. "Half the pier would like a word with you, and the other half is waiting to watch."' },
 ];
 
 const CASES = [
@@ -174,7 +177,7 @@ const CASES = [
         id: 'fight',
         title: 'The bystander arrives on a fight line in a tense scene',
         history: [{ role: 'assistant', content: FIGHT_OPENING }, ...FIGHT_EXCHANGE],
-        action: 'I\'ve had enough of the staring. I shove the loudmouthed one, Bram Kettlewick, hard enough to put him on the boards, and tell him to say it to my face.',
+        action: 'I\'ve had enough of it. I shove the loudmouthed deckhand, Bram Kettlewick, who has been running his mouth about last night, hard enough to put him on the boards, and tell him to say it to my face.',
         pass: s => (s.treatment === 'played_straight' || s.treatment === 'quietly_absent') && !s.narrator_diagnoses && !s.npc_doubts_sanity,
         expect: 'Bram is simply there (the fight may start) or plausibly absent; no diagnosis; NPCs do not doubt the hero\'s mind',
     },

@@ -359,3 +359,25 @@ describe('hero tells — queue sweep 2026-09-24 (scene window, id claim, witness
         expect(HERO_TELLS_STANDING_RULE.length).toBeLessThan(1000);
     });
 });
+
+describe('hero tells — the 2026-09-29 real-provider playtest (docs/HERO_TELLS_PLAYTEST_2026-09-29.md)', () => {
+    it('folds a short/long form of one witness into ONE name and keeps the fuller form ("Tammo" / "Old Tammo")', () => {
+        let tells = recordHeroTells([], [{ text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses: ['Tammo'] }], { messageCount: 4 });
+        tells = recordHeroTells(tells, [{ id: tells[0].id, text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses: ['Old Tammo'] }], { messageCount: 25 });
+        tells = recordHeroTells(tells, [{ id: tells[0].id, text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses: ['tammo', 'Orsa Pellwyn'] }], { messageCount: 45 });
+        expect(tells[0].witnesses).toEqual(['Old Tammo', 'Orsa Pellwyn']);
+        expect(tells[0].sightings).toEqual([4, 25, 45]);
+    });
+
+    it('a voiced-only report never adds its speaker (or anyone) to the witnesses — a remark is not a sighting', () => {
+        let tells = recordHeroTells([], [{ text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses: ['Tammo'] }], { messageCount: 4 });
+        // A dockhand who only HEARD of the habit names it; the Scribe lists him as a witness anyway.
+        tells = recordHeroTells(tells, [{ id: tells[0].id, text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses: ['young dockhand'], voiced: true, voicedBy: 'young dockhand' }], { messageCount: 60 });
+        expect(tells[0]).toMatchObject({ witnesses: ['Tammo'], voicedBy: ['young dockhand'], voicedCount: 1, sightings: [4] });
+        // A voiced report WITH a sighting still adds the witness.
+        tells = recordHeroTells(tells, [{ id: tells[0].id, text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses: ['Orsa Pellwyn'], voiced: true, voicedBy: 'Orsa Pellwyn', sighted: true }], { messageCount: 90 });
+        expect(tells[0].witnesses).toEqual(['Tammo', 'Orsa Pellwyn']);
+        expect(tells[0].sightings).toEqual([4, 90]);
+    });
+});
+
