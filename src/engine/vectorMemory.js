@@ -561,8 +561,8 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
  *   then runs against a partial store until the next mount, which the
  *   player should hear about (it used to be console-only).
  */
-export function seedMemories(apiKey, items, sessionId = null, { onIncomplete = null } = {}) {
-    const run = seedMemoriesInner(apiKey, items, sessionId, { onIncomplete });
+export function seedMemories(apiKey, items, sessionId = null, { onIncomplete = null, retiredTexts = null } = {}) {
+    const run = seedMemoriesInner(apiKey, items, sessionId, { onIncomplete, retiredTexts });
     // Retrieval awaits an in-flight seed (2026-09-06 audit): the first turn
     // after Continue on an uncached campaign used to query a partial store
     // while the cold seed was still embedding — silently, with the DM's first
@@ -576,7 +576,7 @@ export function seedMemories(apiKey, items, sessionId = null, { onIncomplete = n
 /** The seed currently loading/embedding, or null — awaited by retrieveRelevant. */
 let seedInFlight = null;
 
-async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null } = {}) {
+async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null, retiredTexts = null } = {}) {
     if (!apiKey) return;
     activeSessionId = sessionId;
     memoryStore = [];
@@ -591,11 +591,18 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
     // rows — rides ONE transaction at the end (2026-09-29 P2).
     const persistedRaw = sessionId != null ? await loadPersistedEmbeddings(sessionId) : [];
     const currentSeedTexts = new Set((items || []).map(item => item.text));
+    // Retired texts (2026-09-29): an IMMUTABLE-category row is normally kept
+    // even when the seed no longer carries it, so a world fact superseded by a
+    // flip would stay retrievable forever under its DM-given category. The
+    // caller names the texts the record has retired; those rows prune like a
+    // reworded mutable row, whatever their category.
+    const retired = retiredTexts instanceof Set ? retiredTexts : new Set(Array.isArray(retiredTexts) ? retiredTexts : []);
     const persisted = [];
     const stale = [];
     for (const entry of persistedRaw) {
-        (!isMutableSeedCategory(entry.category) || currentSeedTexts.has(entry.text)
-            ? persisted : stale).push(entry);
+        const keep = !retired.has(entry.text)
+            && (!isMutableSeedCategory(entry.category) || currentSeedTexts.has(entry.text));
+        (keep ? persisted : stale).push(entry);
     }
     if (stale.length > 0) {
         console.log(`[VectorMemory] Pruned ${stale.length} stale reworded rows from the campaign cache`);

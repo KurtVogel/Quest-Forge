@@ -16,6 +16,7 @@
  */
 import { namesMatch, normalizeBondMoments, selectKeyBondMoments } from './npcRoster.js';
 import { conversationalDistance } from './replayLedger.js';
+import { liveWorldFacts } from './worldFacts.js';
 
 export const RELATIONSHIP_STAGES = ['stranger', 'acquaintance', 'familiar', 'trusted', 'intimate', 'rival', 'estranged'];
 
@@ -160,7 +161,7 @@ export function listKnownByNpc(npc = {}, worldFacts = [], storyMemory = [], { li
     const knows = (knownBy) => (Array.isArray(knownBy) ? knownBy : [])
         .some(knower => typeof knower === 'string' && !HERO_KNOWER_RE.test(knower.trim()) && namesMatch(knower, name));
     const out = [];
-    for (const fact of (Array.isArray(worldFacts) ? worldFacts : [])) {
+    for (const fact of liveWorldFacts(worldFacts)) {
         const line = text(fact?.fact);
         if (line && knows(fact?.knownBy)) out.push({ text: line.slice(0, 200), source: 'fact' });
     }

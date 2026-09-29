@@ -4,6 +4,7 @@ import { normalizeFront } from '../engine/fronts.js';
 import { MAX_ACTIVE_FRONTS, WEB_TARGET_FRONTS } from '../engine/worldTempo.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH, CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
+import { liveWorldFacts } from '../engine/worldFacts.js';
 
 const MAX_FRONTS = 2;
 
@@ -74,7 +75,7 @@ export function buildFrontMigrationContext(state) {
             privateNotes: cleanText(npc.privateNotes, 500),
             lastLocation: cleanText(npc.lastLocation, 120),
         })),
-        canonicalWorldFacts: (state.worldFacts || []).slice(-40).map(fact => ({
+        canonicalWorldFacts: liveWorldFacts(state.worldFacts).slice(-40).map(fact => ({
             category: cleanText(fact.category, 60),
             fact: cleanText(fact.fact, 700),
         })),

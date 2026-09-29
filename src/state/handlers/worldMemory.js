@@ -2,7 +2,7 @@
  * Long-term memory: world facts (near-duplicate rejection), story-memory
  * cards, journal entries/summarization marks, and the campaign chronicle.
  */
-import { containment, tokenSet } from '../../engine/textMatch.js';
+import { classifyFactCandidate, factTokenSet, liveWorldFacts } from '../../engine/worldFacts.js';
 import {
     applyStoryMemoryDormancy,
     findStoryMemoryMatch,
@@ -75,24 +75,10 @@ export function rollWonderRequest(state, { onDemand = false } = {}) {
     return { ...session, pendingWonder: mintPendingWonder(state, { onDemand }) };
 }
 
-// --- World-fact near-duplicate detection (Scribe over-extraction guard) ---
-const FACT_STOP_WORDS = new Set([
-    'the', 'a', 'an', 'of', 'to', 'in', 'is', 'are', 'was', 'were', 'and', 'or',
-    'that', 'this', 'it', 'its', 'their', 'his', 'her', 'has', 'have', 'had',
-    'by', 'for', 'with', 'at', 'on', 'as', 'be', 'been', 'from', 'now', 'not', 'no',
-]);
-
-function factTokenSet(text) {
-    return tokenSet(text, { stopWords: FACT_STOP_WORDS });
-}
-
-// A fact whose meaningful tokens are ~all contained in an existing fact (or vice
-// versa) is a restatement — "Odo is dead" vs "Odo is dead, killed at the docks".
-function isNearDuplicateFact(candidate, existingSets) {
-    const tokens = factTokenSet(candidate);
-    if (tokens.size === 0) return true;
-    return existingSets.some(existing => containment(tokens, existing) >= 0.9);
-}
+// The world-fact dedupe and the polarity-aware supersession ledger live in
+// engine/worldFacts.js (2026-09-29): a near-duplicate restatement is rejected,
+// a near-duplicate whose NEGATION differs is a FLIP — stored, superseding the
+// older truth, which drops out of every live reader and stays on the record.
 
 /**
  * Append chronicle chapter(s). The payload may be one chapter or an array —
@@ -122,20 +108,34 @@ export const handlers = {
     ADD_WORLD_FACTS(state, action) {
         // Bulk add, rejecting exact and near-duplicate restatements of known facts
         // (the Scribe tends to re-canonize the same truth with slight rewording).
-        const existingSets = state.worldFacts.map(f => factTokenSet(f.fact));
-        const newFacts = [];
+        // Only LIVE facts take part: a flip (the same claim, negation reversed)
+        // is stored and supersedes its twin (engine/worldFacts.js, 2026-09-29),
+        // and a later re-flip judges against the current truth, never the buried one.
+        let worldFacts = Array.isArray(state.worldFacts) ? state.worldFacts : [];
+        let live = liveWorldFacts(worldFacts);
+        let liveSets = live.map(f => factTokenSet(f.fact));
+        const messageCount = (state.messages || []).length;
+        let changed = false;
         for (const f of action.payload || []) {
             const sanitized = sanitizeWorldFactPayload(f);
-            if (!sanitized || isNearDuplicateFact(sanitized.fact, existingSets)) continue;
-            existingSets.push(factTokenSet(sanitized.fact));
-            newFacts.push({
-                id: `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                timestamp: Date.now(),
-                ...sanitized,
-            });
+            if (!sanitized) continue;
+            const verdict = classifyFactCandidate(sanitized.fact, live, liveSets);
+            if (verdict.kind === 'duplicate') continue;
+            const id = `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            const next = { id, timestamp: Date.now(), ...sanitized };
+            if (verdict.kind === 'flip' && verdict.of?.id) {
+                next.supersedes = verdict.of.id;
+                worldFacts = worldFacts.map(existing => (existing.id === verdict.of.id
+                    ? { ...existing, supersededBy: id, supersededAtMessage: messageCount }
+                    : existing));
+            }
+            worldFacts = [...worldFacts, next];
+            live = liveWorldFacts(worldFacts);
+            liveSets = live.map(x => factTokenSet(x.fact));
+            changed = true;
         }
-        if (newFacts.length === 0) return state;
-        return { ...state, worldFacts: [...state.worldFacts, ...newFacts] };
+        if (!changed) return state;
+        return { ...state, worldFacts };
     },
 
     ADD_STORY_MEMORY_CARD(state, action) {

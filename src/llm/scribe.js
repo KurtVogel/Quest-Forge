@@ -23,6 +23,7 @@ import { findSubjectsInText } from '../engine/vectorMemory.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import { HERO_TELL_REPORT_CAP, isHeroTellEstablished } from '../engine/heroTells.js';
+import { liveWorldFacts } from '../engine/worldFacts.js';
 import {
     CAST_AUDIT_RULES,
     describeAppliedLoot,
@@ -840,7 +841,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         // whole 8k scaffolding on every cadence (2026-09-28 audit P2).
         premise: reflectionText(typeof state.session?.premise === 'string' ? state.session.premise : '', REFLECTION_PREMISE_MAX) || undefined,
         recentJournal,
-        worldFacts: (state.worldFacts || []).slice(-12),
+        worldFacts: liveWorldFacts(state.worldFacts).slice(-12),
         npcs,
         fronts,
         partySize: (state.party || []).length,

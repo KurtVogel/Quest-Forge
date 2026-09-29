@@ -32,6 +32,7 @@ import {
     isAbsenceDriftLocalNpc,
 } from '../engine/worldTempo.js';
 import { namesMatch } from '../engine/npcRoster.js';
+import { liveWorldFacts } from '../engine/worldFacts.js';
 
 export { ABSENCE_DRIFT_MIN_AWAY, ABSENCE_DRIFT_WINDOW_MESSAGES, MAX_DRIFT_DEVELOPMENTS };
 
@@ -117,7 +118,7 @@ export function buildAbsenceDriftContext(state) {
             level: character.level || 1,
         },
         npcsOfThisPlace: localNpcs,
-        canonicalWorldFacts: (state.worldFacts || []).slice(-20).map(fact => ({
+        canonicalWorldFacts: liveWorldFacts(state.worldFacts).slice(-20).map(fact => ({
             category: cleanText(fact.category, 60),
             fact: cleanText(fact.fact, 400),
         })),

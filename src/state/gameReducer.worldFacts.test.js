@@ -123,3 +123,54 @@ describe('world-fact hostile-input type guard (2026-07-23 audit)', () => {
         for (const f of facts) expect(typeof f.fact).toBe('string');
     });
 });
+
+describe('polarity-aware supersession (2026-09-29 — a fact can stop being true)', () => {
+    it('a FLIP is stored and supersedes its twin; the twin leaves the live set but stays on the record', () => {
+        const state = { ...stateWithFacts(['The bridge at Ashford is passable.']), messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }] };
+        const next = gameReducer(state, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'The bridge at Ashford is not passable.' }] });
+        expect(next.worldFacts).toHaveLength(2);
+        const [old, fresh] = next.worldFacts;
+        expect(old.supersededBy).toBe(fresh.id);
+        expect(old.supersededAtMessage).toBe(2);
+        expect(fresh.supersedes).toBe(old.id);
+        expect(fresh.supersededBy).toBeUndefined();
+    });
+
+    it('a same-polarity restatement is still rejected, and a re-flip judges against the LIVE truth only', () => {
+        const state = stateWithFacts(['The bridge at Ashford is passable.']);
+        const flipped = gameReducer(state, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'The bridge at Ashford is not passable.' }] });
+        // Restating the now-superseded claim in the same polarity as the LIVE fact: duplicate.
+        expect(gameReducer(flipped, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'The Ashford bridge is not passable' }] })).toBe(flipped);
+        // Flipping back: a third row superseding the second; the first stays buried.
+        const back = gameReducer(flipped, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'The bridge at Ashford is passable again.' }] });
+        expect(back.worldFacts).toHaveLength(3);
+        expect(back.worldFacts[1].supersededBy).toBe(back.worldFacts[2].id);
+        expect(back.worldFacts[0].supersededBy).toBe(back.worldFacts[1].id);
+        expect(back.worldFacts[2].supersedes).toBe(back.worldFacts[1].id);
+    });
+
+    it('LOAD_GAME types the ledger stamps and revives a fact whose superseding twin is not on record', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...initialGameState.character, name: 'A', race: 'human', class: 'fighter', level: 1 },
+                inventory: [],
+                messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }],
+                worldFacts: [
+                    { id: 'f1', fact: 'The bridge is passable.', supersededBy: 'f2', supersededAtMessage: '99' },
+                    { id: 'f2', fact: 'The bridge is not passable.', supersedes: 'f1' },
+                    { id: 'f3', fact: 'The mill is empty.', supersededBy: 'ghost', supersededAtMessage: 1 },
+                    { id: 'f4', fact: 'The well is dry.', supersededBy: { evil: true }, supersedes: 42 },
+                ],
+            },
+        });
+        const byId = Object.fromEntries(next.worldFacts.map(f => [f.id, f]));
+        expect(byId.f1.supersededBy).toBe('f2');
+        expect(byId.f1.supersededAtMessage).toBe(2); // clamped to the transcript
+        expect(byId.f2.supersedes).toBe('f1');
+        expect(byId.f3.supersededBy).toBeUndefined(); // dangling pointer → live again
+        expect(byId.f3.supersededAtMessage).toBeUndefined();
+        expect(byId.f4.supersededBy).toBeUndefined();
+        expect(byId.f4.supersedes).toBeUndefined();
+    });
+});

@@ -17,6 +17,7 @@ import { generateWonder, shouldGenerateWonder } from '../../llm/wonderDirector.j
 import { isDirectorBackingOff } from '../../engine/directorRetry.js';
 import { isWonderRequest } from '../../engine/wonder.js';
 import { formatSecrecyTag } from '../../engine/storyMemory.js';
+import { liveWorldFacts } from '../../engine/worldFacts.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
@@ -388,7 +389,9 @@ export default function ChatPanel() {
         const items = [
             // Secret facts/cards keep their knower boundary inside the embedded
             // text, so a RAG hit re-surfaces the SECRET tag along with the canon.
-            ...(s.worldFacts || []).map(f => ({ text: `${formatSecrecyTag(f.knownBy)}${f.fact}`, category: f.category || 'world_fact' })),
+            // Live facts only: a fact superseded by a flip (2026-09-29) is
+            // history for the record lane, never a retrieval candidate.
+            ...liveWorldFacts(s.worldFacts).map(f => ({ text: `${formatSecrecyTag(f.knownBy)}${f.fact}`, category: f.category || 'world_fact' })),
             // `subjects` = who a memory is ABOUT (presence-aware retrieval,
             // 2026-08-28): person-tied rows go dormant in scenes their person
             // is nowhere near, instead of semantically shadowing the hero.
@@ -424,6 +427,9 @@ export default function ChatPanel() {
         // page reload no longer re-embeds the whole corpus. One mount = one campaign
         // (AppShell is keyed by session id), so mount-time seeding is sound.
         seedMemories(machineryKey, items, s.session?.id || null, {
+            // The superseded facts' cached rows retire with them (immutable
+            // categories are otherwise kept when absent from the seed).
+            retiredTexts: new Set((s.worldFacts || []).filter(f => f && f.supersededBy).map(f => `${formatSecrecyTag(f.knownBy)}${f.fact}`)),
             // Rows the seed could not embed (a rate limit, an outage, a
             // rejected key) leave the whole session on a partial store — said
             // once, as an infrastructure line (2026-09-29 vector-memory P2).

@@ -58,6 +58,11 @@ export function GameProvider({ children }) {
         if (!new URLSearchParams(window.location.search).has('debugState')) return;
         const { settings: _settings, user: _user, ...snapshot } = state;
         window.__QF_STATE__ = snapshot;
+        // The same gate exposes dispatch for the one player action a probe
+        // cannot always reach through the DOM: the sheet's "That's not me"
+        // strike renders only for a tell someone has SAID (2026-09-29, the
+        // hero-tells probe). Never a production surface — the param is the gate.
+        window.__QF_DISPATCH__ = dispatch;
     }, [state]);
 
     // The dirty-flag + debounce choreography lives in autosaveRuntime.js

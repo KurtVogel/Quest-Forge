@@ -63,6 +63,20 @@ function makeState() {
 
 const INTENT = { question: 'Saima, remember when the ghouls took the ferryman?', subjects: ['Saima Aallotar'], queryTokens: ['ghouls', 'took', 'ferryman'] };
 
+describe('a superseded fact is history on the record (2026-09-29)', () => {
+    it('renders with the NO LONGER TRUE tag while the live twin renders bare', () => {
+        const state = makeState();
+        state.messages = Array.from({ length: 12 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: 'ghouls took the ferryman' }));
+        state.worldFacts = [
+            { id: 'w1', fact: 'Ghouls took the ferryman of the Broken Ford.', category: 'event', knownBy: [], supersededBy: 'w2', supersededAtMessage: 4 },
+            { id: 'w2', fact: 'Ghouls did not take the ferryman of the Broken Ford after all.', category: 'event', knownBy: [], supersedes: 'w1' },
+        ];
+        const text = buildRecallDossier(state, INTENT).text;
+        expect(text).toContain('[NO LONGER TRUE — changed 4 turns ago] Ghouls took the ferryman');
+        expect(text).toMatch(/- FACT: Ghouls did not take the ferryman/);
+    });
+});
+
 describe('buildRecallDossier — order of authority', () => {
     it('gathers ledgers, journal, cards, facts, the person\'s record, and verbatim lines that name the thing', () => {
         const dossier = buildRecallDossier(makeState(), INTENT);

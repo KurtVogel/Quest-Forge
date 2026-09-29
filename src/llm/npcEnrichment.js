@@ -18,6 +18,7 @@ import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
 import { cleanText } from './directorUtils.js';
+import { liveWorldFacts } from '../engine/worldFacts.js';
 
 function mentionsName(text, name) {
     const hay = cleanText(text).toLowerCase();
@@ -53,7 +54,7 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
         }));
 
     const journalTail = (state.journal || []).slice(-4).map(entry => entry.summary);
-    const worldFacts = (state.worldFacts || [])
+    const worldFacts = liveWorldFacts(state.worldFacts)
         .filter(f => mentionsName(f.fact, name))
         .slice(-8)
         .map(f => f.fact);

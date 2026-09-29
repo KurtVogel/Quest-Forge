@@ -9,6 +9,8 @@
  *   node scripts/playtest_recall_wonder.cjs wonder gemini gemini gemini-3.1-pro-preview
  *   node scripts/playtest_recall_wonder.cjs wonder terra  openai gpt-5.6-terra
  *   node scripts/playtest_recall_wonder.cjs full flash gemini gemini-3.8-flash   (PROBE 3: a general ordinary-play run)
+ *   node scripts/playtest_recall_wonder.cjs tells pro   gemini gemini-3.1-pro-preview (PROBE 4: hero tells — habit → recognition → "That's not me")
+ *   node scripts/playtest_recall_wonder.cjs tells terra openai gpt-5.6-terra
  *
  * Never the xAI/Grok DM (Vesa, 2026-09-14) — Gemini Pro and GPT Terra only.
  * The Gemini Flash machinery (Scribe, journal, embeddings) is identical in every
@@ -50,8 +52,8 @@ const PROBE = process.argv[2];
 const runLabel = process.argv[3];
 const provider = process.argv[4];
 const model = process.argv[5];
-if (!['recall', 'wonder', 'full'].includes(PROBE) || !runLabel || !provider || !model) {
-    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full> <label> <provider> <model>');
+if (!['recall', 'wonder', 'full', 'tells'].includes(PROBE) || !runLabel || !provider || !model) {
+    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full|tells> <label> <provider> <model>');
     process.exit(1);
 }
 if (provider === 'xai') {
@@ -273,6 +275,15 @@ async function snap(page) {
             pendingWonder: s.session?.pendingWonder || null,
             wonder: s.session?.wonder || null,
             lastWonderMessage: s.session?.lastWonderMessage ?? null,
+            // Hero tells (PROBE 4): the record as the engine holds it.
+            heroTells: (s.heroTells || []).map(t => ({
+                id: t.id, kind: t.kind, text: t.text, dormant: !!t.dormant,
+                sightings: Array.isArray(t.sightings) ? t.sightings : [],
+                witnesses: t.witnesses || [], voicedCount: t.voicedCount || 0, voicedBy: t.voicedBy || [],
+                lastVoicedMessage: t.lastVoicedMessage ?? null, lastSeenMessage: t.lastSeenMessage ?? null, public: !!t.public,
+            })),
+            heroTellBeat: s.session?.heroTellBeat || null,
+            lastHeroTellBeatMessage: s.session?.lastHeroTellBeatMessage ?? null,
             recordReceipts: (s.messages || []).map((m, i) => ({ i, kind: m.kind, content: m.content })).filter(m => m.kind === 'record'),
         };
     }).catch(() => null);
@@ -432,6 +443,8 @@ async function playTurn(page, label, action, { settle = {} } = {}) {
         hasRecordBlock: sys.includes('## THE RECORD'),
         hasNothingFound: /NOTHING FOUND/.test(sys),
         hasWonderCue: sys.includes('SOMETHING STRANGE ARRIVES'),
+        hasTellsBlock: sys.includes('## WHAT THEY HAVE NOTICED ABOUT THE HERO'),
+        hasTellBeat: sys.includes('SOMEONE HAS THE HERO\'S NUMBER'),
         console: consoleLines.slice(consoleFrom).map(c => c.text).filter(t => /\[Wonder\]|\[Journal\]/.test(t)),
     };
     turns.push(record);
@@ -1371,6 +1384,184 @@ async function runFullProbe(page) {
     saveAll();
 }
 
+// ---------------------------------------------------------------------------
+// PROBE 4 — hero tells: habit → recognition → "That's not me" (2026-09-29)
+// The dialogue's contested proof run (docs/agent-dialogues/2026-09-28-vision.md,
+// Contested 1 — depth): does someone come to KNOW this hero's manner, say so
+// in their own voice, and honor the player's strike? The Saltmere starter
+// gives a recurring witness (Old Tammo at his brazier). The hero shows ONE
+// visible habit — a brass coin walked over the knuckles before answering —
+// in four separate scenes with Tammo, nine ordinary turns apart (> 16 raw
+// rows, HERO_TELL_SCENE_MESSAGES, so each is a distinct sighting), then
+// strikes the tell and plays four more Tammo scenes WITHOUT the habit.
+// ---------------------------------------------------------------------------
+const TELL_HABIT_RX = /\b(coin)\b[\s\S]{0,80}\b(knuckle|knuckles)\b|\b(knuckle|knuckles)\b[\s\S]{0,80}\b(coin)\b/i;
+const TELL_SCENES = [
+    'I sit down on the stool Tammo keeps by his brazier. Before I answer his question about the catch, I dig out the old brass coin and walk it over my knuckles the way I always do, then tell him the run was thin.',
+    'I come back to the brazier and ask Tammo whether the lighthouse keeper has any family ashore. The brass coin comes out and rolls across my knuckles while I wait for his answer.',
+    'I find Tammo at the brazier again and ask him straight whether Orsa has ever forgiven a debt. The coin is already walking over my knuckles before he opens his mouth.',
+    'I sit with Tammo and ask what he makes of Orsa\'s mood today. I catch myself turning the brass coin over my knuckles again while I listen.',
+];
+const TELL_FILLER = [
+    'I head up the quay to the harbormaster\'s office with the tally of the catch.',
+    'I knock, go in, and put the tally on Orsa Pellwyn\'s desk without a word.',
+    'I ask Orsa what I still owe on the Kittiwake after this run.',
+    'I leave the office and stop at the fish-market stalls to see who is buying today.',
+    'I buy a hot pie from the nearest stall and eat it watching the breakwater.',
+    'I go back down to the seaward pier and check the Kittiwake\'s hull for rot before we haul her up.',
+    'I ask the nearest deckhand to lend a shoulder getting the boat onto the rollers.',
+    'I walk to the tide-bell tower and ask the bell-keeper whether the lighthouse keeper has come ashore lately.',
+    'I head to the harbor tavern and order a small beer.',
+    'I listen to the talk around me for a while and ask the barkeep about the lighthouse keeper by name, if there is one.',
+    'I finish the beer, thank the barkeep, and walk the length of the breakwater to look at the water.',
+    'I check the mooring lines on the Kittiwake and re-tie the one that has frayed.',
+    'I go looking for the chandler to ask the price of a new coil of rope.',
+    'I stop at the well and fill the water cask for the boat.',
+    'I climb the harbor steps and watch the fishing fleet come in.',
+    'I help a stranger carry a crate of salt up from the landing.',
+    'I look in at the net-loft to see whether there is mending work to be had.',
+    'I sit on the harbor wall and count my coin against what the ledger says I owe.',
+];
+const TELL_POST_STRIKE = [
+    'I sit down by Tammo\'s brazier and ask him what he thinks the weather will do tonight. I keep my hands on my knees.',
+    'I bring Tammo a heel of bread and ask him about the knot he is working on.',
+    'I ask Tammo whether he ever rowed out to Gannet Rock himself, back when.',
+    'I tell Tammo I mean to settle the ledger by spring and ask if he believes me.',
+];
+
+async function judgeTellRemark(reply, { struck = false } = {}) {
+    const prompt = `A single-player RPG. The hero, Aino Halme, has a HABIT: she takes out an old brass coin and walks/turns it over her knuckles while thinking or before answering. ${struck ? 'The PLAYER has just told the game "that is not me" — the habit must no longer be remarked on by anyone.' : 'The people who have watched her do it several times may, sparingly and in their own voice, remark on it.'}
+
+DM reply: """${String(reply || '').slice(0, 4500)}"""
+
+Return JSON:
+{"remarked": boolean (a CHARACTER — in dialogue, a look, a gesture, a tease, a question — visibly notices or names the coin-over-the-knuckles habit, or the hero's hands/coin, as a pattern of hers),
+ "by": "the character's name, or empty",
+ "quote": "the 1–2 sentences that carry it, verbatim, or empty",
+ "coinMentioned": boolean (the coin habit appears in the reply at all, by anyone incl. the narrator),
+ "narratorMotive": boolean (the NARRATOR'S OWN VOICE states what the habit MEANS about the hero's feelings or motives as fact — nerves, stalling, fear — rather than a character guessing),
+ "note": "one short sentence"}`;
+    return await flash(prompt);
+}
+
+async function tellsTurn(page, label, action, { struck = false, scene = false } = {}) {
+    const { after, dm, record } = await playTurn(page, label, action);
+    const tells = after?.heroTells || [];
+    const coinTell = tells.find(t => TELL_HABIT_RX.test(t.text)) || null;
+    const entry = {
+        turn: record.turn, label, scene, struck, msgs: after?.msgCount,
+        tells: tells.map(t => ({ id: t.id, kind: t.kind, sightings: t.sightings.length, witnesses: t.witnesses, voicedCount: t.voicedCount, voicedBy: t.voicedBy, dormant: t.dormant, text: t.text })),
+        coinTell: coinTell ? { id: coinTell.id, sightings: coinTell.sightings, witnesses: coinTell.witnesses, voicedCount: coinTell.voicedCount, voicedBy: coinTell.voicedBy, dormant: coinTell.dormant, text: coinTell.text } : null,
+        promptHasTellsBlock: record.hasTellsBlock,
+        promptHasBeat: record.hasTellBeat,
+        beat: after?.heroTellBeat ? { tellId: after.heroTellBeat.tellId, mode: after.heroTellBeat.mode, opensAt: after.heroTellBeat.opensAtMessage, closesAt: after.heroTellBeat.closesAtMessage } : null,
+        judge: null,
+        dm,
+    };
+    if (scene && dm) entry.judge = await judgeTellRemark(dm, { struck });
+    tellsLog.push(entry);
+    note('tells-log', `t${entry.turn} msgs=${entry.msgs} coinTell=${entry.coinTell ? `${entry.coinTell.sightings.length} sightings, voiced ${entry.coinTell.voicedCount}, dormant ${entry.coinTell.dormant}` : 'none'} block=${entry.promptHasTellsBlock} beat=${entry.promptHasBeat}${entry.judge ? ` judge=${JSON.stringify({ remarked: entry.judge.remarked, by: entry.judge.by, narratorMotive: entry.judge.narratorMotive })}` : ''}`);
+    fs.writeFileSync(path.join(OUT_DIR, 'tells-log.json'), JSON.stringify(tellsLog, null, 2));
+    return entry;
+}
+const tellsLog = [];
+
+/** The player's strike: the sheet's "That's not me" when the tell is listed there (voiced), else the same action through the debug dispatch. */
+async function strikeTell(page, tellId) {
+    // Open the character sheet and look for the button.
+    const viaUi = await page.evaluate((id) => {
+        const tab = Array.from(document.querySelectorAll('button, [role="tab"]')).find(e => /^character$/i.test(e.textContent.trim()) || /character sheet/i.test(e.getAttribute('aria-label') || ''));
+        if (tab) tab.click();
+        return !!tab;
+    }, tellId);
+    await delay(800);
+    const clicked = await page.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === "That's not me");
+        if (btn) { btn.click(); return true; }
+        return false;
+    });
+    if (clicked) {
+        await delay(600);
+        const s = await snap(page);
+        const t = (s?.heroTells || []).find(x => x.id === tellId);
+        if (t?.dormant) return 'ui';
+    }
+    const viaDispatch = await page.evaluate((id) => {
+        if (typeof window.__QF_DISPATCH__ !== 'function') return false;
+        window.__QF_DISPATCH__({ type: 'SET_HERO_TELL_DORMANT', payload: { id, dormant: true } });
+        return true;
+    }, tellId);
+    await delay(600);
+    const s = await snap(page);
+    const t = (s?.heroTells || []).find(x => x.id === tellId);
+    return t?.dormant ? (viaUi && clicked ? 'ui' : 'dispatch') : (viaDispatch ? 'dispatch-failed' : 'none');
+}
+
+async function runTellsProbe(page) {
+    await bootAndCreateHero(page, { premiseMode: 'starter', premiseText: 'The Debt at Saltmere' });
+    saveAll();
+    const FILLER_BETWEEN = Number(process.env.TELL_FILLER) || 9;
+    let filler = 0;
+    const findings = { sightingsAfterScene: [], establishedAtScene: null, blockTurns: [], beatTurns: [], voicedTurns: [], remarkTurns: [], narratorMotiveTurns: [], strike: null, postStrike: null };
+
+    for (let i = 0; i < TELL_SCENES.length; i++) {
+        const entry = await tellsTurn(page, `scene:${i + 1}`, TELL_SCENES[i], { scene: true });
+        findings.sightingsAfterScene.push(entry.coinTell ? entry.coinTell.sightings.length : 0);
+        if (entry.coinTell && entry.coinTell.sightings.length >= 3 && findings.establishedAtScene === null) findings.establishedAtScene = i + 1;
+        if (i < TELL_SCENES.length - 1) {
+            for (let f = 0; f < FILLER_BETWEEN; f++) {
+                await tellsTurn(page, `filler:${filler + 1}`, TELL_FILLER[filler % TELL_FILLER.length]);
+                filler += 1;
+            }
+        }
+    }
+    // One more Tammo scene WITHOUT the habit line, to see whether the established
+    // tell is voiced unprompted once the block has had a few scenes to land.
+    const unprompted = await tellsTurn(page, 'scene:unprompted', 'I sit down by Tammo again and ask him, quietly, whether he thinks I should row out to Gannet Rock tomorrow.', { scene: true });
+
+    for (const e of tellsLog) {
+        if (e.promptHasTellsBlock) findings.blockTurns.push(e.turn);
+        if (e.promptHasBeat) findings.beatTurns.push(e.turn);
+        if (e.coinTell && e.coinTell.voicedCount > 0 && !findings.voicedTurns.includes(e.turn)) findings.voicedTurns.push(e.turn);
+        if (e.judge?.remarked) findings.remarkTurns.push({ turn: e.turn, by: e.judge.by, quote: e.judge.quote });
+        if (e.judge?.narratorMotive) findings.narratorMotiveTurns.push(e.turn);
+    }
+    const before = await snap(page);
+    const coinTell = (before?.heroTells || []).find(t => TELL_HABIT_RX.test(t.text)) || null;
+    findings.tellOnRecord = coinTell;
+    await shot(page, 'before-strike');
+
+    if (coinTell) {
+        const path_ = await strikeTell(page, coinTell.id);
+        findings.strike = { path: path_, tellId: coinTell.id, voicedBefore: coinTell.voicedCount };
+        note('strike', `"That's not me" on ${coinTell.id} via ${path_}.`);
+        const post = [];
+        for (let i = 0; i < TELL_POST_STRIKE.length; i++) {
+            const e = await tellsTurn(page, `post-strike:${i + 1}`, TELL_POST_STRIKE[i], { struck: true, scene: true });
+            post.push({ turn: e.turn, block: e.promptHasTellsBlock, beat: e.promptHasBeat, dormant: e.coinTell?.dormant ?? null, judge: e.judge });
+        }
+        findings.postStrike = {
+            turns: post,
+            blockRendered: post.filter(p => p.block).map(p => p.turn),
+            remarked: post.filter(p => p.judge?.remarked).map(p => ({ turn: p.turn, by: p.judge.by, quote: p.judge.quote })),
+            coinMentioned: post.filter(p => p.judge?.coinMentioned).map(p => p.turn),
+            stillDormant: post.every(p => p.dormant === true),
+        };
+    } else {
+        note('strike', 'No coin tell on record — nothing to strike.');
+    }
+    findings.unprompted = { turn: unprompted.turn, judge: unprompted.judge };
+    results.push({ kind: 'tells-summary', ...findings });
+    note('summary', JSON.stringify({
+        sightingsAfterScene: findings.sightingsAfterScene, establishedAtScene: findings.establishedAtScene,
+        blockTurns: findings.blockTurns, beatTurns: findings.beatTurns, voicedTurns: findings.voicedTurns,
+        remarks: findings.remarkTurns.length, narratorMotive: findings.narratorMotiveTurns,
+        strike: findings.strike, postStrike: findings.postStrike && { block: findings.postStrike.blockRendered, remarked: findings.postStrike.remarked.length, coinMentioned: findings.postStrike.coinMentioned, stillDormant: findings.postStrike.stillDormant },
+    }));
+    fs.writeFileSync(path.join(OUT_DIR, 'tells-summary.json'), JSON.stringify(findings, null, 2));
+    saveAll();
+}
+
 async function run() {
     fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
     const browser = await puppeteer.launch({
@@ -1386,6 +1577,7 @@ async function run() {
     try {
         if (PROBE === 'recall') await runRecallProbe(page);
         else if (PROBE === 'full') await runFullProbe(page);
+        else if (PROBE === 'tells') await runTellsProbe(page);
         else await runWonderProbe(page);
     } finally {
         fs.writeFileSync(path.join(OUT_DIR, 'transcript.json'), JSON.stringify(await page.evaluate(() => (window.__QF_STATE__?.messages || []).map(m => ({ role: m.role, kind: m.kind || null, hidden: !!m.hidden, content: m.content }))).catch(() => []), null, 2));

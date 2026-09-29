@@ -78,6 +78,36 @@ function typeLoadedMessage(message, index) {
     return typed;
 }
 
+/**
+ * World facts at the load boundary. The 2026-07-25 heal re-typed fact /
+ * category / knownBy; the supersession ledger (2026-09-29) adds three
+ * engine stamps typed here: `supersedes` / `supersededBy` string-or-drop,
+ * `supersededAtMessage` clamped to the transcript, and a `supersededBy`
+ * whose superseding fact is not on record is cleared — the fact is LIVE
+ * again rather than buried by a dangling pointer from a hostile save.
+ */
+function typeLoadedWorldFacts(list, maxMessageCount) {
+    const typed = (Array.isArray(list) ? list : [])
+        .map(f => {
+            const sanitized = sanitizeWorldFactPayload(f);
+            if (!sanitized) return null;
+            const { supersedes, supersededBy, supersededAtMessage, ...rest } = f;
+            const out = { ...rest, ...sanitized };
+            if (typeof supersedes === 'string' && supersedes) out.supersedes = supersedes;
+            if (typeof supersededBy === 'string' && supersededBy) {
+                out.supersededBy = supersededBy;
+                const at = Number(supersededAtMessage);
+                out.supersededAtMessage = Number.isFinite(at) ? Math.max(0, Math.min(Math.floor(at), maxMessageCount)) : 0;
+            }
+            return out;
+        })
+        .filter(Boolean);
+    const ids = new Set(typed.map(f => f.id).filter(id => typeof id === 'string'));
+    return typed.map(f => (f.supersededBy && !ids.has(f.supersededBy)
+        ? (({ supersededBy: _by, supersededAtMessage: _at, ...live }) => live)(f)
+        : f));
+}
+
 const JOURNAL_LIST_MAX_ITEMS = 8;
 const JOURNAL_LIST_ITEM_MAX = 300;
 /** The load twin of normalizeJournalSummary's list clamp: string elements, 8 × 300. */
@@ -365,12 +395,7 @@ function validateSaveState(payload) {
         npcs,
         // Heal poisoned saves: a pre-guard non-string fact/category crashed prompt
         // building on every turn — re-type what's fixable, drop what isn't.
-        worldFacts: (Array.isArray(payload.worldFacts) ? payload.worldFacts : [])
-            .map(f => {
-                const sanitized = sanitizeWorldFactPayload(f);
-                return sanitized ? { ...f, ...sanitized } : null;
-            })
-            .filter(Boolean),
+        worldFacts: typeLoadedWorldFacts(payload.worldFacts, (Array.isArray(payload.messages) ? payload.messages : []).length),
         // Promotion-twin heal (2026-08-30 P1): merges stale same-subject
         // `npc_roster` cards stranded by pre-stable-id type flips and stamps
         // the survivor's stable id. No-op on healthy saves.

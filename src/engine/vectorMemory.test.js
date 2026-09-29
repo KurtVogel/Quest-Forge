@@ -522,6 +522,24 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
         expect(texts).toContain('The old gate fell in the goblin raid.');
     });
 
+    it('retired texts prune even from an IMMUTABLE category — a superseded world fact leaves the cache (2026-09-29)', async () => {
+        await putEmbeddings([
+            row('The bridge at Ashford is passable.', 'world_fact', 1),
+            row('The old gate fell in the goblin raid.', 'world_fact', 2),
+        ]);
+        embedTextMock.mockResolvedValue(unitVector(1));
+        const seed = [{ text: 'The bridge at Ashford is not passable.', category: 'world_fact' }];
+        await seedMemories('key', seed, 's1', { retiredTexts: new Set(['The bridge at Ashford is passable.']) });
+        await flushAsync();
+        const texts = getMemoryTexts();
+        expect(texts).not.toContain('The bridge at Ashford is passable.');
+        expect(texts).toContain('The bridge at Ashford is not passable.');
+        // Immutable rows absent from the seed but NOT retired still survive.
+        expect(texts).toContain('The old gate fell in the goblin raid.');
+        await seedMemories('key', seed, 's1');
+        expect(getMemoryTexts()).not.toContain('The bridge at Ashford is passable.');
+    });
+
     it('seeding over the cap evicts oldest transient rows first and mirrors eviction to disk', async () => {
         const rows = [
             row('player action one', 'player', 1),

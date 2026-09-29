@@ -25,6 +25,7 @@ import { isLowLevelSolo } from '../engine/combatExchange.js';
 import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock, describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
+import { liveWorldFacts } from '../engine/worldFacts.js';
 
 /**
  * Tripwire against unbounded prompt growth, NOT a target. A deliberately
@@ -258,8 +259,9 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Canonical world facts — these NEVER get compressed or forgotten
-    if (worldFacts && worldFacts.length > 0 && !narrationOnly) {
-        parts.push(buildWorldFactsBlock(worldFacts), 'worldFacts');
+    const liveFacts = liveWorldFacts(worldFacts);
+    if (liveFacts.length > 0 && !narrationOnly) {
+        parts.push(buildWorldFactsBlock(liveFacts), 'worldFacts');
     }
 
     // Session memory — journal entries and NPC tracker
@@ -311,7 +313,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Active constraints — synthesized DM reminders from world state and threats
-    const constraints = buildActiveConstraints(worldFacts, character, party, combat);
+    const constraints = buildActiveConstraints(liveFacts, character, party, combat);
     if (constraints) {
         parts.push(constraints, 'dmReminders');
     }

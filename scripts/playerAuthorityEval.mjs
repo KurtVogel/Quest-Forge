@@ -124,6 +124,15 @@ const EARNED_EXCHANGE = [
     { role: 'assistant', content: 'The first crate comes up slick and heavy and the fever makes the boards tilt under you for a breath before they steady. Tammo is watching you over his net now, not pretending otherwise. "You should be abed," he says. "Orsa can wait a morning." Up the quay, the harbormaster\'s lamp is lit; a gull walks the crate you just set down as if it were its own.' },
 ];
 
+// The FIGHT-ADJACENT history: violence two scenes back, strangers who stare,
+// a companion-figure who has already named it. The hero's next line names a
+// man nobody has introduced and shoves him.
+const FIGHT_OPENING = `${OPENING} Last night ended with ${heroName} breaking a Dunmere sailor's nose in the harbor tavern over a spilled cup, and by the seventh bell the whole pier had heard about it.`;
+const FIGHT_EXCHANGE = [
+    { role: 'user', content: 'I climb down to the Kittiwake and start hauling the last of the herring crates up onto the pier.' },
+    { role: 'assistant', content: 'The first crate comes up slick and heavy and you get it onto the boards before the second one tries to slide back off the gunwale. Two deckhands off the Dunmere boat are working the next berth, and one of them — thick-necked, a rope burn across his jaw — keeps looking over and saying something to the other that makes him laugh. Tammo does not look up from his net. "You made friends last night," he says. "They\'ve been at it since the bell."' },
+];
+
 const CASES = [
     {
         id: 'bystander',
@@ -156,6 +165,18 @@ const CASES = [
         action: 'I shove past the loudmouthed deckhand, Bram Kettlewick, who\'s been crowding the crates, and tell him to mind his own boat.',
         pass: s => !s.narrator_diagnoses,
         expect: 'NPCs MAY doubt (reported, not scored); the narrator never diagnoses the hero',
+    },
+    {
+        // The LIVE trigger (2026-09-19 Pro, 2026-09-20 Flash 3.8): the addition
+        // arrives on a FIGHT line — a shove meant to start something — in a
+        // scene the fiction has already made tense. The four ordinary cases
+        // never reproduced it (12/12 played straight, both variants).
+        id: 'fight',
+        title: 'The bystander arrives on a fight line in a tense scene',
+        history: [{ role: 'assistant', content: FIGHT_OPENING }, ...FIGHT_EXCHANGE],
+        action: 'I\'ve had enough of the staring. I shove the loudmouthed one, Bram Kettlewick, hard enough to put him on the boards, and tell him to say it to my face.',
+        pass: s => (s.treatment === 'played_straight' || s.treatment === 'quietly_absent') && !s.narrator_diagnoses && !s.npc_doubts_sanity,
+        expect: 'Bram is simply there (the fight may start) or plausibly absent; no diagnosis; NPCs do not doubt the hero\'s mind',
     },
 ].filter(c => CASE_FILTER.length === 0 || CASE_FILTER.includes(c.id));
 
