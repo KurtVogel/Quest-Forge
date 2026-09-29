@@ -2,7 +2,7 @@
  * Google Gemini API provider.
  * Uses the REST API directly (no SDK dependency needed).
  */
-import { assertStreamComplete, makeCompletionGuard, makeHttpError, readSseStream } from './sse.js';
+import { assertStreamComplete, isNetworkFailure, makeCompletionGuard, makeHttpError, parseRetryAfterMs, readSseStream } from './sse.js';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1alpha/models';
 const GEMINI_EMBED_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -222,47 +222,78 @@ export async function embedText(apiKey, text, { inputType = 'document', onError 
         try { onError(reason); } catch { /* a diagnostic must never break the null path */ }
     };
     const url = `${GEMINI_EMBED_BASE}/${GEMINI_EMBED_MODEL}:embedContent`;
-    try {
-        const formattedText = formatEmbeddingInput(text, inputType);
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-            body: JSON.stringify({
-                model: `models/${GEMINI_EMBED_MODEL}`,
-                content: { parts: [{ text: formattedText }] },
-                output_dimensionality: GEMINI_EMBED_DIMENSIONS,
-            }),
-            // RAG retrieval is awaited BEFORE the DM prompt is built — a stalled
-            // embed call must fail into the null path, never hang the turn.
-            signal: AbortSignal.timeout(30_000),
-        });
-        if (!response.ok) {
+    const formattedText = formatEmbeddingInput(text, inputType);
+    // RAG retrieval is awaited BEFORE the DM prompt is built — a stalled
+    // embed call must fail into the null path, never hang the turn. The
+    // deadline covers the WHOLE call, retry included (2026-09-29).
+    const deadline = Date.now() + EMBED_QUERY_TIMEOUT_MS;
+    let retried = false;
+    for (;;) {
+        let reason;
+        let retryAfterMs = null;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+                body: JSON.stringify({
+                    model: `models/${GEMINI_EMBED_MODEL}`,
+                    content: { parts: [{ text: formattedText }] },
+                    output_dimensionality: GEMINI_EMBED_DIMENSIONS,
+                }),
+                signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+            });
+            if (response.ok) {
+                const data = asObject(await response.json());
+                const values = data.embedding?.values;
+                if (isEmbeddingVector(values)) return values;
+                console.error(
+                    `[Gemini embed] Expected ${GEMINI_EMBED_DIMENSIONS} values from ${GEMINI_EMBED_MODEL}, received ${values?.length || 0}:`,
+                    data,
+                );
+                report({ status: response.status, message: `Gemini returned no ${GEMINI_EMBED_DIMENSIONS}-value vector`, timedOut: false });
+                return null;
+            }
             const body = await response.text().catch(() => '');
             console.error(
                 `[Gemini embed] HTTP ${response.status} ${response.statusText} from ${GEMINI_EMBED_MODEL}:`,
                 body.slice(0, 500),
             );
-            report({ status: response.status, message: apiErrorMessage(body) || response.statusText || '', timedOut: false });
-            return null;
+            reason = { status: response.status, message: apiErrorMessage(body) || response.statusText || '', timedOut: false };
+            if (RETRYABLE_EMBED_STATUS.has(response.status)) {
+                retryAfterMs = parseRetryAfterMs(response.headers?.get?.('retry-after')) ?? EMBED_RETRY_DEFAULT_MS;
+            }
+        } catch (err) {
+            console.error('[Gemini embed] Request failed:', err);
+            const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+            reason = { status: null, message: typeof err?.message === 'string' ? err.message : '', timedOut };
+            if (!timedOut && isNetworkFailure(err)) retryAfterMs = EMBED_RETRY_DEFAULT_MS;
         }
-        const data = asObject(await response.json());
-        const values = data.embedding?.values;
-        if (!isEmbeddingVector(values)) {
-            console.error(
-                `[Gemini embed] Expected ${GEMINI_EMBED_DIMENSIONS} values from ${GEMINI_EMBED_MODEL}, received ${values?.length || 0}:`,
-                data,
-            );
-            report({ status: response.status, message: `Gemini returned no ${GEMINI_EMBED_DIMENSIONS}-value vector`, timedOut: false });
-            return null;
+        // ONE Retry-After-bounded whole-request retry on the common transient
+        // (2026-09-29 providers-adapter P2): this is the BLOCKING embed — the
+        // query — and one per-minute 429 used to cost the turn its memory.
+        // Only inside the deadline, with room for the retried fetch.
+        if (retryAfterMs != null && !retried && Date.now() + retryAfterMs + EMBED_RETRY_MIN_ROOM_MS < deadline) {
+            retried = true;
+            console.warn(`[Gemini embed] Transient failure (${reason.status ?? reason.message}); retrying once in ${retryAfterMs}ms.`);
+            await sleep(retryAfterMs);
+            continue;
         }
-        return values;
-    } catch (err) {
-        console.error('[Gemini embed] Request failed:', err);
-        const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
-        report({ status: null, message: typeof err?.message === 'string' ? err.message : '', timedOut });
+        report(reason);
         return null;
     }
 }
+
+/** Stall budget of the single (query) embed, retry included. */
+export const EMBED_QUERY_TIMEOUT_MS = 30_000;
+/** Stall budget of one batch request. */
+export const EMBED_BATCH_TIMEOUT_MS = 60_000;
+/** Backoff before the one retry when the provider sends no Retry-After. */
+export const EMBED_RETRY_DEFAULT_MS = 1000;
+/** The retried fetch needs at least this much of the deadline left. */
+const EMBED_RETRY_MIN_ROOM_MS = 2000;
+/** Transient statuses worth ONE whole-request retry: a per-minute 429 or a 5xx blip. */
+const RETRYABLE_EMBED_STATUS = new Set([429, 500, 502, 503, 504]);
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * @typedef {{ status: number|null, message: string, timedOut: boolean }} EmbedFailure
@@ -291,7 +322,7 @@ function apiErrorMessage(body) {
  * chunk so callers skip those items exactly like the per-item path (the next
  * mount's seed retries whatever the cache is still missing).
  */
-export async function embedTexts(apiKey, texts, { inputType = 'document' } = {}) {
+export async function embedTexts(apiKey, texts, { inputType = 'document', onError = null } = {}) {
     const list = Array.isArray(texts) ? texts : [];
     const results = new Array(list.length).fill(null);
     if (!apiKey || list.length === 0) return results;
@@ -303,6 +334,14 @@ export async function embedTexts(apiKey, texts, { inputType = 'document' } = {})
     const url = `${GEMINI_EMBED_BASE}/${GEMINI_EMBED_MODEL}:batchEmbedContents`;
     const BATCH_LIMIT = 100; // the API's per-call request ceiling
     let rejectedRequests = 0;
+    // The first failure's reason, reported once (2026-09-29): the seed says
+    // out loud when rows are still missing, and with what cause.
+    let reported = false;
+    const report = (reason) => {
+        if (reported || typeof onError !== 'function') return;
+        reported = true;
+        try { onError(reason); } catch { /* a diagnostic must never break the null path */ }
+    };
 
     // One request for one chunk. Fills `results` on success; on failure says
     // whether the API REJECTED the body (400/413 — one bad text among a
@@ -322,7 +361,7 @@ export async function embedTexts(apiKey, texts, { inputType = 'document' } = {})
                 }),
                 // Seeding runs in the background at mount — a stalled batch must
                 // fail into nulls (skip + retry next mount), never hang the seed.
-                signal: AbortSignal.timeout(60_000),
+                signal: AbortSignal.timeout(EMBED_BATCH_TIMEOUT_MS),
             });
             if (!response.ok) {
                 const body = await response.text().catch(() => '');
@@ -330,7 +369,14 @@ export async function embedTexts(apiKey, texts, { inputType = 'document' } = {})
                     `[Gemini embed] Batch HTTP ${response.status} ${response.statusText} from ${GEMINI_EMBED_MODEL} (${chunk.length} texts):`,
                     body.slice(0, 500),
                 );
-                return { ok: false, rejected: response.status === 400 || response.status === 413 };
+                const transient = RETRYABLE_EMBED_STATUS.has(response.status);
+                return {
+                    ok: false,
+                    rejected: response.status === 400 || response.status === 413,
+                    transient,
+                    retryAfterMs: transient ? (parseRetryAfterMs(response.headers?.get?.('retry-after')) ?? EMBED_RETRY_DEFAULT_MS) : null,
+                    reason: { status: response.status, message: apiErrorMessage(body) || response.statusText || '', timedOut: false },
+                };
             }
             const data = asObject(await response.json());
             const embeddings = Array.isArray(data.embeddings) ? data.embeddings : [];
@@ -343,8 +389,35 @@ export async function embedTexts(apiKey, texts, { inputType = 'document' } = {})
             return { ok: true, rejected: false };
         } catch (err) {
             console.error('[Gemini embed] Batch request failed:', err);
-            return { ok: false, rejected: false };
+            const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+            const transient = !timedOut && isNetworkFailure(err);
+            return {
+                ok: false,
+                rejected: false,
+                transient,
+                retryAfterMs: transient ? EMBED_RETRY_DEFAULT_MS : null,
+                reason: { status: null, message: typeof err?.message === 'string' ? err.message : '', timedOut },
+            };
         }
+    };
+
+    // ONE Retry-After-bounded whole-request retry per chunk on a transient
+    // failure (2026-09-29 vector-memory P2: a 429 on the seed was a silent
+    // partial store for the whole session). A retry that fails the same way
+    // means the quota is gone for this call: later chunks null out at once
+    // (the next mount retries), so a sustained 429 costs one wait, never one
+    // per chunk — retrieveRelevant awaits this seed on the first turn.
+    let transientRetryExhausted = false;
+    const sendChunkWithRetry = async (chunk) => {
+        let outcome = await sendChunk(chunk);
+        if (!outcome.ok && outcome.transient && !transientRetryExhausted) {
+            console.warn(`[Gemini embed] Transient batch failure (${outcome.reason.status ?? outcome.reason.message}); retrying once in ${outcome.retryAfterMs}ms.`);
+            await sleep(outcome.retryAfterMs);
+            outcome = await sendChunk(chunk);
+            if (!outcome.ok && outcome.transient) transientRetryExhausted = true;
+        }
+        if (!outcome.ok) report(outcome.reason);
+        return outcome;
     };
 
     // A rejected chunk is BISECTED so one bad text costs one row (2026-09-17
@@ -357,7 +430,7 @@ export async function embedTexts(apiKey, texts, { inputType = 'document' } = {})
     // exactly like before and the next mount retries.
     const embedChunk = async (chunk) => {
         if (rejectedRequests > MAX_REJECTED_EMBED_REQUESTS) return;
-        const outcome = await sendChunk(chunk);
+        const outcome = await sendChunkWithRetry(chunk);
         if (outcome.ok || !outcome.rejected) return;
         rejectedRequests += 1;
         if (chunk.length < 2) return;

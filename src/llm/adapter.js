@@ -36,6 +36,16 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const DEFAULT_SEND_TIMEOUT_MS = 90_000;
 
 /**
+ * Retries after the first attempt. A retry budget belongs to the LANE, not
+ * the call (2026-09-29 providers-adapter P2): three 60 s attempts are right
+ * for a background extraction, where a lost Scribe pass costs the campaign,
+ * and wrong for a call the player is watching — a pre-commit lane passes
+ * `maxRetries: 0` with its own short `timeoutMs` (machinery.js
+ * getPreCommitConfig).
+ */
+export const DEFAULT_SEND_MAX_RETRIES = 2;
+
+/**
  * The streaming twin (2026-09-16 audit P2): a proxy that accepts the POST and
  * never sends a byte, or stops mid-reply without closing, parked the DM turn
  * in "waiting" forever — the 2026-08-08 stall class one lane over. An idle
@@ -68,15 +78,17 @@ export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 90_000;
  * @param {number} [options.maxOutputTokens] - Per-call output cap override.
  * @param {number} [options.timeoutMs] - Stall guard; a call this old is aborted
  *   and retried (default 90s).
+ * @param {number} [options.maxRetries] - Retries after the first attempt
+ *   (default 2; 0 = one attempt, for a call the player is waiting on).
  * @param {AbortSignal} [options.signal] - External cancel; never retried.
  * @returns {Promise<string>} LLM response text
  */
-export async function sendMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, signal }) {
+export async function sendMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, maxRetries = DEFAULT_SEND_MAX_RETRIES, signal }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
 
-    const MAX_RETRIES = 2;
+    const MAX_RETRIES = Number.isInteger(maxRetries) && maxRetries >= 0 ? maxRetries : DEFAULT_SEND_MAX_RETRIES;
     for (let attempt = 0; ; attempt++) {
         if (signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
         // Per-attempt controller: the stall timer must not leak an abort into a
@@ -92,7 +104,8 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
             if (signal?.aborted) throw error; // caller cancelled — never retry
             if (!stalled && (attempt >= MAX_RETRIES || !isRetryableError(error))) throw error;
             if (stalled && attempt >= MAX_RETRIES) {
-                throw new Error(`${provider} request stalled — no response after ${Math.round(timeoutMs / 1000)}s (${MAX_RETRIES + 1} attempts).`);
+                const attempts = MAX_RETRIES + 1;
+                throw new Error(`${provider} request stalled — no response after ${Math.round(timeoutMs / 1000)}s (${attempts} attempt${attempts === 1 ? '' : 's'}).`);
             }
             const reason = stalled ? `stalled after ${Math.round(timeoutMs / 1000)}s` : error.message;
             // A `Retry-After` the provider sent wins over the default backoff —

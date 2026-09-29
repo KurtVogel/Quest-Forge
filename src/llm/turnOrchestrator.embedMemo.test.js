@@ -14,7 +14,9 @@
  * trip for the same vector.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+
+globalThis.IDBKeyRange = IDBKeyRange; // the ranged campaign read (2026-09-29 P1)
 
 const { embedTextMock, embedTextsMock, sendMessageMock } = vi.hoisted(() => ({
     embedTextMock: vi.fn(),
@@ -34,7 +36,7 @@ vi.mock('./adapter.js', async (importOriginal) => ({
 
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 import { createCharacter } from '../engine/characterUtils.js';
-import { addMemory, clearMemories } from '../engine/vectorMemory.js';
+import { addMemory, clearMemories, flushMemoryQueue } from '../engine/vectorMemory.js';
 import { createTurnRunner } from './turnOrchestrator.js';
 
 const ABILITY_SCORES = {
@@ -141,5 +143,30 @@ describe('check turn query embeds (2026-09-22 roll-resolution P2)', () => {
         await runner.sendToLLM('I cross the yard.', 'I cross the yard.');
 
         expect(queryEmbeds()).toHaveLength(2);
+    });
+});
+
+describe('the ordinary turn embeds through ONE document batch (2026-09-29 vector-memory P2)', () => {
+    it('three world facts + the narrative = one embedTexts request; the query stays the one single embed', async () => {
+        await addMemory('test-key', MEMORY, 'world_fact');
+        embedTextsMock.mockClear();
+        embedTextMock.mockClear();
+        const reply = 'The sergeant names three things.\n```json\n{"world_facts": ['
+            + '{"fact": "The gate closes at dusk.", "category": "world_fact"}, '
+            + '{"fact": "The sergeant drinks at the Lamb.", "category": "world_fact"}, '
+            + '{"fact": "The captain is away.", "category": "world_fact"}]}\n```';
+        const { runner } = createHarness({ streamMessage: scriptedStream([reply]) });
+
+        await runner.sendToLLM(ACTION, ACTION);
+        expect(embedTextsMock).not.toHaveBeenCalled(); // queued, not sent, until the turn completes
+        expect(runner.runPostTurnExtraction(ACTION)).toBe(true);
+        await flushMemoryQueue();
+
+        expect(queryEmbeds()).toHaveLength(1);
+        expect(embedTextsMock).toHaveBeenCalledTimes(1);
+        const texts = embedTextsMock.mock.calls[0][1];
+        expect(texts).toHaveLength(4);
+        expect(texts.slice(0, 3)).toEqual(['The gate closes at dusk.', 'The sergeant drinks at the Lamb.', 'The captain is away.']);
+        expect(texts[3]).toMatch(/^\[Location: The gatehouse\] The sergeant names three things\./);
     });
 });

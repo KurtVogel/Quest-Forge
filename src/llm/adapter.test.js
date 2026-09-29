@@ -17,7 +17,7 @@ vi.mock('./providers/gemini.js', () => ({ sendGeminiMessage, streamGeminiMessage
 vi.mock('./providers/openai.js', () => ({ sendOpenAIMessage, streamOpenAIMessage }));
 vi.mock('./providers/xai.js', () => ({ sendXaiMessage, streamXaiMessage }));
 
-const { sendMessage, streamMessage, PROVIDERS, PROVIDER_LIST } = await import('./adapter.js');
+const { sendMessage, streamMessage, PROVIDERS, PROVIDER_LIST, DEFAULT_SEND_MAX_RETRIES } = await import('./adapter.js');
 
 beforeEach(() => {
     sendGeminiMessage.mockReset();
@@ -307,5 +307,57 @@ describe('streamMessage idle stall guard (2026-09-16 providers-adapter P2)', () 
         const error = await outcome;
         expect(error.name).toBe('AbortError');
         expect(error.message).not.toMatch(/stalled/);
+    });
+});
+
+describe('a retry budget belongs to the lane, not the call (2026-09-29 providers-adapter P2)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    const hangUntilAborted = ({ signal }) => new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')), { once: true });
+    });
+
+    it('maxRetries: 0 is ONE attempt — a never-answering provider fails at exactly timeoutMs', async () => {
+        vi.useFakeTimers();
+        sendGeminiMessage.mockImplementation(hangUntilAborted);
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini', timeoutMs: 20_000, maxRetries: 0 });
+        const outcome = expect(promise).rejects.toThrow('stalled — no response after 20s (1 attempt).');
+        await vi.advanceTimersByTimeAsync(19_999);
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('the background lane\'s budget, pinned as a number: 60 s × 3 attempts + backoff ≈ 183 s', async () => {
+        vi.useFakeTimers();
+        sendGeminiMessage.mockImplementation(hangUntilAborted);
+        let settled = false;
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini', timeoutMs: 60_000 }).catch(() => { settled = true; });
+        await vi.advanceTimersByTimeAsync(60_000 + 1_000 + 60_000 + 2_000 + 60_000 - 1);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(501); // + the two jitters (≤ 250 ms each)
+        expect(settled).toBe(true);
+        await promise;
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(3);
+    });
+
+    it('a transient 429 with maxRetries: 0 is thrown as-is, no backoff; a junk maxRetries falls back to the default', async () => {
+        vi.useFakeTimers();
+        const error = Object.assign(new Error('Too Many Requests'), { status: 429 });
+        sendGeminiMessage.mockRejectedValue(error);
+        await expect(sendMessage({ ...baseOptions, provider: 'gemini', maxRetries: 0 })).rejects.toBe(error);
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
+
+        sendGeminiMessage.mockClear();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const junk = sendMessage({ ...baseOptions, provider: 'gemini', maxRetries: -1 });
+        const outcome = expect(junk).rejects.toBe(error);
+        await vi.advanceTimersByTimeAsync(10_000);
+        await outcome;
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(DEFAULT_SEND_MAX_RETRIES + 1);
+        vi.restoreAllMocks();
     });
 });

@@ -126,3 +126,52 @@ export function getBackgroundConfig(settings) {
         timeoutMs: 60_000,
     };
 }
+
+/**
+ * Stall budget for the two machinery calls that sit BETWEEN the DM's last
+ * streamed token and the commit — the roll arbiter and the semantic roll
+ * detector (2026-09-29 providers-adapter P2). The background lane's three
+ * 60 s attempts (183 s with backoff) are right for the Scribe and the
+ * journal, where a lost extraction costs the campaign; here the player is
+ * watching "waiting" with the narration already fully received, and both
+ * callers carry an offline fallback (the sync rules / "no rolls detected"),
+ * so the lane gets ONE attempt at this budget and then falls back.
+ */
+export const PRE_COMMIT_TIMEOUT_MS = 20_000;
+
+/** getBackgroundConfig for a call the player is waiting on: one attempt, 20 s. */
+export function getPreCommitConfig(settings) {
+    return { ...getBackgroundConfig(settings), timeoutMs: PRE_COMMIT_TIMEOUT_MS, maxRetries: 0 };
+}
+
+/**
+ * The player-facing line for a mount seed that could not embed every row
+ * (2026-09-29 vector-memory P2): a rate-limited or failed seed used to be
+ * console-only, and the whole session then ran against a partial store.
+ * Same cause vocabulary as describeMemoryUnavailable (`{ status, message,
+ * timedOut }` from the batch embed, or null).
+ */
+export function describeMemorySeedIncomplete(missing, reason, settings) {
+    const count = Number.isFinite(missing) && missing > 0 ? Math.floor(missing) : 0;
+    const rows = `${count} ${count === 1 ? 'memory' : 'memories'}`;
+    const status = Number.isFinite(reason?.status) ? reason.status : null;
+    const message = typeof reason?.message === 'string' ? reason.message.trim() : '';
+    const detail = status != null ? `HTTP ${status}${message ? `: ${message}` : ''}` : message;
+    const partial = 'Long-term memory runs on a partial record this session; the rest embed on the next Continue.';
+    // A batch 400 is ambiguous (one oversized row among a hundred is also a
+    // 400) — the key wording needs 401/403 or Google's own "API key" message.
+    const keyRejected = status === 401 || status === 403 || (status === 400 && /api key/i.test(message));
+    if (keyRejected) {
+        return `${rows} could not be embedded — Gemini rejected the game-memory key (${detail}). Long-term memory, the Scribe, and the journal cannot run until the key is fixed: ${describeMachineryKeyField(settings)}.`;
+    }
+    if (status === 429) {
+        return `${rows} could not be embedded — Gemini rate-limited the embedding call (${detail}). ${partial}`;
+    }
+    if (reason?.timedOut) {
+        return `${rows} could not be embedded — the embedding call stalled and was abandoned. ${partial}`;
+    }
+    if (detail) {
+        return `${rows} could not be embedded — the embedding call failed (${detail}). ${partial}`;
+    }
+    return `${rows} could not be embedded (the embedding call failed). ${partial}`;
+}

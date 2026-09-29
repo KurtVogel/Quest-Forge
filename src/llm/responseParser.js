@@ -14,7 +14,7 @@
 
 import { parseBalancedJsonAt, parseJsonObjectLoose, repairJson, scanBalancedObject } from './utils/jsonExtractor.js';
 import { sendMessage } from './adapter.js';
-import { getBackgroundConfig } from './machinery.js';
+import { getPreCommitConfig } from './machinery.js';
 import { normalizeEvents, EVENT_CHANNELS } from './eventChannels.js';
 import { isMemoryInspectorEnabled } from '../debug/memoryInspectorStore.js';
 
@@ -268,7 +268,9 @@ export function parseResponse(response) {
 export const SEMANTIC_ROLL_NARRATIVE_MAX = 4000;
 
 export async function detectSemanticTextRolls(narrative, settings, { signal } = {}) {
-    const background = getBackgroundConfig(settings);
+    // A pre-commit lane: the narration is fully received and the player is
+    // watching "waiting" — one attempt, 20 s, then "no rolls" (2026-09-29).
+    const background = getPreCommitConfig(settings);
     if (!background.apiKey || !narrative) return null;
     narrative = String(narrative).slice(-SEMANTIC_ROLL_NARRATIVE_MAX);
 

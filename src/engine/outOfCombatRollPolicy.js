@@ -1,5 +1,5 @@
 import { sendMessage } from '../llm/adapter.js';
-import { getBackgroundConfig } from '../llm/machinery.js';
+import { getPreCommitConfig } from '../llm/machinery.js';
 import { extractBalancedJson } from '../llm/utils/jsonExtractor.js';
 
 const SOCIAL_SKILLS = new Set(['persuasion', 'deception', 'intimidation', 'charisma']);
@@ -59,7 +59,9 @@ export function reviewOutsideCombatRollsSync(rolls, playerMessage) {
 }
 
 export async function reviewOutsideCombatRolls(rolls, playerMessage, dmNarrative = '', settings = null, { signal } = {}) {
-    const background = getBackgroundConfig(settings);
+    // A pre-commit lane: the player is waiting on this call with the narration
+    // already received — one attempt, 20 s, then the sync rules (2026-09-29).
+    const background = getPreCommitConfig(settings);
     // Fall back to synchronous regex-based rules if settings, API key, or inputs are missing
     if (!background.apiKey || !playerMessage || !rolls || rolls.length === 0) {
         return reviewOutsideCombatRollsSync(rolls, playerMessage);

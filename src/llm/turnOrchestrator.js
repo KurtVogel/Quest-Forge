@@ -32,7 +32,7 @@ import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt, rev
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe } from './scribe.js';
 import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
-import { addMemory, findSubjectsInText, retrieveRelevant } from '../engine/vectorMemory.js';
+import { addMemory, findSubjectsInText, flushMemoryQueue, queueMemory, retrieveRelevant } from '../engine/vectorMemory.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
 import { describeMemoryUnavailable, getMachineryGeminiKey } from './machinery.js';
 import { curateStoryMemory, formatSecrecyTag } from '../engine/storyMemory.js';
@@ -599,7 +599,11 @@ Translate the player's committed action into the single bounded combat_exchange 
                 // Same secrecy-tagged text the mount seed builds — an untagged
                 // live embed of a secret fact was a mismatched duplicate row
                 // (and leaked the canon without its knower boundary) on reload.
-                addMemory(machineryKey, `${formatSecrecyTag(f.knownBy)}${f.fact}`, f.category || 'world_fact', events?.location || s.currentLocation).catch(() => {});
+                // QUEUED, not embedded (2026-09-29 P2): the turn's facts and
+                // its narrative ride ONE batch request, flushed by the
+                // post-turn extraction (or by the queue's own window when no
+                // extraction follows — a fight-starting response).
+                queueMemory(machineryKey, `${formatSecrecyTag(f.knownBy)}${f.fact}`, f.category || 'world_fact', events?.location || s.currentLocation).catch(() => {});
             }
         }
 
@@ -744,8 +748,11 @@ Translate the player's committed action into the single bounded combat_exchange 
             const narrativeText = loc
                 ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
                 : finalNarration.content.slice(0, 500);
-            addMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
+            // The narrative joins the facts sendToLLM queued and the whole
+            // turn embeds as ONE request (2026-09-29 P2).
+            queueMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
         }
+        flushMemoryQueue().catch(() => {});
         return true;
     };
 

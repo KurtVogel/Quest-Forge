@@ -57,31 +57,74 @@ function openEmbedDB() {
     });
 }
 
-function persistEmbedding(entry) {
-    openEmbedDB().then(db => {
+/**
+ * The exact key range of ONE campaign's rows. In IndexedDB key order arrays
+ * sort after every string, so [sessionId, []] is an upper bound past any
+ * text. Shared by the campaign READ and the campaign delete (2026-09-29
+ * vector-memory P1: the read used to `getAll()` the whole store and filter
+ * by sessionId in JS, so every Continue structured-cloned every OTHER
+ * campaign's vectors on the device — ~46 MB for five mature campaigns — to
+ * keep the one it wanted).
+ */
+function campaignKeyRange(sessionId) {
+    return IDBKeyRange.bound([sessionId, ''], [sessionId, []]);
+}
+
+/**
+ * ONE readwrite transaction for a batch of puts and deletes (2026-09-29
+ * vector-memory P2): the seed used to open a connection and a transaction
+ * per persisted row — 1,501 `indexedDB.open` calls at the cap on a cold
+ * device, 41 on a warm mount with 40 retags. Unkeyed rows (added before any
+ * seed set a session) are skipped: the composite key rejects a null part.
+ * Never rejects — the cache is non-critical, in-memory still works. Resolves
+ * once the transaction settles, so a caller can order work behind it.
+ */
+function syncPersistedEmbeddings({ put = [], remove = [] } = {}) {
+    const puts = put.filter(e => e && e.sessionId != null);
+    const removes = remove.filter(e => e && e.sessionId != null);
+    if (puts.length === 0 && removes.length === 0) return Promise.resolve();
+    return openEmbedDB().then(db => new Promise(resolve => {
         const tx = db.transaction(EMBED_STORE, 'readwrite');
-        tx.objectStore(EMBED_STORE).put(entry);
+        const store = tx.objectStore(EMBED_STORE);
+        for (const e of removes) store.delete([e.sessionId, e.text]);
+        for (const e of puts) store.put(e);
         // A failed put (quota) aborts the transaction and used to leave the
         // connection open forever — one leaked handle per failed write, which
         // then blocks every later version upgrade (2026-09-06 audit; the
         // 2026-07-12 persistence.js class, one store over).
-        tx.oncomplete = () => db.close();
-        tx.onabort = () => db.close();
+        const settle = () => { db.close(); resolve(); };
+        tx.oncomplete = settle;
+        tx.onabort = settle;
         tx.onerror = () => db.close();
-    }).catch(() => {}); // Non-critical — in-memory still works
+    })).catch(() => {});
+}
+
+/** Fire-and-forget single-row write — the live lane (one memory at a time). */
+function persistEmbedding(entry) {
+    syncPersistedEmbeddings({ put: [entry] });
 }
 
 /** Fire-and-forget removal of specific persisted rows (eviction / stale-prune). */
 function deletePersistedEmbeddings(entries) {
-    const keyed = (entries || []).filter(e => e && e.sessionId != null);
-    if (keyed.length === 0) return;
-    openEmbedDB().then(db => {
-        const tx = db.transaction(EMBED_STORE, 'readwrite');
-        const store = tx.objectStore(EMBED_STORE);
-        for (const e of keyed) store.delete([e.sessionId, e.text]);
-        tx.oncomplete = () => db.close();
-        tx.onabort = () => db.close();
-    }).catch(() => {}); // Non-critical — in-memory already dropped them
+    syncPersistedEmbeddings({ remove: entries || [] });
+}
+
+/**
+ * Vectors are STORED as Float32Array (2026-09-29 vector-memory P2): a
+ * 768-double `number[]` structured-clones at 6,144 bytes per row — 8.8 MB
+ * per campaign at the cap, in memory, on disk, and through every campaign
+ * read — and float32 halves all three at no retrieval cost at the 0.55 /
+ * 0.9 thresholds. Same vectors, narrower storage: the schema tag is
+ * untouched, a legacy `number[]` row loads as-is and narrows on read (it is
+ * rewritten only when a retag persists it), and cosineSimilarity indexes
+ * either shape.
+ */
+function toStoredVector(vector) {
+    return vector instanceof Float32Array ? vector : Float32Array.from(vector);
+}
+
+function isVectorShape(value) {
+    return Array.isArray(value) || value instanceof Float32Array;
 }
 
 function clearPersistedEmbeddings() {
@@ -103,19 +146,22 @@ async function loadPersistedEmbeddings(sessionId) {
         // instead of degrading to [] (found by the 2026-07-28 audit tests).
         return await new Promise((resolve, reject) => {
             const tx = db.transaction(EMBED_STORE, 'readonly');
-            const request = tx.objectStore(EMBED_STORE).getAll();
+            // The campaign's OWN key range — the read scales with this
+            // campaign, not with every campaign on the device (2026-09-29 P1).
+            const request = tx.objectStore(EMBED_STORE).getAll(campaignKeyRange(sessionId));
             request.onsuccess = () => {
                 const entries = Array.isArray(request.result) ? request.result : [];
                 const compatible = entries.filter(entry => (
                     entry && typeof entry === 'object'
                     // Only the active campaign's rows — another campaign's memories
-                    // must never leak into this session's retrieval.
+                    // must never leak into this session's retrieval (the range
+                    // guarantees it; this is the belt).
                     && entry.sessionId === sessionId
                     && entry.schema === GEMINI_EMBED_SCHEMA
                     // The row's TEXT is its key and its prompt line — a
                     // non-string one would read "[object Object]" (2026-09-17 belt).
                     && typeof entry.text === 'string' && entry.text.trim()
-                    && Array.isArray(entry.vector)
+                    && isVectorShape(entry.vector)
                     && entry.vector.length === GEMINI_EMBED_DIMENSIONS
                     // A corrupted/tampered row with NaN/non-number elements would
                     // yield NaN cosine scores and pollute the store.
@@ -264,6 +310,7 @@ function typeCachedRow(entry) {
     const { location: _location, subjects: _subjects, ...rest } = entry;
     return {
         ...rest,
+        vector: toStoredVector(entry.vector),
         category: cleanLabel(entry.category, 'general'),
         ...(location && { location }),
         ...(subjects && { subjects }),
@@ -363,13 +410,118 @@ export async function addMemory(apiKey, text, category = 'general', location = n
         return;
     }
 
-    storeMemoryEntry({ text, vector, category, location, subjects });
+    const entry = storeMemoryEntry({ text, vector, category, location, subjects });
+    if (entry) persistEmbedding(entry); // fire-and-forget to IndexedDB
     enforceCampaignCap();
 }
 
-/** Store one already-embedded entry (dedupe + persist) — shared by addMemory and the batch seed. */
+/**
+ * Add MANY memories through one embed round trip and one persist transaction
+ * (2026-09-29 vector-memory P2: the ordinary turn's fan-out was one
+ * `embedContent` request per world fact plus one for the narrative — six
+ * embed calls on a turn with three facts, all against the per-minute quota
+ * the NEXT turn's blocking query embed needs). Dedupes against the store and
+ * within the batch; a failed vector skips its item exactly like addMemory.
+ * @param {string} apiKey
+ * @param {Array<{text: string, category?: string, location?: string|null, subjects?: string[]|null}>} items
+ */
+export async function addMemories(apiKey, items) {
+    if (!apiKey) return;
+    const seen = new Set();
+    const fresh = [];
+    for (const item of (Array.isArray(items) ? items : [])) {
+        const text = item?.text;
+        if (typeof text !== 'string' || !text.trim() || seen.has(text)) continue;
+        if (memoryStore.some(m => m.text === text)) continue;
+        seen.add(text);
+        fresh.push(item);
+    }
+    if (fresh.length === 0) return;
+    const vectors = await embedTexts(apiKey, fresh.map(item => item.text), { inputType: 'document' });
+    const stored = [];
+    fresh.forEach((item, i) => {
+        if (!vectors?.[i]) {
+            console.error('[VectorMemory] Embedding failed for:', item.text.slice(0, 80));
+            return;
+        }
+        const entry = storeMemoryEntry({
+            text: item.text, vector: vectors[i], category: item.category || 'general',
+            location: item.location, subjects: item.subjects,
+        });
+        if (entry) stored.push(entry);
+    });
+    syncPersistedEmbeddings({ put: stored });
+    enforceCampaignCap();
+}
+
+/**
+ * The turn's memory batch (2026-09-29 vector-memory P2). A turn's world
+ * facts land in sendToLLM and its narrative in the post-turn extraction, a
+ * few awaits apart; queueing lets them ride ONE embed request. The caller
+ * that knows the turn is complete calls flushMemoryQueue; a queue nobody
+ * flushes (a fight-starting response, the opening scene) flushes itself
+ * after this window, so no memory is ever held back. The player line still
+ * embeds alone through addMemory — it lands before the reply exists.
+ */
+export const MEMORY_BATCH_WINDOW_MS = 1500;
+let pendingBatch = null; // { apiKey, items, timer, promise, resolve }
+
+/**
+ * Queue one memory for the next batch. Resolves when that batch has been
+ * embedded and stored (or skipped).
+ * @param {string} apiKey
+ * @param {string} text
+ * @param {string} [category]
+ * @param {string|null} [location]
+ * @param {string[]|null} [subjects]
+ */
+export function queueMemory(apiKey, text, category = 'general', location = null, subjects = null) {
+    if (!apiKey || typeof text !== 'string' || !text.trim()) return Promise.resolve();
+    // A batch is one key: a different key (a Settings change mid-turn)
+    // flushes what was queued under the old one first.
+    if (pendingBatch && pendingBatch.apiKey !== apiKey) flushMemoryQueue();
+    if (!pendingBatch) {
+        let resolve;
+        const promise = new Promise(r => { resolve = r; });
+        pendingBatch = {
+            apiKey,
+            items: [],
+            timer: setTimeout(() => { flushMemoryQueue(); }, MEMORY_BATCH_WINDOW_MS),
+            promise,
+            resolve,
+        };
+    }
+    pendingBatch.items.push({ text, category, location, subjects });
+    return pendingBatch.promise;
+}
+
+/** Embed and store everything queued so far, now. Resolves when done. */
+export function flushMemoryQueue() {
+    const batch = pendingBatch;
+    if (!batch) return Promise.resolve();
+    pendingBatch = null;
+    clearTimeout(batch.timer);
+    const run = addMemories(batch.apiKey, batch.items).catch(() => {});
+    run.then(batch.resolve, batch.resolve);
+    return run;
+}
+
+/** Drop a queued batch without embedding it (campaign reset). */
+function discardMemoryQueue() {
+    const batch = pendingBatch;
+    if (!batch) return;
+    pendingBatch = null;
+    clearTimeout(batch.timer);
+    batch.resolve();
+}
+
+/**
+ * Store one already-embedded entry in memory (dedupe; NO persist — the caller
+ * persists, alone or in a batch). Returns the stored entry, or null when the
+ * text was already in the store. Shared by addMemory, addMemories, and the seed.
+ */
 function storeMemoryEntry({ text, vector, category = 'general', location = null, subjects = null }) {
-    if (memoryStore.some(m => m.text === text)) return;
+    if (memoryStore.some(m => m.text === text)) return null;
     const cleanSubjects = normalizeSubjects(subjects);
     const entry = {
         // Campaign key — rows are persisted per campaign so a switch loads its own
@@ -377,7 +529,7 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
         // session stays in-memory only (the composite key rejects a null part).
         sessionId: activeSessionId,
         text,
-        vector,
+        vector: toStoredVector(vector),
         category,
         // Where the hero was when this memory was recorded — lets retrieval label
         // memories from elsewhere so the DM doesn't transplant local color across
@@ -391,7 +543,7 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
         timestamp: Date.now(),
     };
     memoryStore.push(entry);
-    if (activeSessionId != null) persistEmbedding(entry); // fire-and-forget to IndexedDB
+    return entry;
 }
 
 /**
@@ -402,9 +554,15 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
  * @param {string} apiKey
  * @param {Array<{text: string, category: string}>} items
  * @param {string|null} sessionId - the campaign these memories belong to
+ * @param {{ onIncomplete?: (report: { missing: number, reason: object|null }) => void }} [options] -
+ *   `onIncomplete` (2026-09-29): called once when rows the seed meant to embed
+ *   are still missing at the end (a rate limit, an outage, a rejected key)
+ *   with the count and the provider's first failure reason — the session
+ *   then runs against a partial store until the next mount, which the
+ *   player should hear about (it used to be console-only).
  */
-export function seedMemories(apiKey, items, sessionId = null) {
-    const run = seedMemoriesInner(apiKey, items, sessionId);
+export function seedMemories(apiKey, items, sessionId = null, { onIncomplete = null } = {}) {
+    const run = seedMemoriesInner(apiKey, items, sessionId, { onIncomplete });
     // Retrieval awaits an in-flight seed (2026-09-06 audit): the first turn
     // after Continue on an uncached campaign used to query a partial store
     // while the cold seed was still embedding — silently, with the DM's first
@@ -418,16 +576,19 @@ export function seedMemories(apiKey, items, sessionId = null) {
 /** The seed currently loading/embedding, or null — awaited by retrieveRelevant. */
 let seedInFlight = null;
 
-async function seedMemoriesInner(apiKey, items, sessionId) {
+async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null } = {}) {
     if (!apiKey) return;
     activeSessionId = sessionId;
     memoryStore = [];
+    discardMemoryQueue(); // a batch queued under the previous campaign
     if (!items?.length && sessionId == null) return;
 
     // This campaign's cached embeddings first. Mutable-category rows (NPC notes,
     // story cards — state snapshots that get reworded) are kept only while their
     // exact text is still in the current seed: anything else is a stale
     // predecessor wording, dropped here and from disk (replace, not append).
+    // Every disk write of the seed — the stale deletes, the retags, the new
+    // rows — rides ONE transaction at the end (2026-09-29 P2).
     const persistedRaw = sessionId != null ? await loadPersistedEmbeddings(sessionId) : [];
     const currentSeedTexts = new Set((items || []).map(item => item.text));
     const persisted = [];
@@ -437,9 +598,9 @@ async function seedMemoriesInner(apiKey, items, sessionId) {
             ? persisted : stale).push(entry);
     }
     if (stale.length > 0) {
-        deletePersistedEmbeddings(stale);
         console.log(`[VectorMemory] Pruned ${stale.length} stale reworded rows from the campaign cache`);
     }
+    const toPersist = [];
     if (persisted.length > 0) {
         memoryStore = persisted;
         console.log(`[VectorMemory] Loaded ${persisted.length} cached embeddings for this campaign`);
@@ -466,7 +627,7 @@ async function seedMemoriesInner(apiKey, items, sessionId) {
         const cleanSubjects = seedItem ? normalizeSubjects(seedItem.subjects) : null;
         if (cleanSubjects && !sameSubjects(cleanSubjects, entry.subjects)) {
             entry.subjects = cleanSubjects;
-            if (entry.sessionId != null) persistEmbedding(entry);
+            toPersist.push(entry);
         }
     }
 
@@ -474,23 +635,37 @@ async function seedMemoriesInner(apiKey, items, sessionId) {
     const newItems = (items || [])
         .filter(item => typeof item?.text === 'string' && item.text.trim())
         .filter(item => !existingTexts.has(item.text));
+    let missing = 0;
+    let failure = null;
     if (newItems.length > 0) {
         if (persisted.length > 0) console.log(`[VectorMemory] Embedding ${newItems.length} new items not in cache`);
-        const vectors = await embedTexts(apiKey, newItems.map(item => item.text), { inputType: 'document' });
+        const vectors = await embedTexts(apiKey, newItems.map(item => item.text), {
+            inputType: 'document',
+            onError: (reason) => { failure = reason; },
+        });
         newItems.forEach((item, i) => {
             if (vectors?.[i]) {
-                storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location, subjects: item.subjects });
+                const entry = storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location, subjects: item.subjects });
+                if (entry) toPersist.push(entry);
             } else {
+                missing += 1;
                 console.error('[VectorMemory] Embedding failed for:', item.text.slice(0, 80));
             }
         });
     }
+    syncPersistedEmbeddings({ put: toPersist, remove: stale });
     if (persisted.length === 0) {
         console.log(`[VectorMemory] Seeded ${memoryStore.length} memories (fresh embeddings)`);
     }
     // A long campaign's cache can arrive over the cap (rows persisted before the
     // cap existed) — addMemory enforces per-add, this covers the bulk load.
     enforceCampaignCap();
+    // Rows still missing run this whole session against a partial store
+    // (2026-09-29 P2) — said once, with the provider's reason, so the player
+    // hears it instead of the console.
+    if (missing > 0 && typeof onIncomplete === 'function') {
+        try { onIncomplete({ missing, reason: failure }); } catch { /* a notice must never break the seed */ }
+    }
 }
 
 /**
@@ -615,6 +790,7 @@ export function clearMemories() {
     memoryStore = [];
     activeSessionId = null;
     queryVectorMemo.clear();
+    discardMemoryQueue();
     // Awaitable: resolves once the persisted clear actually commits.
     return clearPersistedEmbeddings();
 }
@@ -674,16 +850,48 @@ export function getMemoryTexts() {
  * @param {Array<{text: string, category: string}>} memories
  * @returns {string}
  */
+/**
+ * The block's ceilings (2026-09-29 vector-memory P2 — every other prompt
+ * block got a ceiling constant in the 09-25/09-27 sweeps; this one was
+ * bounded only by its sources' clamps: 8 journal rows at JOURNAL_SUMMARY_MAX
+ * were 17k chars of LIVE prompt bytes, the recall lane's 16 rows 33k). A row
+ * is clipped at a sentence end; the lines together stop at the ceiling with
+ * an honest "+K more" tail. The typical block (8 rows of a 2–3-sentence
+ * summary) never meets either.
+ */
+export const RETRIEVED_MEMORY_ROW_MAX = 600;
+export const RETRIEVED_MEMORIES_CHAR_CEILING = 8000;
+
+/** Clip at the last sentence end inside `max` (past its midpoint), else hard. */
+function clipMemoryText(text, max) {
+    const clean = typeof text === 'string' ? text : '';
+    if (clean.length <= max) return clean;
+    const head = clean.slice(0, max);
+    const cut = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('? '), head.lastIndexOf('.\n'));
+    if (cut >= max / 2) return `${head.slice(0, cut + 1)} …`;
+    return `${head.trimEnd()}…`;
+}
+
 export function buildRetrievedMemoriesBlock(memories) {
     if (!memories || memories.length === 0) return '';
-    const lines = memories.map(m => {
+    const lines = [];
+    let used = 0;
+    let omitted = 0;
+    for (const m of memories) {
         const category = cleanLabel(m.category, 'general');
         const label = category === 'player'
             ? 'player statement/attempt — not automatically canon'
             : category;
         const location = cleanLabel(m.location);
         const locationTag = location ? ` — recorded at: ${location}` : '';
-        return `- [${label}${locationTag}] ${m.text}`;
-    }).join('\n');
-    return `## RETRIEVED MEMORIES (most relevant to current scene)\nUse canonical world facts and DM-established memories normally. An entry labeled "player statement/attempt" records something the player said, wanted, or tried; it is not proof that an external claim became true unless the established fiction corroborates it.\nThese are memories, not the current scene. An entry recorded at a DIFFERENT place than where the hero now stands is context from elsewhere — never transplant its creatures, factions, or local color into the present location unless the fiction has actually moved them here. Distant places stay distinct: give each region its own dangers.\n${lines}`;
+        const line = `- [${label}${locationTag}] ${clipMemoryText(m.text, RETRIEVED_MEMORY_ROW_MAX)}`;
+        if (used + line.length + 1 > RETRIEVED_MEMORIES_CHAR_CEILING) {
+            omitted += 1;
+            continue;
+        }
+        lines.push(line);
+        used += line.length + 1;
+    }
+    if (omitted > 0) lines.push(`- (+${omitted} more relevant ${omitted === 1 ? 'memory' : 'memories'} omitted for length)`);
+    return `## RETRIEVED MEMORIES (most relevant to current scene)\nUse canonical world facts and DM-established memories normally. An entry labeled "player statement/attempt" records something the player said, wanted, or tried; it is not proof that an external claim became true unless the established fiction corroborates it.\nThese are memories, not the current scene. An entry recorded at a DIFFERENT place than where the hero now stands is context from elsewhere — never transplant its creatures, factions, or local color into the present location unless the fiction has actually moved them here. Distant places stay distinct: give each region its own dangers.\n${lines.join('\n')}`;
 }

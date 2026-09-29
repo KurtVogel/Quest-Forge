@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import { IDBFactory, IDBKeyRange, IDBObjectStore } from 'fake-indexeddb';
+
+// The campaign READ is ranged like the delete (2026-09-29 P1) — the browser
+// global must exist before any seed runs.
+globalThis.IDBKeyRange = IDBKeyRange;
 
 const { embedTextMock, embedTextsMock, SCHEMA } = vi.hoisted(() => ({
     embedTextMock: vi.fn(),
@@ -335,7 +339,7 @@ describe('seedMemories', () => {
         ], 's1');
 
         expect(embedTextMock).toHaveBeenCalledTimes(1);
-        expect(embedTextMock).toHaveBeenCalledWith('key', 'Brand new fact.', { inputType: 'document' });
+        expect(embedTextMock).toHaveBeenCalledWith('key', 'Brand new fact.', expect.objectContaining({ inputType: 'document' }));
         expect(getMemoryCount()).toBe(2);
     });
 
@@ -371,7 +375,7 @@ describe('seedMemories', () => {
 
         expect(embedTextsMock).toHaveBeenCalledTimes(1);
         expect(embedTextsMock.mock.calls[0][1]).toHaveLength(12);
-        expect(embedTextsMock.mock.calls[0][2]).toEqual({ inputType: 'document' });
+        expect(embedTextsMock.mock.calls[0][2]).toMatchObject({ inputType: 'document' });
         expect(getMemoryCount()).toBe(12);
     });
 
@@ -1266,5 +1270,226 @@ describe('query-vector memo (2026-09-22 roll-resolution P2)', () => {
         await addMemory('key', 'Fact one.', 'world_fact');
         await retrieveRelevant('key', 'query');
         expect(queryEmbeds()).toHaveLength(2);
+    });
+});
+
+import {
+    addMemories,
+    flushMemoryQueue,
+    MEMORY_BATCH_WINDOW_MS,
+    queueMemory,
+    RETRIEVED_MEMORIES_CHAR_CEILING,
+    RETRIEVED_MEMORY_ROW_MAX,
+} from './vectorMemory.js';
+
+describe('2026-09-29 audit: the ranged campaign read, one transaction per seed, float32 rows, the batched turn, the block ceiling, the seed notice', () => {
+    beforeEach(() => {
+        clearMemories();
+        globalThis.indexedDB = new IDBFactory();
+        embedTextMock.mockReset();
+        embedTextMock.mockResolvedValue(unitVector(0));
+    });
+
+    /** Every raw row of the store, read outside the module. */
+    function readAllRows() {
+        return new Promise((resolve, reject) => {
+            const request = globalThis.indexedDB.open('rpg-vector-memory', 4);
+            request.onsuccess = () => {
+                const db = request.result;
+                const tx = db.transaction('embeddings', 'readonly');
+                const req = tx.objectStore('embeddings').getAll();
+                req.onsuccess = () => { db.close(); resolve(req.result); };
+                req.onerror = () => { db.close(); reject(req.error); };
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    it('P1: the campaign read passes the campaign KEY RANGE — other campaigns\' rows are never read; the JS filter is the belt', async () => {
+        await putEmbedding({ sessionId: 'other', text: 'Other campaign fact.', vector: unitVector(1), category: 'world_fact', schema: SCHEMA, timestamp: 1 });
+        await putEmbedding({ sessionId: 's1', text: 'Mine.', vector: unitVector(0), category: 'world_fact', schema: SCHEMA, timestamp: 1 });
+        const getAll = vi.spyOn(IDBObjectStore.prototype, 'getAll');
+
+        await seedMemories('key', [{ text: 'Mine.', category: 'world_fact' }], 's1');
+
+        expect(getAll).toHaveBeenCalledTimes(1);
+        const range = getAll.mock.calls[0][0];
+        expect(range).toBeInstanceOf(IDBKeyRange);
+        expect(range.lower).toEqual(['s1', '']);
+        expect(range.upper).toEqual(['s1', []]);
+        // What the request actually returned: this campaign's row alone.
+        expect(getAll.mock.results[0].value.result.map(row => row.sessionId)).toEqual(['s1']);
+        expect(embedTextMock).not.toHaveBeenCalled();
+        expect(getMemoryCount()).toBe(1);
+        getAll.mockRestore();
+    });
+
+    it('P2: a seed opens the database at most TWICE — one read, one write transaction — whatever its size', async () => {
+        const open = vi.spyOn(globalThis.indexedDB, 'open');
+        const items = Array.from({ length: 120 }, (_, i) => ({ text: `Fact ${i}.`, category: 'world_fact' }));
+
+        await seedMemories('key', items, 's1');
+        expect(open).toHaveBeenCalledTimes(2); // was 121
+        expect(await readAllRows()).toHaveLength(120);
+
+        // Warm mount with 5 retagged rows: one read, one write, no embed.
+        open.mockClear();
+        embedTextMock.mockClear();
+        const retagged = items.map((item, i) => (i < 5 ? { ...item, subjects: ['Saima'] } : item));
+        await seedMemories('key', retagged, 's1');
+        expect(open).toHaveBeenCalledTimes(2); // was 6
+        expect(embedTextMock).not.toHaveBeenCalled();
+        expect((await readAllRows()).filter(row => row.subjects?.[0] === 'Saima')).toHaveLength(5);
+
+        // Fully cached and unchanged: the read alone.
+        open.mockClear();
+        await seedMemories('key', retagged, 's1');
+        expect(open).toHaveBeenCalledTimes(1);
+    });
+
+    it('P2: rows are STORED as Float32Array (half the bytes); a legacy number[] row still loads, narrows, and retrieves at full score', async () => {
+        await seedMemories('key', [], 's1'); // the active campaign
+        await addMemory('key', 'Stored narrow.', 'world_fact');
+        const rows = await readAllRows();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].vector).toBeInstanceOf(Float32Array);
+        expect(rows[0].vector).toHaveLength(768);
+        expect(rows[0].schema).toBe(SCHEMA); // same vectors, narrower storage — no schema bump
+
+        // A distinct direction (cos 0.7 to the query) so the diversity pass keeps both rows.
+        await putEmbedding({ sessionId: 's1', text: 'Legacy wide.', vector: alignedVector(1, 0.7), category: 'world_fact', schema: SCHEMA, timestamp: 1 });
+        embedTextMock.mockClear();
+        await seedMemories('key', [{ text: 'Stored narrow.', category: 'world_fact' }, { text: 'Legacy wide.', category: 'world_fact' }], 's1');
+        expect(embedTextMock).not.toHaveBeenCalled();
+        const matches = await retrieveRelevant('key', 'query', 5, 0.5);
+        expect(matches.map(m => m.text).sort()).toEqual(['Legacy wide.', 'Stored narrow.']);
+        expect(matches.find(m => m.text === 'Stored narrow.').score).toBeGreaterThan(0.99);
+        expect(matches.find(m => m.text === 'Legacy wide.').score).toBeCloseTo(0.7 + 0.03, 5); // float32 loses nothing that matters (+ the world_fact boost)
+    });
+
+    it('P2: addMemories embeds a batch through ONE request, dedupes within the batch and against the store, and skips only a failed slot', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        await addMemory('key', 'Already here.', 'world_fact');
+        embedTextsMock.mockReset();
+        embedTextsMock.mockResolvedValue([unitVector(1), null, unitVector(2)]);
+
+        await addMemories('key', [
+            { text: 'Fact A.', category: 'world_fact' },
+            { text: 'Fact B.', category: 'world_fact' },
+            { text: 'Narrative C.', category: 'narrative', location: 'Ashford' },
+            { text: 'Fact A.', category: 'world_fact' },
+            { text: 'Already here.', category: 'world_fact' },
+            { text: '   ' },
+            null,
+        ]);
+
+        expect(embedTextsMock).toHaveBeenCalledTimes(1);
+        expect(embedTextsMock.mock.calls[0][1]).toEqual(['Fact A.', 'Fact B.', 'Narrative C.']);
+        expect(getMemoryTexts().sort()).toEqual(['Already here.', 'Fact A.', 'Narrative C.']);
+        await expect(addMemories('key', [])).resolves.toBeUndefined();
+        await expect(addMemories('', [{ text: 'x' }])).resolves.toBeUndefined();
+        expect(embedTextsMock).toHaveBeenCalledTimes(1);
+        vi.restoreAllMocks();
+    });
+
+    it('P2: queueMemory holds a turn\'s memories for ONE batch — flushMemoryQueue embeds them together, the window flushes a batch nobody drains, a key change and clearMemories are handled', async () => {
+        vi.useFakeTimers();
+        embedTextsMock.mockClear();
+        const a = queueMemory('key', 'Fact one.', 'world_fact', 'Ashford');
+        const b = queueMemory('key', 'Fact two.', 'world_fact', 'Ashford');
+        const c = queueMemory('key', '[Location: Ashford] The gate opens.', 'narrative', 'Ashford');
+        expect(embedTextsMock).not.toHaveBeenCalled();
+
+        await flushMemoryQueue();
+        await Promise.all([a, b, c]);
+        expect(embedTextsMock).toHaveBeenCalledTimes(1);
+        expect(embedTextsMock.mock.calls[0][1]).toEqual(['Fact one.', 'Fact two.', '[Location: Ashford] The gate opens.']);
+        expect(getMemoryCount()).toBe(3);
+        await flushMemoryQueue(); // an empty queue is a no-op
+        expect(embedTextsMock).toHaveBeenCalledTimes(1);
+
+        // A fight-starting response queues its facts and never reaches the
+        // post-turn flush: the window embeds them anyway.
+        const d = queueMemory('key', 'Fact three.', 'world_fact');
+        await vi.advanceTimersByTimeAsync(MEMORY_BATCH_WINDOW_MS - 1);
+        expect(embedTextsMock).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        await d;
+        expect(embedTextsMock).toHaveBeenCalledTimes(2);
+        expect(getMemoryCount()).toBe(4);
+
+        // A different key flushes the old batch first; a junk text is ignored.
+        queueMemory('key', 'Fact four.', 'world_fact');
+        await expect(queueMemory('key', '   ', 'world_fact')).resolves.toBeUndefined();
+        await expect(queueMemory('', 'Fact x.', 'world_fact')).resolves.toBeUndefined();
+        queueMemory('other-key', 'Fact five.', 'world_fact');
+        expect(embedTextsMock).toHaveBeenCalledTimes(3);
+        expect(embedTextsMock.mock.calls[2][0]).toBe('key');
+        expect(embedTextsMock.mock.calls[2][1]).toEqual(['Fact four.']);
+
+        // clearMemories discards a queued batch without embedding it.
+        const pending = queueMemory('other-key', 'Fact six.', 'world_fact');
+        clearMemories();
+        await pending;
+        await vi.advanceTimersByTimeAsync(MEMORY_BATCH_WINDOW_MS);
+        expect(embedTextsMock).toHaveBeenCalledTimes(3);
+        vi.useRealTimers();
+    });
+
+    it('P2: the retrieved block clips a row at a sentence end and its lines stop at the ceiling with an honest "+K more" tail', () => {
+        const long = Array.from({ length: 40 }, (_, i) => `Sentence number ${i} of a very long journal summary about the siege.`).join(' ');
+        expect(long.length).toBeGreaterThan(RETRIEVED_MEMORY_ROW_MAX);
+        const one = buildRetrievedMemoriesBlock([{ text: long, category: 'journal' }]);
+        const line = one.split('\n').find(l => l.startsWith('- [journal]'));
+        expect(line.length).toBeLessThanOrEqual('- [journal] '.length + RETRIEVED_MEMORY_ROW_MAX + 2);
+        expect(line).toMatch(/siege\. …$/); // sentence-ended, never mid-word
+        expect(buildRetrievedMemoriesBlock([{ text: 'Kraul fell.', category: 'general' }])).toContain('- [general] Kraul fell.');
+
+        // The recall lane's 16 rows at JOURNAL_SUMMARY_MAX: the lines never pass the ceiling.
+        const rows = Array.from({ length: 16 }, (_, i) => ({ text: `${i} ${long}`, category: 'journal' }));
+        const block = buildRetrievedMemoriesBlock(rows);
+        const header = buildRetrievedMemoriesBlock([{ text: 'x', category: 'general' }]).split('\n').slice(0, -1).join('\n');
+        expect(block.startsWith(header)).toBe(true);
+        const lines = block.slice(header.length + 1).split('\n');
+        const tail = lines.at(-1);
+        expect(tail).toMatch(/^- \(\+\d+ more relevant memories omitted for length\)$/);
+        const kept = lines.slice(0, -1);
+        expect(kept.join('\n').length).toBeLessThanOrEqual(RETRIEVED_MEMORIES_CHAR_CEILING);
+        expect(kept.length + Number(tail.match(/\+(\d+)/)[1])).toBe(16);
+        expect(kept[0]).toContain('- [journal] 0 Sentence number 0');
+
+        // Eight ordinary rows of a 2–3-sentence summary meet neither limit.
+        const ordinary = Array.from({ length: 8 }, (_, i) => ({ text: `Summary ${i}. The hero spoke with the steward. The gate stayed shut.`, category: 'journal' }));
+        expect(buildRetrievedMemoriesBlock(ordinary)).not.toContain('omitted for length');
+        expect(buildRetrievedMemoriesBlock(ordinary)).not.toContain('…');
+    });
+
+    it('P2: the seed reports rows it could not embed ONCE, with the provider reason — and says nothing when whole', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        embedTextsMock.mockReset();
+        embedTextsMock.mockImplementation(async (apiKey, texts, { onError }) => {
+            onError?.({ status: 429, message: 'Quota exceeded', timedOut: false });
+            return texts.map((text, i) => (i === 0 ? unitVector(0) : null));
+        });
+        const onIncomplete = vi.fn();
+        const items = ['A.', 'B.', 'C.'].map(text => ({ text, category: 'world_fact' }));
+
+        await seedMemories('key', items, 's1', { onIncomplete });
+        expect(onIncomplete).toHaveBeenCalledTimes(1);
+        expect(onIncomplete).toHaveBeenCalledWith({ missing: 2, reason: { status: 429, message: 'Quota exceeded', timedOut: false } });
+        expect(getMemoryCount()).toBe(1);
+
+        // The next mount retries only the missing rows; a whole seed says nothing.
+        embedTextsMock.mockImplementation(async (apiKey, texts) => texts.map((text, i) => unitVector(i + 1)));
+        onIncomplete.mockClear();
+        await seedMemories('key', items, 's1', { onIncomplete });
+        expect(embedTextsMock.mock.calls.at(-1)[1]).toEqual(['B.', 'C.']);
+        expect(onIncomplete).not.toHaveBeenCalled();
+        expect(getMemoryCount()).toBe(3);
+
+        // A throwing notice never breaks the seed.
+        embedTextsMock.mockImplementation(async (apiKey, texts) => texts.map(() => null));
+        await expect(seedMemories('key', [{ text: 'D.', category: 'world_fact' }], 's1', { onIncomplete: () => { throw new Error('ui'); } })).resolves.toBeUndefined();
+        vi.restoreAllMocks();
     });
 });

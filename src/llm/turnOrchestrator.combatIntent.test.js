@@ -18,6 +18,8 @@ vi.mock('../engine/vectorMemory.js', async (importOriginal) => ({
     ...(await importOriginal()),
     retrieveRelevant: retrieveRelevantMock,
     addMemory: vi.fn(async () => {}),
+    queueMemory: vi.fn(async () => {}),
+    flushMemoryQueue: vi.fn(async () => {}),
 }));
 vi.mock('../engine/storyMemory.js', async (importOriginal) => ({
     ...(await importOriginal()),

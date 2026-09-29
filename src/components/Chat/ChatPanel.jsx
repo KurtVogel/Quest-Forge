@@ -8,7 +8,7 @@ import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
 import { addMemory, findSubjectsInText, seedMemories } from '../../engine/vectorMemory.js';
-import { getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
+import { describeMemorySeedIncomplete, getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/frontAftermath.js';
 import { generateAbsenceDrift, shouldGenerateAbsenceDrift } from '../../llm/absenceDrift.js';
@@ -423,7 +423,15 @@ export default function ChatPanel() {
         // re-embeds only what's missing — no wipe, no cross-campaign leakage, and a
         // page reload no longer re-embeds the whole corpus. One mount = one campaign
         // (AppShell is keyed by session id), so mount-time seeding is sound.
-        seedMemories(machineryKey, items, s.session?.id || null)
+        seedMemories(machineryKey, items, s.session?.id || null, {
+            // Rows the seed could not embed (a rate limit, an outage, a
+            // rejected key) leave the whole session on a partial store — said
+            // once, as an infrastructure line (2026-09-29 vector-memory P2).
+            onIncomplete: ({ missing, reason }) => dispatch({
+                type: 'ADD_MESSAGE',
+                payload: { role: 'system', kind: 'error', content: describeMemorySeedIncomplete(missing, reason, stateRef.current.settings) },
+            }),
+        })
             .catch((e) => {
                 console.error('[RAG] Memory seeding failed — will retry next mount:', e);
                 memorySeededRef.current = false; // Allow retry on next mount

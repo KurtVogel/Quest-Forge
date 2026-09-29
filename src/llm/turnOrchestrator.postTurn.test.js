@@ -12,6 +12,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
     runScribe: vi.fn(async () => {}),
     addMemory: vi.fn(async () => {}),
+    // The turn's facts + narrative ride the batch lane (2026-09-29).
+    queueMemory: vi.fn(async () => {}),
+    flushMemoryQueue: vi.fn(async () => {}),
     maybeAutoSummarize: vi.fn(async () => ({})),
 }));
 
@@ -22,6 +25,8 @@ vi.mock('./scribe.js', async (importOriginal) => ({
 vi.mock('../engine/vectorMemory.js', async (importOriginal) => ({
     ...(await importOriginal()),
     addMemory: mocks.addMemory,
+    queueMemory: mocks.queueMemory,
+    flushMemoryQueue: mocks.flushMemoryQueue,
     retrieveRelevant: async () => [],
 }));
 vi.mock('../engine/worldJournal.js', async (importOriginal) => ({
@@ -69,6 +74,8 @@ function createLaggingHarness({ streamMessage }) {
 beforeEach(() => {
     mocks.runScribe.mockClear();
     mocks.addMemory.mockClear();
+    mocks.queueMemory.mockClear();
+    mocks.flushMemoryQueue.mockClear();
     mocks.maybeAutoSummarize.mockClear();
 });
 
@@ -85,8 +92,9 @@ describe('runPostTurnExtraction — committed-record reads (2026-09-07 P2)', () 
 
         expect(mocks.runScribe).toHaveBeenCalledTimes(1);
         expect(mocks.runScribe.mock.calls[0][0].dmLocationEvent).toBe('Ashford');
-        const narrativeEmbeds = mocks.addMemory.mock.calls.filter(call => call[2] === 'narrative');
+        const narrativeEmbeds = mocks.queueMemory.mock.calls.filter(call => call[2] === 'narrative');
         expect(narrativeEmbeds).toHaveLength(1);
+        expect(mocks.flushMemoryQueue).toHaveBeenCalledTimes(1);
         expect(narrativeEmbeds[0][1]).toMatch(/^\[Location: Ashford\]/);
         expect(narrativeEmbeds[0][3]).toBe('Ashford');
     });
@@ -103,7 +111,7 @@ describe('runPostTurnExtraction — committed-record reads (2026-09-07 P2)', () 
         runner.finalizeRoleplayTurn('I keep walking.');
 
         expect(mocks.runScribe).not.toHaveBeenCalled();
-        expect(mocks.addMemory.mock.calls.filter(call => call[2] === 'narrative')).toHaveLength(0);
+        expect(mocks.queueMemory.mock.calls.filter(call => call[2] === 'narrative')).toHaveLength(0);
         expect(mocks.maybeAutoSummarize).not.toHaveBeenCalled();
     });
 

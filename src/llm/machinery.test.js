@@ -128,3 +128,45 @@ describe('type-strict keys (2026-09-16 providers-adapter P2 — a numeric key cr
         expect(isMachineryReady({ llmProvider: 'gemini', apiKey: 42 })).toBe(false);
     });
 });
+
+import { describeMemorySeedIncomplete, getPreCommitConfig, PRE_COMMIT_TIMEOUT_MS } from './machinery.js';
+
+describe('the pre-commit lane (2026-09-29 providers-adapter P2 — a blocking call held the turn for 183 s)', () => {
+    it('getPreCommitConfig is the background config with ONE attempt at 20 s', () => {
+        const settings = { llmProvider: 'openai', apiKey: 'oa-key', geminiApiKey: 'gem-key' };
+        expect(PRE_COMMIT_TIMEOUT_MS).toBe(20_000);
+        expect(getPreCommitConfig(settings)).toEqual({ ...getBackgroundConfig(settings), timeoutMs: 20_000, maxRetries: 0 });
+        expect(getPreCommitConfig(settings).apiKey).toBe('gem-key');
+    });
+});
+
+describe('describeMemorySeedIncomplete (2026-09-29 vector-memory P2 — a rate-limited seed was a silent partial store)', () => {
+    const settings = { llmProvider: 'xai' };
+
+    it('a rate limit names the count, the cause, the partial record, and the next Continue', () => {
+        const line = describeMemorySeedIncomplete(12, { status: 429, message: 'Quota exceeded', timedOut: false }, settings);
+        expect(line).toContain('12 memories could not be embedded');
+        expect(line).toContain('rate-limited');
+        expect(line).toContain('HTTP 429: Quota exceeded');
+        expect(line).toContain('partial record this session');
+        expect(line).toContain('next Continue');
+    });
+
+    it('a rejected key is a standing outage with the Settings remedy — 401/403 always, 400 only on Google\'s own "API key" message', () => {
+        expect(describeMemorySeedIncomplete(1, { status: 401, message: 'Unauthorized', timedOut: false }, settings))
+            .toContain('Settings → AI Provider → Gemini API Key (game memory)');
+        expect(describeMemorySeedIncomplete(1, { status: 400, message: 'API key not valid. Please pass a valid API key.', timedOut: false }, settings))
+            .toContain('rejected the game-memory key');
+        const oversized = describeMemorySeedIncomplete(1, { status: 400, message: 'Request payload size exceeds the limit', timedOut: false }, settings);
+        expect(oversized).not.toContain('game-memory key');
+        expect(oversized).toContain('1 memory could not be embedded');
+        expect(oversized).toContain('next Continue');
+    });
+
+    it('a stall, a bare message, no reason, and a junk count each read as one honest line', () => {
+        expect(describeMemorySeedIncomplete(3, { status: null, message: 'aborted', timedOut: true }, settings)).toContain('stalled');
+        expect(describeMemorySeedIncomplete(3, { status: null, message: 'Failed to fetch', timedOut: false }, settings)).toContain('(Failed to fetch)');
+        expect(describeMemorySeedIncomplete(3, null, settings)).toContain('3 memories could not be embedded (the embedding call failed)');
+        expect(describeMemorySeedIncomplete('7', null, settings)).toContain('0 memories');
+    });
+});

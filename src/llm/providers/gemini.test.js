@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { embedText, embedTexts, GEMINI_EMBED_DIMENSIONS, MAX_EMBED_INPUT_CHARS, MAX_REJECTED_EMBED_REQUESTS, sendGeminiMessage, streamGeminiMessage } from './gemini.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EMBED_QUERY_TIMEOUT_MS, EMBED_RETRY_DEFAULT_MS, embedText, embedTexts, GEMINI_EMBED_DIMENSIONS, MAX_EMBED_INPUT_CHARS, MAX_REJECTED_EMBED_REQUESTS, sendGeminiMessage, streamGeminiMessage } from './gemini.js';
 
 function jsonResponse(payload, { ok = true, status = 200, statusText = 'OK' } = {}) {
     return { ok, status, statusText, json: async () => payload };
@@ -508,19 +508,150 @@ describe('embed input cap + rejected-chunk bisect (2026-09-17 vector-memory P1)'
         expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(MAX_REJECTED_EMBED_REQUESTS + 1);
     });
 
-    it('a transient failure (429 / 5xx / network) still nulls the chunk WITHOUT bisecting - a retry per item would only amplify it', async () => {
+    it('a transient failure (429 / 5xx) still nulls the chunk WITHOUT bisecting - one whole-request retry, never a retry per item', async () => {
+        vi.useFakeTimers();
         const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 429, statusText: 'Too Many Requests', text: async () => 'slow down' });
         vi.stubGlobal('fetch', fetchMock);
         vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-        const vectors = await embedTexts('test-key', Array.from({ length: 50 }, (_, i) => `Fact ${i}.`));
+        const run = embedTexts('test-key', Array.from({ length: 50 }, (_, i) => `Fact ${i}.`));
+        await vi.advanceTimersByTimeAsync(EMBED_RETRY_DEFAULT_MS);
+        const vectors = await run;
 
         expect(vectors.every(v => v === null)).toBe(true);
-        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledTimes(2); // the request + its ONE retry — no bisect
 
-        fetchMock.mockRejectedValue(new Error('network down'));
+        // A non-network exception is not transient: one call, no retry.
+        fetchMock.mockRejectedValue(new Error('boom'));
         expect(await embedTexts('test-key', ['a', 'b'])).toEqual([null, null]);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        vi.useRealTimers();
+    });
+});
+
+describe('embed retries (2026-09-29 providers-adapter + vector-memory P2 — a rate limit was paid in memory)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    const vector = () => Array.from({ length: GEMINI_EMBED_DIMENSIONS }, (_, i) => i / GEMINI_EMBED_DIMENSIONS);
+    const rateLimited = (retryAfter) => ({
+        ok: false, status: 429, statusText: 'Too Many Requests',
+        headers: { get: (name) => (name === 'retry-after' && retryAfter != null ? String(retryAfter) : null) },
+        text: async () => JSON.stringify({ error: { message: 'Quota exceeded for embed requests per minute.' } }),
+    });
+    const single = () => ({ ok: true, status: 200, json: async () => ({ embedding: { values: vector() } }) });
+    const batch = (n) => ({ ok: true, status: 200, json: async () => ({ embeddings: Array.from({ length: n }, () => ({ values: vector() })) }) });
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    it('the BLOCKING query embed retries ONCE after Retry-After and the turn keeps its memory', async () => {
+        const fetchMock = vi.fn().mockResolvedValueOnce(rateLimited(2)).mockResolvedValueOnce(single());
+        vi.stubGlobal('fetch', fetchMock);
+        const onError = vi.fn();
+
+        const run = embedText('test-key', 'Who holds the bridge?', { inputType: 'query', onError });
+        await vi.advanceTimersByTimeAsync(1999);
+        expect(fetchMock).toHaveBeenCalledTimes(1); // Retry-After honored, not the 1 s default
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await run).toHaveLength(GEMINI_EMBED_DIMENSIONS);
         expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('a second 429 is the answer: null, the reason reported once, exactly two requests', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(rateLimited(null));
+        vi.stubGlobal('fetch', fetchMock);
+        const onError = vi.fn();
+
+        const run = embedText('test-key', 'anything', { onError });
+        await vi.advanceTimersByTimeAsync(EMBED_RETRY_DEFAULT_MS);
+        expect(await run).toBeNull();
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledWith({ status: 429, message: 'Quota exceeded for embed requests per minute.', timedOut: false });
+    });
+
+    it('a rejected key (400) and a stall never retry; a browser network failure retries once', async () => {
+        const rejected = vi.fn().mockResolvedValue({ ok: false, status: 400, statusText: 'Bad Request', text: async () => 'bad key' });
+        vi.stubGlobal('fetch', rejected);
+        expect(await embedText('test-key', 'anything')).toBeNull();
+        expect(rejected).toHaveBeenCalledTimes(1);
+
+        const timeout = new Error('The operation was aborted due to timeout');
+        timeout.name = 'TimeoutError';
+        const stalled = vi.fn().mockRejectedValue(timeout);
+        vi.stubGlobal('fetch', stalled);
+        expect(await embedText('test-key', 'anything')).toBeNull();
+        expect(stalled).toHaveBeenCalledTimes(1);
+
+        const flaky = vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce(single());
+        vi.stubGlobal('fetch', flaky);
+        const run = embedText('test-key', 'anything');
+        await vi.advanceTimersByTimeAsync(EMBED_RETRY_DEFAULT_MS);
+        expect(await run).toHaveLength(GEMINI_EMBED_DIMENSIONS);
+        expect(flaky).toHaveBeenCalledTimes(2);
+    });
+
+    it('the query retry stays inside its deadline: no retry when the wait would run past it', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(rateLimited(2));
+        vi.stubGlobal('fetch', fetchMock);
+        // A request that answers 429 only after (deadline − 1 s): a 2 s wait +
+        // the retried fetch cannot fit — one request, null, the reason reported.
+        fetchMock.mockImplementationOnce(() => new Promise(resolve => setTimeout(() => resolve(rateLimited(2)), EMBED_QUERY_TIMEOUT_MS - 1000)));
+        const onError = vi.fn();
+        const run = embedText('test-key', 'anything', { onError });
+        await vi.advanceTimersByTimeAsync(EMBED_QUERY_TIMEOUT_MS + 5000);
+        expect(await run).toBeNull();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledTimes(1);
+    });
+
+    it('a batch chunk retries once and the seed keeps every row; the reason is reported only on failure', async () => {
+        const fetchMock = vi.fn().mockResolvedValueOnce(rateLimited(3)).mockResolvedValueOnce(batch(20));
+        vi.stubGlobal('fetch', fetchMock);
+        const onError = vi.fn();
+
+        const run = embedTexts('test-key', Array.from({ length: 20 }, (_, i) => `Fact ${i}.`), { onError });
+        await vi.advanceTimersByTimeAsync(3000);
+        const vectors = await run;
+        expect(vectors.filter(Boolean)).toHaveLength(20);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(onError).not.toHaveBeenCalled();
+    });
+
+    it('a SUSTAINED 429 costs one wait, not one per chunk: after the retry fails, later chunks null out at once', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(rateLimited(null));
+        vi.stubGlobal('fetch', fetchMock);
+        const onError = vi.fn();
+
+        // 250 texts = 3 chunks. Chunk 1: request + retry; chunks 2–3: one request each, no wait.
+        const run = embedTexts('test-key', Array.from({ length: 250 }, (_, i) => `Fact ${i}.`), { onError });
+        await vi.advanceTimersByTimeAsync(EMBED_RETRY_DEFAULT_MS);
+        const vectors = await run;
+        expect(vectors.every(v => v === null)).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(4);
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError.mock.calls[0][0]).toMatchObject({ status: 429, timedOut: false });
+    });
+
+    it('a rejected batch (400) reports its reason without a transient retry', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: false, status: 400, statusText: 'Bad Request',
+            text: async () => JSON.stringify({ error: { message: 'API key not valid. Please pass a valid API key.' } }),
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        const onError = vi.fn();
+        await embedTexts('test-key', ['a', 'b'], { onError });
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledWith({ status: 400, message: 'API key not valid. Please pass a valid API key.', timedOut: false });
     });
 });
 
