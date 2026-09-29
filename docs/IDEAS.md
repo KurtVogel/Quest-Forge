@@ -1800,6 +1800,10 @@ TTFT p50/p95. One playtest after wiring answers whether the $0.06 → $0.02/turn
 efficient-stack math is real. If implicit hits are poor, the follow-up is explicit
 context caching for the static prefix (Gemini-only, scoped). Matters double now that
 production is hosted-Gemini (DECISIONS.md 2026-08-22): these are Vesa's own unit costs.
+2026-09-29 (strengthening audit, providers-adapter Lap 3): the wiring is per LANE, not per
+provider — the OpenAI-compatible STREAM lane returns no `usage` at all unless the request carries
+`stream_options: { include_usage: true }` (`openaiCompatible.js:131`), and OpenAI's cached share lives at
+`usage.prompt_tokens_details.cached_tokens`; xAI documents cached-input pricing with no field yet.
 
 ### Gemini `responseSchema` structured outputs on the JSON-only lanes — status: `planned` (2026-08-22 focus plan, track B)
 `responseSchema`/`responseMimeType` appear nowhere in src — every JSON-only call (combat
@@ -2826,15 +2830,28 @@ ships 20 quests including finished ones at 600 chars where its live siblings fil
 FLANKED annotation repeats a 97-char instruction per flanked row, and terminal quest rows (never
 rendered to the DM) are 159 KB per 500 in every save. From the 2026-09-27 strengthening audit.
 
----
-
-## Rejected (with reasons — don't re-propose without new arguments)
-
-- **Shared cloud autosave slot** (one "Continue" synced across devices) — rejected
-  2026-06-10. Newest-device-wins silently overwrites another device's session; Vesa prefers
-  autosave = this device's session, cloud = deliberate manual saves. See DECISIONS.md.
-- **Generic LLM-generated three-act campaign structure** — rejected 2026-06-11 in favor of
-  fronts (above): act structures produce railroady, beige plots.
+### [strengthening] A keyed store read without its key is a device-wide read; a retry budget belongs to the lane, not the call; fire-and-forget calls still spend the quota the blocking one needs — status: `idea` (2026-09-29 audit, providers-adapter + vector-memory-rag Lap 3; queue lines in SCHEDULED_STRENGTHENING.md)
+Three rules from the providers-adapter + vector-memory-rag Lap-3 pass (2026-09-29), every number
+measured against the real `vectorMemory.js` under `fake-indexeddb` and the real `sendMessage` under
+fake timers. **(1)** The embedding cache was campaign-keyed on 2026-07-30 so a switch loads "only that
+campaign's rows" — and the write and the delete pass the key (`deleteCampaignMemories` uses
+`IDBKeyRange.bound([sessionId, ''], [sessionId, []])`), while the READ still does `getAll()` on the whole
+store and filters in JS: four campaigns × 500 rows make the active campaign's seed 4× slower, and five
+mature campaigns at the cap read ~46 MB of other campaigns' 768-double vectors on EVERY Continue.
+Beside it: one `indexedDB.open` per persisted row (a cold seed of 300 = 301 opens), six unbatched
+embed HTTP calls per ordinary turn, 6,144 bytes per vector where a `Float32Array` is 3,072, and a
+RETRIEVED MEMORIES block with no ceiling (33k chars on the recall lane). Rule: grep every `getAll()` /
+`openCursor()` on a keyed store and ask what range it passes; a per-row write inside a loop is a
+per-row connection. **(2)** `sendMessage`'s 3 × stall guard is one policy for a background extraction
+(right) and for a pre-commit call the player is waiting on: the roll arbiter and the semantic detector
+sit between the stream's last token and the commit, and a never-answering provider holds "waiting" for
+183 s there. Rule: check every `sendMessage` caller for whether it blocks a visible turn, and give the
+blocking ones their own attempt count and guard (`timeoutMs` exists; nobody passes it). **(3)** Five of
+a turn's six embed requests are fire-and-forget, all on the RPM the next turn's blocking query embed
+shares, and neither embed lane retries a 429 (the seed's chunk goes silently missing for the session;
+the query embed turns the turn memory-less). Rule: a fan-out is free only until the one call that
+matters gets the 429 — batch the background ones and give the blocking one a bounded retry. From the
+2026-09-29 strengthening audit.
 
 ### [strengthening] A parsed object kept on its row is a persisted field; a context line that carries its rule is the overflow tail's sibling; a worst-case fixture is built at the caps — status: `idea` (2026-09-28 audit, response-parsing + scribe Lap 3; queue lines in SCHEDULED_STRENGTHENING.md)
 Three rules from the response-parsing + scribe Lap-3 pass (2026-09-28), every number measured against
@@ -2859,3 +2876,13 @@ built at the projection's caps, sharing its constants, and the whole context get
 (`directorContexts.size.test.js` covers neither machinery prompt today). Also from the pair: the text
 roll detector compiles up to 27 regexes per prose-only reply, and RESPONSE_FORMAT still names two
 non-channels (`combat_end`, `resources_used`) as "never emit". From the 2026-09-28 strengthening audit.
+
+---
+
+## Rejected (with reasons — don't re-propose without new arguments)
+
+- **Shared cloud autosave slot** (one "Continue" synced across devices) — rejected
+  2026-06-10. Newest-device-wins silently overwrites another device's session; Vesa prefers
+  autosave = this device's session, cloud = deliberate manual saves. See DECISIONS.md.
+- **Generic LLM-generated three-act campaign structure** — rejected 2026-06-11 in favor of
+  fronts (above): act structures produce railroady, beige plots.
