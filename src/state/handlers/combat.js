@@ -21,6 +21,7 @@ import {
 } from '../../engine/combatExchange.js';
 import { appendRecentEncounter, buildEncounterEntry, distanceSince } from '../../engine/worldTempo.js';
 import { HEARSAY_WINDOW_MESSAGES } from '../../engine/regionalHearsay.js';
+import { describeFightCause } from '../../engine/heroDeath.js';
 import { isSameLocation } from '../../engine/locationRegistry.js';
 import { initialGameState } from '../initialState.js';
 import { gameReducer } from '../gameReducer.js';
@@ -153,7 +154,10 @@ export const handlers = {
         // (hero dropped / ≤ 25 % / crit taken / companion downed), from the
         // tally the exchanges accumulated — read BEFORE the envelope resets.
         const outcome = action.payload?.defeat ? 'defeat' : action.payload?.escaped ? 'escaped' : 'victory';
-        const woundCard = buildFightWoundCard(state.combat.fightTally, state, outcome);
+        // A dead hero carries no wound into later scenes (the last chapter,
+        // 2026-09-30, the WOW Lap-3 note): the epitaph is the mark.
+        const heroDied = !!state.character?.isDead;
+        const woundCard = heroDied ? null : buildFightWoundCard(state.combat.fightTally, state, outcome);
         // The fight is remembered (WOW 2026-09-28): the companions who stood
         // here remember what was striking (one graded bond moment each, who
         // saved whom in plain words) and the place keeps its particular as the
@@ -175,7 +179,7 @@ export const handlers = {
         // tally — the terminal narration said DIED, the page says it too. The
         // terminal stays `defeat` (slain-XP rules untouched); the line is the
         // only thing death adds here. Read from the pre-reset envelope.
-        if (outcome === 'defeat' && state.character?.isDead) {
+        if (outcome === 'defeat' && heroDied) {
             const cost = describeFightCost(state.combat.fightTally, state);
             newState = {
                 ...newState,
@@ -184,6 +188,18 @@ export const handlers = {
                     systemMessage(`☠ **${state.character.name || 'The hero'} is dead.** The third failed death save ends the story here.${cost ? ` ${cost}` : ''}`),
                 ],
             };
+        }
+        // The last chapter (WOW 2026-09-30): the ☠ line above is the FIGHT's
+        // ending (its cost); the epitaph is the STORY's — two lines, two
+        // owners, on purpose. Posted here, after the terminal narration, with
+        // the killer read from the pre-reset tally / envelope; whatever the
+        // payload says (a manual End Combat on a dead hero is still a death).
+        // RECORD_HERO_DEATH is idempotent, so a death already written stands.
+        if (heroDied) {
+            newState = gameReducer(newState, {
+                type: 'RECORD_HERO_DEATH',
+                payload: { cause: describeFightCause(state.combat.fightTally, state.combat.enemies) },
+            });
         }
         // Ambush-on-arrival (2026-08-31 P2): a fight that started while a live
         // hearsay offer's window was open burns that window through the rounds

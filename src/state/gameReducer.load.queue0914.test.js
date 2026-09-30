@@ -165,7 +165,8 @@ describe('chronicler at load (2026-09-13 audit)', () => {
         const poisoned = load(save({}, { session: { id: 's1', chapterCloseSuggested: { frontId: 'f1', title: { evil: true }, at: 1 } } }));
         expect(poisoned.session.chapterCloseSuggested).toBeNull();
         const healthy = load(save({}, { session: { id: 's1', chapterCloseSuggested: { frontId: 'f1', title: 'The Ash Court', at: 1 } } }));
-        expect(healthy.session.chapterCloseSuggested).toEqual({ frontId: 'f1', title: 'The Ash Court', at: 1 });
+        // A pre-2026-09-30 nudge (no `reason`) loads as the front nudge it was.
+        expect(healthy.session.chapterCloseSuggested).toEqual({ reason: 'front', frontId: 'f1', title: 'The Ash Court', at: 1 });
         const absent = load(save({}, { session: { id: 's1' } }));
         expect(absent.session).not.toHaveProperty('chapterCloseSuggested');
     });

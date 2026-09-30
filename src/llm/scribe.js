@@ -100,6 +100,7 @@ Rules:
 - HARD EXTRACTION BUDGET: at most 2 world_facts and 2 story_memory cards per turn (3 only on a truly pivotal turn). Most ordinary turns — travel, shopping, small talk, routine fights — should produce ZERO of each. When over budget, keep only the most campaign-defining entries and drop the rest. This budget NEVER applies to npc_updates, "appearance", "player_appearance", or "location" — visual and positional continuity is always captured in full.
 - World facts are durable, campaign-level truths a DM would still need many sessions later: deaths, alliances, betrayals, discoveries, curses, historical facts revealed
 - Do NOT record transient action descriptions, scene-level detail, prices, purchases, minor chatter, or restatements of anything already implied by an existing fact ("Player attacked goblin" is not a world fact)
+- A STATE THAT WILL PASS — a flooded road, a siege, a fever, a wound healing, a gate shut for the night, a person away or in hiding — is written in its progressive or temporary form exactly as the fiction has it ("The harbor road is flooded", "Tammo is recovering from the fever"), NEVER flattened into a standing truth ("The harbor road floods", "Tammo was ill"). When the state is local to one place or one person, it belongs in location_profile.last_state or that NPC's lastNotes rather than world_facts. Never rewrite an existing state fact as permanent.
 - DO record outcomes: "The goblin captain Rarg is dead", "The village of Millhaven burned to the ground"
 - Story memory is for emotionally or dramatically useful callbacks: promises, debts, named objects, scars, injuries, insults, flirtation, fears, private vows, unresolved clues, player-authored proper nouns, foreshadowing, NPC agendas, and relationship tension. A card must earn its slot: if you cannot picture the DM paying it off in a later scene, do not write it.
 - Capture player-authored canon from the player's action when it concerns their own compatible backstory, vows, names, and personal attachments the DM should remember later.
@@ -413,7 +414,10 @@ export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'story_memor
  */
 export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST and the DM answered from the engine\'s own record of this campaign. Extract NOTHING new from the answer — no world_facts, no story cards, no location change, no loot, no payment, no appearance — everything it recounts is already on record. The ONE exception: if the remembering itself visibly moved someone (warmth, grief, a grudge surfacing), report that as an npc_updates bondMoment or stanceToPlayer for that person. Emit "world_facts": [] and leave every other field empty.';
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownHeroTells = null, knownLocations = null, dmLocationEvent = null, recallTurn = false }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownHeroTells = null, knownLocations = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null }) {
+    // Source-stamped retraction (memory-research M0, 2026-09-30): every
+    // record this pass writes remembers the DM message it was read from.
+    const laneMeta = typeof sourceMessageId === 'string' && sourceMessageId ? { sourceMessage: sourceMessageId } : null;
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
 
@@ -491,7 +495,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             ? extracted.world_facts.filter(fact => !contradictsAuthoritativeCombat(fact?.fact, authoritativeContext))
             : []).slice(0, 3);
         if (worldFacts.length > 0) {
-            dispatch({ type: 'ADD_WORLD_FACTS', payload: worldFacts });
+            dispatch({ type: 'ADD_WORLD_FACTS', payload: worldFacts, ...(laneMeta && { meta: laneMeta }) });
             console.log(`[Scribe] Added ${worldFacts.length} world fact(s)`);
         }
 
@@ -508,7 +512,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                 }
                 // Shared classify→dispatch with the journal's npcs_encountered
                 // loop (2026-08-31 P2 — one helper owns the roster boundary).
-                if (dispatchClassifiedNpcUpdate(dispatch, npc)) {
+                if (dispatchClassifiedNpcUpdate(dispatch, npc, laneMeta)) {
                     rosteredNames.push(npc?.name || '(unnamed)');
                 }
             }
@@ -525,7 +529,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                 .filter(memory => !contradictsAuthoritativeCombat(memory.text, authoritativeContext))
             : []).slice(0, 3);
         if (storyMemory.length > 0) {
-            dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: storyMemory });
+            dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: storyMemory, ...(laneMeta && { meta: laneMeta }) });
             console.log(`[Scribe] Added ${storyMemory.length} story memory card(s)`);
         }
 

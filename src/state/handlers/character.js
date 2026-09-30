@@ -22,6 +22,19 @@ import {
     withCondition,
     withInventoryAndAC,
 } from './shared.js';
+import { gameReducer } from '../gameReducer.js';
+
+/**
+ * The last chapter (2026-09-30): a death that ends OUTSIDE a fight (the
+ * resolver's death save, a fatal blow while dying) has no END_COMBAT to write
+ * its epitaph, so the death route writes it at once. Inside a fight the
+ * envelope is still live — END_COMBAT posts the epitaph after the terminal
+ * narration, and RECORD_HERO_DEATH is idempotent either way.
+ */
+function recordDeathOutsideCombat(state, cause) {
+    if (state.combat?.active) return state;
+    return gameReducer(state, { type: 'RECORD_HERO_DEATH', payload: { cause } });
+}
 
 // XP replay ledger (2026-08-26, Vesa's live report: "asked the DM for the XP it
 // forgot, it promised it on my next action, then awarded the same amount on the
@@ -230,6 +243,7 @@ export const handlers = {
             if (failures >= 3) {
                 character = applyDeath(character);
                 messages.push(systemMessage('**The blow proves fatal. Your character dies.**'));
+                return recordDeathOutsideCombat({ ...state, character, messages }, 'struck down while dying');
             } else {
                 messages.push(systemMessage(`💔 **Struck while dying!** That counts as a death save failure (${failures}/3).`));
             }
@@ -296,7 +310,10 @@ export const handlers = {
             return { ...state, character: stable };
         }
         if (judged.outcome === 'dead') {
-            return { ...state, character: applyDeath(character) };
+            // The last chapter (2026-09-30): outside a fight this IS the
+            // death's last word, so the epitaph lands here; inside one,
+            // END_COMBAT writes it after the terminal narration.
+            return recordDeathOutsideCombat({ ...state, character: applyDeath(character) }, 'the wounds proved fatal — three failed death saves');
         }
         return { ...state, character: { ...character, deathSaves: { successes: judged.successes, failures: judged.failures } } };
     },

@@ -198,6 +198,9 @@ export function formatSecrecyTag(knownBy) {
 export const STORY_MEMORY_ENGINE_STAMPS = Object.freeze([
     'firstSeenMessage', 'lastSeenMessage', 'lastUsedMessage',
     'firstSeenAt', 'first_seen_at', 'lastSeenAt', 'last_seen_at', 'lastUsedAt', 'last_used_at',
+    // Source-stamped retraction (2026-09-30): the reducer stamps the DM
+    // message a card was read from and the message count it was retracted at.
+    'sourceMessage', 'retractedAtMessage',
 ]);
 
 export function stripStoryMemoryEngineStamps(card) {
@@ -252,9 +255,17 @@ export function normalizeStoryMemoryCard(card = {}, existing = null, { maxMessag
     // when the DM last paid it off.
     const lastSeenMessage = messageStamp(card.lastSeenMessage, messageStamp(base?.lastSeenMessage, undefined, maxMessageCount), maxMessageCount);
     const lastUsedMessage = messageStamp(card.lastUsedMessage, messageStamp(base?.lastUsedMessage, undefined, maxMessageCount), maxMessageCount);
+    // Retraction stamps (2026-09-30): the DM message this card came from, and
+    // when it was retracted with that message — engine-owned, string / clamped.
+    const sourceMessage = typeof card.sourceMessage === 'string' && card.sourceMessage
+        ? card.sourceMessage.slice(0, 80)
+        : (typeof base?.sourceMessage === 'string' && base.sourceMessage ? base.sourceMessage.slice(0, 80) : null);
+    const retractedAtMessage = messageStamp(card.retractedAtMessage, messageStamp(base?.retractedAtMessage, undefined, maxMessageCount), maxMessageCount);
 
     return {
         ...(knownBy.length > 0 && { knownBy }),
+        ...(sourceMessage && { sourceMessage }),
+        ...(Number.isFinite(retractedAtMessage) && { retractedAtMessage }),
         ...(witnessed && { witnessed: true }),
         ...(Number.isFinite(firstSeenMessage) && { firstSeenMessage }),
         ...(Number.isFinite(lastSeenMessage) && { lastSeenMessage }),

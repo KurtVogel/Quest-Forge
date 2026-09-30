@@ -440,6 +440,36 @@
   justify-content: flex-end;
 }
 
+/* The ending card (the last chapter, 2026-09-30): the composer's replacement
+   on a dead sheet — the return card's frame, a darker cast. */
+.ending-card {
+  margin-bottom: 0.75rem;
+  border-color: rgba(212, 175, 55, 0.5);
+  background: linear-gradient(145deg, rgba(30, 24, 26, 0.98), rgba(18, 18, 20, 0.99));
+}
+
+.ending-card-epitaph {
+  margin: 0 0 0.7rem;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.ending-card-epitaph p {
+  margin: 0;
+}
+
+.ending-card-actions {
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ending-card-notice {
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
 @media (max-width: 640px) {
   .return-card-grid {
     grid-template-columns: minmax(0, 1fr);

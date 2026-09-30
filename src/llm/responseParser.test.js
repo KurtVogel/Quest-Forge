@@ -1098,19 +1098,20 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_NPC', payload: { name: 'Captain Voss', disposition: 'hostile' } });
     });
 
-    it('converts a non-lethal player_death into a narrative continuation for a leveled party character', () => {
+    it('a player_death for a leveled party character marks the hero dead and records the death — no narrative continuation (the last chapter, 2026-09-30)', () => {
         const dispatch = run(
             { player_death: { description: 'The blade finds its mark.' } },
             { character: { level: 5 }, party: [{ id: 'c1' }] },
         );
-        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-            type: 'ADD_MESSAGE',
-            payload: expect.objectContaining({ role: 'system', isDeathEvent: true }),
-        }));
         expect(dispatch).toHaveBeenCalledWith({
             type: 'UPDATE_CHARACTER',
             payload: { currentHP: 0, isDead: true, dying: false },
         });
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'RECORD_HERO_DEATH',
+            payload: { cause: 'The blade finds its mark.' },
+        });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_MESSAGE' }));
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'PLAYER_DEFEAT' }));
     });
 

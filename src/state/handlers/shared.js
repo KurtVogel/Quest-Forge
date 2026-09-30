@@ -236,7 +236,10 @@ export function sanitizeWorldFactPayload(payload) {
     // Epistemics boundary (DECISIONS.md 2026-08-05 ×2): a non-empty knownBy
     // marks the fact as private to exactly those people. Always present in the
     // output so a hostile save's junk value gets overwritten on load.
-    return { fact, category, knownBy: normalizeKnownBy(payload.knownBy ?? payload.known_by) };
+    // `pinned` (2026-09-30): an engine-minted commitment the post-journal
+    // verifier must find live after every cadence (a front's resolution fact).
+    const pinned = payload.pinned === true || payload.pinned === 'true';
+    return { fact, category, knownBy: normalizeKnownBy(payload.knownBy ?? payload.known_by), ...(pinned && { pinned: true }) };
 }
 
 export const RECENT_TRANSACTION_LIMIT = 20;

@@ -55,6 +55,7 @@ export function describeBondForPrompt(npc = {}, storyMemory = [], { messages = n
     return lines;
 }
 import { describeAbsence, describeStageForPrompt, resolveOpenThread } from './relationshipArc.js';
+import { snapshotCommitments, verifyCommitmentsAfterCadence } from './commitmentVerifier.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
 import { collectNarrativeMessages } from '../llm/narrativeMessages.js';
 import { describeCurrentPlace, describeTravelLink, isSameLocation, listKnownWays, sanitizeExtractedLocation } from './locationRegistry.js';
@@ -210,7 +211,7 @@ Rules:
  * @param {number} lastSummarizedIndex - Index of last message that was summarized
  * @returns {Promise<{index: number, journalEntry: object|null}>} Updated index and new journal entry if created
  */
-export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
+export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, { getState = null } = {}) {
     const messageCount = state.messages.length;
     const newRawMessages = countWeightedRows(state.messages, lastSummarizedIndex);
     const newNarrativeMessages = collectNarrativeMessages(state.messages, lastSummarizedIndex).length;
@@ -269,6 +270,9 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
         return { index: batchEnd, journalEntry };
     };
 
+    // The post-journal verifier (memory-research M1, 2026-09-30): what the
+    // DM must still find on the record after this cadence's own writes.
+    const commitmentsBefore = snapshotCommitments(state);
     try {
         // The unsummarized stretch (bounded batch, per-message clamp) through
         // THE narrative-eligibility predicate (2026-09-06 P1): `kind: 'error'`
@@ -419,7 +423,12 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
                 keyDecisions: normalized.keyDecisions,
                 consequences: normalized.consequences,
             },
-        }).catch(() => {});
+        }).catch(() => {}).then(() => {
+            // Zero tokens: the cadence's writes (summary facts, the reflection's
+            // NPC / card / front dispatches) have all landed — anything the
+            // record no longer carries is said out loud, once.
+            if (typeof getState === 'function') verifyCommitmentsAfterCadence(commitmentsBefore, getState(), dispatch);
+        });
 
         console.log(`[Journal] Summarized messages ${lastSummarizedIndex}–${batchEnd}, extracted ${summary.world_facts?.length || 0} world facts`);
         return { index: batchEnd, journalEntry };

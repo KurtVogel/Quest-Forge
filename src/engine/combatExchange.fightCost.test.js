@@ -29,7 +29,7 @@ describe('startFightTally / snapshotHeroResources', () => {
     it('seeds the ledger from the live hero: HP, class resources used, slots used, potions carried', () => {
         const tally = startFightTally({ character: hero({ currentHP: 17 }), inventory: [potion(2), { id: 'a', name: 'Antitoxin', type: 'consumable', consumableType: 'antitoxin' }] });
         expect(tally).toEqual({
-            heroHpStart: 17, heroMaxHp: 20, heroLowestHp: 17, heroDroppedRound: null, deathSaves: 0,
+            heroHpStart: 17, heroMaxHp: 20, heroLowestHp: 17, heroDroppedRound: null, heroDroppedBy: null, deathSaves: 0,
             critsTaken: [], companionsDowned: [],
             witnesses: [], saves: [], heroKillingCrits: [], heroLowExchangeId: null,
             resourcesStart: { resources: { secondWind: 0, actionSurge: 0 }, slotsUsed: 0, potions: 2 },

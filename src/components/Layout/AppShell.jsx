@@ -47,6 +47,18 @@ export default function AppShell() {
         dispatch({ type: 'SET_UI', payload: { isSettingsOpen: true } });
     };
 
+    // A panel may ask for the Journal on a given tab (the ending card's
+    // "Close the last chapter", 2026-09-30): `ui.journalRequest` is a
+    // nonce-keyed request, never persisted (ui is stripped from saves).
+    const journalRequest = state.ui?.journalRequest;
+    const [handledJournalRequest, setHandledJournalRequest] = useState(null);
+    if (journalRequest && journalRequest !== handledJournalRequest) {
+        // A new request opens the panel: state adjusted during render (the
+        // React-sanctioned shape), never a setState inside an effect.
+        setHandledJournalRequest(journalRequest);
+        setIsJournalOpen(true);
+    }
+
     return (
         <div className="app-shell">
             <header className="app-header">
@@ -184,7 +196,7 @@ export default function AppShell() {
                 )}
             </div>
 
-            <JournalPanel isOpen={isJournalOpen} onClose={() => setIsJournalOpen(false)} />
+            <JournalPanel isOpen={isJournalOpen} onClose={() => setIsJournalOpen(false)} requestedTab={journalRequest} />
             {inspectorEnabled && (
                 <MemoryInspector isOpen={isInspectorOpen} onClose={() => setIsInspectorOpen(false)} />
             )}

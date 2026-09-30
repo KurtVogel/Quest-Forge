@@ -784,12 +784,16 @@ function resolveDeathSave(character, dispatch, party = []) {
     // both sides of a fight.
     const judged = judgeDeathSave(character.deathSaves, die);
 
-    dispatch({ type: 'DEATH_SAVE_RESULT', payload: { die } });
-
+    // The line lands BEFORE the reducer judges the die (the last chapter,
+    // 2026-09-30): a third failure makes DEATH_SAVE_RESULT post the epitaph,
+    // which must read below "THE THIRD FAILURE. Astra dies.", not above it.
+    // The line is computed from `judged`, never from reducer state.
     dispatch({
         type: 'ADD_MESSAGE',
         payload: { role: 'system', content: deathSaveLine(judged, character.name), isDeathEvent: judged.outcome === 'dead' },
     });
+
+    dispatch({ type: 'DEATH_SAVE_RESULT', payload: { die } });
 
     return { type: 'death_save', rolled: die, outcome: judged.outcome, successes: judged.successes, failures: judged.failures };
 }

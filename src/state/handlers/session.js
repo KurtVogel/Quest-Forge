@@ -11,6 +11,7 @@ import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
 import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
 import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
 import { sanitizeHeroTells } from '../../engine/heroTells.js';
+import { buildHeroDeath, describeEpitaph } from '../../engine/heroDeath.js';
 import { sanitizeQuestRecords } from './quests.js';
 import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX, MESSAGE_CONTENT_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
@@ -29,6 +30,7 @@ import {
     sanitizeRollHistoryEntry,
     sanitizeWorldFactPayload,
     healChronicleChapter,
+    systemMessage,
 } from './shared.js';
 
 /** Campaign name as typed at adventure start (the save-slot list renders it). */
@@ -93,8 +95,16 @@ function typeLoadedWorldFacts(list, maxMessageCount) {
         .map(f => {
             const sanitized = sanitizeWorldFactPayload(f);
             if (!sanitized) return null;
-            const { supersedes, supersededBy, supersededAtMessage, ...rest } = f;
+            const { supersedes, supersededBy, supersededAtMessage, aspect, atMessage, sourceMessage, retractedAtMessage, ...rest } = f;
             const out = { ...rest, ...sanitized };
+            // The 2026-09-30 stamps: aspect whitelisted, message stamps clamped
+            // to the transcript, the source message id string-or-drop.
+            if (aspect === 'state') out.aspect = 'state';
+            const born = Number(atMessage);
+            if (Number.isFinite(born)) out.atMessage = Math.max(0, Math.min(Math.floor(born), maxMessageCount));
+            if (typeof sourceMessage === 'string' && sourceMessage) out.sourceMessage = sourceMessage.slice(0, 80);
+            const retracted = Number(retractedAtMessage);
+            if (Number.isFinite(retracted)) out.retractedAtMessage = Math.max(0, Math.min(Math.floor(retracted), maxMessageCount));
             if (typeof supersedes === 'string' && supersedes) out.supersedes = supersedes;
             if (typeof supersededBy === 'string' && supersededBy) {
                 out.supersededBy = supersededBy;
@@ -639,6 +649,42 @@ export const handlers = {
         return {
             ...state,
             ui: { ...state.ui, ...action.payload },
+        };
+    },
+
+    /**
+     * The last chapter (WOW 2026-09-30, death-and-stakes W1): the ONE place a
+     * hero's death is written into the campaign. Every death route ends here —
+     * END_COMBAT after the terminal narration (the fight's own ☠ line stays the
+     * FIGHT's ending, with its cost; this line is the STORY's — two owners,
+     * two lines, by choice: the cost belongs to the fight, the epitaph to the
+     * saga), the out-of-combat death save / fatal blow in the character
+     * handlers, and the DM's narrative player_death through applyEvents.
+     * Idempotent on `session.heroDeath`: a second route (or a replayed
+     * action) posts nothing. Posts one engine epitaph (dmVisible — the
+     * epilogue's table-talk call reads it in the window), stamps
+     * `session.heroDeath`, and raises the Chronicle tab's nudge with
+     * `reason: 'death'` (a pending front nudge is superseded — the death is
+     * the larger arc). No DM channel; a dead sheet accepts no ordinary turn
+     * (ChatPanel's ending card replaces the composer).
+     */
+    RECORD_HERO_DEATH(state, action) {
+        if (!state.character?.isDead || state.session?.heroDeath) return state;
+        const heroDeath = buildHeroDeath(state, { cause: action.payload?.cause });
+        const epitaph = describeEpitaph(heroDeath, state);
+        const heroName = typeof state.character.name === 'string' ? state.character.name.trim().slice(0, 160) : '';
+        return {
+            ...state,
+            session: {
+                ...state.session,
+                heroDeath,
+                chapterCloseSuggested: {
+                    reason: 'death',
+                    title: heroName || 'the hero',
+                    at: Date.now(),
+                },
+            },
+            messages: [...(state.messages || []), systemMessage(epitaph, { dmVisible: true, kind: 'epitaph' })],
         };
     },
 

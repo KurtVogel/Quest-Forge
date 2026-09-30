@@ -514,7 +514,13 @@ export function normalizeImpressions(list = [], { messageCount } = {}) {
         if (Number.isFinite(messageCount) && atMessage !== null
             && messageCount - atMessage > NPC_IMPRESSION_TTL_MESSAGES) continue;
         if (out.some(known => known.field === entry.field && isNearDuplicateText(text, known.text))) continue;
-        out.push({ field: entry.field, text, ...(atMessage !== null && { atMessage }) });
+        out.push({
+            field: entry.field,
+            text,
+            ...(atMessage !== null && { atMessage }),
+            // The DM message the impression came from (retraction, 2026-09-30).
+            ...(typeof entry.sourceMessage === 'string' && entry.sourceMessage && { sourceMessage: entry.sourceMessage.slice(0, 80) }),
+        });
     }
     return out.slice(-MAX_NPC_IMPRESSIONS);
 }
@@ -931,11 +937,11 @@ export function classifyNpcCandidate(payload = {}, existing = null) {
  *
  * @returns {boolean} true when the update was dispatched.
  */
-export function dispatchClassifiedNpcUpdate(dispatch, candidate) {
+export function dispatchClassifiedNpcUpdate(dispatch, candidate, meta = null) {
     if (!candidate || typeof candidate !== 'object') return false;
     const classified = classifyNpcCandidate(candidate);
     if (!classified.allowRoster) return false;
-    dispatch({ type: 'UPDATE_NPC', payload: { ...candidate, kind: classified.kind } });
+    dispatch({ type: 'UPDATE_NPC', payload: { ...candidate, kind: classified.kind }, ...(meta && typeof meta === 'object' && { meta }) });
     return true;
 }
 

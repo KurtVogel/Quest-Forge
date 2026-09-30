@@ -1,5 +1,41 @@
 import { describe, it, expect } from 'vitest';
-import { isTableTalkMessage, RECAP_REQUEST_MESSAGE, TABLE_TALK_RESPONSE_MODE, TABLE_TALK_STANDING_RULE } from './tableTalk.js';
+import {
+    EPILOGUE_REQUEST_MESSAGE, EPILOGUE_RESPONSE_MODE, isEpilogueRequest, isTableTalkMessage,
+    RECAP_REQUEST_MESSAGE, TABLE_TALK_RESPONSE_MODE, TABLE_TALK_STANDING_RULE,
+} from './tableTalk.js';
+
+describe('the ending card epilogue request (WOW 2026-09-30, death-and-stakes W1 — the last chapter)', () => {
+    it('is explicitly table talk, bounded, and asks for the Fallout slides: companions, people, unfinished business, places', () => {
+        expect(isTableTalkMessage(EPILOGUE_REQUEST_MESSAGE)).toBe(true);
+        expect(EPILOGUE_REQUEST_MESSAGE).toMatch(/^OOC: /);
+        expect(EPILOGUE_REQUEST_MESSAGE.length).toBeLessThan(400);
+        expect(EPILOGUE_REQUEST_MESSAGE).toContain('each companion');
+        expect(EPILOGUE_REQUEST_MESSAGE).toContain('the people who knew them');
+        expect(EPILOGUE_REQUEST_MESSAGE).toContain('the unfinished business');
+        expect(EPILOGUE_REQUEST_MESSAGE).toContain('the places');
+        expect(EPILOGUE_REQUEST_MESSAGE).toContain('unvarnished');
+    });
+
+    it('is detected verbatim only — a paraphrase is ordinary table talk', () => {
+        expect(isEpilogueRequest(EPILOGUE_REQUEST_MESSAGE)).toBe(true);
+        expect(isEpilogueRequest(`  ${EPILOGUE_REQUEST_MESSAGE}\n`)).toBe(true);
+        expect(isEpilogueRequest('OOC: what became of everyone?')).toBe(false);
+        expect(isEpilogueRequest(RECAP_REQUEST_MESSAGE)).toBe(false);
+        expect(isEpilogueRequest(null)).toBe(false);
+    });
+
+    it('the epilogue mode keeps the lane\'s contract: no events, hidden fronts stay hidden, nothing new begins, one paragraph per party companion and >= 2 named people', () => {
+        expect(EPILOGUE_RESPONSE_MODE).toMatch(/^## CURRENT RESPONSE MODE — THE EPILOGUE/);
+        expect(EPILOGUE_RESPONSE_MODE).toContain('no JSON event block');
+        expect(EPILOGUE_RESPONSE_MODE).toContain('emit ANY game events');
+        expect(EPILOGUE_RESPONSE_MODE).toContain('Never reveal hidden campaign fronts');
+        expect(EPILOGUE_RESPONSE_MODE).toContain('Nothing new begins');
+        expect(EPILOGUE_RESPONSE_MODE).toContain('every companion');
+        expect(EPILOGUE_RESPONSE_MODE).toContain('at least two other people');
+        expect(EPILOGUE_RESPONSE_MODE).toContain('Under 500 words');
+        expect(EPILOGUE_RESPONSE_MODE).toContain('unvarnished');
+    });
+});
 
 describe('the return card recap request (WOW 2026-09-15, session-return W2)', () => {
     it('is explicitly table talk, bounded, and asks for the three things the card promises', () => {

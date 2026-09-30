@@ -54,7 +54,7 @@ describe('turn runner — journal boundary survives a same-session load (P1 2026
         });
 
         await runner.runAutoSummarize();
-        expect(maybeAutoSummarizeMock).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 4);
+        expect(maybeAutoSummarizeMock).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 4, expect.anything());
 
         // Simulate LOAD_GAME of an EARLIER save of the same campaign swapping
         // the timeline under the same runner: only 2 messages are summarized
@@ -62,7 +62,7 @@ describe('turn runner — journal boundary survives a same-session load (P1 2026
         // messages 2–3 from the journal.
         state = makeState({ messageCount: 6, summarizedPrefix: 2, prunedMessageCount: 2 });
         await runner.runAutoSummarize();
-        expect(maybeAutoSummarizeMock).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 2);
+        expect(maybeAutoSummarizeMock).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 2, expect.anything());
     });
 
     it('trusts the summarized flags when the session counter is missing or stale', async () => {
@@ -75,12 +75,12 @@ describe('turn runner — journal boundary survives a same-session load (P1 2026
             sendMessage: vi.fn(async () => ''),
         });
         await runner.runAutoSummarize();
-        expect(maybeAutoSummarizeMock).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 5);
+        expect(maybeAutoSummarizeMock).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 5, expect.anything());
 
         // Corrupt/stale counter ahead of the flags: the flags win, so the
         // unsummarized stretch is never silently skipped.
         state = makeState({ messageCount: 8, summarizedPrefix: 3, prunedMessageCount: 6 });
         await runner.runAutoSummarize();
-        expect(maybeAutoSummarizeMock).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 3);
+        expect(maybeAutoSummarizeMock).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 3, expect.anything());
     });
 });

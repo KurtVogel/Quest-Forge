@@ -127,6 +127,22 @@ export const handlers = {
             nextNpcs = nextNpcs.map(npc => (npc === touched ? regraded : npc));
             touched = regraded;
         }
+        // Source-stamped retraction (2026-09-30): an impression minted by THIS
+        // dispatch remembers the DM message the lane read (`meta.sourceMessage`),
+        // so DELETE_MESSAGE can drop it with the message. Only rows stamped
+        // at the live count and not yet sourced — never an older row.
+        const laneSource = typeof action.meta?.sourceMessage === 'string' && action.meta.sourceMessage ? action.meta.sourceMessage : null;
+        if (touched && laneSource && Array.isArray(touched.recentImpressions)) {
+            const count = (state.messages || []).length;
+            const stamped = touched.recentImpressions.map(entry => (
+                entry && entry.atMessage === count && !entry.sourceMessage ? { ...entry, sourceMessage: laneSource } : entry
+            ));
+            if (stamped.some((entry, i) => entry !== touched.recentImpressions[i])) {
+                const sourced = { ...touched, recentImpressions: stamped };
+                nextNpcs = nextNpcs.map(npc => (npc === touched ? sourced : npc));
+                touched = sourced;
+            }
+        }
         // The quiet tell + the initiative consume (2026-09-13 overhaul): a
         // key moment landing or the stage moving marks the DM message it
         // came from (a small chip, no text); a seen NPC settles their own

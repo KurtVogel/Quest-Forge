@@ -17,6 +17,19 @@
  * flip. "The keeper is alive" vs "the keeper is dead" share no negation and
  * few tokens, so both stand — that is the semantic supersession the IDEAS entry
  * leaves for a later slice, not this one.
+ *
+ * Two more stamps since 2026-09-30 (memory-research M0 ×2):
+ * - `aspect: 'state'` — "a state is not a fact" (LAPSE, arXiv 2609.36457: every
+ *   memory writer tested flattened a progressive statement into a timeless
+ *   truth, never the reverse, and readers then acted on the expired fact). A
+ *   fact whose head clause is a passing STATE ("the harbor road is flooded",
+ *   "Tammo is recovering") is marked by a small aspect lexicon and rendered
+ *   with its AGE (`for now (N turns ago): …`) so the DM judges whether the
+ *   flood is over; a restatement re-stamps the age instead of being dropped.
+ *   Nothing expires, nothing is deleted.
+ * - `retractedAtMessage` — source-stamped retraction: a fact minted from a
+ *   DM message the player later removed (✕, a refusal) leaves the LIVE set
+ *   with the message, so scrubbing a refusal scrubs its canon.
  */
 import { containment, tokenSet } from './textMatch.js';
 import { conversationalDistance } from './replayLedger.js';
@@ -39,9 +52,10 @@ export function hasNegation(text) {
 
 export const NEAR_DUPLICATE_FACT_CONTAINMENT = 0.9;
 
-/** A fact still true as far as the record knows: not superseded by a later flip. */
+/** A fact still true as far as the record knows: not superseded by a later flip, not retracted with its message. */
 export function isLiveFact(fact) {
-    return !!fact && typeof fact === 'object' && typeof fact.fact === 'string' && !fact.supersededBy;
+    return !!fact && typeof fact === 'object' && typeof fact.fact === 'string'
+        && !fact.supersededBy && !Number.isFinite(fact.retractedAtMessage);
 }
 
 /** The facts every LIVE reader (prompt, seed, directors, "knows about you") should see. */
@@ -51,9 +65,9 @@ export function liveWorldFacts(list) {
 
 /**
  * How a candidate relates to the LIVE facts: `new` (store), `duplicate` (a
- * same-polarity restatement — reject), or `flip` (the same claim with its
- * negation reversed — store, and supersede `of`). `existingSets` may be
- * passed to reuse token sets across a batch.
+ * same-polarity restatement — reject, or re-stamp when `of` is a state), or
+ * `flip` (the same claim with its negation reversed — store, and supersede
+ * `of`). `existingSets` may be passed to reuse token sets across a batch.
  */
 export function classifyFactCandidate(candidate, liveFacts = [], existingSets = null) {
     const tokens = factTokenSet(candidate);
@@ -71,18 +85,72 @@ export function classifyFactCandidate(candidate, liveFacts = [], existingSets = 
     return { kind: 'new', of: null };
 }
 
+// ——— A state is not a fact (2026-09-30) ———
+
+/** Explicit temporariness markers anywhere in the sentence. */
+const STATE_MARKER_RE = /\b(?:for now|for the moment|for the time being|at the moment|at present|currently|right now|tonight|these days|temporarily|for the (?:night|winter|summer|season|week)|this (?:week|month|season|winter|summer|morning|evening|night)|until (?:the|it|they|he|she|further|dawn|morning|spring|winter|summer))\b/i;
+// -ing words that are nouns, not progressives.
+const NOT_PROGRESSIVE = 'nothing|something|anything|everything|king|ring|thing|wing|spring|string|morning|evening|sibling|darling|building|ceiling|dwelling|cunning|willing|unwilling|lightning|herring|pudding|shilling|farthing|offspring|earring|bring|sting|swing|sling|fling';
+/** A copula followed by a progressive or a state predicate: "is flooded", "are recovering", "remains under siege". */
+const STATE_PREDICATE_RE = new RegExp(
+    String.raw`\b(?:is|are|remains?|stays?|lies?|sits?|stands?)\s+(?:(?:still|currently|now|also|again|being)\s+)?(?:`
+    + String.raw`(?!(?:${NOT_PROGRESSIVE})\b)\w+ing\b`
+    + String.raw`|(?:under|in)\s+(?:siege|quarantine|lockdown|mourning|hiding|repair|construction|recovery|flood|revolt|uproar|chaos)`
+    + String.raw`|flooded|besieged|closed|shut|shuttered|barred|blocked|impassable|cut off|snowed in|occupied|garrisoned|guarded|watched|missing|away|abroad|asleep|abed|bedridden|wounded|injured|sick|ill|feverish|drunk|imprisoned|jailed|captive|held|detained|at large|on the run|in hiding|on fire|crowded|empty|deserted|out of town|overdue|late|delayed|stranded|adrift|becalmed|frozen|iced over|unconscious|unwell|indisposed|in labor|in labour|pregnant|in mourning|in debt|in exile|at war|at sea|underway|afoot`
+    + String.raw`)\b`,
+    'i',
+);
+
+/**
+ * `'state'` when the fact describes a condition that will pass (a flood, a
+ * siege, a fever, a closed gate), `null` for a standing truth (a death, a
+ * name, a history). Lexical, deliberately small: a marker word, or a copula
+ * followed by a progressive or a state predicate. A death is never a state.
+ */
+export function classifyFactAspect(text) {
+    const fact = String(text || '');
+    if (!fact.trim()) return null;
+    if (/\b(?:is|are|was|were)\s+(?:now\s+)?dead\b/i.test(fact)) return null;
+    if (STATE_MARKER_RE.test(fact)) return 'state';
+    if (STATE_PREDICATE_RE.test(fact)) return 'state';
+    return null;
+}
+
+function turnsSince(at, { messages = null, messageCount } = {}) {
+    if (!Number.isFinite(at)) return null;
+    const end = Number.isFinite(messageCount) ? messageCount : (Array.isArray(messages) ? messages.length : null);
+    if (end === null) return null;
+    const ago = Array.isArray(messages) ? conversationalDistance(messages, at - 1, end - 1) : Math.max(0, end - at);
+    return Math.max(0, Math.round(ago / 2));
+}
+
+function describeTurns(turns) {
+    return turns === 0 ? 'this turn' : `${turns} turn${turns === 1 ? '' : 's'} ago`;
+}
+
+/**
+ * The live readers' tag for a state fact: `for now (N turns ago): ` — the
+ * age in conversational turns from the fact's `atMessage` (re-stamped by
+ * every restatement), or `for now: ` for a legacy row without one. '' for a
+ * standing fact.
+ */
+export function describeStateTag(fact, { messages = null, messageCount } = {}) {
+    if (!fact || fact.aspect !== 'state') return '';
+    const turns = turnsSince(fact.atMessage, { messages, messageCount });
+    return turns === null ? 'for now: ' : `for now (as of ${describeTurns(turns)}): `;
+}
+
 /**
  * The record lane's tag for a superseded fact: history, never the present.
  * Distance is conversational when the transcript is given, raw otherwise.
  */
 export function describeSupersededTag(fact, { messages = null, messageCount } = {}) {
     if (!fact || !fact.supersededBy) return '';
-    const at = Number.isFinite(fact.supersededAtMessage) ? fact.supersededAtMessage : null;
-    const end = Number.isFinite(messageCount) ? messageCount : (Array.isArray(messages) ? messages.length : null);
-    let ago = null;
-    if (at !== null && end !== null) {
-        ago = Array.isArray(messages) ? conversationalDistance(messages, at - 1, end - 1) : Math.max(0, end - at);
-    }
-    const turns = ago === null ? null : Math.max(0, Math.round(ago / 2));
-    return turns === null ? '[NO LONGER TRUE] ' : `[NO LONGER TRUE — changed ${turns === 0 ? 'this turn' : `${turns} turn${turns === 1 ? '' : 's'} ago`}] `;
+    const turns = turnsSince(fact.supersededAtMessage, { messages, messageCount });
+    return turns === null ? '[NO LONGER TRUE] ' : `[NO LONGER TRUE — changed ${describeTurns(turns)}] `;
+}
+
+/** The record lane's tag for a retracted fact: it was minted by a message the player removed. */
+export function describeRetractedTag(fact) {
+    return fact && Number.isFinite(fact.retractedAtMessage) ? '[RETRACTED — its message was removed] ' : '';
 }

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, memo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { createTurnRunner } from '../../llm/turnOrchestrator.js';
@@ -6,8 +6,10 @@ import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt } fr
 import { combatNarrationPrompt, COMBAT_PHASES, describeFightCost, describeFightResonance, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
-import { isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
-import { addMemory, findSubjectsInText, seedMemories } from '../../engine/vectorMemory.js';
+import { EPILOGUE_REQUEST_MESSAGE, isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
+import { saveRosterCharacter } from '../../state/persistence.js';
+import { clearImageCache } from '../../llm/providers/imageGen.js';
+import { addMemory, findSubjectsInText, retractMemoriesFromMessage, seedMemories } from '../../engine/vectorMemory.js';
 import { describeMemorySeedIncomplete, getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/frontAftermath.js';
@@ -25,6 +27,8 @@ import MarkdownText from './MarkdownText.jsx';
 import CheckOddsLine from './CheckOddsLine.jsx';
 import ReturnCard from './ReturnCard.jsx';
 import { buildReturnCard, returnCardDismissKey } from './returnCard.js';
+import EndingCard from './EndingCard.jsx';
+import { buildEndingCard } from './endingCard.js';
 import './Chat.css';
 
 /**
@@ -123,8 +127,16 @@ export default function ChatPanel() {
     const inputRef = useRef(null);
     // Stable so the memoized ChatMessage rows don't re-render per panel paint.
     const handleDeleteMessage = useCallback((id) => {
+        // Source-stamped retraction (memory-research M0, 2026-09-30): the
+        // reducer retracts the facts / cards / impressions this message
+        // minted; its RAG rows leave the store here (the reducer cannot reach
+        // IndexedDB). The fact texts are named in the seed's own format.
+        const factTexts = (state.worldFacts || [])
+            .filter(fact => fact && fact.sourceMessage === id)
+            .map(fact => `${formatSecrecyTag(fact.knownBy)}${fact.fact}`);
         dispatch({ type: 'DELETE_MESSAGE', payload: id });
-    }, [dispatch]);
+        retractMemoriesFromMessage(id, factTexts).catch(() => {});
+    }, [dispatch, state.worldFacts]);
     const hasPrimedRef = useRef(false); // True while an opening-scene attempt is in flight (reset on failure so it can retry)
     const [primingRetryToken, setPrimingRetryToken] = useState(0); // Bumped after a failed attempt to re-arm the priming effect
     const primingAttemptsRef = useRef(0); // Bounded so a persistently failing key can't loop the opening call
@@ -429,7 +441,7 @@ export default function ChatPanel() {
         seedMemories(machineryKey, items, s.session?.id || null, {
             // The superseded facts' cached rows retire with them (immutable
             // categories are otherwise kept when absent from the seed).
-            retiredTexts: new Set((s.worldFacts || []).filter(f => f && f.supersededBy).map(f => `${formatSecrecyTag(f.knownBy)}${f.fact}`)),
+            retiredTexts: new Set((s.worldFacts || []).filter(f => f && (f.supersededBy || Number.isFinite(f.retractedAtMessage))).map(f => `${formatSecrecyTag(f.knownBy)}${f.fact}`)),
             // Rows the seed could not embed (a rate limit, an outage, a
             // rejected key) leave the whole session on a partial store — said
             // once, as an infrastructure line (2026-09-29 vector-memory P2).
@@ -688,6 +700,10 @@ export default function ChatPanel() {
         // never a character action: it must not enter the combat-intent machine,
         // seed memory, or run the Scribe — the world is paused for one exchange.
         const tableTalkTurn = isTableTalkMessage(trimmed);
+        // A dead sheet accepts no ordinary turn (the last chapter, 2026-09-30):
+        // the composer is gone, and this belt keeps every other send path to
+        // the ending card's table-talk lane (the epilogue).
+        if (stateRef.current.character?.isDead && !tableTalkTurn) return;
         // "OOC: surprise me" — the player asking for wonder is the one case
         // where the lull detector's waiting is wrong (WOW 2026-09-18).
         if (tableTalkTurn && isWonderRequest(trimmed)) dispatch({ type: 'REQUEST_WONDER', payload: { onDemand: true } });
@@ -911,6 +927,54 @@ export default function ChatPanel() {
     // The user line stamps lastPlayedAt, so the card retires on its own.
     const handleAskRecap = () => submitPlayerMessage(RECAP_REQUEST_MESSAGE);
 
+    // The ending card (WOW 2026-09-30, death-and-stakes W1 — the last chapter):
+    // replaces the composer once the hero is dead and the fight has closed
+    // (mid-fight the narration / retry path still needs the input row). Pure,
+    // UI only, derived on every relevant change — the epilogue button's state
+    // is read from the transcript, so one tap is one call across reloads.
+    const endingCard = useMemo(
+        () => (state.character?.isDead && !state.combat?.active ? buildEndingCard(state) : null),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [state.character?.isDead, state.combat?.active, state.messages, state.session?.heroDeath, state.party, state.quests, state.currentLocation],
+    );
+    const [endingNotice, setEndingNotice] = useState('');
+    const [beginningAgain, setBeginningAgain] = useState(false);
+    // "What became of them": ONE player-initiated call through the table-talk
+    // lane (events force-nulled, kept out of memory) with its own response mode.
+    const handleEpilogue = () => submitPlayerMessage(EPILOGUE_REQUEST_MESSAGE);
+    // "Close the last chapter": the existing Chronicle close, reached through
+    // the Journal — the shell opens it on the Chronicle tab (ui.journalRequest).
+    const handleCloseChapter = () => {
+        dispatch({ type: 'SET_UI', payload: { journalRequest: { tab: 'chronicle', nonce: Date.now() } } });
+    };
+    // "Begin again with this hero": the roster is a TEMPLATE (DECISIONS.md
+    // 2026-09-03) — save the hero, then the new-campaign path opens the wizard
+    // on the roster with this hero selected; the roster start rests them. This
+    // campaign's death stands in its own save.
+    const handleBeginAgain = async () => {
+        if (beginningAgain) return;
+        const character = stateRef.current.character;
+        if (!character) return;
+        setBeginningAgain(true);
+        setEndingNotice('');
+        let heroId = character.id || null;
+        try {
+            const entry = await saveRosterCharacter(character, stateRef.current.inventory);
+            heroId = entry?.id || heroId;
+        } catch (e) {
+            console.warn('Failed to save the dead hero to the roster:', e);
+            setBeginningAgain(false);
+            setEndingNotice(`Could not save ${character.name || 'the hero'} to the roster — browser storage failed (${e?.message || e?.name || 'unknown error'}). Export the hero from the Character Sheet instead.`);
+            return;
+        }
+        clearImageCache(); // Scene-art cache is per-campaign — never show another campaign's art
+        dispatch({ type: 'NEW_GAME' });
+        dispatch({
+            type: 'SET_UI',
+            payload: { isCharacterCreationOpen: true, isSettingsOpen: false, characterCreationStart: { phase: 'roster', heroId } },
+        });
+    };
+
     const combatInputLocked = state.combat?.active && (
         state.combat.phase !== COMBAT_PHASES.AWAITING_PLAYER || !!state.combat.queuedExchange
     );
@@ -995,7 +1059,7 @@ export default function ChatPanel() {
                 />
             )}
 
-            {returnCard && !state.combat?.active && (
+            {returnCard && !state.combat?.active && !endingCard && (
                 <ReturnCard
                     card={returnCard}
                     onDismiss={dismissReturnCard}
@@ -1004,6 +1068,18 @@ export default function ChatPanel() {
                 />
             )}
 
+            {endingCard ? (
+                <EndingCard
+                    card={endingCard}
+                    onEpilogue={handleEpilogue}
+                    epilogueDisabled={isLoading || !readyToPlay}
+                    onCloseChapter={handleCloseChapter}
+                    onBeginAgain={handleBeginAgain}
+                    beginAgainDisabled={isLoading || beginningAgain}
+                    onStop={isLoading ? handleStop : null}
+                    notice={endingNotice}
+                />
+            ) : (
             <div className="chat-input-area">
                 <textarea
                     ref={inputRef}
@@ -1044,6 +1120,7 @@ export default function ChatPanel() {
                     </button>
                 )}
             </div>
+            )}
         </div>
     );
 }

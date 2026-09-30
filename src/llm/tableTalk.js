@@ -28,6 +28,32 @@ export function isTableTalkMessage(text) {
 export const RECAP_REQUEST_MESSAGE = 'OOC: Recap where we are, what\'s open, and what you last asked me — in your voice, under 120 words.';
 
 /**
+ * "What became of them" (WOW 2026-09-30, death-and-stakes W1 — the last
+ * chapter): the ending card's ONE epilogue request, sent once on tap after
+ * the hero's death. It rides the same lane as the recap — the OOC prefix
+ * makes it table talk (events force-nulled, kept out of memory, hidden
+ * fronts never revealed) — and `EPILOGUE_RESPONSE_MODE` replaces the
+ * ordinary table-talk mode for it, because an epilogue must be allowed to
+ * move the world on (the ordinary mode forbids advancing time). The player
+ * chooses the ending's shape, never whether the hero died.
+ */
+export const EPILOGUE_REQUEST_MESSAGE = 'OOC: My hero is dead and the story is over. Give me the ending — what became of everyone and everything they left behind: each companion, the people who knew them, the unfinished business, and the places. One short passage each, in your voice, unvarnished.';
+
+/** True when the player line IS the ending card's epilogue request (verbatim). */
+export function isEpilogueRequest(text) {
+    return String(text || '').trim() === EPILOGUE_REQUEST_MESSAGE;
+}
+
+/** The response mode the epilogue request gets instead of TABLE_TALK_RESPONSE_MODE. */
+export const EPILOGUE_RESPONSE_MODE = `## CURRENT RESPONSE MODE — THE EPILOGUE
+The hero is dead and this campaign is over. The player has asked you, out of character, for the ending: what became of the people and places the hero leaves behind. Write it as a series of short closing passages in your own narrator's voice — one paragraph each, in this order:
+- every companion who traveled with the hero (by name): what they did after, and what the hero's death meant to them;
+- at least two other people who knew the hero (by name — the ones with a real stance toward them), each in the light of that stance and their history together;
+- the unfinished business: each active quest or open promise, whether it was ever finished, and by whom;
+- the places the hero marked, and what they are like a season later.
+Ground every passage in what is on record — the known people, their stances and key moments, the active quests, the world facts, the campaign's last scenes. Be unvarnished and specific; grief, relief, indifference, and profit are all allowed. Nothing new begins: no hooks, no successors, no offers to continue. Never reveal hidden campaign fronts, clocks, stages, or private notes — but the world may move on from pressures the hero never resolved, seen only through their visible consequences. Do NOT request rolls or emit ANY game events; no JSON event block belongs in this response. Under 500 words. End on the last line of the saga, not on a question.`;
+
+/**
  * Response-mode block appended to the system prompt on a detected table-talk turn.
  * Mirrors the combat-intent-only mode: one unambiguous contract for this response.
  */

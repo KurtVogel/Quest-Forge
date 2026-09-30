@@ -36,7 +36,11 @@ function CharCountdown({ length, max }) {
 
 export default function CharacterCreation() {
     const { state, dispatch } = useGame();
-    const [phase, setPhase] = useState('start'); // 'start' | 'wizard' | 'roster'
+    // The ending card's "Begin again with this hero" (2026-09-30) opens the
+    // wizard ON the roster with the saved hero selected (`ui.characterCreationStart`,
+    // never persisted); the roster start rests them like any roster hero.
+    const startOnRoster = state.ui?.characterCreationStart?.phase === 'roster';
+    const [phase, setPhase] = useState(startOnRoster ? 'roster' : 'start'); // 'start' | 'wizard' | 'roster'
     const [step, setStep] = useState(0);
     const [name, setName] = useState('');
     const [gender, setGender] = useState('');
@@ -59,7 +63,10 @@ export default function CharacterCreation() {
     // export through loadRosterCharacter (2026-09-24 character-vault P2).
     const [roster, setRoster] = useState([]);
     const [rosterCount, setRosterCount] = useState(0);
-    const [selectedHeroId, setSelectedHeroId] = useState(null);
+    const [selectedHeroId, setSelectedHeroId] = useState(() => {
+        const heroId = state.ui?.characterCreationStart?.heroId;
+        return startOnRoster && typeof heroId === 'string' && heroId ? heroId : null;
+    });
     const [selectedHero, setSelectedHero] = useState(null);
     const [rosterError, setRosterError] = useState(null);
     const [portraitUrl, setPortraitUrl] = useState('');

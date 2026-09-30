@@ -493,14 +493,11 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             return;
         }
 
-        dispatch({
-            type: 'ADD_MESSAGE',
-            payload: {
-                role: 'system',
-                content: `**${events.playerDeath.description}**\n\nYour story is not over. Describe what happens next — does your spirit linger, possess a body nearby, or does fate have other plans?`,
-                isDeathEvent: true,
-            },
-        });
+        // The last chapter (WOW 2026-09-30, Vesa's ruling): a dead hero's
+        // campaign is FINISHED — no spirit, no successor prompt. The reducer
+        // writes the epitaph (the description is its cause) and ChatPanel's
+        // ending card replaces the composer.
         dispatch({ type: 'UPDATE_CHARACTER', payload: { currentHP: 0, isDead: true, dying: false } });
+        dispatch({ type: 'RECORD_HERO_DEATH', payload: { cause: events.playerDeath.description } });
     }
 }

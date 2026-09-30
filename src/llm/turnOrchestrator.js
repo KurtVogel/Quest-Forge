@@ -31,7 +31,7 @@ import { handleRequestedRolls } from '../engine/rollResolver.js';
 import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../engine/outOfCombatRollPolicy.js';
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe } from './scribe.js';
-import { TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
+import { EPILOGUE_RESPONSE_MODE, isEpilogueRequest, TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { addMemory, findSubjectsInText, flushMemoryQueue, queueMemory, retrieveRelevant } from '../engine/vectorMemory.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
 import { describeMemoryUnavailable, getMachineryGeminiKey } from './machinery.js';
@@ -174,7 +174,7 @@ export function createTurnRunner({
         if (summarizeInFlight) return;
         summarizeInFlight = true;
         try {
-            const result = await maybeAutoSummarize(getState(), dispatch, summarizedBoundary());
+            const result = await maybeAutoSummarize(getState(), dispatch, summarizedBoundary(), { getState });
             const machineryKey = getMachineryGeminiKey(getState().settings);
             // A `fallback` entry ("Auto-summary was unavailable…") is honest
             // bookkeeping, not memory: never embed it (2026-09-06 P2 — the
@@ -385,7 +385,9 @@ Translate the player's committed action into the single bounded combat_exchange 
         } else if (opts.tableTalk) {
             // Deterministic OOC contract: some DM providers (Grok in live play) never
             // break character on their own and steamroll "DM, ..." into scene prose.
-            systemPrompt = `${baseSystemPrompt}\n\n${TABLE_TALK_RESPONSE_MODE}`;
+            // The ending card's epilogue (the last chapter, 2026-09-30) rides the
+            // same lane with its own mode: an epilogue must move the world on.
+            systemPrompt = `${baseSystemPrompt}\n\n${isEpilogueRequest(originalPlayerMessage) ? EPILOGUE_RESPONSE_MODE : TABLE_TALK_RESPONSE_MODE}`;
         }
         const messageHistory = buildMessageHistory();
 
@@ -739,6 +741,9 @@ Translate the player's committed action into the single bounded combat_exchange 
             settings: latest.settings,
             dispatch,
             recallTurn,
+            // The message every record from this pass is stamped with (M0,
+            // 2026-09-30): removing it retracts them.
+            sourceMessageId: typeof finalNarration.id === 'string' ? finalNarration.id : null,
             knownAppearances: buildKnownAppearances(latest, playerMessage, finalNarration.content),
             knownStances: buildKnownStances(latest, playerMessage, finalNarration.content),
             knownStoryCards: buildKnownStoryCards(latest, playerMessage, finalNarration.content),
@@ -770,7 +775,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 : finalNarration.content.slice(0, 500);
             // The narrative joins the facts sendToLLM queued and the whole
             // turn embeds as ONE request (2026-09-29 P2).
-            queueMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
+            queueMemory(machineryKey, narrativeText, 'narrative', loc, null, typeof finalNarration.id === 'string' ? finalNarration.id : null).catch(() => {});
         }
         flushMemoryQueue().catch(() => {});
         return true;

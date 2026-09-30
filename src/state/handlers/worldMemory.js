@@ -2,7 +2,7 @@
  * Long-term memory: world facts (near-duplicate rejection), story-memory
  * cards, journal entries/summarization marks, and the campaign chronicle.
  */
-import { classifyFactCandidate, factTokenSet, liveWorldFacts } from '../../engine/worldFacts.js';
+import { classifyFactAspect, classifyFactCandidate, factTokenSet, liveWorldFacts } from '../../engine/worldFacts.js';
 import {
     applyStoryMemoryDormancy,
     findStoryMemoryMatch,
@@ -116,14 +116,41 @@ export const handlers = {
         let live = liveWorldFacts(worldFacts);
         let liveSets = live.map(f => factTokenSet(f.fact));
         const messageCount = (state.messages || []).length;
+        // Source-stamped retraction (memory-research M0, 2026-09-30): the lane
+        // names the DM message it read (`meta.sourceMessage`); DELETE_MESSAGE
+        // retracts what that message minted.
+        const sourceMessage = typeof action.meta?.sourceMessage === 'string' && action.meta.sourceMessage ? action.meta.sourceMessage : null;
         let changed = false;
         for (const f of action.payload || []) {
             const sanitized = sanitizeWorldFactPayload(f);
             if (!sanitized) continue;
             const verdict = classifyFactCandidate(sanitized.fact, live, liveSets);
-            if (verdict.kind === 'duplicate') continue;
+            if (verdict.kind === 'duplicate') {
+                // A state is not a fact (M0, 2026-09-30): a restatement of a
+                // STATE fact ("the road is still flooded") re-stamps its age
+                // instead of being dropped — the DM reads the freshness.
+                if (verdict.of?.aspect === 'state' && verdict.of.id) {
+                    const ofId = verdict.of.id;
+                    worldFacts = worldFacts.map(existing => (existing.id === ofId
+                        ? { ...existing, atMessage: messageCount, timestamp: Date.now() }
+                        : existing));
+                    live = liveWorldFacts(worldFacts);
+                    changed = true;
+                }
+                continue;
+            }
             const id = `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-            const next = { id, timestamp: Date.now(), ...sanitized };
+            const aspect = classifyFactAspect(sanitized.fact);
+            const next = {
+                id,
+                timestamp: Date.now(),
+                // Birth stamp in messages: the age every state tag and the
+                // retraction ledger read (legacy rows simply have none).
+                atMessage: messageCount,
+                ...sanitized,
+                ...(aspect && { aspect }),
+                ...(sourceMessage && { sourceMessage }),
+            };
             if (verdict.kind === 'flip' && verdict.of?.id) {
                 next.supersedes = verdict.of.id;
                 worldFacts = worldFacts.map(existing => (existing.id === verdict.of.id
@@ -150,7 +177,10 @@ export const handlers = {
             // Message-index birth stamp: regional hearsay measures a witnessed
             // deed's age in conversational messages, which wall-clock can't do.
             // lastSeenMessage feeds the curation recency window the same way.
-            const born = { ...card, firstSeenMessage: messageCount, lastSeenMessage: messageCount };
+            // `sourceMessage` (M0, 2026-09-30): the DM message this card was
+            // read from, so removing that message retracts the card.
+            const sourceMessage = typeof action.meta?.sourceMessage === 'string' && action.meta.sourceMessage ? action.meta.sourceMessage : null;
+            const born = { ...card, firstSeenMessage: messageCount, lastSeenMessage: messageCount, ...(sourceMessage && { sourceMessage }) };
             return { ...state, storyMemory: [...(state.storyMemory || []), born] };
         }
         const existing = state.storyMemory[idx];
@@ -195,7 +225,7 @@ export const handlers = {
             ? action.payload.filter(card => card && typeof card === 'object' && !Array.isArray(card))
             : [];
         for (const card of cards) {
-            next = gameReducer(next, { type: 'ADD_STORY_MEMORY_CARD', payload: card });
+            next = gameReducer(next, { type: 'ADD_STORY_MEMORY_CARD', payload: card, ...(action.meta && { meta: action.meta }) });
         }
         return next;
     },

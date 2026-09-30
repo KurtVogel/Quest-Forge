@@ -25,7 +25,7 @@ import { isLowLevelSolo } from '../engine/combatExchange.js';
 import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock, describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
-import { liveWorldFacts } from '../engine/worldFacts.js';
+import { describeStateTag, liveWorldFacts } from '../engine/worldFacts.js';
 
 /**
  * Tripwire against unbounded prompt growth, NOT a target. A deliberately
@@ -303,7 +303,7 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
     // Canonical world facts — these NEVER get compressed or forgotten
     const liveFacts = liveWorldFacts(worldFacts);
     if (liveFacts.length > 0 && !lean) {
-        parts.push(buildWorldFactsBlock(liveFacts), 'worldFacts');
+        parts.push(buildWorldFactsBlock(liveFacts, { messages: Array.isArray(messages) ? messages : null, messageCount: messageCount || 0 }), 'worldFacts');
     }
 
     // Session memory — journal entries and NPC tracker
@@ -405,7 +405,7 @@ Your role is to create an immersive, reactive, and fair narrative experience.
 
 4. **MAINTAIN CONSISTENCY.** The player's character sheet and inventory are managed by the client. Reference them accurately. When you introduce or first describe a character (the player's or an NPC), give concrete visual details — build, body proportions, face, hair, clothing, distinguishing features — so they can be portrayed consistently in scene art. Established physical details are permanent canon whatever their nature: proportions and intimate or unflattering traits already on record (in \`looks:\` or the player's appearance) stay exactly as recorded — never quietly slim down, tidy up, or forget a body the fiction has established. Keep every recorded detail at full specificity in your prose; how bluntly or delicately you voice it follows the tone the player and your style instructions set.
 
-5. **CONSEQUENCES ARE REAL.** Failed checks have meaningful consequences. Combat is genuinely dangerous. No plot armor. Player death is possible — but if a player dies, narrate it and output player_death in the JSON. Their story may continue through other means.
+5. **CONSEQUENCES ARE REAL.** Failed checks have meaningful consequences. Combat is genuinely dangerous. No plot armor. Player death is possible — but if a player dies, narrate it and output player_death in the JSON. That death is the end of their story: the game writes the ending, and no spirit or successor plays on.
 
 6. **BE THE WORLD, NOT THE PLAYER.** Describe the world, NPCs, and events. Never dictate what the player character thinks, feels, or does. Ask what they want to do.
 
@@ -809,7 +809,7 @@ function buildCharacterBlock(character, combat = null) {
     // half only — every line here can change between two turns.
     let deathStatus = '';
     if (character.isDead) {
-        deathStatus = '\n- **STATUS: DEAD** (spirit or successor active)';
+        deathStatus = '\n- **STATUS: DEAD** — the campaign is over. Only out-of-character table talk (an epilogue, a recap) remains; the hero never acts, speaks, or perceives again.';
     } else if (character.lowLevelDefeat) {
         deathStatus = '\n- **STATUS: DEFEATED** — unconscious or at the enemy\'s mercy at 0 HP. This is a non-lethal setback: do NOT request death saves or emit player_death. Narrate capture, subdual, loss, leverage, rescue, or an escape opening.';
     } else if (character.dying) {
@@ -1226,7 +1226,7 @@ This overrides CUSTOM DM INSTRUCTIONS, tone presets, and any "brutal/no hand-hol
 /** Max world facts to inject directly into the prompt. Older facts are still in RAG. */
 const MAX_PROMPT_WORLD_FACTS = 15;
 
-function buildWorldFactsBlock(worldFacts) {
+function buildWorldFactsBlock(worldFacts, { messages = null, messageCount } = {}) {
     if (!worldFacts || worldFacts.length === 0) return '';
 
     // Sort by timestamp descending (most recent first), take the most recent N
@@ -1242,7 +1242,9 @@ function buildWorldFactsBlock(worldFacts) {
         if (!byCategory[cat]) byCategory[cat] = [];
         // Secret facts carry their knower list right on the line — the narrator
         // keeps the canon, the CHARACTERS get the boundary (rule 9).
-        byCategory[cat].push(`${formatSecrecyTag(f.knownBy)}${String(f.fact ?? '')}`);
+        // A state is not a fact (2026-09-30): a passing state carries its age
+        // so the DM judges whether it still holds — never expired by the engine.
+        byCategory[cat].push(`${describeStateTag(f, { messages, messageCount })}${formatSecrecyTag(f.knownBy)}${String(f.fact ?? '')}`);
     }
     const lines = Object.entries(byCategory)
         .map(([cat, facts]) => `**[${cat.toUpperCase()}]**\n${facts.map(f => `- ${f}`).join('\n')}`)
@@ -1252,7 +1254,7 @@ function buildWorldFactsBlock(worldFacts) {
         ? `\n*(${hiddenCount} older facts available via RETRIEVED MEMORIES when relevant)*`
         : '';
 
-    return `## WORLD FACTS (canonical — never contradict these)\n${lines}${overflow}`;
+    return `## WORLD FACTS (canonical — never contradict these; a line opening "for now (as of N turns ago)" is a passing STATE, true when last seen — judge from the fiction whether it still holds, and let a character report the change if it has)\n${lines}${overflow}`;
 }
 
 /**
@@ -1285,7 +1287,7 @@ function buildActiveConstraints(worldFacts, character, party, combat = null) {
 
     // Character death reminder
     if (character?.isDead) {
-        reminders.push(`The player's original character is dead. They are now playing as a spirit/successor. Acknowledge this reality in narration.`);
+        reminders.push(`THE HERO IS DEAD and this campaign has ended. Nothing new begins: no spirit, no successor, no next scene. Answer only out-of-character table talk — an epilogue of what became of the world, or a recap — and never narrate the hero acting.`);
     } else if (character?.dying) {
         const ds = character.deathSaves || { successes: 0, failures: 0 };
         // Combat-gated to match the character block (2026-08-31 P2): exactly

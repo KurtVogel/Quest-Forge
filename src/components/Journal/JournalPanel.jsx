@@ -21,7 +21,9 @@ const DISPOSITION_MARK = {
     unknown: 'Unknown',
 };
 
-export default function JournalPanel({ isOpen, onClose }) {
+const JOURNAL_TABS = new Set(['journal', 'chronicle', 'npcs', 'places', 'archived']);
+
+export default function JournalPanel({ isOpen, onClose, requestedTab = null }) {
     const { state, dispatch, flushAutoSave } = useGame();
     // Every async write below (Deepen memory, portrait, chapter close) resolves
     // minutes after it started. Loading ANY save remounts the shell, so an
@@ -31,6 +33,14 @@ export default function JournalPanel({ isOpen, onClose }) {
     const mountedRef = useRef(true);
     useEffect(() => () => { mountedRef.current = false; }, []);
     const [tab, setTab] = useState('journal');
+    // The shell may open this panel ON a tab (the ending card's "Close the
+    // last chapter", 2026-09-30): a nonce-keyed request, whitelisted tab.
+    const [handledTabRequest, setHandledTabRequest] = useState(null);
+    if (requestedTab && requestedTab !== handledTabRequest) {
+        // State adjusted during render on a new request (never in an effect).
+        setHandledTabRequest(requestedTab);
+        if (JOURNAL_TABS.has(requestedTab.tab)) setTab(requestedTab.tab);
+    }
     const [enrichingId, setEnrichingId] = useState(null);
     const [enrichError, setEnrichError] = useState('');
     const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -284,7 +294,7 @@ export default function JournalPanel({ isOpen, onClose }) {
                             onWrite={handleWriteChapter}
                             onExport={handleExportChronicle}
                             onRemove={handleRemoveChapter}
-                            suggestedTitle={state.session?.chapterCloseSuggested?.title || null}
+                            suggested={state.session?.chapterCloseSuggested || null}
                         />
                     )}
                     {tab === 'npcs' && (
@@ -364,7 +374,11 @@ export default function JournalPanel({ isOpen, onClose }) {
     );
 }
 
-function ChronicleTab({ chapters, messages, heroName, chapterTitle, onChapterTitle, writing, status, onWrite, onExport, onRemove, suggestedTitle }) {
+function ChronicleTab({ chapters, messages, heroName, chapterTitle, onChapterTitle, writing, status, onWrite, onExport, onRemove, suggested }) {
+    // The ceremony nudge: a front's fall, or — the last chapter (2026-09-30)
+    // — the hero's death. `suggested` is typed at load (complete-or-null).
+    const suggestedTitle = typeof suggested?.title === 'string' ? suggested.title : '';
+    const suggestedDeath = suggested?.reason === 'death';
     const [removeArmed, setRemoveArmed] = useState(false);
     const lastChronicled = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) : -1;
     // The pending walk and the passage plan are memoized on the transcript
@@ -385,8 +399,10 @@ function ChronicleTab({ chapters, messages, heroName, chapterTitle, onChapterTit
             <div className="chronicle-compose">
                 {suggestedTitle && canWrite && !writing && (
                     <p className="journal-hint chronicle-suggested">
-                        🕰️ The fall of “{suggestedTitle}” just closed a major arc — a fitting
-                        moment to close this chapter of the saga.
+                        {suggestedDeath
+                            ? <>🪦 {suggestedTitle}’s story has ended — close the last chapter of the saga.</>
+                            : <>🕰️ The fall of “{suggestedTitle}” just closed a major arc — a fitting
+                                moment to close this chapter of the saga.</>}
                     </p>
                 )}
                 <p className="journal-hint">

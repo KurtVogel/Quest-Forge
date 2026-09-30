@@ -307,14 +307,36 @@ function cleanLabel(value, fallback = '') {
 function typeCachedRow(entry) {
     const location = cleanLabel(entry.location);
     const subjects = normalizeSubjects(entry.subjects);
-    const { location: _location, subjects: _subjects, ...rest } = entry;
+    const { location: _location, subjects: _subjects, sourceMessage: _source, ...rest } = entry;
     return {
         ...rest,
         vector: toStoredVector(entry.vector),
         category: cleanLabel(entry.category, 'general'),
         ...(location && { location }),
         ...(subjects && { subjects }),
+        ...(typeof entry.sourceMessage === 'string' && entry.sourceMessage && { sourceMessage: entry.sourceMessage.slice(0, 80) }),
     };
+}
+
+/**
+ * Source-stamped retraction (memory-research M0, 2026-09-30): drop every row
+ * this campaign read from one DM message — the narrative row stamped with
+ * its id, and the `world_fact` rows whose text the reducer's retraction
+ * named (`texts`, in the seed's own format) — from the store and from disk.
+ * The player removed the message (✕, a refusal); its canon leaves with it.
+ * Never rejects; the cache is derivable.
+ */
+export function retractMemoriesFromMessage(messageId, texts = []) {
+    if (typeof messageId !== 'string' || !messageId) return Promise.resolve(0);
+    const named = new Set((Array.isArray(texts) ? texts : []).filter(t => typeof t === 'string' && t));
+    const gone = memoryStore.filter(row => row.sourceMessage === messageId || (named.size > 0 && named.has(row.text)));
+    if (gone.length === 0) return Promise.resolve(0);
+    const goneSet = new Set(gone);
+    memoryStore = memoryStore.filter(row => !goneSet.has(row));
+    queryVectorMemo.clear();
+    const persisted = gone.filter(row => row.sessionId != null);
+    if (persisted.length === 0) return Promise.resolve(gone.length);
+    return syncPersistedEmbeddings({ remove: persisted }).then(() => gone.length, () => gone.length);
 }
 
 /** Clamp an untrusted subjects list to a small array of clean name strings. */
@@ -396,7 +418,7 @@ export function findSubjectsInText(text, names, cap = 4) {
  * @param {string|null} [location]
  * @param {string[]|null} [subjects] - people this memory is ABOUT (presence-aware retrieval)
  */
-export async function addMemory(apiKey, text, category = 'general', location = null, subjects = null) {
+export async function addMemory(apiKey, text, category = 'general', location = null, subjects = null, sourceMessage = null) {
     // `?.` guards null/undefined but not type — an object-valued world fact from
     // the parser would throw on .trim() inside this async fn (2026-07-28 audit).
     if (!apiKey || typeof text !== 'string' || !text.trim()) return;
@@ -410,7 +432,7 @@ export async function addMemory(apiKey, text, category = 'general', location = n
         return;
     }
 
-    const entry = storeMemoryEntry({ text, vector, category, location, subjects });
+    const entry = storeMemoryEntry({ text, vector, category, location, subjects, sourceMessage });
     if (entry) persistEmbedding(entry); // fire-and-forget to IndexedDB
     enforceCampaignCap();
 }
@@ -446,7 +468,7 @@ export async function addMemories(apiKey, items) {
         }
         const entry = storeMemoryEntry({
             text: item.text, vector: vectors[i], category: item.category || 'general',
-            location: item.location, subjects: item.subjects,
+            location: item.location, subjects: item.subjects, sourceMessage: item.sourceMessage,
         });
         if (entry) stored.push(entry);
     });
@@ -475,7 +497,7 @@ let pendingBatch = null; // { apiKey, items, timer, promise, resolve }
  * @param {string|null} [location]
  * @param {string[]|null} [subjects]
  */
-export function queueMemory(apiKey, text, category = 'general', location = null, subjects = null) {
+export function queueMemory(apiKey, text, category = 'general', location = null, subjects = null, sourceMessage = null) {
     if (!apiKey || typeof text !== 'string' || !text.trim()) return Promise.resolve();
     // A batch is one key: a different key (a Settings change mid-turn)
     // flushes what was queued under the old one first.
@@ -491,7 +513,7 @@ export function queueMemory(apiKey, text, category = 'general', location = null,
             resolve,
         };
     }
-    pendingBatch.items.push({ text, category, location, subjects });
+    pendingBatch.items.push({ text, category, location, subjects, sourceMessage });
     return pendingBatch.promise;
 }
 
@@ -520,7 +542,7 @@ function discardMemoryQueue() {
  * persists, alone or in a batch). Returns the stored entry, or null when the
  * text was already in the store. Shared by addMemory, addMemories, and the seed.
  */
-function storeMemoryEntry({ text, vector, category = 'general', location = null, subjects = null }) {
+function storeMemoryEntry({ text, vector, category = 'general', location = null, subjects = null, sourceMessage = null }) {
     if (memoryStore.some(m => m.text === text)) return null;
     const cleanSubjects = normalizeSubjects(subjects);
     const entry = {
@@ -539,6 +561,9 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
         // down-weights person-tied memories in scenes that person is nowhere
         // near. Optional; untagged rows are never gated.
         ...(cleanSubjects && { subjects: cleanSubjects }),
+        // The DM message this row was read from (retraction, 2026-09-30):
+        // removing that message removes the row. Optional; legacy rows have none.
+        ...(typeof sourceMessage === 'string' && sourceMessage.trim() && { sourceMessage: sourceMessage.trim().slice(0, 80) }),
         schema: GEMINI_EMBED_SCHEMA,
         timestamp: Date.now(),
     };

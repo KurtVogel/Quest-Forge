@@ -1974,6 +1974,9 @@ export function sanitizeFightTally(value) {
         heroMaxHp,
         heroLowestHp: Math.max(0, Math.min(heroHpStart, finiteInt(value.heroLowestHp, heroHpStart))),
         heroDroppedRound: Number.isInteger(value.heroDroppedRound) && value.heroDroppedRound >= 1 ? value.heroDroppedRound : null,
+        // The foe whose blow dropped the hero the LAST time (the last chapter,
+        // 2026-09-30): the epitaph's killer when the clock then ran out.
+        heroDroppedBy: tallyName(value.heroDroppedBy) || null,
         deathSaves: Math.max(0, finiteInt(value.deathSaves, 0)),
         critsTaken,
         companionsDowned,
@@ -2001,6 +2004,7 @@ export function startFightTally(state) {
         heroMaxHp: Math.max(1, finiteInt(character.maxHP, hp || 1)),
         heroLowestHp: hp,
         heroDroppedRound: null,
+        heroDroppedBy: null,
         deathSaves: 0,
         critsTaken: [],
         companionsDowned: [],
@@ -2033,6 +2037,7 @@ export function recordExchangeCost(tally, { result, heroName, hpBefore, hpAfter,
     let lowest = base.heroLowestHp;
     if (Number.isFinite(hpAfter)) lowest = Math.min(lowest, Math.max(0, Math.trunc(hpAfter)));
     let droppedRound = base.heroDroppedRound;
+    let droppedBy = base.heroDroppedBy;
     let deathSaves = base.deathSaves;
     const crits = [...base.critsTaken];
     const downed = [...base.companionsDowned];
@@ -2079,7 +2084,12 @@ export function recordExchangeCost(tally, { result, heroName, hpBefore, hpAfter,
         }
         if (onHero && Number.isFinite(remaining)) {
             lowest = Math.min(lowest, Math.max(0, remaining));
-            if (remaining <= 0 && droppedRound === null) droppedRound = round;
+            if (remaining <= 0) {
+                if (droppedRound === null) droppedRound = round;
+                // The LAST dropper wins: a natural-20 revive and a second
+                // drop make the second blow the one the clock ran out on.
+                droppedBy = actor || droppedBy;
+            }
         }
         if (onCompanion && Number.isFinite(remaining) && remaining <= 0) noteDowned(target);
         if (event.critical && crits.length < MAX_TALLY_CRITS) {
@@ -2116,6 +2126,7 @@ export function recordExchangeCost(tally, { result, heroName, hpBefore, hpAfter,
         ...base,
         heroLowestHp: lowest,
         heroDroppedRound: droppedRound,
+        heroDroppedBy: droppedBy,
         deathSaves,
         critsTaken: crits,
         companionsDowned: downed,

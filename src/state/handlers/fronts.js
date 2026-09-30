@@ -303,6 +303,7 @@ export const handlers = {
                 resolvedAt: Date.now(),
             },
             chapterCloseSuggested: {
+                reason: 'front',
                 frontId: existing.id,
                 title: updatedFront.title,
                 at: Date.now(),
@@ -310,7 +311,7 @@ export const handlers = {
         };
         return gameReducer(next, {
             type: 'ADD_WORLD_FACTS',
-            payload: [{ fact: buildFrontResolutionFact(updatedFront, update.notes), category: 'event' }],
+            payload: [{ fact: buildFrontResolutionFact(updatedFront, update.notes), category: 'event', pinned: true }],
         });
     },
 

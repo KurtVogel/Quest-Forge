@@ -19,8 +19,12 @@ import { sanitizeRelationshipBeat } from './relationshipArc.js';
 import { sanitizeHeroTellBeat } from './heroTells.js';
 import { sanitizePendingWonder, sanitizeWonder } from './wonder.js';
 import { sanitizeDirectorFailures } from './directorRetry.js';
+import { sanitizeHeroDeath } from './heroDeath.js';
 
 const HEARSAY_GRADES = ['firsthand', 'secondhand', 'legend'];
+
+/** Why the Chronicle tab suggests a close: a front's fall, or the hero's death (2026-09-30). */
+export const CHAPTER_CLOSE_REASONS = Object.freeze(['front', 'death']);
 
 function text(value, max) {
     if (typeof value !== 'string') return '';
@@ -118,11 +122,19 @@ export function sanitizePendingRegionalFronts(raw) {
  */
 export function sanitizeChapterCloseSuggested(raw) {
     if (!isRecord(raw)) return null;
+    // `reason` is whitelisted (the last chapter, 2026-09-30): absent = 'front',
+    // the pre-2026-09-30 shape. A front nudge needs its frontId; a death nudge
+    // carries the hero's name as its title.
+    const reason = raw.reason === undefined ? 'front' : raw.reason;
+    if (!CHAPTER_CLOSE_REASONS.includes(reason)) return null;
     const frontId = text(raw.frontId, 120);
     const title = text(raw.title, 160);
-    if (!frontId || !title) return null;
+    if (!title) return null;
+    if (reason === 'front' && !frontId) return null;
     const at = Number(raw.at);
-    return { frontId, title, at: Number.isFinite(at) ? at : null };
+    const out = { reason, title, at: Number.isFinite(at) ? at : null };
+    if (frontId) out.frontId = frontId;
+    return out;
 }
 
 export function sanitizePendingFrontAftermath(raw) {
@@ -167,6 +179,11 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
     for (const field of ['lastWonderMessage', 'lastHeroTellBeatMessage', 'lastRelationshipBeatMessage']) {
         if (session[field] === undefined) continue;
         next[field] = finiteStamp(session[field], maxMessageCount);
+    }
+    // The hero's death stamp (the last chapter, 2026-09-30): complete-or-null,
+    // `atMessage` clamped to the transcript like the beat cooldowns.
+    if (session.heroDeath !== undefined) {
+        next.heroDeath = sanitizeHeroDeath(session.heroDeath, { maxMessageCount });
     }
     // The directors' give-up tally (2026-09-20): known names, typed entries.
     if (session.directorFailures !== undefined) {

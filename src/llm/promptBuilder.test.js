@@ -739,7 +739,7 @@ describe('world facts block', () => {
                 { fact: 'Thornhaven burned down.', category: 'location', timestamp: 1 },
             ],
         });
-        expect(text).toContain('## WORLD FACTS (canonical — never contradict these)');
+        expect(text).toContain('## WORLD FACTS (canonical — never contradict these;');
         expect(text).toContain('**[EVENT]**');
         expect(text).toContain('**[LOCATION]**');
         expect(text).toContain('The bandit captain is dead.');
@@ -772,9 +772,12 @@ describe('active constraints (DM reminders)', () => {
         expect(text).toContain('A bounty hunter is pursuing the player.');
     });
 
-    it('reminds the DM the character is dead', () => {
+    it('reminds the DM the character is dead and the campaign is over — no spirit, no successor (the last chapter, 2026-09-30)', () => {
         const text = prompt({ character: makeCharacter({ isDead: true }) });
-        expect(text).toContain("The player's original character is dead");
+        expect(text).toContain('THE HERO IS DEAD and this campaign has ended');
+        expect(text).toContain('**STATUS: DEAD** — the campaign is over');
+        expect(text).not.toContain('spirit or successor active');
+        expect(text).not.toContain('playing as a spirit/successor');
     });
 
     it('reminds the DM the character is dying with death save counts', () => {

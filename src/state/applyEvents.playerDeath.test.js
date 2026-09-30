@@ -47,6 +47,16 @@ describe('applyEvents player_death routing', () => {
             type: 'UPDATE_CHARACTER',
             payload: { currentHP: 0, isDead: true, dying: false },
         });
+        // The last chapter (2026-09-30): the reducer writes the epitaph with
+        // the description as its cause — no "your story is not over" line,
+        // no spirit prompt.
+        expect(dispatch).toHaveBeenCalledWith({
+            type: 'RECORD_HERO_DEATH',
+            payload: { cause: 'The warden leaves you bleeding in the snow.' },
+        });
+        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_MESSAGE' }));
+        const order = dispatch.mock.calls.map(call => call[0].type);
+        expect(order.indexOf('UPDATE_CHARACTER')).toBeLessThan(order.indexOf('RECORD_HERO_DEATH'));
     });
 
     it('a level-3 hero with a downed companion is above the protected levels (behaviour unchanged, DECISIONS question open)', () => {

@@ -149,7 +149,7 @@ flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NP
 - Remaining ideas: real-provider eval for "natural old detail recall without exposition",
   salience tuning after real play, and the memory debug inspector (below).
 - **[memory-research] 2026-09-17 (`docs/MEMORY_RESEARCH.md`, seeding run):** two queued slices —
-  (a) **the post-journal verifier** (M1, Lane C): after each cadence assert every active quest,
+  (a) **the post-journal verifier** (M1, Lane C) — **shipped 2026-09-30** (`engine/commitmentVerifier.js`, one `📓 Journal check` line on a loss, zero tokens): after each cadence assert every active quest,
   resolved-front epitaph, open thread, and pinned fact is still reachable OUTSIDE the summary,
   zero tokens — "The Compaction Cliff" (CIKM'26) measured constraint recall at 53% after one
   compaction cycle without such a verifier; (b) **a lexical channel in `retrieveRelevant`** (M1,
@@ -287,8 +287,9 @@ flooded" is stored beside "Saltmere lies on the coast" with no aspect mark and n
 rendered `for now (N turns ago): …` — nothing expires, nothing is rewritten; a re-report refreshes the stamp. Expiry
 only if the commitment probe shows the DM still treats an aged state as current. Full shape in
 `docs/MEMORY_RESEARCH.md` Verdict Log 2026-09-30.
+**2026-09-30 — the state slice shipped the same day** (DECISIONS.md 2026-09-30): `classifyFactAspect` + `aspect: 'state'` + `atMessage` on every fact + the re-stamping restatement + `for now (as of N turns ago): …` in WORLD FACTS and the record lane + the Scribe rule. Still open from the shape: the Scribe `supersedes` ref for semantic flips without a negation, the `(formerly: …)` tail, and expiry (only if the commitment probe's N+30 state question fails — the smoke passed it).
 
-### [memory-research] Source-stamped retraction: scrubbing a message scrubs its canon — status: `idea` (M0, memory research 2026-09-17, Lane A)
+### [memory-research] Source-stamped retraction: scrubbing a message scrubs its canon — status: `shipped` (2026-09-30 — `meta.sourceMessage` on every Scribe dispatch, `retractedAtMessage` on facts, dormant cards, dropped impressions, `retractMemoriesFromMessage` for the RAG rows; DECISIONS.md 2026-09-30; `bondMoments` deliberately not stamped) (M0, memory research 2026-09-17, Lane A)
 `DELETE_MESSAGE` (2026-08-28, built to scrub refusals) soft-deletes the row and every reader
 honors it — but the Scribe facts, cards, NPC impressions, and the `narrative`/`player` RAG rows
 that turn minted stay live, so a scrubbed refusal keeps priming from memory. Every enthusiast
@@ -848,7 +849,7 @@ GPT-5.2 keeps its commitments intact in only 42% of interactive stories by turn 
 one-knower secret, a fact later overturned, an NPC's stated want, a named object, a
 player-authored backstory detail), revisit each at turns 10 / 20 / 30 without naming it, and let a
 Flash judge score survival (recalled / laundered / forgotten / contradicted) — the G1 baseline
-every memory trial row is judged by. **Amended 2026-09-23 (Lane B):** each commitment is a
+every memory trial row is judged by. **BUILT 2026-09-30** as `scripts/commitmentProbe.cjs` (`npm run eval:commitments`; smoke 11/13 at checkpoint 10 on Gemini Pro, `docs/MEMORY_RESEARCH.md` Adoption Queue). **Amended 2026-09-23 (Lane B):** each commitment is a
 knowledge point (MemTrace, https://arxiv.org/abs/2606.17328: age × question type × evidence
 condition), every miss classified RETRIEVAL vs USE from the inspector's captured injection (MemTrace:
 the evidence was retrievable 10× more often than missing), seeded flips marker-free, and the

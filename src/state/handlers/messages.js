@@ -10,6 +10,7 @@ import {
     sanitizePendingRoleplayCheck,
 } from '../../engine/roleplayCheck.js';
 import { appendRollHistory, reviveCharacter, systemMessage } from './shared.js';
+import { isLiveFact } from '../../engine/worldFacts.js';
 
 export const handlers = {
     ADD_MESSAGE(state, action) {
@@ -105,12 +106,60 @@ export const handlers = {
         const messageId = typeof action.payload === 'object' ? action.payload?.id : action.payload;
         if (!messageId) return state;
         let deleted = false;
-        const messages = state.messages.map(msg => {
+        let messages = state.messages.map(msg => {
             if (msg.id !== messageId || msg.deleted) return msg;
             deleted = true;
             return { ...msg, deleted: true };
         });
-        return deleted ? { ...state, messages } : state;
+        if (!deleted) return state;
+        // Source-stamped retraction (memory-research M0, 2026-09-30): the
+        // message removal was built to scrub a refusal, but the refusal's
+        // canon — the facts, cards and unconfirmed impressions the Scribe
+        // read from it — stayed live and re-primed the next turn. A fact
+        // minted from this message leaves the LIVE set (`retractedAtMessage`;
+        // never deleted — the record lane shows it tagged), an active card
+        // goes dormant, an impression is dropped. The RAG rows leave the
+        // store in ChatPanel (the reducer cannot reach IndexedDB).
+        const messageCount = state.messages.length;
+        let facts = 0;
+        let cards = 0;
+        let impressions = 0;
+        const worldFacts = (state.worldFacts || []).map(fact => {
+            if (!fact || fact.sourceMessage !== messageId || !isLiveFact(fact)) return fact;
+            facts += 1;
+            return { ...fact, retractedAtMessage: messageCount };
+        });
+        const storyMemory = (state.storyMemory || []).map(card => {
+            if (!card || card.sourceMessage !== messageId || (card.status || 'active') !== 'active') return card;
+            cards += 1;
+            return { ...card, status: 'dormant', retractedAtMessage: messageCount };
+        });
+        const npcs = (state.npcs || []).map(npc => {
+            if (!npc || !Array.isArray(npc.recentImpressions)) return npc;
+            const kept = npc.recentImpressions.filter(entry => entry?.sourceMessage !== messageId);
+            if (kept.length === npc.recentImpressions.length) return npc;
+            impressions += npc.recentImpressions.length - kept.length;
+            if (kept.length > 0) return { ...npc, recentImpressions: kept };
+            const { recentImpressions: _dropped, ...rest } = npc;
+            return rest;
+        });
+        const retracted = facts + cards + impressions;
+        if (retracted > 0) {
+            const parts = [
+                facts > 0 && `${facts} world fact${facts === 1 ? '' : 's'}`,
+                cards > 0 && `${cards} story card${cards === 1 ? '' : 's'}`,
+                impressions > 0 && `${impressions} unconfirmed impression${impressions === 1 ? '' : 's'}`,
+            ].filter(Boolean).join(', ');
+            // An infrastructure line (kind: 'error'): never retold as saga.
+            messages = [...messages, systemMessage(`✕ Message removed — and what it had put on the record is retracted with it: ${parts}. The DM no longer sees them; nothing else changed.`, { kind: 'error' })];
+        }
+        return {
+            ...state,
+            messages,
+            ...(facts > 0 && { worldFacts }),
+            ...(cards > 0 && { storyMemory }),
+            ...(impressions > 0 && { npcs }),
+        };
     },
 
     // Un-hide a withheld roll-setup narration when no dice will ever supersede it

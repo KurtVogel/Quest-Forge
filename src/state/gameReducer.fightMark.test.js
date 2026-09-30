@@ -77,7 +77,7 @@ describe('the fight leaves a mark — reducer flow', () => {
     it('START_COMBAT seeds the tally from the live hero', () => {
         const state = startFight();
         expect(state.combat.fightTally).toEqual({
-            heroHpStart: 12, heroMaxHp: 12, heroLowestHp: 12, heroDroppedRound: null, deathSaves: 0, critsTaken: [], companionsDowned: [],
+            heroHpStart: 12, heroMaxHp: 12, heroLowestHp: 12, heroDroppedRound: null, heroDroppedBy: null, deathSaves: 0, critsTaken: [], companionsDowned: [],
             witnesses: ['Garrick'], saves: [], heroKillingCrits: [], heroLowExchangeId: null,
             resourcesStart: { resources: { secondWind: 0, actionSurge: 0 }, slotsUsed: 0, potions: 2 }, rounds: 1,
         });
@@ -269,7 +269,7 @@ describe('LOAD_GAME types combat.fightTally complete-or-null', () => {
         for (const junk of ['x', 7, [], { heroMaxHp: 'lots' }, null]) expect(load(junk).combat.fightTally).toBeNull();
         const typed = load({ heroMaxHp: 12, heroHpStart: 12, heroLowestHp: '3', critsTaken: [null, { by: 'Goblin', target: 'Astra', damage: 9, round: 1 }], companionsDowned: ['Garrick', 4], resourcesStart: { resources: { secondWind: 1 }, potions: '2' }, rounds: 2, hostile: 'x' }).combat.fightTally;
         expect(typed).toEqual({
-            heroHpStart: 12, heroMaxHp: 12, heroLowestHp: 3, heroDroppedRound: null, deathSaves: 0,
+            heroHpStart: 12, heroMaxHp: 12, heroLowestHp: 3, heroDroppedRound: null, heroDroppedBy: null, deathSaves: 0,
             critsTaken: [{ by: 'Goblin', target: 'Astra', damage: 9, round: 1 }], companionsDowned: ['Garrick'],
             // A pre-fix tally loads with the fight-memory fields EMPTY, not null.
             witnesses: [], saves: [], heroKillingCrits: [], heroLowExchangeId: null,

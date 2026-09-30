@@ -27,7 +27,7 @@ import { collectNarrativeEntries } from '../llm/narrativeMessages.js';
 import { conversationalDistance } from './replayLedger.js';
 import { formatSecrecyTag } from './storyMemory.js';
 import { splitBondMoments } from './npcRoster.js';
-import { describeSupersededTag } from './worldFacts.js';
+import { describeRetractedTag, describeStateTag, describeSupersededTag } from './worldFacts.js';
 
 /**
  * 2,400 (was 1,500, 2026-09-19): the live playtest showed 1,500 could not hold
@@ -322,7 +322,7 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
         CAPS.facts,
     // A superseded fact stays on the record as HISTORY, tagged — the record
     // lane answers "what was true", the prompt's WORLD FACTS carries only the present.
-    ).map(({ item }) => row('facts', `- FACT: ${describeSupersededTag(item, { messages: state?.messages, messageCount: (state?.messages || []).length })}${formatSecrecyTag(item.knownBy)}${clip(item.fact, 240)}`));
+    ).map(({ item }) => row('facts', `- FACT: ${describeRetractedTag(item)}${describeSupersededTag(item, { messages: state?.messages, messageCount: (state?.messages || []).length })}${describeStateTag(item, { messages: state?.messages, messageCount: (state?.messages || []).length })}${formatSecrecyTag(item.knownBy)}${clip(item.fact, 240)}`));
 
     // 4. The asked-about people: their key moments with the hero, the open thread.
     const roster = (Array.isArray(state?.npcs) ? state.npcs : []).filter(n => n && typeof n === 'object' && typeof n.name === 'string' && n.name.trim());
