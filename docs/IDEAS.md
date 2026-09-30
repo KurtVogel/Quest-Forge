@@ -1470,6 +1470,38 @@ Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md
 
 ## Tech & Infra
 
+### [playtest] Findings from the 2026-09-30 proof day (six WOW proofs run) — status: `idea` backlog
+The six unrun WOW proof steps were run in one day (DECISIONS.md 2026-09-30; reports `docs/COMBAT_DRAMA_EVAL_2026-09-30.md`,
+`docs/ROLL_CONSEQUENCE_EVAL_2026-09-30.md`, `docs/OPENING_EVAL_2026-09-30.md`, `docs/PROOF_PLAYTEST_2026-09-30.md`). What they left open:
+- **The destination's place card on the arrival turn.** The road is a scene: the departure turn ends on the road and the
+  arrival is the NEXT turn's consequence — but the prompt for that arrival turn is built while `currentLocation` is still
+  the road, so the destination's signature / "now" line reaches the DM only on the turn AFTER arrival (Pro run 1: the
+  arrival narration read as a return through Tammo on his usual stool, but never touched the harbor's signature; the
+  signature line rendered on the following turn). Cheapest fix: when the player's line names a KNOWN place (a record the
+  hero has visited), render that record's one-liner as `**Where you are headed**` beside Current location for that turn
+  only — zero calls, the `describeCurrentPlace` shelf.
+- **Terra's `location` wire lags the prose.** Run 1: the narration reached Tammo's brazier on Saltmere's pier while the
+  wire said "Gullhaven"; the Scribe's own `location` report is the belt and did not catch it that turn either. Worth a
+  `location`-wire column in the full probe (narrated place vs wire vs record) before touching anything.
+- **The wound card did not surface on a calm return.** A marking fight minted the salience-4 `wound` card (hero to 0 HP,
+  a crit taken); back home three scenes later it was never among the five DRAMATIC CALLBACK cards (location and NPC
+  scoring favor the present scene's cards). By design its echo lands in the NEXT dangerous moment (FIGHT MEMORY needs a
+  companion; none here). Decide whether a fresh engine wound deserves a location-independent boost for its first N
+  scenes, or leave the calm return alone — a taste call.
+- **The Scribe rewrote an engine wound card.** Pro run 2: the fight-1 `wound` card ("fell to Wrecker at the cove… took Wrecker's
+  critical blow") was id-updated by the Scribe on the rest turn into "bound her cutlass and hatchet wounds and took a long rest…
+  restoring her strength" — the fight left the record. The "update a listed card in place with the COMPLETE text" rule is right for the
+  Scribe's own cards and wrong for `source: 'engine'` ones: an engine card should accept `resolved` (or an appended clause), never a
+  rewrite. One reducer guard in `ADD_STORY_MEMORY_CARD` / the merge (keep the engine text, append the Scribe's as a clause), one test.
+- **Gemini's openings run long** (7/12 over three paragraphs, median 258 words vs Terra's 219) — the same column the
+  turn-grammar eval could not move. A per-model word ceiling on the opening, or accept it.
+- **Terra dumps the look as description** in 2/12 openings ("Astra, tall and rope-scarred…") instead of letting one detail
+  surface; the ECHO clause could add "never as a description of the hero — only as something that happens".
+- **Probe follow-ups:** the hunt line must FOLLOW the DM's pointer (Terra sent the hero to Gannet Rock by skiff and kept
+  the world honest when she "waited on the slipway" and later "walked the Coast Road" from open water — player authority
+  working, the scripted probe not adapting); a Terra fight needs the destination in the line. The sheet's "That's not me"
+  button and the recap button still go through dispatch / the OOC line in the harness rather than the DOM.
+
 ### Agent dialogue 2026-09-28 (Claude ↔ Codex, the vision debate) — open calls — status: `open` (Vesa's picks)
 The first file dialogue under `docs/agent-dialogues/README.md` (the transcript is git-ignored; both
 sides' Close is the record). Agreed and BUILT the same day: the Bram clause (above). Agreed and not yet

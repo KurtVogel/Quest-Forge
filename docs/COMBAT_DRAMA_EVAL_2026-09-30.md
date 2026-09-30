@@ -11,10 +11,20 @@ and GPT-5.6 Terra (never Grok).
 |---|---|---|
 | telegraph-honored-by-next-intents — the archer keeps its telegraphed target (the companion) | 3/3 | 2/3 (run 2: attacked the player instead) |
 | telegraph-honored-by-next-intents — the critical cutter breaks (flee / surrender) | 3/3 | 3/3 |
-| bloodied-foes-break — at least one of three bloodied raiders breaks | 3/3 (all three broke, every run) | 1/3 (all three broke in run 3; runs 1–2 returned NO combat_exchange at all) |
+| bloodied-foes-break — at least one of three bloodied raiders breaks (first scenario wording: "I raise my sword and step toward the kneeling one") | 3/3 (all three broke, every run) | 1/3 (all three broke in run 3; runs 1–2 returned NO combat_exchange at all — see Findings) |
+| bloodied-foes-break — SAME scenario with an unambiguous action ("I attack the kneeling raider with my longsword"), 3 more Terra runs + 1 Gemini | 1/1 (all three broke) | 3/3 (two of three broke, every run) |
+| telegraph-honored-by-next-intents, the 3 later Terra runs | — | archer kept its target 2/3, the critical cutter broke 3/3 |
 | the five older pacing scenarios | 15/15 | 15/15 |
 
 ## Findings
+
+- **Corrected reading (same day):** Terra's two "no envelope" runs were NOT foes fighting on. Run 4 with responses printed showed a
+  prose surrender with no JSON, and the later runs showed the clarifying question the contract allows for an AMBIGUOUS line
+  ("Are you ordering it to surrender, or striking?"). The scenario's line "I raise my sword and step toward the kneeling one"
+  was a threat, not an attack. With an unambiguous attack line Terra declared the break through `enemy_intents` 3/3 (two of
+  three raiders each run) and Gemini 1/1 (all three). The scenario now uses the unambiguous line; COMBAT NOTES gained "a break is
+  still DECLARED through `enemy_intents`, never narrated here" for the prose-surrender case. **Net: both providers break
+  bloodied foes every run; Terra keeps a telegraphed target 4 of 6 runs (the archer turned on the hero twice), Gemini 4/4.**
 
 - **Gemini Pro honors both rules every time.** The archer kept its telegraphed target, the critical cutter fled, and all
   three bloodied raiders broke in all three runs.

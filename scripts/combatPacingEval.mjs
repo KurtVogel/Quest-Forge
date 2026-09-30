@@ -236,7 +236,10 @@ const scenarios = [
                 { role: 'assistant', content: 'Your longsword takes the first raider across the ribs and it drops to one knee. The other two are no better off — one clutches a gashed arm, the other drags a leg. Three raiders, all bleeding, their leader already dead in the ditch behind them; the one on its knee looks from you to the treeline and back. What do you do?' },
             ],
         }),
-        userMessage: 'I raise my sword and step toward the kneeling one.',
+        // An UNAMBIGUOUS action (2026-09-30): 'I raise my sword and step toward the kneeling one' read as a threat, and
+        // Terra answered it with the clarifying question the contract allows ('ordering it to surrender, or striking?') — no
+        // envelope, no morale to measure. The break must be observed on a turn that commits an attack.
+        userMessage: 'I attack the kneeling raider with my longsword.',
         checks: [
             hasCombatExchange,
             someFoeBreaks(['enemy-1', 'enemy-2', 'enemy-3']),
