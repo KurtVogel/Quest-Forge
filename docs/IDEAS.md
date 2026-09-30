@@ -2878,6 +2878,36 @@ non-channels (`combat_end`, `resources_used`) as "never emit". From the 2026-09-
 
 ---
 
+### [strengthening] A curated list is a projection for display, not a lookup table; one lane's two calls deserve two projections; an O(transcript) helper is cheap until a turn calls it K + 2N times — status: `idea` (2026-09-30 audit, story-memory + prompt-building Lap 3; queue lines in SCHEDULED_STRENGTHENING.md)
+Three rules from the story-memory + prompt-building Lap-3 pass (2026-09-30), every number measured
+against the real reducer, `curateStoryMemory`, `findPresentNpcs` and `buildSystemPrompt` on a
+2,000-row / 200-NPC / 300-card / 40-entry state. **(1)** `buildSystemPrompt` takes ONE `storyMemory`
+and reads it two ways: the cards to SHOW (DRAMATIC CALLBACKS — rightly the orchestrator's ≤5 curated
+cards) and the cards to LOOK UP (`resolveOpenThread`'s promise fallback behind every KNOWN NPCs /
+party line's `between you now:`, DECISIONS 2026-09-13). The caller's projection silently narrowed
+the lookup: a promise outscored by five louder cards, or one the DM just paid off (cooldown 8), drops
+off the NPC's line while the Journal card — which reads the pool — still shows it, and the relationship
+beat (pool) can fire on a thread the prompt never carried. Rule: for every list a builder takes, ask
+whether each read is a display or a lookup; a lookup gets the pool, whatever was curated for display
+(pool cost measured 0.3–0.5 ms per build at 1,000 cards). **(2)** `narrationOnly` (2026-09-23) gave
+the combat narration call its own projection; the INTENT call — the other half of the same round —
+still carries the ordinary turn's dynamic half: 38,622 dynamic chars (INVENTORY / QUESTS / WORLD FACTS /
+SESSION HISTORY / place / DM REMINDERS 20,146 + KNOWN NPCs 17,579) vs the narration call's 19,322, for
+~300 bytes of JSON whose targets are enemy ids. Rule: every `opts.*Only` flag has a sibling call it
+did not cover. **(3)** `conversationalDistance` walks the transcript from the stamp to the end, and a
+turn calls it for every card's two stamps plus every roster NPC's age and absence — over a transcript
+that never shrinks (summarized rows stay): curation 5 → 25 ms and `curateNpcsForPrompt` 8 of the
+build's 10 ms, all main-thread between send and first token, ×4–5 on a phone. One prefix count of
+narrative rows per transcript (computed once per build, or memoized on the array identity) makes every
+distance O(1) without touching a caller's semantics. Also measured: the prefix IS byte-stable at 60 % of
+a caster's 130k-char prompt through the four 09-24 → 09-26 extensions; KNOWN NPCs is the largest
+dynamic block (18.8k typical / 25.7k maxed) with `notes` its one unclamped field (600 vs 180); SESSION
+HISTORY spends 7.2k of its 11.3k on the consequences lists; the card pool has no ceiling (466 B/card,
+dormant and resolved forever — a decision, since the recall dossier reads them as the record). From the
+2026-09-30 strengthening audit.
+
+---
+
 ## Rejected (with reasons — don't re-propose without new arguments)
 
 - **Shared cloud autosave slot** (one "Continue" synced across devices) — rejected
