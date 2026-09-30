@@ -17,13 +17,40 @@
  */
 export function conversationalDistance(messages, fromIndex, toIndex) {
     if (!Array.isArray(messages)) return Math.max(0, toIndex - fromIndex);
-    let distance = 0;
-    for (let i = Math.max(0, fromIndex + 1); i <= Math.min(toIndex, messages.length - 1); i++) {
+    const lo = Math.max(0, Math.floor(fromIndex + 1));
+    const hi = Math.min(Math.floor(toIndex), messages.length - 1);
+    if (!(hi >= lo)) return 0;
+    const prefix = narrativePrefixCounts(messages);
+    return prefix[hi + 1] - prefix[lo];
+}
+
+/**
+ * Prefix counts of conversational rows, memoized on the transcript array
+ * (2026-09-30 story-memory + prompt-building Lap-3 P2). A turn asks for the
+ * distance since a stamp K + 2N times — every story card's two stamps, every
+ * roster NPC's last-seen and open-thread stamps, every ledger entry — and the
+ * transcript never shrinks (summarized rows stay), so the per-call walk was
+ * O(transcript) and the per-turn total O(cards × transcript): 5 ms → 25 ms
+ * on a desktop at 1,000 cards / 6,000 rows, ×4–5 on a phone, all of it on
+ * the main thread between send and stream start. The reducer replaces the
+ * `messages` array on every change, so one count per array reference makes
+ * every later distance O(1). The length is re-checked as a belt against an
+ * in-place push; an in-place flag flip on an existing row (never done by the
+ * reducer) would read stale until the next reducer change.
+ */
+const prefixCache = new WeakMap();
+
+function narrativePrefixCounts(messages) {
+    const cached = prefixCache.get(messages);
+    if (cached && cached.length === messages.length + 1) return cached;
+    const prefix = new Uint32Array(messages.length + 1);
+    for (let i = 0; i < messages.length; i++) {
         const message = messages[i];
-        if (!message || message.role === 'system' || message.hidden || message.deleted) continue;
-        distance += 1;
+        const counts = !(!message || message.role === 'system' || message.hidden || message.deleted);
+        prefix[i + 1] = prefix[i] + (counts ? 1 : 0);
     }
-    return distance;
+    prefixCache.set(messages, prefix);
+    return prefix;
 }
 
 /** "sourceId|key|messageIndex" → parts. Legacy two-part entries (pre-index

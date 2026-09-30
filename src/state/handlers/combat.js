@@ -16,8 +16,8 @@ import {
     validateEnemySaveBonus,
 } from '../../engine/enemyStats.js';
 import {
-    COMBAT_PHASES, buildFightMemories, buildFightWoundCard, describeFightMark, exchangeEventLines, isEnemyActive, mergeCharacterUpdates,
-    reconcileStartingCombatExchange, recordExchangeCost, startFightTally,
+    COMBAT_PHASES, buildFightMemories, buildFightWoundCard, describeFightCost, describeFightMark, exchangeEventLines, isEnemyActive,
+    mergeCharacterUpdates, reconcileStartingCombatExchange, recordExchangeCost, startFightTally,
 } from '../../engine/combatExchange.js';
 import { appendRecentEncounter, buildEncounterEntry, distanceSince } from '../../engine/worldTempo.js';
 import { HEARSAY_WINDOW_MESSAGES } from '../../engine/regionalHearsay.js';
@@ -170,6 +170,21 @@ export const handlers = {
                 buildEncounterEntry(state, { ...(action.payload || {}), mark: fightMark }),
             ),
         };
+        // The death is stated plainly (WOW 2026-09-30, death-and-stakes): a
+        // hero whose clock ran out gets ONE engine line with the fight's cost
+        // tally — the terminal narration said DIED, the page says it too. The
+        // terminal stays `defeat` (slain-XP rules untouched); the line is the
+        // only thing death adds here. Read from the pre-reset envelope.
+        if (outcome === 'defeat' && state.character?.isDead) {
+            const cost = describeFightCost(state.combat.fightTally, state);
+            newState = {
+                ...newState,
+                messages: [
+                    ...newState.messages,
+                    systemMessage(`☠ **${state.character.name || 'The hero'} is dead.** The third failed death save ends the story here.${cost ? ` ${cost}` : ''}`),
+                ],
+            };
+        }
         // Ambush-on-arrival (2026-08-31 P2): a fight that started while a live
         // hearsay offer's window was open burns that window through the rounds
         // before any local can speak. If the hero is still at the offer's place,

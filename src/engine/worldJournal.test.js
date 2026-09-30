@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildJournalContext, normalizeJournalSummary, normalizeLocationName } from './worldJournal.js';
+import {
+    KNOWN_NPC_NOTES_MAX, SESSION_HISTORY_CONSEQUENCES, SESSION_HISTORY_CONSEQUENCE_CHARS,
+    buildJournalContext, normalizeJournalSummary, normalizeLocationName,
+} from './worldJournal.js';
 
 describe('normalizeJournalSummary (queue 2026-07-30)', () => {
     it('normalizes a well-formed summary with clamped typed fields', () => {
@@ -78,6 +81,30 @@ describe('worldJournal context builder', () => {
         expect(context).toContain('Met a merchant.');
         expect(context).not.toContain('reeve remembers'); // string shape: skipped, not joined char-by-char
         expect(context).toContain('[Consequences: Pack scattered]');
+    });
+
+    it('clamps the KNOWN NPCs line opener at KNOWN_NPC_NOTES_MAX — the one field that rode the 600-char dossier clamp raw (2026-09-30 Lap-3 P2)', () => {
+        const lastNotes = 'She warned the hero off the docks and named the harbormaster as the one who takes the coin. '.repeat(8).slice(0, 600);
+        const context = buildJournalContext([], [{ name: 'Maera', disposition: 'wary', lastNotes, lastSeen: 1000 }], 'Road');
+        const line = context.split('\n').find(l => l.startsWith('- **Maera**'));
+        const bracket = line.indexOf(' [');
+        const opener = line.slice(line.indexOf(': ') + 2, bracket < 0 ? undefined : bracket);
+        expect(opener.length).toBeLessThanOrEqual(KNOWN_NPC_NOTES_MAX);
+        expect(opener.endsWith('…')).toBe(true);
+        expect(opener.startsWith('She warned the hero off the docks')).toBe(true);
+    });
+
+    it('SESSION HISTORY shows only the newest SESSION_HISTORY_CONSEQUENCES consequences per entry, each clamped (2026-09-30 Lap-3 P2)', () => {
+        const consequences = Array.from({ length: 8 }, (_, i) => `Consequence ${i}: ${'the weir wardens remember it '.repeat(12)}`.slice(0, 300));
+        const context = buildJournalContext([{ summary: 'A hard week at the weir.', consequences, location: 'Road' }], [], 'Road');
+        const from = context.indexOf('[Consequences: ');
+        const shown = context.slice(from + '[Consequences: '.length, context.indexOf(']', from));
+        expect(shown).toContain('Consequence 5:');
+        expect(shown).toContain('Consequence 7:');
+        expect(shown).not.toContain('Consequence 4:');
+        const pieces = shown.split('; ');
+        expect(pieces).toHaveLength(SESSION_HISTORY_CONSEQUENCES);
+        for (const piece of pieces) expect(piece.length).toBeLessThanOrEqual(SESSION_HISTORY_CONSEQUENCE_CHARS);
     });
 
     it('injects established NPC looks so the DM cannot re-invent hair, eyes, or build', () => {

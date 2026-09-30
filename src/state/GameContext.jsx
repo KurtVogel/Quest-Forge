@@ -3,6 +3,7 @@
  */
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useReducer, useEffect, useCallback, useState, useRef } from 'react';
+import { getInspectorSnapshot } from '../debug/memoryInspectorStore.js';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { createAutosaveRuntime } from './autosaveRuntime.js';
 import { loadSettings, saveSettings, autoSave } from './persistence.js';
@@ -63,6 +64,9 @@ export function GameProvider({ children }) {
         // strike renders only for a tell someone has SAID (2026-09-29, the
         // hero-tells probe). Never a production surface — the param is the gate.
         window.__QF_DISPATCH__ = dispatch;
+        // The inspector's capture store (cache telemetry, retrieval hits —
+        // 2026-09-30) for the eval harnesses' reports; same gate.
+        window.__QF_INSPECTOR__ = getInspectorSnapshot;
     }, [state]);
 
     // The dirty-flag + debounce choreography lives in autosaveRuntime.js

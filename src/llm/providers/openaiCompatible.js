@@ -5,7 +5,7 @@
  * label, and (for xAI) a key normalizer differ. Keeping one implementation
  * means stream-truncation fixes land once instead of being hand-copied.
  */
-import { assertStreamComplete, makeCompletionGuard, makeHttpError, readSseStream } from './sse.js';
+import { assertStreamComplete, isNetworkFailure, makeCompletionGuard, makeHttpError, readSseStream } from './sse.js';
 
 /**
  * Output cap is a glitch-loop guard, not a budget — 4096 silently truncated
@@ -66,7 +66,28 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
  *   (defaults to DEFAULT_MAX_TOKENS for every model).
  * @returns {{ send: function, stream: function }}
  */
-export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens', temperatureUnsupported = () => false, maxOutputTokensFor = () => DEFAULT_MAX_TOKENS }) {
+export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens', temperatureUnsupported = () => false, maxOutputTokensFor = () => DEFAULT_MAX_TOKENS, streamUsage = false, extraHeaders = () => ({}) }) {
+    /**
+     * One fetch with the provider's extra headers (2026-09-30 cache telemetry:
+     * xAI's `x-grok-conv-id` routes a conversation to one server so its
+     * per-server cache can hit). A custom header costs a CORS preflight; if
+     * the provider's edge does not allow it the browser fails the request
+     * before any byte, as a network TypeError — then the request is sent
+     * ONCE more without the header and the caller is told, so a header the
+     * edge rejects can never take the DM lane down. A caller abort passes.
+     */
+    async function fetchWithExtraHeaders(args, init) {
+        const extra = extraHeaders(args) || {};
+        const keys = Object.keys(extra);
+        if (keys.length === 0) return fetch(baseUrl, init);
+        try {
+            return await fetch(baseUrl, { ...init, headers: { ...init.headers, ...extra } });
+        } catch (error) {
+            if (args.signal?.aborted || !isNetworkFailure(error)) throw error;
+            args.onHeaderRejected?.(keys);
+            return fetch(baseUrl, init);
+        }
+    }
     const httpError = makeHttpError(label);
 
     /**
@@ -81,8 +102,9 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
         new Error(`The model declined to respond: ${String(refusal).trim().slice(0, 500)} — edit or remove (✕) the message it objected to, or rephrase, then continue.`);
 
     /** Send a non-streaming message. (thinkingBudget is Gemini-only; ignored here.) */
-    async function send({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, maxOutputTokens, signal }) {
-        const response = await fetch(baseUrl, {
+    async function send(args) {
+        const { apiKey, model, systemPrompt, messageHistory, userMessage, temperature, maxOutputTokens, signal, onUsage } = args;
+        const response = await fetchWithExtraHeaders(args, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -108,6 +130,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             throw refusalError(message.refusal);
         }
         assertCompleteResponse(data.choices?.[0]?.finish_reason);
+        reportUsage(onUsage, data.usage);
         const content = contentText(message?.content);
         if (!content) {
             throw new Error('No response generated. The model may have been blocked or returned empty.');
@@ -116,8 +139,9 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
     }
 
     /** Stream a message, calling onChunk with each text fragment. */
-    async function stream({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature }) {
-        const response = await fetch(baseUrl, {
+    async function stream(args) {
+        const { apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, onUsage } = args;
+        const response = await fetchWithExtraHeaders(args, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -129,6 +153,10 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
                 ...(temperatureUnsupported(model) ? {} : { temperature: temperature ?? 0.9 }),
                 [maxTokensParam]: maxOutputTokensFor(model),
                 stream: true,
+                // OpenAI reports usage on a stream only when asked; the final
+                // chunk then carries it (cached_tokens included). xAI sends it
+                // unasked, so the flag is per provider.
+                ...(streamUsage ? { stream_options: { include_usage: true } } : {}),
             }),
             signal,
         });
@@ -140,8 +168,10 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
         let fullText = '';
         let refusalText = '';
         let finishReason = null;
+        let usage = null;
 
         await readSseStream(response, (parsed) => {
+            if (parsed.usage && typeof parsed.usage === 'object') usage = parsed.usage;
             const choice = parsed.choices?.[0];
             if (choice?.finish_reason) finishReason = choice.finish_reason;
             const refusal = choice?.delta?.refusal;
@@ -157,10 +187,37 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             throw refusalError(refusalText);
         }
         assertStreamComplete(finishReason, assertCompleteResponse);
+        reportUsage(onUsage, usage);
         return fullText;
     }
 
     return { send, stream };
+}
+
+/**
+ * Token usage in the adapter's one shape (2026-09-30 cache telemetry):
+ * `{ promptTokens, cachedTokens, outputTokens }` from an OpenAI-compatible
+ * `usage` object — `prompt_tokens`, `prompt_tokens_details.cached_tokens`
+ * (OpenAI and xAI report the cache hit there), `completion_tokens`. Missing
+ * or non-numeric fields read as null / 0; a throw in the callback is the
+ * caller's and never fails the reply.
+ */
+export function normalizeOpenAIUsage(usage) {
+    if (!usage || typeof usage !== 'object') return null;
+    const num = (value) => (Number.isFinite(value) ? value : null);
+    const promptTokens = num(usage.prompt_tokens);
+    if (promptTokens === null) return null;
+    return {
+        promptTokens,
+        cachedTokens: num(usage.prompt_tokens_details?.cached_tokens) ?? 0,
+        outputTokens: num(usage.completion_tokens),
+    };
+}
+
+function reportUsage(onUsage, raw) {
+    if (typeof onUsage !== 'function') return;
+    const usage = normalizeOpenAIUsage(raw);
+    if (usage) onUsage(usage);
 }
 
 /**

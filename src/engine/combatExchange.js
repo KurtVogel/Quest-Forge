@@ -17,7 +17,9 @@ import {
     getSkillModifier,
     getWeaponAttackBonus,
     getWeaponDamageNotation,
+    normalizeDeathSaves,
 } from './rules.js';
+import { DEATH_SAVE_OUTCOMES, deathSaveLine, describeDeathSaveCount, judgeDeathSave } from './deathSaves.js';
 import {
     applyUncannyDodge,
     conditionAwareAttackModifiers,
@@ -433,7 +435,13 @@ function eventMessage(event) {
             : event.success ? 'Success' : 'Failure';
         return `**${event.actor}: ${event.description}** — Rolled **${event.rolled}** vs DC ${event.dc}${checkMode}; **${outcome}.**`;
     }
-    if (event.type === 'death_save') return `**Death Saving Throw:** natural **${event.natural}**.`;
+    if (event.type === 'death_save') {
+        // The count is on the page (WOW 2026-09-30): the event carries the
+        // engine's judged outcome + tally and renders through THE shared
+        // line. A pre-change stored event (no outcome) keeps the bare line.
+        if (!DEATH_SAVE_OUTCOMES.includes(event.outcome)) return `**Death Saving Throw:** natural **${event.natural}**.`;
+        return deathSaveLine(event, event.actor);
+    }
     return event.text || `${event.actor} ${event.type}.`;
 }
 
@@ -478,7 +486,9 @@ function makeResult(kind, exchangeId, round, events, terminal, {
     companions = [],
     character = null,
     playerHp = null,
+    player = null,
 } = {}) {
+    const snapshot = player || (character ? projectPlayerSnapshot({ character, playerHp }) : null);
     return {
         exchangeId,
         kind,
@@ -490,6 +500,10 @@ function makeResult(kind, exchangeId, round, events, terminal, {
                 name: character.name || 'Player',
                 hp: Number.isFinite(playerHp) ? playerHp : character.currentHP,
                 maxHp: character.maxHP,
+                // The hero's state after the exchange (WOW 2026-09-30): the
+                // narration prompt's PLAYER line and the DIED terminal read it.
+                status: snapshot.status,
+                deathSaves: snapshot.deathSaves,
             } : null,
             enemies: enemies.map(enemySnapshot),
             companions: companions.map(companion => ({
@@ -1019,7 +1033,18 @@ function resolvePlayerSlots({ state, exchange, enemies, companions, events, roll
             const save = rollWithModifier(1, 20, 0, 'Death Saving Throw');
             rolls.push(save);
             deathSaveNatural = save.rolls[0];
-            events.push({ type: 'death_save', natural: deathSaveNatural });
+            // The event carries the judged outcome and the post-save tally so
+            // the chat line reads as a countdown (WOW 2026-09-30); the reducer's
+            // DEATH_SAVE_RESULT judges the same die through the same judge.
+            const judged = judgeDeathSave(character.deathSaves, deathSaveNatural);
+            events.push({
+                type: 'death_save',
+                natural: deathSaveNatural,
+                actor: character.name || 'The player',
+                outcome: judged.outcome,
+                successes: judged.successes,
+                failures: judged.failures,
+            });
             continue;
         }
         if (slot.action === 'second_wind') {
@@ -1450,12 +1475,56 @@ function projectRevivedCharacter(character) {
 }
 
 function projectedDeathSaveState(character, natural) {
-    if (!Number.isInteger(natural)) return 'dying';
-    if (natural === 20) return 'revived';
-    const saves = character.deathSaves || { successes: 0, failures: 0 };
-    if (natural >= 10) return (saves.successes || 0) + 1 >= 3 ? 'stable' : 'dying';
-    const failures = (saves.failures || 0) + (natural === 1 ? 2 : 1);
-    return failures >= 3 ? 'dead' : 'dying';
+    const judged = judgeDeathSave(character.deathSaves, natural);
+    if (!judged) return 'dying';
+    return judged.outcome === 'success' || judged.outcome === 'failure' ? 'dying' : judged.outcome;
+}
+
+const FRESH_TALLY = Object.freeze({ successes: 0, failures: 0 });
+
+/**
+ * The hero's state AFTER the exchange, for `postState.player` (WOW
+ * 2026-09-30, death-and-stakes): `status` in PLAYER_SNAPSHOT_STATUSES plus
+ * the death-save tally as the reducer will hold it once the commit lands.
+ * Mirrors terminalState's party choice exactly — a still-dying hero is judged
+ * at the death save against the party as it stood (`partyAtSave`); a
+ * conscious or just-revived hero dropping to 0 against the post-exchange
+ * party (`partyAfter`) — so the snapshot never says `dying` beside a reducer
+ * that converted the moment into the low-level defeat setback.
+ */
+function projectPlayerSnapshot({
+    character,
+    playerHp = null,
+    deathSaveNatural = null,
+    deathSaveSkipped = false,
+    partyAtSave = [],
+    partyAfter = [],
+}) {
+    const hp = Number.isFinite(playerHp) ? playerHp : (character.currentHP ?? 0);
+    const held = normalizeDeathSaves(character.deathSaves);
+    if (character.isDead) return { status: 'dead', deathSaves: held };
+    if (character.lowLevelDefeat) return { status: 'defeated', deathSaves: held };
+    if (character.dying) {
+        if (deathSaveSkipped || isLowLevelSolo(character, partyAtSave)) return { status: 'defeated', deathSaves: held };
+        const judged = judgeDeathSave(character.deathSaves, deathSaveNatural);
+        if (!judged) return { status: 'dying', deathSaves: held };
+        const saves = { successes: judged.successes, failures: judged.failures };
+        if (judged.outcome === 'dead') return { status: 'dead', deathSaves: saves };
+        if (judged.outcome === 'stable') return { status: 'stable', deathSaves: saves };
+        if (judged.outcome === 'revived') {
+            if (hp > 0) return { status: 'revived', deathSaves: { ...FRESH_TALLY } };
+            // Dropped again after the revive — a fresh clock, judged like any
+            // conscious hero's drop (the reducer's TAKE_DAMAGE order).
+            return isLowLevelSolo(character, partyAfter)
+                ? { status: 'defeated', deathSaves: { ...FRESH_TALLY } }
+                : { status: 'dying', deathSaves: { ...FRESH_TALLY } };
+        }
+        return { status: 'dying', deathSaves: saves };
+    }
+    if (hp > 0) return { status: 'active', deathSaves: { ...FRESH_TALLY } };
+    return isLowLevelSolo(character, partyAfter)
+        ? { status: 'defeated', deathSaves: { ...FRESH_TALLY } }
+        : { status: 'dying', deathSaves: { ...FRESH_TALLY } };
 }
 
 /**
@@ -1566,6 +1635,7 @@ export function planCombatExchange(state, exchange) {
             companions,
             character: state.character,
             playerHp: healedBaseHp,
+            player: projectPlayerSnapshot({ character: state.character, playerHp: healedBaseHp, partyAtSave: state.party || [], partyAfter: companions }),
         });
         return {
             ok: true,
@@ -1643,6 +1713,14 @@ export function planCombatExchange(state, exchange) {
         companions,
         character: state.character,
         playerHp,
+        player: projectPlayerSnapshot({
+            character: state.character,
+            playerHp,
+            deathSaveNatural: player.deathSaveNatural,
+            deathSaveSkipped: player.deathSaveSkipped,
+            partyAtSave: state.party || [],
+            partyAfter: companions,
+        }),
     });
 
     // Persist standing flanks for the next exchange. Repositioning by the hero
@@ -1741,6 +1819,7 @@ export function planOpeningExchange(state) {
         companions,
         character: state.character,
         playerHp,
+        player: projectPlayerSnapshot({ character: state.character, playerHp, partyAtSave: state.party || [], partyAfter: companions }),
     });
     return {
         ok: true,
@@ -2344,6 +2423,30 @@ export function describeFightResonance(state, result) {
     return `FIGHT MEMORY (private, engine record): ${lines.join(' · ')} Let it show ${when} in ONE beat of their bearing or a single line in their own voice — never a speech, never narrator commentary, never a second mention this fight.`;
 }
 
+/**
+ * The narration prompt's PLAYER line (WOW 2026-09-30): the hero's status
+ * after the exchange and, while dying, the count — so the DM plays the round
+ * over the body knowing what the next die means. A pre-change stored result
+ * (no status) renders the old HP-only line.
+ */
+function describePlayerPostState(player) {
+    const head = `${player.name} — ${player.hp}/${player.maxHp} HP`;
+    switch (player.status) {
+        case 'dying':
+            return `- PLAYER DYING: ${head}; death saves ${describeDeathSaveCount(player.deathSaves)}. Unconscious: cannot act, speak, or be roused without healing.`;
+        case 'stable':
+            return `- PLAYER STABLE: ${head}; three successful death saves — unconscious, no longer dying. Not dead, not awake.`;
+        case 'revived':
+            return `- PLAYER REVIVED: ${head}; a natural-20 death save put them back on their feet — conscious and acting.`;
+        case 'defeated':
+            return `- PLAYER DEFEATED: ${head}; down but alive — a setback, never a death.`;
+        case 'dead':
+            return `- PLAYER DEAD: ${head}; the third failed death save. Dead — not dying, not unconscious, not coming back.`;
+        default:
+            return `- PLAYER: ${head}.`;
+    }
+}
+
 const TELEGRAPH_RULE = 'THE FOE\'S NEXT MOVE IS ON THE PAGE: the passage\'s LAST beat is, for each ALIVE AND ACTIVE foe, its visible next move in the fiction (circling to a companion\'s blind side, nocking another arrow, backing toward the door, lowering the blade), grounded in the health word beside it — a bloodied foe fights like it, a critical foe with no reason to die fighting is on the edge of flight or plea, and the passage says which. That telegraph IS the situation returned to the player.';
 const COST_RULE = 'Let the ending carry its cost: a wound the hero will feel tomorrow, named in the fiction; a companion\'s fall felt by those still standing; what was spent, remembered. Never add damage or alter the tally.';
 
@@ -2357,14 +2460,19 @@ const COST_RULE = 'Let the ending carry its cost: a wound the hero will feel tom
 export function combatNarrationPrompt(result, { cost = null, resonance = null } = {}) {
     const terminalEnd = ['victory', 'defeat', 'escaped'].includes(result.terminal);
     const ongoing = !result.terminal;
+    // The engine terminal stays `defeat` for a dead hero (END_COMBAT's XP and
+    // ledger rules are untouched); the PROMPT says DIED (WOW 2026-09-30).
+    const heroDead = result.postState?.player?.status === 'dead';
     const ending = result.terminal === 'victory'
         ? 'The fight is mechanically won. Narrate the victory and its immediate fictional consequences.'
         : result.terminal === 'defeat'
-            ? 'The player is mechanically defeated. Narrate the setback or collapse without adding more damage.'
+            ? (heroDead
+                ? 'The player has DIED — the third failed death save. Narrate the death plainly and finally; the fight ends here. Do not add damage, a rescue, or a last-moment revival.'
+                : 'The player is mechanically defeated. Narrate the setback or collapse without adding more damage.')
             : result.terminal === 'escaped'
                 ? 'The player has mechanically escaped combat. Narrate the retreat without adding pursuit attacks or XP.'
             : result.terminal === 'dying'
-                ? 'The player remains unconscious and dying. Narrate the danger briefly; do not end combat or invent another attack.'
+                ? 'The player remains unconscious and dying. Narrate this round from the party\'s side — who does what over the body, and what the count means. Do not end combat or invent another attack.'
             : 'COMBAT IS STILL ACTIVE. End with the situation returned to the player for their next decision. Do not narrate victory or the end of the fight.';
     const enemyStates = result.postState?.enemies?.length
         ? result.postState.enemies.map(enemy => {
@@ -2379,9 +2487,7 @@ export function combatNarrationPrompt(result, { cost = null, resonance = null } 
             .map(event => event.remainingHp <= 0
                 ? `- DEFEATED: ${event.target} — 0/${event.maxHp} HP.`
                 : `- ALIVE AND ACTIVE: ${event.target} — ${event.remainingHp}/${event.maxHp} HP.`);
-    const playerState = result.postState?.player
-        ? `- PLAYER: ${result.postState.player.name} — ${result.postState.player.hp}/${result.postState.player.maxHp} HP.`
-        : null;
+    const playerState = result.postState?.player ? describePlayerPostState(result.postState.player) : null;
     const companionStates = (result.postState?.companions || []).map(companion => (companion.hp ?? 0) <= 0
         ? `- COMPANION DOWN: ${companion.name} — 0/${companion.maxHp} HP (unconscious, not dead unless an event says so).`
         : `- COMPANION ALIVE: ${companion.name} — ${companion.hp}/${companion.maxHp} HP.`);

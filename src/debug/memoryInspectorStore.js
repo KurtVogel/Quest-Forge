@@ -19,7 +19,15 @@ let snapshot = {
     lastInjection: null,
     lastScribePass: null,
     lastReflection: null,
+    // Cache telemetry (memory-research M2, 2026-09-30): what each DM call
+    // cost and how much of its prompt the provider served from cache.
+    lastUsage: null,
+    usageHistory: [],
+    providerNotes: [],
 };
+
+/** DM-call usage rows kept for the inspector's trend column. */
+export const USAGE_HISTORY_CAP = 24;
 
 const listeners = new Set();
 
@@ -53,6 +61,9 @@ export function captureInjection({ playerMessage, location, retrieved = [], cura
                 category: memory.category || 'unknown',
                 score: round(memory.score),
                 location: clip(memory.location, 80) || null,
+                // Per-row retrieval hits this session (engine-stamped in
+                // vectorMemory, never a survival rule — M2, 2026-09-30).
+                hits: Number.isFinite(memory.hits) ? memory.hits : null,
             })),
             curated: (curated || []).slice(0, 12).map(card => ({
                 id: card.id || null,
@@ -112,6 +123,44 @@ export function captureReflection({ cadenceId = null, npcsUpdated = [], frontAdv
     });
 }
 
+/**
+ * One DM (or machinery) call's token usage as the provider reported it —
+ * `{ promptTokens, cachedTokens, outputTokens }` from the adapter's `onUsage`
+ * — with the call's lane, provider and model. `cachedShare` is the fraction
+ * of the prompt the provider served from its cache: the number that decides
+ * whether the byte-stable prefix (DECISIONS 2026-07-18) actually caches on
+ * each provider, and on OpenAI (1.25x cache WRITES since GPT-5.6) whether the
+ * volatile tail is a paid write every turn.
+ */
+export function captureUsage({ lane = 'dm', mode = 'standard', provider = null, model = null, promptTokens = null, cachedTokens = null, outputTokens = null, thoughtTokens = null, promptChars = null } = {}) {
+    const prompt = Number.isFinite(promptTokens) ? promptTokens : null;
+    const cached = Number.isFinite(cachedTokens) ? cachedTokens : null;
+    const row = {
+        at: Date.now(),
+        lane: clip(lane, 20) || 'dm',
+        mode: clip(mode, 40) || 'standard',
+        provider: clip(provider, 40) || null,
+        model: clip(model, 80) || null,
+        promptTokens: prompt,
+        cachedTokens: cached,
+        outputTokens: Number.isFinite(outputTokens) ? outputTokens : null,
+        thoughtTokens: Number.isFinite(thoughtTokens) ? thoughtTokens : null,
+        promptChars: Number.isFinite(promptChars) ? promptChars : null,
+        cachedShare: prompt && cached !== null ? Number((cached / prompt).toFixed(3)) : null,
+    };
+    publish({
+        lastUsage: row,
+        usageHistory: [...snapshot.usageHistory, row].slice(-USAGE_HISTORY_CAP),
+    });
+}
+
+/** A provider-side note the player should be able to read (e.g. the xAI affinity header's preflight was refused). Deduped by text. */
+export function captureProviderNote(text) {
+    const note = clip(text, 240);
+    if (!note || snapshot.providerNotes.includes(note)) return;
+    publish({ providerNotes: [...snapshot.providerNotes, note].slice(-8) });
+}
+
 export function getInspectorSnapshot() {
     return snapshot;
 }
@@ -123,7 +172,7 @@ export function subscribeInspector(listener) {
 
 /** Test helper: return the store to its initial empty state. */
 export function resetInspector() {
-    publish({ lastInjection: null, lastScribePass: null, lastReflection: null });
+    publish({ lastInjection: null, lastScribePass: null, lastReflection: null, lastUsage: null, usageHistory: [], providerNotes: [] });
 }
 
 /** Panel visibility: explicit Settings toggle, or a ?debugMemory=1 URL flag. */

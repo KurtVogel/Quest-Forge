@@ -81,9 +81,16 @@ export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 90_000;
  * @param {number} [options.maxRetries] - Retries after the first attempt
  *   (default 2; 0 = one attempt, for a call the player is waiting on).
  * @param {AbortSignal} [options.signal] - External cancel; never retried.
+ * @param {function} [options.onUsage] - Receives `{ promptTokens, cachedTokens,
+ *   outputTokens }` once the provider reports usage (2026-09-30 cache
+ *   telemetry); the reply itself stays a string.
+ * @param {string} [options.conversationId] - Cache-affinity id for providers
+ *   that route by conversation (xAI `x-grok-conv-id`); ignored elsewhere.
+ * @param {function} [options.onHeaderRejected] - Called with the header names
+ *   when a provider's edge refused the affinity header's preflight.
  * @returns {Promise<string>} LLM response text
  */
-export async function sendMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, maxRetries = DEFAULT_SEND_MAX_RETRIES, signal }) {
+export async function sendMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, maxRetries = DEFAULT_SEND_MAX_RETRIES, signal, onUsage, conversationId, onHeaderRejected }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
@@ -98,7 +105,7 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
         signal?.addEventListener('abort', onExternalAbort, { once: true });
         const stallTimer = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            return await p.send({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, signal: controller.signal });
+            return await p.send({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, signal: controller.signal, onUsage, conversationId, onHeaderRejected });
         } catch (error) {
             const stalled = error?.name === 'AbortError' && !signal?.aborted;
             if (signal?.aborted) throw error; // caller cancelled — never retry
@@ -130,7 +137,7 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
  * @param {AbortSignal} [options.signal] - Optional abort signal
  * @returns {Promise<string>} Complete response text
  */
-export async function streamMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS }) {
+export async function streamMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS, onUsage, conversationId, onHeaderRejected }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
@@ -154,7 +161,7 @@ export async function streamMessage({ provider, apiKey, model, systemPrompt, mes
     };
     armIdleTimer();
     try {
-        const result = await p.stream({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk: guardedOnChunk, signal: controller.signal, temperature });
+        const result = await p.stream({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk: guardedOnChunk, signal: controller.signal, temperature, onUsage, conversationId, onHeaderRejected });
         if (import.meta.env.DEV) {
             console.log('[LLM Adapter] Full response received, length:', result.length);
             console.log('[LLM Adapter] Contains ```json:', result.includes('```json'));

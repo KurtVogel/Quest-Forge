@@ -42,7 +42,49 @@ export const PROMPT_CHAR_BUDGET = 160000;
 /**
  * Build the complete system prompt for the LLM.
  */
-export function buildSystemPrompt({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, narrationOnly = false }) {
+export function buildSystemPrompt(options) {
+    const namedParts = buildSystemPromptParts(options);
+    const promptText = namedParts.map(p => p.text).join('\n\n');
+
+    // Size observability (dev only; TEST excluded so vitest output stays clean):
+    // one compact line per build — total chars plus the top 5 largest blocks.
+    // A mature campaign can stack a huge prompt without anyone noticing; this
+    // line and PROMPT_CHAR_BUDGET's tripwire test are how growth gets seen.
+    if (import.meta.env?.DEV && !import.meta.env?.TEST) {
+        const top = [...namedParts]
+            .sort((a, b) => b.text.length - a.text.length)
+            .slice(0, 5)
+            .map(p => `${p.name}=${p.text.length}`)
+            .join(', ');
+        console.log(`[PromptBuilder] system prompt: ${promptText.length} chars (budget ${PROMPT_CHAR_BUDGET}); largest blocks: ${top}`);
+    }
+
+    return promptText;
+}
+
+/**
+ * The prompt as named blocks, in push order — `buildSystemPrompt` joins them.
+ * Exported for the block-size pins (`promptBlocks.size.test.js`, 2026-09-30):
+ * every dynamic block has a ceiling from its inputs' caps, and a test that can
+ * read the blocks by name can pin each one instead of only the total.
+ */
+export function buildSystemPromptParts({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, narrationOnly = false, intentOnly = false, storyMemoryPool = null }) {
+    // `intentOnly` (2026-09-30 prompt-building Lap-3 P2): the combat INTENT
+    // call translates one committed action into a bounded combat_exchange
+    // whose targets are enemy ids and whose actions are the slot whitelist —
+    // it carried ~38k dynamic chars (the narration set above PLUS KNOWN NPCs,
+    // the place line, and recent rulings) for ~300 bytes of JSON every round.
+    // It keeps character, party, inventory, DM REMINDERS (the death_save slot
+    // and the safety block live there), and the full combat block.
+    // `storyMemoryPool` (2026-09-30 story-memory Lap-3 P1): `storyMemory` is
+    // the CURATED list to SHOW (DRAMATIC CALLBACKS, ≤5 cards); an NPC's open
+    // thread is a LOOKUP (the newest active promise linked to them) and must
+    // read the whole pool — fed the curated five, Oren's promise vanished
+    // whenever louder cards about someone else outscored it, and for 8
+    // messages right after the DM paid it off. Callers that pass only
+    // `storyMemory` (the builder-level tests) keep the old single list.
+    const threadPool = Array.isArray(storyMemoryPool) ? storyMemoryPool : (storyMemory || []);
+    const lean = narrationOnly || intentOnly;
     // `narrationOnly` (2026-09-23 combat-exchange P2): the combat narration
     // call retells RESOLVED EVENTS the engine already committed — it needs the
     // combat block, the character/party, KNOWN NPCs present, and tone, and
@@ -229,7 +271,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
 
     // Party / Companions
     if (party && party.length > 0) {
-        parts.push(buildPartyBlock(party, npcs || [], storyMemory || [], { messages: Array.isArray(messages) ? messages : null, messageCount: messageCount || 0 }), 'party');
+        parts.push(buildPartyBlock(party, npcs || [], threadPool, { messages: Array.isArray(messages) ? messages : null, messageCount: messageCount || 0 }), 'party');
     }
 
     // Inventory
@@ -238,7 +280,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Active quests
-    if (quests && quests.length > 0 && !narrationOnly) {
+    if (quests && quests.length > 0 && !lean) {
         const activeQuests = quests.filter(q => q.status === 'active');
         if (activeQuests.length > 0) {
             parts.push(buildQuestBlock(activeQuests), 'quests');
@@ -254,13 +296,13 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     }
 
     // Recent no-dice check rulings — table history the DM must not re-litigate.
-    if (recentRulings && recentRulings.length > 0) {
+    if (recentRulings && recentRulings.length > 0 && !intentOnly) {
         parts.push(buildRecentRulingsBlock(recentRulings), 'recentRulings');
     }
 
     // Canonical world facts — these NEVER get compressed or forgotten
     const liveFacts = liveWorldFacts(worldFacts);
-    if (liveFacts.length > 0 && !narrationOnly) {
+    if (liveFacts.length > 0 && !lean) {
         parts.push(buildWorldFactsBlock(liveFacts), 'worldFacts');
     }
 
@@ -275,10 +317,10 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
         : null;
     // An empty journal skips SESSION HISTORY and LOCATION TRANSITION HISTORY
     // (both derive from it) while the place card and KNOWN NPCs still render.
-    const journalContext = buildJournalContext(narrationOnly ? [] : (journal || []), npcs || [], currentLocation, {
+    const journalContext = intentOnly ? '' : buildJournalContext(narrationOnly ? [] : (journal || []), npcs || [], currentLocation, {
         presentNames,
         messages: Array.isArray(messages) ? messages : null,
-        storyMemory: storyMemory || [],
+        storyMemory: threadPool,
         locations: Array.isArray(locations) ? locations : [],
     });
     if (journalContext) {
@@ -345,22 +387,7 @@ export function buildSystemPrompt({ character, inventory, quests, rollHistory, p
     // trailing-JSON habit lives on recency — keep a short reminder last.
     parts.push(FORMAT_REMINDER, 'formatReminder');
 
-    const promptText = namedParts.map(p => p.text).join('\n\n');
-
-    // Size observability (dev only; TEST excluded so vitest output stays clean):
-    // one compact line per build — total chars plus the top 5 largest blocks.
-    // A mature campaign can stack a huge prompt without anyone noticing; this
-    // line and PROMPT_CHAR_BUDGET's tripwire test are how growth gets seen.
-    if (import.meta.env?.DEV && !import.meta.env?.TEST) {
-        const top = [...namedParts]
-            .sort((a, b) => b.text.length - a.text.length)
-            .slice(0, 5)
-            .map(p => `${p.name}=${p.text.length}`)
-            .join(', ');
-        console.log(`[PromptBuilder] system prompt: ${promptText.length} chars (budget ${PROMPT_CHAR_BUDGET}); largest blocks: ${top}`);
-    }
-
-    return promptText;
+    return namedParts;
 }
 
 const CORE_INSTRUCTIONS = `# YOU ARE THE DUNGEON MASTER

@@ -72,7 +72,13 @@ describe('death-save mirror reads a typed tally', () => {
         rollQueue.push(5);
         const { results, dispatch } = run([{ type: 'death_save' }], { character: { ...dyingChar, deathSaves: { successes: '2', failures: '1' } } });
         expect(results[0]).toMatchObject({ outcome: 'failure', failures: 2, successes: 2 });
-        expect(messagesFrom(dispatch)).not.toContain('dies');
+        // The shared countdown line names the death that is one failure away
+        // ("One more and X dies." — WOW 2026-09-30); what must never appear is
+        // the death itself.
+        const line = messagesFrom(dispatch);
+        expect(line).toContain('failure (2/3). One more and');
+        expect(line).not.toContain('THE THIRD FAILURE');
+        expect(line).not.toMatch(/is dead|character dies/i);
     });
 
     it('a negative tally clamps to zero before the die applies', () => {

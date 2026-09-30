@@ -16,6 +16,8 @@ import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX, MESSAGE_CONTENT
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { canonicalEnemyId, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES, normalizeCombatExchange, sanitizeFightTally } from '../../engine/combatExchange.js';
+import { DEATH_SAVE_OUTCOMES, PLAYER_SNAPSHOT_STATUSES } from '../../engine/deathSaves.js';
+import { normalizeDeathSaves } from '../../engine/rules.js';
 import { archiveDescriptiveLabels, dedupeNpcRoster, healPromotedStoryMemoryTwins, migrateLegacyNpc } from '../../engine/npcRoster.js';
 import {
     ensureCompanionRosterRecord,
@@ -186,6 +188,15 @@ function sanitizeStoredExchangeEvent(event) {
         typed.success ??= false;
     } else if (typed.type === 'death_save') {
         typed.natural ??= 0;
+        // The count on the page (WOW 2026-09-30): outcome whitelisted, tally
+        // through the one death-save normalizer; a junk outcome renders the
+        // legacy bare line, never a countdown built on `undefined`.
+        if (DEATH_SAVE_OUTCOMES.includes(event.outcome)) {
+            const saves = normalizeDeathSaves({ successes: event.successes, failures: event.failures });
+            typed.outcome = event.outcome;
+            typed.successes = saves.successes;
+            typed.failures = saves.failures;
+        }
     }
     return typed;
 }
@@ -207,6 +218,15 @@ function sanitizeStoredExchangeResult(result) {
                     name: cleanTextField(result.postState.player.name, EXCHANGE_NAME_MAX) || 'Player',
                     hp: Math.trunc(finiteOr(result.postState.player.hp, 0)),
                     maxHp: Math.max(1, Math.trunc(finiteOr(result.postState.player.maxHp, 1))),
+                    // The hero's post-exchange status + tally (WOW 2026-09-30):
+                    // status whitelisted, tally typed; a junk or pre-change
+                    // snapshot carries neither and renders the HP-only line.
+                    ...(PLAYER_SNAPSHOT_STATUSES.includes(result.postState.player.status)
+                        ? {
+                            status: result.postState.player.status,
+                            deathSaves: normalizeDeathSaves(result.postState.player.deathSaves),
+                        }
+                        : {}),
                 }
                 : null,
             enemies: Array.isArray(result.postState.enemies)

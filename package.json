@@ -13,6 +13,7 @@
     "test:play": "node scripts/test_play.cjs",
     "eval:combat": "node scripts/combatPacingEval.mjs",
     "eval:memory": "node scripts/memoryTuningPlaytest.cjs",
+    "eval:commitments": "node scripts/commitmentProbe.cjs",
     "eval:turns": "node scripts/turnGrammarEval.mjs",
     "eval:authority": "node scripts/playerAuthorityEval.mjs",
     "eval:consequence": "node scripts/rollConsequenceEval.mjs",

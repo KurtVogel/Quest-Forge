@@ -712,7 +712,7 @@ export const CATEGORY_BOOST = {
  *   QUERY embed fails (a memory-less turn) with the provider's failure reason
  *   (`{ status, message, timedOut }`) or null.
  */
-export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55, { presenceText = '', onUnavailable = null } = {}) {
+export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55, { presenceText = '', onUnavailable = null, atMessage = null } = {}) {
     if (!apiKey || !query) return [];
     // A cold seed still embedding: wait for the store to be whole rather than
     // answer from the slice that happens to have landed.
@@ -780,7 +780,17 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55,
         chosen.push(candidate);
     }
 
-    return chosen.map(m => ({ text: m.text, category: m.category, score: m.score, ...(m.location && { location: m.location }) }));
+    // Retrieval telemetry (memory-research M2, 2026-09-30): a per-row hit
+    // count and the last message it was retrieved for, stamped on the
+    // in-memory store row — read by the inspector, never a survival rule,
+    // never persisted (the cache store is written by the batch, not per turn).
+    for (const m of chosen) {
+        const row = memoryStore.find(entry => entry.text === m.text && entry.category === m.category);
+        if (!row) continue;
+        row.hits = (Number.isFinite(row.hits) ? row.hits : 0) + 1;
+        if (Number.isFinite(atMessage)) row.lastHitMessage = atMessage;
+    }
+    return chosen.map(m => ({ text: m.text, category: m.category, score: m.score, hits: (Number.isFinite(m.hits) ? m.hits : 0) + 1, ...(m.location && { location: m.location }) }));
 }
 
 /**

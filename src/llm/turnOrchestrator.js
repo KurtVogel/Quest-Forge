@@ -36,7 +36,7 @@ import { addMemory, findSubjectsInText, flushMemoryQueue, queueMemory, retrieveR
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
 import { describeMemoryUnavailable, getMachineryGeminiKey } from './machinery.js';
 import { curateStoryMemory, formatSecrecyTag } from '../engine/storyMemory.js';
-import { captureInjection } from '../debug/memoryInspectorStore.js';
+import { captureInjection, captureProviderNote, captureUsage } from '../debug/memoryInspectorStore.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from '../components/Chat/turnVisibility.js';
 import { buildNudgePrompt, detectMissingEventsCue, extractNudgeEventFields } from '../components/Chat/missingEventsNudge.js';
 import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../engine/roleplayCheck.js';
@@ -203,10 +203,14 @@ export function createTurnRunner({
     /**
      * Build the system prompt from current state, with optional RAG memories injected.
      */
-    const buildCurrentSystemPrompt = (retrievedMemories = [], storyMemory = [], recallRecord = '', { narrationOnly = false } = {}) => {
+    const buildCurrentSystemPrompt = (retrievedMemories = [], storyMemory = [], recallRecord = '', { narrationOnly = false, intentOnly = false } = {}) => {
         const s = getState();
         return buildSystemPrompt({
             narrationOnly,
+            intentOnly,
+            // The whole pool for the open-thread LOOKUP (2026-09-30 P1); the
+            // curated `storyMemory` below is only what the callbacks block SHOWS.
+            storyMemoryPool: s.storyMemory || [],
             recallRecord,
             character: s.character,
             inventory: s.inventory,
@@ -334,6 +338,7 @@ export function createTurnRunner({
                 : buildPresenceText(s.messages);
             retrievedMemories = await retrieveRelevant(machineryKey, sceneContext, topN, minScore, {
                 presenceText,
+                atMessage: (s.messages || []).length,
                 // A failed query embed is a memory-LESS turn, said out loud
                 // (2026-09-17 vector-memory P2): infrastructure line, so the
                 // chronicler never retells it and the DM window never sees it.
@@ -369,6 +374,9 @@ export function createTurnRunner({
         // / history / inventory blocks are dead weight there (2026-09-23 P2).
         const baseSystemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories, recallRecord, {
             narrationOnly: !!opts.combatNarration,
+            // The intent call is the round's other half (2026-09-30 P2): it
+            // gets the projection its JSON-only job needs, not the ordinary turn's.
+            intentOnly: !!opts.combatIntentOnly,
         });
         let systemPrompt = baseSystemPrompt;
         if (opts.combatIntentOnly) {
@@ -394,6 +402,18 @@ Translate the player's committed action into the single bounded combat_exchange 
             systemPrompt,
             messageHistory,
             userMessage,
+            // Cache telemetry (memory-research M2, 2026-09-30): the provider's
+            // own prompt / cached-token counts per DM call, into the inspector.
+            conversationId: typeof s.session?.id === 'string' ? s.session.id : undefined,
+            onUsage: (usage) => captureUsage({
+                ...usage,
+                lane: 'dm',
+                mode: opts.combatIntentOnly ? 'combat-intent' : (opts.combatNarration ? 'combat-narration' : (opts.tableTalk ? 'table-talk' : 'standard')),
+                provider: s.settings.llmProvider,
+                model: s.settings.model,
+                promptChars: systemPrompt.length,
+            }),
+            onHeaderRejected: (names) => captureProviderNote(`${s.settings.llmProvider} refused the ${names.join(', ')} header at the CORS preflight — sent without it (no per-server cache affinity).`),
             onChunk: (chunk) => {
                 if (firstChunkAt === null) firstChunkAt = performance.now();
                 streamBuffer += chunk;

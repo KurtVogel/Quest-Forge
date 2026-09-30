@@ -441,6 +441,12 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex) {
  *   `presentNames` (roster names found in the scene text) reserve slots ahead
  *   of the score ranking; `messages` feeds the conversational recency term.
  */
+/** KNOWN NPCs line opener budget — the party line's cap for the same fields. */
+export const KNOWN_NPC_NOTES_MAX = 300;
+/** SESSION HISTORY: consequences shown per entry, and the clamp on each. */
+export const SESSION_HISTORY_CONSEQUENCES = 3;
+export const SESSION_HISTORY_CONSEQUENCE_CHARS = 150;
+
 export function buildJournalContext(journal, npcs, currentLocation, { presentNames = null, messages = null, storyMemory = [], locations = [] } = {}) {
     const parts = [];
 
@@ -466,8 +472,15 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
             let entry = `Entry ${journal.length - recentEntries.length + i + 1}: ${e.summary}`;
             // Array belt for legacy entries persisted before normalizeJournalSummary —
             // a string-valued consequences here crashed the prompt build every turn.
+            // Newest 3 consequences, 150 chars each (2026-09-30 prompt-building
+            // Lap-3 P2): the block printed 8 × 300 × 3 = 7,200 chars of
+            // consequences beside a 2,000-char summary that already covers
+            // the beat — 11.3k measured; the record keeps every consequence.
             if (Array.isArray(e.consequences) && e.consequences.length) {
-                entry += ` [Consequences: ${e.consequences.join('; ')}]`;
+                const shown = e.consequences.slice(-SESSION_HISTORY_CONSEQUENCES)
+                    .map(c => clampText(c, SESSION_HISTORY_CONSEQUENCE_CHARS))
+                    .filter(Boolean);
+                if (shown.length) entry += ` [Consequences: ${shown.join('; ')}]`;
             }
             return entry;
         }).join('\n');
@@ -537,7 +550,12 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
             // on never re-guessing them — a goblin must never drift human.
             const identity = [n.species, n.gender, n.disposition].filter(Boolean).join(', ');
             const disp = identity ? ` (${identity})` : '';
-            const notes = n.lastNotes || n.notes || '';
+            // The line's opener was the block's one unclamped field (2026-09-30
+            // prompt-building Lap-3 P2): `lastNotes` rides at the 600-char dossier
+            // clamp while every sibling renders at 180, so one maxed line ran
+            // 3,177 chars and eight of them cost ~3.4k chars per call. The
+            // party line caps the same fields at 300; the same budget here.
+            const notes = briefNpcFieldForPrompt(n.lastNotes || n.notes || '', KNOWN_NPC_NOTES_MAX);
             // Show the latest relationship shift so the DM keeps a changed bond
             // consistent — a friend who turned on the player should stay turned.
             // Only previous → current: the full chain burned tokens/card space

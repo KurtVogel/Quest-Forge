@@ -14,10 +14,11 @@
  */
 
 import { rollWithModifier } from './dice.ts';
-import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, normalizeDeathSaves, canonicalRollKey, SKILL_ABILITIES } from './rules.js';
+import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, canonicalRollKey, SKILL_ABILITIES } from './rules.js';
 import { validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
 import { applyUncannyDodge, conditionAwareAttackModifiers, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
 import { isCompanionActive, isLowLevelSolo } from './combatExchange.js';
+import { deathSaveLine, judgeDeathSave } from './deathSaves.js';
 
 const ABILITY_NAMES = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
 
@@ -775,40 +776,22 @@ function resolveDeathSave(character, dispatch, party = []) {
     dispatch({ type: 'ADD_ROLL', payload: result });
 
     const die = result.rolls[0];
-    // Same typed tally the reducer reads, so the chat line and the DM summary
-    // can never disagree with DEATH_SAVE_RESULT (a string tally used to make
-    // both announce a death on the first failed save).
-    const prev = normalizeDeathSaves(character.deathSaves);
-    let successes = prev.successes;
-    let failures = prev.failures;
-    let outcome;
-    if (die === 20) {
-        outcome = 'revived';
-    } else if (die >= 10) {
-        successes += 1;
-        outcome = successes >= 3 ? 'stable' : 'success';
-    } else {
-        failures += die === 1 ? 2 : 1;
-        outcome = failures >= 3 ? 'dead' : 'failure';
-    }
+    // THE one judge and THE one line (engine/deathSaves.js, WOW 2026-09-30):
+    // the same typed tally DEATH_SAVE_RESULT reads, so the chat line and the
+    // DM summary can never disagree with the reducer (a string tally used to
+    // make both announce a death on the first failed save), and the same
+    // wording the combat exchange line uses — the count reads the same on
+    // both sides of a fight.
+    const judged = judgeDeathSave(character.deathSaves, die);
 
     dispatch({ type: 'DEATH_SAVE_RESULT', payload: { die } });
 
-    const tally = `(successes ${Math.min(successes, 3)}/3, failures ${Math.min(failures, 3)}/3)`;
-    const outcomeText = {
-        revived: '**Natural 20!** You surge back to consciousness with 1 HP!',
-        stable: '**Stabilized.** You are unconscious but no longer dying.',
-        success: `**Success.** ${tally}`,
-        failure: `${die === 1 ? '**Natural 1 — two failures!**' : '**Failure.**'} ${tally}`,
-        dead: '**Third failure. Your character dies.**',
-    }[outcome];
-
     dispatch({
         type: 'ADD_MESSAGE',
-        payload: { role: 'system', content: `**Death Saving Throw**: Rolled **${die}** — ${outcomeText}`, isDeathEvent: outcome === 'dead' },
+        payload: { role: 'system', content: deathSaveLine(judged, character.name), isDeathEvent: judged.outcome === 'dead' },
     });
 
-    return { type: 'death_save', rolled: die, outcome, successes: Math.min(successes, 3), failures: Math.min(failures, 3) };
+    return { type: 'death_save', rolled: die, outcome: judged.outcome, successes: judged.successes, failures: judged.failures };
 }
 
 // One formatter for the player d20 outcome line — resolveSinglePlayerAttackRoll

@@ -169,7 +169,32 @@ function formatMessages(systemPrompt, messageHistory, userMessage, temperature, 
 /**
  * Send a non-streaming message to Gemini.
  */
-export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, signal }) {
+/**
+ * Token usage in the adapter's one shape (2026-09-30 cache telemetry) from a
+ * Gemini `usageMetadata`: `promptTokenCount`, `cachedContentTokenCount` (the
+ * implicit-cache hit — the app never creates an explicit cache), and
+ * `candidatesTokenCount` (+ `thoughtsTokenCount` as `thoughtTokens`).
+ */
+export function normalizeGeminiUsage(usageMetadata) {
+    if (!usageMetadata || typeof usageMetadata !== 'object') return null;
+    const num = (value) => (Number.isFinite(value) ? value : null);
+    const promptTokens = num(usageMetadata.promptTokenCount);
+    if (promptTokens === null) return null;
+    return {
+        promptTokens,
+        cachedTokens: num(usageMetadata.cachedContentTokenCount) ?? 0,
+        outputTokens: num(usageMetadata.candidatesTokenCount),
+        thoughtTokens: num(usageMetadata.thoughtsTokenCount),
+    };
+}
+
+function reportUsage(onUsage, usageMetadata) {
+    if (typeof onUsage !== 'function') return;
+    const usage = normalizeGeminiUsage(usageMetadata);
+    if (usage) onUsage(usage);
+}
+
+export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, signal, onUsage }) {
     const url = `${GEMINI_API_BASE}/${model}:generateContent`;
     const body = formatMessages(systemPrompt, messageHistory, userMessage, temperature, { thinkingBudget, maxOutputTokens });
 
@@ -191,6 +216,7 @@ export async function sendGeminiMessage({ apiKey, model, systemPrompt, messageHi
         throw promptBlockedError(blockReason, data);
     }
     assertCompleteResponse(candidate?.finishReason);
+    reportUsage(onUsage, data.usageMetadata);
     const text = extractCandidateText(candidate);
     if (!text) {
         throw new Error('No response generated. The model may have been blocked or returned empty.');
@@ -451,7 +477,7 @@ export const MAX_REJECTED_EMBED_REQUESTS = 12;
 /**
  * Stream a message from Gemini.
  */
-export async function streamGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature }) {
+export async function streamGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, onUsage }) {
     const url = `${GEMINI_API_BASE}/${model}:streamGenerateContent?alt=sse`;
     const body = formatMessages(systemPrompt, messageHistory, userMessage, temperature);
 
@@ -470,8 +496,11 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
     let finishReason = null;
     let blockReason = null;
     let blockedPayload = null;
+    let usageMetadata = null;
 
     await readSseStream(response, (data) => {
+        // Every chunk may carry usageMetadata; the last one is the whole call's.
+        if (data.usageMetadata && typeof data.usageMetadata === 'object') usageMetadata = data.usageMetadata;
         const reason = promptBlockReason(data);
         if (reason) {
             blockReason = reason;
@@ -490,5 +519,6 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
         throw promptBlockedError(blockReason, blockedPayload);
     }
     assertStreamComplete(finishReason, assertCompleteResponse);
+    reportUsage(onUsage, usageMetadata);
     return fullText;
 }

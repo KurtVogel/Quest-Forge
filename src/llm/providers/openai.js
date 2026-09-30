@@ -77,6 +77,9 @@ const { send: sendRaw, stream: streamRaw } = makeOpenAICompatProvider({
     // Reasoning models (gpt-5 family, o-series) 400 on any non-default temperature.
     temperatureUnsupported: isReasoningModel,
     maxOutputTokensFor: (model) => (isReasoningModel(model) ? REASONING_MAX_TOKENS : DEFAULT_MAX_TOKENS),
+    // The final stream chunk carries `usage` (cached_tokens included) only
+    // with stream_options.include_usage (2026-09-30 cache telemetry).
+    streamUsage: true,
 });
 
 /** Send a non-streaming message to OpenAI. */

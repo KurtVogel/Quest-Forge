@@ -15,7 +15,7 @@ import { getBackgroundConfig } from './machinery.js';
 import { bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
 import { isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { tryParseDirectorJson } from './directorUtils.js';
-import { captureReflection, captureScribePass } from '../debug/memoryInspectorStore.js';
+import { captureReflection, captureScribePass, captureUsage } from '../debug/memoryInspectorStore.js';
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
 import { getKnownSpells, isSpellcaster } from '../engine/spellcasting.js';
 import { containment, tokenSet } from '../engine/textMatch.js';
@@ -435,6 +435,8 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
     try {
         const response = await sendMessage({
             ...background,
+            // The write path's own cost beside what it wrote (M2, 2026-09-30).
+            onUsage: (usage) => captureUsage({ ...usage, lane: 'scribe', mode: 'extraction', provider: 'gemini', model: background.model }),
             systemPrompt: SCRIBE_SYSTEM_PROMPT
                 + (lootAudit ? LOOT_AUDIT_RULES : '')
                 + (castAudit ? CAST_AUDIT_RULES : ''),

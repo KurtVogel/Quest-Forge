@@ -101,6 +101,37 @@ describe('LOAD_GAME stored exchange result typing (2026-09-11 combat-exchange P1
         expect(result.postState.companions).toEqual([{ id: 'c1', name: 'Companion', hp: 0, maxHp: 10, status: 'healthy' }]);
     });
 
+    it('types the death-save count (WOW 2026-09-30): status whitelisted, tally normalized, junk outcome dropped, renderers never read undefined', () => {
+        const stored = {
+            exchangeId: 'exchange-6', kind: 'exchange', round: 6, terminal: 'dying',
+            events: [
+                { type: 'death_save', natural: 4, actor: 'Survivor', outcome: 'failure', successes: '1', failures: '2', extra: 'junk' },
+                { type: 'death_save', natural: 13, outcome: 'bogus', successes: 1, failures: 1 },
+            ],
+            postState: {
+                player: { name: 'Survivor', hp: 0, maxHp: 20, status: 'dying', deathSaves: { successes: '1', failures: -3 }, junk: true },
+                enemies: [{ name: 'Cave-Worg', hp: 9, maxHp: 32, status: 'active', conditions: [] }],
+                companions: [],
+            },
+        };
+        const next = load({ active: true, phase: 'awaiting_narration', enemies: [worg], turnOrder: [{ type: 'player', name: 'Survivor', initiative: 15 }], round: 6, lastExchangeResult: stored });
+        const result = next.combat.lastExchangeResult;
+        expect(result.events[0]).toEqual({ type: 'death_save', natural: 4, actor: 'Survivor', outcome: 'failure', successes: 1, failures: 2 });
+        expect(result.events[1]).toEqual({ type: 'death_save', natural: 13 });
+        expect(result.postState.player).toEqual({ name: 'Survivor', hp: 0, maxHp: 20, status: 'dying', deathSaves: { successes: 1, failures: 0 } });
+        const prompt = combatNarrationPrompt(result);
+        expect(prompt).not.toContain('undefined');
+        expect(prompt).toContain('- PLAYER DYING: Survivor — 0/20 HP; death saves 1 success / 0 failures — three more failures kill.');
+        expect(prompt).toContain('**Death Saving Throw:** natural **4** — failure (2/3). One more and Survivor dies.');
+        expect(prompt).toContain('**Death Saving Throw:** natural **13**.');
+
+        const junkStatus = load({ active: true, phase: 'awaiting_narration', enemies: [worg], turnOrder: [{ type: 'player', name: 'Survivor', initiative: 15 }], round: 6, lastExchangeResult: {
+            ...stored, postState: { ...stored.postState, player: { name: 'Survivor', hp: 0, maxHp: 20, status: 'zombie', deathSaves: { successes: 3, failures: 3 } } },
+        } });
+        expect(junkStatus.combat.lastExchangeResult.postState.player).toEqual({ name: 'Survivor', hp: 0, maxHp: 20 });
+        expect(combatNarrationPrompt(junkStatus.combat.lastExchangeResult)).toContain('- PLAYER: Survivor — 0/20 HP.');
+    });
+
     it('the narration prompt builds from the healed result with no "[object Object]" and a bounded size', () => {
         const next = load({ active: true, phase: 'awaiting_narration', enemies: [worg], turnOrder: [{ type: 'player', name: 'Survivor', initiative: 15 }], round: 5, lastExchangeResult: hostileResult });
         let prompt;

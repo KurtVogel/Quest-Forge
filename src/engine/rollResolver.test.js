@@ -193,6 +193,20 @@ describe('death saves', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'DEATH_SAVE_RESULT', payload: { die: 15 } });
     });
 
+    it('posts THE shared death-save line — the count on the page (WOW 2026-09-30)', () => {
+        const lineOf = dispatch => dispatch.mock.calls.map(([a]) => a).find(a => a.type === 'ADD_MESSAGE' && String(a.payload?.content).startsWith('**Death Saving Throw:**'));
+        rollQueue.push(4);
+        const failed = run([{ type: 'death_save' }], { ...dyingChar, name: 'Astra', deathSaves: { successes: 0, failures: 1 } });
+        expect(lineOf(failed.dispatch).payload).toMatchObject({ role: 'system', content: '**Death Saving Throw:** natural **4** — failure (2/3). One more and Astra dies.', isDeathEvent: false });
+        rollQueue.push(13);
+        const succeeded = run([{ type: 'death_save' }], { ...dyingChar, name: 'Astra' });
+        expect(lineOf(succeeded.dispatch).payload.content).toBe('**Death Saving Throw:** natural **13** — success (1/3). Two more and Astra is stable.');
+        rollQueue.push(1);
+        const died = run([{ type: 'death_save' }], { ...dyingChar, name: 'Astra', deathSaves: { successes: 1, failures: 1 } });
+        expect(lineOf(died.dispatch).payload).toMatchObject({ content: '**Death Saving Throw:** natural **1** — THE THIRD FAILURE. Astra dies.', isDeathEvent: true });
+        expect(formatRollSummary(died.results)).toContain('THE PLAYER CHARACTER IS DEAD');
+    });
+
     it('below 10 is a failure; natural 1 counts twice', () => {
         rollQueue.push(7);
         expect(run([{ type: 'death_save' }], dyingChar).results[0]).toMatchObject({ outcome: 'failure', failures: 1 });

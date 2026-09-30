@@ -51,7 +51,7 @@ export default function MemoryInspector({ isOpen, onClose }) {
 
     if (!isOpen) return null;
 
-    const { lastInjection, lastScribePass, lastReflection } = captured;
+    const { lastInjection, lastScribePass, lastReflection, lastUsage, usageHistory = [], providerNotes = [] } = captured;
     const messageCount = (state.messages || []).length;
     const heat = computeRecentHeat(state);
     const directive = state.worldTempo?.directive || null;
@@ -65,6 +65,15 @@ export default function MemoryInspector({ isOpen, onClose }) {
         acc[card.type] = (acc[card.type] || 0) + 1;
         return acc;
     }, {});
+    // The pool by status (2026-09-30): the story-card pool has no ceiling by
+    // design — this count is how we learn whether one is ever needed.
+    const cardStatusCounts = cards.reduce((acc, card) => {
+        const status = card?.status || 'active';
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+    }, {});
+    const formatTokens = (value) => (Number.isFinite(value) ? value.toLocaleString() : '—');
+    const describeUsage = (row) => `${row.mode} · ${row.provider || '?'}${row.model ? ` ${row.model}` : ''}: prompt ${formatTokens(row.promptTokens)} tokens, cached ${formatTokens(row.cachedTokens)}${row.cachedShare !== null ? ` (${Math.round(row.cachedShare * 100)}%)` : ''}, output ${formatTokens(row.outputTokens)}${Number.isFinite(row.thoughtTokens) ? ` (+${formatTokens(row.thoughtTokens)} thinking)` : ''}`;
     const fronts = state.fronts || [];
     const journal = state.journal || [];
 
@@ -118,6 +127,7 @@ export default function MemoryInspector({ isOpen, onClose }) {
                                                 <span className="mi-meta">
                                                     <ScoreTag value={memory.score} />
                                                     {memory.location && ` · at ${memory.location}`}
+                                                    {Number.isFinite(memory.hits) && ` · hits ${memory.hits}`}
                                                 </span>
                                             </li>
                                         ))}
@@ -128,11 +138,41 @@ export default function MemoryInspector({ isOpen, onClose }) {
                     </details>
 
                     <details>
+                        <summary>Call cost &amp; cache {lastUsage ? `— last DM call cached ${lastUsage.cachedShare !== null ? `${Math.round(lastUsage.cachedShare * 100)}%` : 'n/a'} of ${formatTokens(lastUsage.promptTokens)} prompt tokens` : '(no call reported usage yet)'}</summary>
+                        <div className="mi-section">
+                            <p className="mi-hint">
+                                The provider's own counts per call. "cached" is what it served from its prompt cache — the byte-stable
+                                prefix should show here on every provider; a low share on a long campaign means the cache is not
+                                engaging (Gemini implicit ≥ 4k tokens; OpenAI bills cache writes at 1.25× and forgets after 30 min idle;
+                                xAI needs the conversation header).
+                            </p>
+                            {providerNotes.length > 0 && (
+                                <div className="mi-kv"><span>Provider notes:</span> {providerNotes.join(' · ')}</div>
+                            )}
+                            {usageHistory.length > 0 ? (
+                                <ul className="mi-list">
+                                    {[...usageHistory].reverse().map((row, i) => (
+                                        <li key={`${row.at}-${i}`} className="mi-row">
+                                            <span className="mi-type">{row.lane}</span>
+                                            <span className="mi-text">{describeUsage(row)}</span>
+                                            <span className="mi-meta">{formatAgo(row.at)}{Number.isFinite(row.promptChars) ? ` · ${row.promptChars.toLocaleString()} prompt chars` : ''}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : <p className="mi-empty">Send a message; the DM and Scribe calls report their usage here.</p>}
+                        </div>
+                    </details>
+
+                    <details>
                         <summary>Story memory ledger ({cards.length} cards)</summary>
                         <div className="mi-section">
                             <div className="mi-kv">
                                 <span>By type:</span>{' '}
                                 {Object.entries(cardCounts).map(([type, count]) => `${type} ${count}`).join(' · ') || '—'}
+                            </div>
+                            <div className="mi-kv">
+                                <span>By status (the pool has no ceiling — watch this):</span>{' '}
+                                {Object.entries(cardStatusCounts).map(([status, count]) => `${status} ${count}`).join(' · ') || '—'}
                             </div>
                             <ul className="mi-list">
                                 {cards.map(card => <CardRow key={card.id} card={card} />)}

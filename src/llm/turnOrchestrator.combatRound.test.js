@@ -60,9 +60,14 @@ function createHarness({ streamMessage, sendMessage } = {}) {
 
 const SKIPPED_ON_NARRATION = ['## ACTIVE QUESTS', '## WORLD FACTS', '## SESSION HISTORY', '## LOCATION TRANSITION HISTORY', '## INVENTORY'];
 const KEPT_ON_NARRATION = ['## ACTIVE COMBAT', '## PLAYER CHARACTER', '## COMPANIONS (PARTY)', '## KNOWN NPCs', '## SETTING & TONE', '**Current location:**'];
+// The intent call's projection (2026-09-30 prompt-building Lap-3 P2): the
+// narration set minus INVENTORY (the attack's weapon is a row) plus KNOWN NPCs
+// and the place line — its targets are enemy ids, its actions the slot list.
+const SKIPPED_ON_INTENT = ['## ACTIVE QUESTS', '## WORLD FACTS', '## SESSION HISTORY', '## LOCATION TRANSITION HISTORY', '## KNOWN NPCs', '**Current location:**', '## RECENT TABLE RULINGS'];
+const KEPT_ON_INTENT = ['## ACTIVE COMBAT', '## PLAYER CHARACTER', '## COMPANIONS (PARTY)', '## INVENTORY', '## SETTING & TONE'];
 
-describe('turn runner — a combat round is two DM stream calls, the narration one slimmed', () => {
-    it('intent + narration = 2 stream calls, 0 Flash calls; the narration prompt keeps the prefix and drops the dead-weight blocks', async () => {
+describe('turn runner — a combat round is two DM stream calls, each with its own projection', () => {
+    it('intent + narration = 2 stream calls, 0 Flash calls; each prompt keeps the prefix and drops the blocks its call cannot use', async () => {
         const streamMessage = vi.fn(async ({ onChunk, systemPrompt }) => {
             const text = systemPrompt.includes('COMBAT INTENT ONLY')
                 ? '```json\n{"combat_exchange": {"player_slots": [{"action": "attack", "strikes": [{"target": "Goblin"}]}], "enemy_intents": []}}\n```'
@@ -80,9 +85,12 @@ describe('turn runner — a combat round is two DM stream calls, the narration o
         expect(sendMessage).not.toHaveBeenCalled();
         const [intent, narration] = streamMessage.mock.calls.map(call => call[0].systemPrompt);
 
-        // The intent call still carries the full dynamic half.
-        for (const heading of SKIPPED_ON_NARRATION) expect(intent).toContain(heading);
+        // The intent call carries only what a JSON-only translation reads.
+        for (const heading of SKIPPED_ON_INTENT) expect(intent).not.toContain(heading);
+        for (const heading of KEPT_ON_INTENT) expect(intent).toContain(heading);
         expect(intent).toContain('COMBAT INTENT ONLY');
+        // DM REMINDERS stay: the death_save slot and the safety block live there.
+        expect(intent).not.toContain('Reeve Halvard');
 
         // The narration call drops what it cannot use and keeps what it narrates from.
         for (const heading of SKIPPED_ON_NARRATION) expect(narration).not.toContain(heading);
@@ -94,7 +102,6 @@ describe('turn runner — a combat round is two DM stream calls, the narration o
         const prefixEnd = intent.indexOf(PREMISE) + PREMISE.length;
         expect(prefixEnd).toBeGreaterThan(1000);
         expect(narration.slice(0, prefixEnd)).toBe(intent.slice(0, prefixEnd));
-        expect(narration.length).toBeLessThan(intent.length);
 
         // The narration committed as the round's prose; the intent stored no bubble.
         const assistants = getState().messages.filter(m => m.role === 'assistant');

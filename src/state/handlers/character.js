@@ -2,7 +2,8 @@
  * Character domain: creation/update, ability score improvements, damage &
  * healing, the death-save state machine, XP/levels, and conditions.
  */
-import { computeACFromInventory, getModifier, normalizeConditionName, normalizeDeathSaves, CONDITION_LIST_CAP } from '../../engine/rules.js';
+import { computeACFromInventory, getModifier, normalizeConditionName, CONDITION_LIST_CAP } from '../../engine/rules.js';
+import { judgeDeathSave } from '../../engine/deathSaves.js';
 import { ABILITY_NAMES, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../../engine/characterUtils.js';
 import { awardExperience, getDmBonusXpCap, getStoryMilestoneXp, isHeroDown, isMaxLevel } from '../../engine/progression.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
@@ -274,29 +275,30 @@ export const handlers = {
         // (it judged the hero low-level solo). If the live check above
         // disagreed, nothing was rolled, so nothing is tallied — never let a
         // null die count as a failure.
-        if (!Number.isInteger(die)) return state;
-        // Belt behind the load heal: integer tallies 0..3, never `"1" + 1`.
-        const prev = normalizeDeathSaves(character.deathSaves);
+        // THE one judge (engine/deathSaves.js, WOW 2026-09-30): the exchange
+        // engine's death_save event and the out-of-combat resolver judge the
+        // same die through it, so the chat line's count and this tally can
+        // never disagree. Integer tallies 0..3 behind the load heal, never
+        // `"1" + 1`. This handler posts no line by design — the two lanes
+        // that roll the die render THE shared `deathSaveLine` (the exchange
+        // line in combat, the resolver's system line outside it).
+        const judged = judgeDeathSave(character.deathSaves, die);
+        if (!judged) return state;
 
-        if (die === 20) {
+        if (judged.outcome === 'revived') {
             // Natural 20: back on your feet with 1 HP.
             const revived = reviveCharacter({ ...character, currentHP: 1 });
             return { ...state, character: revived };
         }
-        if (die >= 10) {
-            const successes = prev.successes + 1;
-            if (successes >= 3) {
-                // Stable: unconscious at 0 HP, but no longer dying.
-                const stable = { ...character, dying: false, deathSaves: { successes: 0, failures: 0 } };
-                return { ...state, character: stable };
-            }
-            return { ...state, character: { ...character, deathSaves: { ...prev, successes } } };
+        if (judged.outcome === 'stable') {
+            // Stable: unconscious at 0 HP, but no longer dying.
+            const stable = { ...character, dying: false, deathSaves: { successes: 0, failures: 0 } };
+            return { ...state, character: stable };
         }
-        const failures = prev.failures + (die === 1 ? 2 : 1);
-        if (failures >= 3) {
+        if (judged.outcome === 'dead') {
             return { ...state, character: applyDeath(character) };
         }
-        return { ...state, character: { ...character, deathSaves: { ...prev, failures } } };
+        return { ...state, character: { ...character, deathSaves: { successes: judged.successes, failures: judged.failures } } };
     },
 
     PLAYER_DEFEAT(state, action) {

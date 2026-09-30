@@ -1221,3 +1221,64 @@ describe('narrationOnly prompt variant — the combat narration call (2026-09-23
         expect(build(undefined)).toBe(full);
     });
 });
+
+describe('intentOnly prompt variant — the combat intent call (2026-09-30 prompt-building Lap-3 P2)', () => {
+    const premise = 'The barony of Kolkanmaa is starving and the toll-weirs keep failing.';
+    const filler = (seed, len) => seed.repeat(Math.ceil(len / seed.length)).slice(0, len);
+    const round = {
+        premise,
+        customSystemPrompt: 'Grim, grounded tone.',
+        currentLocation: 'Jewelglade',
+        party: [{ id: 'c1', name: 'Osma', hp: 9, maxHp: 18, ac: 16, level: 2, affinity: 60 }],
+        inventory: Array.from({ length: 12 }, (_, i) => ({ id: `item-${i}`, name: `Trade good ${i}`, type: 'misc', quantity: 1 })),
+        quests: Array.from({ length: 6 }, (_, i) => ({ id: `q-${i}`, name: `Errand ${i}`, status: 'active', description: filler('find the weir wardens before the flood ', 200) })),
+        worldFacts: Array.from({ length: 30 }, (_, i) => ({ id: `f-${i}`, fact: `Fact ${i}: ${filler('the Pike buys captives at the toll gate ', 80)}`, category: 'lore', timestamp: i })),
+        journal: Array.from({ length: 8 }, (_, i) => ({
+            id: `j-${i}`, timestamp: i, keyDecisions: [], consequences: [], messageRange: [i * 10, i * 10 + 10],
+            location: i < 6 ? 'Brackwater' : 'Jewelglade',
+            summary: filler(`Entry ${i}: the hero pressed on through the toll country. `, 1500),
+        })),
+        npcs: Array.from({ length: 8 }, (_, i) => ({ id: `n${i}`, name: `Notable ${i}`, rosterTier: 'character', disposition: 'hostile', importance: 4, lastNotes: filler('has a grudge about the weir ', 400) })),
+        messages: [{ role: 'assistant', content: 'Notable 1 draws steel as the goblins close.' }],
+        recentRulings: [{ id: 'r1', text: 'Set aside: no roll to intimidate the reeve.', messageIndex: 0, outcome: 'set_aside', skill: 'intimidation', dc: 12 }],
+        combat: { active: true, round: 2, enemies: [{ id: 'g1', name: 'Goblin', hp: 5, maxHp: 11, ac: 12 }], turnOrder: [] },
+    };
+    const build = (flags) => buildSystemPrompt({
+        character: makeCharacter(),
+        rollHistory: [],
+        preset: 'classicFantasy',
+        ruleset: 'simplified5e',
+        locations: [],
+        fronts: [],
+        storyMemory: [],
+        retrievedMemories: [],
+        relationshipBeat: null,
+        messageCount: round.messages.length,
+        ...round,
+        ...flags,
+    });
+
+    it('drops the narration set PLUS KNOWN NPCs, the place line, and recent rulings; keeps character, party, INVENTORY, DM REMINDERS, and the full combat block', () => {
+        const full = build({});
+        const intent = build({ intentOnly: true });
+        const skipped = ['## ACTIVE QUESTS', '## WORLD FACTS', '## SESSION HISTORY', '## LOCATION TRANSITION HISTORY', '## KNOWN NPCs', '**Current location:**', '## RECENT TABLE RULINGS'];
+        const kept = ['## ACTIVE COMBAT', '## PLAYER CHARACTER', '## COMPANIONS (PARTY)', '## INVENTORY', '## SETTING & TONE', '## CUSTOM DM INSTRUCTIONS'];
+        for (const heading of skipped) expect(full).toContain(heading);
+        for (const heading of skipped) expect(intent).not.toContain(heading);
+        for (const heading of kept) expect(intent).toContain(heading);
+        expect(intent).toContain('(id: g1)');
+        expect(intent).not.toContain('Notable 1');
+    });
+
+    it('keeps the cached static prefix byte-identical and is materially smaller than both the full prompt and the narration variant', () => {
+        const full = build({});
+        const intent = build({ intentOnly: true });
+        const narration = build({ narrationOnly: true });
+        const prefixEnd = full.indexOf(premise) + premise.length;
+        expect(prefixEnd).toBeGreaterThan(1000);
+        expect(intent.slice(0, prefixEnd)).toBe(full.slice(0, prefixEnd));
+        expect(full.length - intent.length).toBeGreaterThan(8000);
+        expect(intent.length).toBeLessThan(narration.length);
+        expect(build({ intentOnly: false })).toBe(full);
+    });
+});
