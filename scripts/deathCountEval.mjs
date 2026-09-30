@@ -140,10 +140,12 @@ function beforeVariant(prompt, kind) {
     return out;
 }
 
-const SCENARIOS = [
+const ALL_SCENARIOS = [
     { id: 'dying-round', kind: 'dying', result: dyingResult },
     { id: 'death-terminal', kind: 'dead', result: deadResult },
 ];
+const wantedScenarios = (process.env.QF_EVAL_SCENARIOS || 'dying-round,death-terminal').split(',').map(s => s.trim()).filter(Boolean);
+const SCENARIOS = ALL_SCENARIOS.filter(s => wantedScenarios.includes(s.id));
 
 const JUDGE_SYSTEM = `You are an unvarnished editorial judge of tabletop-RPG combat narration. The engine has resolved a round in which the hero is UNCONSCIOUS AND DYING (or has just DIED). You score the DM's narration of that round. Reply with ONLY a JSON object — no prose, no fences.
 - "names_count": true if the prose conveys where the death-save clock stands — how many failures or successes, or that one more failure means death, or that the hero is a breath from stable — in any wording (numbers, "one more", "twice now", "a third").
@@ -238,7 +240,8 @@ for (const providerName of providers) {
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const date = new Date().toISOString().slice(0, 10);
 const md = render(results);
-fs.writeFileSync(path.join(OUT_DIR, `death-count-${date}.md`), md);
-fs.writeFileSync(path.join(OUT_DIR, `death-count-${date}.json`), JSON.stringify(results, null, 2));
-console.log(`\nReport: ${path.join(OUT_DIR, `death-count-${date}.md`)}`);
+const label = process.env.QF_EVAL_LABEL ? `-${process.env.QF_EVAL_LABEL}` : '';
+fs.writeFileSync(path.join(OUT_DIR, `death-count-${date}${label}.md`), md);
+fs.writeFileSync(path.join(OUT_DIR, `death-count-${date}${label}.json`), JSON.stringify(results, null, 2));
+console.log(`\nReport: ${path.join(OUT_DIR, `death-count-${date}${label}.md`)}`);
 console.log(md.split('\n## Narrations')[0]);

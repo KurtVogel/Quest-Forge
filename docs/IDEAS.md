@@ -1180,7 +1180,7 @@ not as a speech; a `wound` card's scar and a fight memory's text could cross-ref
 Scribe's appearance merge already makes the scar canon — the memory could name it once it has
 a name).
 
-### [wow] Death and stakes: the count on the page, and the last chapter — status: `proposed` (wow audit 2026-09-30, death-and-stakes Lap 1, two W1 slices)
+### [wow] Death and stakes: the count on the page, and the last chapter — status: `shipped` (both slices 2026-09-30, same day as proposed — `engine/deathSaves.js` + `postState.player.status`; `RECORD_HERO_DEATH` + the ending card + the one-call epilogue; the spirit/successor mode deleted on Vesa's ruling; DECISIONS.md 2026-09-30; the count proof run — `docs/DEATH_COUNT_EVAL_2026-09-30.md` —, the epilogue's live proof still to run) (wow audit 2026-09-30, death-and-stakes Lap 1, two W1 slices)
 The genre shape (5e counted aloud, Darkest Dungeon's Death's Door and graveyard, XCOM's memorial
 wall, Wildermyth's written legacy, Fallout's ending slides, the roguelike morgue file): **the count
 is on the page while you die; the death is stated plainly; then the game WRITES the ending and

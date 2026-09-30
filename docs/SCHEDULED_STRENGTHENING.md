@@ -74,44 +74,53 @@ Refreshed by the audit **at most weekly** (when older than 7 days), via:
 `npm.cmd install --no-save @vitest/coverage-v8 && npx.cmd vitest run --coverage --coverage.all --coverage.include='src/**/*.{js,jsx,ts}'`
 Used only to bias feature picking toward weak spots; per-file statement % for registry files.
 
-**2026-09-24** (2981 tests / 164 files passing; overall 81.97% statements — up from 80.45 on
-09-17 as the 09-19/09-20/09-21 sweeps landed their pins). % Statements per registry file (Linux,
+**2026-09-30** (3348 tests / 201 files passing; overall 83.57% statements — up from 81.97 on
+09-24 as the 09-25 → 09-30 sweeps and the 09-30 build session landed their pins: `replayLedger`,
+`promptBlocks.size`, `cacheTelemetry`, `deathSaves`, `heroDeath`, `commitmentVerifier`,
+`worldFacts.aspect`, `retraction`). % Statements per registry file (Windows,
 `@vitest/coverage-v8@4.1.8` pinned to the vitest version, `--no-save`). This run's text report
-listed 79 file rows; a file it did not list carries its 09-17 value, marked `†`. Weakest spots,
-for picking: `auth.js` 78.94, `combatExchange.js` 85.48, `rollResolver.js` 87.69,
-`frontDirector.js` 87.50, `handlers/heroTells.js` 88.57, `persistence.js` 88.85,
-`characterVault.js` 89.33, `handlers/session.js` 90.22, `roleplayCheck.js` 90.24,
-`absenceDrift.js` 90.90. The two files still at 0 are the DOM-bound `ChatPanel.jsx` /
-`GameContext.jsx` (untestable by construction under the node environment; their logic keeps
-being extracted into tested pure modules).
+listed 123 file rows; a file it did not list carries its 09-24 value, marked `†`. Weakest spots,
+for picking: `auth.js` 78.94†, `combatExchange.js` 85.48†, `frontDirector.js` 87.50,
+`persistence.js` 88.86, `characterVault.js` 89.33†, `roleplayCheck.js` 90.24,
+`handlers/session.js` 92.09, `handlers/heroTells.js` 92.10, `scribeAudits.js` 92.12,
+`npcRoster.js` 92.31, `absenceDrift.js` 92.42, `rollResolver.js` 92.72 (up from 87.69 — the
+death-save countdown pins). The files at 0 are the DOM-bound `ChatPanel.jsx` / `GameContext.jsx`
+(untestable by construction under the node environment; their logic keeps being extracted into
+tested pure modules — `endingCard.js` 100 is this run's example).
 
 | Feature ID | File | % Stmts |
 |---|---|---|
 | dice-engine | `engine/dice.ts` | 100† |
-| rules-math | `engine/rules.js` | 98.51 |
+| rules-math | `engine/rules.js` | 98.54 |
 | progression | `engine/progression.js` | 98.66 |
-| response-parsing | `responseParser.js` / `jsonExtractor.js` / `eventChannels.js` | 98.07 / 99.30 / 98.91 |
-| prompt-building | `promptBuilder.js` (+ `npcRoster.js` 92.16) | 98.02 |
-| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` / `roleplayCheck.js` | 87.69 / 98.75 / 90.24 |
-| combat-exchange | `combatExchange.js` / `combatMath.js` / `handlers/combat.js` | 85.48 / 95.89 / 93.23 |
+| response-parsing | `responseParser.js` / `jsonExtractor.js` / `eventChannels.js` | 98.07† / 99.30 / 98.92 |
+| prompt-building | `promptBuilder.js` (+ `npcRoster.js` 92.31) | 98.33 |
+| roll-resolution | `rollResolver.js` / `outOfCombatRollPolicy.js` / `roleplayCheck.js` | 92.72 / 98.75† / 90.24 |
+| combat-exchange | `combatExchange.js` / `combatMath.js` / `handlers/combat.js` (+ `deathSaves.js` new) | 85.48† / 95.89 / 94.59 |
 | enemy-stats-conditions | `enemyStats.js` | 98.01 |
-| hidden-fronts | `engine/fronts.js` / `frontDirector.js` / `frontUpgrade.js` / `worldTempo.js` / `handlers/fronts.js` | 95.17 / 87.50 / 97.77 / 98.40 / 98.11 |
-| living-world | `regionalHearsay.js` / `absenceDrift.js` / `frontAftermath.js` / `regionalFronts.js` | 96.59 / 90.90 / 100 / 100 |
-| scribe | `scribe.js` / `scribeAudits.js` | 94.40 / 91.81 |
-| memory-journal | `worldJournal.js` | 98.85 |
-| story-memory | `storyMemory.js` / `handlers/worldMemory.js` (+ `relationshipArc.js` 95.05) | 97.59 / 93.79 |
-| vector-memory-rag | `vectorMemory.js` (+ `gemini.js` 98.10 as the embed boundary) | 96.12 |
-| persistence | `persistence.js` / `migrations.js` / `handlers/session.js` | 88.85 / 97.66 / 90.22 (`GameContext.jsx` 0; `autosaveRuntime.js` 97.91, `autosavePolicy.js` 100†, `portraitStore.js` 94.93) |
-| cloud-sync | `cloudSync.js` / `auth.js` | 96.80 / 78.94 |
-| character-vault | `characterVault.js` / `characterUtils.js` | 89.33 / 95.65 |
-| inventory-economy | `items.js` / `equipment.js` / `companionGear.js` / `handlers/inventory.js` / `handlers/economy.js` / `currency.js` | 99.48 / 100 / 100 / 94.53 / 96.82 / 100† |
+| hidden-fronts | `engine/fronts.js` / `frontDirector.js` / `frontUpgrade.js` / `worldTempo.js` / `handlers/fronts.js` | 95.17 / 87.50 / 97.77 / 99.20 / 98.11 |
+| living-world | `regionalHearsay.js` / `absenceDrift.js` / `frontAftermath.js` / `regionalFronts.js` | 96.59† / 92.42 / 100† / 100† |
+| scribe | `scribe.js` / `scribeAudits.js` | 96.01 / 92.12 |
+| memory-journal | `worldJournal.js` (+ `commitmentVerifier.js` new) | 98.50 |
+| story-memory | `storyMemory.js` / `handlers/worldMemory.js` (+ `relationshipArc.js` 95.05†, `worldFacts.js` 96.07, `replayLedger.js` 94.87) | 97.68 / 95.20 |
+| vector-memory-rag | `vectorMemory.js` (+ `gemini.js` 98.17 as the embed boundary) | 96.86 |
+| persistence | `persistence.js` / `migrations.js` / `handlers/session.js` | 88.86 / 97.78 / 92.09 (`GameContext.jsx` 0; `autosaveRuntime.js` 97.91†, `autosavePolicy.js` 100†, `portraitStore.js` 96.80) |
+| cloud-sync | `cloudSync.js` / `auth.js` | 97.66 / 78.94† |
+| character-vault | `characterVault.js` / `characterUtils.js` | 89.33† / 95.65† |
+| inventory-economy | `items.js` / `equipment.js` / `companionGear.js` / `handlers/inventory.js` / `handlers/economy.js` / `currency.js` | 99.53 / 100 / 100 / 94.65 / 96.87 / 100† |
 | quests | `state/handlers/quests.js` | 100 |
 | scene-art | `imageGen.js` | 95.65 |
-| providers-adapter | `adapter.js` / `gemini.js` / `openai.js` / `openaiCompatible.js` / `xai.js` / `sse.js` / `machinery.js` | 97.46 / 98.10 / 97.05 / 100 / 100† / 98.68 / 100† |
-| chat-orchestration | `ChatPanel.jsx` / `turnOrchestrator.js` | 0 / 92.73 |
-| spellcasting | `engine/spellcasting.js` / `data/spells.js` / `handlers/spellcasting.js` | 94.02 / 100 / 95.58 |
-| chronicler | `chronicler.js` | 96.77 |
-| hero-tells | `engine/heroTells.js` / `handlers/heroTells.js` (+ `livingWorldSession.js` 90.24) | 94.08 / 88.57 |
+| providers-adapter | `adapter.js` / `gemini.js` / `openai.js` / `openaiCompatible.js` / `xai.js` / `sse.js` / `machinery.js` | 97.53 / 98.17 / 97.05 / 100† / 100† / 98.68 / 100 |
+| chat-orchestration | `ChatPanel.jsx` / `turnOrchestrator.js` (+ `endingCard.js` 100, `handlers/messages.js` 94.80) | 0 / 92.73† |
+| spellcasting | `engine/spellcasting.js` / `data/spells.js` / `handlers/spellcasting.js` | 95.00 / 100 / 96.35 |
+| chronicler | `chronicler.js` | 97.32 |
+| hero-tells | `engine/heroTells.js` / `handlers/heroTells.js` (+ `livingWorldSession.js` 90.24†, `heroDeath.js` 98.36) | 95.06 / 92.10 |
+
+<details><summary>Previous snapshot — 2026-09-24 (2981 tests / 164 files, 81.97%)</summary>
+
+dice.ts 100 · rules.js 98.51 · progression.js 98.66 · responseParser/jsonExtractor/eventChannels 98.07/99.30/98.91 · promptBuilder 98.02 (npcRoster 92.16) · rollResolver/outOfCombatRollPolicy/roleplayCheck 87.69/98.75/90.24 · combatExchange/combatMath/handlers-combat 85.48/95.89/93.23 · enemyStats 98.01 · fronts/frontDirector/frontUpgrade/worldTempo/handlers-fronts 95.17/87.50/97.77/98.40/98.11 · regionalHearsay/absenceDrift/frontAftermath/regionalFronts 96.59/90.90/100/100 · scribe/scribeAudits 94.40/91.81 · worldJournal 98.85 · storyMemory/handlers-worldMemory 97.59/93.79 (relationshipArc 95.05) · vectorMemory 96.12 (gemini 98.10) · persistence/migrations/handlers-session 88.85/97.66/90.22 (autosaveRuntime 97.91, autosavePolicy 100, portraitStore 94.93) · cloudSync/auth 96.80/78.94 · characterVault/characterUtils 89.33/95.65 · items/equipment/companionGear/handlers-inventory/handlers-economy/currency 99.48/100/100/94.53/96.82/100 · handlers-quests 100 · imageGen 95.65 · adapter/gemini/openai/openaiCompatible/xai/sse/machinery 97.46/98.10/97.05/100/100/98.68/100 · ChatPanel/turnOrchestrator 0/92.73 · spellcasting/spells/handlers-spellcasting 94.02/100/95.58 · chronicler 96.77 · heroTells/handlers-heroTells 94.08/88.57 (livingWorldSession 90.24)
+
+</details>
 
 <details><summary>Previous snapshot — 2026-09-17 (2710 tests / 149 files, 130 source files, 80.45%)</summary>
 
