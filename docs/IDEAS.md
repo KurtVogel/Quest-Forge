@@ -276,6 +276,17 @@ in `docs/MEMORY_RESEARCH.md` Verdict Log 2026-09-17 (Lane B).
 lost, not stored beside the old one. The FIRST slice is therefore a polarity-aware dedupe that turns
 that discard into the supersession stamp. MemStrata (https://arxiv.org/abs/2606.26511) shows cosine
 has the same blindness (contradiction vs duplicate AUROC 0.59) — no similarity rule can see a flip.
+**2026-09-30 (memory research, Lane C run, light B — the next slice, queued M0):** the sibling failure is a STATE
+written as a timeless fact. LAPSE (https://arxiv.org/abs/2609.36457, G2 — three writer models × mem0 / Graphiti /
+Letta, all 11 configurations one way) finds memory writers flatten a progressive statement ("is driving a Peugeot")
+into a static fact ("drives a Peugeot") in 244 of 381 pairs and NEVER the reverse, and readers then act on expired
+facts without asking. Our Scribe rule forbids transient ACTIONS, not transient STATES, so "the harbor road is
+flooded" is stored beside "Saltmere lies on the coast" with no aspect mark and no age. The slice: one Scribe rule
+(keep the progressive form; a place's or person's passing state goes to `last_state` / `lastNotes`), an engine
+`aspect: 'state'` mark from a small string-only lexicon in `classifyFactCandidate`, and the live WORLD FACTS line
+rendered `for now (N turns ago): …` — nothing expires, nothing is rewritten; a re-report refreshes the stamp. Expiry
+only if the commitment probe shows the DM still treats an aged state as current. Full shape in
+`docs/MEMORY_RESEARCH.md` Verdict Log 2026-09-30.
 
 ### [memory-research] Source-stamped retraction: scrubbing a message scrubs its canon — status: `idea` (M0, memory research 2026-09-17, Lane A)
 `DELETE_MESSAGE` (2026-08-28, built to scrub refusals) soft-deletes the row and every reader
