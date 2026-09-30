@@ -1168,6 +1168,48 @@ not as a speech; a `wound` card's scar and a fight memory's text could cross-ref
 Scribe's appearance merge already makes the scar canon — the memory could name it once it has
 a name).
 
+### [wow] Death and stakes: the count on the page, and the last chapter — status: `proposed` (wow audit 2026-09-30, death-and-stakes Lap 1, two W1 slices)
+The genre shape (5e counted aloud, Darkest Dungeon's Death's Door and graveyard, XCOM's memorial
+wall, Wildermyth's written legacy, Fallout's ending slides, the roguelike morgue file): **the count
+is on the page while you die; the death is stated plainly; then the game WRITES the ending and
+offers the next thing.** Today the low-level solo mercy is genre-strong and engine-owned (the
+defeat line hands the DM "capture, rob, spare, bind, abandon, or bargain"; the 1-HP stand-up on
+the next line; the live predicate — DECISIONS 2026-07-17 / 08-09 / 09-02), but the dying beat is
+MUTE and the death has NO ENDING. **Slice A — the count on the page (W1):** the `death_save`
+event carries its projected outcome (`projectedDeathSaveState` already computes it) and ONE
+shared renderer (the out-of-combat resolver's wording, `rollResolver.js:306-314`) writes
+`natural 4 — failure (2/3). One more and Astra dies.` / `— STABLE` / `— NATURAL 20: back on her
+feet with 1 HP` / `— THE THIRD FAILURE. Astra dies.` (today: `natural 4.` and `DEATH_SAVE_RESULT`
+posts nothing — the tally lives only in the Combat panel strip); `postState.player` gains
+`status` + the tally so the narration prompt's PLAYER line reads `PLAYER DYING … 1 success /
+2 failures — the next failure kills` (today HP only, `combatExchange.js:2382`) and the dying
+ending asks for the round from the party's side over the body; a DEAD hero's terminal prompt says
+DIED, not "setback or collapse" (`terminalState` folds `dead` into `defeat`, `:1479` / `:2363`),
+and END_COMBAT posts the death line with `describeFightCost`'s tally. Zero calls, ~+30 tokens on
+the ongoing narration message while dying, prefix untouched. **Slice B — the last chapter (W1):**
+on `isDead` (both routes) ONE engine epitaph line (name, level, cause from the fight tally or the
+`player_death` description, place, campaign day), `session.heroDeath` stamped and typed at load,
+`chapterCloseSuggested` raised with `reason: 'death'`; ChatPanel replaces the composer with an
+**ending card** (the return-card pattern — pure, UI-only, never a message): "The story of Astra
+ends here" + the epitaph + **What became of them** (ONE player-initiated call through the existing
+table-talk lane with the roster's stances / open threads, active quests, and front stubs in
+context — the Fallout slides in the DM's voice, events force-nulled, kept out of memory), **Close
+the last chapter** (the existing Chronicle close), **Begin again with this hero** (Save to Roster
+→ the new-campaign path, alive and rested, DECISIONS 2026-09-03); and the two prompt lines that
+run an undesigned "spirit/successor" mode after death (`promptBuilder.js:785`, `:1261`) plus the
+out-of-combat "Your story is not over. Describe what happens next — does your spirit linger…"
+line (`applyEvents.js:500`) are deleted — a dead hero's campaign is finished. **Needs Vesa's
+ruling:** that deletion reverses an implicit possibility no DECISIONS entry ever made; the
+alternative is a designed SUCCESSOR flow (a new hero in the same world, companions and fronts
+carried), the larger vision and the later slice. Proof: a fixture death rolling 4 / 13 / 1 reads as
+a countdown; on Gemini Pro + GPT Terra 5 of 5 dying narrations name the count or the party's
+action over the body, 5 of 5 death terminals say the hero died, the epilogue names every party
+companion and ≥ 2 roster NPCs with a stance. **Later slices:** the chronicler's final-chapter
+register; the successor flow; a dead hero's marking fight should not mint an engine `wound` card;
+and the merged "Dispute a narrated death" (2026-09-02) — stage an out-of-combat `player_death`
+like a roleplay-check proposal with **Accept** / **Dispute** once, an upheld ruling final — which
+the ending card is the natural home for (the card renders, the sheet flips only on Accept).
+
 ### [wow] Combat drama: the foe's next move, and the fight leaves a mark — status: `shipped` (both slices 2026-09-27 — the telegraph rule on every ongoing narration beat + the prefix "honor your own telegraph, and let foes break" bullet; `combat.fightTally` → the `COST OF THIS FIGHT:` line on the terminal beat + ONE engine-minted `wound` card per marking fight with a six-cadence dormancy of its own; DECISIONS.md 2026-09-27; the `eval:combat` proof scenarios are built but unrun, the five-fights callback probe still to run) (wow audit 2026-09-23, combat-drama Lap 1, two W1 slices)
 The exchange machine is genre-best at the DICE (engine initiative + Opening Initiative, guard
 interception, standing flanks, conditions, targeting from fiction — nothing can be cheated) and
@@ -2020,7 +2062,7 @@ external outcome ("when Dodd lunges at me, I cut him down") makes the DM withhol
 (player-authority rule) — script fights as approaches ("I walk to the crossroads, sword
 drawn"), not outcomes. `scripts/playtest_money_traffic_20.cjs` carries both lessons.
 
-### Dispute a narrated death — the roleplay-check "Challenge ruling" pattern for `player_death` — status: `idea` (2026-09-02)
+### ~~Dispute a narrated death — the roleplay-check "Challenge ruling" pattern for `player_death`~~ — status: `merged` (2026-09-30 wow audit [wow]): listed as a later slice of "[wow] Death and stakes: the count on the page, and the last chapter" above — the ending card that slice proposes is the natural home for Accept / Dispute (the card renders, the sheet flips only on Accept); the reasoning below stands
 Out-of-combat `player_death` is the one DM channel that ends a campaign irreversibly
 (resurrection is cut by design) and it has no mechanical precondition on purpose
 (DECISIONS.md 2026-09-02: an execution at full HP is exactly the channel's contract, and the
