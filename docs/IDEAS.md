@@ -1485,11 +1485,7 @@ vs breadth (the built `full` probe on Gemini Pro this week, NOT EXERCISED column
 lean depth after the close; (2) the third slot — polarity-aware changed-fact handling ("[memory-research]
 Bi-temporal world facts": `isNearDuplicateFact` strips not/no/now, so a flipped fact is DROPPED as a
 duplicate — scratch-proven, never seen in play) vs the memory-correction spike — both lean the fact fix.
-**Questions for Vesa:** (3) is an expert "exclude as memory source" control wanted at all, given its
-reach; (4) desired off-plot wonder frequency (the standalone weighting waits on it); (5) the process
-rule — the session after an experience feature ships runs its smallest live proof before unrelated
-hardening, and a strengthening finding earns a session on stated player harm with evidence, not on a
-severity label alone (no monthly embargo, no P2 veto). Tick and date each when decided.
+**Answered 2026-09-30 (Vesa):** (1) proof depth first — DONE 09-29 (hero tells proved); (2) third slot — DONE 09-29 (world-fact supersession); (3) the expert "exclude as memory source" control — **REJECTED** ("maybe not needed at all; could cause more harm than good"); (4) off-plot wonder frequency — decided by judgement: the die is standalone-weighted (`pickWonderIndex`: a coin first decides whether the wonder is off-plot when the director offered both kinds, so an unconnected strange thing lands ≥ half the time; DECISIONS.md 2026-09-30); (5) the process rule — **ADOPTED** by judgement (CLAUDE.md / AGENTS.md conventions, DECISIONS.md 2026-09-30); the dialogue transcript is tracked (`2026-09-28-vision.closed.md`); a non-witness MAY voice a PUBLIC tell as hearsay when worded as hearsay, possibly a little wrong (the tells block's HEARSAY lines).
 
 ### Compact agent onboarding and restore the one-screen status — status: `idea` (2026-09-28, Codex documentation review)
 

@@ -11,6 +11,7 @@
  *   node scripts/playtest_recall_wonder.cjs full flash gemini gemini-3.8-flash   (PROBE 3: a general ordinary-play run)
  *   node scripts/playtest_recall_wonder.cjs tells pro   gemini gemini-3.1-pro-preview (PROBE 4: hero tells — habit → recognition → "That's not me")
  *   node scripts/playtest_recall_wonder.cjs tells terra openai gpt-5.6-terra
+ *   node scripts/playtest_recall_wonder.cjs proof pro   gemini gemini-3.1-pro-preview (PROBE 5: place-card return visit + wound callback + recap taps)
  *
  * Never the xAI/Grok DM (Vesa, 2026-09-14) — Gemini Pro and GPT Terra only.
  * The Gemini Flash machinery (Scribe, journal, embeddings) is identical in every
@@ -52,8 +53,8 @@ const PROBE = process.argv[2];
 const runLabel = process.argv[3];
 const provider = process.argv[4];
 const model = process.argv[5];
-if (!['recall', 'wonder', 'full', 'tells'].includes(PROBE) || !runLabel || !provider || !model) {
-    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full|tells> <label> <provider> <model>');
+if (!['recall', 'wonder', 'full', 'tells', 'proof'].includes(PROBE) || !runLabel || !provider || !model) {
+    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full|tells|proof> <label> <provider> <model>');
     process.exit(1);
 }
 if (provider === 'xai') {
@@ -283,6 +284,11 @@ async function snap(page) {
                 lastVoicedMessage: t.lastVoicedMessage ?? null, lastSeenMessage: t.lastSeenMessage ?? null, public: !!t.public,
             })),
             heroTellBeat: s.session?.heroTellBeat || null,
+            // PROBE 5 (proof): place records, the fight-cost wound cards, the private front titles.
+            places: (s.locations || []).map(r => ({ name: r.name, signature: r.signature || null, lastState: r.lastState || null, visitCount: r.visitCount ?? null, lastVisitedMessage: r.lastVisitedMessage ?? null })),
+            fightCards: (s.storyMemory || []).filter(c => Array.isArray(c.tags) && c.tags.includes('fight-cost')).map(c => ({ id: c.id, type: c.type, salience: c.salience, status: c.status, text: String(c.text || '') })),
+            recentEncounterCount: (s.recentEncounters || []).length,
+            frontTitles: (s.fronts || []).map(f => f.title).filter(Boolean),
             lastHeroTellBeatMessage: s.session?.lastHeroTellBeatMessage ?? null,
             recordReceipts: (s.messages || []).map((m, i) => ({ i, kind: m.kind, content: m.content })).filter(m => m.kind === 'record'),
         };
@@ -1562,6 +1568,189 @@ async function runTellsProbe(page) {
     saveAll();
 }
 
+// ---------------------------------------------------------------------------
+// PROBE 5 — proof: the place card on a return visit, the fight's wound card
+// as a later callback, and the return card's recap taps (2026-09-30 — three of
+// the six unrun WOW proof steps in one run; the other three are prompt-level
+// evals: eval:combat, eval:consequence, eval:openings).
+//   A. three ordinary turns at Saltmere so the Scribe writes the place's signature
+//   B. travel north to a hamlet, five fights there with long rests between
+//   C. walk back to Saltmere: the record's visitCount / signature, the DM prompt's
+//      Current-location line, and a judge on whether the arrival touches the
+//      place's particular; the fight-cost wound card in DRAMATIC CALLBACKS and a
+//      judge on whether the narration wove it in
+//   D. three "Ask the DM for a recap" taps (the return card's exact OOC line)
+// ---------------------------------------------------------------------------
+const RECAP_LINE = 'OOC: Recap where we are, what\'s open, and what you last asked me — in your voice, under 120 words.';
+const PROOF_HOME = [
+    'I stamp warmth into my hands at Tammo\'s brazier and look out over the pier and the boats, taking in the place.',
+    'I walk the length of the seaward pier and note what is particular about Saltmere this morning — the smell, the sound of the tide-bell, who is working.',
+    'I ask Tammo what makes this pier different from any other harbor he has mended nets on.',
+];
+const PROOF_TRAVEL_OUT = [
+    'I take the coast road north out of Saltmere toward the fishing hamlet of Gullhaven, half a day\'s walk up the shore.',
+    'I arrive in Gullhaven and look for whoever speaks for the place.',
+    'I ask them what has been troubling Gullhaven lately and offer my sword against it, for a fair price.',
+];
+const PROOF_FIGHT = 'I go out to where the trouble is, longsword drawn, and attack whatever is threatening Gullhaven — I am looking for a fight.';
+const PROOF_REST = 'I go back to Gullhaven, bind my wounds, and take a long rest until I am healed and ready to go out again.';
+const PROOF_RETURN = [
+    'I walk the coast road back south to Saltmere, the way I came.',
+    'I go down to the seaward pier and find Tammo at his brazier.',
+    'I sit with Tammo and tell him what happened up at Gullhaven.',
+];
+
+async function judgeReturnVisit(signature, lastState, reply) {
+    const prompt = `A single-player RPG. The hero returns to a place she left some time ago. The game holds ONE particular that IS this place (its "signature") and a "now" line for its current state, and told the DM both. Judge whether the DM's arrival narration made the return FEEL like a return to a known place.
+
+Signature: """${signature || '(none)'}"""
+Now: """${lastState || '(none)'}"""
+DM reply: """${String(reply || '').slice(0, 4500)}"""
+
+Return JSON:
+{"touches_signature": boolean (the reply shows or names the signature's particular, or something unmistakably the same),
+ "reads_as_return": boolean (the narration treats this as coming BACK — something remembered, changed, or the same as before — not a first arrival),
+ "quote": "the 1–2 sentences that carry it, verbatim, or empty",
+ "note": "one short sentence"}`;
+    return await flash(prompt);
+}
+async function judgeWoundCallback(cardText, reply) {
+    const prompt = `A single-player RPG. The engine recorded a WOUND card after a hard fight and offered it to the DM as a dramatic callback opportunity for this scene. Judge whether the DM's reply wove the wound in.
+
+Wound card: """${cardText}"""
+DM reply: """${String(reply || '').slice(0, 4500)}"""
+
+Return JSON:
+{"woven": boolean (the fight's cost — the wound, the near-death, the companion who went down — is present in the reply as a felt thing: a limp, a scar, a word from someone, a flinch),
+ "natural": boolean (it reads as part of the scene, not as a list or an explanation of the memory system),
+ "quote": "the 1–2 sentences that carry it, verbatim, or empty",
+ "note": "one short sentence"}`;
+    return await flash(prompt);
+}
+async function judgeRecap(reply, frontTitles) {
+    const prompt = `A single-player RPG. The player pressed "Ask the DM for a recap", which sends this out-of-character line: "${RECAP_LINE}". Judge the DM's answer.
+
+Hidden campaign pressures the DM must NEVER name (their private titles): ${JSON.stringify(frontTitles)}
+DM reply: """${String(reply || '').slice(0, 4500)}"""
+
+Return JSON:
+{"in_voice": boolean (it reads as the DM at the table in their own voice, not a bland system summary),
+ "covers_where": boolean (says where the hero is now),
+ "covers_open": boolean (names what is open — a job, a debt, a question, a person waiting),
+ "covers_asked": boolean (recalls what the DM last asked the player),
+ "reveals_hidden": boolean (names or paraphrases one of the hidden pressure titles, a clock, a stage, or a secret motive as such),
+ "advances_scene": boolean (moves time, has an NPC act, or narrates a new event — it must not),
+ "note": "one short sentence"}`;
+    return await flash(prompt);
+}
+
+async function runProofProbe(page) {
+    await bootAndCreateHero(page, { premiseMode: 'starter', premiseText: 'The Debt at Saltmere' });
+    saveAll();
+    const findings = { home: null, fights: [], returnVisit: null, callback: null, recaps: [] };
+    const proofLog = [];
+    const log = (label, extra) => { const e = { turn: turnNo, label, ...extra }; proofLog.push(e); fs.writeFileSync(path.join(OUT_DIR, 'proof-log.json'), JSON.stringify(proofLog, null, 2)); return e; };
+    const placeOf = (s, name) => (s?.places || []).find(p => p.name && new RegExp('\\b' + name + '\\b', 'i').test(p.name)) || null;
+
+    // A. home
+    for (const line of PROOF_HOME) {
+        const { after } = await playTurn(page, 'home', line);
+        log('home', { location: after?.location, saltmere: placeOf(after, 'Saltmere') });
+    }
+    let s = await snap(page);
+    // Home = the place the DM actually set (run 1 on Terra: no `location` wire
+    // in the opening, so the harbor had no record and nothing to return to);
+    // "Saltmere" by name, else the current location's record, else the first.
+    const homeName = (s?.location && /saltmere/i.test(s.location)) ? 'Saltmere' : (s?.location || 'Saltmere');
+    const homeOf = (snapshot) => placeOf(snapshot, 'Saltmere') || (snapshot?.places || []).find(p => p.name && homeName && p.name.toLowerCase() === String(homeName).toLowerCase()) || null;
+    findings.home = { location: s?.location, homeName, saltmere: homeOf(s), places: (s?.places || []).map(p => p.name) };
+    note('proof', `home: location=${JSON.stringify(s?.location)} record=${JSON.stringify(findings.home.saltmere)} places=${JSON.stringify(findings.home.places)}`);
+
+    // B. out and the fights
+    for (const line of PROOF_TRAVEL_OUT) {
+        const { after } = await playTurn(page, 'travel', line);
+        log('travel', { location: after?.location });
+    }
+    const FIGHTS = Number(process.env.PROOF_FIGHTS) || 5;
+    for (let i = 0; i < FIGHTS; i++) {
+        const before = await snap(page);
+        let { after, record } = await playTurn(page, `fight:${i + 1}`, PROOF_FIGHT);
+        // A DM that answers the hunt with a scene ("come back at dark") gets
+        // ONE follow-up that forces the encounter; still no combat = not exercised.
+        if (!record.combatIters && !record.dm.includes('leaves a mark')) {
+            const again = await playTurn(page, `fight:${i + 1}:wait`, 'I stay right here and wait for it, however long it takes, and the moment it shows itself I attack it with my longsword.');
+            after = again.after; record = { ...again.record, combatIters: again.record.combatIters, dm: `${record.dm}\n${again.record.dm}` };
+        }
+        const newCards = (after?.fightCards || []).filter(c => !(before?.fightCards || []).some(b => b.id === c.id));
+        const entry = { n: i + 1, combatIters: record.combatIters, exercised: record.combatIters > 0, hpAfter: after?.hp, maxHp: after?.maxHp, encounters: after?.recentEncounterCount, fightCards: (after?.fightCards || []).length, newCards, fightMarkLine: (record.dm || '').includes('leaves a mark') };
+        findings.fights.push(entry);
+        log('fight', entry);
+        note('proof', `fight ${i + 1}: combat×${record.combatIters} hp ${after?.hp}/${after?.maxHp} cards ${entry.fightCards} new ${newCards.length}`);
+        if (i < FIGHTS - 1) await playTurn(page, `rest:${i + 1}`, PROOF_REST);
+    }
+
+    // C. the return
+    s = await snap(page);
+    const saltBefore = homeOf(s);
+    const woundCards = (s?.fightCards || []);
+    const returnTurns = [];
+    // The road is a scene: the departure turn ends on the road and arrival is
+    // the next turn's consequence (DECISIONS 2026-09-16), so walk until the
+    // hero is actually back (up to 4 extra turns) before judging the return.
+    const atHome = (snapshot) => !!(snapshot?.location && (/saltmere/i.test(snapshot.location) || (homeName && snapshot.location.toLowerCase() === String(homeName).toLowerCase())));
+    const returnLines = [PROOF_RETURN[0]];
+    let arrived = false;
+    for (let i = 0; i < returnLines.length && i < 6; i++) {
+        const isArrival = arrived === false;
+        const { after, dm, sys } = await playTurn(page, `return:${i + 1}`, returnLines[i]);
+        const salt = homeOf(after);
+        const sigInPrompt = !!(salt?.signature && sys.includes(salt.signature.replace(/[.;,]\s*$/, '')));
+        const cbAt = sys.indexOf('## DRAMATIC CALLBACK OPPORTUNITIES');
+        const cbBlock = cbAt >= 0 ? sys.slice(cbAt, cbAt + 3000) : '';
+        const woundInBlock = woundCards.find(c => c.text && cbBlock.includes(c.text.slice(0, 60))) || null;
+        const placeLine = (sys.match(/^[^\n]*Current location[^\n]*$/mi) || [''])[0].slice(0, 400);
+        const entry = { turn: turnNo, label: `return:${i + 1}`, location: after?.location, atHome: atHome(after), saltmere: salt, signatureInPrompt: sigInPrompt, currentPlaceLine: placeLine, callbackBlock: cbAt >= 0, woundInBlock: woundInBlock ? woundInBlock.text : null, dm };
+        if (atHome(after) && isArrival) { arrived = true; entry.arrival = true; entry.returnJudge = await judgeReturnVisit(salt?.signature, salt?.lastState, dm); }
+        if (woundInBlock) entry.callbackJudge = await judgeWoundCallback(woundInBlock.text, dm);
+        returnTurns.push(entry);
+        log('return', { ...entry, dm: undefined });
+        note('proof', `return ${i + 1}: @${after?.location} home=${atHome(after)} visits=${salt?.visitCount} sig=${!!salt?.signature} sigInPrompt=${sigInPrompt} callback=${cbAt >= 0} wound=${!!woundInBlock} judge=${JSON.stringify(entry.returnJudge || entry.callbackJudge || null)}`);
+        if (!arrived) {
+            if (returnLines.length < 5) returnLines.push('I keep walking south along the Coast Road until I reach Saltmere and the seaward pier.');
+        } else if (returnLines.length < i + 1 + (PROOF_RETURN.length - 1)) {
+            // Arrived: the two Tammo scenes follow (once).
+            if (!returnLines.includes(PROOF_RETURN[1])) returnLines.push(PROOF_RETURN[1], PROOF_RETURN[2]);
+        }
+    }
+    findings.returnVisit = { before: saltBefore, turns: returnTurns.map(t => ({ ...t, dm: undefined })) };
+    findings.callback = { woundCardsOnRecord: woundCards.map(c => ({ id: c.id, salience: c.salience, status: c.status, text: c.text })), offered: returnTurns.filter(t => t.woundInBlock).map(t => t.turn), woven: returnTurns.filter(t => t.callbackJudge?.woven).map(t => t.turn) };
+
+    // D. the recap taps
+    s = await snap(page);
+    const frontTitles = s?.frontTitles || [];
+    for (let i = 0; i < 3; i++) {
+        const before = await snap(page);
+        const { after, dm } = await playTurn(page, `recap:${i + 1}`, RECAP_LINE);
+        const words = String(dm || '').trim().split(/\s+/).filter(Boolean).length;
+        const judge = await judgeRecap(dm, frontTitles);
+        const noEvents = JSON.stringify(before?.purse) === JSON.stringify(after?.purse) && before?.inventory.join('|') === after?.inventory.join('|') && before?.exp === after?.exp && before?.location === after?.location && (after?.rollHistoryLen ?? 0) === (before?.rollHistoryLen ?? 0);
+        const entry = { n: i + 1, words, under120: words <= 120, noEvents, judge, dm };
+        findings.recaps.push(entry);
+        log('recap', { ...entry, dm: undefined });
+        note('proof', `recap ${i + 1}: ${words}w noEvents=${noEvents} judge=${JSON.stringify(judge)}`);
+    }
+
+    results.push({ kind: 'proof-summary', ...findings });
+    note('summary', JSON.stringify({
+        home: findings.home.saltmere, fights: findings.fights.map(f => ({ n: f.n, iters: f.combatIters, hp: `${f.hpAfter}/${f.maxHp}`, cards: f.fightCards, mark: f.fightMarkLine })),
+        returnVisit: findings.returnVisit.turns.map(t => ({ turn: t.turn, visits: t.saltmere?.visitCount, sig: !!t.saltmere?.signature, sigInPrompt: t.signatureInPrompt, judge: t.returnJudge && { touches: t.returnJudge.touches_signature, returns: t.returnJudge.reads_as_return } })),
+        callback: { onRecord: findings.callback.woundCardsOnRecord.length, offered: findings.callback.offered, woven: findings.callback.woven },
+        recaps: findings.recaps.map(r => ({ n: r.n, words: r.words, noEvents: r.noEvents, judge: r.judge })),
+    }));
+    fs.writeFileSync(path.join(OUT_DIR, 'proof-summary.json'), JSON.stringify(findings, null, 2));
+    saveAll();
+}
+
 async function run() {
     fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
     const browser = await puppeteer.launch({
@@ -1578,6 +1767,7 @@ async function run() {
         if (PROBE === 'recall') await runRecallProbe(page);
         else if (PROBE === 'full') await runFullProbe(page);
         else if (PROBE === 'tells') await runTellsProbe(page);
+        else if (PROBE === 'proof') await runProofProbe(page);
         else await runWonderProbe(page);
     } finally {
         fs.writeFileSync(path.join(OUT_DIR, 'transcript.json'), JSON.stringify(await page.evaluate(() => (window.__QF_STATE__?.messages || []).map(m => ({ role: m.role, kind: m.kind || null, hidden: !!m.hidden, content: m.content }))).catch(() => []), null, 2));

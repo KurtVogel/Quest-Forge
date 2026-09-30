@@ -199,6 +199,25 @@ export function normalizeWonderHooks(raw, { fronts = [] } = {}) {
  * delays its window by 0–3 scenes (the world-tempo timing-die rule). An
  * on-demand wonder opens at once — the player asked, waiting is wrong.
  */
+/**
+ * Which hook the die picks (Vesa, 2026-09-30 — the 09-19 report's "weight the
+ * die toward standalone", decided): when the director offered BOTH standalone
+ * and front-tied hooks, a coin decides first whether the wonder is off-plot
+ * at all (heads → one of the standalone hooks, tails → any hook), so an
+ * unconnected strange thing lands at least half the time whatever the mix.
+ * `die(n)` returns 1..n — the crypto die in production, a stub in tests.
+ */
+export function pickWonderIndex(hooks, { die }) {
+    const list = Array.isArray(hooks) ? hooks.filter(Boolean) : [];
+    if (list.length === 0) return 0;
+    const roll = typeof die === 'function' ? die : (n => 1 + Math.floor(Math.random() * n));
+    const standalone = list.map((h, i) => (h?.fits === 'standalone' ? i : -1)).filter(i => i >= 0);
+    if (standalone.length > 0 && standalone.length < list.length && roll(2) === 1) {
+        return standalone[roll(standalone.length) - 1];
+    }
+    return roll(list.length) - 1;
+}
+
 export function selectWonder(hooks, { messageCount, pick, delayScenes, onDemand = false, key = '' }) {
     const list = Array.isArray(hooks) ? hooks.filter(Boolean) : [];
     if (list.length === 0) return null;

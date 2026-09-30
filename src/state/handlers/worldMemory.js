@@ -23,6 +23,7 @@ import {
     mintPendingWonder,
     normalizeWonderHooks,
     sanitizePendingWonder,
+    pickWonderIndex,
     selectWonder,
     shouldRequestWonder,
 } from '../../engine/wonder.js';
@@ -300,7 +301,9 @@ export const handlers = {
         const hooks = normalizeWonderHooks(payload.hooks, { fronts: state.fronts || [] });
         const wonder = selectWonder(hooks, {
             messageCount,
-            pick: rollDie(Math.max(1, hooks.length)) - 1,
+            // Standalone-weighted (2026-09-30): a coin first decides whether the
+            // wonder is off-plot at all when the director offered both kinds.
+            pick: pickWonderIndex(hooks, { die: rollDie }),
             delayScenes: rollDie(WONDER_TIMING_DIE_SIDES) - 1,
             onDemand: pending.onDemand,
             key: pending.key,

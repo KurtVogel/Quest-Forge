@@ -356,7 +356,8 @@ describe('hero tells — queue sweep 2026-09-24 (scene window, id claim, witness
         const block = buildHeroTellsBlock(tells, { presentNames: witnesses, messageCount: 100 });
         expect(block.split('\n').filter(line => line.startsWith('- '))).toHaveLength(HERO_TELL_PROMPT_CAP);
         expect(block.length).toBeLessThanOrEqual(HERO_TELLS_BLOCK_CHAR_CEILING);
-        expect(HERO_TELLS_STANDING_RULE.length).toBeLessThan(1000);
+        // 1,200 since 2026-09-30: the hearsay allowance (Vesa) added one clause to the cached-prefix rule.
+        expect(HERO_TELLS_STANDING_RULE.length).toBeLessThan(1200);
     });
 });
 
@@ -381,3 +382,35 @@ describe('hero tells — the 2026-09-29 real-provider playtest (docs/HERO_TELLS_
     });
 });
 
+describe('hero tells — hearsay (Vesa, 2026-09-30): a PUBLIC pattern may be repeated by a non-witness, as hearsay', () => {
+    const PUBLIC_COIN = { text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses: ['Tammo'], public: true };
+    const PRIVATE_PIPE = { text: 'digs out the pipe and walks off when a conversation turns on the hero', kind: 'habit', witnesses: ['Tammo'] };
+    const INTIMATE = { text: 'laughs when kissed on the neck', kind: 'intimate', witnesses: ['Maren'], public: true };
+
+    it('a public, established tell renders as HEARSAY when no witness is present; a private or intimate one does not', () => {
+        const tells = [...sightings([PUBLIC_COIN], [10, 40, 70]), ...sightings([PRIVATE_PIPE], [12, 42, 72]), ...sightings([INTIMATE], [15])];
+        const voiceable = listVoiceableTells(tells, { presentNames: ['Orsa Pellwyn'], messageCount: 100 });
+        expect(voiceable).toHaveLength(1);
+        expect(voiceable[0]).toMatchObject({ hearsay: true, witnesses: [] });
+        expect(voiceable[0].tell.text).toBe(PUBLIC_COIN.text);
+        const block = buildHeroTellsBlock(tells, { presentNames: ['Orsa Pellwyn'], messageCount: 100 });
+        expect(block).toContain('HEARSAY: nobody present saw this');
+        expect(block).toContain('never as their own observation');
+        expect(block).not.toContain(PRIVATE_PIPE.text);
+        expect(block).not.toContain(INTIMATE.text);
+    });
+
+    it('a present witness makes it a witnessed line, and witnessed lines rank before hearsay ones', () => {
+        const tells = [...sightings([PUBLIC_COIN], [10, 40, 70]), ...sightings([{ ...PRIVATE_PIPE, public: true, witnesses: ['Bran'] }], [12, 42, 72, 90])];
+        const voiceable = listVoiceableTells(tells, { presentNames: ['Tammo'], messageCount: 100 });
+        expect(voiceable.map(v => [v.tell.text === PUBLIC_COIN.text ? 'coin' : 'pipe', v.hearsay])).toEqual([['coin', false], ['pipe', true]]);
+        const block = buildHeroTellsBlock(tells, { presentNames: ['Tammo'], messageCount: 100 });
+        expect(block).toContain('(seen by Tammo)');
+        expect(block.indexOf(PUBLIC_COIN.text)).toBeLessThan(block.indexOf('HEARSAY'));
+    });
+
+    it('the standing rule carries the hearsay allowance', () => {
+        expect(HERO_TELLS_STANDING_RULE).toContain('unless its line is marked HEARSAY');
+        expect(HERO_TELLS_STANDING_RULE).toContain('the telling may have drifted a little');
+    });
+});

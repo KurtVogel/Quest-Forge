@@ -21,6 +21,7 @@ import {
     normalizeWonderHooks,
     sanitizePendingWonder,
     sanitizeWonder,
+    pickWonderIndex,
     selectWonder,
     shouldRequestWonder,
     wonderThreshold,
@@ -253,5 +254,34 @@ describe('buildWonderBlock + the residue card + the OOC ask', () => {
         const closed = buildSystemPrompt({ ...base, wonder: { ...HOOK, chosenAtMessage: 60, openAtMessage: 70 } });
         expect(closed).not.toContain('## SOMETHING STRANGE ARRIVES');
         expect(buildSystemPrompt(base)).not.toContain('## SOMETHING STRANGE ARRIVES');
+    });
+});
+
+describe('pickWonderIndex — the standalone-weighted die (Vesa, 2026-09-30)', () => {
+    const mixed = [{ fits: 'front-a' }, { fits: 'standalone' }, { fits: 'front-b' }, { fits: 'standalone' }];
+    const dieOf = (...rolls) => { let i = 0; return () => rolls[i++ % rolls.length]; };
+
+    it('heads on the coin picks among the standalone hooks only', () => {
+        // coin → 1 (heads), then a 2-sided pick → 2 → the second standalone (index 3)
+        expect(pickWonderIndex(mixed, { die: dieOf(1, 2) })).toBe(3);
+        expect(pickWonderIndex(mixed, { die: dieOf(1, 1) })).toBe(1);
+    });
+    it('tails picks among ALL hooks', () => {
+        // coin → 2 (tails), then a 4-sided pick → 3 → index 2 (front-b)
+        expect(pickWonderIndex(mixed, { die: dieOf(2, 3) })).toBe(2);
+    });
+    it('no coin when the hooks are all standalone or all front-tied, and an empty list picks 0', () => {
+        const all = [{ fits: 'standalone' }, { fits: 'standalone' }];
+        expect(pickWonderIndex(all, { die: dieOf(2) })).toBe(1); // a single 2-sided roll, no coin consumed first
+        const none = [{ fits: 'front-a' }, { fits: 'front-b' }, { fits: 'front-c' }];
+        expect(pickWonderIndex(none, { die: dieOf(3) })).toBe(2);
+        expect(pickWonderIndex([], { die: dieOf(1) })).toBe(0);
+    });
+    it('lands off-plot at least half the time over a fair die', () => {
+        let standalone = 0;
+        const n = 4000;
+        const fair = (sides) => 1 + Math.floor(Math.random() * sides);
+        for (let i = 0; i < n; i++) if (mixed[pickWonderIndex(mixed, { die: fair })].fits === 'standalone') standalone++;
+        expect(standalone / n).toBeGreaterThan(0.68); // 0.5 + 0.5 × 0.5 = 0.75 expected
     });
 });

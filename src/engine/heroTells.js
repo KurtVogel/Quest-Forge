@@ -463,10 +463,20 @@ export function listVoiceableTells(tells = [], { presentNames = [], messages = n
     for (const tell of (Array.isArray(tells) ? tells : [])) {
         if (!isHeroTellLive(tell, { messages, messageCount })) continue;
         const witnesses = present.filter(name => tellWitnessedBy(tell, name));
-        if (witnesses.length === 0) continue;
-        out.push({ tell, witnesses });
+        if (witnesses.length === 0) {
+            // Hearsay (Vesa, 2026-09-30 — after the 09-29 playtest, where Gemini
+            // had a dockhand voice a public tell he never saw): a PUBLIC,
+            // non-intimate pattern may be repeated by someone who did not
+            // witness it — plainly AS hearsay, never as their own observation,
+            // and the telling may have drifted. Witnessed lines rank first.
+            if (!tell.public || isIntimateTell(tell)) continue;
+            out.push({ tell, witnesses: [], hearsay: true });
+            continue;
+        }
+        out.push({ tell, witnesses, hearsay: false });
     }
-    out.sort((a, b) => (b.tell.sightings?.length || 0) - (a.tell.sightings?.length || 0));
+    out.sort((a, b) => (a.hearsay ? 1 : 0) - (b.hearsay ? 1 : 0)
+        || (b.tell.sightings?.length || 0) - (a.tell.sightings?.length || 0));
     return out.slice(0, limit);
 }
 
@@ -616,9 +626,13 @@ const KIND_LABELS = {
     intimate: 'intimate — known only to the one who shared the bed',
 };
 
-function describeTell(tell, witnesses) {
+function describeTell(tell, witnesses, hearsay = false) {
+    const label = KIND_LABELS[normalizeHeroTellKind(tell.kind)];
+    if (hearsay) {
+        return `- ${tell.text} [${label} — HEARSAY: nobody present saw this; a character may have HEARD of it — repeat it only as hearsay ("they say…", "I heard…"), never as their own observation, and the telling may have drifted a little]`;
+    }
     const who = witnesses.length > 0 ? ` (seen by ${witnesses.join(', ')})` : '';
-    return `- ${tell.text} [${KIND_LABELS[normalizeHeroTellKind(tell.kind)]}${who}]`;
+    return `- ${tell.text} [${label}${who}]`;
 }
 
 /**
@@ -627,7 +641,7 @@ function describeTell(tell, witnesses) {
  * the ~860-char paragraph used to ride the dynamic half on every turn a
  * witness was present). The block itself carries lines only.
  */
-export const HERO_TELLS_STANDING_RULE = `**WHAT THEY HAVE NOTICED ABOUT THE HERO.** When a section of that name is present, it lists patterns in the hero's MANNER that the characters in the scene have watched form, each with the witnesses who know it. This is what these people KNOW of the hero's ways. They may draw on it in their own register — an aside, a tease, an in-joke, a raised eyebrow, a serious question — sparingly, when the scene touches it, never as a list and never more than a touch per scene. It is always THEIR reading of the hero, said or shown in fiction; the narrator never states the hero's feelings or motives as fact, and the hero may confirm, deny, or laugh it off. A character who did not witness a pattern does not know it. A tell marked intimate is spoken of only by the partner who knows it and only where the two are private or in a look or phrase only they would understand — never before others, never crudely, and never to shame.`;
+export const HERO_TELLS_STANDING_RULE = `**WHAT THEY HAVE NOTICED ABOUT THE HERO.** When a section of that name is present, it lists patterns in the hero's MANNER that the characters in the scene have watched form, each with the witnesses who know it. This is what these people KNOW of the hero's ways. They may draw on it in their own register — an aside, a tease, an in-joke, a raised eyebrow, a serious question — sparingly, when the scene touches it, never as a list and never more than a touch per scene. It is always THEIR reading of the hero, said or shown in fiction; the narrator never states the hero's feelings or motives as fact, and the hero may confirm, deny, or laugh it off. A character who did not witness a pattern does not know it — unless its line is marked HEARSAY: then they may repeat what they HEARD, plainly as hearsay ("they say"), never as their own observation, and the telling may have drifted a little. A tell marked intimate is spoken of only by the partner who knows it and only where the two are private or in a look or phrase only they would understand — never before others, never crudely, and never to shame.`;
 
 /** The block's byte ceiling: header + intro + HERO_TELL_PROMPT_CAP lines at every cap (text, label, 8 witnesses). */
 export const HERO_TELLS_BLOCK_CHAR_CEILING = 4800;
@@ -642,7 +656,7 @@ export function buildHeroTellsBlock(tells = [], { presentNames = [], messages = 
     if (combatActive) return '';
     const voiceable = listVoiceableTells(tells, { presentNames, messages, messageCount });
     if (voiceable.length === 0) return '';
-    const lines = voiceable.map(({ tell, witnesses }) => describeTell(tell, witnesses));
+    const lines = voiceable.map(({ tell, witnesses, hearsay }) => describeTell(tell, witnesses, hearsay));
     return `## WHAT THEY HAVE NOTICED ABOUT THE HERO — PRIVATE
 Patterns the characters present have watched form (only the named witnesses know each one; the standing rule applies):
 ${lines.join('\n')}`;

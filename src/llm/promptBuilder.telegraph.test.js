@@ -26,6 +26,9 @@ describe('COMBAT NOTES — honor your own telegraph, and let foes break', () => 
             const notes = text.slice(text.indexOf('COMBAT NOTES — INTENT ONLY'), text.indexOf('PLAYER DEATH & DYING:'));
             expect(notes).toContain('**Honor your own telegraph, and let foes break.**');
             expect(notes).toContain('the foe shown nocking an arrow at Torvald attacks Torvald, the foe shown backing toward the door flees');
+            // 2026-09-30 eval:combat on GPT Terra: the break rule landed but 2 of 3 runs
+            // narrated the surrender in prose with NO intent envelope — the break is declared, never narrated here.
+            expect(notes).toContain('A break is still DECLARED through `enemy_intents` (`flee` / `surrender`) in this JSON reply — never narrated here');
             expect(notes).toContain('BREAKS by the round after it was bloodied: `flee`, `surrender`, or one desperate attack before it does');
             expect(notes).toContain('Fanatics, the undead, constructs, and beasts guarding young or a kill are the exceptions');
             expect(notes.indexOf('Honor your own telegraph')).toBeGreaterThan(notes.indexOf('`enemy_intents`: at most one per living foe'));
