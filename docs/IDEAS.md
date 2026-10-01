@@ -2990,6 +2990,35 @@ dormant and resolved forever — a decision, since the recall dossier reads them
 
 ---
 
+### [strengthening] A budget nobody reaches is a budget nobody checked; a read after an await is a read of a different state — status: `idea` (2026-10-01 audit, memory-journal + chat-orchestration Lap 3; queue lines in SCHEDULED_STRENGTHENING.md)
+Two rules from the memory-journal + chat-orchestration Lap-3 pass (2026-10-01), every number measured
+against the real reducer, the real `maybeAutoSummarize` with a scripted Flash reply, and the real turn
+runner with a React-shaped lagging `getState`. **(1)** `MESSAGE_WINDOW` = 20 is documented as "the DM
+sees a 20-message sliding window" and tested as a CAP — but the journal cadence's `batchBoundary`
+returns `messages.length` whenever the backlog is under 40 weighted rows and the mark flags every row,
+so after every cadence (every ~10 narrative rows, ~5 turns) the DM's next call carries the player's new
+line and, by the accident of the lagging ref, the newest DM row: the history saw-tooths 1 → ~11 → 1 and
+the turn after each cadence is narrated from a 2–3-sentence summary + 3 clamped consequences. The
+2026-06-23 LOCATION TRANSITION HISTORY was built against exactly that symptom. Rule: for every
+"window of N" / "last N" constant, measure the TYPICAL fill across the cycle that empties it, not the
+ceiling; the fix shape is a kept tail (`KEEP_TAIL` 6 narrative rows ≈ 1.1k tokens per call, trigger at
+`SUMMARIZE_EVERY + KEEP_TAIL`, summarize the oldest `SUMMARIZE_EVERY`) — a decision item as much as a
+fix, since the summary is the design's continuity carrier and the tail only removes the cliff. **(2)**
+`getState()` before a pipeline's first `await` is pre-dispatch; after it, post-flush. `submitPlayerMessage`
+dispatches the user row, `sendToLLM` awaits the query embed, and the window read that follows keeps the
+row as its last entry while the same text goes again as `userMessage` — the player's line reaches the
+provider TWICE on every ordinary turn (both providers append without dedupe; the combat lanes escape
+only because nothing is awaited before their read). The surviving DM row after a cadence is the SAME
+mechanism with the opposite sign, and the 09-07 header trap was its third face. Rule: a value a pipeline
+needs consistently (the window, the cadence's transcript and count) is captured ONCE at a named point and
+threaded, never re-read through the ref wherever convenient. Cheap proof for the duplicate: `npm run
+eval:turns` before/after on the Echo column (Gemini 61 %, the one column the 09-11 grammar did not move).
+Also measured: a typical journal batch is ~2k tokens (system 2,626 + user 3,200–4,466 chars; 49.8k user
+chars at the 40-row cap); `collectNarrativeEntries` 0.15 ms at 2,000 rows ×4 per turn; the mark clones
+2,000 rows to flag 10; a journal entry is 1,137 B typical / 7,187 B max — 444 KB / 2.8 MB at 400 entries
+in every save plus 400 durable RAG rows, and the Journal tab renders them all unwindowed. From the
+2026-10-01 strengthening audit.
+
 ## Rejected (with reasons — don't re-propose without new arguments)
 
 - **Shared cloud autosave slot** (one "Continue" synced across devices) — rejected
