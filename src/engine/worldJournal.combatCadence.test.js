@@ -29,7 +29,7 @@ vi.mock('../llm/scribe.js', async (importOriginal) => ({
 
 const { gameReducer, initialGameState } = await import('../state/gameReducer.js');
 const { COMBAT_PHASES, normalizeCombatExchange, planCombatExchange, planOpeningExchange } = await import('./combatExchange.js');
-const { maybeAutoSummarize, resetSummarizeFailureTracker, SUMMARIZE_EVERY } = await import('./worldJournal.js');
+const { KEEP_TAIL, maybeAutoSummarize, resetSummarizeFailureTracker, SUMMARIZE_EVERY } = await import('./worldJournal.js');
 const { buildPresenceText, collectNarrativeMessages } = await import('../llm/narrativeMessages.js');
 
 const EXCHANGES = 9;
@@ -149,18 +149,33 @@ describe('a 9-exchange fight and the journal cadence (2026-09-23 combat-exchange
             expect(text).toContain('Oda');
         }
 
-        // ONE cadence: the first post-fight call summarizes the whole fight in
-        // one batch; the next call finds nothing left.
+        // Right after the fight nothing is journaled (2026-10-01): the kept
+        // tail's cut would fall between two rounds, and a fight is never split
+        // — its narration stays in the DM's window, whole.
         const dispatch = vi.fn();
-        const first = await maybeAutoSummarize(state, dispatch, 0);
+        const early = await maybeAutoSummarize(state, dispatch, 0);
+        expect(early).toEqual({ index: 0, journalEntry: null });
+        expect(sendMessageMock).not.toHaveBeenCalled();
+
+        // ONE cadence: three exchanges later the tail has moved past the fight
+        // and the first call summarizes the whole fight in one batch; the next
+        // call finds nothing left.
+        const fightEnd = state.messages.length;
+        let after = state;
+        for (let i = 0; i < KEEP_TAIL / 2; i++) {
+            after = gameReducer(after, { type: 'ADD_MESSAGE', payload: { role: 'user', content: `I catch my breath (${i}).` } });
+            after = gameReducer(after, { type: 'ADD_MESSAGE', payload: { role: 'assistant', content: `The marsh goes quiet (${i}).` } });
+        }
+        const first = await maybeAutoSummarize(after, dispatch, 0);
         expect(sendMessageMock).toHaveBeenCalledTimes(1);
         expect(first.journalEntry).toBeTruthy();
-        expect(first.index).toBe(state.messages.length);
+        expect(first.index).toBe(fightEnd);
         const payload = sendMessageMock.mock.calls[0][0].userMessage;
         expect(payload).not.toContain('Rolled **');
         expect(payload).toContain('the reeds shake');
+        expect(payload).not.toContain('I catch my breath');
 
-        const second = await maybeAutoSummarize(state, dispatch, first.index);
+        const second = await maybeAutoSummarize(after, dispatch, first.index);
         expect(second).toEqual({ index: first.index, journalEntry: null });
         expect(sendMessageMock).toHaveBeenCalledTimes(1);
     });

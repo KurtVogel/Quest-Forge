@@ -90,11 +90,24 @@ export function dropOrphanCombatExchange(events, combatActive) {
  * with no fiction between them is one receipt, joined by newlines — the same
  * bytes, one slot, one turn. Roll lines and fiction break the run.
  *
+ * The window never carries the line the call is about to send
+ * (2026-10-01 chat-orchestration P1): the player's row is dispatched before
+ * the turn starts, and whether it is already in `messages` when the window is
+ * read depends on whether an `await` preceded the read (the query embed lets
+ * React flush). When it was, both providers appended the same text again as
+ * `userMessage` — the DM was told the action twice on every ordinary and
+ * table-talk turn. `pendingUserMessage` names that line: the newest player row
+ * with no DM reply after it is dropped when it is exactly this text, so the
+ * result is the same whichever side of the flush the read lands on.
+ *
  * @param {Array<object>} messages - full chat history from state.
  * @param {number} windowSize - max messages to keep (MESSAGE_WINDOW).
+ * @param {object} [options]
+ * @param {string|null} [options.pendingUserMessage] - the player row this
+ *   call sends as its own `userMessage`.
  * @returns {Array<{role: string, content: string}>}
  */
-export function buildMessageWindow(messages, windowSize) {
+export function buildMessageWindow(messages, windowSize, { pendingUserMessage = null } = {}) {
     const unsummarized = (messages || []).filter(m => {
         if (m.summarized || m.hidden || m.deleted || m.exchangeLine) return false;
         if (m.role === 'system') {
@@ -102,6 +115,14 @@ export function buildMessageWindow(messages, windowSize) {
         }
         return true;
     });
+    if (typeof pendingUserMessage === 'string' && pendingUserMessage) {
+        for (let i = unsummarized.length - 1; i >= 0; i--) {
+            const m = unsummarized[i];
+            if (m.role === 'system') continue;
+            if (m.role === 'user' && m.content === pendingUserMessage) unsummarized.splice(i, 1);
+            break;
+        }
+    }
     // The belt behind the LOAD_GAME row heal: the window never carries a
     // non-string or an unbounded row to a provider (2026-09-19 audit P2).
     const text = m => (typeof m.content === 'string' ? m.content.slice(0, MESSAGE_CONTENT_MAX) : '');

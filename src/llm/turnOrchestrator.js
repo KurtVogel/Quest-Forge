@@ -32,7 +32,7 @@ import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt, rev
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe } from './scribe.js';
 import { EPILOGUE_RESPONSE_MODE, isEpilogueRequest, TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
-import { addMemory, findSubjectsInText, flushMemoryQueue, queueMemory, retrieveRelevant } from '../engine/vectorMemory.js';
+import { findSubjectsInText, flushMemoryQueue, queueMemory, retrieveRelevant } from '../engine/vectorMemory.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
 import { describeMemoryUnavailable, getMachineryGeminiKey } from './machinery.js';
 import { curateStoryMemory, formatSecrecyTag } from '../engine/storyMemory.js';
@@ -161,8 +161,7 @@ export function createTurnRunner({
     // the live messages ARE the boundary (every advancing path in worldJournal
     // dispatches MARK_MESSAGES_SUMMARIZED); prunedMessageCount only fast-
     // forwards the scan when it agrees with the flags.
-    const summarizedBoundary = () => {
-        const s = getState();
+    const summarizedBoundary = (s) => {
         const messages = s?.messages || [];
         let prefix = s?.session?.prunedMessageCount || 0;
         if (!(prefix > 0 && prefix <= messages.length && messages[prefix - 1]?.summarized)) prefix = 0;
@@ -170,28 +169,44 @@ export function createTurnRunner({
         return prefix;
     };
 
+    // Journal entries waiting for the next turn's memory batch (2026-10-01 P2).
+    let carriedJournalMemories = [];
+
     const runAutoSummarize = async () => {
         if (summarizeInFlight) return;
         summarizeInFlight = true;
         try {
-            const result = await maybeAutoSummarize(getState(), dispatch, summarizedBoundary(), { getState });
-            const machineryKey = getMachineryGeminiKey(getState().settings);
+            // ONE state for the cadence (2026-10-01 P2): the transcript it
+            // counts, the boundary, and the batch are the same read. The ref
+            // may still be one committed row behind (the render has not
+            // flushed on the sync path) — harmless since KEEP_TAIL: a
+            // transcript one row short only ever keeps MORE tail.
+            const cadenceState = getState();
+            const result = await maybeAutoSummarize(cadenceState, dispatch, summarizedBoundary(cadenceState), { getState });
             // A `fallback` entry ("Auto-summary was unavailable…") is honest
             // bookkeeping, not memory: never embed it (2026-09-06 P2 — the
             // mount seed skips it the same way).
-            if (result.journalEntry && !result.journalEntry.fallback && machineryKey) {
+            if (result.journalEntry && !result.journalEntry.fallback && getMachineryGeminiKey(cadenceState.settings)) {
                 // Bare summary, location as metadata — the EXACT text the mount
                 // seed builds. The old "[Location: X] summary" prefix never
                 // matched the seed's bare text, so every journal entry was
                 // re-embedded (and duplicated in retrieval) on each reload
                 // (live playtest #10, 2026-08-22: 40 re-embeds on Continue).
                 // Subjects tagged like the seed does, so live rows get the same
-                // presence-aware retrieval treatment (2026-08-28).
+                // presence-aware retrieval treatment (2026-08-28) — from the
+                // roster AFTER the cadence, whose NPC lane has just written.
+                //
+                // CARRIED, not embedded (2026-10-01 P2): the turn's batch
+                // flushed seconds ago, so an embed here was a third request on
+                // every cadence turn. The row rides the NEXT turn's batch
+                // instead — SESSION HISTORY renders the entry meanwhile, and a
+                // reload before then is covered by the mount seed.
                 const rosterNames = (getState().npcs || []).map(n => n?.name).filter(Boolean);
-                await addMemory(
-                    machineryKey, result.journalEntry.summary, 'journal', result.journalEntry.location,
-                    findSubjectsInText(result.journalEntry.summary, rosterNames),
-                ).catch(() => {});
+                carriedJournalMemories.push({
+                    text: result.journalEntry.summary,
+                    location: result.journalEntry.location,
+                    subjects: findSubjectsInText(result.journalEntry.summary, rosterNames),
+                });
             }
         } catch (e) {
             console.error('[Journal RAG Seeding] Failed:', e);
@@ -203,8 +218,7 @@ export function createTurnRunner({
     /**
      * Build the system prompt from current state, with optional RAG memories injected.
      */
-    const buildCurrentSystemPrompt = (retrievedMemories = [], storyMemory = [], recallRecord = '', { narrationOnly = false, intentOnly = false } = {}) => {
-        const s = getState();
+    const buildCurrentSystemPrompt = (s, retrievedMemories = [], storyMemory = [], recallRecord = '', { narrationOnly = false, intentOnly = false } = {}) => {
         return buildSystemPrompt({
             narrationOnly,
             intentOnly,
@@ -253,8 +267,10 @@ export function createTurnRunner({
      * Build the sliding-window message history for the LLM.
      * Only sends the last MESSAGE_WINDOW un-summarized messages.
      * Older messages have been captured in journal entries and world facts.
+     * `pendingUserMessage` is the transcript row this call sends as its own
+     * `userMessage` — never in the window too (2026-10-01 P1).
      */
-    const buildMessageHistory = () => buildMessageWindow(getState().messages, MESSAGE_WINDOW);
+    const buildMessageHistory = (s, pendingUserMessage = null) => buildMessageWindow(s.messages, MESSAGE_WINDOW, { pendingUserMessage });
 
     /**
      * The assistant message the most recent sendToLLM call committed to the
@@ -292,6 +308,9 @@ export function createTurnRunner({
         // Per-call semantics: a call that commits nothing (combat intent,
         // failure) must never leave an older turn's message readable here.
         lastCommittedTurn = null;
+        // ENTRY state: the state the player acted in — pre-dispatch on the sync
+        // path, so it does not carry the player's own row yet. Retrieval, the
+        // recall dossier, settings, and the entry-time combat flag read it.
         const s = getState();
 
         // RAG: retrieve memories relevant to the current scene (machinery key —
@@ -307,15 +326,7 @@ export function createTurnRunner({
         const wantsMemories = !!originalPlayerMessage && !opts.combatIntentOnly && !opts.skipMemories;
         let retrievedMemories = [];
         let dramaticMemories = [];
-        // Scene-driven curation: present NPCs only, and the live transcript
-        // for the conversational cooldown/recency windows (2026-09-06).
-        const curateDramaticMemories = (query) => curateStoryMemory({
-            memories: s.storyMemory || [],
-            query,
-            location: s.currentLocation || '',
-            npcs: findPresentNpcs(s, originalPlayerMessage),
-            messages: s.messages || [],
-        });
+        let curationQuery = originalPlayerMessage;
         // "Remember when…" (WOW 2026-09-18): a question about the past gets
         // the engine's dossier of what actually happened, wider retrieval with
         // the asked-about people counted as present, and a no-invention block.
@@ -350,9 +361,24 @@ export function createTurnRunner({
                     payload: { role: 'system', kind: 'error', content: describeMemoryUnavailable(reason, s.settings) },
                 }),
             }).catch(() => []);
-            dramaticMemories = curateDramaticMemories(sceneContext);
-        } else if (wantsMemories) {
-            dramaticMemories = curateDramaticMemories(originalPlayerMessage);
+            curationQuery = sceneContext;
+        }
+        // PROMPT state — the ONE read after the call's only pre-stream await
+        // (2026-10-01 P2, the 09-07 header-trap rule applied to the window):
+        // the query embed lets React flush, so a `getState()` after it is a
+        // different state than the one before it. Curation, the system prompt,
+        // and the message window all read THIS capture, never the ref again.
+        const promptState = getState();
+        if (wantsMemories) {
+            // Scene-driven curation: present NPCs only, and the live transcript
+            // for the conversational cooldown/recency windows (2026-09-06).
+            dramaticMemories = curateStoryMemory({
+                memories: promptState.storyMemory || [],
+                query: curationQuery,
+                location: promptState.currentLocation || '',
+                npcs: findPresentNpcs(promptState, originalPlayerMessage),
+                messages: promptState.messages || [],
+            });
         }
         if (wantsMemories || recallDossier) {
             // Scores/similarities are dropped once the prompt string is built —
@@ -372,7 +398,7 @@ export function createTurnRunner({
         const recallRecord = recallDossier ? buildRecallRecordBlock(recallDossier, recallIntent.question) : '';
         // Combat narration retells committed RESOLVED EVENTS: the quest / facts
         // / history / inventory blocks are dead weight there (2026-09-23 P2).
-        const baseSystemPrompt = buildCurrentSystemPrompt(retrievedMemories, dramaticMemories, recallRecord, {
+        const baseSystemPrompt = buildCurrentSystemPrompt(promptState, retrievedMemories, dramaticMemories, recallRecord, {
             narrationOnly: !!opts.combatNarration,
             // The intent call is the round's other half (2026-09-30 P2): it
             // gets the projection its JSON-only job needs, not the ordinary turn's.
@@ -389,7 +415,9 @@ Translate the player's committed action into the single bounded combat_exchange 
             // same lane with its own mode: an epilogue must move the world on.
             systemPrompt = `${baseSystemPrompt}\n\n${isEpilogueRequest(originalPlayerMessage) ? EPILOGUE_RESPONSE_MODE : TABLE_TALK_RESPONSE_MODE}`;
         }
-        const messageHistory = buildMessageHistory();
+        // The player's own row never rides the window beside `userMessage`
+        // (the challenge lane names the row its prompt restates).
+        const messageHistory = buildMessageHistory(promptState, opts.pendingUserRow || userMessage);
 
         const abortController = new AbortController();
         setAbortController(abortController);
@@ -642,7 +670,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 narrative,
                 combatActive: !!getState().combat?.active,
             });
-            if (nudgeCue) await recoverMissingEvents(nudgeCue, narrative, msgId, abortController.signal);
+            if (nudgeCue) await recoverMissingEvents(nudgeCue, { id: msgId, content: narrative }, abortController.signal);
         }
 
         return events;
@@ -653,9 +681,18 @@ Translate the player's committed action into the single bounded combat_exchange 
      * hard-whitelisted (missingEventsNudge.js) and re-shaped through the real parser
      * before applying, so nothing beyond quest_updates/starting_items can enter.
      */
-    const recoverMissingEvents = async (cue, narrative, lootSourceId, signal) => {
+    const recoverMissingEvents = async (cue, committed, signal) => {
         try {
+            // ONE state for the call's prompt and window. The narration rides
+            // ONCE, as the history's last assistant row (2026-10-01 P2): the
+            // committed row was in the window only when the render had flushed
+            // AND the prompt quoted 1,500 chars of it again. Whatever the ref
+            // shows, the row is taken out by id and appended explicitly.
             const s = getState();
+            const history = buildMessageWindow([
+                ...(s.messages || []).filter(m => m?.id !== committed.id),
+                { role: 'assistant', content: committed.content },
+            ], MESSAGE_WINDOW);
             // The turn's own abort signal rides along (2026-09-07 audit P2):
             // Stop used to be inert here — the nudge ran to the 90s stall guard
             // (times retries) while isLoading kept the Stop button showing.
@@ -663,9 +700,9 @@ Translate the player's committed action into the single bounded combat_exchange 
                 provider: s.settings.llmProvider,
                 apiKey: s.settings.apiKey,
                 model: s.settings.model,
-                systemPrompt: buildCurrentSystemPrompt([], []),
-                messageHistory: buildMessageHistory(),
-                userMessage: buildNudgePrompt(cue, narrative),
+                systemPrompt: buildCurrentSystemPrompt(s, [], []),
+                messageHistory: history,
+                userMessage: buildNudgePrompt(cue),
                 temperature: 0.2,
                 signal,
             });
@@ -675,7 +712,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             if (!synthetic.events) return;
             applyEvents(synthetic.events, dispatch, getState, {
                 openingScene: cue.reason === 'opening',
-                lootSourceId: `${lootSourceId}:nudge`,
+                lootSourceId: `${committed.id}:nudge`,
             });
             console.warn(`[ChatPanel] Missing-events nudge recovered ${Object.keys(rawFields).join(' + ')} (${cue.reason} cue).`);
         } catch (error) {
@@ -777,6 +814,14 @@ Translate the player's committed action into the single bounded combat_exchange 
             // turn embeds as ONE request (2026-09-29 P2).
             queueMemory(machineryKey, narrativeText, 'narrative', loc, null, typeof finalNarration.id === 'string' ? finalNarration.id : null).catch(() => {});
         }
+        // The last cadence's journal entry rides this turn's batch (see
+        // runAutoSummarize): one embed request, not a request of its own.
+        if (machineryKey && carriedJournalMemories.length > 0) {
+            for (const row of carriedJournalMemories) {
+                queueMemory(machineryKey, row.text, 'journal', row.location, row.subjects).catch(() => {});
+            }
+            carriedJournalMemories = [];
+        }
         flushMemoryQueue().catch(() => {});
         return true;
     };
@@ -870,13 +915,17 @@ Translate the player's committed action into the single bounded combat_exchange 
         const challenge = String(challengeText || '').trim();
         if (!proposal || proposal.challengeUsed || !challenge) return;
         dispatch({ type: 'CLEAR_ROLEPLAY_CHECK' });
-        dispatch({ type: 'ADD_MESSAGE', payload: { role: 'user', content: `**Roll challenge:** ${challenge}` } });
+        const challengeRow = `**Roll challenge:** ${challenge}`;
+        dispatch({ type: 'ADD_MESSAGE', payload: { role: 'user', content: challengeRow } });
         setLoading(true);
         onStatus('DM reconsidering the ruling');
         try {
+            // The prompt restates the challenge with its ruling context — the
+            // visible row must not reach the DM beside it (2026-10-01 P1).
             const events = await sendToLLM(
                 buildRoleplayChallengePrompt(proposal, challenge),
-                proposal.playerAction
+                proposal.playerAction,
+                { pendingUserRow: challengeRow },
             );
             if (events?.requestedRolls?.length > 0) {
                 // Upheld/revised rulings are JSON-only responses; the original withheld

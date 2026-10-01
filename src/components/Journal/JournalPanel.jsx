@@ -528,7 +528,13 @@ const ChronicleChapterCard = memo(function ChronicleChapterCard({ chapter, newes
     );
 });
 
+// The tab renders the newest entries only (2026-10-01 P2): the journal is
+// never pruned, so a 2,000-turn campaign's ~400 entries all mounted on open.
+// Windowed like the chat; older entries are one tap away.
+const JOURNAL_ENTRY_WINDOW = 150;
+
 function JournalTab({ journal, location }) {
+    const [shown, setShown] = useState(JOURNAL_ENTRY_WINDOW);
     if (journal.length === 0) {
         return (
             <div className="journal-empty">
@@ -547,7 +553,7 @@ function JournalTab({ journal, location }) {
                 </div>
             )}
 
-            {[...journal].reverse().map((entry, idx) => (
+            {journal.slice(-shown).reverse().map((entry, idx) => (
                 <div key={entry.id} className="journal-entry">
                     <div className="journal-entry-header">
                         <span className="journal-entry-num">Entry {journal.length - idx}</span>
@@ -574,6 +580,16 @@ function JournalTab({ journal, location }) {
                     )}
                 </div>
             ))}
+
+            {journal.length > shown && (
+                <button
+                    type="button"
+                    className="chat-load-earlier"
+                    onClick={() => setShown(count => count + JOURNAL_ENTRY_WINDOW)}
+                >
+                    Show earlier entries ({journal.length - shown} more)
+                </button>
+            )}
         </div>
     );
 }

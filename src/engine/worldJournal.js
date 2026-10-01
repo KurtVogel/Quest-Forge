@@ -57,7 +57,7 @@ export function describeBondForPrompt(npc = {}, storyMemory = [], { messages = n
 import { describeAbsence, describeStageForPrompt, resolveOpenThread } from './relationshipArc.js';
 import { snapshotCommitments, verifyCommitmentsAfterCadence } from './commitmentVerifier.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
-import { collectNarrativeMessages } from '../llm/narrativeMessages.js';
+import { collectNarrativeEntries } from '../llm/narrativeMessages.js';
 import { describeCurrentPlace, describeTravelLink, isSameLocation, listKnownWays, sanitizeExtractedLocation } from './locationRegistry.js';
 
 export function normalizeLocationName(loc) {
@@ -74,6 +74,19 @@ export function normalizeLocationName(loc) {
 // counting raw rows journaled roll-heavy play every ~2 turns and aged
 // low-salience cards out in ~6 turns through DORMANCY_JOURNAL_CYCLES).
 export const SUMMARIZE_EVERY = 10;
+
+/**
+ * The newest player/DM rows a cadence never summarizes (2026-10-01 P1). The
+ * batch used to end at `messages.length`, so every cadence flagged the whole
+ * transcript and EMPTIED the DM's window: the call after it carried the
+ * player's new line and a 2–3-sentence summary — the merchant's exact offer
+ * two exchanges back, the companion's last line, gone. `MESSAGE_WINDOW` 20 was
+ * a ceiling the history saw-toothed under (1 → ~11 → 1 every ~5 turns). The
+ * cadence now fires once SUMMARIZE_EVERY narrative rows lie BEFORE the tail and
+ * summarizes only those; six rows = the last three exchanges stay verbatim.
+ * Engine lines among the tail (roll results, receipts) stay with it.
+ */
+export const KEEP_TAIL = 6;
 
 // A stalled cadence must not grow its payload without bound: one summarize call
 // covers at most MAX_BATCH_MESSAGES (a backlog drains cap-by-cap across turns),
@@ -92,13 +105,82 @@ const MAX_MESSAGE_CHARS = 2000;
  */
 const isWeightlessRow = m => m?.exchangeLine === true;
 
-/** Rows after `fromIndex` that count toward the raw backlog escape. */
-function countWeightedRows(messages, fromIndex) {
+/** Rows in [`fromIndex`, `toIndex`) that count toward the raw backlog escape. */
+function countWeightedRows(messages, fromIndex, toIndex = messages.length) {
     let count = 0;
-    for (let i = fromIndex; i < messages.length; i++) {
+    for (let i = fromIndex; i < toIndex; i++) {
         if (!isWeightlessRow(messages[i])) count += 1;
     }
     return count;
+}
+
+const isConversationalRow = m => m?.role === 'user' || m?.role === 'assistant';
+
+/**
+ * The raw index the kept tail starts at: the KEEP_TAIL-th newest
+ * narrative-eligible player/DM row of the unsummarized stretch. With fewer
+ * than KEEP_TAIL such rows, all of them are tail (only what precedes the
+ * oldest can be archived); with none, there is nothing to keep.
+ *
+ * The tail opens on the PLAYER's line: when its oldest row is the DM's, the
+ * player line that prompted it joins the tail, so neither the window nor the
+ * batch ever holds half an exchange (an action summarized without its
+ * outcome). That is the shape the cadence usually sees — the orchestrator's
+ * state can be one committed DM row behind the transcript.
+ */
+function tailBoundary(messages, entries) {
+    let boundary = messages.length;
+    let oldestKept = null;
+    let kept = 0;
+    let i = entries.length - 1;
+    for (; i >= 0 && kept < KEEP_TAIL; i--) {
+        if (!isConversationalRow(entries[i].message)) continue;
+        oldestKept = entries[i];
+        boundary = oldestKept.index;
+        kept += 1;
+    }
+    if (oldestKept?.message.role === 'assistant') {
+        for (; i >= 0; i--) {
+            if (!isConversationalRow(entries[i].message)) continue;
+            if (entries[i].message.role === 'user') boundary = entries[i].index;
+            break;
+        }
+    }
+    return boundary;
+}
+
+// A fight's dice-line groups sit at most this many player/DM rows apart (the
+// beat's narration + the next action, one row of slack).
+const FIGHT_GAP_ROWS = 3;
+
+/**
+ * A finished fight is journaled WHOLE. The tail's cut can land between two
+ * rounds of a fight that just ended; the batch before it would then carry
+ * mid-fight state with no outcome — the durable "Mara at 1/12 HP" history
+ * the 2026-08-09 no-mid-fight rule exists to prevent. When dice lines sit on
+ * both sides of the cut within one fight, the cut moves back to the fight's
+ * first dice line: the fight waits in the tail and is summarized in one
+ * batch once the tail has moved past it.
+ */
+function fightSafeCut(messages, fromIndex, cut) {
+    let after = -1;
+    for (let i = cut; i < messages.length; i++) {
+        if (isWeightlessRow(messages[i])) { after = i; break; }
+    }
+    if (after === -1) return cut;
+    let start = -1;
+    let gap = 0;
+    for (let i = after - 1; i >= fromIndex; i--) {
+        const m = messages[i];
+        if (isWeightlessRow(m)) {
+            start = i;
+            gap = 0;
+        } else if (isConversationalRow(m) && !m.hidden && !m.deleted) {
+            gap += 1;
+            if (gap > FIGHT_GAP_ROWS) break;
+        }
+    }
+    return start === -1 ? cut : start;
 }
 
 /**
@@ -213,8 +295,16 @@ Rules:
  */
 export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, { getState = null } = {}) {
     const messageCount = state.messages.length;
-    const newRawMessages = countWeightedRows(state.messages, lastSummarizedIndex);
-    const newNarrativeMessages = collectNarrativeMessages(state.messages, lastSummarizedIndex).length;
+    // The cut: everything before it may be summarized, the tail after it
+    // never is (KEEP_TAIL). Under the raw cap the cut also never splits a
+    // fight; past the cap the backlog drains cap-by-cap as it always did.
+    const entries = collectNarrativeEntries(state.messages, lastSummarizedIndex);
+    const tailStart = tailBoundary(state.messages, entries);
+    const cut = countWeightedRows(state.messages, lastSummarizedIndex, tailStart) < MAX_BATCH_MESSAGES
+        ? fightSafeCut(state.messages, lastSummarizedIndex, tailStart)
+        : tailStart;
+    const newRawMessages = countWeightedRows(state.messages, lastSummarizedIndex, cut);
+    const newNarrativeMessages = entries.filter(entry => entry.index < cut).length;
 
     // Narrative cadence, with the raw backlog cap as the escape: a stretch of
     // MAX_BATCH_MESSAGES rows with nothing narrative in it (hidden setups,
@@ -235,7 +325,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, {
     const background = getBackgroundConfig(state.settings);
     if (!background.apiKey) return { index: lastSummarizedIndex, journalEntry: null };
 
-    const batchEnd = batchBoundary(state.messages, lastSummarizedIndex);
+    const batchEnd = Math.min(batchBoundary(state.messages, lastSummarizedIndex), cut);
     const batchKey = `${state.session?.id || 'campaign'}:${lastSummarizedIndex}`;
 
     // A parse failure, an unusable summary, or a rejected call all land here.
@@ -284,7 +374,9 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, {
         // engine roll-result system lines pass the predicate and still ride
         // the transcript; combat-exchange dice lines do not (2026-09-23) — the
         // narration prose and the END_COMBAT lines carry the fight's outcome.
-        const recentMessages = collectNarrativeMessages(state.messages, lastSummarizedIndex, batchEnd - 1)
+        const recentMessages = entries
+            .filter(entry => entry.index < batchEnd)
+            .map(entry => entry.message)
             .map(m => `[${roleLabel(m.role)}]: ${clampText(m.content, MAX_MESSAGE_CHARS)}`)
             .join('\n\n');
 

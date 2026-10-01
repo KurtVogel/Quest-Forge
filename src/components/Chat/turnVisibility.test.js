@@ -103,6 +103,53 @@ describe('buildMessageWindow', () => {
         expect(buildMessageWindow([msg('system', undefined)], 5)).toEqual([]);
     });
 
+    describe('the pending player line never rides the window beside userMessage (2026-10-01 chat-orchestration P1)', () => {
+        const before = [
+            msg('user', 'I greet the reeve.'),
+            msg('assistant', 'He grunts.'),
+        ];
+
+        it('drops the newest unanswered player row when it is the line being sent', () => {
+            const flushed = [...before, msg('user', 'I pay the toll.')];
+            expect(buildMessageWindow(flushed, 20, { pendingUserMessage: 'I pay the toll.' })).toEqual([
+                { role: 'user', content: 'I greet the reeve.' },
+                { role: 'assistant', content: 'He grunts.' },
+            ]);
+        });
+
+        it('gives the same window whether or not the row has reached the state yet', () => {
+            const flushed = [...before, msg('user', 'I pay the toll.')];
+            expect(buildMessageWindow(flushed, 20, { pendingUserMessage: 'I pay the toll.' }))
+                .toEqual(buildMessageWindow(before, 20, { pendingUserMessage: 'I pay the toll.' }));
+        });
+
+        it('looks past engine lines after the row, and frees the slot before the slice', () => {
+            const flushed = [
+                msg('user', 'old'),
+                ...before,
+                msg('user', 'I pay the toll.'),
+                msg('system', '−2 sp · purse: 4 gp', { dmVisible: true }),
+            ];
+            const window = buildMessageWindow(flushed, 3, { pendingUserMessage: 'I pay the toll.' });
+            expect(window.map(m => m.content)).toEqual(['I greet the reeve.', 'He grunts.', '−2 sp · purse: 4 gp']);
+        });
+
+        it('keeps an ANSWERED earlier line with the same words, and a different pending line', () => {
+            const repeated = [
+                msg('user', 'I wait.'),
+                msg('assistant', 'Nothing stirs.'),
+                msg('user', 'I wait.'),
+            ];
+            expect(buildMessageWindow(repeated, 20, { pendingUserMessage: 'I wait.' }).map(m => m.content))
+                .toEqual(['I wait.', 'Nothing stirs.']);
+            // An engine prompt as userMessage (narration, roll result) drops nothing.
+            expect(buildMessageWindow(repeated, 20, { pendingUserMessage: '[ROLL RESULT] Stealth 14' })).toHaveLength(3);
+            // Already answered: the DM's reply is newer than the row, so it stays.
+            const answered = [...before, msg('user', 'I pay the toll.'), msg('assistant', 'He takes the coin.')];
+            expect(buildMessageWindow(answered, 20, { pendingUserMessage: 'I pay the toll.' })).toHaveLength(4);
+        });
+    });
+
     it('keeps dmVisible system lines — coin/loot receipts the DM must see (P1 2026-08-31)', () => {
         // Without these the DM was structurally blind to engine coin/loot
         // accounting and re-emitted an already-banked reward at quest completion.

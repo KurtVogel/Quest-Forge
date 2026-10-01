@@ -273,8 +273,12 @@ export const handlers = {
         const upTo = action.payload;
         return {
             ...state,
+            // Only the rows this cadence newly covers are re-minted (2026-10-01
+            // P2): the old map cloned every row below the mark — 2,000 of
+            // 2,000 when 10 were new — so each already-summarized row changed
+            // identity per cadence and its memoized ChatMessage re-rendered.
             messages: state.messages.map((msg, idx) =>
-                idx < upTo ? { ...msg, summarized: true } : msg
+                idx < upTo && !msg.summarized ? { ...msg, summarized: true } : msg
             ),
             session: { ...state.session, prunedMessageCount: upTo },
         };

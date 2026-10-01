@@ -52,9 +52,12 @@ export function detectMissingEventsCue({ hadEventBlock = false, openingScene = f
     return null;
 }
 
-/** The JSON-only follow-up request. Carries the narrative inline so it does not
- * depend on the just-added message having reached the history window yet. */
-export function buildNudgePrompt(cue, narrative = '') {
+/** The JSON-only follow-up request. The narration it refers to is NOT quoted
+ * here (2026-10-01 P2): the orchestrator hands the call a history whose last
+ * assistant row IS that narration, whole — the old 1,500-char inline quote
+ * rode beside the committed row whenever the render had flushed, and the DM
+ * read its own reply twice. */
+export function buildNudgePrompt(cue) {
     const reasonLine = cue.reason === 'opening'
         ? 'This was the campaign\'s opening scene: if it established concrete portable items as the hero\'s own possessions, emit them as "starting_items"; if it committed the hero to a task, open it with "quest_updates".'
         : 'The narration completed a job, deal, debt, or commitment the hero accepted: open (or update) it with "quest_updates" as the QUEST TRACKING INSTRUCTIONS require.';
@@ -64,7 +67,6 @@ export function buildNudgePrompt(cue, narrative = '') {
         reasonLine,
         `Reply with ONLY a fenced \`\`\`json block containing the missing events — no prose, no narration. Allowed fields: ${allowedFields}. Do not include any other field, do not request rolls, do not re-emit events from earlier turns.`,
         'If that narration genuinely established nothing needing events, reply with an empty block: {}]',
-        `Your previous response, for reference: "${String(narrative || '').slice(0, 1500)}"`,
     ].join(' ');
 }
 

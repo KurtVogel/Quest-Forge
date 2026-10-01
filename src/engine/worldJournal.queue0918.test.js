@@ -16,11 +16,17 @@ vi.mock('../llm/adapter.js', () => ({ sendMessage: sendMessageMock }));
 vi.mock('../llm/machinery.js', () => ({ getBackgroundConfig: backgroundConfigMock }));
 vi.mock('../llm/scribe.js', () => ({ runNpcFrontReflection: reflectionMock }));
 
-const { buildJournalContext, maybeAutoSummarize, normalizeJournalSummary, resetSummarizeFailureTracker } = await import('./worldJournal.js');
+const { buildJournalContext, KEEP_TAIL, maybeAutoSummarize, normalizeJournalSummary, resetSummarizeFailureTracker } = await import('./worldJournal.js');
 
 const makeMessages = (count) => Array.from({ length: count }, (_, i) => ({
     id: `m-${i}`, role: i % 2 === 0 ? 'user' : 'assistant', content: `Message ${i}`,
 }));
+
+/** `count` summarizable rows followed by the tail a cadence never touches (2026-10-01). */
+const makeBacklog = (count) => [
+    ...makeMessages(count),
+    ...Array.from({ length: KEEP_TAIL }, (_, i) => ({ id: `tail-${i}`, role: i % 2 === 0 ? 'user' : 'assistant', content: `Tail ${i}` })),
+];
 
 const makeState = (messages) => ({
     messages,
@@ -55,7 +61,7 @@ describe('journal cadence commit order (2026-09-18 P1)', () => {
             npcs_encountered: [null, 'Reeve', 7, ['x'], { name: 'Reeve Holt', disposition: 'hostile', notes: 'Insulted at the gate' }],
         }));
         const dispatch = vi.fn();
-        const result = await maybeAutoSummarize(makeState(makeMessages(12)), dispatch, 0);
+        const result = await maybeAutoSummarize(makeState(makeBacklog(12)), dispatch, 0);
         expect(result.index).toBe(12);
         const seen = types(dispatch);
         expect(seen.filter(t => t === 'ADD_JOURNAL_ENTRY')).toHaveLength(1);
@@ -76,21 +82,21 @@ describe('journal cadence commit order (2026-09-18 P1)', () => {
             }
         });
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const result = await maybeAutoSummarize(makeState(makeMessages(12)), dispatch, 0);
+        const result = await maybeAutoSummarize(makeState(makeBacklog(12)), dispatch, 0);
         warn.mockRestore();
         const seen = types(dispatch);
         expect(seen.slice(0, 2)).toEqual(['ADD_JOURNAL_ENTRY', 'MARK_MESSAGES_SUMMARIZED']);
         expect(result.index).toBe(12);
         expect(result.journalEntry?.summary).toMatch(/Brackwater/);
         // The next cadence call has nothing left to re-summarize: no duplicate entry, no second Flash call.
-        const again = await maybeAutoSummarize(makeState(makeMessages(12)), dispatch, result.index);
+        const again = await maybeAutoSummarize(makeState(makeBacklog(12)), dispatch, result.index);
         expect(again).toEqual({ index: 12, journalEntry: null });
         expect(sendMessageMock).toHaveBeenCalledTimes(1);
     });
 
     it('a role-less / non-string-role message in the batch is labeled, not thrown on — the batch is summarized, not archived', async () => {
         sendMessageMock.mockResolvedValue(summaryJson());
-        const messages = makeMessages(12);
+        const messages = makeBacklog(12);
         messages[3] = { id: 'm-3', content: 'A line with no role' };
         messages[5] = { id: 'm-5', role: { junk: true }, content: 'A line with an object role' };
         const dispatch = vi.fn();

@@ -2990,7 +2990,7 @@ dormant and resolved forever — a decision, since the recall dossier reads them
 
 ---
 
-### [strengthening] A budget nobody reaches is a budget nobody checked; a read after an await is a read of a different state — status: `idea` (2026-10-01 audit, memory-journal + chat-orchestration Lap 3; queue lines in SCHEDULED_STRENGTHENING.md)
+### [strengthening] A budget nobody reaches is a budget nobody checked; a read after an await is a read of a different state — status: `shipped` (2026-10-01 audit; cleared the same day — `KEEP_TAIL`, the pending-row drop, one captured state per call; DECISIONS.md 2026-10-01. The `eval:turns` Echo proof named below was NOT run: see the next entry)
 Two rules from the memory-journal + chat-orchestration Lap-3 pass (2026-10-01), every number measured
 against the real reducer, the real `maybeAutoSummarize` with a scripted Flash reply, and the real turn
 runner with a React-shaped lagging `getState`. **(1)** `MESSAGE_WINDOW` = 20 is documented as "the DM
@@ -3018,6 +3018,22 @@ chars at the 40-row cap); `collectNarrativeEntries` 0.15 ms at 2,000 rows ×4 pe
 2,000 rows to flag 10; a journal entry is 1,137 B typical / 7,187 B max — 444 KB / 2.8 MB at 400 entries
 in every save plus 400 durable RAG rows, and the Journal tab renders them all unwindowed. From the
 2026-10-01 strengthening audit.
+
+### [strengthening] A duplicate-line ARM for `eval:turns` — the only honest proof that the double-sent player line fed the echo — status: `idea` (2026-10-01 build session)
+The 10-01 audit named `npm run eval:turns` before/after on the Echo column (Gemini 61 %, the one column
+the 09-11 turn grammar did not move) as the proof for the double-sent player line. It cannot be: the
+eval builds its own history (`scripts/turnGrammarEval.mjs`: `history.push({ role: 'user', … })` AFTER
+the call) and never sent the line twice, so the 61 % was measured WITHOUT the duplicate — production
+was, if anything, worse than the eval. The fix is deterministic and pinned
+(`turnOrchestrator.window.test.js`); what is unmeasured is how much echo the duplicate ADDED. One arm:
+a `--duplicate` flag that appends the player's line to `messageHistory` before the call (what the app
+sent until 2026-10-01), judged by the same Flash rubric on the Echo column only, Gemini Pro + GPT Terra,
+18 turns per arm. If the duplicate arm is not measurably worse, the echo is the model's own habit and
+the ordinary-turn grammar needs a different lever (a one-line "never restate the player's action"
+example pair is the cheap next try). Two more notes from the same session: an EMPTY memory store skips
+the query embed, so a campaign's first turns have no pre-stream await at all (the lanes' behavior
+differed by store size, not only by lane); and the roll-challenge lane restated the player's challenge
+in its prompt beside the visible row — fixed with the same mechanism (`opts.pendingUserRow`).
 
 ## Rejected (with reasons — don't re-propose without new arguments)
 

@@ -82,14 +82,19 @@ describe('extractNudgeEventFields', () => {
 });
 
 describe('buildNudgePrompt', () => {
-    it('asks for a JSON-only reply, names the allowed fields, and embeds the narrative', () => {
-        const prompt = buildNudgePrompt({ reason: 'opening', allowStartingItems: true }, 'You wake in the mill.');
+    it('asks for a JSON-only reply and names the allowed fields', () => {
+        const prompt = buildNudgePrompt({ reason: 'opening', allowStartingItems: true });
         expect(prompt).toContain('ONLY a fenced');
         expect(prompt).toContain('"quest_updates" and "starting_items"');
-        expect(prompt).toContain('You wake in the mill.');
         expect(prompt).toContain('empty block: {}');
 
-        const dealPrompt = buildNudgePrompt({ reason: 'deal', allowStartingItems: false }, 'It\'s settled.');
+        const dealPrompt = buildNudgePrompt({ reason: 'deal', allowStartingItems: false });
         expect(dealPrompt).toContain('Allowed fields: "quest_updates".');
+    });
+
+    it('never quotes the narration — the history\'s last assistant row carries it, once (2026-10-01 P2)', () => {
+        const prompt = buildNudgePrompt({ reason: 'opening', allowStartingItems: true }, 'You wake in the mill.');
+        expect(prompt).not.toContain('You wake in the mill.');
+        expect(prompt).toContain('your previous response');
     });
 });

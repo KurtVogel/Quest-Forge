@@ -76,6 +76,11 @@ export default function MemoryInspector({ isOpen, onClose }) {
     const describeUsage = (row) => `${row.mode} · ${row.provider || '?'}${row.model ? ` ${row.model}` : ''}: prompt ${formatTokens(row.promptTokens)} tokens, cached ${formatTokens(row.cachedTokens)}${row.cachedShare !== null ? ` (${Math.round(row.cachedShare * 100)}%)` : ''}, output ${formatTokens(row.outputTokens)}${Number.isFinite(row.thoughtTokens) ? ` (+${formatTokens(row.thoughtTokens)} thinking)` : ''}`;
     const fronts = state.fronts || [];
     const journal = state.journal || [];
+    // The journal's weight (2026-10-01): entries are never pruned (the record
+    // lane reads every one) and each real entry is a DURABLE RAG row the
+    // cache never evicts — the count and bytes are how growth becomes visible.
+    const journalBytes = journal.reduce((sum, entry) => sum + JSON.stringify(entry ?? null).length, 0);
+    const journalRagRows = journal.filter(entry => entry && !entry.fallback).length;
 
     return (
         <div className="journal-overlay" onClick={onClose}>
@@ -258,7 +263,12 @@ export default function MemoryInspector({ isOpen, onClose }) {
                         <div className="mi-section">
                             <div className="mi-kv"><span>World facts:</span> {(state.worldFacts || []).length}</div>
                             <div className="mi-kv"><span>NPCs rostered:</span> {(state.npcs || []).length}</div>
-                            <div className="mi-kv"><span>Journal entries:</span> {journal.length}</div>
+                            <div className="mi-kv">
+                                <span>Journal entries (never pruned — watch this):</span>{' '}
+                                {journal.length} · {(journalBytes / 1024).toFixed(1)} KB in every save
+                                {journal.length > 0 ? ` (~${Math.round(journalBytes / journal.length).toLocaleString()} B each)` : ''}
+                                {' '}· {journalRagRows} durable RAG rows
+                            </div>
                             <div className="mi-kv"><span>Premise length:</span> {(state.session?.premise || '').length} chars</div>
                             {journal.length > 0 && (
                                 <div className="mi-kv">

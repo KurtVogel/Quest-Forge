@@ -10,7 +10,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { maybeAutoSummarizeMock, addMemoryMock, curateStoryMemoryMock, retrieveRelevantMock } = vi.hoisted(() => ({
+const { maybeAutoSummarizeMock, addMemoryMock, queueMemoryMock, flushMemoryQueueMock, curateStoryMemoryMock, retrieveRelevantMock } = vi.hoisted(() => ({
+    queueMemoryMock: vi.fn(async () => {}),
+    flushMemoryQueueMock: vi.fn(async () => {}),
     maybeAutoSummarizeMock: vi.fn(async (state, dispatch, boundary) => ({ index: boundary, journalEntry: null })),
     addMemoryMock: vi.fn(async () => {}),
     curateStoryMemoryMock: vi.fn(() => []),
@@ -25,8 +27,8 @@ vi.mock('../engine/vectorMemory.js', async (importOriginal) => ({
     ...(await importOriginal()),
     retrieveRelevant: retrieveRelevantMock,
     addMemory: addMemoryMock,
-    queueMemory: vi.fn(async () => {}),
-    flushMemoryQueue: vi.fn(async () => {}),
+    queueMemory: queueMemoryMock,
+    flushMemoryQueue: flushMemoryQueueMock,
 }));
 vi.mock('../engine/storyMemory.js', async (importOriginal) => ({
     ...(await importOriginal()),
@@ -81,6 +83,8 @@ function createHarness(overrides) {
 beforeEach(() => {
     maybeAutoSummarizeMock.mockClear();
     addMemoryMock.mockClear();
+    queueMemoryMock.mockClear();
+    flushMemoryQueueMock.mockClear();
     curateStoryMemoryMock.mockClear();
     retrieveRelevantMock.mockClear();
 });
@@ -120,7 +124,7 @@ describe('sendToLLM curates dramatic callbacks from the scene', () => {
 });
 
 describe('runAutoSummarize never embeds a fallback journal entry (2026-09-06 P2)', () => {
-    it('skips addMemory for a fallback entry and embeds a real summary', async () => {
+    it('never carries a fallback entry; a real summary rides the NEXT turn\'s batch, not a request of its own (2026-10-01 P2)', async () => {
         const { runner } = createHarness();
 
         maybeAutoSummarizeMock.mockResolvedValueOnce({
@@ -132,16 +136,33 @@ describe('runAutoSummarize never embeds a fallback journal entry (2026-09-06 P2)
             },
         });
         await runner.runAutoSummarize();
-        expect(addMemoryMock).not.toHaveBeenCalled();
 
         maybeAutoSummarizeMock.mockResolvedValueOnce({
             index: 20,
             journalEntry: { summary: 'Celeste showed the hero the ledger.', location: 'Parlour' },
         });
         await runner.runAutoSummarize();
-        expect(addMemoryMock).toHaveBeenCalledTimes(1);
-        expect(addMemoryMock.mock.calls[0][1]).toBe('Celeste showed the hero the ledger.');
-        expect(addMemoryMock.mock.calls[0][2]).toBe('journal');
-        expect(addMemoryMock.mock.calls[0][4]).toEqual(['Celeste']);
+        // The cadence itself embeds NOTHING: the turn's batch already flushed,
+        // so an embed here was a third request on every cadence turn.
+        expect(addMemoryMock).not.toHaveBeenCalled();
+        expect(queueMemoryMock).not.toHaveBeenCalled();
+
+        // The next turn's extraction carries the row in its one batch.
+        await runner.sendToLLM('I ask about the ledger.', 'I ask about the ledger.');
+        expect(runner.runPostTurnExtraction('I ask about the ledger.')).toBe(true);
+        const journalRows = queueMemoryMock.mock.calls.filter(call => call[2] === 'journal');
+        expect(journalRows).toHaveLength(1);
+        expect(journalRows[0][1]).toBe('Celeste showed the hero the ledger.');
+        expect(journalRows[0][3]).toBe('Parlour');
+        expect(journalRows[0][4]).toEqual(['Celeste']);
+        expect(queueMemoryMock.mock.calls.some(call => /unavailable/.test(call[1]))).toBe(false);
+        expect(flushMemoryQueueMock).toHaveBeenCalledTimes(1);
+        expect(addMemoryMock).not.toHaveBeenCalled();
+
+        // Carried once: the turn after that queues only its own narrative.
+        queueMemoryMock.mockClear();
+        await runner.sendToLLM('I leave the parlour.', 'I leave the parlour.');
+        runner.runPostTurnExtraction('I leave the parlour.');
+        expect(queueMemoryMock.mock.calls.filter(call => call[2] === 'journal')).toHaveLength(0);
     });
 });
