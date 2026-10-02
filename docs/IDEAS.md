@@ -3035,6 +3035,24 @@ the query embed, so a campaign's first turns have no pre-stream await at all (th
 differed by store size, not only by lane); and the roll-challenge lane restated the player's challenge
 in its prompt beside the visible row — fixed with the same mechanism (`opts.pendingUserRow`).
 
+### [strengthening] A prompt rule about an engine line is a contract with the WINDOW; a lane with no writer is a lane with no caller — status: `idea` (2026-10-02 audit, progression Lap 3 + hidden-fronts Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+Two patterns from the run. **(1)** The cached prefix tells the DM "the engine shows every award as a
+system line; if none appeared, it was not granted — award the missing amount ONCE"
+(`promptBuilder.js:757`), and no XP row is `dmVisible`: the player sees every award, the DM's window
+sees none (reproduced), so the sentence is a contract the DM cannot honor — the 08-26 double-award's
+root, with the ledger as its belt. The coin lanes got the receipt fix on 08-31; XP did not. Rule: when
+the prefix says the engine "posts / shows / confirms" a line, that line is `dmVisible` — audit the
+~30 `systemMessage` sites against those sentences once, and make the window's receipt fold the shape
+every engine receipt uses (one row per run, never one per line). The level-up line is the WOW half of
+the same bytes: today the DM learns the new level from the HERO SHEET's number and never the moment.
+**(2)** `session.frontMigration` is read in three places and written in none; the lane it gates
+(`generateContextualFronts` + prompt + sanitizer, ~105 lines) has five passing tests and no caller —
+a passing test is how dead code survives. Rule for the design lap: for every `session.<marker>` /
+`settings.<flag>` READ, grep the writer before reading what it gates; for every module, grep each
+export's importers before reading any of them. The same lap found the front record's `lastAdvancedAt`
+and six `session.frontDirector` telemetry fields with no reader — a `FRONT_RECORD_KEYS` pin (the
+roster's `NPC_RECORD_KEYS` pattern) is the test that keeps a record from growing write-only fields.
+
 ## Rejected (with reasons — don't re-propose without new arguments)
 
 - **Shared cloud autosave slot** (one "Continue" synced across devices) — rejected
