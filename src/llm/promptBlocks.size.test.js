@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildSystemPromptParts, PROMPT_CHAR_BUDGET } from './promptBuilder.js';
 import { createCharacter } from '../engine/characterUtils.js';
+import { awardExperience, getExperienceThreshold } from '../engine/progression.js';
 
 const fill = (label, length) => `${label} `.repeat(Math.ceil(length / (label.length + 1))).slice(0, length);
 const ABILITY_SCORES = { strength: 14, dexterity: 10, constitution: 16, intelligence: 10, wisdom: 18, charisma: 12 };
@@ -205,5 +206,31 @@ describe('prompt blocks — per-block ceilings, prefix stability, per-call-type 
         // Ceilings for the two combat calls (measured 2026-09-30, ~10 % headroom).
         expect(intent).toBeLessThan(30000);
         expect(narration).toBeLessThan(45000);
+    });
+
+    // 2026-10-02 progression Lap-3: the prefix-stability pin above varies LIVE
+    // state only. A regression that interpolated the level into HERO IDENTITY,
+    // the premise, or the core rules would re-bill 100 % of the prefix on every
+    // level-up with that test green. A level-up may move the sheet's own blocks
+    // and nothing before them — measured: the first differing byte sits in the
+    // LAST prefix block, so a provider caching by prefix keeps ~99 %.
+    it('a level-up changes ONLY the heroSheet / spellbook prefix blocks', () => {
+        for (const [race, cls] of [['human', 'fighter'], ['dwarf', 'cleric']]) {
+            const level1 = createCharacter('Testa Longname', race, cls, ABILITY_SCORES, ['insight', 'religion']);
+            const level2 = awardExperience(level1, getExperienceThreshold(1)).character;
+            expect(level2.level).toBe(2);
+            const prefixOf = (character) => {
+                const parts = build({ ...maxedState(), character, characterExtras: {} });
+                const end = parts.findIndex(part => part.name === PREFIX_END);
+                expect(end).toBeGreaterThan(0);
+                return parts.slice(0, end + 1);
+            };
+            const before = prefixOf(level1);
+            const after = prefixOf(level2);
+            expect(after.map(part => part.name)).toEqual(before.map(part => part.name));
+            const changed = before.filter((part, i) => part.text !== after[i].text).map(part => part.name);
+            expect(changed).toContain('heroSheet');
+            expect(changed.filter(name => !['heroSheet', 'spellbook'].includes(name)), cls).toEqual([]);
+        }
     });
 });

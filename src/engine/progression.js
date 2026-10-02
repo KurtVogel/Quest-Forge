@@ -17,13 +17,21 @@ const XP_THRESHOLDS = [
     21000, 15000, 20000, 20000, 25000, 30000, 30000, 40000, 40000, 50000,
 ];
 
+// THE level coercion for the tier math and the cap check (2026-10-02: each
+// reader carried its own copy) — junk, 0, and negatives are level 1.
+function levelOf(level) {
+    return Math.max(1, Number(level) || 1);
+}
+
+// Deliberately NOT levelOf: a NaN level reads the table's LAST row (pinned in
+// progression.test.js) — junk never makes the next level cheaper.
 export function getExperienceThreshold(level) {
     const idx = Math.max(1, level) - 1;
     return XP_THRESHOLDS[idx] ?? XP_THRESHOLDS[XP_THRESHOLDS.length - 1];
 }
 
 export function isMaxLevel(level) {
-    return Math.max(1, Number(level) || 1) >= MAX_CHARACTER_LEVEL;
+    return levelOf(level) >= MAX_CHARACTER_LEVEL;
 }
 
 /*
@@ -47,7 +55,7 @@ export function isMaxLevel(level) {
  * LLM-declared exp_awarded channel.
  */
 export function getFrontResolutionMilestoneXp(level) {
-    return Math.round(0.5 * getExperienceThreshold(Math.max(1, Number(level) || 1)));
+    return Math.round(0.5 * getExperienceThreshold(levelOf(level)));
 }
 
 // Flat award for a quest opened and resolved inside a single DM response (or
@@ -64,15 +72,23 @@ export const QUEST_INSTANT_XP = 25;
  * awarded 0.
  */
 export function getQuestCompletionXp(level) {
-    return Math.round(0.125 * getExperienceThreshold(Math.max(1, Number(level) || 1)));
+    return Math.round(0.125 * getExperienceThreshold(levelOf(level)));
 }
 
+// Every progression line is a RECEIPT the DM must see (2026-10-02 audit): the
+// prefix tells the DM "the engine shows every award as a system line; if none
+// appeared, it was not granted", and a plain system row never reaches the DM's
+// window — the 08-26 double-award's structural cause, the fix the coin lanes
+// got on 08-31. `dmVisible` rides buildMessageWindow, where a run of receipts
+// folds into ONE row. (Kept local: importing systemMessage from
+// handlers/shared would cycle progression ⇄ handlers/shared.)
 function createSystemMessage(kind, content) {
     return {
         id: `msg-${Date.now()}-${kind}-${Math.random().toString(36).slice(2, 7)}`,
         timestamp: Date.now(),
         role: 'system',
         content,
+        dmVisible: true,
     };
 }
 
@@ -88,7 +104,6 @@ function applySingleLevelUp(character, { milestone = false, keepDowned = false }
     const classData = CLASSES[character.class];
     const hitDie = classData?.hitDie || 8;
     const conMod = getModifier(character.abilityScores?.constitution || 10);
-    const averageHp = Math.floor(hitDie / 2) + 1;
     const hpGain = perLevelHpGain(hitDie, conMod);
     const newLevel = (Number(character.level) || 1) + 1;
     const newMaxHP = character.maxHP + hpGain;
@@ -177,7 +192,7 @@ function applySingleLevelUp(character, { milestone = false, keepDowned = false }
         character: updatedCharacter,
         message: createSystemMessage(
             'lvl',
-            `**Level Up!** You are now **Level ${newLevel}**!${milestoneMsg} Average HP **${averageHp}** from d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${character.maxHP} → ${newMaxHP}).${healMsg}${featureMsg}`
+            `**Level Up!** You are now **Level ${newLevel}**!${milestoneMsg} Average HP **${perLevelHpGain(hitDie, 0)}** from d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${character.maxHP} → ${newMaxHP}).${healMsg}${featureMsg}`
         ),
     };
 }
@@ -209,6 +224,9 @@ export function getDmBonusXpCap(level) {
 /**
  * @param {object} options
  * @param {string} [options.reason] - shown on the XP system line.
+ * @param {number} [options.cappedFrom] - the DM's requested amount when the
+ *   engine capped it; the XP line itself says so (`+38 XP (capped from 50)`)
+ *   — one receipt row, not an award line plus a separate note.
  * @param {boolean} [options.milestoneLevelUp] - engine/legacy whole-level grant.
  * @param {boolean} [options.keepDowned] - a level crossed while the hero is
  *   down (0 HP / dying / defeated / Unconscious) grows the sheet but never
@@ -225,7 +243,12 @@ export function awardExperience(character, amount = 0, options = {}) {
     };
 
     if (xpAwarded > 0) {
-        const reason = options.reason ? ` (${options.reason})` : '';
+        const cappedFrom = Math.floor(Number(options.cappedFrom) || 0);
+        const notes = [
+            options.reason,
+            cappedFrom > xpAwarded ? `capped from ${cappedFrom}` : '',
+        ].filter(Boolean);
+        const reason = notes.length > 0 ? ` (${notes.join('; ')})` : '';
         const progress = isMaxLevel(updatedCharacter.level)
             ? `${updatedCharacter.exp} XP. Max level reached.`
             : `${updatedCharacter.exp} / ${getExperienceThreshold(updatedCharacter.level)} XP.`;

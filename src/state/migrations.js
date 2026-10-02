@@ -543,7 +543,7 @@ function reseedMissingFronts(save) {
     });
     let session = save.session;
     if (session?.frontDirector) {
-        const { generationVersion: _lostGeneration, source: _lostSource, ...directorRest } = session.frontDirector;
+        const { generationVersion: _lostGeneration, ...directorRest } = session.frontDirector;
         session = { ...session, frontDirector: directorRest };
     }
     return { ...save, fronts, session };

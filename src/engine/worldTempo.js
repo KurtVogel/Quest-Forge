@@ -24,6 +24,7 @@
 import { findLocationRecord, getCurrentLocationRecord, isSameLocation } from './locationRegistry.js';
 import { conversationalDistance } from './replayLedger.js';
 import { DEFAULT_MAX_CLOCK } from './fronts.js';
+import { cleanText as typedText } from './text.js';
 
 export const INTENSITY_LEVELS = ['whispers', 'indirect', 'presence', 'confrontation'];
 export const PACE_DIALS = ['slow-burn', 'standard', 'breakneck'];
@@ -115,10 +116,7 @@ const INTENSITY_GUIDANCE = {
 
 // Type-strict (2026-09-08): an object `enemies` on a ledger entry rendered
 // "[object Object]" into the tempo block and the hearsay text.
-function cleanText(value, max = 200) {
-    if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return '';
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
-}
+const cleanText = (value, max = 200) => typedText(value, max);
 
 const ENCOUNTER_OUTCOMES = ['victory', 'defeat', 'escaped'];
 

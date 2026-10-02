@@ -1,16 +1,27 @@
+// Type-strict text (2026-09-08 hidden-fronts P2 — the rule lives in
+// engine/text.js): `String(value)` on an object minted "[object Object]" as a
+// front's resolution epitaph, the RECENT VICTORY echo, the hearsay text AND a
+// permanent world fact. `cleanText` here is the `(value, fallback)` form.
+import { textOr as cleanText } from './text.js';
+
 export const DEFAULT_MAX_CLOCK = 6;
 export const FRONTS_VERSION = 2;
 
-// Type-strict (2026-09-08 hidden-fronts P2): `String(value)` on an object
-// minted "[object Object]" as a front's resolution epitaph, the RECENT
-// VICTORY echo, the hearsay text AND a permanent world fact. Only strings
-// and finite numbers carry text; every other shape is junk → fallback.
-function cleanText(value, fallback = '') {
-    if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return fallback;
-    const text = String(value || '').trim();
-    return text || fallback;
+/**
+ * Initial generation is CLOSED once a rich web has landed (generation or the
+ * v2 upgrade stamps `generationVersion`) or a journal cadence has run on the
+ * web the campaign has (`lastCadenceId`). `session.frontDirector.version` used
+ * to carry both meanings with three writers beside `generationVersion`
+ * (2026-10-02 Lap-4); `generationVersion` is the ONE generation flag now and
+ * the cadence watermark is the cadence's own.
+ */
+export function isFrontGenerationClosed(session) {
+    const director = session?.frontDirector;
+    return director?.generationVersion >= FRONTS_VERSION || !!director?.lastCadenceId;
 }
 
+// Rounds — a clock is a count, and 2.6 from a director is 3. (Not the wire
+// clampInt in llm/eventChannels.js, which FLOORS: a 2.9-coin grant pays 2.)
 function clampInt(value, min, max, fallback) {
     const n = Number(value);
     if (!Number.isFinite(n)) return fallback;
@@ -42,20 +53,14 @@ const FRONT_PROSE_MAX = 400;
 const FRONT_NOTES_MAX = 500;
 const FRONT_HINT_MAX = 240;
 
-function normalizeTextArray(value, fallback = []) {
+// One list rule, two ends: portents and relationships keep the FIRST six
+// (authored order), the hint ledger keeps the NEWEST six (`recent`).
+function normalizeTextArray(value, fallback = [], { recent = false } = {}) {
     const source = Array.isArray(value) ? value : fallback;
-    return source
+    const texts = source
         .map(v => cleanText(v).slice(0, FRONT_HINT_MAX))
-        .filter(Boolean)
-        .slice(0, 6);
-}
-
-function normalizeRecentTextArray(value, fallback = []) {
-    const source = Array.isArray(value) ? value : fallback;
-    return source
-        .map(v => cleanText(v).slice(0, FRONT_HINT_MAX))
-        .filter(Boolean)
-        .slice(-6);
+        .filter(Boolean);
+    return recent ? texts.slice(-6) : texts.slice(0, 6);
 }
 
 // THE faction sanitizer (2026-08-26): frontDirector and frontUpgrade used to
@@ -130,32 +135,54 @@ export function createInitialFronts({ premise = '', character = null, location =
     })];
 }
 
+// Every director prompt asks for "3-5" portents; the proposal boundary used to
+// keep 5 on the generation / upgrade lanes and 6 on the emergent ones.
+const PROPOSAL_PORTENTS_MAX = 5;
+
 /**
- * Emergent front promotion (DECISIONS.md 2026-07-14): the cadence reflection
- * may propose that a player-engaged recurring threat (the goblin den that
- * kept mattering) becomes a real front. Strictly validated — a complete
- * proposal or nothing — deduped against existing fronts by title/faction,
- * always born at clock 0/stage 0.
+ * THE front-proposal boundary (2026-10-02 hidden-fronts Lap-4). Every lane
+ * that proposes a NEW front — campaign generation, the v2 upgrade, emergent
+ * promotion (DECISIONS.md 2026-07-14), aftermath successors, regional natives
+ * — and the reducer that re-validates each of them calls this one function;
+ * four hand-rolled validators had drifted (portents 5 vs 6, hints 1 vs 2 vs 0,
+ * dedupe by title-or-faction vs id-and-title vs none).
+ *
+ * Complete or nothing: a title, a goal, stakes, at least three grim portents,
+ * and a faction with a goal — else null. Always born at clock 0 / stage 0 /
+ * active with the default clock, whatever the proposal carried.
+ *
+ * @param {object} proposal - untrusted (LLM output or a reducer payload).
+ * @param {object} [options]
+ * @param {Array<object>} [options.existing] - fronts the proposal must not
+ *   duplicate (the web plus this batch's earlier accepts): same title, or —
+ *   unless `allowSharedFaction` — the same driving faction.
+ * @param {string} [options.id] - the caller's id scheme; minted when omitted.
+ * @param {number} [options.maxHints] - already-visible symptoms to keep (0 for
+ *   a pressure born invisible; generation and the upgrade keep one).
+ * @param {boolean} [options.allowSharedFaction] - generation and the upgrade
+ *   may field ONE faction on two fronts (a local and a wider agenda); the
+ *   emergent lanes may not (a second front for a faction already on the web
+ *   is the same pressure again).
  */
-export function normalizeEmergentFront(proposal, existingFronts = []) {
-    if (!proposal || typeof proposal !== 'object') return null;
+export function normalizeFrontProposal(proposal, { existing = [], id = '', maxHints = 0, allowSharedFaction = false } = {}) {
+    if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) return null;
     const title = cleanText(proposal.title || proposal.name).slice(0, 90);
     const goal = cleanText(proposal.goal).slice(0, 280);
     const stakes = cleanText(proposal.stakes).slice(0, 280);
     const grimPortents = normalizeTextArray(proposal.grimPortents || proposal.grim_portents)
-        .map(portent => portent.slice(0, 240));
+        .slice(0, PROPOSAL_PORTENTS_MAX);
     const faction = normalizeFaction(proposal.faction);
-    if (!title || !goal || !stakes || grimPortents.length < 3 || !faction || !faction.goal) return null;
+    if (!title || !goal || !stakes || grimPortents.length < 3 || !faction?.goal) return null;
 
     const titleLower = title.toLowerCase();
     const factionLower = faction.name.toLowerCase();
-    const duplicate = (existingFronts || []).some(front =>
-        front?.title?.toLowerCase() === titleLower
-        || front?.faction?.name?.toLowerCase() === factionLower);
+    const duplicate = (Array.isArray(existing) ? existing : []).some(front =>
+        (typeof front?.title === 'string' && front.title.toLowerCase() === titleLower)
+        || (!allowSharedFaction && typeof front?.faction?.name === 'string' && front.faction.name.toLowerCase() === factionLower));
     if (duplicate) return null;
 
     return normalizeFront({
-        id: `front-em-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: cleanText(id) || `front-em-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         title,
         goal,
         stakes,
@@ -164,11 +191,24 @@ export function normalizeEmergentFront(proposal, existingFronts = []) {
         maxClock: DEFAULT_MAX_CLOCK,
         stage: 0,
         status: 'active',
-        publicHints: [],
-        notes: cleanText(proposal.reason || proposal.notes).slice(0, 500),
+        publicHints: normalizeTextArray(proposal.publicHints || proposal.public_hints)
+            .slice(0, Math.max(0, maxHints)),
+        notes: cleanText(proposal.reason || proposal.notes).slice(0, FRONT_NOTES_MAX),
         faction,
     });
 }
+
+/**
+ * The persisted key set of a front record — pinned by test so a field with a
+ * writer and no reader shows up as a diff (`lastAdvancedAt` was stamped on
+ * every update for months and read nowhere; the roster's NPC_RECORD_KEYS is
+ * the precedent). normalizeFront projects to exactly these.
+ */
+export const FRONT_RECORD_KEYS = Object.freeze([
+    'id', 'title', 'goal', 'stakes', 'grimPortents', 'clock', 'maxClock', 'stage', 'status',
+    'publicHints', 'lastAdvanceId', 'lastAdvanceDelta', 'notes', 'faction',
+    'resolvedAtMessage', 'resolution', 'resolvedTheaterIds', 'lastDmClockGainMessage',
+]);
 
 export function normalizeFront(front = {}, existing = null) {
     const maxClock = clampInt(front.maxClock ?? front.max_clock, 3, 12, existing?.maxClock || DEFAULT_MAX_CLOCK);
@@ -209,8 +249,7 @@ export function normalizeFront(front = {}, existing = null) {
         maxClock,
         stage,
         status: normalizeStatus(front.status, existing?.status || 'active'),
-        publicHints: normalizeRecentTextArray(front.publicHints || front.public_hints, existing?.publicHints || []),
-        lastAdvancedAt: front.lastAdvancedAt || front.last_advanced_at || existing?.lastAdvancedAt || null,
+        publicHints: normalizeTextArray(front.publicHints || front.public_hints, existing?.publicHints || [], { recent: true }),
         lastAdvanceId: cleanText(front.lastAdvanceId || front.last_advance_id, existing?.lastAdvanceId || '') || null,
         lastAdvanceDelta: clampInt(front.lastAdvanceDelta ?? front.last_advance_delta, -1, 1, existing?.lastAdvanceDelta ?? 0),
         notes: cleanText(front.notes, existing?.notes || '').slice(0, FRONT_NOTES_MAX),
@@ -250,7 +289,7 @@ export function normalizeFrontUpdate(update = {}) {
     const clock = finiteOrUndefined(update.clock);
     const stage = finiteOrUndefined(update.stage);
     const rawHints = update.publicHints ?? update.public_hints;
-    const publicHints = normalizeRecentTextArray(typeof rawHints === 'string' ? [rawHints] : rawHints);
+    const publicHints = normalizeTextArray(typeof rawHints === 'string' ? [rawHints] : rawHints, [], { recent: true });
     const status = update.status === undefined ? null : normalizeStatus(update.status, null);
     const notes = cleanText(update.notes).slice(0, FRONT_NOTES_MAX);
 
@@ -261,7 +300,6 @@ export function normalizeFrontUpdate(update = {}) {
         ...(stage !== undefined && { stage: clampInt(stage, 0, 12, 0) }),
         ...(publicHints.length > 0 && { publicHints }),
         ...(notes && { notes }),
-        lastAdvancedAt: Date.now(),
     };
     if (status) normalized.status = status;
     return normalized;
@@ -337,7 +375,6 @@ export function applyFrontAdvanceBatch(fronts = [], batch = {}) {
             stage: Math.max(front.stage || 0, derivedStage),
             publicHints,
             notes: advance.reason || front.notes,
-            lastAdvancedAt: Date.now(),
             lastAdvanceId: cadenceId,
             lastAdvanceDelta: delta,
         }, front);

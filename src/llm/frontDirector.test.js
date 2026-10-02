@@ -23,7 +23,9 @@ describe('Fronts v2 campaign generation', () => {
     it('only runs for a fresh, unmigrated campaign', () => {
         expect(shouldGenerateCampaignFronts(campaign())).toBe(true);
         expect(shouldGenerateCampaignFronts(campaign({ messages: [{}, {}, {}] }))).toBe(false);
-        expect(shouldGenerateCampaignFronts(campaign({ session: { ...campaign().session, frontDirector: { version: 2 } } }))).toBe(false);
+        expect(shouldGenerateCampaignFronts(campaign({ session: { ...campaign().session, frontDirector: { generationVersion: 2 } } }))).toBe(false);
+        // A journal cadence has run on the fallback web: too late to replace it.
+        expect(shouldGenerateCampaignFronts(campaign({ session: { ...campaign().session, frontDirector: { lastCadenceId: 'journal-c-10', lastJournalEnd: 10 } } }))).toBe(false);
         expect(shouldGenerateCampaignFronts(campaign({ combat: { active: true } }))).toBe(false);
     });
 

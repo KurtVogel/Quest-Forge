@@ -150,6 +150,27 @@ export function sanitizePendingFrontAftermath(raw) {
 }
 
 /**
+ * The front director's marker, projected to the keys that have a READER
+ * (2026-10-02 hidden-fronts Lap-4): `generationVersion` is the one generation
+ * flag (a rich web landed — generation or the v2 upgrade), `lastJournalEnd` /
+ * `lastCadenceId` are the cadence watermarks, `lastEmergentCadenceId` the
+ * emergent-front one-shot. A legacy marker's `version` (three writers, two
+ * meanings), `source`, `generatedAt`, `upgradedAt`, `contextCounts`,
+ * `lastProcessedAt` and `lastAppliedCount` had no reader and are dropped.
+ */
+export function sanitizeFrontDirector(raw) {
+    if (!isRecord(raw)) return null;
+    const next = {};
+    const generationVersion = finiteStamp(raw.generationVersion);
+    if (generationVersion) next.generationVersion = generationVersion;
+    if (raw.lastJournalEnd !== undefined) next.lastJournalEnd = finiteStamp(raw.lastJournalEnd) ?? 0;
+    for (const key of ['lastCadenceId', 'lastEmergentCadenceId']) {
+        if (typeof raw[key] === 'string' && raw[key]) next[key] = raw[key].slice(0, 160);
+    }
+    return next;
+}
+
+/**
  * Re-type the living-world sub-objects on a loaded `session`. Keys the save
  * never carried stay absent (no `null` is minted for a field that was
  * undefined) so healthy legacy saves round-trip byte-identically.
@@ -171,6 +192,8 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
         // The wonder die (2026-09-18): the request marker and the chosen hook.
         ['pendingWonder', sanitizePendingWonder],
         ['wonder', sanitizeWonder],
+        // The front director's marker (2026-10-02): readers' keys only.
+        ['frontDirector', sanitizeFrontDirector],
     ];
     // The three beat cooldowns clamp to the transcript (2026-09-24 sweep):
     // a stamp past the end (`1e9`) used to survive LOAD_GAME and silence

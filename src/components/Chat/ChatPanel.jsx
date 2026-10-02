@@ -375,7 +375,7 @@ export default function ChatPanel() {
         }
     }, [
         state.session?.id,
-        state.session?.frontDirector?.version,
+        state.session?.frontDirector?.generationVersion,
         state.session?.pendingFrontAftermath?.frontId,
         state.session?.pendingAbsenceDrift?.key,
         state.session?.pendingRegionalFronts?.key,

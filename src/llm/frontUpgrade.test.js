@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { sanitizeFrontUpgrade, upgradeCampaignFrontsV2 } from './frontUpgrade.js';
+import { buildFrontUpgradeContext, sanitizeFrontUpgrade, upgradeCampaignFrontsV2 } from './frontUpgrade.js';
 import { sendMessage } from './adapter.js';
 
 vi.mock('./adapter.js', () => ({ sendMessage: vi.fn() }));
@@ -67,6 +67,49 @@ describe('established campaign Fronts v2 upgrade', () => {
     it('rejects incomplete enrichment without changing state', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({ front_enrichments: [], new_fronts: [] }));
         await expect(upgradeCampaignFrontsV2(vesaCampaign())).rejects.toThrow('No campaign state was changed');
+    });
+});
+
+// The one live test of the deleted frontMigration.js (2026-10-02): the
+// context builder is the upgrade's own now.
+describe('buildFrontUpgradeContext', () => {
+    it('builds private context from established canon, NPCs, memories, quests, and recent events', () => {
+        const { context, counts } = buildFrontUpgradeContext({
+            character: { name: 'Vesa', race: 'human', class: 'fighter', level: 2, appearance: 'scarred warrior in chain mail' },
+            session: { id: 'vesa-campaign', premise: 'Vesa was exiled from Tanelorn and seeks a name in the borderlands.' },
+            currentLocation: 'Kraul’s cavern',
+            fronts: [],
+            party: [],
+            worldFacts: [
+                { category: 'death', fact: 'Chief Kraul is dead, slain by Vesa.' },
+                { category: 'reputation', fact: 'Two surviving goblins call Vesa the new chief.' },
+            ],
+            journal: [{ title: 'The cavern', summary: 'Vesa defeated Kraul after a brutal duel.' }],
+            npcs: [{ name: 'Mira', disposition: 'wary', agenda: 'Learn who now controls the goblin tunnels.' }],
+            storyMemory: [{ status: 'active', type: 'playerCanon', subject: 'Goblin Slayer', text: 'Vesa claimed the title Goblin Slayer.' }],
+            quests: [
+                { name: 'Goblin chief', description: 'End Kraul’s raids.', status: 'completed' },
+                { name: 'The salt road', description: 'Find who bleeds the caravans.', status: 'active' },
+            ],
+            inventory: [{ name: 'Longsword', equipped: true }],
+            messages: [
+                { role: 'user', content: 'I declare myself the new chief.' },
+                { role: 'assistant', content: 'The two sickly goblins kneel beside Kraul’s corpse.' },
+            ],
+        });
+
+        expect(context.campaignPremise).toContain('Tanelorn');
+        expect(context.canonicalWorldFacts).toEqual(expect.arrayContaining([
+            expect.objectContaining({ fact: expect.stringContaining('Kraul is dead') }),
+        ]));
+        expect(context.knownNpcs[0]).toMatchObject({ name: 'Mira', agenda: expect.stringContaining('goblin tunnels') });
+        expect(context.dramaticMemory[0].text).toContain('Goblin Slayer');
+        // Active rows only, name + description, the live directors' projection
+        // (2026-09-27 quests P2): a completed quest is history the journal and
+        // world facts already carry.
+        expect(context.quests).toEqual([{ name: 'The salt road', description: 'Find who bleeds the caravans.' }]);
+        expect(context.recentEvents).toHaveLength(2);
+        expect(counts).toMatchObject({ facts: 2, journalEntries: 1, npcs: 1, memories: 1, recentEvents: 2 });
     });
 });
 

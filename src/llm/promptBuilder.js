@@ -5,7 +5,7 @@
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT, classDisplayName, getFightingStyleLabel, getMartialArchetypeLabel, raceDisplayName } from '../engine/characterUtils.js';
 import { describeArmorAc, describeShieldAc, formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifier, hasListEntry, isProficientWithWeapon } from '../engine/rules.js';
-import { getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
+import { getDmBonusXpCap, getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock, findSubjectsInText } from '../engine/vectorMemory.js';
 import { buildWonderBlock } from '../engine/wonder.js';
@@ -753,7 +753,7 @@ REST & RESOURCES:
 
 PROGRESSION & STATUS EFFECTS:
 - The engine awards XP automatically for combat (defeated, surrendered, or fled threats — with a larger reward for a decisively beaten "boss": true foe) AND for every quest completed via quest_updates. NEVER emit "exp_awarded" for winning a fight or completing a quest — the engine already paid; an award on top double-pays.
-- Use "exp_awarded" ONLY for small freeform bonuses the engine cannot see: clever roleplay, a brilliant solution, a discovery, a personal milestone outside any quest. Keep it modest (tens to low hundreds of XP) — the engine caps a freeform bonus at the quest-completion tier for the hero's level and posts a note if you exceed it.
+- Use "exp_awarded" ONLY for small freeform bonuses the engine cannot see: clever roleplay, a brilliant solution, a discovery, a personal milestone outside any quest. Keep it modest: the EXP line in PLAYER CHARACTER shows the current "freeform bonus cap" — the engine pays at most that, and says so on the XP line if you exceed it.
 - "exp_awarded" is one-shot: award XP for an accomplishment exactly once, in the response that resolves it — never re-emit XP in a later response that references, recaps, or confirms the same accomplishment, even if the player asks whether XP was granted (the engine shows every award as a system line; if none appeared, it was not granted — award the missing amount ONCE, then never again).
 - **LEVELING:** The client owns XP thresholds, HP gain, hit dice, feature unlocks, and level-up messages. Do NOT narrate HP or stat changes yourself. Use "level_up": true only for a deliberate, rare story milestone (a great deed decisively completed, an arc closed). The engine pays a fixed milestone reward for it — half a level of XP, two milestones = one level — never a whole level on request; otherwise award XP normally and let the system decide.
 - **FIGHTER EXTRA ATTACK:** Fighters of level 5+ may declare two targetable strikes inside each Attack slot. The engine rolls and applies both.
@@ -851,7 +851,7 @@ function buildCharacterBlock(character, combat = null) {
 
     const expLine = isMaxLevel(character.level)
         ? `${character.exp || 0} XP (max level reached)`
-        : `${character.exp || 0} / ${getExperienceThreshold(character.level)} to next level`;
+        : `${character.exp || 0} / ${getExperienceThreshold(character.level)} to next level · freeform bonus cap ${getDmBonusXpCap(character.level)}`;
 
     // String-or-empty belt (2026-09-09 audit P1): `x?.trim()` is a TYPE
     // assumption, and an object here threw out of every prompt build.

@@ -8,6 +8,7 @@ import { LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_M
 import { sanitizePortraitUrl } from './portraitUrl.js';
 import { conversationalDistance } from './replayLedger.js';
 import { coverage, tokenSet } from './textMatch.js';
+import { cleanText } from './text.js';
 
 export const NPC_ROSTER_TIERS = new Set(['character', 'archived_creature']);
 export const NPC_KINDS = new Set(['character', 'creature', 'ephemeral']);
@@ -127,10 +128,6 @@ const DISAMBIGUATOR = /^(?:[a-z]|\d{1,3}|i{1,3}|iv|v|vi{0,3}|ix|x|one|two|three|
 // sources portraits can legitimately come from survive normalization.
 
 const COMBAT_ONLY_NOTE = /\b(attack|fought|slain|killed|defeated|stabbed|shot|arrow|spear|sword|combat|battle|ambush|patrol)\b/i;
-
-function cleanText(value) {
-    return String(value || '').replace(/\s+/g, ' ').trim();
-}
 
 /** Journal dossier fields — full depth for player review and Scribe context.
  * Canonical value lives in config/contentLimits.js; re-exported here for the

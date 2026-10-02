@@ -143,7 +143,8 @@ describe('hidden campaign fronts', () => {
         });
         expect(installed.fronts).toHaveLength(2);
         expect(installed.fronts[0].faction.name).toBe('Faction 1');
-        expect(installed.session.frontDirector).toMatchObject({ version: 2, source: 'campaign-creation' });
+        // Readers' keys only (2026-10-02): no `version` / `source` / `generatedAt`.
+        expect(installed.session.frontDirector).toEqual({ generationVersion: 2, lastJournalEnd: 0 });
     });
 
     it('installs a late-arriving generation while the fallback front is untouched (2026-07-14 eval race)', () => {
@@ -176,7 +177,7 @@ describe('hidden campaign fronts', () => {
             payload: { sessionId: 'fresh-session', fronts: generated },
         });
         expect(installed.fronts).toHaveLength(2);
-        expect(installed.session.frontDirector).toMatchObject({ version: 2 });
+        expect(installed.session.frontDirector).toMatchObject({ generationVersion: 2 });
 
         const movedFallback = {
             ...state,
@@ -221,7 +222,7 @@ describe('hidden campaign fronts', () => {
             publicHints: ['The last mule train arrives empty.'],
             lastAdvanceId: 'journal-campaign-20',
         });
-        expect(advanced.session.frontDirector).toMatchObject({ lastJournalEnd: 20, lastAppliedCount: 1 });
+        expect(advanced.session.frontDirector).toEqual({ version: 2, lastJournalEnd: 20, lastCadenceId: 'journal-campaign-20' });
         expect(gameReducer(advanced, action)).toBe(advanced);
     });
 
@@ -463,9 +464,7 @@ describe('hidden campaign fronts', () => {
             notes: existingFront.notes, faction: { name: 'Kraul’s Remnants' },
         });
         expect(upgraded.fronts[1]).toMatchObject({ id: 'front-upgrade-2', clock: 0 });
-        expect(upgraded.session.frontDirector).toMatchObject({
-            version: 2, generationVersion: 2, source: 'existing-campaign-upgrade', lastJournalEnd: 20,
-        });
+        expect(upgraded.session.frontDirector).toEqual({ generationVersion: 2, lastJournalEnd: 20 });
         expect(gameReducer(upgraded, action)).toBe(upgraded);
     });
 

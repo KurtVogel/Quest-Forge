@@ -8,9 +8,11 @@ import {
     buildFrontResolutionFact,
     createInitialFronts,
     DEFAULT_MAX_CLOCK,
-    normalizeEmergentFront,
+    FRONT_RECORD_KEYS,
+    isFrontGenerationClosed,
     normalizeFaction,
     normalizeFront,
+    normalizeFrontProposal,
     normalizeFrontUpdate,
 } from './fronts.js';
 
@@ -101,7 +103,7 @@ describe('applyFrontAdvanceBatch pacing guards', () => {
     });
 });
 
-describe('normalizeEmergentFront (complete-or-nothing)', () => {
+describe('normalizeFrontProposal — the one proposal boundary (complete-or-nothing)', () => {
     const proposal = {
         title: 'The Drowned Choir',
         goal: 'Claim the tide caves',
@@ -111,8 +113,9 @@ describe('normalizeEmergentFront (complete-or-nothing)', () => {
     };
 
     it('accepts a complete proposal, born at clock 0 / stage 0 / active', () => {
-        const front = normalizeEmergentFront(proposal);
+        const front = normalizeFrontProposal(proposal);
         expect(front).toMatchObject({ clock: 0, stage: 0, status: 'active', title: 'The Drowned Choir' });
+        expect(front.id).toMatch(/^front-em-/);
     });
 
     it.each([
@@ -123,14 +126,64 @@ describe('normalizeEmergentFront (complete-or-nothing)', () => {
         ['faction', { ...proposal, faction: null }],
         ['faction goal', { ...proposal, faction: { name: 'X' } }],
     ])('rejects a proposal missing %s', (_label, bad) => {
-        expect(normalizeEmergentFront(bad)).toBeNull();
+        expect(normalizeFrontProposal(bad)).toBeNull();
+    });
+
+    it.each([null, 'a front', 7, [proposal]])('rejects a non-object proposal (%j)', (junk) => {
+        expect(normalizeFrontProposal(junk)).toBeNull();
     });
 
     it('dedupes against existing fronts by title OR faction name', () => {
         const existing = [baseFront({ title: 'The Drowned Choir' })];
-        expect(normalizeEmergentFront(proposal, existing)).toBeNull();
+        expect(normalizeFrontProposal(proposal, { existing })).toBeNull();
         const byFaction = [baseFront({ title: 'Other', faction: { name: 'The Drowned Choir', goal: 'x' } })];
-        expect(normalizeEmergentFront(proposal, byFaction)).toBeNull();
+        expect(normalizeFrontProposal(proposal, { existing: byFaction })).toBeNull();
+    });
+
+    it('allowSharedFaction keeps a second front for one faction, never a repeated title', () => {
+        const byFaction = [baseFront({ title: 'Other', faction: { name: 'The Drowned Choir', goal: 'x' } })];
+        expect(normalizeFrontProposal(proposal, { existing: byFaction, allowSharedFaction: true })).not.toBeNull();
+        const byTitle = [baseFront({ title: 'the drowned choir' })];
+        expect(normalizeFrontProposal(proposal, { existing: byTitle, allowSharedFaction: true })).toBeNull();
+    });
+
+    it('one set of caps for every lane: 5 portents, hints only on request, born at clock 0 with the default clock', () => {
+        const loud = {
+            ...proposal,
+            grimPortents: ['one', 'two', 'three', 'four', 'five', 'six', 'seven'],
+            publicHints: ['a smell of brine', 'wet footprints'],
+            clock: 5, stage: 3, maxClock: 12, status: 'resolved', reason: 'the caves kept mattering',
+        };
+        const quiet = normalizeFrontProposal(loud, { id: 'front-region-1' });
+        expect(quiet).toMatchObject({ id: 'front-region-1', clock: 0, stage: 0, status: 'active', maxClock: DEFAULT_MAX_CLOCK, notes: 'the caves kept mattering' });
+        expect(quiet.grimPortents).toHaveLength(5);
+        expect(quiet.publicHints).toEqual([]);
+        expect(normalizeFrontProposal(loud, { maxHints: 1 }).publicHints).toEqual(['a smell of brine']);
+    });
+});
+
+describe('the front record and the generation flag (2026-10-02 Lap-4)', () => {
+    it('normalizeFront projects to exactly FRONT_RECORD_KEYS — a write-only field cannot ride the record', () => {
+        const front = normalizeFront({
+            ...baseFront(), lastAdvancedAt: 123, last_advanced_at: 456, source: 'x', exp_awarded: 99,
+        });
+        expect(Object.keys(front).sort()).toEqual([...FRONT_RECORD_KEYS].sort());
+        expect(Object.keys(normalizeFront({}, front)).sort()).toEqual([...FRONT_RECORD_KEYS].sort());
+    });
+
+    it('a notes-only update carries no timestamp: an identical re-emission leaves the record deep-equal', () => {
+        const front = normalizeFront(baseFront({ notes: 'The den is watched.' }));
+        const update = normalizeFrontUpdate({ id: front.id, notes: 'The den is watched.' });
+        expect(update).toEqual({ id: front.id, notes: 'The den is watched.' });
+        expect(normalizeFront(update, front)).toEqual(front);
+    });
+
+    it('generation is closed by a landed rich web or by a cadence that has run — and by nothing else', () => {
+        expect(isFrontGenerationClosed({})).toBe(false);
+        expect(isFrontGenerationClosed({ frontDirector: {} })).toBe(false);
+        expect(isFrontGenerationClosed({ frontDirector: { version: 2 } })).toBe(false); // the legacy field has no meaning
+        expect(isFrontGenerationClosed({ frontDirector: { generationVersion: 2 } })).toBe(true);
+        expect(isFrontGenerationClosed({ frontDirector: { lastCadenceId: 'journal-s1-10', lastJournalEnd: 10 } })).toBe(true);
     });
 });
 

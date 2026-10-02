@@ -9,6 +9,7 @@ import { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud
 import { getFirebaseConfigError, initializeFirebase } from '../../config/firebase.js';
 import { signInWithGoogle, logOut } from '../../state/auth.js';
 import { upgradeCampaignFrontsV2 } from '../../llm/frontUpgrade.js';
+import { FRONTS_VERSION } from '../../engine/fronts.js';
 import { clearImageCache } from '../../llm/providers/imageGen.js';
 import { describeKeyVendorMismatch } from '../../llm/machinery.js';
 import './Settings.css';
@@ -43,7 +44,7 @@ export default function SettingsModal() {
     const [syncStatus, setSyncStatus] = useState('');
     const [isMigratingFronts, setIsMigratingFronts] = useState(false);
     const [frontMigrationStatus, setFrontMigrationStatus] = useState('');
-    const hasRichLivingWorld = state.session?.frontDirector?.generationVersion >= 2;
+    const hasRichLivingWorld = state.session?.frontDirector?.generationVersion >= FRONTS_VERSION;
 
     useEffect(() => {
         let isCancelled = false;
@@ -572,8 +573,6 @@ export default function SettingsModal() {
                                     <label className="setting-label">Living World</label>
                                     {hasRichLivingWorld
                                         ? <span className="living-world-badge">Dynamic</span>
-                                        : state.session?.frontMigration?.version >= 1
-                                            ? <span className="living-world-badge basic">Contextual</span>
                                         : (state.fronts || []).length > 0
                                             ? <span className="living-world-badge basic">Basic</span>
                                             : null}

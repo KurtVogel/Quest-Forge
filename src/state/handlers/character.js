@@ -345,11 +345,10 @@ export const handlers = {
         // hundreds" and one 10000-XP emission used to take a hero L1→L5. The
         // clamp runs BEFORE the ledger so a re-emitted oversized award still
         // matches its own echo signature.
+        // The cap is said ON the XP line (`+38 XP (capped from 50)`, 2026-10-02):
+        // one DM-visible receipt, not an award row plus a note the DM never saw.
         const bonusCap = meta ? getDmBonusXpCap(state.character?.level) : Infinity;
         const amount = Math.min(requested, bonusCap);
-        const clampNote = amount < requested
-            ? [systemMessage(`The DM's **+${requested} XP** bonus exceeds what a freeform award may pay at level ${state.character?.level || 1} — capped at **+${amount} XP** (the quest-completion tier).`)]
-            : [];
         let recentExpAwards = state.recentExpAwards || [];
         if (meta && amount > 0) {
             const guarded = guardExpAwardLedger(recentExpAwards, amount, meta, currentMessageIndex(state), state.messages);
@@ -360,13 +359,15 @@ export const handlers = {
                     recentExpAwards,
                     messages: [
                         ...state.messages,
-                        systemMessage(`Duplicate XP award ignored — **+${amount} XP** matches an award just granted. If a second identical award is genuinely owed, ask the DM for it again.`),
+                        // dmVisible: the DM must learn its re-emission was suppressed.
+                        systemMessage(`Duplicate XP award ignored — **+${amount} XP** matches an award just granted. If a second identical award is genuinely owed, ask the DM for it again.`, { dmVisible: true }),
                     ],
                 };
             }
         }
         const result = awardExperience(state.character, amount, {
             reason: action.reason,
+            cappedFrom: amount < requested ? requested : undefined,
             // No DM channel ends a death-save clock (2026-09-19 ruling, the
             // 09-04 "gasped prayer" class through the XP door): a DM award
             // that crosses a level while the hero is DYING grows the sheet and
@@ -377,7 +378,7 @@ export const handlers = {
             ...state,
             character: result.character,
             recentExpAwards,
-            messages: [...state.messages, ...clampNote, ...result.messages],
+            messages: [...state.messages, ...result.messages],
             // Remember XP was earned mid-fight so the manual End-Combat fallback won't re-award.
             combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
         };
@@ -438,7 +439,7 @@ export const handlers = {
                     recentExpAwards: rememberTransaction(recentExpAwards, levelUpMarker, sourceId, messageIndex, 'ignored'),
                     messages: [
                         ...state.messages,
-                        systemMessage('Duplicate level-up ignored — a milestone level-up was just applied.'),
+                        systemMessage('Duplicate level-up ignored — a milestone level-up was just applied.', { dmVisible: true }),
                     ],
                 };
             }
@@ -450,14 +451,11 @@ export const handlers = {
             const level = state.character?.level || 1;
             const requestedBonus = bonusExp;
             bonusExp = Math.min(bonusExp, getDmBonusXpCap(level));
-            if (bonusExp < requestedBonus) {
-                extraMessages.push(systemMessage(`The DM's **+${requestedBonus} XP** bonus exceeds what a freeform award may pay at level ${level} — capped at **+${bonusExp} XP** (the quest-completion tier).`));
-            }
             if (bonusExp > 0) {
                 const guarded = guardExpAwardLedger(recentExpAwards, bonusExp, meta, messageIndex, state.messages);
                 recentExpAwards = guarded.recentExpAwards;
                 if (guarded.suppressed) {
-                    extraMessages.push(systemMessage(`Duplicate XP award ignored — **+${bonusExp} XP** matches an award just granted; the milestone itself stands.`));
+                    extraMessages.push(systemMessage(`Duplicate XP award ignored — **+${bonusExp} XP** matches an award just granted; the milestone itself stands.`, { dmVisible: true }));
                     bonusExp = 0;
                 }
             }
@@ -471,8 +469,12 @@ export const handlers = {
             // the one suppressed reward with no line (2026-09-07 P2).
             const milestoneXp = getStoryMilestoneXp(level);
             const atCap = isMaxLevel(level);
+            // A capped bonus that survived the ledger is said on the XP line itself.
+            const bonusNote = bonusExp > 0 && bonusExp < requestedBonus
+                ? ` + bonus ${bonusExp}, capped from ${requestedBonus}`
+                : '';
             const result = awardExperience(state.character, milestoneXp + bonusExp, {
-                reason: atCap ? 'story milestone — max level reached, no level gained' : 'story milestone',
+                reason: `${atCap ? 'story milestone — max level reached, no level gained' : 'story milestone'}${bonusNote}`,
                 // A DM-declared milestone never ends a death-save clock (see ADD_EXP).
                 keepDowned: !!state.character?.dying,
             });

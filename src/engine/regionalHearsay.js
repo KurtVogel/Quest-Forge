@@ -26,6 +26,7 @@
 import { areRelatedPlaces, findLocationRecord, isSameLocation } from './locationRegistry.js';
 import { distanceSince } from './worldTempo.js';
 import { listPublicTells } from './heroTells.js';
+import { cleanText as typedText } from './text.js';
 
 export const HEARSAY_MAX_ITEMS = 2;
 /** A deed from ELSEWHERE needs this conversational age to have traveled here. */
@@ -48,10 +49,7 @@ const GRADE_GUIDANCE = {
 
 // Type-strict (2026-09-08): an object `enemies`/`resolution` on a source must
 // never travel as "[object Object]" hearsay.
-function cleanText(value, max = 200) {
-    if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return '';
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
-}
+const cleanText = (value, max = 200) => typedText(value, max);
 
 /** Stable key a location contributes to ledger entries: record id when known. */
 function locationKey(locations, name) {

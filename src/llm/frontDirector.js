@@ -1,6 +1,6 @@
 import { sendMessage } from './adapter.js';
 import { cleanText, parseDirectorJson } from './directorUtils.js';
-import { FRONTS_VERSION, normalizeFaction, normalizeFront } from '../engine/fronts.js';
+import { isFrontGenerationClosed, normalizeFrontProposal } from '../engine/fronts.js';
 import { WEB_TARGET_FRONTS } from '../engine/worldTempo.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
@@ -41,43 +41,27 @@ Rules:
 
 export function shouldGenerateCampaignFronts(state) {
     if (!state?.character || !state?.session?.id || !state?.settings?.apiKey) return false;
-    if (state.combat?.active || state.session?.frontDirector?.version >= FRONTS_VERSION) return false;
-    if (state.session?.frontMigration?.version >= 1) return false;
+    if (state.combat?.active || isFrontGenerationClosed(state.session)) return false;
     const visibleMessages = (state.messages || []).filter(message => !message.hidden && !message.deleted);
     return !!state.session.createdAt && visibleMessages.length <= 2;
 }
 
+// The engine's one proposal boundary (normalizeFrontProposal) with this lane's
+// terms: ids by position, one already-visible symptom, and a faction MAY drive
+// two generated fronts — only a repeated title is the same front twice.
 export function sanitizeGeneratedFronts(rawFronts) {
     if (!Array.isArray(rawFronts)) return [];
-    return rawFronts.slice(0, WEB_TARGET_FRONTS).map((front, index) => {
-        const title = cleanText(front?.title || front?.name, 90);
-        const goal = cleanText(front?.goal, 280);
-        const stakes = cleanText(front?.stakes, 280);
-        const grimPortents = (Array.isArray(front?.grimPortents) ? front.grimPortents : front?.grim_portents || [])
-            .map(portent => cleanText(portent, 240))
-            .filter(Boolean)
-            .slice(0, 5);
-        // The shared engine sanitizer (goal checked here — generated factions must have one).
-        const faction = normalizeFaction(front?.faction);
-        if (!title || !goal || !stakes || grimPortents.length < 3 || !faction?.goal) return null;
-        return normalizeFront({
+    const fronts = [];
+    rawFronts.slice(0, WEB_TARGET_FRONTS).forEach((raw, index) => {
+        const front = normalizeFrontProposal(raw, {
+            existing: fronts,
             id: `front-v2-${index + 1}`,
-            title,
-            goal,
-            stakes,
-            grimPortents,
-            clock: 0,
-            maxClock: 6,
-            stage: 0,
-            status: 'active',
-            publicHints: (Array.isArray(front.publicHints) ? front.publicHints : front.public_hints || [])
-                .map(hint => cleanText(hint, 220))
-                .filter(Boolean)
-                .slice(0, 1),
-            notes: cleanText(front.notes, 500),
-            faction,
+            maxHints: 1,
+            allowSharedFaction: true,
         });
-    }).filter(Boolean);
+        if (front) fronts.push(front);
+    });
+    return fronts;
 }
 
 export async function generateCampaignFronts(state) {

@@ -3035,7 +3035,7 @@ the query embed, so a campaign's first turns have no pre-stream await at all (th
 differed by store size, not only by lane); and the roll-challenge lane restated the player's challenge
 in its prompt beside the visible row — fixed with the same mechanism (`opts.pendingUserRow`).
 
-### [strengthening] A prompt rule about an engine line is a contract with the WINDOW; a lane with no writer is a lane with no caller — status: `idea` (2026-10-02 audit, progression Lap 3 + hidden-fronts Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+### [strengthening] A prompt rule about an engine line is a contract with the WINDOW; a lane with no writer is a lane with no caller — status: `built 2026-10-02` for XP and the fronts lane (DECISIONS.md 2026-10-02); STILL OPEN: the one-time pass over the ~30 `systemMessage` sites against the prefix's "the engine posts / shows / confirms" sentences (Second Wind / potion lines reach the DM through `narrationCue`, not the window — checked) (2026-10-02 audit, progression Lap 3 + hidden-fronts Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
 Two patterns from the run. **(1)** The cached prefix tells the DM "the engine shows every award as a
 system line; if none appeared, it was not granted — award the missing amount ONCE"
 (`promptBuilder.js:757`), and no XP row is `dmVisible`: the player sees every award, the DM's window

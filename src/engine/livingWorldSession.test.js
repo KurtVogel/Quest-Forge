@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     sanitizeAbsenceDriftState,
+    sanitizeFrontDirector,
     sanitizeLivingWorldSession,
     sanitizePendingAbsenceDrift,
     sanitizePendingFrontAftermath,
@@ -55,9 +56,27 @@ describe('installed living-world state', () => {
     });
 });
 
+describe('sanitizeFrontDirector — readers\' keys only (2026-10-02)', () => {
+    it('keeps the generation flag and the cadence watermarks, typed, and drops every write-only legacy field', () => {
+        expect(sanitizeFrontDirector({
+            version: 2, generationVersion: 2, source: 'campaign-creation', generatedAt: 1, upgradedAt: 2,
+            contextCounts: { facts: 9 }, lastProcessedAt: 3, lastAppliedCount: 1,
+            lastCadenceId: 'journal-s1-30', lastJournalEnd: '30', lastEmergentCadenceId: 'journal-s1-20',
+        })).toEqual({
+            generationVersion: 2, lastJournalEnd: 30, lastCadenceId: 'journal-s1-30', lastEmergentCadenceId: 'journal-s1-20',
+        });
+    });
+
+    it('a legacy version-only marker carries nothing; junk is null or dropped', () => {
+        expect(sanitizeFrontDirector({ version: 2 })).toEqual({});
+        expect(sanitizeFrontDirector('yes')).toBeNull();
+        expect(sanitizeFrontDirector({ generationVersion: {}, lastJournalEnd: 'soon', lastCadenceId: 7 })).toEqual({ lastJournalEnd: 0 });
+    });
+});
+
 describe('sanitizeLivingWorldSession', () => {
     it('re-types only the keys the save carries and passes everything else through', () => {
-        const session = { id: 's1', premise: 'A quiet town.', frontDirector: { version: 2 }, pendingAbsenceDrift: 'yes' };
+        const session = { id: 's1', premise: 'A quiet town.', frontDirector: { generationVersion: 2 }, pendingAbsenceDrift: 'yes' };
         const next = sanitizeLivingWorldSession(session);
         expect(next).toEqual({ ...session, pendingAbsenceDrift: null });
         expect(next).not.toHaveProperty('absenceDrift');

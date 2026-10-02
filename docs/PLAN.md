@@ -44,7 +44,7 @@ Design pattern every housekeeper job should follow:
 | On demand | `npcFodderReview.js` | Suggest disposable roster entries; player confirms via checkboxes + bulk archive |
 
 **Not Scribe-tier today** (uses DM model): initial front generation (`frontDirector.js`),
-Dynamic World v2 upgrade (`frontUpgrade.js`), contextual front migration (`frontMigration.js`).
+Dynamic World v2 upgrade (`frontUpgrade.js`; the v1 contextual migration lane, `frontMigration.js`, was deleted 2026-10-02 — it had no caller).
 
 ---
 

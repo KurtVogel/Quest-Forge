@@ -15,7 +15,7 @@ const { buildAbsenceDriftContext } = await import('./absenceDrift.js');
 const { buildRegionalFrontsContext } = await import('./regionalFronts.js');
 const { buildWonderContext } = await import('./wonderDirector.js');
 const { generateCampaignFronts } = await import('./frontDirector.js');
-const { buildFrontMigrationContext } = await import('./frontMigration.js');
+const { buildFrontUpgradeContext } = await import('./frontUpgrade.js');
 
 const fill = (label, length) => `${label} `.padEnd(length, label[0]);
 
@@ -138,7 +138,7 @@ describe('background director contexts — worst-case ceilings and key sets', ()
 
     it('a terminal quest row stays out of EVERY director lane, the Dynamic-World upgrade included (2026-09-27 quests P2)', () => {
         const state = worstCaseState();
-        for (const build of [buildFrontAftermathContext, buildAbsenceDriftContext, buildRegionalFrontsContext, buildWonderContext, buildFrontMigrationContext]) {
+        for (const build of [buildFrontAftermathContext, buildAbsenceDriftContext, buildRegionalFrontsContext, buildWonderContext, buildFrontUpgradeContext]) {
             const built = build(state);
             const context = built?.context ?? built; // the upgrade returns { context, counts }
             expect(context, `${build.name} built a context`).toBeTruthy();
@@ -146,7 +146,7 @@ describe('background director contexts — worst-case ceilings and key sets', ()
         }
         // The upgrade's projection matches its live siblings: active only, the
         // 10 newest, name + description, 120 / 400 clamps (was 20 rows × 600 with status).
-        const { context: migration } = buildFrontMigrationContext(state);
+        const { context: migration } = buildFrontUpgradeContext(state);
         expect(migration.quests).toHaveLength(10);
         for (const quest of migration.quests) {
             expect(Object.keys(quest).sort()).toEqual(['description', 'name']);

@@ -9,7 +9,7 @@
  * Runs on the DM model (creative work, not extraction — the frontDirector
  * pattern) in the background after the resolving turn; the reducer's
  * INSTALL_AFTERMATH_FRONTS re-validates every proposal via
- * normalizeEmergentFront and owns the one-shot pending flag.
+ * normalizeFrontProposal and owns the one-shot pending flag.
  */
 import { sendMessage } from './adapter.js';
 import { cleanText, compactMessage, parseDirectorJson } from './directorUtils.js';
@@ -136,7 +136,7 @@ export function buildFrontAftermathContext(state) {
     };
 }
 
-/** Light shaping only: INSTALL_AFTERMATH_FRONTS re-validates via normalizeEmergentFront. */
+/** Light shaping only: INSTALL_AFTERMATH_FRONTS re-validates via normalizeFrontProposal. */
 export function sanitizeAftermathProposals(rawFronts) {
     if (!Array.isArray(rawFronts)) return [];
     return rawFronts.slice(0, 2).map(front => ({

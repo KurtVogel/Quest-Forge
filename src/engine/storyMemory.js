@@ -1,5 +1,6 @@
 import { containment, overlapCount, tokenSet as sharedTokenSet } from './textMatch.js';
 import { conversationalDistance } from './replayLedger.js';
+import { textOr as cleanText } from './text.js';
 
 const ALLOWED_TYPES = new Set([
     'callback',
@@ -51,15 +52,9 @@ const TYPE_BY_FOLDED_KEY = new Map([...ALLOWED_TYPES].map(type => [foldTypeKey(t
  * "subject: [object Object]" into DRAMATIC CALLBACKS and the RAG seed — and
  * an object `id` became the string "[object Object]", so the next such card
  * MERGED into it by id. A finite number still reads as its digits (a numeric
- * id from the DM is harmless); everything else is no text.
+ * id from the DM is harmless); everything else is no text. The rule lives in
+ * engine/text.js; `cleanText` here is its `(value, fallback)` form.
  */
-function cleanText(value, fallback = '') {
-    const raw = typeof value === 'string'
-        ? value
-        : (typeof value === 'number' && Number.isFinite(value) ? String(value) : '');
-    const text = raw.replace(/\s+/g, ' ').trim();
-    return text || fallback;
-}
 
 function clampNumber(value, min, max, fallback) {
     const n = Number(value);

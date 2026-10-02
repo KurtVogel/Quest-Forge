@@ -17,6 +17,7 @@
 
 import { containment, coverage, tokenSet } from './textMatch.js';
 import { conversationalDistance } from './replayLedger.js';
+import { cleanText as typedText } from './text.js';
 
 export const LOCATION_TYPES = ['haven', 'settlement', 'wilderness', 'frontier', 'hostile_site'];
 export const DANGER_LEVELS = ['none', 'low', 'moderate', 'high', 'deadly'];
@@ -88,10 +89,7 @@ const ROUTE_MAX = 60;
 const STOP_WORDS = new Set(['the', 'a', 'an', 'of', 'in', 'at', 'on', 'to', 'by', 'near']);
 
 // Type-strict (2026-09-08): an object name/alias must never become "[object Object]".
-function cleanText(value, max = 120) {
-    if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return '';
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
-}
+const cleanText = (value, max = 120) => typedText(value, max);
 
 function locationTokens(name) {
     return tokenSet(name, { stopWords: STOP_WORDS, minLength: 3 });

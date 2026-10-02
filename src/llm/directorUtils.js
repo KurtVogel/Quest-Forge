@@ -1,6 +1,6 @@
 /**
  * Shared helpers for the living-world director family (frontDirector,
- * frontUpgrade, frontMigration, frontAftermath, absenceDrift, regionalFronts)
+ * frontUpgrade, frontAftermath, absenceDrift, regionalFronts)
  * and the Scribe-side machinery modules. Every director receives its answer
  * as prose-wrapped JSON and used to carry a private copy of the same
  * extract→parse→repair→throw dance plus a private cleanText (2026-08-19
@@ -9,16 +9,11 @@
  */
 import { extractBalancedJson, repairJson, scanBalancedObject, stripMarkdownFences } from './utils/jsonExtractor.js';
 
-/**
- * Whitespace-collapse + trim + optional clamp. Omit maxLength to keep the full text.
- * Type-strict (2026-09-08 living-world P2): only strings and finite numbers
- * carry text — `String(object)` installed "[object Object]" as a permanent
- * world fact through absence drift and as a front symptom through reflection.
- */
-export function cleanText(value, maxLength) {
-    if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return '';
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
-}
+// Whitespace-collapse + trim + optional clamp (omit the max to keep the full
+// text), type-strict — the engine's own shelf since 2026-10-02.
+import { cleanText } from '../engine/text.js';
+
+export { cleanText };
 
 /**
  * Extract and parse a director response's JSON object, anchored on a key the

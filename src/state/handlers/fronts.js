@@ -7,8 +7,9 @@ import {
     buildFrontResolutionFact,
     DEFAULT_MAX_CLOCK,
     FRONTS_VERSION,
-    normalizeEmergentFront,
+    isFrontGenerationClosed,
     normalizeFront,
+    normalizeFrontProposal,
     normalizeFrontUpdate,
 } from '../../engine/fronts.js';
 import { DM_CLOCK_GAIN_WINDOW, MAX_ACTIVE_FRONTS, normalizeTempoDirective, WEB_TARGET_FRONTS } from '../../engine/worldTempo.js';
@@ -22,20 +23,19 @@ import { systemMessage } from './shared.js';
 /**
  * Shared installer core for the aftermath/regional one-shot proposals
  * (2026-08-24 P2: the two handlers carried the same 25-line loop twice).
- * Validates each proposal complete-or-nothing via normalizeEmergentFront —
- * which already returns a fully normalized front, so re-stamping the id is a
- * plain spread, not a second normalization pass.
+ * Validates each proposal complete-or-nothing via normalizeFrontProposal
+ * (the engine's one proposal boundary), deduped against the web and the
+ * batch's earlier accepts by title or faction.
  */
 function buildProposedFrontAdditions(fronts, proposals, room, idPrefix) {
     const additions = [];
     for (const proposal of (Array.isArray(proposals) ? proposals : []).slice(0, 2)) {
         if (additions.length >= room) break;
-        const front = normalizeEmergentFront(proposal, [...fronts, ...additions]);
-        if (!front) continue;
-        additions.push({
-            ...front,
+        const front = normalizeFrontProposal(proposal, {
+            existing: [...fronts, ...additions],
             id: `${idPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         });
+        if (front) additions.push(front);
     }
     return additions;
 }
@@ -43,7 +43,7 @@ function buildProposedFrontAdditions(fronts, proposals, room, idPrefix) {
 export const handlers = {
     INSTALL_GENERATED_FRONTS(state, action) {
         if (action.payload?.sessionId !== state.session?.id
-            || state.session?.frontDirector?.version >= FRONTS_VERSION
+            || isFrontGenerationClosed(state.session)
             || !Array.isArray(action.payload?.fronts)) return state;
         // Generation runs on the slow DM model while play continues, so the
         // result routinely lands after the opening exchange. A late install is
@@ -57,7 +57,20 @@ export const handlers = {
                 && !(existingFronts[0].clock > 0)
                 && !(existingFronts[0].stage > 0));
         if (visibleCount > 2 && !untouchedFallback) return state;
-        const fronts = action.payload.fronts.slice(0, WEB_TARGET_FRONTS).map(front => normalizeFront(front));
+        // Re-validated at the reducer through the engine's one proposal boundary
+        // on the director's own terms (sanitizeGeneratedFronts) — `normalizeFront`
+        // alone is not complete-or-nothing: a keyless payload entry used to
+        // install as "Unnamed Front".
+        const fronts = [];
+        action.payload.fronts.slice(0, WEB_TARGET_FRONTS).forEach((proposal, index) => {
+            const front = normalizeFrontProposal(proposal, {
+                existing: fronts,
+                id: typeof proposal?.id === 'string' && proposal.id ? proposal.id : `front-v2-${index + 1}`,
+                maxHints: 1,
+                allowSharedFaction: true,
+            });
+            if (front) fronts.push(front);
+        });
         if (fronts.length < 2) return state;
         return {
             ...state,
@@ -65,10 +78,7 @@ export const handlers = {
             session: {
                 ...state.session,
                 frontDirector: {
-                    version: FRONTS_VERSION,
                     generationVersion: FRONTS_VERSION,
-                    source: 'campaign-creation',
-                    generatedAt: Date.now(),
                     lastJournalEnd: 0,
                 },
             },
@@ -107,7 +117,7 @@ export const handlers = {
         if (cadenceId && state.session?.frontDirector?.lastEmergentCadenceId === cadenceId) return state;
         const fronts = state.fronts || [];
         if (fronts.filter(f => (f.status || 'active') === 'active').length >= MAX_ACTIVE_FRONTS) return state;
-        const front = normalizeEmergentFront(payload.proposal, fronts);
+        const front = normalizeFrontProposal(payload.proposal, { existing: fronts });
         if (!front) return state;
         // Private, like every front: no system line — the player only ever feels it.
         return {
@@ -144,15 +154,25 @@ export const handlers = {
         if (enriched.some(front => isWebMember(front) && (!front.faction?.name || !front.faction?.goal))) return state;
         const webCount = enriched.filter(isWebMember).length;
 
+        // The trust-boundary re-validation is the engine's one proposal
+        // boundary on the director's own terms (sanitizeFrontUpgrade): a
+        // repeated title is a duplicate, a faction may drive two fronts, one
+        // already-visible symptom — plus an id the web does not hold yet.
         const existingIds = new Set(enriched.map(front => front.id));
-        const existingTitles = new Set(enriched.map(front => front.title?.toLowerCase()).filter(Boolean));
-        const additions = action.payload.newFronts
-            .filter(front => front?.id && front?.title && front?.goal && front?.stakes
-                && Array.isArray(front?.grimPortents) && front.grimPortents.length >= 3
-                && front?.faction?.name && front?.faction?.goal
-                && !existingIds.has(front.id) && !existingTitles.has(front.title.toLowerCase()))
-            .slice(0, Math.max(0, WEB_TARGET_FRONTS - webCount))
-            .map(front => normalizeFront(front));
+        const room = Math.max(0, WEB_TARGET_FRONTS - webCount);
+        const additions = [];
+        for (const proposal of action.payload.newFronts) {
+            if (additions.length >= room) break;
+            const id = typeof proposal?.id === 'string' ? proposal.id : '';
+            if (!id || existingIds.has(id) || additions.some(front => front.id === id)) continue;
+            const front = normalizeFrontProposal(proposal, {
+                existing: [...enriched, ...additions],
+                id,
+                maxHints: 1,
+                allowSharedFaction: true,
+            });
+            if (front) additions.push(front);
+        }
         const fronts = [...enriched, ...additions];
         const webTotal = webCount + additions.length;
         if (webTotal < 2 || webTotal > Math.max(WEB_TARGET_FRONTS, webCount)) return state;
@@ -164,11 +184,7 @@ export const handlers = {
                 ...state.session,
                 frontDirector: {
                     ...state.session?.frontDirector,
-                    version: FRONTS_VERSION,
                     generationVersion: FRONTS_VERSION,
-                    source: 'existing-campaign-upgrade',
-                    upgradedAt: Date.now(),
-                    contextCounts: action.payload.counts || {},
                     lastJournalEnd: state.session?.frontDirector?.lastJournalEnd || state.session?.prunedMessageCount || 0,
                 },
             },
@@ -422,11 +438,8 @@ export const handlers = {
                 ...state.session,
                 frontDirector: {
                     ...state.session?.frontDirector,
-                    version: FRONTS_VERSION,
                     lastCadenceId: cadenceId,
                     lastJournalEnd: journalEnd,
-                    lastProcessedAt: Date.now(),
-                    lastAppliedCount: result.appliedCount,
                 },
             },
         };

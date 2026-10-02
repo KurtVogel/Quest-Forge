@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { buildMessageWindow } from '../components/Chat/turnVisibility.js';
 
 const hero = {
     name: 'Astra',
@@ -199,11 +200,11 @@ describe('DM XP lanes are bounded engine-side (2026-09-07)', () => {
         expect(state.messages.some(m => (m.content || '').includes('Duplicate'))).toBe(false);
     });
 
-    it('exp_awarded is capped at the quest tier with a visible note', () => {
+    it('exp_awarded is capped at the quest tier, and the XP line itself says so', () => {
         const state = gameReducer(makeState(), dmExp(10000, { sourceId: 'msg-10' }));
         expect(state.character.level).toBe(3);
         expect(state.character.exp).toBe(225); // 12.5% of 1800
-        expect(state.messages.some(m => (m.content || '').includes('capped at **+225 XP**'))).toBe(true);
+        expect(state.messages.at(-1).content).toContain('+225 XP (capped from 10000)');
     });
 
     it('a capped oversized award still matches its own echo', () => {
@@ -218,7 +219,7 @@ describe('DM XP lanes are bounded engine-side (2026-09-07)', () => {
         const state = gameReducer(makeState(), dmLevelUp(5000, { sourceId: 'msg-10' }));
         expect(state.character.level).toBe(3);
         expect(state.character.exp).toBe(900 + 225); // milestone + capped bonus
-        expect(state.messages.some(m => (m.content || '').includes('capped at **+225 XP**'))).toBe(true);
+        expect(state.messages.at(-1).content).toContain('+1125 XP (story milestone + bonus 225, capped from 5000)');
     });
 
     it('a level-20 milestone posts a line instead of a silent no-op', () => {
@@ -237,5 +238,63 @@ describe('DM XP lanes are bounded engine-side (2026-09-07)', () => {
         const state = gameReducer(makeState(), { type: 'ADD_EXP', payload: 10000 });
         expect(state.character.level).toBeGreaterThan(4);
         expect(state.messages.some(m => (m.content || '').includes('capped'))).toBe(false);
+    });
+});
+
+/**
+ * XP receipts reach the DM (2026-10-02 progression Lap-3). The prefix tells
+ * the DM "the engine shows every award as a system line; if none appeared, it
+ * was not granted" — and every progression row used to be a plain system row
+ * buildMessageWindow dropped, so the DM could not see the line the rule is
+ * about (the 08-26 double-award's structural cause). The rows are `dmVisible`
+ * now and fold into ONE window row; an over-cap award is one row, not two.
+ */
+describe('XP receipts — rows per award and what the DM window carries', () => {
+    const added = (before, after) => after.messages.slice(before.messages.length);
+    const dmLevelUp = (bonusExp, meta = {}) => ({ type: 'LEVEL_UP', payload: { bonusExp, _meta: meta } });
+    const windowOf = (state) => buildMessageWindow(state.messages, 20);
+
+    it('an over-cap DM award posts ONE row, and the window carries it', () => {
+        const base = makeState();
+        const state = gameReducer(base, dmExp(10000, { sourceId: 'msg-10' }));
+        const rows = added(base, state);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].dmVisible).toBe(true);
+        const window = windowOf(state);
+        expect(window).toHaveLength(base.messages.length + 1);
+        expect(window.at(-1)).toEqual({ role: 'user', content: rows[0].content });
+    });
+
+    it('a suppressed replay posts ONE row the DM can see', () => {
+        let state = gameReducer(makeState(), dmExp(150, { sourceId: 'msg-10' }));
+        state = passTurns(state, 1);
+        const echo = gameReducer(state, dmExp(150, { sourceId: 'msg-11' }));
+        const rows = added(state, echo);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].dmVisible).toBe(true);
+        expect(windowOf(echo).at(-1).content).toContain('Duplicate XP award ignored');
+    });
+
+    it('a level-crossing engine award posts TWO rows that fold into ONE window row', () => {
+        const base = makeState();
+        // Engine lane (a bare number — combat / quest / front XP): L3 needs 1800.
+        const state = gameReducer(base, { type: 'ADD_EXP', payload: 1800 });
+        const rows = added(base, state);
+        expect(state.character.level).toBe(4);
+        expect(rows.map(m => m.dmVisible)).toEqual([true, true]);
+        const window = windowOf(state);
+        expect(window).toHaveLength(base.messages.length + 1);
+        expect(window.at(-1).content).toContain('+1800 XP');
+        expect(window.at(-1).content).toContain('You are now **Level 4**');
+    });
+
+    it('a suppressed duplicate level-up is a receipt too', () => {
+        let state = gameReducer(makeState(), dmLevelUp(0, { sourceId: 'msg-10' }));
+        state = passTurns(state, 1);
+        const echo = gameReducer(state, dmLevelUp(0, { sourceId: 'msg-11' }));
+        const rows = added(state, echo);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].dmVisible).toBe(true);
+        expect(rows[0].content).toContain('Duplicate level-up ignored');
     });
 });
