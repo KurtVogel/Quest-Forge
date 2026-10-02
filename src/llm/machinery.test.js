@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeKeyVendorMismatch, describeMachineryKeyField, describeMemoryUnavailable, detectApiKeyVendor, getMachineryGeminiKey, getBackgroundConfig, isMachineryReady, MACHINERY_MODEL } from './machinery.js';
+import { describeKeyVendorMismatch, describeMachineryKeyField, describeMemoryUnavailable, detectApiKeyVendor, getMachineryGeminiKey, getBackgroundConfig, isMachineryReady, MACHINERY_FALLBACK_MODEL, MACHINERY_MODEL } from './machinery.js';
 
 describe('getMachineryGeminiKey', () => {
     it('doubles the main key as the machinery key when the DM is Gemini', () => {
@@ -106,6 +106,8 @@ describe('getBackgroundConfig', () => {
             provider: 'gemini',
             apiKey: 'gem-key',
             model: MACHINERY_MODEL,
+            // A capacity refusal gets one attempt on another Flash (2026-10-02).
+            fallbackModel: MACHINERY_FALLBACK_MODEL,
             // Extraction economics (2026-08-09): no reasoning tokens, bounded
             // JSON output, and a 60s stall guard on every machinery call.
             thinkingBudget: 0,

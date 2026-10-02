@@ -34,7 +34,7 @@ describe('snapshotCommitments / diffCommitments', () => {
         expect([...snap.facts.keys()]).toEqual(['f2']);
         expect([...snap.threads.keys()]).toEqual(['n1']);
         expect([...snap.promises.keys()]).toEqual(['c1']);
-        expect(snapshotCommitments({})).toEqual({ quests: new Map(), facts: new Map(), threads: new Map(), promises: new Map() });
+        expect(snapshotCommitments({})).toEqual({ quests: new Map(), facts: new Map(), threads: new Map(), promises: new Map(), promiseTexts: new Map(), carriers: [] });
     });
 
     it('reports what vanished: a quest gone, a pinned fact superseded, a thread cleared, a promise resolved — a REPLACED thread is not a loss', () => {
@@ -51,6 +51,14 @@ describe('snapshotCommitments / diffCommitments', () => {
             { kind: 'thread', label: 'Orsa' },
             { kind: 'promise', label: 'The hero swore to bring the ledger back before the ice.' },
         ]);
+        const reworded = state();
+        reworded.storyMemory[0] = { ...reworded.storyMemory[0], status: 'resolved' };
+        reworded.storyMemory.push({ id: 'c9', type: 'promise', status: 'active', text: 'Before the ice comes the hero will bring back the ledger.' });
+        expect(diffCommitments(before, snapshotCommitments(reworded))).toEqual([]);
+        const asThread = state();
+        asThread.storyMemory[0] = { ...asThread.storyMemory[0], status: 'resolved' };
+        asThread.npcs[1] = { ...asThread.npcs[1], openThread: 'She swore to bring the ledger back before the ice.' };
+        expect(diffCommitments(before, snapshotCommitments(asThread))).toEqual([]);
         const moved = state();
         moved.npcs[0] = { ...moved.npcs[0], openThread: 'Now she wants the keys, not the ledger.' };
         expect(diffCommitments(before, snapshotCommitments(moved))).toEqual([]);

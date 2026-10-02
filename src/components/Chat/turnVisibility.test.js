@@ -148,6 +148,40 @@ describe('buildMessageWindow', () => {
             const answered = [...before, msg('user', 'I pay the toll.'), msg('assistant', 'He takes the coin.')];
             expect(buildMessageWindow(answered, 20, { pendingUserMessage: 'I pay the toll.' })).toHaveLength(4);
         });
+
+        it('a resent line rides ONCE on any lane, and after it was answered (combat narration, later turns)', () => {
+            const failed = [
+                ...before,
+                msg('user', 'I attack again.'),
+                msg('system', 'Gemini API error (503)', { kind: 'error' }),
+                msg('user', 'I attack again.'),
+                msg('system', 'Gemini API error (503)', { kind: 'error' }),
+                msg('user', 'I attack again.'),
+                msg('assistant', 'Steel rings.'),
+                msg('user', 'I wait.'),
+                msg('assistant', 'Nothing.'),
+                msg('user', 'I wait.'),
+            ];
+            expect(buildMessageWindow(failed, 20, { pendingUserMessage: '[COMBAT NARRATION] …' }).map(m => m.content))
+                .toEqual(['I greet the reeve.', 'He grunts.', 'I attack again.', 'Steel rings.', 'I wait.', 'Nothing.', 'I wait.']);
+        });
+
+        it('drops EVERY unanswered copy a failed turn left behind, never a different unanswered line (grand playtest 2026-10-02)', () => {
+            // Four provider 503s, the player resent the same line each time: the
+            // DM read the action five times. A different line typed between the
+            // failures is the player's own words and stays.
+            const failed = [
+                ...before,
+                msg('user', 'I buy nails.'),
+                msg('system', 'Gemini API error (503)', { kind: 'error' }),
+                msg('user', 'I buy nails.'),
+                msg('system', 'Gemini API error (503)', { kind: 'error' }),
+                msg('user', 'Hello?'),
+                msg('user', 'I buy nails.'),
+            ];
+            expect(buildMessageWindow(failed, 20, { pendingUserMessage: 'I buy nails.' }).map(m => m.content))
+                .toEqual(['I greet the reeve.', 'He grunts.', 'Hello?']);
+        });
     });
 
     it('keeps dmVisible system lines — coin/loot receipts the DM must see (P1 2026-08-31)', () => {

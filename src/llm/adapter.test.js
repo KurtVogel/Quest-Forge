@@ -17,7 +17,7 @@ vi.mock('./providers/gemini.js', () => ({ sendGeminiMessage, streamGeminiMessage
 vi.mock('./providers/openai.js', () => ({ sendOpenAIMessage, streamOpenAIMessage }));
 vi.mock('./providers/xai.js', () => ({ sendXaiMessage, streamXaiMessage }));
 
-const { sendMessage, streamMessage, PROVIDERS, PROVIDER_LIST, DEFAULT_SEND_MAX_RETRIES } = await import('./adapter.js');
+const { sendMessage, streamMessage, PROVIDERS, PROVIDER_LIST, DEFAULT_SEND_MAX_RETRIES, STREAM_START_MAX_RETRIES } = await import('./adapter.js');
 
 beforeEach(() => {
     sendGeminiMessage.mockReset();
@@ -359,5 +359,87 @@ describe('a retry budget belongs to the lane, not the call (2026-09-29 providers
         await outcome;
         expect(sendGeminiMessage).toHaveBeenCalledTimes(DEFAULT_SEND_MAX_RETRIES + 1);
         vi.restoreAllMocks();
+    });
+});
+
+describe('a DM stream refused before its first byte is retried (grand playtest 2026-10-02)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+    const overloaded = () => Object.assign(new Error('Gemini API error (503): overloaded'), { status: 503 });
+
+    it('retries a 503 that arrived before any chunk and returns the recovered reply', async () => {
+        vi.useFakeTimers();
+        streamGeminiMessage.mockRejectedValueOnce(overloaded()).mockImplementationOnce(async ({ onChunk }) => { onChunk('ok'); return 'ok'; });
+        const onChunk = vi.fn();
+        const promise = streamMessage({ ...baseOptions, provider: 'gemini', onChunk });
+        await vi.advanceTimersByTimeAsync(3000);
+        await expect(promise).resolves.toBe('ok');
+        expect(streamGeminiMessage).toHaveBeenCalledTimes(2);
+        expect(onChunk).toHaveBeenCalledWith('ok');
+    });
+
+    it('gives up after STREAM_START_MAX_RETRIES and surfaces the provider error', async () => {
+        vi.useFakeTimers();
+        streamGeminiMessage.mockRejectedValue(overloaded());
+        const promise = streamMessage({ ...baseOptions, provider: 'gemini', onChunk: vi.fn() });
+        const outcome = expect(promise).rejects.toThrow('(503)');
+        await vi.advanceTimersByTimeAsync(20000);
+        await outcome;
+        expect(streamGeminiMessage).toHaveBeenCalledTimes(STREAM_START_MAX_RETRIES + 1);
+    });
+
+    it('never retries once a chunk reached the player, nor a non-transient error', async () => {
+        streamGeminiMessage.mockImplementationOnce(async ({ onChunk }) => { onChunk('half'); throw overloaded(); });
+        await expect(streamMessage({ ...baseOptions, provider: 'gemini', onChunk: vi.fn() })).rejects.toThrow('(503)');
+        expect(streamGeminiMessage).toHaveBeenCalledTimes(1);
+        streamGeminiMessage.mockReset();
+        streamGeminiMessage.mockRejectedValueOnce(Object.assign(new Error('Gemini API error (400): bad'), { status: 400 }));
+        await expect(streamMessage({ ...baseOptions, provider: 'gemini', onChunk: vi.fn() })).rejects.toThrow('(400)');
+        expect(streamGeminiMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('the Stop button during the backoff surfaces as an AbortError', async () => {
+        vi.useFakeTimers();
+        streamGeminiMessage.mockRejectedValue(overloaded());
+        const controller = new AbortController();
+        const promise = streamMessage({ ...baseOptions, provider: 'gemini', onChunk: vi.fn(), signal: controller.signal });
+        const outcome = promise.catch(e => e);
+        await vi.advanceTimersByTimeAsync(100);
+        controller.abort();
+        await vi.advanceTimersByTimeAsync(5000);
+        const error = await outcome;
+        expect(error.name).toBe('AbortError');
+    });
+});
+
+describe('a machinery lane falls back to another model on a capacity refusal (grand playtest 2026-10-02)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+    const overloaded = () => Object.assign(new Error('Gemini API error (503): high demand'), { status: 503 });
+
+    it('spends the retry budget on the primary, then ONE attempt on the fallback model', async () => {
+        sendGeminiMessage.mockRejectedValueOnce(overloaded()).mockResolvedValueOnce('from fallback');
+        await expect(sendMessage({ ...baseOptions, provider: 'gemini', model: 'primary', maxRetries: 0, fallbackModel: 'backup' }))
+            .resolves.toBe('from fallback');
+        expect(sendGeminiMessage.mock.calls.map(([o]) => o.model)).toEqual(['primary', 'backup']);
+    });
+
+    it('a fallback that also refuses surfaces the error after exactly one extra call', async () => {
+        sendGeminiMessage.mockRejectedValue(overloaded());
+        await expect(sendMessage({ ...baseOptions, provider: 'gemini', model: 'primary', maxRetries: 0, fallbackModel: 'backup' }))
+            .rejects.toThrow('(503)');
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('never falls back on a non-capacity error, nor without a fallback model', async () => {
+        sendGeminiMessage.mockRejectedValue(Object.assign(new Error('Gemini API error (400): bad'), { status: 400 }));
+        await expect(sendMessage({ ...baseOptions, provider: 'gemini', model: 'primary', maxRetries: 0, fallbackModel: 'backup' })).rejects.toThrow('(400)');
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
+        sendGeminiMessage.mockReset();
+        sendGeminiMessage.mockRejectedValue(overloaded());
+        await expect(sendMessage({ ...baseOptions, provider: 'gemini', model: 'primary', maxRetries: 0 })).rejects.toThrow('(503)');
+        expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
     });
 });

@@ -18,6 +18,15 @@
 // merges, roll audits) remain the quality gate on any future swap.
 export const MACHINERY_MODEL = 'gemini-3.7-flash';
 
+/**
+ * One extra attempt on another Flash when MACHINERY_MODEL refuses for
+ * capacity (429 / 5xx) after the lane's own retries (grand playtest
+ * 2026-10-02: a 3.7 Flash "high demand" spike lost whole Scribe passes —
+ * facts, cards, the loot and payment audits — while 3 Flash answered every
+ * call). Text lanes only; embeddings keep their own model.
+ */
+export const MACHINERY_FALLBACK_MODEL = 'gemini-3-flash-preview';
+
 /** The Gemini key powering embeddings/RAG and background extraction, or ''. */
 export function getMachineryGeminiKey(settings) {
     if (!settings) return '';
@@ -121,6 +130,7 @@ export function getBackgroundConfig(settings) {
         provider: 'gemini',
         apiKey: getMachineryGeminiKey(settings),
         model: MACHINERY_MODEL,
+        fallbackModel: MACHINERY_FALLBACK_MODEL,
         thinkingBudget: 0,
         maxOutputTokens: 8192,
         timeoutMs: 60_000,

@@ -2388,6 +2388,12 @@ export function describeFightMark(tally, state, outcome = 'victory') {
     else if (t.heroDroppedRound !== null) mark = `${hero} was left at 0 HP`;
     else if (t.companionsDowned.length > 0) mark = `${joinNames(t.companionsDowned)} went down`;
     else if (t.heroKillingCrits.length > 0) mark = `${hero}'s critical blow felled ${t.heroKillingCrits[0].target}`;
+    // The last two marking kinds (grand playtest 2026-10-02): isMarkingFight
+    // counts a hero cut to a quarter and any critical blow taken, and such a
+    // fight minted its wound card while the place kept no mark for hearsay.
+    else if (t.heroLowestHp < t.heroHpStart && t.heroLowestHp <= t.heroMaxHp * FIGHT_MARK_HP_RATIO) {
+        mark = `${hero} was cut down to ${t.heroLowestHp} HP${won ? ' and still won' : ''}`;
+    } else if (t.critsTaken.length > 0) mark = `${t.critsTaken[0].target} took ${t.critsTaken[0].by}'s critical blow`;
     return mark ? mark.slice(0, 160) : null;
 }
 

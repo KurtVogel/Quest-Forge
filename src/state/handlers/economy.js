@@ -74,8 +74,15 @@ function buildPurchaseTransaction(payload = {}) {
     // (2026-09-25 inventory-economy P2: three of six purchases in one measured
     // response bought "Unknown item", two of them for 100 gp).
     const unknownKey = itemKeyRef && !normalizeItemKey(itemKeyRef) ? itemKeyRef.slice(0, 60) : null;
+    // An off-catalog row bought at a stated price remembers its unit price
+    // (grand playtest 2026-10-02): without it SELL_ITEM valued the row at
+    // half of nothing — "Claw Hammer" bought for coin sold back for 0 cp
+    // while the DM narrated four silver changing hands.
+    const pricedItem = (!Number.isFinite(item.valueCp) || item.valueCp <= 0) && priceCp > 0
+        ? { ...item, valueCp: Math.floor(priceCp / quantity) }
+        : item;
     return {
-        item,
+        item: pricedItem,
         quantity,
         priceCp,
         // A purchase with no item name or key (`item: []` spread to `{}`) used
@@ -922,6 +929,17 @@ export const handlers = {
         // override is unbounded LLM input, and legacy save items may carry an
         // unclamped valueCp.
         const overridePriceCp = toFiniteNumber(payload.priceCp);
+        // No price the engine can see — no catalog value and none on the
+        // event — is refused, the item kept (grand playtest 2026-10-02): the
+        // sale paid 0 cp and took the hammer while the narration counted out
+        // four silver, and the Scribe's audit is told sales are the engine's.
+        // The receipt rides the DM's window, so the DM can re-emit it priced.
+        if (overridePriceCp === null && !(Number.isFinite(item.valueCp) && item.valueCp > 0)) {
+            return {
+                ...state,
+                messages: [...state.messages, coinLine(`${item.name} not sold — the engine has no price for it (no catalog value, and the sale named none); it stays in your pack.`)],
+            };
+        }
         const proceedsCp = Math.min(MAX_SALE_PROCEEDS_CP, overridePriceCp !== null
             ? Math.max(0, Math.trunc(overridePriceCp))
             : Math.floor((item.valueCp || 0) / 2) * quantity);

@@ -116,11 +116,34 @@ export function buildMessageWindow(messages, windowSize, { pendingUserMessage = 
         return true;
     });
     if (typeof pendingUserMessage === 'string' && pendingUserMessage) {
+        // Every unanswered copy goes, not only the newest (grand playtest
+        // 2026-10-02): a turn that failed (a provider 503 posts a `kind:
+        // 'error'` line, which the window skips) leaves its player row behind,
+        // and the player resends the same line — after four failures the DM
+        // read the action five times. Walk back to the last DM reply; a
+        // DIFFERENT unanswered line is the player's own words and stays.
         for (let i = unsummarized.length - 1; i >= 0; i--) {
             const m = unsummarized[i];
-            if (m.role === 'system') continue;
+            if (m.role === 'assistant') break;
             if (m.role === 'user' && m.content === pendingUserMessage) unsummarized.splice(i, 1);
-            break;
+        }
+    }
+    // A resent line rides once, on every lane and every later turn (grand
+    // playtest 2026-10-02): the pending-line drop above covers only the call
+    // that sends it, and a combat narration call (its userMessage is the
+    // engine's prompt) carried three failed copies of "I attack it again".
+    // A player row identical to the NEXT player row with no DM reply between
+    // them is a failed attempt — the later copy is the one that was answered.
+    for (let i = unsummarized.length - 1; i >= 0; i--) {
+        const m = unsummarized[i];
+        if (m.role !== 'user') continue;
+        for (let j = i + 1; j < unsummarized.length; j++) {
+            const next = unsummarized[j];
+            if (next.role === 'assistant') break;
+            if (next.role === 'user') {
+                if (next.content === m.content) unsummarized.splice(i, 1);
+                break;
+            }
         }
     }
     // The belt behind the LOAD_GAME row heal: the window never carries a

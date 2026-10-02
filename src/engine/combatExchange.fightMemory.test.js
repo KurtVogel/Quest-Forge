@@ -198,6 +198,11 @@ describe('describeFightMark — the particular the place keeps', () => {
         expect(describeFightMark(decisive, endState(decisive), 'victory')).toBe('one blow of Astra\'s ended it — Goblin Cutter felled outright');
         const fell = fold(start, [attack('Goblin Cutter', 'Torvald', { damage: 18, remainingHp: 0, maxHp: 18 })], { partyAfter: [torvald({ hp: 0 })] });
         expect(describeFightMark(fell, endState(fell), 'victory')).toBe('Torvald went down');
+        const cut = fold(start, [attack('Goblin Cutter', 'Astra', { damage: 17, remainingHp: 3 })], { hpBefore: 20, hpAfter: 3 });
+        expect(describeFightMark(cut, endState(cut), 'victory')).toBe('Astra was cut down to 3 HP and still won');
+        expect(describeFightMark(cut, endState(cut), 'escaped')).toBe('Astra was cut down to 3 HP');
+        const critted = fold(start, [attack('Goblin Cutter', 'Torvald', { critical: true, damage: 6, remainingHp: 12, maxHp: 18 })]);
+        expect(describeFightMark(critted, endState(critted), 'victory')).toBe("Torvald took Goblin Cutter's critical blow");
         expect(describeFightMark(start, endState(start), 'victory')).toBeNull();
         expect(describeFightMark(null, endState(null), 'victory')).toBeNull();
     });

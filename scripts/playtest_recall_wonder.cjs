@@ -53,8 +53,8 @@ const PROBE = process.argv[2];
 const runLabel = process.argv[3];
 const provider = process.argv[4];
 const model = process.argv[5];
-if (!['recall', 'wonder', 'full', 'tells', 'proof'].includes(PROBE) || !runLabel || !provider || !model) {
-    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full|tells|proof> <label> <provider> <model>');
+if (!['recall', 'wonder', 'full', 'tells', 'proof', 'grand', 'death'].includes(PROBE) || !runLabel || !provider || !model) {
+    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full|tells|proof|grand|death> <label> <provider> <model>');
     process.exit(1);
 }
 if (provider === 'xai') {
@@ -154,7 +154,12 @@ function attachCapture(page) {
             const director = /private wonder director/i.test(sys);
             const kind = director ? 'director' : (reqModel === model ? 'dm' : 'machinery');
             if (director) directorRequests.add(req);
-            captured.push({ t: Date.now(), kind, model: reqModel, sys });
+            // The history rows the provider received (grand probe: the journal tail, the
+            // pending-line-once rule, XP receipts in the window — 2026-10-01/02).
+            const rows = isGemini
+                ? (body.contents || []).map(c => ({ role: c.role, text: (c.parts || []).map(x => x.text || '').join('') }))
+                : (body.messages || []).filter(x => x.role !== 'system' && x.role !== 'developer').map(x => ({ role: x.role, text: typeof x.content === 'string' ? x.content : JSON.stringify(x.content || '') }));
+            captured.push({ t: Date.now(), kind, model: reqModel, sys, rows });
         } catch { /* capture is best-effort */ }
     });
     page.on('response', async (resp) => {
@@ -172,10 +177,11 @@ function attachCapture(page) {
     });
     page.on('console', (msg) => {
         const text = msg.text();
-        if (msg.type() === 'error' || msg.type() === 'warning'
+        if (msg.type() === 'error' || msg.type() === 'warning' || msg.type() === 'warn'
             || /\[LLM timing\]|\[ResponseParser\]|\[Scribe\]|\[Journal\]|\[Wonder\]|\[Fronts\]|\[Recall\]|\[Memory\]/.test(text)) {
             consoleLines.push({ t: Date.now(), text: text.slice(0, 300) });
             if (/\[Wonder\]|pageerror/i.test(text) || msg.type() === 'error') note('console', `${msg.type()}: ${text.slice(0, 260)}`);
+            if (/\[LLM Adapter\]/.test(text)) note('adapter', text.slice(0, 260));
         }
     });
     page.on('pageerror', err => note('pageerror', String(err).slice(0, 300)));
@@ -1751,6 +1757,401 @@ async function runProofProbe(page) {
     saveAll();
 }
 
+// ---------------------------------------------------------------------------
+// PROBE 6 — the grand run (2026-10-02): one long Gemini Flash campaign over the
+// newest features. Homecoming to Brannock's Ford: a habit shown in four scenes
+// (hero tells), a recruited companion (fight memory + bond), purchase + sale,
+// a quest, a check, a road, fights with the companion present (fight tally,
+// wound card, encounter mark), OOC + recall + "surprise me", a deleted DM
+// message (retraction), the return home (place card, hearsay), the recap,
+// reload → Continue, a chapter close, scene art (the new close button), and
+// finally the last chapter: the hero dies, the epitaph, the ending card, the
+// epilogue. Extra instrumentation: the history rows each DM call carried (the
+// journal tail must never empty the window, the player's line once, XP
+// receipts riding the window), the Journal-check verifier lines, state facts,
+// cache telemetry.
+// ---------------------------------------------------------------------------
+const HABIT_RX = /\bear\b/i;
+const grandLog = [];
+function glog(label, extra) {
+    const e = { t: new Date().toISOString(), turn: turnNo, label, ...extra };
+    grandLog.push(e);
+    fs.writeFileSync(path.join(OUT_DIR, 'grand-log.json'), JSON.stringify(grandLog, null, 2));
+    return e;
+}
+
+async function grandSnap(page) {
+    return await page.evaluate(() => {
+        const s = window.__QF_STATE__;
+        if (!s) return null;
+        const c = s.character || {};
+        const msgs = s.messages || [];
+        const dunstan = (s.npcs || []).find(n => /dunstan/i.test(n.name || ''));
+        return {
+            msgCount: msgs.length,
+            hero: { hp: c.currentHP, maxHp: c.maxHP, level: c.level, exp: c.exp, dying: !!c.dying, isDead: !!c.isDead, deathSaves: c.deathSaves || null, conditions: c.conditions || [] },
+            party: (s.party || []).map(p => ({ id: p.id, name: p.name, hp: p.currentHP ?? p.hp, maxHp: p.maxHP ?? p.maxHp, status: p.status, affinity: p.affinity, weapon: p.weapon })),
+            dunstan: dunstan ? {
+                name: dunstan.name, disposition: dunstan.disposition, trust: dunstan.trust,
+                stance: dunstan.stanceToPlayer || null, openThread: dunstan.openThread || null,
+                bondMoments: (dunstan.bondMoments || []).map(m => typeof m === 'string' ? { text: m } : { text: m.text, kind: m.kind, salience: m.salience, voice: m.voice || null }),
+                impressions: dunstan.recentImpressions || [], appearance: dunstan.appearance || null, gender: dunstan.gender || null,
+            } : null,
+            journalChecks: msgs.map((m, i) => ({ i, c: String(m.content || '') })).filter(m => /Journal check/.test(m.c)),
+            retractionLines: msgs.map((m, i) => ({ i, c: String(m.content || '') })).filter(m => /retract|removed message|was removed/i.test(m.c) && m.c.length < 600),
+            xpLines: msgs.map((m, i) => ({ i, c: String(m.content || ''), dmVisible: !!m.dmVisible })).filter(m => /\bXP\b/.test(m.c) && m.c.length < 400),
+            epitaph: msgs.filter(m => m.kind === 'epitaph').map(m => m.content),
+            heroDeath: s.session?.heroDeath || null,
+            chapterCloseSuggested: s.session?.chapterCloseSuggested || null,
+            facts: (s.worldFacts || []).map(f => ({ fact: f.fact, aspect: f.aspect || null, pinned: !!f.pinned, superseded: !!f.supersededBy, retracted: Number.isFinite(f.retractedAtMessage), source: f.sourceMessage ?? null })),
+            cards: (s.storyMemory || []).map(card => ({ id: card.id, type: card.type, salience: card.salience, status: card.status, text: String(card.text || '').slice(0, 200), tags: card.tags || [], source: card.source || null })),
+            encounters: (s.recentEncounters || []).map(e => ({ foes: e.foes || e.enemies || null, outcome: e.outcome, mark: e.mark || null, location: e.location || null })),
+            fightTally: s.combat?.fightTally || null,
+            heroTells: (s.heroTells || []).map(t => ({ id: t.id, kind: t.kind, text: t.text, sightings: (t.sightings || []).length, witnesses: t.witnesses || [], voicedCount: t.voicedCount || 0, dormant: !!t.dormant, public: !!t.public })),
+            heroTellBeat: s.session?.heroTellBeat || null,
+            relationshipBeat: s.session?.relationshipBeat || null,
+            wonder: s.session?.wonder || null, pendingWonder: s.session?.pendingWonder || null,
+            places: (s.locations || []).map(r => ({ name: r.name, region: r.region || null, signature: r.signature || null, lastState: r.lastState || null, visitCount: r.visitCount ?? null, links: (r.links || []).length })),
+            fronts: (s.fronts || []).map(f => ({ id: f.id, title: f.title, status: f.status, clock: f.clock, stage: f.stage })),
+            journal: (s.journal || []).length,
+            summarized: msgs.filter(m => m.summarized).length,
+            quests: (s.quests || []).map(q => ({ name: q.name, status: q.status })),
+            inventory: (s.inventory || []).map(i => `${i.name}×${i.quantity ?? 1}${i.equipped ? '*' : ''}`).sort(),
+            purse: { gold: c.gold, silver: c.silver, copper: c.copper },
+            location: s.currentLocation,
+        };
+    }).catch(() => null);
+}
+
+/** The newest DM call since `sinceMs`: its history rows, judged against the 2026-10-01/02 rules. */
+function windowReport(sinceMs, playerLine) {
+    const dm = captured.filter(c => c.kind === 'dm' && c.t >= sinceMs && c.sys.length > 2000 && Array.isArray(c.rows));
+    if (!dm.length) return null;
+    const out = dm.map(call => {
+        const rows = call.rows;
+        const exact = playerLine ? rows.filter(r => r.text.includes(playerLine.slice(0, 80))).length : null;
+        return {
+            rows: rows.length,
+            userRows: rows.filter(r => r.role === 'user').length,
+            modelRows: rows.filter(r => r.role === 'model' || r.role === 'assistant').length,
+            playerLineCopies: exact,
+            xpRows: rows.filter(r => /\bXP\b/.test(r.text) && r.text.length < 600).map(r => r.text.slice(0, 160)),
+            journalBlock: call.sys.includes('SESSION HISTORY'),
+            stateFacts: (call.sys.match(/for now \(as of/g) || []).length,
+            sysChars: call.sys.length,
+        };
+    });
+    return out;
+}
+
+async function grandTurn(page, kind, action, opts = {}) {
+    const t0 = Date.now();
+    const before = await grandSnap(page);
+    const r = await fullTurn(page, kind, action);
+    const after = await grandSnap(page);
+    const win = windowReport(t0, action);
+    const narrativeCall = win ? win[win.length - 1] : null;
+    const flags = [];
+    if (narrativeCall && narrativeCall.rows <= 2 && turnNo > 6) flags.push(`THIN WINDOW (${narrativeCall.rows} rows)`);
+    if (narrativeCall && narrativeCall.playerLineCopies > 1) flags.push(`PLAYER LINE ×${narrativeCall.playerLineCopies}`);
+    const newChecks = (after?.journalChecks || []).filter(j => !(before?.journalChecks || []).some(b => b.i === j.i));
+    const journalRan = (after?.journal ?? 0) > (before?.journal ?? 0);
+    const e = glog(kind, {
+        action: action.slice(0, 160), window: win, journalRan, newJournalChecks: newChecks.map(j => j.c),
+        hero: after?.hero, party: after?.party, location: after?.location,
+        tells: after?.heroTells, dunstanMoments: after?.dunstan?.bondMoments?.length ?? 0, flags,
+        habitVoiced: HABIT_RX.test(r.dm || '') && kind !== 'tell',
+    });
+    if (flags.length || newChecks.length || journalRan) note('grand', `#${turnNo} ${flags.join(' | ')}${journalRan ? ' journal-cadence' : ''}${newChecks.length ? ' JOURNAL CHECK: ' + newChecks[0].c.slice(0, 160) : ''} window=${narrativeCall?.rows}`);
+    if (e.habitVoiced) note('grand', `#${turnNo} the ear habit appears in a non-tell turn's narration: ${(r.dm.match(/[^.]*\bear\b[^.]*\./i) || [''])[0].slice(0, 200)}`);
+    return { ...r, before, gafter: after, win };
+}
+
+const GRAND_HOME = [
+    ['ordinary', 'I walk up from the ferry landing to my aunt Hesper\'s house on Tanner\'s Lane and knock on the door.'],
+    ['ordinary', 'I tell Hesper I am sorry I never wrote, and ask her how she has been managing on her own.'],
+    ['purchase', 'I go to the market square and buy a hammer and a bag of roofing nails for Hesper\'s roof, paying in coin.'],
+    ['ordinary', 'I climb onto Hesper\'s roof and mend the worst of the leaks before the light goes.'],
+    ['tell', 'I walk down to the ferry and find Dunstan hauling on the rope. When he asks why I came back, I tug at my notched left ear the way I always have before I answer, then tell him I ran out of places to be someone else.'],
+    ['sale', 'Back at the market I sell the hammer to the ironmonger — the roof is done and I will not need it on the road.'],
+    ['rumor', 'I ask around the market stalls about the new owners up at the old Aldwick estate, and why the price of flour keeps climbing.'],
+    ['quest', 'If the miller or anyone else wants someone to go upriver and find out what is happening at Aldwick, I tell them plainly I will do it and ask what it pays.'],
+    ['check', 'While the miller talks, I watch his face closely, trying to tell whether he is holding something back.'],
+    ['ordinary', 'I visit my mother\'s grave in the churchyard and clear the moss off the stone.'],
+    ['tell', 'I go back to the ferry and ask Dunstan to come upriver to Aldwick with me — I will split the pay with him. While he thinks it over I tug at my notched ear again and wait.'],
+    ['recruit', 'I tell Dunstan I would rather have him at my back than anyone. "Come with me, Dunstan. Lock up the ferry for three days."'],
+    ['rest', 'I go back to Hesper\'s, eat supper with her, and take a long rest in my old room.'],
+];
+const GRAND_ROAD = [
+    ['travel', 'At dawn Dunstan and I set out upriver along the towpath toward the Aldwick estate.'],
+    ['travel', 'We keep walking. I ask Dunstan what he has heard about the new owners.'],
+    ['travel', 'We press on until the estate gates come into sight.'],
+    ['tell', 'At the gate Dunstan asks whether we go in openly or quietly. Before I answer, I tug at my notched ear, then say we go in openly.'],
+    ['ordinary', 'I knock at the gatehouse and ask to speak to whoever runs the estate now.'],
+];
+const GRAND_FIGHT = 'If anyone here means us harm, I draw my longsword and fight them, with Dunstan at my side.';
+const GRAND_FIGHT_FORCE = 'I stop talking, draw my longsword, and attack the nearest armed guard here. Dunstan comes in beside me.';
+const GRAND_AFTER_FIGHT = [
+    ['loot', 'When it is over I catch my breath and search the fallen for anything worth taking.'],
+    ['tell', 'I sit down beside Dunstan while we catch our breath. He asks if I am hurt; I tug at my notched ear before I answer that I will live.'],
+    ['ooc', 'OOC: quick table check — what am I carrying, roughly how much coin do I have left, and what job am I on?'],
+    ['recall', 'Remember when I bought the hammer and nails at the market? What did I pay, and who sold them?'],
+    ['recall', 'Dunstan, what did I tell you at the ferry, the day you asked me why I came back?'],
+    ['ordinary', 'I search the estate house for whatever explains the price of flour and the new owners.'],
+    ['ordinary', 'I follow whatever I found to its source.'],
+    ['wonder', 'OOC: surprise me — something strange, please.'],
+    ['ordinary', 'I keep my eyes open and carry on with what I was doing.'],
+    ['ordinary', 'I go and look more closely at whatever just caught my attention.'],
+    ['ordinary', 'I ask Dunstan what he makes of it.'],
+];
+const GRAND_RETURN = [
+    ['travel', 'Dunstan and I head back downriver along the towpath to Brannock\'s Ford.'],
+    ['travel', 'I keep walking until we reach the ferry landing at Brannock\'s Ford.'],
+    ['ordinary', 'I go to Hesper\'s house and tell her what we found upriver.'],
+    ['hearsay', 'I go to the tavern on market street, order a cup of ale, and listen to what people are saying about me and the Aldwick business.'],
+    ['ordinary', 'I find the miller and tell him what we learned, and ask for the pay he promised.'],
+];
+const GRAND_AFTER_RELOAD = [
+    ['ordinary', 'I pick up where I left off and look around to see what has changed.'],
+    ['ordinary', 'I ask Dunstan what he means to do now that the job is done.'],
+];
+
+async function grandFight(page, label) {
+    const before = await grandSnap(page);
+    let r = await grandTurn(page, 'fight', GRAND_FIGHT);
+    if (!r.row.combatIters) r = await grandTurn(page, 'fight', GRAND_FIGHT_FORCE);
+    const after = await grandSnap(page);
+    const newCards = (after?.cards || []).filter(c => !(before?.cards || []).some(b => b.id === c.id));
+    const entry = glog(`fight-summary:${label}`, {
+        exercised: r.row.combatIters > 0, combatIters: r.row.combatIters,
+        hero: after?.hero, party: after?.party,
+        newWoundCards: newCards.filter(c => c.tags.includes('fight-cost')),
+        newCards: newCards.map(c => `${c.type}/${c.salience}/${c.source || ''}: ${c.text.slice(0, 120)}`),
+        encounters: after?.encounters,
+        dunstanMomentsBefore: before?.dunstan?.bondMoments || [], dunstanMomentsAfter: after?.dunstan?.bondMoments || [],
+        xpLinesAfter: (after?.xpLines || []).slice(-3),
+    });
+    note('grand', `fight ${label}: exercised=${entry.exercised} iters=${entry.combatIters} hero ${after?.hero?.hp}/${after?.hero?.maxHp} L${after?.hero?.level} party ${JSON.stringify(after?.party)} woundCards=${entry.newWoundCards.length} dunstanMoments ${entry.dunstanMomentsBefore.length}→${entry.dunstanMomentsAfter.length} mark=${JSON.stringify((after?.encounters || []).slice(-1)[0]?.mark || null)}`);
+    return entry;
+}
+
+async function deleteNewestDmMessage(page) {
+    const before = await grandSnap(page);
+    const target = await page.evaluate(() => {
+        const nodes = Array.from(document.querySelectorAll('.chat-message.assistant'));
+        const last = nodes[nodes.length - 1];
+        const btn = last?.querySelector('.message-delete');
+        if (!btn) return null;
+        btn.click();
+        return (last.querySelector('.message-content')?.innerText || '').slice(0, 300);
+    });
+    if (!target) { note('warn', 'No delete button on the newest DM message.'); return glog('delete', { ok: false }); }
+    await delay(600);
+    await page.evaluate(() => {
+        const nodes = Array.from(document.querySelectorAll('.chat-message.assistant'));
+        nodes[nodes.length - 1]?.querySelector('.message-delete.confirming')?.click();
+    });
+    await delay(4000);
+    const after = await grandSnap(page);
+    const retractedFacts = (after?.facts || []).filter(f => f.retracted).length - (before?.facts || []).filter(f => f.retracted).length;
+    const dormantNow = (after?.cards || []).filter(c => c.status === 'dormant').length - (before?.cards || []).filter(c => c.status === 'dormant').length;
+    const newLines = await page.evaluate((from) => (window.__QF_STATE__?.messages || []).slice(from).map(m => `${m.role}/${m.kind || ''}: ${String(m.content || '').slice(0, 240)}`), before?.msgCount ?? 0);
+    const e = glog('delete', { ok: true, deletedText: target, retractedFacts, newlyDormantCards: dormantNow, newLines });
+    note('grand', `delete: retracted facts +${retractedFacts}, dormant cards +${dormantNow}, lines ${JSON.stringify(newLines).slice(0, 300)}`);
+    return e;
+}
+
+async function sceneArtCheck(page) {
+    const has = await page.evaluate(() => !!document.querySelector('.scene-art-generate-btn'));
+    if (!has) { note('warn', 'Scene art generate button not on screen.'); return glog('scene-art', { ok: false, why: 'no button' }); }
+    await page.click('.scene-art-generate-btn');
+    const start = Date.now();
+    let img = false;
+    while (Date.now() - start < 180000) {
+        await delay(4000);
+        const st = await page.evaluate(() => ({ img: !!document.querySelector('.scene-art-image'), loading: !!document.querySelector('.scene-art-loading'), err: document.querySelector('.scene-art-error')?.innerText || '', notice: document.querySelector('.scene-art-notice')?.innerText || '' }));
+        if (st.img || (!st.loading && st.err)) { img = st.img; if (!st.img) note('grand', `scene art error: ${st.err}`); break; }
+    }
+    const notice = await page.evaluate(() => document.querySelector('.scene-art-notice')?.innerText || '');
+    await shot(page, 'scene-art');
+    let lightboxOpened = false, lightboxEscClosed = false, lightboxBtnClosed = false, hidden = false, shownAgain = false, portaled = false;
+    if (img) {
+        await page.click('.scene-art-image-wrap').catch(() => {});
+        await delay(700);
+        lightboxOpened = await page.evaluate(() => !!document.querySelector('.scene-art-lightbox'));
+        portaled = await page.evaluate(() => document.querySelector('.scene-art-lightbox')?.parentElement === document.body);
+        await shot(page, 'scene-art-lightbox');
+        await page.keyboard.press('Escape');
+        await delay(600);
+        lightboxEscClosed = await page.evaluate(() => !document.querySelector('.scene-art-lightbox'));
+        await page.click('.scene-art-image-wrap').catch(() => {});
+        await delay(600);
+        await page.click('.scene-art-lightbox-close').catch(() => {});
+        await delay(600);
+        lightboxBtnClosed = await page.evaluate(() => !document.querySelector('.scene-art-lightbox'));
+        await page.click('.scene-art-close-btn').catch(() => {});
+        await delay(600);
+        hidden = await page.evaluate(() => !document.querySelector('.scene-art-image'));
+        await clickByText(page, '.scene-art-reroll-btn', 'Show image');
+        await delay(600);
+        shownAgain = await page.evaluate(() => !!document.querySelector('.scene-art-image'));
+    }
+    const e = glog('scene-art', { ok: img, notice, lightboxOpened, portaled, lightboxEscClosed, lightboxBtnClosed, hidden, shownAgain, secs: Math.round((Date.now() - start) / 1000) });
+    note('grand', `scene art: ${JSON.stringify(e)}`);
+    return e;
+}
+
+async function deathPhase(page) {
+    note('grand', 'The last chapter: HP set to 1 (debug dispatch), then a fight the hero cannot win.');
+    let s = await grandSnap(page);
+    await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'UPDATE_CHARACTER', payload: { currentHP: 1 } }));
+    await delay(1000);
+    const deathLines = [
+        'Word comes that the thing behind the Aldwick trouble is coming for Brannock\'s Ford tonight. I go out alone to the ferry landing to meet it, sword drawn, and attack it the moment it shows itself.',
+        'I attack it again with everything I have left.',
+    ];
+    for (const line of deathLines) {
+        await grandTurn(page, 'death-fight', line);
+        s = await grandSnap(page);
+        glog('death-state', { hero: s?.hero, heroDeath: s?.heroDeath, epitaph: s?.epitaph });
+        if (s?.hero?.isDead) break;
+    }
+    let route = 'natural';
+    // Dying but stabilized / fight over: drive the clock out of combat with the
+    // reducer's own death-save action (die 1 = a natural one, two failures).
+    for (let i = 0; i < 3 && !s?.hero?.isDead; i++) {
+        route = 'forced-death-saves';
+        if (!s?.hero?.dying) await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'UPDATE_CHARACTER', payload: { currentHP: 0, dying: true, deathSaves: { successes: 0, failures: 0 } } }));
+        await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'DEATH_SAVE_RESULT', payload: { die: 1 } }));
+        await delay(1500);
+        s = await grandSnap(page);
+    }
+    await delay(3000);
+    s = await grandSnap(page);
+    const ending = await page.evaluate(() => ({
+        card: !!document.querySelector('.ending-card'),
+        composer: !!document.querySelector('textarea.chat-input'),
+        text: document.querySelector('.ending-card')?.innerText?.slice(0, 1500) || '',
+    }));
+    await shot(page, 'ending-card');
+    const e = glog('death', { route, hero: s?.hero, heroDeath: s?.heroDeath, epitaph: s?.epitaph, chapterCloseSuggested: s?.chapterCloseSuggested, ending });
+    note('grand', `death: route=${route} isDead=${s?.hero?.isDead} epitaph=${JSON.stringify(s?.epitaph)} card=${ending.card} composerGone=${!ending.composer}`);
+    if (!ending.card) return e;
+    // What became of them — the one epilogue call.
+    const msgBefore = s.msgCount;
+    const t0 = Date.now();
+    await clickByText(page, '.ending-card button', 'What became of them');
+    await waitForIdle(page);
+    await delay(4000);
+    const epilogue = await page.evaluate((from) => (window.__QF_STATE__?.messages || []).slice(from).filter(m => m.role === 'assistant').map(m => m.content).join('\n\n'), msgBefore);
+    const after = await grandSnap(page);
+    const disabledAfter = await page.evaluate(() => Array.from(document.querySelectorAll('.ending-card button')).find(b => b.textContent.includes('What became of them'))?.disabled ?? null);
+    const judge = epilogue ? await flash(`A solo fantasy RPG campaign has just ended with the hero's death (epitaph: ${JSON.stringify(s.epitaph)}). The player asked the DM "what became of them" — the people and places the hero leaves behind. Companions: ${JSON.stringify(after?.party?.map(p => p.name))}. Open quests: ${JSON.stringify(after?.quests)}. Judge the epilogue below. Return JSON {"per_companion": boolean (a paragraph or clear passage for each companion), "people": boolean (at least two other people with their attitude toward the hero), "quests": boolean (says what became of the open quests), "places": boolean (places a season later), "revives_hero": boolean (the hero is somehow alive or plays on — must be false), "events_feel": "one sentence", "words": number}\n\nEPILOGUE:\n${epilogue.slice(0, 8000)}`) : null;
+    const mechanicsMoved = JSON.stringify(after?.purse) !== JSON.stringify(s.purse) || JSON.stringify(after?.inventory) !== JSON.stringify(s.inventory);
+    const e2 = glog('epilogue', { words: grammar(epilogue).words, secs: Math.round((Date.now() - t0) / 1000), disabledAfter, mechanicsMoved, judge, epilogue });
+    note('grand', `epilogue: ${e2.words}w buttonDisabledAfter=${disabledAfter} mechanicsMoved=${mechanicsMoved} judge=${JSON.stringify(judge)}`);
+    await shot(page, 'epilogue');
+    // A typed non-OOC line must be refused (the composer is gone; check it stays gone).
+    // Close the last chapter → the Journal opens on the Chronicle tab.
+    await clickByText(page, '.ending-card button', 'Close the last chapter');
+    await delay(1500);
+    const chronicleOpen = await page.evaluate(() => !!document.querySelector('.chronicle-write-btn') || /Chronicle/.test(document.querySelector('.journal-tab.active')?.textContent || ''));
+    glog('ending-close-chapter', { chronicleOpen });
+    note('grand', `ending card → Close the last chapter opens the Chronicle: ${chronicleOpen}`);
+    await shot(page, 'ending-chronicle');
+    return e2;
+}
+
+async function runGrandProbe(page) {
+    await bootAndCreateHero(page, { premiseMode: 'starter', premiseText: 'Homecoming to Brannock' });
+    saveAll();
+    for (const [kind, action] of GRAND_HOME) await grandTurn(page, kind, action);
+    let s = await grandSnap(page);
+    note('grand', `home done: party=${JSON.stringify(s?.party)} quests=${JSON.stringify(s?.quests)} tells=${JSON.stringify(s?.heroTells)} purse=${JSON.stringify(s?.purse)}`);
+    if (!(s?.party || []).length) {
+        await grandTurn(page, 'recruit', 'I ask Dunstan straight out: "Will you travel with me to Aldwick as my companion? Yes or no." I wait for his answer.');
+        s = await grandSnap(page);
+        note('grand', `recruit retry: party=${JSON.stringify(s?.party)}`);
+    }
+    for (const [kind, action] of GRAND_ROAD) await grandTurn(page, kind, action);
+    await grandFight(page, 'estate');
+    for (const [kind, action] of GRAND_AFTER_FIGHT) await grandTurn(page, kind, action);
+    await deleteNewestDmMessage(page);
+    await grandTurn(page, 'ordinary', 'I shake off the strangeness and take stock of where we stand.');
+    await grandFight(page, 'second');
+    await grandTurn(page, 'loot', 'I search the fallen and bind whatever wounds Dunstan and I took.');
+    for (const [kind, action] of GRAND_RETURN) await grandTurn(page, kind, action);
+    await grandTurn(page, 'recap', 'OOC: Recap where we are, what\'s open, and what you last asked me — in your voice, under 120 words.');
+    s = await grandSnap(page);
+    results.push({ kind: 'grand-mid', snap: s });
+    fs.writeFileSync(path.join(OUT_DIR, 'grand-mid-state.json'), JSON.stringify(s, null, 2));
+    note('grand', `mid: journal=${s?.journal} summarized=${s?.summarized} checks=${s?.journalChecks?.length} facts=${s?.facts?.length} (state ${s?.facts?.filter(f => f.aspect === 'state').length}, retracted ${s?.facts?.filter(f => f.retracted).length}) tells=${JSON.stringify(s?.heroTells)} dunstan=${JSON.stringify(s?.dunstan)?.slice(0, 600)}`);
+
+    const reloaded = await reloadAndContinue(page);
+    if (reloaded) for (const [kind, action] of GRAND_AFTER_RELOAD) await grandTurn(page, kind, action);
+
+    await sceneArtCheck(page);
+    // Close the Journal modal etc. before the chapter close / death.
+    await chapterCloseCheck(page);
+    await page.keyboard.press('Escape').catch(() => {});
+    await clickByText(page, 'button', 'Close').catch(() => {});
+    await delay(1000);
+
+    // Cache telemetry (memory-research M2): the inspector's per-call cached share.
+    const usage = await page.evaluate(() => {
+        const snapI = window.__QF_INSPECTOR__?.();
+        return (snapI?.usageHistory || []).map(u => ({ mode: u.mode || u.lane || null, cachedShare: u.cachedShare ?? null, prompt: u.promptTokens ?? u.inputTokens ?? null }));
+    }).catch(() => []);
+    fs.writeFileSync(path.join(OUT_DIR, 'usage.json'), JSON.stringify(usage, null, 2));
+    note('grand', `usage rows ${usage.length}; mean cached share ${(usage.filter(u => typeof u.cachedShare === 'number').reduce((a, u) => a + u.cachedShare, 0) / Math.max(1, usage.filter(u => typeof u.cachedShare === 'number').length)).toFixed(2)}`);
+
+    await deathPhase(page);
+
+    note('judge', 'Flash judge over the transcript.');
+    const issues = await judgeFullRun();
+    const final = await grandSnap(page);
+    fs.writeFileSync(path.join(OUT_DIR, 'grand-final-state.json'), JSON.stringify(final, null, 2));
+    const summary = {
+        kind: 'grand-summary',
+        turns: fullTurns.length,
+        freshDm: fullTurns.filter(t => t.dmFresh).length,
+        leakTurns: fullTurns.filter(t => t.leaks.length).map(t => ({ n: t.n, l: t.leaks })),
+        lintTurns: fullTurns.filter(t => t.lint.length).map(t => ({ n: t.n, lint: t.lint })),
+        errorLineTurns: fullTurns.filter(t => t.sysErrors).map(t => t.n),
+        consoleErrorTurns: fullTurns.filter(t => t.consoleErrors.length).map(t => ({ n: t.n, e: t.consoleErrors })),
+        longTurns: fullTurns.filter(t => !['fight', 'ooc', 'recall', 'recap', 'death-fight'].includes(t.kind) && (t.words > 180 || t.paras > 3)).map(t => ({ n: t.n, w: t.words, p: t.paras })),
+        meanWords: Math.round(fullTurns.reduce((a, t) => a + t.words, 0) / Math.max(1, fullTurns.length)),
+        maxPromptChars: Math.max(...fullTurns.map(t => t.promptChars || 0)),
+        meanSecs: Math.round(fullTurns.reduce((a, t) => a + t.secs, 0) / Math.max(1, fullTurns.length)),
+        thinWindows: grandLog.filter(e => (e.flags || []).some(f => /THIN/.test(f))).map(e => e.turn),
+        duplicatePlayerLines: grandLog.filter(e => (e.flags || []).some(f => /PLAYER LINE/.test(f))).map(e => e.turn),
+        journalChecks: final?.journalChecks,
+        tells: final?.heroTells,
+        dunstan: final?.dunstan,
+        judgeIssues: issues,
+    };
+    results.push(summary);
+    fs.writeFileSync(path.join(OUT_DIR, 'grand-summary.json'), JSON.stringify(summary, null, 2));
+    note('summary', JSON.stringify({ ...summary, judgeIssues: issues.length, dunstan: undefined, tells: undefined }).slice(0, 2000));
+    for (const i of issues) note('judge-issue', `t${i.turn} ${i.category}: ${i.detail}`);
+    saveAll();
+}
+
+// PROBE 7 — the last chapter alone (2026-10-02): the grand run's level-2 hero
+// with a downed companion is low-level-solo, so 0 HP is a setback by design
+// and the death lane never opened. Level 3 (debug dispatch) takes the
+// protection away; the rest is the grand probe's deathPhase.
+async function runDeathProbe(page) {
+    await bootAndCreateHero(page, { premiseMode: 'starter', premiseText: 'Homecoming to Brannock' });
+    await grandTurn(page, 'ordinary', "I walk up from the ferry landing to my aunt Hesper's house on Tanner's Lane and knock on the door.");
+    await grandTurn(page, 'ordinary', 'I tell Hesper I am sorry I never wrote, and ask how she has been managing.');
+    await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'UPDATE_CHARACTER', payload: { level: 3 } }));
+    await delay(800);
+    await deathPhase(page);
+    const final = await grandSnap(page);
+    fs.writeFileSync(path.join(OUT_DIR, 'death-final-state.json'), JSON.stringify(final, null, 2));
+    saveAll();
+}
 async function run() {
     fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
     const browser = await puppeteer.launch({
@@ -1768,6 +2169,8 @@ async function run() {
         else if (PROBE === 'full') await runFullProbe(page);
         else if (PROBE === 'tells') await runTellsProbe(page);
         else if (PROBE === 'proof') await runProofProbe(page);
+        else if (PROBE === 'grand') await runGrandProbe(page);
+        else if (PROBE === 'death') await runDeathProbe(page);
         else await runWonderProbe(page);
     } finally {
         fs.writeFileSync(path.join(OUT_DIR, 'transcript.json'), JSON.stringify(await page.evaluate(() => (window.__QF_STATE__?.messages || []).map(m => ({ role: m.role, kind: m.kind || null, hidden: !!m.hidden, content: m.content }))).catch(() => []), null, 2));

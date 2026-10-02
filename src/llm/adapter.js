@@ -57,12 +57,20 @@ export const DEFAULT_SEND_MAX_RETRIES = 2;
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 /**
+ * Retries of a DM stream that a provider REFUSED before its first byte
+ * (429 / 5xx / network failure — the same classifier as sendMessage). Safe:
+ * no partial output exists yet. Mid-stream failures still surface at once.
+ */
+export const STREAM_START_MAX_RETRIES = 2;
+
+/**
  * Send a message to the configured LLM provider.
  *
  * Non-streaming calls (Scribe, journal, roll policy, front generation) retry
  * transient failures with backoff — a single 429/503 must not silently cost the
  * campaign a memory extraction or loot audit. Streaming (the visible DM turn)
- * never retries here: the player has UI-level retry paths and partial output.
+ * retries only a refusal before its first byte (STREAM_START_MAX_RETRIES);
+ * once output has reached the player a failure surfaces as is.
  *
  * @param {object} options
  * @param {string} options.provider - Provider name ('gemini' | 'openai')
@@ -88,14 +96,21 @@ export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 90_000;
  *   that route by conversation (xAI `x-grok-conv-id`); ignored elsewhere.
  * @param {function} [options.onHeaderRejected] - Called with the header names
  *   when a provider's edge refused the affinity header's preflight.
+ * @param {string} [options.fallbackModel] - Same provider, another model: ONE
+ *   extra attempt once the retry budget is spent on a capacity refusal
+ *   (429 / 5xx — never a stall, a 4xx, or a cancel). Grand playtest
+ *   2026-10-02: `gemini-3.7-flash` answered ~1 call in 3 with "503 high
+ *   demand" for an hour and the Scribe lost whole turns while another Flash
+ *   answered every call.
  * @returns {Promise<string>} LLM response text
  */
-export async function sendMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, maxRetries = DEFAULT_SEND_MAX_RETRIES, signal, onUsage, conversationId, onHeaderRejected }) {
+export async function sendMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, maxRetries = DEFAULT_SEND_MAX_RETRIES, signal, onUsage, conversationId, onHeaderRejected, fallbackModel }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
 
     const MAX_RETRIES = Number.isInteger(maxRetries) && maxRetries >= 0 ? maxRetries : DEFAULT_SEND_MAX_RETRIES;
+    let activeModel = model;
     for (let attempt = 0; ; attempt++) {
         if (signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
         // Per-attempt controller: the stall timer must not leak an abort into a
@@ -105,10 +120,16 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
         signal?.addEventListener('abort', onExternalAbort, { once: true });
         const stallTimer = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            return await p.send({ apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, signal: controller.signal, onUsage, conversationId, onHeaderRejected });
+            return await p.send({ apiKey, model: activeModel, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, signal: controller.signal, onUsage, conversationId, onHeaderRejected });
         } catch (error) {
             const stalled = error?.name === 'AbortError' && !signal?.aborted;
             if (signal?.aborted) throw error; // caller cancelled — never retry
+            if (!stalled && attempt >= MAX_RETRIES && isRetryableError(error) && !isNetworkFailure(error)
+                && typeof fallbackModel === 'string' && fallbackModel && activeModel !== fallbackModel) {
+                console.warn(`[LLM Adapter] ${provider} ${activeModel} refused after ${attempt + 1} attempt(s) (${error.message}); one attempt on ${fallbackModel}.`);
+                activeModel = fallbackModel;
+                continue;
+            }
             if (!stalled && (attempt >= MAX_RETRIES || !isRetryableError(error))) throw error;
             if (stalled && attempt >= MAX_RETRIES) {
                 const attempts = MAX_RETRIES + 1;
@@ -159,9 +180,31 @@ export async function streamMessage({ provider, apiKey, model, systemPrompt, mes
         armIdleTimer();
         onChunk?.(chunk);
     };
+    let streamed = false;
     armIdleTimer();
     try {
-        const result = await p.stream({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk: guardedOnChunk, signal: controller.signal, temperature, onUsage, conversationId, onHeaderRejected });
+        let result;
+        for (let attempt = 0; ; attempt++) {
+            try {
+                result = await p.stream({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk: (chunk) => { streamed = true; guardedOnChunk(chunk); }, signal: controller.signal, temperature, onUsage, conversationId, onHeaderRejected });
+                break;
+            } catch (error) {
+                // A transient refusal BEFORE the first byte is safe to retry —
+                // nothing reached the player (grand playtest 2026-10-02: Gemini
+                // 3.8 Flash refused DM streams with 503s for an hour, and every
+                // one cost the player a whole turn and a retyped line). A stall,
+                // a cancel, or anything after a chunk is never retried.
+                if (streamed || stalled || controller.signal.aborted || signal?.aborted
+                    || attempt >= STREAM_START_MAX_RETRIES || !isRetryableError(error)) throw error;
+                const backoff = 1500 * 2 ** attempt + Math.random() * 250;
+                const wait = Math.max(backoff, Number.isFinite(error?.retryAfterMs) ? error.retryAfterMs : 0);
+                console.warn(`[LLM Adapter] ${provider} stream refused before the first byte (${error.message}); retry ${attempt + 1}/${STREAM_START_MAX_RETRIES} in ~${Math.round(wait)}ms.`);
+                clearTimeout(idleTimer);
+                await sleep(wait);
+                if (signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
+                armIdleTimer();
+            }
+        }
         if (import.meta.env.DEV) {
             console.log('[LLM Adapter] Full response received, length:', result.length);
             console.log('[LLM Adapter] Contains ```json:', result.includes('```json'));
