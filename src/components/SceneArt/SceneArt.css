@@ -309,3 +309,42 @@
     border-color: var(--gold);
     color: var(--text-primary);
 }
+
+/* Put-away / close controls — 44px touch targets for phones. */
+.scene-art-close-btn,
+.scene-art-lightbox-close {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+}
+
+.scene-art-close-btn {
+    top: 0.4rem;
+    right: 0.4rem;
+    z-index: 1;
+    width: 2rem;
+    height: 2rem;
+    font-size: 0.95rem;
+}
+
+.scene-art-lightbox-close {
+    top: max(0.75rem, env(safe-area-inset-top));
+    right: max(0.75rem, env(safe-area-inset-right));
+    width: 2.75rem;
+    height: 2.75rem;
+    font-size: 1.25rem;
+}
+
+.scene-art-close-btn:hover,
+.scene-art-lightbox-close:hover {
+    border-color: var(--gold);
+    color: var(--gold);
+}

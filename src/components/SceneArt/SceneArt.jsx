@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useGame } from '../../state/GameContext.jsx';
 import { generatePortraitImageDetailed, generateSceneImageDetailed, peekCachedImage } from '../../llm/providers/imageGen.js';
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
@@ -20,6 +21,10 @@ export default function SceneArt() {
     const [currentImage, setCurrentImage] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
+    // The player can put the picture away (it used to sit above the chat until
+    // the hero moved — 180px of a phone screen) and bring it back without
+    // paying for a new render.
+    const [isHidden, setIsHidden] = useState(false);
     const [mode, setMode] = useState('scene');
     const [targetId, setTargetId] = useState('');
     const [customSubject, setCustomSubject] = useState('');
@@ -97,6 +102,7 @@ export default function SceneArt() {
                 const prompt = buildFocusedPrompt(selectedTarget, location);
                 const result = await generatePortraitImageDetailed(prompt, state.settings.imageApiKey, genOptions);
                 if (result) {
+                    setIsHidden(false);
                     setCurrentImage({ url: result.url, caption: selectedTarget.label, shape: 'portrait' });
                     setGenerationNotice(fallbackNotice(result));
                 }
@@ -107,6 +113,7 @@ export default function SceneArt() {
                 const prompt = buildCustomPrompt(customSubject.trim(), location, state.character);
                 const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey, genOptions);
                 if (result) {
+                    setIsHidden(false);
                     setCurrentImage({ url: result.url, caption: customSubject.trim(), shape: 'scene' });
                     setGenerationNotice(fallbackNotice(result));
                 }
@@ -134,6 +141,7 @@ export default function SceneArt() {
                     sessionScope: genOptions.sessionScope,
                 });
                 if (cached) {
+                    setIsHidden(false);
                     setCurrentImage({ url: cached.url, caption: location, shape: 'scene' });
                     setGenerationNotice(fallbackNotice(cached));
                     return;
@@ -160,7 +168,8 @@ export default function SceneArt() {
 
             const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey, { ...genOptions, cacheKey: sceneCacheKey });
             if (result) {
-                setCurrentImage({ url: result.url, caption: location, shape: 'scene' });
+                setIsHidden(false);
+                    setCurrentImage({ url: result.url, caption: location, shape: 'scene' });
                 setGenerationNotice(fallbackNotice(result));
             }
         } catch (e) {
@@ -188,6 +197,14 @@ export default function SceneArt() {
             lastLocationRef.current = current;
         }
     }, [state.currentLocation]);
+
+    // Escape closes the lightbox on keyboards; the ✕ and the backdrop do on touch.
+    useEffect(() => {
+        if (!isExpanded) return undefined;
+        const onKey = (e) => { if (e.key === 'Escape') setIsExpanded(false); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [isExpanded]);
 
     // Abandon an in-flight render when the panel unmounts.
     useEffect(() => () => abortRef.current?.abort(), []);
@@ -265,6 +282,15 @@ export default function SceneArt() {
                                     ? (selectedTarget?.label || 'Character')
                                     : 'Subject'}
                         </button>
+                        {currentImage && isHidden && (
+                            <button
+                                className="scene-art-reroll-btn"
+                                onClick={() => setIsHidden(false)}
+                                title="Show the last image again"
+                            >
+                                Show image
+                            </button>
+                        )}
                         {currentImage && (
                             <button
                                 className="scene-art-reroll-btn"
@@ -279,7 +305,7 @@ export default function SceneArt() {
                     </div>
                 )}
 
-                {currentImage && (
+                {currentImage && !isHidden && (
                     <div
                         className={`scene-art-image-wrap ${currentImage.shape === 'portrait' ? 'portrait' : ''}`}
                         onClick={() => setIsExpanded(true)}
@@ -292,6 +318,15 @@ export default function SceneArt() {
                             // sit as a silent broken frame (2026-09-09 audit P2).
                             onError={() => setError('The image provider returned a picture the browser could not display. Use "Reroll image" to try again.')}
                         />
+                        <button
+                            type="button"
+                            className="scene-art-close-btn"
+                            aria-label="Hide image"
+                            title="Hide image"
+                            onClick={(e) => { e.stopPropagation(); setIsHidden(true); setIsExpanded(false); }}
+                        >
+                            ✕
+                        </button>
                         <div className="scene-art-caption">
                             <span className="scene-location-icon" aria-hidden="true" />
                             {currentImage.caption || state.currentLocation}
@@ -300,15 +335,26 @@ export default function SceneArt() {
                 )}
             </div>
 
-            {isExpanded && currentImage && (
-                <div className="scene-art-lightbox" onClick={() => setIsExpanded(false)}>
+            {/* Portaled to <body>: a transformed/overflow ancestor in the app
+                shell must never trap the fixed overlay on a phone. */}
+            {isExpanded && currentImage && createPortal(
+                <div className="scene-art-lightbox" role="dialog" aria-modal="true" onClick={() => setIsExpanded(false)}>
+                    <button
+                        type="button"
+                        className="scene-art-lightbox-close"
+                        aria-label="Close image"
+                        onClick={(e) => { e.stopPropagation(); setIsExpanded(false); }}
+                    >
+                        ✕
+                    </button>
                     <img
                         src={currentImage.url}
                         alt={currentImage.caption || state.currentLocation || 'Scene'}
                         className="scene-art-lightbox-img"
                     />
                     <div className="scene-art-lightbox-caption">{currentImage.caption || state.currentLocation}</div>
-                </div>
+                </div>,
+                document.body,
             )}
         </>
     );
