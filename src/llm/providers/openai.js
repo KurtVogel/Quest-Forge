@@ -7,8 +7,12 @@
 import { DEFAULT_MAX_TOKENS, makeOpenAICompatProvider } from './openaiCompatible.js';
 import { isNetworkFailure, makeHttpError } from './sse.js';
 
-/** Reasoning models: gpt-5 family and the o-series. */
-const isReasoningModel = (model) => /^(gpt-5|o\d)/.test(model || '');
+/**
+ * Reasoning models: the gpt-5 and gpt-6 families (Astra / Sol / Luna / Terra
+ * tiers alike) and the o-series. Open-ended on the major so the next family
+ * is not sent a temperature it 400s on (gpt-6.1-sol, 2026-10-03).
+ */
+const isReasoningModel = (model) => /^(gpt-[5-9]|o\d)/.test(model || '');
 
 /**
  * Reasoning tokens count against `max_completion_tokens`, so the gpt-4o

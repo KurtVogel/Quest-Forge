@@ -76,11 +76,17 @@ describe('sendOpenAIMessage', () => {
         await sendOpenAIMessage({ ...SEND_ARGS, model: 'gpt-5', temperature: 0.7 });
         await sendOpenAIMessage({ ...SEND_ARGS, model: 'o3-mini', temperature: 0.7 });
         await sendOpenAIMessage({ ...SEND_ARGS, model: 'gpt-4o', temperature: 0.7 });
+        // The gpt-6 family is reasoning too (gpt-6.1-sol, 2026-10-03): the old
+        // ^gpt-5 predicate would have sent it a temperature.
+        await sendOpenAIMessage({ ...SEND_ARGS, model: 'gpt-6.1-sol', temperature: 0.7 });
+        await sendOpenAIMessage({ ...SEND_ARGS, model: 'gpt-6-astra', temperature: 0.7 });
 
         const bodies = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body));
         expect(bodies[0].temperature).toBeUndefined();
         expect(bodies[1].temperature).toBeUndefined();
         expect(bodies[2].temperature).toBe(0.7);
+        expect(bodies[3].temperature).toBeUndefined();
+        expect(bodies[4].temperature).toBeUndefined();
     });
 
     it('throws a retryable truncation error on finish_reason "length"', async () => {

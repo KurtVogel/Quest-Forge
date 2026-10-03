@@ -38,7 +38,7 @@ export function seedDevSettings() {
     } else if (dm === 'openai' && openaiKey) {
         settings.llmProvider = 'openai';
         settings.apiKey = openaiKey;
-        settings.model = 'gpt-5.6-terra';
+        settings.model = 'gpt-6.1-sol';
     } else if (geminiKey) {
         settings.llmProvider = 'gemini';
         settings.apiKey = geminiKey;

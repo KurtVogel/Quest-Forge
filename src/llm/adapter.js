@@ -241,10 +241,15 @@ export const PROVIDERS = {
     openai: {
         name: 'OpenAI',
         models: [
-            { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra (Recommended)', description: 'Balanced current-gen tier' },
-            { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: 'Highest quality, priciest' },
-            { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', description: 'Fast, low-cost current-gen' },
-            { id: 'gpt-5', name: 'GPT-5', description: 'Previous gen' },
+            // GPT-6 family (Astra 2026-09-03, Sol/Luna 09-22, 6.1 Sol 09-29). For a
+            // DM the tier is the prose: Terra reviewed as narratively flat, Astra
+            // leads EQ-Bench creative writing at 5× Sol's price (2026-10-03).
+            { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol (Recommended)', description: 'Newest — near-Astra quality at a fifth of the price' },
+            { id: 'gpt-6-astra', name: 'GPT-6 Astra', description: 'Best prose, priciest ($10/$50 per M tokens)' },
+            { id: 'gpt-6-luna', name: 'GPT-6 Luna', description: 'Fast, cheapest current-gen' },
+            { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: 'Previous flagship tier, strong fiction' },
+            { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', description: 'Previous mid tier — flat for fiction' },
+            { id: 'gpt-5', name: 'GPT-5', description: 'Older gen' },
             { id: 'gpt-4o', name: 'GPT-4o', description: 'Legacy' },
         ],
     },
