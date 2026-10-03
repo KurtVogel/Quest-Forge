@@ -28,7 +28,7 @@ import { parseResponse } from '../src/llm/responseParser.js';
 import { parseJsonObjectLoose } from '../src/llm/utils/jsonExtractor.js';
 import { initialGameState } from '../src/state/initialState.js';
 import { buildPremiseFromStarter, findPremiseStarter } from '../src/data/premiseStarters.js';
-import { MACHINERY_MODEL } from '../src/llm/machinery.js';
+import { MACHINERY_MODEL, MACHINERY_FALLBACK_MODEL } from '../src/llm/machinery.js';
 import { createInitialFronts } from '../src/engine/fronts.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -227,7 +227,7 @@ async function judgeTurn(turn) {
     if (!turn.narrative) return null;
     const userMessage = `PLAYER ACTION:\n${turn.userMessage}\n\nDM REPLY:\n${turn.narrative}`;
     const raw = await sendMessage({
-        provider: 'gemini', apiKey: GEMINI_KEY, model: MACHINERY_MODEL,
+        provider: 'gemini', apiKey: GEMINI_KEY, model: MACHINERY_MODEL, fallbackModel: MACHINERY_FALLBACK_MODEL,
         systemPrompt: JUDGE_SYSTEM, messageHistory: [], userMessage,
         temperature: 0, thinkingBudget: 0, maxOutputTokens: 600, timeoutMs: 60000,
     });

@@ -97,9 +97,11 @@ async function shot(page, name) {
 // ---------------------------------------------------------------------------
 // Flash: ground-truth extractor + judge (the script's own machinery; key never printed)
 // ---------------------------------------------------------------------------
+const JUDGE_FALLBACK_MODEL = 'gemini-3-flash-preview'; // the machinery's own fallback (2026-10-02): 3.7 Flash 503s cost the judge AND the player agent their calls
 async function flash(prompt) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${JUDGE_MODEL}:generateContent`;
     for (let attempt = 0; attempt < 4; attempt++) {
+        // Attempts 3–4 go to the fallback Flash: a capacity refusal on the judge model is not the prompt's fault.
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${attempt >= 2 ? JUDGE_FALLBACK_MODEL : JUDGE_MODEL}:generateContent`;
         try {
             const res = await fetch(url, {
                 method: 'POST',
@@ -1769,9 +1771,95 @@ async function runProofProbe(page) {
 // epilogue. Extra instrumentation: the history rows each DM call carried (the
 // journal tail must never empty the window, the player's line once, XP
 // receipts riding the window), the Journal-check verifier lines, state facts,
-// cache telemetry.
+// cache telemetry, and (2026-10-03) first-byte latency per DM call.
+//
+// The ADAPTIVE PLAYER AGENT (2026-10-03): the plan's lines are INTENTS, not
+// verbatim sends. Before each adaptable turn a thinking-free Flash call reads
+// the DM's last reply + a compact state and writes the line the player would
+// type NOW to pursue that intent — keeping every concrete beat the intent names
+// (people, items, the question, the habit sentence word for word). The 10-02
+// runs sent five scripted "we set out" lines into a door-kicking scene, and the
+// judge counted the DM's correct declines as agency issues. Probe lines whose
+// exact wording IS the test (OOC, recall, recap, "surprise me", the fight
+// triggers, the death lines) are never adapted. QF_GRAND_SCRIPTED=1 restores
+// the verbatim script.
+//
+// Two debug backstops so the features are exercised BY CONSTRUCTION, not by
+// luck (10-02: Dunstan refused to join in one run, so companion fight memory
+// went unexercised; a level-2 hero with a downed companion is low-level-solo,
+// so the planned death was impossible by design): if the recruit lines fail,
+// ADD_COMPANION is dispatched (logged as a debug recruit); before the last
+// chapter the hero is set to level 3 and, if no foe shows up for the death
+// line, START_COMBAT stages one. Both are logged so the report can tell the
+// fiction's result from the harness's.
 // ---------------------------------------------------------------------------
 const HABIT_RX = /\bear\b/i;
+const GRAND_SCRIPTED = process.env.QF_GRAND_SCRIPTED === '1';
+/** Kinds whose exact wording is the probe: never adapted. */
+const UNADAPTED_KINDS = new Set(['ooc', 'recall', 'recap', 'wonder', 'fight', 'death-fight']);
+const TIMING_RX = /\[LLM timing\] ([\w-]+): TTFT (n\/a|\d+)ms, total (\d+)ms/;
+
+/** The orchestrator's [LLM timing] lines since console index `from`: { mode, ttftMs, totalMs }. */
+function timingSince(from) {
+    return consoleLines.slice(from).map(c => c.text.match(TIMING_RX)).filter(Boolean)
+        .map(m => ({ mode: m[1], ttftMs: m[2] === 'n/a' ? null : Number(m[2]), totalMs: Number(m[3]) }));
+}
+function percentiles(values) {
+    const v = values.filter(Number.isFinite).sort((a, b) => a - b);
+    if (!v.length) return null;
+    const at = q => v[Math.min(v.length - 1, Math.floor(q * v.length))];
+    return { n: v.length, p50: at(0.5), p90: at(0.9), max: v[v.length - 1] };
+}
+/** First-byte and total latency per DM call mode over the whole run, plus the stall / refusal counts the stall-guard idea needs. */
+function timingSummary() {
+    const all = timingSince(0);
+    const byMode = {};
+    for (const mode of new Set(all.map(t => t.mode))) {
+        const rows = all.filter(t => t.mode === mode);
+        byMode[mode] = { ttft: percentiles(rows.map(t => t.ttftMs)), total: percentiles(rows.map(t => t.totalMs)), noFirstByte: rows.filter(t => t.ttftMs === null).length };
+    }
+    const texts = consoleLines.map(c => c.text).concat(notes.map(n => String(n.message)));
+    return {
+        byMode,
+        stalls: texts.filter(t => /stream stalled/i.test(t)).length,
+        refusedBeforeFirstByte: texts.filter(t => /stream refused before the first byte/i.test(t)).length,
+        machineryFallbacks: texts.filter(t => /one attempt on gemini-/i.test(t)).length,
+    };
+}
+
+/**
+ * The adaptive player agent: the line the player would type NOW to pursue the
+ * scripted INTENT in the scene the DM actually opened. Returns null to send the
+ * intent verbatim (scripted mode, an unadaptable kind, or a failed call).
+ */
+async function adaptLine(page, kind, intent, before) {
+    if (GRAND_SCRIPTED || UNADAPTED_KINDS.has(kind)) return { status: 'skipped' };
+    const lastDm = (await lastDmMessage(page)).slice(-1800);
+    if (!lastDm) return { status: 'skipped' };
+    const state = {
+        location: before?.location || null,
+        hp: before?.hero ? `${before.hero.hp}/${before.hero.maxHp}` : null,
+        party: (before?.party || []).map(p => `${p.name} (${p.status || 'standing'})`),
+        activeQuests: (before?.quests || []).filter(q => q.status === 'active').map(q => q.name),
+        inventory: (before?.inventory || []).slice(0, 12),
+    };
+    const out = await flash(`You are the PLAYER of a solo text RPG, typing for the hero. A test plan gives you the INTENT of your next turn; the DM's last reply shows what the scene is actually doing right now. Write the line the player would type NOW.
+Rules:
+- Pursue the INTENT. Keep every concrete beat it names: the people, the item, the question asked, the place — and any sentence about the hero's own gesture or habit WORD FOR WORD.
+- Read the scene. If the DM's last reply left something in the hero's face (a person speaking to them, a question asked, a danger, a door being kicked), deal with it in the same line and still move toward the intent. If the intent is impossible right now, write the natural step toward it.
+- First person, present tense, 1–3 sentences, plain words. Declare what the hero does and says. Never narrate results, never speak or act for other characters, never roll dice, never add new facts about the world.
+- If the intent already fits the scene as written, return it unchanged.
+Return JSON: {"line": string, "changed": boolean, "why": "one sentence"}
+
+INTENT: ${JSON.stringify(intent)}
+STATE: ${JSON.stringify(state)}
+LAST DM REPLY:
+${lastDm}`);
+    const line = typeof out?.line === 'string' ? out.line.trim() : '';
+    if (!line || line.length > 700) return { status: 'unavailable' };
+    const changed = out.changed === true && line !== intent;
+    return { status: changed ? 'changed' : 'kept', line, changed, why: typeof out?.why === 'string' ? out.why.slice(0, 200) : '' };
+}
 const grandLog = [];
 function glog(label, extra) {
     const e = { t: new Date().toISOString(), turn: turnNo, label, ...extra };
@@ -1819,6 +1907,7 @@ async function grandSnap(page) {
             inventory: (s.inventory || []).map(i => `${i.name}×${i.quantity ?? 1}${i.equipped ? '*' : ''}`).sort(),
             purse: { gold: c.gold, silver: c.silver, copper: c.copper },
             location: s.currentLocation,
+            combat: s.combat?.active ? { phase: s.combat.phase } : null,
         };
     }).catch(() => null);
 }
@@ -1847,6 +1936,13 @@ function windowReport(sinceMs, playerLine) {
 async function grandTurn(page, kind, action, opts = {}) {
     const t0 = Date.now();
     const before = await grandSnap(page);
+    const consoleFrom = consoleLines.length;
+    const intent = action;
+    const adapted = await adaptLine(page, kind, intent, before);
+    if (adapted?.changed) {
+        action = adapted.line;
+        note('agent', `#${turnNo + 1} ${kind} intent → "${action.slice(0, 180)}" (${adapted.why})`);
+    }
     const r = await fullTurn(page, kind, action);
     const after = await grandSnap(page);
     const win = windowReport(t0, action);
@@ -1861,6 +1957,9 @@ async function grandTurn(page, kind, action, opts = {}) {
         hero: after?.hero, party: after?.party, location: after?.location,
         tells: after?.heroTells, dunstanMoments: after?.dunstan?.bondMoments?.length ?? 0, flags,
         habitVoiced: HABIT_RX.test(r.dm || '') && kind !== 'tell',
+        agent: adapted?.status || 'skipped',
+        intent: adapted?.changed ? intent.slice(0, 200) : undefined, adaptedWhy: adapted?.changed ? adapted.why : undefined,
+        timing: timingSince(consoleFrom),
     });
     if (flags.length || newChecks.length || journalRan) note('grand', `#${turnNo} ${flags.join(' | ')}${journalRan ? ' journal-cadence' : ''}${newChecks.length ? ' JOURNAL CHECK: ' + newChecks[0].c.slice(0, 160) : ''} window=${narrativeCall?.rows}`);
     if (e.habitVoiced) note('grand', `#${turnNo} the ear habit appears in a non-tell turn's narration: ${(r.dm.match(/[^.]*\bear\b[^.]*\./i) || [''])[0].slice(0, 200)}`);
@@ -2004,19 +2103,41 @@ async function sceneArtCheck(page) {
 async function deathPhase(page) {
     note('grand', 'The last chapter: HP set to 1 (debug dispatch), then a fight the hero cannot win.');
     let s = await grandSnap(page);
+    let route = 'natural';
+    if ((s?.hero?.level ?? 1) < 3) {
+        // Low-level-solo protection (2026-07-17 / 09-02) makes 0 HP a setback for a
+        // level ≤ 2 hero with no standing companion — correct by design, and it
+        // made the 10-02 grand run's death impossible. Level 3 takes it away.
+        await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'UPDATE_CHARACTER', payload: { level: 3 } }));
+        await delay(800);
+        route = 'level-3-debug';
+        note('grand', 'DEBUG: hero set to level 3 so the death lane can open (low-level-solo protection is the design, not a bug).');
+    }
     await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'UPDATE_CHARACTER', payload: { currentHP: 1 } }));
     await delay(1000);
     const deathLines = [
-        'Word comes that the thing behind the Aldwick trouble is coming for Brannock\'s Ford tonight. I go out alone to the ferry landing to meet it, sword drawn, and attack it the moment it shows itself.',
+        'Word comes that the thing behind the Aldwick trouble is coming for Brannock\'s Ford tonight. I go out to the ferry landing to meet it, sword drawn, and attack it the moment it shows itself.',
         'I attack it again with everything I have left.',
     ];
     for (const line of deathLines) {
         await grandTurn(page, 'death-fight', line);
         s = await grandSnap(page);
-        glog('death-state', { hero: s?.hero, heroDeath: s?.heroDeath, epitaph: s?.epitaph });
+        glog('death-state', { hero: s?.hero, heroDeath: s?.heroDeath, epitaph: s?.epitaph, combat: s?.combat });
         if (s?.hero?.isDead) break;
+        if (!s?.hero?.dying && !s?.combat) {
+            // The DM talked instead of fielding a foe (or the fight was won): stage
+            // one through the engine's own START_COMBAT so the death is a real
+            // fight's — death saves counted on the page — not a forced clock.
+            await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'START_COMBAT', payload: { enemies: [{ name: 'the Aldwick Reeve', hp: 45, ac: 15, attackBonus: 6, damage: '2d6+4' }] } }));
+            await delay(1500);
+            // A foe that beats initiative opens with an engine-owned exchange and the
+            // composer is locked until it lands (smoke 2026-10-03: "Send button not
+            // found" — the next death line was lost). Wait for awaiting_player.
+            await waitForIdle(page);
+            route = route === 'natural' ? 'debug-foe' : `${route}+debug-foe`;
+            note('grand', 'DEBUG FOE: no fight came of the death line; START_COMBAT staged the Aldwick Reeve (45 HP, AC 15, +6, 2d6+4).');
+        }
     }
-    let route = 'natural';
     // Dying but stabilized / fight over: drive the clock out of combat with the
     // reducer's own death-save action (die 1 = a natural one, two failures).
     for (let i = 0; i < 3 && !s?.hero?.isDead; i++) {
@@ -2073,6 +2194,18 @@ async function runGrandProbe(page) {
         s = await grandSnap(page);
         note('grand', `recruit retry: party=${JSON.stringify(s?.party)}`);
     }
+    if (!(s?.party || []).length) {
+        // The fiction refused twice: the companion joins by debug dispatch so fight
+        // memory / the bond / the party line are exercised by construction. Logged
+        // as a DEBUG recruit — the report must not read it as the DM's doing.
+        const name = s?.dunstan?.name || 'Dunstan Reeve';
+        await page.evaluate((name) => window.__QF_DISPATCH__?.({ type: 'ADD_COMPANION', payload: { name, role: 'ferryman', level: 2, maxHp: 18, hp: 18, ac: 13, weapon: 'Quarterstaff', attackBonus: 3 } }), name);
+        await delay(1200);
+        s = await grandSnap(page);
+        glog('debug-recruit', { party: s?.party });
+        note('grand', `DEBUG RECRUIT: Dunstan refused in the fiction; ADD_COMPANION dispatched — party=${JSON.stringify(s?.party)}`);
+        await grandTurn(page, 'ordinary', 'Dunstan is with me now, pack on his shoulder. I ask him what made him change his mind, and we make ready for the road.');
+    }
     for (const [kind, action] of GRAND_ROAD) await grandTurn(page, kind, action);
     await grandFight(page, 'estate');
     for (const [kind, action] of GRAND_AFTER_FIGHT) await grandTurn(page, kind, action);
@@ -2128,11 +2261,18 @@ async function runGrandProbe(page) {
         journalChecks: final?.journalChecks,
         tells: final?.heroTells,
         dunstan: final?.dunstan,
+        adaptedTurns: grandLog.filter(e => e.intent).map(e => ({ n: e.turn, intent: e.intent, sent: e.action, why: e.adaptedWhy })),
+        agentStatus: ['changed', 'kept', 'unavailable', 'skipped'].reduce((acc, k) => ({ ...acc, [k]: grandLog.filter(e => e.agent === k).length }), {}),
+        debugRecruit: grandLog.some(e => e.label === 'debug-recruit'),
+        timing: timingSummary(),
         judgeIssues: issues,
     };
     results.push(summary);
     fs.writeFileSync(path.join(OUT_DIR, 'grand-summary.json'), JSON.stringify(summary, null, 2));
-    note('summary', JSON.stringify({ ...summary, judgeIssues: issues.length, dunstan: undefined, tells: undefined }).slice(0, 2000));
+    fs.writeFileSync(path.join(OUT_DIR, 'timing.json'), JSON.stringify({ summary: summary.timing, calls: timingSince(0) }, null, 2));
+    note('grand', `timing: ${JSON.stringify(summary.timing)}`);
+    note('grand', `adapted turns: ${summary.adaptedTurns.length} of ${fullTurns.length}; debug recruit: ${summary.debugRecruit}`);
+    note('summary', JSON.stringify({ ...summary, judgeIssues: issues.length, dunstan: undefined, tells: undefined, adaptedTurns: summary.adaptedTurns.length, timing: undefined }).slice(0, 2000));
     for (const i of issues) note('judge-issue', `t${i.turn} ${i.category}: ${i.detail}`);
     saveAll();
 }
@@ -2145,9 +2285,9 @@ async function runDeathProbe(page) {
     await bootAndCreateHero(page, { premiseMode: 'starter', premiseText: 'Homecoming to Brannock' });
     await grandTurn(page, 'ordinary', "I walk up from the ferry landing to my aunt Hesper's house on Tanner's Lane and knock on the door.");
     await grandTurn(page, 'ordinary', 'I tell Hesper I am sorry I never wrote, and ask how she has been managing.');
-    await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'UPDATE_CHARACTER', payload: { level: 3 } }));
-    await delay(800);
-    await deathPhase(page);
+    await deathPhase(page); // sets level 3 itself and stages a foe if none comes
+    fs.writeFileSync(path.join(OUT_DIR, 'timing.json'), JSON.stringify({ summary: timingSummary(), calls: timingSince(0) }, null, 2));
+    note('grand', `timing: ${JSON.stringify(timingSummary())}`);
     const final = await grandSnap(page);
     fs.writeFileSync(path.join(OUT_DIR, 'death-final-state.json'), JSON.stringify(final, null, 2));
     saveAll();
