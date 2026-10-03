@@ -28,7 +28,7 @@ const CARRIED_CONTAINMENT = 0.5;
 const CARRY_STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'their', 'her', 'his', 'them', 'they', 'was', 'were', 'has', 'have', 'had', 'will', 'would', 'agreed', 'promised', 'swore']);
 const carryTokens = (value) => tokenSet(value, { stopWords: CARRY_STOP_WORDS, minLength: 3, foldPossessives: true });
 
-/** The commitments as they stand now: `{ quests, facts, threads, promises }`, each a Map of id → label, plus `carriers` (the full texts of every active promise and open thread) and `promiseTexts` (id → full text). */
+/** The commitments as they stand now: `{ quests, facts, threads, promises }`, each a Map of id → label, plus `carriers` (the full texts of every active promise and open thread), `promiseTexts` (id → full text), `resolvedThreads` (NPC id → the message the thread was SETTLED at, from the reducer's `openThreadResolvedMessage` stamp), and `messageCount` (the transcript length at the snapshot). */
 export function snapshotCommitments(state = {}) {
     const quests = new Map();
     for (const quest of (Array.isArray(state.quests) ? state.quests : [])) {
@@ -39,13 +39,18 @@ export function snapshotCommitments(state = {}) {
         if (fact && fact.pinned === true && typeof fact.id === 'string' && isLiveFact(fact)) facts.set(fact.id, text(fact.fact).slice(0, 80));
     }
     const threads = new Map();
+    const resolvedThreads = new Map();
     const carriers = [];
     for (const npc of (Array.isArray(state.npcs) ? state.npcs : [])) {
-        if (npc && typeof npc.id === 'string' && text(npc.openThread)) {
+        if (!npc || typeof npc.id !== 'string') continue;
+        if (text(npc.openThread)) {
             threads.set(npc.id, text(npc.name) || npc.id);
             carriers.push(text(npc.openThread));
+        } else if (Number.isFinite(npc.openThreadResolvedMessage)) {
+            resolvedThreads.set(npc.id, npc.openThreadResolvedMessage);
         }
     }
+    const messageCount = Array.isArray(state.messages) ? state.messages.length : 0;
     const promises = new Map();
     const promiseTexts = new Map();
     for (const card of (Array.isArray(state.storyMemory) ? state.storyMemory : [])) {
@@ -55,14 +60,17 @@ export function snapshotCommitments(state = {}) {
             if (text(card.text)) carriers.push(text(card.text));
         }
     }
-    return { quests, facts, threads, promises, promiseTexts, carriers };
+    return { quests, facts, threads, promises, promiseTexts, carriers, resolvedThreads, messageCount };
 }
 
 /**
  * What `before` had that `after` no longer carries: `[{ kind, label }]`.
  * A quest is lost when it is gone or no longer active; a pinned fact when it
  * is no longer live; a thread when the NPC's `openThread` is empty (a
- * REPLACED thread is not a loss — the cadence may move the beat); a promise
+ * REPLACED thread is not a loss — the cadence may move the beat — and neither
+ * is one a lane SETTLED at or after the snapshot: `openThreadResolved: true`
+ * stamps `openThreadResolvedMessage`, and the 2026-10-03 Sol run's 📓 line
+ * reported a serving woman's thread the Scribe had just closed); a promise
  * card when it is no longer active AND no other active promise or open
  * thread still says it (a reworded successor is not a loss).
  */
@@ -70,7 +78,12 @@ export function diffCommitments(before, after) {
     const losses = [];
     for (const [id, label] of before.quests) if (!after.quests.has(id)) losses.push({ kind: 'quest', label });
     for (const [id, label] of before.facts) if (!after.facts.has(id)) losses.push({ kind: 'fact', label });
-    for (const [id, label] of before.threads) if (!after.threads.has(id)) losses.push({ kind: 'thread', label });
+    for (const [id, label] of before.threads) {
+        if (after.threads.has(id)) continue;
+        const settledAt = after.resolvedThreads?.get(id);
+        if (Number.isFinite(settledAt) && settledAt >= (before.messageCount ?? 0)) continue;
+        losses.push({ kind: 'thread', label });
+    }
     const carriers = (after.carriers || []).map(carryTokens).filter(set => set.size > 0);
     for (const [id, label] of before.promises) {
         if (after.promises.has(id)) continue;

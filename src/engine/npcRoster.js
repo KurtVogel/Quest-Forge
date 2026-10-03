@@ -53,7 +53,7 @@ export const NPC_LANE_KEYS = new Set([
 export const NPC_RECORD_KEYS = new Set([
     ...Object.keys(NPC_LANE_TEXT_LIMITS),
     'id', 'kind', 'rosterTier', 'pinned', 'importance', 'disposition', 'trust',
-    'bondMoments', 'recentImpressions', 'openThread', 'openThreadMessage', 'callbackHooks',
+    'bondMoments', 'recentImpressions', 'openThread', 'openThreadMessage', 'openThreadResolvedMessage', 'callbackHooks',
     'knownFacts', 'relationshipHistory', 'arcDisposition', 'firstMet', 'lastSeen', 'lastSeenMessage',
     // `portraitPrompt` is deliberately NOT a record key (2026-09-21 audit P2):
     // ≤ 2,000 chars per portrait, read only as an <img> tooltip — write-only

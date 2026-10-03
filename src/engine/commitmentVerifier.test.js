@@ -34,7 +34,7 @@ describe('snapshotCommitments / diffCommitments', () => {
         expect([...snap.facts.keys()]).toEqual(['f2']);
         expect([...snap.threads.keys()]).toEqual(['n1']);
         expect([...snap.promises.keys()]).toEqual(['c1']);
-        expect(snapshotCommitments({})).toEqual({ quests: new Map(), facts: new Map(), threads: new Map(), promises: new Map(), promiseTexts: new Map(), carriers: [] });
+        expect(snapshotCommitments({})).toEqual({ quests: new Map(), facts: new Map(), threads: new Map(), promises: new Map(), promiseTexts: new Map(), carriers: [], resolvedThreads: new Map(), messageCount: 0 });
     });
 
     it('reports what vanished: a quest gone, a pinned fact superseded, a thread cleared, a promise resolved — a REPLACED thread is not a loss', () => {
@@ -62,6 +62,31 @@ describe('snapshotCommitments / diffCommitments', () => {
         const moved = state();
         moved.npcs[0] = { ...moved.npcs[0], openThread: 'Now she wants the keys, not the ledger.' };
         expect(diffCommitments(before, snapshotCommitments(moved))).toEqual([]);
+    });
+
+    it('a thread a lane SETTLED at or after the snapshot is not a loss; one settled before it, or cleared without the stamp, is (grand playtest 2026-10-03)', () => {
+        const withMessages = { ...state(), messages: new Array(40).fill({ role: 'user', content: 'x' }) };
+        const before = snapshotCommitments(withMessages);
+        expect(before.messageCount).toBe(40);
+        const settled = { ...state(), messages: withMessages.messages };
+        settled.npcs[0] = { ...settled.npcs[0], openThread: '', openThreadMessage: null, openThreadResolvedMessage: 41 };
+        expect(diffCommitments(before, snapshotCommitments(settled))).toEqual([]);
+        const settledAtSnapshot = { ...settled, npcs: [{ ...settled.npcs[0], openThreadResolvedMessage: 40 }, settled.npcs[1]] };
+        expect(diffCommitments(before, snapshotCommitments(settledAtSnapshot))).toEqual([]);
+        const stale = { ...settled, npcs: [{ ...settled.npcs[0], openThreadResolvedMessage: 12 }, settled.npcs[1]] };
+        expect(diffCommitments(before, snapshotCommitments(stale))).toEqual([{ kind: 'thread', label: 'Orsa' }]);
+        const unstamped = { ...settled, npcs: [{ ...settled.npcs[0], openThreadResolvedMessage: undefined }, settled.npcs[1]] };
+        expect(diffCommitments(before, snapshotCommitments(unstamped))).toEqual([{ kind: 'thread', label: 'Orsa' }]);
+    });
+
+    it('UPDATE_NPC with openThreadResolved: true stamps openThreadResolvedMessage from the transcript length (never from the payload)', () => {
+        let s = { ...initialGameState, messages: new Array(7).fill({ role: 'user', content: 'x' }), npcs: [{ id: 'n1', name: 'Orsa', openThread: 'The ledger is still owed.', openThreadMessage: 3 }] };
+        s = gameReducer(s, { type: 'UPDATE_NPC', payload: { id: 'n1', name: 'Orsa', openThreadResolved: true, openThreadResolvedMessage: 999 } });
+        const orsa = s.npcs.find(n => n.id === 'n1');
+        expect(orsa.openThread).toBe('');
+        expect(orsa.openThreadResolvedMessage).toBe(7);
+        const before = snapshotCommitments({ ...s, npcs: [{ id: 'n1', name: 'Orsa', openThread: 'The ledger is still owed.' }] });
+        expect(diffCommitments(before, snapshotCommitments(s))).toEqual([]);
     });
 
     it('describes losses in one line and dispatches exactly one infrastructure line only on a loss', () => {

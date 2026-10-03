@@ -788,6 +788,7 @@ export function upsertNpc(npcs, rawPayload, { messageCount } = {}) {
     // `openThreadResolved: true` (pruneBlankFields drops '' so a clear needs
     // its own token). The stamp is never payload-writable.
     delete update.openThreadMessage;
+    delete update.openThreadResolvedMessage;
     const threadResolved = update.openThreadResolved === true;
     delete update.openThreadResolved;
     if (update.openThread !== undefined) {
@@ -804,6 +805,10 @@ export function upsertNpc(npcs, rawPayload, { messageCount } = {}) {
     if (threadResolved && !update.openThread) {
         update.openThread = '';
         update.openThreadMessage = null;
+        // Settled, not lost (grand playtest 2026-10-03): the post-journal
+        // verifier reads this stamp so a thread the Scribe or the cadence
+        // reflection RESOLVED is never reported as a thread the record dropped.
+        if (Number.isFinite(messageCount)) update.openThreadResolvedMessage = messageCount;
     }
     // Bond moments are append-only history: a turn's `bondMoment` (or an enrichment
     // batch of `bondMoments`) joins the existing record — it can never replace it.

@@ -1793,10 +1793,10 @@ async function runProofProbe(page) {
 // line, START_COMBAT stages one. Both are logged so the report can tell the
 // fiction's result from the harness's.
 // ---------------------------------------------------------------------------
-const HABIT_RX = /\bear\b/i;
+const HABIT_RX = /\btug\w*\b[^.\n]{0,40}\bear\b|\bear\b[^.\n]{0,40}\btug\w*/i; // the HABIT performed (the tug), not any ear: "a pencil behind one ear", "her gaze catches on your notched ear" are not the tell (2026-10-03)
 const GRAND_SCRIPTED = process.env.QF_GRAND_SCRIPTED === '1';
 /** Kinds whose exact wording is the probe: never adapted. */
-const UNADAPTED_KINDS = new Set(['ooc', 'recall', 'recap', 'wonder', 'fight', 'death-fight']);
+const UNADAPTED_KINDS = new Set(['ooc', 'recall', 'recap', 'wonder', 'fight', 'death-fight', 'debug']);
 const TIMING_RX = /\[LLM timing\] ([\w-]+): TTFT (n\/a|\d+)ms, total (\d+)ms/;
 
 /** The orchestrator's [LLM timing] lines since console index `from`: { mode, ttftMs, totalMs }. */
@@ -1847,7 +1847,7 @@ async function adaptLine(page, kind, intent, before) {
 Rules:
 - Pursue the INTENT. Keep every concrete beat it names: the people, the item, the question asked, the place — and any sentence about the hero's own gesture or habit WORD FOR WORD.
 - Read the scene. If the DM's last reply left something in the hero's face (a person speaking to them, a question asked, a danger, a door being kicked), deal with it in the same line and still move toward the intent. If the intent is impossible right now, write the natural step toward it.
-- First person, present tense, 1–3 sentences, plain words. Declare what the hero does and says. Never narrate results, never speak or act for other characters, never roll dice, never add new facts about the world.
+- First person, present tense, 1–3 sentences, plain words. Declare what the hero does and says. Never narrate results, never speak or act for other characters, never roll dice, never add new facts about the world — and never invent a REASON or a claim the INTENT does not give (the 10-03 run told a steward "I have come to fix the roof for Hesper" at the wrong house). If the scene needs an answer the intent does not supply, give a short, non-committal one.
 - If the intent already fits the scene as written, return it unchanged.
 Return JSON: {"line": string, "changed": boolean, "why": "one sentence"}
 
@@ -2019,10 +2019,27 @@ async function grandFight(page, label) {
     const before = await grandSnap(page);
     let r = await grandTurn(page, 'fight', GRAND_FIGHT);
     if (!r.row.combatIters) r = await grandTurn(page, 'fight', GRAND_FIGHT_FORCE);
+    let debugFoe = false;
+    if (!r.row.combatIters && !(await grandSnap(page))?.combat) {
+        // The DM fielded nobody (10-03 Sol run: the steward held a pencil, not a
+        // weapon, and both attack lines were correctly declined in-world — so
+        // the fight tally, the wound card, the mark and the companion's fight
+        // memory went unexercised). Stage two guards through the engine's own
+        // START_COMBAT, wait out the opening exchange, then fight. Logged DEBUG.
+        debugFoe = true;
+        await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'START_COMBAT', payload: { enemies: [
+            { name: 'Aldwick estate guard', hp: 11, ac: 14, attackBonus: 3, damage: '1d8+1' },
+            { name: 'second estate guard', hp: 11, ac: 14, attackBonus: 3, damage: '1d8+1' },
+        ] } }));
+        await delay(1500);
+        await waitForIdle(page);
+        note('grand', `DEBUG FOE (${label}): the DM fielded no foe for either attack line; START_COMBAT staged two estate guards (11 HP, AC 14, +3, 1d8+1).`);
+        r = await grandTurn(page, 'fight', 'I attack the nearest estate guard with my longsword. Dunstan comes in beside me.');
+    }
     const after = await grandSnap(page);
     const newCards = (after?.cards || []).filter(c => !(before?.cards || []).some(b => b.id === c.id));
     const entry = glog(`fight-summary:${label}`, {
-        exercised: r.row.combatIters > 0, combatIters: r.row.combatIters,
+        exercised: r.row.combatIters > 0, combatIters: r.row.combatIters, debugFoe,
         hero: after?.hero, party: after?.party,
         newWoundCards: newCards.filter(c => c.tags.includes('fight-cost')),
         newCards: newCards.map(c => `${c.type}/${c.salience}/${c.source || ''}: ${c.text.slice(0, 120)}`),
@@ -2030,7 +2047,7 @@ async function grandFight(page, label) {
         dunstanMomentsBefore: before?.dunstan?.bondMoments || [], dunstanMomentsAfter: after?.dunstan?.bondMoments || [],
         xpLinesAfter: (after?.xpLines || []).slice(-3),
     });
-    note('grand', `fight ${label}: exercised=${entry.exercised} iters=${entry.combatIters} hero ${after?.hero?.hp}/${after?.hero?.maxHp} L${after?.hero?.level} party ${JSON.stringify(after?.party)} woundCards=${entry.newWoundCards.length} dunstanMoments ${entry.dunstanMomentsBefore.length}→${entry.dunstanMomentsAfter.length} mark=${JSON.stringify((after?.encounters || []).slice(-1)[0]?.mark || null)}`);
+    note('grand', `fight ${label}: exercised=${entry.exercised}${debugFoe ? ' (DEBUG FOE)' : ''} iters=${entry.combatIters} hero ${after?.hero?.hp}/${after?.hero?.maxHp} L${after?.hero?.level} party ${JSON.stringify(after?.party)} woundCards=${entry.newWoundCards.length} dunstanMoments ${entry.dunstanMomentsBefore.length}→${entry.dunstanMomentsAfter.length} mark=${JSON.stringify((after?.encounters || []).slice(-1)[0]?.mark || null)}`);
     return entry;
 }
 
@@ -2124,10 +2141,13 @@ async function deathPhase(page) {
         s = await grandSnap(page);
         glog('death-state', { hero: s?.hero, heroDeath: s?.heroDeath, epitaph: s?.epitaph, combat: s?.combat });
         if (s?.hero?.isDead) break;
-        if (!s?.hero?.dying && !s?.combat) {
+        if (!s?.hero?.dying && !s?.combat && (s?.hero?.hp ?? 0) > 0) {
             // The DM talked instead of fielding a foe (or the fight was won): stage
             // one through the engine's own START_COMBAT so the death is a real
             // fight's — death saves counted on the page — not a forced clock.
+            // A hero STABLE at 0 HP (10-03 Sol run: three saves to stable, the
+            // fight ended as a defeat) is not "no fight" — the fallback below
+            // takes that case, never a second staged foe.
             await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'START_COMBAT', payload: { enemies: [{ name: 'the Aldwick Reeve', hp: 45, ac: 15, attackBonus: 6, damage: '2d6+4' }] } }));
             await delay(1500);
             // A foe that beats initiative opens with an engine-owned exchange and the
@@ -2140,8 +2160,12 @@ async function deathPhase(page) {
     }
     // Dying but stabilized / fight over: drive the clock out of combat with the
     // reducer's own death-save action (die 1 = a natural one, two failures).
-    for (let i = 0; i < 3 && !s?.hero?.isDead; i++) {
-        route = 'forced-death-saves';
+    // Never inside a live fight (10-03 Sol run): a death there defers its
+    // epitaph to END_COMBAT, and a fight nobody drives never ends — the run
+    // finished with isDead and no ending card. Finish the fight first.
+    if (s?.combat && !s?.hero?.isDead) { await resolveCombat(page); s = await grandSnap(page); }
+    for (let i = 0; i < 3 && !s?.hero?.isDead && !s?.combat; i++) {
+        route = route === 'natural' ? 'forced-death-saves' : `${route}+forced-death-saves`;
         if (!s?.hero?.dying) await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'UPDATE_CHARACTER', payload: { currentHP: 0, dying: true, deathSaves: { successes: 0, failures: 0 } } }));
         await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'DEATH_SAVE_RESULT', payload: { die: 1 } }));
         await delay(1500);
@@ -2204,7 +2228,7 @@ async function runGrandProbe(page) {
         s = await grandSnap(page);
         glog('debug-recruit', { party: s?.party });
         note('grand', `DEBUG RECRUIT: Dunstan refused in the fiction; ADD_COMPANION dispatched — party=${JSON.stringify(s?.party)}`);
-        await grandTurn(page, 'ordinary', 'Dunstan is with me now, pack on his shoulder. I ask him what made him change his mind, and we make ready for the road.');
+        await grandTurn(page, 'debug', 'Dunstan is with me now, pack on his shoulder. I ask him what made him change his mind, and we make ready for the road.');
     }
     for (const [kind, action] of GRAND_ROAD) await grandTurn(page, kind, action);
     await grandFight(page, 'estate');
@@ -2219,6 +2243,15 @@ async function runGrandProbe(page) {
     results.push({ kind: 'grand-mid', snap: s });
     fs.writeFileSync(path.join(OUT_DIR, 'grand-mid-state.json'), JSON.stringify(s, null, 2));
     note('grand', `mid: journal=${s?.journal} summarized=${s?.summarized} checks=${s?.journalChecks?.length} facts=${s?.facts?.length} (state ${s?.facts?.filter(f => f.aspect === 'state').length}, retracted ${s?.facts?.filter(f => f.retracted).length}) tells=${JSON.stringify(s?.heroTells)} dunstan=${JSON.stringify(s?.dunstan)?.slice(0, 600)}`);
+
+    // Cache telemetry (memory-research M2): the inspector store is in-memory and
+    // a reload empties it (10-03: 4 rows survived of ~100 calls) — read it now.
+    const usageBeforeReload = await page.evaluate(() => {
+        const snapI = window.__QF_INSPECTOR__?.();
+        return (snapI?.usageHistory || []).map(u => ({ mode: u.mode || u.lane || null, cachedShare: u.cachedShare ?? null, prompt: u.promptTokens ?? u.inputTokens ?? null }));
+    }).catch(() => []);
+    fs.writeFileSync(path.join(OUT_DIR, 'usage-before-reload.json'), JSON.stringify(usageBeforeReload, null, 2));
+    note('grand', `usage rows before reload ${usageBeforeReload.length}; mean cached share ${(usageBeforeReload.filter(u => typeof u.cachedShare === 'number').reduce((a, u) => a + u.cachedShare, 0) / Math.max(1, usageBeforeReload.filter(u => typeof u.cachedShare === 'number').length)).toFixed(2)}`);
 
     const reloaded = await reloadAndContinue(page);
     if (reloaded) for (const [kind, action] of GRAND_AFTER_RELOAD) await grandTurn(page, kind, action);
