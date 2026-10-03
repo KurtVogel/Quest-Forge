@@ -3070,3 +3070,25 @@ roster's `NPC_RECORD_KEYS` pattern) is the test that keeps a record from growing
   autosave = this device's session, cloud = deliberate manual saves. See DECISIONS.md.
 - **Generic LLM-generated three-act campaign structure** — rejected 2026-06-11 in favor of
   fronts (above): act structures produce railroady, beige plots.
+
+### [strengthening] A family of N directors is one runner and N prompts; a boundary that lands in one lane is copied by the next unless the copy is DELETED; a reason string two modules share is a contract with no test — status: `idea` (2026-10-03 audit, living-world + scene-art Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+Four patterns from the design lap. **(1)** The living-world directors (aftermath, absence drift,
+regional fronts, wonder — and the front director and upgrade beside them) are one gate, one
+`sendMessage`, and one base context written five or six times; every shared projection's slice × clamp
+numbers drifted per copy (`canonicalWorldFacts` −30×500 vs −20×400, `activeQuests` three ways,
+`journal` two). `directorUtils.js` already calls itself the family's shelf: a `runDirector(state, {
+prompt, anchor, label, temperature, buildContext, sanitize })` + `baseDirectorContext` leaves each
+module as prompt + place-specific context. **(2)** The 10-02 `normalizeFrontProposal` unification
+reached the two lanes that were read that day; `sanitizeAftermathProposals` — one import away, re-used
+by the regional lane — kept a weaker hand-rolled gate. When a boundary is unified, grep every
+`sanitize*` / `normalize*` / `shape*` in the family and delete what the boundary subsumes; the
+reducer re-validates anyway. **(3)** `imageGen.js` writes `fallbackReason` as prose (`'xai-empty'`,
+`'; gemini-empty (…)'`) and `fallbackNotice` parses it with `===` / `includes`; a renamed reason
+silently degrades the notice to the generic line and no test fails. Name reasons once, export them,
+read them on both sides. **(4)** One stamp, one owner: the hero's `portraitUpdatedAt` is written by
+two components, the NPC's by the reducer — and the four "request a portrait" handlers each assemble
+the same option set, so one of them dropping `sessionScope` would compile. The same lap found the
+four cast-line composers still disagreeing (a focused NPC portrait paints `lastNotes` as the look)
+and the two "is the hero still here" rules behind the hearsay and away blocks (the render guard gets
+an EMPTY locations list; a writer-side re-stamp compensates). None of it is a live bug; all of it is
+the shape that makes the next live bug.
