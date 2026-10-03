@@ -17,6 +17,7 @@
     "eval:death": "node scripts/deathCountEval.mjs",
     "eval:turns": "node scripts/turnGrammarEval.mjs",
     "eval:authority": "node scripts/playerAuthorityEval.mjs",
+    "eval:bakeoff": "node scripts/dmBakeoff.mjs",
     "eval:consequence": "node scripts/rollConsequenceEval.mjs",
     "eval:openings": "node scripts/openingEval.mjs",
     "test:watch": "vitest"
