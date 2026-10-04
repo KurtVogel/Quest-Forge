@@ -323,3 +323,15 @@ Judge: `gemini-3.7-flash`, thinking-free, temperature 0. "Voice" and "register" 
 | 9 aftermath | lived_in: Grounded aftermath with distinct physical texture and an emotionally restrained, gentle NPC offer. | lived_in: Contradicts the player's assumed premise to sharply escalate the encounter with vivid physical threat. | lived_in: Subtle, tactile grounding in the aftermath with an NPC acting with quiet purpose. |
 | 10 eerie | lived_in: Rich sensory detail with the hollow rungs and swell intervals makes the approach immediate and atmospheric. | lived_in, register off: The DM hard-invalidates the player's premise to force a combat encounter, ignoring the requested eerie tone for raw violence. | lived_in: Grounded sensory work with the painted sign board and the heavy ocean swell. |
 
+
+---
+
+## The key (revealed after the reading, 2026-10-04)
+
+| Narrator | Model |
+|---|---|
+| A | GPT-6 Astra (`gpt-6-astra`, $10 / $50 per M) |
+| B | Gemini 3.1 Pro (`gemini-3.1-pro-preview`) — the app's default DM |
+| C | GPT-6.1 Sol (`gpt-6.1-sol`, $2 / $10 per M) |
+
+**Vesa's blind pick: C — GPT-6.1 Sol.** Astra's numbers were a hair better on the word band and a hair worse on live asks, with the judge unable to separate the two on voice (9 of 10 "lived-in" each): nothing here buys 5× the price. Pro came third — half its turns echoed the player's action and it reached for mechanics on the pressure beats (a check for "watch her face", the fight re-opened on the standoff and the aftermath), which this engineless harness then amplified; in the real game those turns become dice and an exchange, so its chain is the least fairly compared. Ruling: DECISIONS.md 2026-10-04.
