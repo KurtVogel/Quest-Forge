@@ -61,7 +61,7 @@ const proposal = (extra = {}) => ({
     title: 'The Vacant Anchorage',
     goal: 'Claim the burned toll rights',
     stakes: 'A new hand on the river trade',
-    grimPortents: ['Salvagers stake claims', 'A muscle crew arrives'],
+    grimPortents: ['Salvagers stake claims', 'A muscle crew arrives', 'The tolls are sold twice'],
     faction: { name: 'The Salvage Ring', goal: 'Own the wrecks', stance: 'Indifferent', relationships: ['Buys from the weir-guild'] },
     reason: 'The burned fleet leaves the tolls unclaimed.',
     ...extra,
@@ -111,26 +111,47 @@ describe('buildFrontAftermathContext', () => {
 });
 
 describe('sanitizeAftermathProposals', () => {
-    it('caps at two proposals and drops entries missing title or goal', () => {
+    it('caps at two proposals and holds the ENGINE\'s gate — the one the installer re-validates with (2026-10-03 audit)', () => {
         const result = sanitizeAftermathProposals([
             proposal(),
-            proposal({ title: 'Second Successor' }),
-            proposal({ title: 'Third — past the cap' }),
+            proposal({ title: 'Second Successor', faction: { name: 'The Other Ring', goal: 'Own the docks' } }),
+            proposal({ title: 'Third — past the cap', faction: { name: 'A Third Ring', goal: 'Own the rest' } }),
         ]);
         expect(result).toHaveLength(2);
-        expect(sanitizeAftermathProposals([proposal({ title: '' }), proposal({ goal: '' })])).toEqual([]);
+        // The shaper used to pass anything with a title and a goal; every one
+        // of these would then be refused by INSTALL_AFTERMATH_FRONTS while the
+        // log said "1 successor pressure(s) proposed".
+        for (const weak of [
+            { title: '' }, { goal: '' }, { stakes: '' },
+            { grimPortents: ['only', 'two'] },
+            { faction: 'The Salvage Ring' },
+            { faction: { name: 'The Salvage Ring' } },
+        ]) {
+            expect(sanitizeAftermathProposals([proposal(weak)]), JSON.stringify(weak)).toEqual([]);
+        }
+        // One faction cannot drive both successors, nor one title name two.
+        expect(sanitizeAftermathProposals([proposal(), proposal({ title: 'Same Faction Again' })])).toHaveLength(1);
+        expect(sanitizeAftermathProposals([proposal(), proposal({ faction: { name: 'Another Ring', goal: 'x' } })])).toHaveLength(1);
     });
 
-    it('clamps fields, accepts snake_case grim_portents, and nulls a non-object faction', () => {
-        const result = sanitizeAftermathProposals([proposal({
+    it('clamps fields, accepts snake_case grim_portents, and carries the rationale as private notes', () => {
+        const [front] = sanitizeAftermathProposals([proposal({
             title: 'x'.repeat(300),
             grimPortents: undefined,
             grim_portents: ['One', '', 'Two', 'Three', 'Four', 'Five', 'Six — past the cap'],
-            faction: 'The Salvage Ring',
         })]);
-        expect(result[0].title).toHaveLength(90);
-        expect(result[0].grimPortents).toEqual(['One', 'Two', 'Three', 'Four', 'Five']);
-        expect(result[0].faction).toBeNull();
+        expect(front.title).toHaveLength(90);
+        expect(front.grimPortents).toEqual(['One', 'Two', 'Three', 'Four', 'Five']);
+        expect(front.notes).toBe('The burned fleet leaves the tolls unclaimed.');
+        expect(front).toMatchObject({ clock: 0, stage: 0, status: 'active' });
+    });
+
+    it('what it shapes, the installer accepts: a shaped proposal re-validates to the same front', async () => {
+        const { normalizeFrontProposal } = await import('../engine/fronts.js');
+        const [shaped] = sanitizeAftermathProposals([proposal()]);
+        const installed = normalizeFrontProposal(shaped, { existing: [], id: 'front-aftermath-1' });
+        expect(installed).toMatchObject({ title: shaped.title, goal: shaped.goal, stakes: shaped.stakes, grimPortents: shaped.grimPortents, notes: shaped.notes });
+        expect(installed.faction).toEqual(shaped.faction);
     });
 
     it('degrades junk to an empty list', () => {

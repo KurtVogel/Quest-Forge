@@ -10,8 +10,7 @@
  * re-validates every hook (`normalizeWonderHooks`), picks ONE with a crypto
  * die, and delays its window by 0–3 scenes.
  */
-import { sendMessage } from './adapter.js';
-import { cleanText, compactMessage, parseDirectorJson } from './directorUtils.js';
+import { cleanText, compactMessage, directorHero, isDirectorReady, runDirector } from './directorUtils.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 import { normalizeWonderHooks, sanitizePendingWonder } from '../engine/wonder.js';
@@ -45,10 +44,7 @@ Rules:
 - Do not alter HP, XP, inventory, quests, combat, or any mechanics. Everything here is private and never shown to the player.`;
 
 export function shouldGenerateWonder(state) {
-    return !!(sanitizePendingWonder(state?.session?.pendingWonder)
-        && state.session?.id
-        && state.settings?.apiKey
-        && !state.combat?.active);
+    return isDirectorReady(state, sanitizePendingWonder(state?.session?.pendingWonder));
 }
 
 export function buildWonderContext(state) {
@@ -64,13 +60,7 @@ export function buildWonderContext(state) {
             paceDial: normalizePaceDial(state.settings?.paceDial),
             playerInstructions: cleanText(state.settings?.customSystemPrompt, 600),
         },
-        hero: {
-            name: cleanText(character.name, 100),
-            race: cleanText(character.race, 60),
-            class: cleanText(character.class, 60),
-            level: character.level || 1,
-            background: cleanText(character.background, 400),
-        },
+        hero: { ...directorHero(character), background: cleanText(character.background, 400) },
         party: (state.party || []).slice(0, 4).map(companion => ({
             name: cleanText(companion.name, 100),
             role: cleanText(companion.role, 100),
@@ -107,14 +97,12 @@ export async function generateWonder(state) {
     if (!shouldGenerateWonder(state)) {
         throw new Error('No wonder is awaiting generation.');
     }
-    const response = await sendMessage({
-        provider: state.settings.llmProvider,
-        apiKey: state.settings.apiKey,
-        model: state.settings.model,
-        systemPrompt: WONDER_DIRECTOR_PROMPT,
-        messageHistory: [],
-        userMessage: JSON.stringify(buildWonderContext(state)),
+    const parsed = await runDirector(state, {
+        prompt: WONDER_DIRECTOR_PROMPT,
+        context: buildWonderContext(state),
+        anchor: 'hooks',
+        label: 'wonder',
         temperature: 0.9, // the whole point is the unexpected — inside a strict schema
     });
-    return normalizeWonderHooks(parseDirectorJson(response, 'hooks', 'wonder').hooks, { fronts: state.fronts || [] });
+    return normalizeWonderHooks(parsed.hooks, { fronts: state.fronts || [] });
 }

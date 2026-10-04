@@ -824,6 +824,26 @@ export function upsertLocation(locations = [], name, profile = null) {
  * a false "related" merely skips one flavor beat, a false "unrelated" narrates
  * weeks of off-screen change for a place the hero never left.
  */
+/**
+ * THE "is the hero still at that place" judgement (2026-10-03 audit: four
+ * sites asked it under three rules). True for the same name, the same
+ * canonical record (an alias or a drifted spelling), or two records of one
+ * CLUSTER — the town square and its own tavern are one audience and one orbit
+ * (`areRelatedPlaces`). Record-aware by construction: a caller that holds the
+ * registry passes it, so "The Gilded Eel" is still Stonebridge with no town
+ * token in its name. Read by the hearsay block, the away block, the arrival's
+ * offer-survival rule, and the combat re-open.
+ */
+export function isStillAtPlace(locations, place, here) {
+    if (typeof place !== 'string' || typeof here !== 'string' || !place.trim() || !here.trim()) return false;
+    if (isSameLocation(place, here)) return true;
+    const list = Array.isArray(locations) ? locations : [];
+    const placeIdx = findLocationRecord(list, place);
+    const hereIdx = findLocationRecord(list, here);
+    if (placeIdx === -1 || hereIdx === -1) return false;
+    return placeIdx === hereIdx || areRelatedPlaces(list[placeIdx], list[hereIdx]);
+}
+
 export function areRelatedPlaces(a, b) {
     const pool = (record) => {
         const tokens = new Set();

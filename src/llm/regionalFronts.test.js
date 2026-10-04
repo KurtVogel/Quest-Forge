@@ -46,7 +46,7 @@ const proposal = () => ({
     title: 'The Brine Compact',
     goal: 'Corner the salt trade',
     stakes: 'Every pan pays the compact',
-    grimPortents: ['Pans change hands', 'A rival drowns'],
+    grimPortents: ['Pans change hands', 'A rival drowns', 'The salt road closes'],
     faction: { name: 'The Compact', goal: 'Own the pans', stance: 'Wary of outsiders', relationships: ['Leans on the harbormaster'] },
     reason: 'Salt is the region\'s one currency.',
 });

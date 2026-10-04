@@ -16,7 +16,7 @@ import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/
 import { generateAbsenceDrift, shouldGenerateAbsenceDrift } from '../../llm/absenceDrift.js';
 import { generateRegionalFronts, shouldGenerateRegionalFronts } from '../../llm/regionalFronts.js';
 import { generateWonder, shouldGenerateWonder } from '../../llm/wonderDirector.js';
-import { isDirectorBackingOff } from '../../engine/directorRetry.js';
+import { isDirectorBackingOff, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
 import { isWonderRequest } from '../../engine/wonder.js';
 import { formatSecrecyTag } from '../../engine/storyMemory.js';
 import { liveWorldFacts } from '../../engine/worldFacts.js';
@@ -61,7 +61,21 @@ function cleanDisplayText(text) {
  * (null when nothing is pending): one key fires at most one call; success
  * parks the key so the result installs at most once per mount, failure clears
  * the slot so a later dependency change retries once the backoff has passed.
+ *
+ * A MARKER-keyed director's key and install action come from the engine's one
+ * registry (`RETRYABLE_DIRECTORS` — the reducer's give-up reads the same
+ * row), so a director cannot be retried under one action and installed under
+ * another; a row here adds only the gate, the LLM call, and the log strings.
  */
+const markerDirector = (name, { ready, generate, logSuccess, failureNote }) => ({
+    name,
+    getKey: (s) => (ready(s) ? RETRYABLE_DIRECTORS[name].pendingKey(s.session) : null),
+    generate,
+    install: RETRYABLE_DIRECTORS[name].install,
+    logSuccess,
+    failureNote,
+});
+
 const BACKGROUND_DIRECTORS = [
     {
         // Privately replace the generic safety-net front with a grounded 2–3-front web.
@@ -72,42 +86,34 @@ const BACKGROUND_DIRECTORS = [
         logSuccess: (s, key, fronts) => `[Fronts] Generated ${fronts.length} private campaign pressures.`,
         failureNote: '[Fronts] Initial private generation failed; deterministic front remains active:',
     },
-    {
-        // A resolved front's aftermath: 0–2 successor pressures, often none.
-        name: 'frontAftermath',
-        getKey: (s) => (shouldGenerateFrontAftermath(s) ? s.session.pendingFrontAftermath.frontId : null),
+    // A resolved front's aftermath: 0–2 successor pressures, often none.
+    markerDirector('frontAftermath', {
+        ready: shouldGenerateFrontAftermath,
         generate: generateFrontAftermath,
-        install: (sessionId, key, fronts) => ({ type: 'INSTALL_AFTERMATH_FRONTS', payload: { sessionId, frontId: key, fronts } }),
         logSuccess: (s, key, fronts) => `[Fronts] Aftermath of ${key}: ${fronts.length} successor pressure(s) proposed.`,
         failureNote: '[Fronts] Aftermath generation failed; will retry:',
-    },
-    {
-        // What happened HERE while the hero was away (DECISIONS.md 2026-08-05).
-        name: 'absenceDrift',
-        getKey: (s) => (shouldGenerateAbsenceDrift(s) ? s.session.pendingAbsenceDrift.key : null),
+    }),
+    // What happened HERE while the hero was away (DECISIONS.md 2026-08-05).
+    markerDirector('absenceDrift', {
+        ready: shouldGenerateAbsenceDrift,
         generate: generateAbsenceDrift,
-        install: (sessionId, key, drift) => ({ type: 'INSTALL_ABSENCE_DRIFT', payload: { sessionId, key, drift } }),
         logSuccess: (s, key, drift) => `[LivingWorld] Absence drift for ${s.session.pendingAbsenceDrift?.locationName}: ${drift.developments.length} development(s)${drift.worldFact ? ' + fact' : ''}${drift.frontSymptom ? ' + symptom' : ''}.`,
         failureNote: '[LivingWorld] Absence-drift generation failed; will retry:',
-    },
-    {
-        // Native pressures for a genuinely new region (world-tempo component 9).
-        name: 'regionalFronts',
-        getKey: (s) => (shouldGenerateRegionalFronts(s) ? s.session.pendingRegionalFronts.key : null),
+    }),
+    // Native pressures for a genuinely new region (world-tempo component 9).
+    markerDirector('regionalFronts', {
+        ready: shouldGenerateRegionalFronts,
         generate: generateRegionalFronts,
-        install: (sessionId, key, fronts) => ({ type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId, key, fronts } }),
         logSuccess: (s, key, fronts) => `[LivingWorld] Native pressures for ${s.session.pendingRegionalFronts?.region}: ${fronts.length} proposed.`,
         failureNote: '[LivingWorld] Regional front seeding failed; will retry:',
-    },
-    {
-        // The wonder die (WOW 2026-09-18): something strange for a long lull.
-        name: 'wonder',
-        getKey: (s) => (shouldGenerateWonder(s) ? s.session.pendingWonder.key : null),
+    }),
+    // The wonder die (WOW 2026-09-18): something strange for a long lull.
+    markerDirector('wonder', {
+        ready: shouldGenerateWonder,
         generate: generateWonder,
-        install: (sessionId, key, hooks) => ({ type: 'INSTALL_WONDER', payload: { sessionId, key, hooks } }),
         logSuccess: (s, key, hooks) => `[Wonder] ${hooks.length} hook(s) proposed for ${key}; the die picks one.`,
         failureNote: '[Wonder] Wonder generation failed; will retry:',
-    },
+    }),
 ];
 
 export default function ChatPanel() {

@@ -316,7 +316,6 @@ export const handlers = {
             pendingFrontAftermath: {
                 frontId: existing.id,
                 title: updatedFront.title,
-                resolvedAt: Date.now(),
             },
             chapterCloseSuggested: {
                 reason: 'front',
@@ -417,7 +416,7 @@ export const handlers = {
         console.warn(`[LivingWorld] ${name} failed ${attempts} times for ${key}; giving up — the quiet answer stands.`);
         return gameReducer(
             { ...state, session: { ...state.session, directorFailures: failures } },
-            director.giveUp(state.session.id, key)
+            director.install(state.session.id, key, director.empty)
         );
     },
 

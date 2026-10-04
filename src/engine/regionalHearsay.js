@@ -23,7 +23,7 @@
  * the same place twice.
  */
 
-import { areRelatedPlaces, findLocationRecord, isSameLocation } from './locationRegistry.js';
+import { areRelatedPlaces, findLocationRecord, isSameLocation, isStillAtPlace } from './locationRegistry.js';
 import { distanceSince } from './worldTempo.js';
 import { listPublicTells } from './heroTells.js';
 import { cleanText as typedText } from './text.js';
@@ -102,14 +102,14 @@ function countTellings(recentHearsay, deedKey) {
         .filter(entry => typeof entry === 'string' && entry.startsWith(`${deedKey}|`)).length;
 }
 
+/** Salience floor for a witnessed story moment to travel as gossip. */
+export const HEARSAY_MIN_CARD_SALIENCE = 4;
+
 /**
  * Deterministically pick ≤2 deeds that could plausibly be tavern talk at the
  * place the hero just arrived. Pure; the SET_LOCATION handler wires it.
  * Returns { items, ledgerEntries } — empty items means no line this arrival.
  */
-/** Salience floor for a witnessed story moment to travel as gossip. */
-export const HEARSAY_MIN_CARD_SALIENCE = 4;
-
 export function selectRegionalHearsay({
     fronts = [],
     recentEncounters = [],
@@ -244,16 +244,11 @@ export function selectRegionalHearsay({
  * selection is empty — the deeds are already ledger-burned for the whole
  * audience — so nulling on every empty selection destroyed the offer before
  * any NPC could voice it. Only arrival at an UNRELATED place drops it; the
- * render guard's location match and age window still gate display.
+ * render guard asks the SAME question (`isStillAtPlace`) and the age window
+ * still gates display.
  */
 export function hearsayOfferSurvivesArrival(regionalHearsay, locations, here) {
-    const offerPlace = regionalHearsay?.locationName;
-    if (!offerPlace || !here) return false;
-    if (isSameLocation(offerPlace, here)) return true;
-    const offerIdx = findLocationRecord(locations || [], offerPlace);
-    const hereIdx = findLocationRecord(locations || [], here);
-    if (offerIdx === -1 || hereIdx === -1) return false;
-    return areRelatedPlaces(locations[offerIdx], locations[hereIdx]);
+    return isStillAtPlace(locations, regionalHearsay?.locationName, here);
 }
 
 export function appendHearsayLedger(recentHearsay, ledgerEntries) {
@@ -271,10 +266,11 @@ export function sanitizeRecentHearsay(value) {
 
 /**
  * The private prompt block. Renders only while the hero is still at the
- * arrival place and the window is open; the true events remain exactly what
+ * arrival place — or anywhere in its cluster, judged against the registry
+ * (`locations`) — and the window is open; the true events remain exactly what
  * the table played — the LLM performs the distortion, never records it.
  */
-export function buildRegionalHearsayBlock(regionalHearsay, { currentLocation, messages = null, messageCount = 0 } = {}) {
+export function buildRegionalHearsayBlock(regionalHearsay, { currentLocation, locations = [], messages = null, messageCount = 0 } = {}) {
     if (!regionalHearsay || typeof regionalHearsay !== 'object') return '';
     const items = (Array.isArray(regionalHearsay.items) ? regionalHearsay.items : [])
         .map(item => ({ text: cleanText(item?.text, 300), grade: GRADE_GUIDANCE[item?.grade] ? item.grade : 'secondhand' }))
@@ -282,7 +278,7 @@ export function buildRegionalHearsayBlock(regionalHearsay, { currentLocation, me
         .slice(0, HEARSAY_MAX_ITEMS);
     if (items.length === 0) return '';
     if (!Number.isFinite(regionalHearsay.arrivedAtMessage)) return '';
-    if (!sameSpot([], regionalHearsay.locationName, currentLocation)) return '';
+    if (!isStillAtPlace(locations, regionalHearsay.locationName, currentLocation)) return '';
     if (distanceSince(messages, regionalHearsay.arrivedAtMessage, messageCount) > HEARSAY_WINDOW_MESSAGES) return '';
 
     const lines = [];

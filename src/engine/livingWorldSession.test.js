@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+    PENDING_MARKER_KEYS,
     sanitizeAbsenceDriftState,
     sanitizeFrontDirector,
     sanitizeLivingWorldSession,
@@ -22,11 +23,39 @@ describe('pending one-shot markers', () => {
 
         expect(sanitizePendingRegionalFronts({ key: 'k' })).toBeNull();
         expect(sanitizePendingRegionalFronts({ key: 'k', region: 'Rimefell', locationName: 'Cold Harbor' }))
-            .toEqual({ key: 'k', region: 'Rimefell', locationName: 'Cold Harbor', atMessage: 0 });
+            .toEqual({ key: 'k', region: 'Rimefell', locationName: 'Cold Harbor' });
 
         expect(sanitizePendingFrontAftermath('front-x')).toBeNull();
         expect(sanitizePendingFrontAftermath({ frontId: 'front-x', title: { x: 1 }, resolvedAt: 'now' }))
-            .toEqual({ frontId: 'front-x', title: '', resolvedAt: null });
+            .toEqual({ frontId: 'front-x', title: '' });
+    });
+
+    it('project to the keys that have a READER (2026-10-03 audit: resolvedAt and atMessage were stamped, typed, and read nowhere)', () => {
+        const loaded = {
+            pendingAbsenceDrift: sanitizePendingAbsenceDrift({ key: 'loc|50', locationName: 'Aldermill', returnMessage: 50, awayDistance: 40, extra: 'x' }),
+            pendingRegionalFronts: sanitizePendingRegionalFronts({ key: 'k', region: 'Rimefell', locationName: 'Cold Harbor', atMessage: 60 }),
+            pendingFrontAftermath: sanitizePendingFrontAftermath({ frontId: 'front-x', title: 'The Tithe', resolvedAt: 1700000000000 }),
+        };
+        for (const [marker, keys] of Object.entries(PENDING_MARKER_KEYS)) {
+            expect(Object.keys(loaded[marker]).sort(), marker).toEqual([...keys].sort());
+        }
+    });
+
+    it('a past-the-end stamp clamps to the transcript — a hostile save cannot hold a block open (2026-10-03 audit)', () => {
+        // The hearsay / away windows test `distance > N`, and a stamp beyond the
+        // end measures 0: unclamped, the block rendered for as long as the
+        // hero stood there.
+        const session = sanitizeLivingWorldSession({
+            id: 's1',
+            pendingAbsenceDrift: { key: 'loc|50', locationName: 'Aldermill', awayDistance: 40, returnMessage: 1e9 },
+            absenceDrift: { locationName: 'Aldermill', arrivedAtMessage: 1e9, awayDistance: 1e9, developments: [], fact: 'x' },
+            regionalHearsay: { locationName: 'Aldermill', arrivedAtMessage: 1e9, items: [{ text: 'x', grade: 'firsthand' }] },
+        }, { maxMessageCount: 120 });
+        expect(session.pendingAbsenceDrift.returnMessage).toBe(120);
+        expect(session.absenceDrift.arrivedAtMessage).toBe(120);
+        expect(session.regionalHearsay.arrivedAtMessage).toBe(120);
+        // A DISTANCE is not a stamp: it is typed, never clamped to the transcript.
+        expect(session.absenceDrift.awayDistance).toBe(1e9);
     });
 });
 
@@ -95,8 +124,8 @@ describe('sanitizeLivingWorldSession', () => {
         const session = {
             id: 's1',
             pendingAbsenceDrift: { key: 'loc|50', locationName: 'Aldermill', awayDistance: 40, returnMessage: 50 },
-            pendingRegionalFronts: { key: 'rimefell|60', region: 'Rimefell', locationName: 'Cold Harbor', atMessage: 60 },
-            pendingFrontAftermath: { frontId: 'front-x', title: 'The Tithe', resolvedAt: 1700000000000 },
+            pendingRegionalFronts: { key: 'rimefell|60', region: 'Rimefell', locationName: 'Cold Harbor' },
+            pendingFrontAftermath: { frontId: 'front-x', title: 'The Tithe' },
             absenceDrift: {
                 locationName: 'Aldermill', arrivedAtMessage: 50, awayDistance: 40,
                 developments: [{ name: 'Marta', agenda: 'roof', lastNotes: 'married', visible: 'ring' }],

@@ -1,5 +1,4 @@
-import { sendMessage } from './adapter.js';
-import { cleanText, compactMessage, parseDirectorJson } from './directorUtils.js';
+import { cleanText, compactMessage, runDirector } from './directorUtils.js';
 import { FRONTS_VERSION, normalizeFaction, normalizeFrontProposal } from '../engine/fronts.js';
 import { MAX_ACTIVE_FRONTS, WEB_TARGET_FRONTS } from '../engine/worldTempo.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH, CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
@@ -153,12 +152,10 @@ function sanitizeFaction(value) {
 }
 
 // Both error surfaces reach the Settings upgrade dialog — keep them verbatim.
-function parseUpgradeResponse(response) {
-    return parseDirectorJson(response, ['front_enrichments', 'new_fronts'], 'living-world upgrade', {
-        missingMessage: 'The living-world upgrade did not contain a valid front web.',
-        malformedMessage: 'The living-world upgrade was malformed. No campaign state was changed.',
-    });
-}
+const UPGRADE_PARSE_ERRORS = {
+    missingMessage: 'The living-world upgrade did not contain a valid front web.',
+    malformedMessage: 'The living-world upgrade was malformed. No campaign state was changed.',
+};
 
 export function sanitizeFrontUpgrade(raw, existingFronts = []) {
     const existingIds = new Set(existingFronts.map(front => front.id).filter(Boolean));
@@ -206,16 +203,14 @@ export async function upgradeCampaignFrontsV2(state) {
     // Resolved fronts are history: never sent, never enriched, never counted.
     const existingFronts = (state.fronts || []).filter(front => (front.status || 'active') !== 'resolved');
     const { context, counts } = buildFrontUpgradeContext(state);
-    const response = await sendMessage({
-        provider: state.settings.llmProvider,
-        apiKey: state.settings.apiKey,
-        model: state.settings.model,
-        systemPrompt: FRONT_UPGRADE_PROMPT,
-        messageHistory: [],
-        userMessage: JSON.stringify(context),
-        temperature: 0.7, // creative front invention, but inside a strict JSON schema
+    const parsed = await runDirector(state, {
+        prompt: FRONT_UPGRADE_PROMPT,
+        context,
+        anchor: ['front_enrichments', 'new_fronts'],
+        label: 'living-world upgrade',
+        errors: UPGRADE_PARSE_ERRORS,
     });
-    const sanitized = sanitizeFrontUpgrade(parseUpgradeResponse(response), existingFronts);
+    const sanitized = sanitizeFrontUpgrade(parsed, existingFronts);
     const enrichmentIds = new Set(sanitized.enrichments.map(entry => entry.id));
     const missingFactionIds = existingFronts
         .filter(front => !front.faction?.name || !front.faction?.goal)

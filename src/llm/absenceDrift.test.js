@@ -89,13 +89,33 @@ describe('buildAbsenceDriftContext', () => {
         expect(context.npcsOfThisPlace.map(npc => npc.name)).toContain('Hedda');
     });
 
-    it('supplies theater fronts with their live intensity band, never clocks', () => {
+    it('supplies THE theater front with its live intensity band — never clocks, never an id the reply cannot return', () => {
         const context = buildAbsenceDriftContext(baseState());
-        expect(context.offScreenPressuresHoldingThisPlace).toHaveLength(1);
-        const pressure = context.offScreenPressuresHoldingThisPlace[0];
-        expect(pressure).toMatchObject({ front_id: 'front-tithe', faction: 'Grey Ledger', maximumIntensity: 'presence' });
-        expect(pressure.clock).toBeUndefined();
-        expect(pressure.stage).toBeUndefined();
+        const pressure = context.offScreenPressureHoldingThisPlace;
+        expect(pressure).toMatchObject({ faction: 'Grey Ledger', maximumIntensity: 'presence' });
+        expect(Object.keys(pressure).sort()).toEqual(['faction', 'goal', 'intensityMeaning', 'maximumIntensity']);
+    });
+
+    it('offers ONE pressure even when two fronts hold the place — the one the installer binds the symptom to (2026-10-03 audit)', () => {
+        // The reply schema has one `front_symptom` string and no front id; the
+        // context used to list two fronts, so a symptom written for the second
+        // installed under the first one's id and intensity band.
+        const state = baseState();
+        state.fronts = [
+            ...state.fronts,
+            { id: 'front-second', status: 'active', clock: 6, maxClock: 6, stage: 3, grimPortents: ['a', 'b', 'c'], faction: { name: 'The Second Hand', goal: 'Take the weir' } },
+        ];
+        state.locations = state.locations.map(record => ({ ...record, theaterFrontIds: [...(record.theaterFrontIds || []), 'front-second'] }));
+        const context = buildAbsenceDriftContext(state);
+        expect(context.offScreenPressureHoldingThisPlace.faction).toBe('Grey Ledger');
+        expect(JSON.stringify(context)).not.toContain('The Second Hand');
+        // No pressure holds the place: the key is null, never an empty list to pick from.
+        state.locations = state.locations.map(record => ({ ...record, theaterFrontIds: [] }));
+        expect(buildAbsenceDriftContext(state).offScreenPressureHoldingThisPlace).toBeNull();
+    });
+
+    it('says the absence in turns, the product\'s one unit of time', () => {
+        expect(buildAbsenceDriftContext(baseState()).returnedTo.absenceLength).toMatch(/^about \d+ turns of play$/);
     });
 });
 
@@ -162,7 +182,7 @@ describe('buildWhileYouWereAwayBlock', () => {
             messageCount: 54,
         });
         expect(block).toContain('## WHILE YOU WERE AWAY — PRIVATE');
-        expect(block).toContain('~20 scenes');
+        expect(block).toContain('~20 turns away');
         expect(block).toContain('Marta: A wedding ring');
         expect(block).toContain('ferry runs again');
         expect(block).toContain('maximum intensity indirect');

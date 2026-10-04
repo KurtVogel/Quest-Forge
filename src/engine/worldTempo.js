@@ -97,6 +97,26 @@ export function isAbsenceDriftLocalNpc(npc, locationName) {
 }
 
 /**
+ * THE front an absence drift may show a symptom of at a place: the first
+ * active front holding theater there. One lookup for the director's context
+ * and the installer (2026-10-03 audit): the context used to offer up to TWO
+ * theater fronts while the reply carries one symptom with no front id and the
+ * installer bound it to the first — a symptom written for the second front
+ * landed under the first one's id and intensity band.
+ */
+export function findDriftTheaterFront(fronts, locationRecord) {
+    if (!locationRecord) return null;
+    const theaterIds = Array.isArray(locationRecord.theaterFrontIds) ? locationRecord.theaterFrontIds : [];
+    return (Array.isArray(fronts) ? fronts : [])
+        .find(front => front && (front.status || 'active') === 'active' && theaterIds.includes(front.id)) || null;
+}
+
+/** An absence in the product's own unit: a turn is the player's line + the DM's answer. */
+export function turnsAway(awayDistance) {
+    return Math.max(1, Math.round((Number(awayDistance) || 0) / 2));
+}
+
+/**
  * Conversational distance since an anchor stamped as "message count at the
  * time" (encounter ledger, directive grants, front resolutions): the first
  * message appended after the stamp sits at index `anchorIndex`, so counting

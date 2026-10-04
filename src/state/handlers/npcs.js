@@ -50,7 +50,7 @@ import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/sto
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isDirectionEvidencedInText, isLocationEvidencedInText, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, linkLocations, normalizeTravelDirection, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
-import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
+import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, findDriftTheaterFront, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { isStaleCampaignAction, upsertNpc } from './shared.js';
 import { cleanTextField, LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
@@ -372,19 +372,15 @@ export const handlers = {
                 ...next.session,
                 regionalHearsay: { locationName: name, arrivedAtMessage: messageIndex, items: selection.items },
             };
-        } else if (hearsayOfferSurvivesArrival(state.session?.regionalHearsay, locations, name)) {
-            // Intra-settlement movement (2026-08-31 P1 r3): the first move from
-            // the town square to its own tavern used to null the live offer —
-            // the cluster rule guarantees an empty selection at a related place
-            // while the deeds are already ledger-burned for the whole audience.
-            // Re-stamp the offer onto the new spelling (so the render guard's
-            // location match keeps working for "The Gilded Eel" with no town
-            // token); the original arrival stamp keeps the age window honest.
-            next.session = {
-                ...next.session,
-                regionalHearsay: { ...state.session.regionalHearsay, locationName: name },
-            };
-        } else {
+        } else if (!hearsayOfferSurvivesArrival(state.session?.regionalHearsay, locations, name)) {
+            // Only an UNRELATED arrival drops a live offer. Intra-settlement
+            // movement (2026-08-31 P1 r3) keeps it untouched: the cluster rule
+            // guarantees an empty selection at a related place while the deeds
+            // are already ledger-burned for the whole audience. The render
+            // guard judges with the same record-aware predicate
+            // (isStillAtPlace), so the offer keeps its own place name and
+            // arrival stamp — the writer no longer re-stamps it onto each new
+            // spelling to compensate for a guard that could not see records.
             next.session = { ...next.session, regionalHearsay: null };
         }
 
@@ -491,10 +487,9 @@ export const handlers = {
         const locations = state.locations || [];
         const idx = findLocationRecord(locations, pending.locationName);
         const record = idx === -1 ? null : locations[idx];
-        const theaterFront = record
-            ? (state.fronts || []).find(front => (front.status || 'active') === 'active'
-                && (record.theaterFrontIds || []).includes(front.id))
-            : null;
+        // The same lookup the director's context used: the symptom was written
+        // for exactly this front.
+        const theaterFront = findDriftTheaterFront(state.fronts, record);
         const symptomText = text(drift.frontSymptom, 240);
         const frontSymptom = theaterFront && symptomText
             ? { frontId: theaterFront.id, maxIntensity: getFrontIntensityBand(theaterFront), text: symptomText }
@@ -653,7 +648,6 @@ export const handlers = {
                 key: `${region.toLowerCase()}|${(state.messages || []).length}`,
                 region,
                 locationName: locations[classifiedIdx].name,
-                atMessage: (state.messages || []).length,
             },
         };
         return next;

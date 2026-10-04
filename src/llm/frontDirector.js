@@ -1,5 +1,4 @@
-import { sendMessage } from './adapter.js';
-import { cleanText, parseDirectorJson } from './directorUtils.js';
+import { cleanText, runDirector } from './directorUtils.js';
 import { isFrontGenerationClosed, normalizeFrontProposal } from '../engine/fronts.js';
 import { WEB_TARGET_FRONTS } from '../engine/worldTempo.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
@@ -80,16 +79,8 @@ export async function generateCampaignFronts(state) {
         },
         travelingAlone: (state.party || []).length === 0,
     };
-    const response = await sendMessage({
-        provider: state.settings.llmProvider,
-        apiKey: state.settings.apiKey,
-        model: state.settings.model,
-        systemPrompt: INITIAL_FRONTS_PROMPT,
-        messageHistory: [],
-        userMessage: JSON.stringify(context),
-        temperature: 0.7, // creative front invention, but inside a strict JSON schema
-    });
-    const fronts = sanitizeGeneratedFronts(parseDirectorJson(response, 'fronts', 'living-world').fronts);
+    const parsed = await runDirector(state, { prompt: INITIAL_FRONTS_PROMPT, context, anchor: 'fronts', label: 'living-world' });
+    const fronts = sanitizeGeneratedFronts(parsed.fronts);
     if (fronts.length < 2) throw new Error('The living-world director did not produce two safe, specific fronts.');
     return fronts;
 }

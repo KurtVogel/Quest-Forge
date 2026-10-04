@@ -22,7 +22,7 @@ import {
 import { appendRecentEncounter, buildEncounterEntry, distanceSince } from '../../engine/worldTempo.js';
 import { HEARSAY_WINDOW_MESSAGES } from '../../engine/regionalHearsay.js';
 import { describeFightCause } from '../../engine/heroDeath.js';
-import { isSameLocation } from '../../engine/locationRegistry.js';
+import { isStillAtPlace } from '../../engine/locationRegistry.js';
 import { initialGameState } from '../initialState.js';
 import { gameReducer } from '../gameReducer.js';
 import { appendRollHistory, clearSustainedSpellState, reviveCharacter, systemMessage } from './shared.js';
@@ -206,7 +206,7 @@ export const handlers = {
             const offer = state.session?.regionalHearsay;
             const combatStartIdx = state.combat?.startedAtMessage;
             if (offer && Number.isFinite(offer.arrivedAtMessage) && Number.isFinite(combatStartIdx)
-                && isSameLocation(offer.locationName, state.currentLocation)
+                && isStillAtPlace(state.locations, offer.locationName, state.currentLocation)
                 && distanceSince(state.messages, offer.arrivedAtMessage, combatStartIdx) <= HEARSAY_WINDOW_MESSAGES) {
                 newState.session = {
                     ...newState.session,

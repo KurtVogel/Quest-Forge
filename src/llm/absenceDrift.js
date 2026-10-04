@@ -16,10 +16,8 @@
  * bond history is untouchable, mechanics are untouchable, a weak proposal
  * installs nothing, and a quiet "nothing much changed" is a first-class answer.
  */
-import { sendMessage } from './adapter.js';
-import { cleanText, parseDirectorJson } from './directorUtils.js';
-import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
-import { findLocationRecord, isSameLocation } from '../engine/locationRegistry.js';
+import { baseDirectorContext, cleanText, isDirectorReady, runDirector } from './directorUtils.js';
+import { findLocationRecord, isStillAtPlace } from '../engine/locationRegistry.js';
 import {
     ABSENCE_DRIFT_MIN_AWAY,
     ABSENCE_DRIFT_WINDOW_MESSAGES,
@@ -28,11 +26,12 @@ import {
     clampIntensity,
     describeIntensity,
     distanceSince,
+    findDriftTheaterFront,
     getFrontIntensityBand,
     isAbsenceDriftLocalNpc,
+    turnsAway,
 } from '../engine/worldTempo.js';
 import { namesMatch } from '../engine/npcRoster.js';
-import { liveWorldFacts } from '../engine/worldFacts.js';
 
 export { ABSENCE_DRIFT_MIN_AWAY, ABSENCE_DRIFT_WINDOW_MESSAGES, MAX_DRIFT_DEVELOPMENTS };
 
@@ -49,7 +48,7 @@ Output ONLY valid JSON:
     }
   ],
   "world_fact": "ONE compact new canonical fact about how this place changed during the absence, or null",
-  "front_symptom": "only if an off-screen pressure listed below holds this place: one symptom AT OR BELOW its stated maximum intensity, or null"
+  "front_symptom": "only if the supplied context names an off-screen pressure holding this place: one symptom of THAT pressure, AT OR BELOW its stated maximum intensity, or null"
 }
 
 Rules:
@@ -62,19 +61,7 @@ Rules:
 - Keep every field compact and specific. All of this is private and never shown to the player.`;
 
 export function shouldGenerateAbsenceDrift(state) {
-    return !!(state?.session?.pendingAbsenceDrift
-        && state.session?.id
-        && state.settings?.apiKey
-        && !state.combat?.active);
-}
-
-/** Active fronts holding theater at the given location record. */
-function theaterFrontsAt(state, locationRecord) {
-    if (!locationRecord) return [];
-    const theaterIds = locationRecord.theaterFrontIds || [];
-    return (state.fronts || [])
-        .filter(front => (front.status || 'active') === 'active' && theaterIds.includes(front.id))
-        .slice(0, 2);
+    return isDirectorReady(state, state?.session?.pendingAbsenceDrift);
 }
 
 export function buildAbsenceDriftContext(state) {
@@ -82,7 +69,12 @@ export function buildAbsenceDriftContext(state) {
     const locations = state.locations || [];
     const idx = findLocationRecord(locations, pending.locationName);
     const record = idx === -1 ? null : locations[idx];
-    const character = state.character || {};
+    const base = baseDirectorContext(state);
+    // ONE pressure, the one INSTALL_ABSENCE_DRIFT will bind the symptom to
+    // (findDriftTheaterFront, shared with the installer): the reply schema has
+    // one symptom string and no front id, so offering two was offering a
+    // choice the reply could not express.
+    const theaterFront = findDriftTheaterFront(state.fronts, record);
 
     const localNpcs = (state.npcs || [])
         .filter(npc => isAbsenceDriftLocalNpc(npc, pending.locationName))
@@ -101,40 +93,20 @@ export function buildAbsenceDriftContext(state) {
             name: cleanText(pending.locationName, 120),
             type: record?.type || null,
             intrinsicDanger: record?.danger || null,
-            absenceLength: `${pending.awayDistance || 0} conversational beats (~${Math.round((pending.awayDistance || 0) / 2)} scenes)`,
+            absenceLength: `about ${turnsAway(pending.awayDistance)} turns of play`,
         },
-        offScreenPressuresHoldingThisPlace: theaterFrontsAt(state, record).map(front => ({
-            front_id: front.id,
-            faction: cleanText(front.faction?.name, 100),
-            goal: cleanText(front.faction?.goal || front.goal, 240),
-            maximumIntensity: getFrontIntensityBand(front),
-            intensityMeaning: describeIntensity(getFrontIntensityBand(front)),
-        })),
-        campaignPremise: cleanText(state.session?.premise, CAMPAIGN_PREMISE_MAX_LENGTH),
-        hero: {
-            name: cleanText(character.name, 100),
-            race: cleanText(character.race, 60),
-            class: cleanText(character.class, 60),
-            level: character.level || 1,
-        },
+        offScreenPressureHoldingThisPlace: theaterFront ? {
+            faction: cleanText(theaterFront.faction?.name, 100),
+            goal: cleanText(theaterFront.faction?.goal || theaterFront.goal, 240),
+            maximumIntensity: getFrontIntensityBand(theaterFront),
+            intensityMeaning: describeIntensity(getFrontIntensityBand(theaterFront)),
+        } : null,
+        campaignPremise: base.campaignPremise,
+        hero: base.hero,
         npcsOfThisPlace: localNpcs,
-        canonicalWorldFacts: liveWorldFacts(state.worldFacts).slice(-20).map(fact => ({
-            category: cleanText(fact.category, 60),
-            fact: cleanText(fact.fact, 400),
-        })),
-        // Journal entries have only summary/keyDecisions/consequences/location —
-        // the old title/content projection shipped `title: ""` every time and
-        // documented a schema that isn't real (2026-08-31 P2).
-        journal: (state.journal || []).slice(-4).map(entry => ({
-            summary: cleanText(entry.summary, 800),
-        })),
-        activeQuests: (state.quests || [])
-            .filter(quest => !['completed', 'failed'].includes(quest.status))
-            .slice(-8)
-            .map(quest => ({
-                name: cleanText(quest.name, 120),
-                description: cleanText(quest.description, 240),
-            })),
+        canonicalWorldFacts: base.canonicalWorldFacts,
+        journal: base.journal,
+        activeQuests: base.activeQuests,
     };
 }
 
@@ -167,16 +139,13 @@ export async function generateAbsenceDrift(state) {
     if (!shouldGenerateAbsenceDrift(state)) {
         throw new Error('No qualifying return is awaiting absence drift.');
     }
-    const response = await sendMessage({
-        provider: state.settings.llmProvider,
-        apiKey: state.settings.apiKey,
-        model: state.settings.model,
-        systemPrompt: ABSENCE_DRIFT_PROMPT,
-        messageHistory: [],
-        userMessage: JSON.stringify(buildAbsenceDriftContext(state)),
-        temperature: 0.7, // creative off-screen life, inside a strict JSON schema
+    const parsed = await runDirector(state, {
+        prompt: ABSENCE_DRIFT_PROMPT,
+        context: buildAbsenceDriftContext(state),
+        anchor: 'developments',
+        label: 'absence-drift',
     });
-    return sanitizeAbsenceDrift(parseDirectorJson(response, 'developments', 'absence-drift'), {
+    return sanitizeAbsenceDrift(parsed, {
         npcs: state.npcs || [],
         locationName: state.session?.pendingAbsenceDrift?.locationName || '',
     });
@@ -184,13 +153,15 @@ export async function generateAbsenceDrift(state) {
 
 /**
  * The private prompt block for the return window. Renders only while the hero
- * is still at the return location; the installed canon (NPC records, world
- * fact) persists regardless — the block is just the DM's cue to surface it.
+ * is still at the return location — or anywhere in its cluster, judged against
+ * the registry (`locations`), the hearsay block's own rule; the installed
+ * canon (NPC records, world fact) persists regardless — the block is just the
+ * DM's cue to surface it.
  */
-export function buildWhileYouWereAwayBlock(absenceDrift, { currentLocation, messages = null, messageCount = 0, fronts = null, npcs = null } = {}) {
+export function buildWhileYouWereAwayBlock(absenceDrift, { currentLocation, locations = [], messages = null, messageCount = 0, fronts = null, npcs = null } = {}) {
     if (!absenceDrift || typeof absenceDrift !== 'object') return '';
     if (!Number.isFinite(absenceDrift.arrivedAtMessage)) return '';
-    if (!isSameLocation(cleanText(absenceDrift.locationName), cleanText(currentLocation))) return '';
+    if (!isStillAtPlace(locations, cleanText(absenceDrift.locationName), cleanText(currentLocation))) return '';
     if (distanceSince(messages, absenceDrift.arrivedAtMessage, messageCount) > ABSENCE_DRIFT_WINDOW_MESSAGES) return '';
 
     // Roster-checked when the caller supplies the roster (2026-09-08 P2): a
@@ -224,10 +195,9 @@ export function buildWhileYouWereAwayBlock(absenceDrift, { currentLocation, mess
         : null;
     if (developments.length === 0 && !fact && !symptom) return '';
 
-    const scenes = Math.max(1, Math.round((absenceDrift.awayDistance || 0) / 2));
     const lines = [];
     lines.push('## WHILE YOU WERE AWAY — PRIVATE');
-    lines.push(`The hero has returned to ${cleanText(absenceDrift.locationName, 120)} after a long absence (~${scenes} scenes away). These off-screen developments are now canon here — surface them through concrete scene detail and NPC dialogue as the fiction allows (discovery, not an exposition dump; one or two touches per scene):`);
+    lines.push(`The hero has returned to ${cleanText(absenceDrift.locationName, 120)} after a long absence (~${turnsAway(absenceDrift.awayDistance)} turns away). These off-screen developments are now canon here — surface them through concrete scene detail and NPC dialogue as the fiction allows (discovery, not an exposition dump; one or two touches per scene):`);
     for (const dev of developments) {
         lines.push(`- ${dev.name}: ${dev.detail}`);
     }

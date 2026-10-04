@@ -223,6 +223,7 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
     // hero still being at the arrival place.
     const awayBlock = buildWhileYouWereAwayBlock(absenceDrift, {
         currentLocation,
+        locations: locations || [],
         messages: messages || null,
         messageCount: messageCount || 0,
         // Render-time liveness + roster check (2026-09-08 living-world P2).
@@ -254,6 +255,7 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
     }
     const hearsayBlock = buildRegionalHearsayBlock(regionalHearsay, {
         currentLocation,
+        locations: locations || [],
         messages: messages || null,
         messageCount: messageCount || 0,
     });

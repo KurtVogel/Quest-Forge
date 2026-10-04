@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { ABSENCE_DRIFT_MIN_AWAY } from '../engine/worldTempo.js';
+import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 
 const msgs = n => Array.from({ length: n }, (_, i) => ({
     role: i % 2 ? 'assistant' : 'user',
@@ -134,13 +135,22 @@ describe('traveling rumor on arrival', () => {
         const next = gameReducer(atMessages(state, 34), { type: 'SET_LOCATION', payload: 'E. Duskwell, Tallow & Tapers' });
         expect(next.recentHearsay).toHaveLength(1); // same audience, no second offer
         // 2026-08-31 P1 r3: the live offer SURVIVES the related-place move
-        // (it used to be nulled here, so the shopkeeper never voiced it) —
-        // re-stamped onto the new spelling, original arrival stamp kept.
-        expect(next.session.regionalHearsay).toMatchObject({
-            locationName: 'E. Duskwell, Tallow & Tapers',
-            arrivedAtMessage: state.session.regionalHearsay.arrivedAtMessage,
+        // (it used to be nulled here, so the shopkeeper never voiced it).
+        // Since 2026-10-03 it survives UNTOUCHED — the writer no longer
+        // re-stamps it onto each new spelling, because the render guard reads
+        // the registry and knows the shop is on that lane.
+        expect(next.session.regionalHearsay).toBe(state.session.regionalHearsay);
+        const block = buildRegionalHearsayBlock(next.session.regionalHearsay, {
+            currentLocation: next.currentLocation,
+            locations: next.locations,
+            messages: next.messages,
+            messageCount: next.messages.length,
         });
-        expect(next.session.regionalHearsay.items).toEqual(state.session.regionalHearsay.items);
+        expect(block).toContain('## REGIONAL HEARSAY — PRIVATE');
+        // Without the registry the guard cannot see the kinship: the names share no token.
+        expect(buildRegionalHearsayBlock(next.session.regionalHearsay, {
+            currentLocation: next.currentLocation, messages: next.messages, messageCount: next.messages.length,
+        })).toBe('');
     });
 
     it('town → its tavern keeps the live offer; an unrelated departure drops it (P1 2026-08-31 r3)', () => {

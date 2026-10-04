@@ -17,37 +17,44 @@
  * Lives in engine/ so reducer handlers never import from llm/.
  */
 import { distanceSince } from './worldTempo.js';
+import { isRecord } from './text.js';
 
 export const DIRECTOR_RETRY_MIN_DISTANCE = 6;
 export const DIRECTOR_MAX_ATTEMPTS = 3;
 
 /**
- * Marker-keyed directors only. `campaignFronts` has no marker and is already
- * self-limiting (it only fires inside the campaign's first two messages).
- * `pendingKey` reads the live marker's key; `giveUp` is the empty install.
+ * THE registry of the marker-keyed directors — one row per director, read by
+ * BOTH sides (2026-10-03 audit: ChatPanel's table and this one each declared
+ * the same four install actions, and a director could be in one and not the
+ * other). `pendingKey` reads the live marker's key, `install` builds the
+ * director's INSTALL_* action, and `empty` is the quiet result — a give-up IS
+ * `install(sessionId, key, empty)`. ChatPanel's rows add only what needs the
+ * LLM (`generate`) and the log strings. `campaignFronts` has no marker and is
+ * already self-limiting (it only fires inside the campaign's first two
+ * messages), so it is not a row here by construction: no marker, no retry.
  */
 export const RETRYABLE_DIRECTORS = {
     frontAftermath: {
         pendingKey: session => session?.pendingFrontAftermath?.frontId,
-        giveUp: (sessionId, key) => ({ type: 'INSTALL_AFTERMATH_FRONTS', payload: { sessionId, frontId: key, fronts: [] } }),
+        install: (sessionId, key, fronts) => ({ type: 'INSTALL_AFTERMATH_FRONTS', payload: { sessionId, frontId: key, fronts } }),
+        empty: [],
     },
     absenceDrift: {
         pendingKey: session => session?.pendingAbsenceDrift?.key,
-        giveUp: (sessionId, key) => ({ type: 'INSTALL_ABSENCE_DRIFT', payload: { sessionId, key, drift: {} } }),
+        install: (sessionId, key, drift) => ({ type: 'INSTALL_ABSENCE_DRIFT', payload: { sessionId, key, drift } }),
+        empty: {},
     },
     regionalFronts: {
         pendingKey: session => session?.pendingRegionalFronts?.key,
-        giveUp: (sessionId, key) => ({ type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId, key, fronts: [] } }),
+        install: (sessionId, key, fronts) => ({ type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId, key, fronts } }),
+        empty: [],
     },
     wonder: {
         pendingKey: session => session?.pendingWonder?.key,
-        giveUp: (sessionId, key) => ({ type: 'INSTALL_WONDER', payload: { sessionId, key, hooks: [] } }),
+        install: (sessionId, key, hooks) => ({ type: 'INSTALL_WONDER', payload: { sessionId, key, hooks } }),
+        empty: [],
     },
 };
-
-function isRecord(value) {
-    return !!value && typeof value === 'object' && !Array.isArray(value);
-}
 
 function sanitizeEntry(raw, maxMessageCount) {
     if (!isRecord(raw) || typeof raw.key !== 'string' || !raw.key) return null;

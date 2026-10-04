@@ -20,23 +20,22 @@ import { sanitizeHeroTellBeat } from './heroTells.js';
 import { sanitizePendingWonder, sanitizeWonder } from './wonder.js';
 import { sanitizeDirectorFailures } from './directorRetry.js';
 import { sanitizeHeroDeath } from './heroDeath.js';
+import { cleanText as text, isRecord } from './text.js';
 
 const HEARSAY_GRADES = ['firsthand', 'secondhand', 'legend'];
 
 /** Why the Chronicle tab suggests a close: a front's fall, or the hero's death (2026-09-30). */
 export const CHAPTER_CLOSE_REASONS = Object.freeze(['front', 'death']);
 
-function text(value, max) {
-    if (typeof value !== 'string') return '';
-    return value.replace(/\s+/g, ' ').trim().slice(0, max);
-}
-
-function finiteIndex(value) {
-    const n = Number(value);
-    return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
-}
-
-/** A finite, floored, non-negative stamp, clamped to the transcript when the caller knows its length. */
+/**
+ * A finite, floored, non-negative stamp, clamped to the transcript when the
+ * caller knows its length. THE one stamp helper since 2026-10-03: a second,
+ * unclamped one typed the hearsay / away blocks' `arrivedAtMessage` and the
+ * drift marker's `returnMessage`, so a past-the-end stamp from a hostile save
+ * kept its block rendering for as long as the hero stood there (the window
+ * test is `distance > N`, and a stamp beyond the end measures 0). A DISTANCE
+ * (`awayDistance`) is not a stamp and passes no ceiling.
+ */
 function finiteStamp(value, maxMessageCount) {
     const n = Number(value);
     if (!Number.isFinite(n)) return null;
@@ -44,14 +43,22 @@ function finiteStamp(value, maxMessageCount) {
     return Number.isFinite(maxMessageCount) ? Math.min(floored, Math.max(0, Math.floor(maxMessageCount))) : floored;
 }
 
-function isRecord(value) {
-    return !!value && typeof value === 'object' && !Array.isArray(value);
-}
+/**
+ * The persisted key sets of the three one-shot markers — pinned by test so a
+ * field with a writer and no reader shows up as a diff (the FRONT_RECORD_KEYS
+ * precedent): `pendingFrontAftermath.resolvedAt` and
+ * `pendingRegionalFronts.atMessage` were stamped, typed here, and read nowhere.
+ */
+export const PENDING_MARKER_KEYS = Object.freeze({
+    pendingAbsenceDrift: Object.freeze(['key', 'locationName', 'awayDistance', 'returnMessage']),
+    pendingRegionalFronts: Object.freeze(['key', 'region', 'locationName']),
+    pendingFrontAftermath: Object.freeze(['frontId', 'title']),
+});
 
-export function sanitizeAbsenceDriftState(raw) {
+export function sanitizeAbsenceDriftState(raw, { maxMessageCount } = {}) {
     if (!isRecord(raw)) return null;
     const locationName = text(raw.locationName, 120);
-    const arrivedAtMessage = finiteIndex(raw.arrivedAtMessage);
+    const arrivedAtMessage = finiteStamp(raw.arrivedAtMessage, maxMessageCount);
     if (!locationName || arrivedAtMessage === null) return null;
     const developments = (Array.isArray(raw.developments) ? raw.developments : [])
         .map(dev => (isRecord(dev)
@@ -75,17 +82,17 @@ export function sanitizeAbsenceDriftState(raw) {
     return {
         locationName,
         arrivedAtMessage,
-        awayDistance: finiteIndex(raw.awayDistance) ?? 0,
+        awayDistance: finiteStamp(raw.awayDistance) ?? 0,
         developments,
         fact: text(raw.fact, 300),
         frontSymptom,
     };
 }
 
-export function sanitizeRegionalHearsayState(raw) {
+export function sanitizeRegionalHearsayState(raw, { maxMessageCount } = {}) {
     if (!isRecord(raw)) return null;
     const locationName = text(raw.locationName, 120);
-    const arrivedAtMessage = finiteIndex(raw.arrivedAtMessage);
+    const arrivedAtMessage = finiteStamp(raw.arrivedAtMessage, maxMessageCount);
     if (!locationName || arrivedAtMessage === null) return null;
     const items = (Array.isArray(raw.items) ? raw.items : [])
         .map(item => (isRecord(item)
@@ -97,13 +104,13 @@ export function sanitizeRegionalHearsayState(raw) {
     return { locationName, arrivedAtMessage, items };
 }
 
-export function sanitizePendingAbsenceDrift(raw) {
+export function sanitizePendingAbsenceDrift(raw, { maxMessageCount } = {}) {
     if (!isRecord(raw)) return null;
     const key = text(raw.key, 200);
     const locationName = text(raw.locationName, 120);
-    const returnMessage = finiteIndex(raw.returnMessage);
+    const returnMessage = finiteStamp(raw.returnMessage, maxMessageCount);
     if (!key || !locationName || returnMessage === null) return null;
-    return { key, locationName, awayDistance: finiteIndex(raw.awayDistance) ?? 0, returnMessage };
+    return { key, locationName, awayDistance: finiteStamp(raw.awayDistance) ?? 0, returnMessage };
 }
 
 export function sanitizePendingRegionalFronts(raw) {
@@ -112,7 +119,7 @@ export function sanitizePendingRegionalFronts(raw) {
     const region = text(raw.region, 120);
     const locationName = text(raw.locationName, 120);
     if (!key || !region || !locationName) return null;
-    return { key, region, locationName, atMessage: finiteIndex(raw.atMessage) ?? 0 };
+    return { key, region, locationName };
 }
 
 /**
@@ -141,12 +148,7 @@ export function sanitizePendingFrontAftermath(raw) {
     if (!isRecord(raw)) return null;
     const frontId = text(raw.frontId, 120);
     if (!frontId) return null;
-    const resolvedAt = Number(raw.resolvedAt);
-    return {
-        frontId,
-        title: text(raw.title, 160),
-        resolvedAt: Number.isFinite(resolvedAt) ? resolvedAt : null,
-    };
+    return { frontId, title: text(raw.title, 160) };
 }
 
 /**
@@ -214,7 +216,7 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
     }
     for (const [field, sanitize] of fields) {
         if (session[field] === undefined) continue;
-        next[field] = sanitize(session[field]);
+        next[field] = sanitize(session[field], { maxMessageCount });
     }
     return next;
 }

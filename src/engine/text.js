@@ -13,6 +13,14 @@ export function cleanText(value, max = Infinity) {
     return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
+/**
+ * A plain object — the record twin of the type-strict rule: an array, a
+ * string, or `null` is never a record a boundary may read fields from.
+ */
+export function isRecord(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
 /** `cleanText` with a fallback for the empty / junk case. */
 export function textOr(value, fallback = '') {
     return cleanText(value) || fallback;
