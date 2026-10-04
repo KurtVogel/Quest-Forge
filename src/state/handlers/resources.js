@@ -4,7 +4,7 @@
  */
 import { CLASSES } from '../../data/classes.js';
 import { getModifier } from '../../engine/rules.js';
-import { rollDie, rollNotation } from '../../engine/dice.ts';
+import { rollNotation, rollWithModifier } from '../../engine/dice.ts';
 import { applyArcaneRecovery, buildSpellSlots, isSpellcaster, refillSpellSlots, summarizeSpellSlots } from '../../engine/spellcasting.js';
 import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
 import {
@@ -12,6 +12,8 @@ import {
     clearSustainedSpellState,
     companionStatus,
     currentMessageIndex,
+    describeFaces,
+    healHero,
     isPlayerCombatTurn,
     normalizeCompanion,
     RECENT_REST_LIMIT,
@@ -148,22 +150,18 @@ export const handlers = {
         if (def.effect?.kind === 'heal') {
             const roll = rollNotation(def.effect.dice || '1d10', def.label);
             const bonus = def.effect.addLevel ? (state.character.level || 0) : 0;
-            const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total + bonus);
-            const gained = healed - state.character.currentHP;
-            const healedCharacter = healed > 0
-                ? reviveCharacter({ ...state.character, currentHP: healed, classResources: spentResources })
-                : { ...state.character, currentHP: healed, classResources: spentResources };
+            const { healed, gained, character: healedHero } = healHero(state.character, roll.total + bonus);
             return {
                 ...state,
-                character: healedCharacter,
+                character: { ...healedHero, classResources: spentResources },
                 combat: usesBonusAction && state.combat.active
                     ? { ...state.combat, bonusActionUsed: true }
                     : state.combat,
-                rollHistory: appendRollHistory(state.rollHistory, roll),
+                rollHistory: appendRollHistory(state, roll),
                 messages: [
                     ...state.messages,
                     systemMessage(
-                        `**${def.label}**${usesBonusAction ? ' *(bonus action)*' : ''} — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${usesBonusAction && state.combat.active ? 'Your main action is still available. ' : ''}${tail} ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${roll.rolls.join(', ')}`,
+                        `**${def.label}**${usesBonusAction ? ' *(bonus action)*' : ''} — you recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${usesBonusAction && state.combat.active ? 'Your main action is still available. ' : ''}${tail} ${def.effect.dice}${bonus ? `+${bonus}` : ''}: ${describeFaces(roll)}`,
                         {
                             narrationCue: {
                                 type: 'player_mechanic',
@@ -248,6 +246,9 @@ export const handlers = {
 
         let healAmount;
         let newHitDice = { ...hitDice };
+        // A Short Rest's hit dice are hero dice — they enter the ledger as ONE
+        // entry (the membership rule in appendRollHistory, 2026-10-04).
+        let hitDiceRoll = null;
 
         if (isLong) {
             // Long rest: full HP restore, recover half hit dice (minimum 1)
@@ -262,9 +263,13 @@ export const handlers = {
             const expectedHealPerDie = Math.max(1, (hitDice.die / 2) + 1 + conMod);
             const canSpend = Math.min(newHitDice.remaining, Math.ceil((state.character.maxHP - state.character.currentHP) / expectedHealPerDie));
             let rolled = 0;
-            for (let i = 0; i < canSpend; i++) {
-                rolled += Math.max(1, rollDie(hitDice.die) + conMod);
-                newHitDice.remaining--;
+            if (canSpend > 0) {
+                const roll = rollWithModifier(canSpend, hitDice.die, conMod * canSpend, 'Short Rest hit dice');
+                // Each die heals at least 1, so the entry's total is the healing
+                // actually rolled, not faces + modifier.
+                rolled = roll.rolls.reduce((sum, face) => sum + Math.max(1, face + conMod), 0);
+                newHitDice.remaining -= canSpend;
+                hitDiceRoll = { ...roll, total: rolled };
             }
             healAmount = rolled;
         }
@@ -392,6 +397,7 @@ export const handlers = {
                 deathSaves: clearsEarlyDefeat ? { successes: 0, failures: 0 } : state.character.deathSaves,
             }) : restedBase,
             party: finalParty,
+            ...(hitDiceRoll && { rollHistory: appendRollHistory(state, hitDiceRoll) }),
             messages: [...state.messages, restMsg],
             recentRests: rememberLedgerEntry(recentRests, {
                 sourceId: restMeta.sourceId,

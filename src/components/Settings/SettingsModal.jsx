@@ -5,7 +5,7 @@ import { PROVIDERS, PROVIDER_LIST } from '../../llm/adapter.js';
 import { PRESETS, PRESET_LIST } from '../../data/presets.js';
 import { saveGame, loadGame, listSaves, deleteSave, getSaveSessionId } from '../../state/persistence.js';
 import { deleteCampaignMemories, shouldPurgeCampaignEmbeddings } from '../../engine/vectorMemory.js';
-import { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud } from '../../state/cloudSync.js';
+import { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud, describeCloudUploads } from '../../state/cloudSync.js';
 import { getFirebaseConfigError, initializeFirebase } from '../../config/firebase.js';
 import { signInWithGoogle, logOut } from '../../state/auth.js';
 import { upgradeCampaignFrontsV2 } from '../../llm/frontUpgrade.js';
@@ -13,19 +13,6 @@ import { FRONTS_VERSION } from '../../engine/fronts.js';
 import { clearImageCache } from '../../llm/providers/imageGen.js';
 import { describeKeyVendorMismatch } from '../../llm/machinery.js';
 import './Settings.css';
-
-// A cloud save reports how many portrait / chapter blobs it uploaded (the
-// content-addressed `portraits` and `chronicleChapters` collections write a
-// picture or a chapter once, 2026-09-24 / 2026-09-26); zero is the steady
-// state and says nothing.
-function describePortraitsUploaded(cloud) {
-    const portraits = Number(cloud?.portraitsUploaded) || 0;
-    const chapters = Number(cloud?.chaptersUploaded) || 0;
-    const parts = [];
-    if (portraits > 0) parts.push(`${portraits} portrait${portraits === 1 ? "" : "s"}`);
-    if (chapters > 0) parts.push(`${chapters} chapter${chapters === 1 ? "" : "s"}`);
-    return parts.length > 0 ? `. ${parts.join(" and ")} uploaded` : "";
-}
 
 export default function SettingsModal() {
     const { state, dispatch } = useGame();
@@ -55,17 +42,10 @@ export default function SettingsModal() {
             setSaves(list);
 
             if (state.user?.uid) {
-                try {
-                    const cList = await listCloudSaves(state.user.uid);
-                    if (!isCancelled) {
-                        setCloudSaves(cList);
-                        setAuthError('');
-                    }
-                } catch (e) {
-                    if (!isCancelled) {
-                        setCloudSaves([]);
-                        setAuthError('Cloud saves could not be loaded: ' + e.message);
-                    }
+                const listed = await listCloudSaves(state.user.uid);
+                if (!isCancelled) {
+                    setCloudSaves(listed.ok ? listed.saves : []);
+                    setAuthError(listed.ok ? '' : listed.message);
                 }
             } else {
                 setCloudSaves([]);
@@ -95,14 +75,9 @@ export default function SettingsModal() {
         const list = await listSaves();
         setSaves(list);
         if (state.user?.uid) {
-            try {
-                const cList = await listCloudSaves(state.user.uid);
-                setCloudSaves(cList);
-                setAuthError('');
-            } catch (e) {
-                setCloudSaves([]);
-                setAuthError('Cloud saves could not be loaded: ' + e.message);
-            }
+            const listed = await listCloudSaves(state.user.uid);
+            setCloudSaves(listed.ok ? listed.saves : []);
+            setAuthError(listed.ok ? '' : listed.message);
         } else {
             setCloudSaves([]);
         }
@@ -128,7 +103,7 @@ export default function SettingsModal() {
                 const cloud = await saveGameToCloud(state.user.uid, slotId, updatedState);
                 await loadSavesList(); // Reflect the cloud copy once it lands
                 setSyncStatus(cloud.ok
-                    ? `✓ Saved locally and to cloud${describePortraitsUploaded(cloud)}`
+                    ? `✓ Saved locally and to cloud${describeCloudUploads(cloud)}`
                     : `Saved locally, but not to the cloud — this save will not appear on other devices. ${cloud.message}`);
             } else {
                 setSyncStatus('Saved locally only — sign in with Google for cloud sync');
@@ -156,13 +131,12 @@ export default function SettingsModal() {
         // missing LOCAL load surfaces feedback instead of silently no-oping, and
         // a rejection never escapes as an unhandled promise.
         try {
-            const savedState = isCloud
-                ? await loadGameFromCloud(state.user.uid, slotId)
-                : await loadGame(slotId);
+            // A cloud load says WHY it failed (no such save / permission denied
+            // with the rules hint / a corrupt chunk) — it used to be one null.
+            const cloud = isCloud ? await loadGameFromCloud(state.user.uid, slotId) : null;
+            const savedState = isCloud ? (cloud.ok ? cloud.state : null) : await loadGame(slotId);
             if (!savedState) {
-                setSyncStatus(isCloud
-                    ? 'Cloud save could not be loaded — details in the browser console.'
-                    : 'That save could not be loaded — details in the browser console.');
+                setSyncStatus(cloud?.message || 'That save could not be loaded — details in the browser console.');
                 return;
             }
             clearImageCache(); // Scene-art cache is per-campaign — never show another campaign's art
@@ -210,8 +184,8 @@ export default function SettingsModal() {
     const handleDeleteCloud = async (slotId, name) => {
         if (!state.user?.uid) return;
         if (!confirm(`Delete the cloud save "${name}"? It will disappear from all your devices.`)) return;
-        const ok = await deleteGameFromCloud(state.user.uid, slotId);
-        setSyncStatus(ok ? `Deleted "${name}" from the cloud` : `Failed to delete "${name}" from the cloud`);
+        const removed = await deleteGameFromCloud(state.user.uid, slotId);
+        setSyncStatus(removed.ok ? `Deleted "${name}" from the cloud` : `Failed to delete "${name}" from the cloud. ${removed.message}`);
         await loadSavesList();
     };
 
@@ -233,7 +207,7 @@ export default function SettingsModal() {
             if (state.user?.uid) {
                 const cloud = await saveGameToCloud(state.user.uid, slotId, updatedState);
                 setSyncStatus(cloud.ok
-                    ? `✓ Overwrote "${name}" locally and in the cloud${describePortraitsUploaded(cloud)}`
+                    ? `✓ Overwrote "${name}" locally and in the cloud${describeCloudUploads(cloud)}`
                     : `Overwrote "${name}" locally, but not in the cloud. ${cloud.message}`);
             } else {
                 setSyncStatus(`Overwrote "${name}" locally (sign in for cloud sync)`);

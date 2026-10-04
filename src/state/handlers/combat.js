@@ -27,11 +27,6 @@ import { initialGameState } from '../initialState.js';
 import { gameReducer } from '../gameReducer.js';
 import { appendRollHistory, clearSustainedSpellState, reviveCharacter, systemMessage } from './shared.js';
 
-const exchangeLedgerRolls = (payload) => {
-    if (Array.isArray(payload.heroRolls)) return payload.heroRolls;
-    return Array.isArray(payload.rolls) ? payload.rolls : [];
-};
-
 function normalizeCombatEnemy(enemy, index, usedIds) {
     const hp = clampEnemyHP(enemy?.hp);
     const ac = clampEnemyAC(enemy?.ac);
@@ -130,7 +125,7 @@ export const handlers = {
                 startedAtMessage: (state.messages || []).length,
                 fightTally: startFightTally(state),
             },
-            rollHistory: appendRollHistory(state.rollHistory, playerInitiativeRoll),
+            rollHistory: appendRollHistory(state, playerInitiativeRoll),
             messages: [
                 ...state.messages,
                 systemMessage(`**Initiative** — ${state.character?.name || 'You'} rolled **${playerInitiativeRoll.total}** (d20: ${playerInitiativeRoll.rolls.join(', ')}${dexMod ? `, DEX ${dexMod >= 0 ? '+' : ''}${dexMod}` : ''}).`),
@@ -374,9 +369,12 @@ export const handlers = {
             character,
             party: next.party,
             // The ledger is counted in the hero's MOMENTS, not in every actor's
-            // dice (2026-09-21 P2); a payload without `heroRolls` (planned before
-            // the split) keeps the old whole-exchange append.
-            rollHistory: appendRollHistory(next.rollHistory, exchangeLedgerRolls(payload)),
+            // dice (2026-09-21 P2): every plan branch emits `heroRolls` (the
+            // opening an empty list), stamped at the exchange's first line.
+            rollHistory: appendRollHistory(
+                { rollHistory: next.rollHistory, messages: state.messages },
+                Array.isArray(payload.heroRolls) ? payload.heroRolls : [],
+            ),
             messages: [...next.messages.slice(0, preExchangeMessageCount), ...resultMessages, ...statusMessages],
             combat: {
                 ...next.combat,

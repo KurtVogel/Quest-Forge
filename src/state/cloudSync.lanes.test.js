@@ -42,8 +42,13 @@ vi.mock('firebase/firestore', () => {
 });
 
 const firestore = await import('firebase/firestore');
-const { saveGameToCloud, loadGameFromCloud, deleteGameFromCloud, CLOUD_BLOB_LANES } = await import('./cloudSync.js');
-const { BLOB_STORES } = await import('./persistence.js');
+const { saveGameToCloud, loadGameFromCloud, deleteGameFromCloud } = await import('./cloudSync.js');
+const loadState = async (...args) => {
+    const loaded = await loadGameFromCloud(...args);
+    return loaded.ok ? loaded.state : null;
+};
+const { prepareSavePayload } = await import('./persistence.js');
+const { BLOB_LANES } = await import('./portraitStore.js');
 
 const chapterText = (n) => `Chapter ${n}. ${'The road bent north under a bruised sky, and Eero walked it. '.repeat(600)}`; // ~38k chars
 function chapters(count, { offset = 0 } = {}) {
@@ -80,25 +85,45 @@ beforeEach(() => {
     firestore.__store.clear();
 });
 
-describe('the two storage paths list the same blob lanes (a storage split has two paths)', () => {
-    it('CLOUD_BLOB_LANES and persistence BLOB_STORES agree lane for lane: refs field, extract, collect, restore, in the same order', () => {
-        expect(CLOUD_BLOB_LANES.map(lane => lane.refsField)).toEqual(BLOB_STORES.map(lane => lane.refsField));
-        expect(CLOUD_BLOB_LANES.map(lane => lane.collection)).toEqual(BLOB_STORES.map(lane => lane.store));
-        CLOUD_BLOB_LANES.forEach((lane, i) => {
-            expect(lane.extract, `${lane.collection} extract`).toBe(BLOB_STORES[i].extract);
-            expect(lane.collect, `${lane.collection} collect`).toBe(BLOB_STORES[i].collect);
-            expect(lane.restore, `${lane.collection} restore`).toBe(BLOB_STORES[i].restore);
-            expect(lane.keyPattern).toBeInstanceOf(RegExp);
-        });
-        expect(CLOUD_BLOB_LANES.map(lane => lane.collection)).toEqual(['portraits', 'chronicleChapters']);
+describe('the two storage paths share ONE lane table and ONE save prologue (2026-10-04 audit)', () => {
+    // This suite used to pin that `CLOUD_BLOB_LANES` and persistence's
+    // `BLOB_STORES` agreed lane for lane — a test whose job was to keep two
+    // copies equal. There is one table now (`BLOB_LANES` in portraitStore.js),
+    // so the pin is the module's own first-line claim instead: both paths
+    // persist the SAME serialized state.
+    it('the lane table is complete per lane: a store / collection id, a refs field, a label, a key pattern, and the extract / collect / restore triple', () => {
+        expect(BLOB_LANES.map(lane => lane.id)).toEqual(['portraits', 'chronicleChapters']);
+        expect(BLOB_LANES.map(lane => lane.refsField)).toEqual(['portraitRefs', 'chapterRefs']);
+        for (const lane of BLOB_LANES) {
+            expect(typeof lane.label, lane.id).toBe('string');
+            expect(lane.keyPattern, lane.id).toBeInstanceOf(RegExp);
+            for (const fn of ['extract', 'collect', 'restore']) expect(typeof lane[fn], `${lane.id} ${fn}`).toBe('function');
+        }
+    });
+
+    it('the cloud payload IS the shared prologue\'s state, and the metadata doc carries the prologue\'s metadata — nothing path-specific but the stamp', async () => {
+        const game = makeGameState({ character: { ...makeGameState().character, portraitUrl: `data:image/jpeg;base64,${'a'.repeat(5000)}` } });
+        await saveGameToCloud('u1', 'slot-same', game);
+        const local = prepareSavePayload('slot-same', game, 0);
+        const { savedAt: _cloudPayloadStamp, ...cloudState } = JSON.parse(chunkData().join(''));
+        const { savedAt: _localPayloadStamp, ...localState } = JSON.parse(JSON.stringify(local.state));
+        expect(cloudState).toEqual(localState);
+        // No secrets, no live-only fields, and the dead save-time stamp is gone.
+        expect(cloudState.settings).toBeUndefined();
+        expect(cloudState.user).toBeUndefined();
+        expect(cloudState.session).toEqual(game.session);
+        const { savedAt: _docStamp, payload: _payload, payloadChunks: _chunks, ...cloudMetadata } = firestore.__store.get('users/u1/saves/slot-same');
+        const { savedAt: _localStamp, ...localMetadata } = local.metadata;
+        expect(cloudMetadata).toEqual(localMetadata);
+        for (const lane of BLOB_LANES) expect(cloudMetadata[lane.refsField].length, lane.id).toBeGreaterThan(0);
     });
 
     it('every lane key the extract mints passes that lane\'s own key pattern (a typed metadata doc must trust real keys)', () => {
         const state = makeGameState({ character: { ...makeGameState().character, portraitUrl: `data:image/jpeg;base64,${'a'.repeat(5000)}` } });
-        for (const lane of CLOUD_BLOB_LANES) {
+        for (const lane of BLOB_LANES) {
             const { refs } = lane.extract(state);
-            expect(refs.length, lane.collection).toBeGreaterThan(0);
-            refs.forEach(ref => expect(ref, `${lane.collection} ${ref}`).toMatch(lane.keyPattern));
+            expect(refs.length, lane.id).toBeGreaterThan(0);
+            refs.forEach(ref => expect(ref, `${lane.id} ${ref}`).toMatch(lane.keyPattern));
         }
     });
 });
@@ -106,7 +131,7 @@ describe('the two storage paths list the same blob lanes (a storage split has tw
 describe('cloud chapter collection (2026-09-26 chronicler P2)', () => {
     it('a save with N chapters carries ZERO chapter prose in its chunks, N chapter docs, and chapterRefs on the metadata doc', async () => {
         const result = await saveGameToCloud('u1', 'slot-saga', makeGameState());
-        expect(result).toEqual({ ok: true, portraitsUploaded: 0, chaptersUploaded: 3 });
+        expect(result).toEqual({ ok: true, uploaded: { portrait: 0, chapter: 3 } });
         const main = firestore.__store.get('users/u1/saves/slot-saga');
         expect(main.payloadChunks).toBe(1);
         expect(main.chapterRefs).toHaveLength(3);
@@ -130,22 +155,22 @@ describe('cloud chapter collection (2026-09-26 chronicler P2)', () => {
     it('a steady-state re-save (same slot or a new one) writes ZERO chapter docs and re-uploads zero chapter bytes', async () => {
         await saveGameToCloud('u1', 'slot-a', makeGameState());
         const again = await recordWrites(() => saveGameToCloud('u1', 'slot-a', makeGameState()));
-        expect(again.result).toEqual({ ok: true, portraitsUploaded: 0, chaptersUploaded: 0 });
+        expect(again.result).toEqual({ ok: true, uploaded: { portrait: 0, chapter: 0 } });
         expect(again.writes.filter(w => w.key.includes('/chronicleChapters/'))).toHaveLength(0);
         expect(again.writes.reduce((n, w) => n + w.chars, 0)).toBeLessThan(20_000);
         // A new slot of the same campaign shares the same three docs.
         const other = await recordWrites(() => saveGameToCloud('u1', 'slot-b', makeGameState()));
-        expect(other.result.chaptersUploaded).toBe(0);
+        expect(other.result.uploaded.chapter).toBe(0);
         expect(pathsUnder('chronicleChapters')).toHaveLength(3);
         // A fourth chapter uploads exactly one doc.
         const closed = await saveGameToCloud('u1', 'slot-a', makeGameState({ chronicle: chapters(4) }));
-        expect(closed.chaptersUploaded).toBe(1);
+        expect(closed.uploaded.chapter).toBe(1);
         expect(pathsUnder('chronicleChapters')).toHaveLength(4);
     });
 
     it('the loader rehydrates every chapter: text back, no chapterRef in what LOAD_GAME receives, order kept', async () => {
         await saveGameToCloud('u1', 'slot-a', makeGameState());
-        const loaded = await loadGameFromCloud('u1', 'slot-a');
+        const loaded = await loadState('u1', 'slot-a');
         expect(loaded.chronicle).toHaveLength(3);
         loaded.chronicle.forEach((chapter, i) => {
             expect(chapter.text).toBe(chapterText(i));
@@ -160,7 +185,7 @@ describe('cloud chapter collection (2026-09-26 chronicler P2)', () => {
         const [, second, third] = firestore.__store.get('users/u1/saves/slot-a').chapterRefs;
         firestore.__store.delete(`users/u1/chronicleChapters/${second}`);
         firestore.__store.set(`users/u1/chronicleChapters/${third}`, { data: { not: 'a string' } });
-        const loaded = await loadGameFromCloud('u1', 'slot-a');
+        const loaded = await loadState('u1', 'slot-a');
         expect(loaded).not.toBeNull();
         expect(loaded.chronicle.map(c => c.id)).toEqual(['ch-0']);
         expect(loaded.chronicle[0].text).toBe(chapterText(0));
@@ -170,9 +195,9 @@ describe('cloud chapter collection (2026-09-26 chronicler P2)', () => {
         await saveGameToCloud('u1', 'slot-a', makeGameState({ chronicle: chapters(3) }));
         await saveGameToCloud('u1', 'slot-b', makeGameState({ chronicle: chapters(2, { offset: 1 }) })); // shares chapters 1 and 2
         const bRefs = firestore.__store.get('users/u1/saves/slot-b').chapterRefs;
-        expect(await deleteGameFromCloud('u1', 'slot-a')).toBe(true);
+        expect((await deleteGameFromCloud('u1', 'slot-a')).ok).toBe(true);
         expect(pathsUnder('chronicleChapters').map(p => p.split('/chronicleChapters/')[1]).sort()).toEqual([...bRefs].sort());
-        expect((await loadGameFromCloud('u1', 'slot-b')).chronicle.map(c => c.text)).toEqual([chapterText(1), chapterText(2)]);
+        expect((await loadState('u1', 'slot-b')).chronicle.map(c => c.text)).toEqual([chapterText(1), chapterText(2)]);
     });
 
     it('an overwrite that releases a ref (a removed chapter) sweeps its doc unless another slot claims it', async () => {
@@ -194,14 +219,14 @@ describe('cloud chapter collection (2026-09-26 chronicler P2)', () => {
         await saveGameToCloud('u1', 'slot-a', makeGameState({ chronicle: [] }));
         expect(pathsUnder('chronicleChapters')).toHaveLength(0);
         expect(firestore.__store.get('users/u1/saves/slot-a').chapterRefs).toEqual([]);
-        expect((await loadGameFromCloud('u1', 'slot-a')).chronicle).toEqual([]);
+        expect((await loadState('u1', 'slot-a')).chronicle).toEqual([]);
     });
 
     it('a pre-split inline payload (chapters with text, no refs) still loads as-is', async () => {
         await saveGameToCloud('u1', 'slot-a', makeGameState({ chronicle: [] }));
         const inline = JSON.stringify({ ...makeGameState(), settings: undefined, user: undefined, ui: undefined, saveVersion: 1 });
         firestore.__store.set('users/u1/saves/slot-legacy', { slotId: 'slot-legacy', payloadChunks: 0, payload: inline });
-        const loaded = await loadGameFromCloud('u1', 'slot-legacy');
+        const loaded = await loadState('u1', 'slot-legacy');
         expect(loaded.chronicle).toHaveLength(3);
         expect(loaded.chronicle[2].text).toBe(chapterText(2));
     });

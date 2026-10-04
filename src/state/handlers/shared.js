@@ -9,7 +9,7 @@ import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromNam
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
-import { CHRONICLE_CHAPTER_TEXT_MAX, NPC_DOSSIER_FIELD_MAX } from '../../config/contentLimits.js';
+import { CHRONICLE_CHAPTER_TEXT_MAX, NPC_DOSSIER_FIELD_MAX, ROLL_HISTORY_CAP } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatExchange.js';
 import {
     appendBondMoments,
@@ -28,18 +28,35 @@ import {
 } from '../../engine/npcRoster.js';
 import { NPC_OPEN_THREAD_MAX } from '../../engine/relationshipArc.js';
 
-// Live rollHistory cap, matching persistence's MAX_SAVED_ROLLS: only 50 are
-// ever persisted, 20 render, 5 reach the prompt — but the live array grew
-// unbounded for the whole session (2026-08-01 audit).
-export const ROLL_HISTORY_CAP = 50;
+// Re-exported for the ledger's importers; the constant itself lives in
+// config/contentLimits.js so persistence.js reads the same one.
+export { ROLL_HISTORY_CAP };
 
-/** Append roll(s) to a rollHistory array, keeping only the newest 50. */
-export function appendRollHistory(rollHistory, rolls) {
-    const additions = Array.isArray(rolls) ? rolls : [rolls];
-    return [...(rollHistory || []), ...additions].slice(-ROLL_HISTORY_CAP);
+/**
+ * Append roll(s) to the ledger, keeping only the newest ROLL_HISTORY_CAP.
+ *
+ * MEMBERSHIP RULE (2026-10-04, stated once): a die the HERO's own action
+ * rolled enters the ledger — checks, saves, attacks and their damage,
+ * initiative, death saves, Second Wind, a potion (drunk or poured into a
+ * companion), an out-of-combat spell heal, a Short Rest's hit dice. Dice other
+ * actors rolled (enemy attacks and saves, companion attacks) never do; an
+ * exchange ledgers only its `heroRolls`.
+ *
+ * Every entry is stamped `atMessage` — the transcript length at the moment of
+ * the roll — because the product measures time in conversational distance
+ * ("N turns ago"), never wall-clock: the recall dossier's DICE row was the one
+ * ledger row that could not say when.
+ */
+export function appendRollHistory(state, rolls) {
+    const atMessage = Array.isArray(state?.messages) ? state.messages.length : 0;
+    const additions = (Array.isArray(rolls) ? rolls : [rolls])
+        .filter(roll => roll && typeof roll === 'object')
+        .map(roll => ({ ...roll, atMessage }));
+    return [...(state?.rollHistory || []), ...additions].slice(-ROLL_HISTORY_CAP);
 }
 
 const ROLL_HISTORY_TEXT_MAX = 120;
+let loadedRollIdCounter = 0;
 
 /**
  * Type one loaded rollHistory entry (2026-09-09 audit P2): the old guard was
@@ -48,11 +65,17 @@ const ROLL_HISTORY_TEXT_MAX = 120;
  * description rode the prompt unclamped. Faces must be finite numbers (at least
  * one), total is recomputed when the stored one is junk, modifier defaults to
  * 0, text fields are string-or-empty and clamped. Returns null to drop.
- * Projected to the ledger's KNOWN keys since 2026-09-21 (audit P2, the 09-16
- * rule): the old `...entry` spread let any unknown key on a stored roll — a
- * 100 KB `foo` — ride every later save forever.
+ * Projected to the keys a ledger CONSUMER reads since 2026-09-21 (audit P2, the
+ * 09-16 rule): the old `...entry` spread let any unknown key on a stored roll —
+ * a 100 KB `foo` — ride every later save forever. Since 2026-10-04 the
+ * projection also drops the three keys no consumer ever read (`timestamp`,
+ * `subtotal`, `dice` — live-roll working fields of dice.ts / combatMath) and
+ * types `atMessage`, clamped to the transcript like every other message stamp
+ * (an OPTIONS OBJECT — never positional, `.map` would pass the index). The id
+ * is string-or-mint: `String(object)` gave every such row one shared
+ * "[object Object]" React key in the Dice Log.
  */
-export function sanitizeRollHistoryEntry(entry) {
+export function sanitizeRollHistoryEntry(entry, { maxMessageCount = null } = {}) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
     if (!Array.isArray(entry.rolls)) return null;
     const rolls = entry.rolls.map(Number).filter(Number.isFinite);
@@ -64,25 +87,41 @@ export function sanitizeRollHistoryEntry(entry) {
     const storedTotal = Number(entry.total);
     const total = Number.isFinite(storedTotal) && typeof entry.total !== 'boolean' ? storedTotal : subtotal + modifier;
     const text = value => (typeof value === 'string' ? value.trim().slice(0, ROLL_HISTORY_TEXT_MAX) : '');
-    const timestamp = Number(entry.timestamp);
-    const count = Number(entry.dice?.count);
-    const sides = Number(entry.dice?.sides);
+    const id = typeof entry.id === 'string' && entry.id
+        ? entry.id.slice(0, 80)
+        : typeof entry.id === 'number' && Number.isFinite(entry.id)
+            ? String(entry.id)
+            : `roll-loaded-${++loadedRollIdCounter}`;
+    const stamp = typeof entry.atMessage === 'number' && Number.isFinite(entry.atMessage)
+        ? Math.max(0, Math.floor(entry.atMessage))
+        : null;
+    const atMessage = stamp !== null && Number.isFinite(maxMessageCount) ? Math.min(stamp, maxMessageCount) : stamp;
     return {
-        id: typeof entry.id === 'string' ? entry.id.slice(0, 80) : String(entry.id ?? `roll-${subtotal}-${rolls.length}`).slice(0, 80),
+        id,
         rolls,
-        subtotal,
         modifier,
         total,
         description: text(entry.description),
         notation: text(entry.notation),
         isCritical: entry.isCritical === true,
         isCritFail: entry.isCritFail === true,
-        ...(Number.isFinite(timestamp) && typeof entry.timestamp !== 'boolean' ? { timestamp } : {}),
-        ...(Number.isInteger(count) && Number.isInteger(sides) ? { dice: { count, sides } } : {}),
+        ...(atMessage !== null ? { atMessage } : {}),
         // combatMath.stampCriticalRoll's two stamps — the prompt's crit label reads `kind`.
         ...(entry.kind === 'attack' ? { kind: 'attack' } : {}),
         ...(text(entry.criticalThreshold) ? { criticalThreshold: text(entry.criticalThreshold) } : {}),
     };
+}
+
+/**
+ * The dice faces of one roll as a receipt fragment: "4, 2 (+2)" / "3 (-1)" /
+ * "7". One owner for the heal lanes' lines (Second Wind, both potion lanes,
+ * the out-of-combat spell heal) — four sites wrote `(+${modifier})`, which
+ * rendered "(+-1)" for a WIS 8 cleric's Cure Wounds (2026-10-04 audit).
+ */
+export function describeFaces(roll) {
+    const faces = (Array.isArray(roll?.rolls) ? roll.rolls : []).join(', ');
+    const modifier = Number(roll?.modifier) || 0;
+    return modifier ? `${faces} (${modifier > 0 ? '+' : ''}${modifier})` : faces;
 }
 
 export function systemMessage(content, extra = {}) {
@@ -92,6 +131,23 @@ export function systemMessage(content, extra = {}) {
         role: 'system',
         content,
         ...extra,
+    };
+}
+
+/**
+ * Heal the hero by an engine-rolled amount: clamp to max HP, revive from 0.
+ * One owner for the hero half of every heal lane (Second Wind, a drunk potion,
+ * an out-of-combat spell heal) — each used to write its own clamp → gained →
+ * revive triple (2026-10-04 audit).
+ */
+export function healHero(character, amount) {
+    const priorHp = Number(character.currentHP) || 0;
+    const healed = Math.min(character.maxHP, priorHp + amount);
+    const healedCharacter = { ...character, currentHP: healed };
+    return {
+        healed,
+        gained: healed - priorHp,
+        character: healed > 0 ? reviveCharacter(healedCharacter) : healedCharacter,
     };
 }
 

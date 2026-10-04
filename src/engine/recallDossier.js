@@ -283,7 +283,8 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
     ).forEach(({ item }) => {
         const total = Number.isFinite(item.total) ? ` rolled ${item.total}` : '';
         const crit = item.isCritical ? ' (a natural 20)' : item.isCritFail ? ' (a natural 1)' : '';
-        ledgers.push(row('rolls', `- DICE: ${clip(item.description, 120)}${total}${crit}.`));
+        const ago = when(item.atMessage);
+        ledgers.push(row('rolls', `- DICE${ago ? ` (${ago})` : ''}: ${clip(item.description, 120)}${total}${crit}.`, item.atMessage));
     });
 
     // 2. Journal — the chronicle of what happened, never a fallback stub.

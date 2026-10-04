@@ -44,11 +44,19 @@ async function loadFirebaseSdk() {
 // the start screen sat on "Checking cloud sync..." forever.
 const configText = (value) => (typeof value === 'string' ? value.trim() : '');
 
+// The three config fields the app needs — one list for the validator and for
+// "is this the same project as the live app instance".
+const REQUIRED_CONFIG = [
+    ['apiKey', "Firebase apiKey is required"],
+    ['authDomain', "Firebase authDomain is required for Google Sign-In"],
+    ['projectId', "Firebase projectId is required"],
+];
+
 export function getFirebaseConfigError(config) {
     if (!config || typeof config !== 'object') return "Firebase config is missing";
-    if (!configText(config.apiKey)) return "Firebase apiKey is required";
-    if (!configText(config.authDomain)) return "Firebase authDomain is required for Google Sign-In";
-    if (!configText(config.projectId)) return "Firebase projectId is required";
+    for (const [key, message] of REQUIRED_CONFIG) {
+        if (!configText(config[key])) return message;
+    }
     return "";
 }
 
@@ -72,9 +80,7 @@ export async function initializeFirebase(config) {
         const { initializeApp, getApps, getApp, deleteApp } = sdk.appModule;
         if (getApps().length) {
             const existingApp = getApp();
-            const isSameConfig = existingApp.options.apiKey === config.apiKey
-                && existingApp.options.authDomain === config.authDomain
-                && existingApp.options.projectId === config.projectId;
+            const isSameConfig = REQUIRED_CONFIG.every(([key]) => existingApp.options[key] === config[key]);
             if (isSameConfig) {
                 setFirebaseServices(existingApp, sdk);
                 return true;

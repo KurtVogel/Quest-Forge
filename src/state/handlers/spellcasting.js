@@ -13,14 +13,16 @@ import {
 } from '../../engine/spellcasting.js';
 import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
 import {
+    appendRollHistory,
     clearSustainedSpellState,
     companionStatus,
     currentMessageIndex,
+    describeFaces,
+    healHero,
     normalizeCompanion,
     normalizeRefToken,
     RECENT_SPELL_CAST_LIMIT,
     repeatIntentNearNoun,
-    reviveCharacter,
     systemMessage,
     withCondition,
 } from './shared.js';
@@ -175,12 +177,16 @@ export const handlers = {
 
         let nextCharacter = { ...character, ...(spell.level > 0 && { spellSlots }) };
         let nextParty = state.party || [];
+        // An out-of-combat heal rolls hero dice — they enter the ledger like a
+        // potion's (the membership rule in appendRollHistory, 2026-10-04).
+        const healingRolls = [];
         const lines = [`**${character.name || 'The hero'} casts ${spell.name}**${slotLevel > spell.level ? ` using a level ${slotLevel} slot` : ''}${spell.level > 0 ? ` (slots left: ${summarizeSpellSlots(spellSlots)})` : ''}.`];
 
         if (spell.healing) {
             // One roll per recipient — the combat resolver's per-ally pattern.
             for (const recipient of recipients) {
                 const roll = rollNotation(spellHealingNotation(spell, character, slotLevel), spell.name);
+                healingRolls.push(roll);
                 if (recipient.type === 'companion') {
                     const target = recipient.companion;
                     const maxHp = target.maxHp || target.hp || 1;
@@ -189,15 +195,11 @@ export const handlers = {
                     nextParty = nextParty.map(c => c.id === target.id
                         ? normalizeCompanion({ hp, status: companionStatus(hp, maxHp) }, c)
                         : c);
-                    lines.push(`${target.name} recovers **${roll.total}** HP (now ${hp}/${maxHp}). Rolled: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}.`);
+                    lines.push(`${target.name} recovers **${roll.total}** HP (now ${hp}/${maxHp}). Rolled: ${describeFaces(roll)}.`);
                 } else {
-                    const priorHp = nextCharacter.currentHP;
-                    const healed = Math.min(character.maxHP, priorHp + roll.total);
-                    const gained = healed - priorHp;
-                    nextCharacter = gained > 0
-                        ? reviveCharacter({ ...nextCharacter, currentHP: healed })
-                        : nextCharacter;
-                    lines.push(`${character.name || 'The hero'} recovers **${gained}** HP (now ${healed}/${character.maxHP}). Rolled: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}.`);
+                    const { healed, gained, character: healedHero } = healHero(nextCharacter, roll.total);
+                    nextCharacter = healedHero;
+                    lines.push(`${character.name || 'The hero'} recovers **${gained}** HP (now ${healed}/${character.maxHP}). Rolled: ${describeFaces(roll)}.`);
                 }
             }
             for (const missed of invalidRefs) {
@@ -258,6 +260,7 @@ export const handlers = {
             ...state,
             character: nextCharacter,
             party: nextParty,
+            ...(healingRolls.length > 0 && { rollHistory: appendRollHistory(state, healingRolls) }),
             ...(castKey && {
                 recentSpellCasts: rememberLedgerEntry(recentCasts, {
                     sourceId,

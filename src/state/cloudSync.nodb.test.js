@@ -10,11 +10,13 @@ vi.mock('../config/firebase.js', () => ({ db: null }));
 const { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud } = await import('./cloudSync.js');
 
 describe('cloud sync without a configured Firebase', () => {
-    it('every function returns its safe empty value', async () => {
-        expect(await saveGameToCloud('u1', 'slot-1', { session: {}, character: {} }))
-            .toMatchObject({ ok: false, reason: 'unavailable' });
-        expect(await loadGameFromCloud('u1', 'slot-1')).toBeNull();
-        expect(await listCloudSaves('u1')).toEqual([]);
-        expect(await deleteGameFromCloud('u1', 'slot-1')).toBe(false);
+    it('every function answers in the one result shape: unavailable, with the Settings remedy — an empty list is not a failure', async () => {
+        const unavailable = { ok: false, reason: 'unavailable' };
+        const save = await saveGameToCloud('u1', 'slot-1', { session: {}, character: {} });
+        expect(save).toMatchObject(unavailable);
+        expect(save.message).toContain('Settings');
+        expect(await loadGameFromCloud('u1', 'slot-1')).toMatchObject(unavailable);
+        expect(await deleteGameFromCloud('u1', 'slot-1')).toMatchObject(unavailable);
+        expect(await listCloudSaves('u1')).toEqual({ ok: true, saves: [] });
     });
 });

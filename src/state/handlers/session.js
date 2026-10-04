@@ -391,7 +391,7 @@ function validateSaveState(payload) {
         // live state until the next append (2026-08-20 audit).
         // Typed per entry since 2026-09-09 (see sanitizeRollHistoryEntry).
         rollHistory: Array.isArray(payload.rollHistory)
-            ? payload.rollHistory.map(sanitizeRollHistoryEntry).filter(Boolean).slice(-ROLL_HISTORY_CAP)
+            ? payload.rollHistory.map(entry => sanitizeRollHistoryEntry(entry, { maxMessageCount: messageCount })).filter(Boolean).slice(-ROLL_HISTORY_CAP)
             : [],
         // Quest rows get the parser whitelist's load twin (2026-09-14 audit
         // P1): an object name rendered "[object Object]" in the prompt every

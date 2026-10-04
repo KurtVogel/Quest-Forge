@@ -25,15 +25,18 @@ describe('LOAD_GAME rollHistory typing', () => {
                 ...base,
                 rollHistory: [{
                     id: 'r1', rolls: [19], total: 24, modifier: 5, description: 'Attack', notation: '1d20+5',
-                    timestamp: 1234, dice: { count: 1, sides: 20 }, kind: 'attack', isCritical: true,
+                    timestamp: 1234, dice: { count: 1, sides: 20 }, subtotal: 19, kind: 'attack', isCritical: true,
+                    atMessage: 0,
                     criticalThreshold: 'Champion 19-20',
                     foo: 'x'.repeat(100_000), advantageDetail: ' (d20: 3, 19 → kept 19)',
                 }],
             },
         });
+        // The keys a ledger CONSUMER reads (2026-10-04): the wall-clock
+        // `timestamp` and the working fields `subtotal` / `dice` had no reader.
         expect(Object.keys(next.rollHistory[0]).sort()).toEqual([
-            'criticalThreshold', 'description', 'dice', 'id', 'isCritFail', 'isCritical',
-            'kind', 'modifier', 'notation', 'rolls', 'subtotal', 'timestamp', 'total',
+            'atMessage', 'criticalThreshold', 'description', 'id', 'isCritFail', 'isCritical',
+            'kind', 'modifier', 'notation', 'rolls', 'total',
         ]);
         expect(JSON.stringify(next.rollHistory).length).toBeLessThan(400);
     });

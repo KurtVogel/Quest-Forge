@@ -14,7 +14,9 @@ import {
     consumeItem,
     appendRollHistory,
     currentMessageIndex,
+    describeFaces,
     findInventoryItemByRef,
+    healHero,
     findRecentTransactionDuplicate,
     isPlayerCombatTurn,
     mintOwnedItem,
@@ -22,7 +24,6 @@ import {
     normalizeRefToken,
     playerMessageSupportsRepeatTransaction,
     rememberTransaction,
-    reviveCharacter,
     systemMessage,
     withInventoryAndAC,
 } from './shared.js';
@@ -223,11 +224,11 @@ export const handlers = {
                     ? normalizeCompanion({ hp: healedTo, status: companionStatus(healedTo, companionMaxHp) }, c)
                     : c),
                 inventory: consumeItem(state.inventory, item.id),
-                rollHistory: appendRollHistory(state.rollHistory, roll),
+                rollHistory: appendRollHistory(state, roll),
                 messages: [
                     ...state.messages,
                     systemMessage(
-                        `You give ${companion.name} a **${item.name}** — they recover **${gained} HP** (now ${healedTo}/${companionMaxHp})${wasDown ? ' and are back on their feet' : ''}. ${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`,
+                        `You give ${companion.name} a **${item.name}** — they recover **${gained} HP** (now ${healedTo}/${companionMaxHp})${wasDown ? ' and are back on their feet' : ''}. ${item.healing}: ${describeFaces(roll)}`,
                         {
                             narrationCue: {
                                 type: 'player_mechanic',
@@ -277,11 +278,7 @@ export const handlers = {
                     messages: [...state.messages, systemMessage(`**${item.name}** has an invalid healing formula (${item.healing}) and cannot be used.`)],
                 };
             }
-            const healed = Math.min(state.character.maxHP, state.character.currentHP + roll.total);
-            const gained = healed - state.character.currentHP;
-            const healedCharacter = healed > 0
-                ? reviveCharacter({ ...state.character, currentHP: healed })
-                : { ...state.character, currentHP: healed };
+            const { healed, gained, character: healedCharacter } = healHero(state.character, roll.total);
             return {
                 ...state,
                 character: healedCharacter,
@@ -289,11 +286,11 @@ export const handlers = {
                     ? { ...state.combat, bonusActionUsed: true }
                     : state.combat,
                 inventory: consumeItem(state.inventory, item.id),
-                rollHistory: appendRollHistory(state.rollHistory, roll),
+                rollHistory: appendRollHistory(state, roll),
                 messages: [
                     ...state.messages,
                     systemMessage(
-                        `You drink a **${item.name}**${usesBonusAction ? ' *(bonus action)*' : ''} and recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${usesBonusAction && state.combat.active ? 'Your main action is still available. ' : ''}${item.healing}: ${roll.rolls.join(', ')}${roll.modifier ? ` (+${roll.modifier})` : ''}`,
+                        `You drink a **${item.name}**${usesBonusAction ? ' *(bonus action)*' : ''} and recover **${gained} HP** (now ${healed}/${state.character.maxHP}). ${usesBonusAction && state.combat.active ? 'Your main action is still available. ' : ''}${item.healing}: ${describeFaces(roll)}`,
                         {
                             narrationCue: {
                                 type: 'player_mechanic',

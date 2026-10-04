@@ -3,12 +3,14 @@
  */
 import { CURRENT_SAVE_VERSION } from './migrations.js';
 import { sanitizeSettings } from './settingsSchema.js';
+import { ROLL_HISTORY_CAP } from '../config/contentLimits.js';
 import {
-    collectChapterRefs,
+    BLOB_LANES,
+    collectLaneRefs,
     collectPortraitRefs,
-    extractChapters,
+    extractLanes,
     extractPortraits,
-    restoreChapters,
+    restoreLanes,
     restorePortraits,
 } from './portraitStore.js';
 
@@ -27,24 +29,12 @@ const DB_NAME = 'rpg-client-saves';
 const DB_VERSION = 5;
 const STORE_NAME = 'saves';
 const PAYLOAD_STORE = 'savePayloads';
+// The two blob stores are named by their lanes' ids (`BLOB_LANES` in
+// portraitStore.js — the one lane table both storage paths read).
 const PORTRAIT_STORE = 'portraits';
 const CHAPTER_STORE = 'chronicleChapters';
 const ROSTER_STORE = 'characters';
 const AUTOSAVE_SLOT = '__autosave__';
-
-/**
- * The blob stores (the 09-21 portrait split, generalized by field name on
- * 2026-09-24): bytes that never change live under a content key, the payload
- * carries a ref, and the slot's metadata record lists its refs under
- * `refsField` so the orphan sweep never opens a payload. Exported because the
- * cloud twin (`CLOUD_BLOB_LANES` in cloudSync.js) must list the same lanes —
- * `cloudSync.lanes.test.js` pins it (2026-09-26: the chapter lane shipped
- * locally on 09-24 without its cloud twin).
- */
-export const BLOB_STORES = [
-    { store: PORTRAIT_STORE, refsField: 'portraitRefs', extract: extractPortraits, collect: collectPortraitRefs, restore: restorePortraits },
-    { store: CHAPTER_STORE, refsField: 'chapterRefs', extract: extractChapters, collect: collectChapterRefs, restore: restoreChapters },
-];
 
 // === LocalStorage (Settings) ===
 
@@ -214,9 +204,6 @@ async function withDb(execute) {
     }
 }
 
-/** Max roll history entries to persist. Only last 5 are ever shown in prompt. */
-const MAX_SAVED_ROLLS = 50;
-
 /**
  * Save-format version stamped into every persisted state payload. Owned by the
  * load-time migration pipeline (state/migrations.js), which version-gates its
@@ -251,7 +238,7 @@ export function serializeGameState(gameState) {
         // slot metadata already carries one, but the loaded state never did,
         // so LOAD_GAME could not heal a pre-stamp campaign's lastPlayedAt.
         savedAt: Date.now(),
-        rollHistory: (gameState.rollHistory || []).slice(-MAX_SAVED_ROLLS),
+        rollHistory: (gameState.rollHistory || []).slice(-ROLL_HISTORY_CAP),
         combat: gameState.combat || { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
     };
 }
@@ -360,13 +347,13 @@ const metadataRefs = (record, refsField) =>
  */
 function sweepOrphanBlobs(tx) {
     const quiet = (event) => { event.preventDefault?.(); event.stopPropagation?.(); };
-    const lanes = BLOB_STORES
-        .filter(lane => tx.objectStoreNames.contains(lane.store))
+    const lanes = BLOB_LANES
+        .filter(lane => tx.objectStoreNames.contains(lane.id))
         .map(lane => ({ ...lane, live: new Set() }));
     if (lanes.length === 0) return;
     const sweepStores = () => {
         for (const lane of lanes) {
-            const store = tx.objectStore(lane.store);
+            const store = tx.objectStore(lane.id);
             const keysRequest = store.getAllKeys();
             keysRequest.onerror = quiet;
             keysRequest.onsuccess = () => {
@@ -385,7 +372,7 @@ function sweepOrphanBlobs(tx) {
                 if (record?.state) lane.collect(record.state).forEach(ref => lane.live.add(ref));
             }
         }
-        const portraitLane = lanes.find(lane => lane.store === PORTRAIT_STORE);
+        const portraitLane = lanes.find(lane => lane.id === PORTRAIT_STORE);
         if (!portraitLane) { sweepStores(); return; }
         const rosterRequest = tx.objectStore(ROSTER_STORE).getAll();
         rosterRequest.onerror = quiet;
@@ -400,6 +387,28 @@ function sweepOrphanBlobs(tx) {
 }
 
 /**
+ * THE save prologue, shared by both storage paths (`saveGame` here,
+ * `saveGameToCloud` in cloudSync.js): serialize, move every lane's immutable
+ * bytes out of the payload, and assemble the slot's metadata record with each
+ * lane's ref list. Each path used to write its own copy (2026-10-04 audit) —
+ * and both copies stamped `session.prunedMessageCount`, a field
+ * `deriveSessionBoundaries` recomputes from the loaded messages on every load;
+ * the dead write is gone with the duplication. `savedAt` is the path's own
+ * stamp shape (a number locally, an ISO string in Firestore).
+ */
+export function prepareSavePayload(slotId, gameState, savedAt) {
+    const { state, lanes } = extractLanes(serializeGameState(gameState));
+    const metadata = {
+        slotId,
+        ...buildSaveMetadata(gameState),
+        savedAt,
+        messageCount: (gameState.messages || []).length,
+        ...Object.fromEntries(lanes.map(lane => [lane.refsField, lane.refs])),
+    };
+    return { state, lanes, metadata };
+}
+
+/**
  * Save game state to a named slot: a metadata-only record in `saves` plus the
  * full state payload in `savePayloads`, committed in ONE transaction (listing
  * must never see a slot whose payload write failed). Keeps the FULL message
@@ -410,25 +419,11 @@ export function saveGame(slotId, gameState) {
         // Roster rows are in scope only for the orphan sweep's live-ref read.
         const tx = db.transaction([PAYLOAD_STORE, ...BLOB_SWEEP_STORES], 'readwrite');
 
-        const savedMessages = gameState.messages || [];
-        // prunedMessageCount indexes into the array we actually persist. Summarized messages
-        // are always a contiguous prefix, so their count IS the boundary index.
-        // `m?.` belt: a null entry in live state must not brick every autosave.
-        const prunedMessageCount = savedMessages.filter(m => m?.summarized).length;
-
         // Portrait bytes ride the `portraits` store and chapter prose the
         // `chronicleChapters` store, not the payload (see portraitStore.js):
         // the payload carries refs, the metadata record lists them so the
         // orphan sweep never opens a payload.
-        let slimState = {
-            ...serializeGameState(gameState),
-            session: { ...gameState.session, prunedMessageCount },
-        };
-        const lanes = BLOB_STORES.map(lane => {
-            const extracted = lane.extract(slimState);
-            slimState = extracted.state;
-            return { ...lane, blobs: extracted.blobs, refs: extracted.refs };
-        });
+        const { state: slimState, lanes, metadata } = prepareSavePayload(slotId, gameState, Date.now());
 
         const saves = tx.objectStore(STORE_NAME);
         let metadataRequest = null;
@@ -454,7 +449,7 @@ export function saveGame(slotId, gameState) {
                 // absent (getKey reads no bytes). A failed put aborts the
                 // transaction — the save fails loudly rather than committing a
                 // payload whose picture or chapter never landed.
-                const store = tx.objectStore(lane.store);
+                const store = tx.objectStore(lane.id);
                 for (const [key, bytes] of lane.blobs) {
                     if (listed.has(key)) continue;
                     const probe = store.getKey(key);
@@ -462,13 +457,6 @@ export function saveGame(slotId, gameState) {
                 }
             }
 
-            const metadata = {
-                slotId,
-                ...buildSaveMetadata(gameState),
-                savedAt: Date.now(),
-                messageCount: savedMessages.length,
-            };
-            for (const lane of lanes) metadata[lane.refsField] = lane.refs;
             metadataRequest = saves.put(metadata);
             payloadRequest = tx.objectStore(PAYLOAD_STORE).put({ slotId, state: slimState });
             // Requests settle in order: the new metadata is in place by the
@@ -507,24 +495,25 @@ export function asSaveObject(parsed) {
  */
 export function loadGame(slotId) {
     return withDb((db, resolve, reject) => {
-        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE, ...BLOB_STORES.map(lane => lane.store)], 'readonly');
+        const tx = db.transaction([STORE_NAME, PAYLOAD_STORE, ...BLOB_LANES.map(lane => lane.id)], 'readonly');
         // Refs → inline bytes before the state leaves this module: live state,
         // the cloud upload loop, and LOAD_GAME never see a portraitRef or a
         // chapterRef. A blob that cannot be read is a missing picture / a
         // dropped chapter, never a failed load.
         const hydrate = (stored) => {
             const state = asSaveObject(stored);
-            const lanes = BLOB_STORES.map(lane => ({ ...lane, refs: lane.collect(state), found: new Map() }));
-            let pending = lanes.reduce((count, lane) => count + lane.refs.length, 0);
+            const wanted = collectLaneRefs(state);
+            let pending = wanted.reduce((count, entry) => count + entry.refs.length, 0);
             if (pending === 0) { resolve(state); return; }
+            const found = new Map(wanted.map(({ lane }) => [lane.id, new Map()]));
             const settle = () => {
                 if (--pending > 0) return;
-                resolve(lanes.reduce((restored, lane) => lane.restore(restored, key => lane.found.get(key)), state));
+                resolve(restoreLanes(state, (lane, key) => found.get(lane.id)?.get(key)));
             };
-            for (const lane of lanes) {
-                for (const ref of lane.refs) {
-                    const blobRequest = tx.objectStore(lane.store).get(ref);
-                    blobRequest.onsuccess = () => { lane.found.set(ref, blobRequest.result); settle(); };
+            for (const { lane, refs } of wanted) {
+                for (const ref of refs) {
+                    const blobRequest = tx.objectStore(lane.id).get(ref);
+                    blobRequest.onsuccess = () => { found.get(lane.id).set(ref, blobRequest.result); settle(); };
                     blobRequest.onerror = (event) => { event.preventDefault?.(); event.stopPropagation?.(); settle(); };
                 }
             }

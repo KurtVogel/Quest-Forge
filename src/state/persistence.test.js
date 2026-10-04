@@ -266,10 +266,15 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         expect(loaded.rollHistory.at(-1).id).toBe('roll-59');
     });
 
-    it('derives prunedMessageCount from the contiguous summarized prefix', async () => {
+    it('persists the session as it is — the summarization boundary is derived at LOAD_GAME, never stamped at save time', async () => {
+        // Both save paths used to count the summarized prefix into
+        // `session.prunedMessageCount` on every save; `deriveSessionBoundaries`
+        // (migrations.js) recomputes it from the loaded messages on every load,
+        // so the write had no reader (2026-10-04 audit). The derivation itself
+        // is pinned in gameReducer.load.test.js.
         await saveGame('slot-1', makeGameState());
         const loaded = await loadGame('slot-1');
-        expect(loaded.session.prunedMessageCount).toBe(1);
+        expect(loaded.session).toEqual({ name: 'The Sundered Coast' });
     });
 
     // Regression for the lost-fronts bug: the old field whitelist silently dropped

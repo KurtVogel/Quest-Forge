@@ -180,7 +180,7 @@ export const handlers = {
     ADD_ROLL(state, action) {
         return {
             ...state,
-            rollHistory: appendRollHistory(state.rollHistory, action.payload),
+            rollHistory: appendRollHistory(state, action.payload),
         };
     },
 };

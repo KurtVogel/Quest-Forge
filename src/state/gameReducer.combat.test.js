@@ -429,6 +429,7 @@ describe('atomic combat exchange lifecycle', () => {
             playerDamage: 3,
             deathSaveNatural: null,
             rolls: [{ id: 'roll-1', total: 17 }],
+            heroRolls: [{ id: 'roll-1', total: 17 }],
             consumeActionSurge: true,
             result: { exchangeId: 'exchange-1', kind: 'exchange', round: 2, terminal: null, summary: '**Astra attacks Goblin** — Hit.' },
         };

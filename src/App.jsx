@@ -49,14 +49,9 @@ function StartScreen() {
   useEffect(() => {
     async function fetchCloudSaves() {
       if (state.user?.uid) {
-        try {
-          setCloudLoadError('');
-          setCloudSaves(await listCloudSaves(state.user.uid));
-        } catch (e) {
-          console.warn('Failed to load cloud saves', e);
-          setCloudLoadError(e.message || 'Failed to load cloud saves');
-          setCloudSaves([]);
-        }
+        const listed = await listCloudSaves(state.user.uid);
+        setCloudLoadError(listed.ok ? '' : listed.message);
+        setCloudSaves(listed.ok ? listed.saves : []);
       } else {
         setCloudLoadError('');
         setCloudSaves([]);
@@ -87,15 +82,16 @@ function StartScreen() {
     }
     setLoadingSlot(slotId);
     try {
-      const savedState = isCloud
-        ? await loadGameFromCloud(state.user.uid, slotId)
-        : await loadGame(slotId);
+      // A cloud load says WHY it failed (no such save / permission denied with
+      // the rules hint / a corrupt chunk) — it used to be one bare null.
+      const cloud = isCloud ? await loadGameFromCloud(state.user.uid, slotId) : null;
+      const savedState = isCloud ? (cloud.ok ? cloud.state : null) : await loadGame(slotId);
 
       if (savedState) {
         clearImageCache();
         dispatch({ type: 'LOAD_GAME', payload: savedState });
       } else {
-        setLoadError('That save could not be loaded — details in the browser console.');
+        setLoadError(cloud?.message || 'That save could not be loaded — details in the browser console.');
       }
     } catch (e) {
       console.error('Failed to load save', e);

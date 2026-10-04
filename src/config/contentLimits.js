@@ -74,6 +74,15 @@ export const JOURNAL_SUMMARY_MAX = 2000;
  */
 export const MESSAGE_CONTENT_MAX = 20000;
 
+/**
+ * THE rollHistory cap — the live append, the LOAD_GAME heal, and
+ * serializeGameState all read this one constant (a second `MAX_SAVED_ROLLS` in
+ * persistence.js was "equal by comment" until 2026-10-04). Only 50 are ever
+ * persisted, 20 render, 5 reach the prompt — the live array grew unbounded for
+ * the whole session before the cap (2026-08-01 audit).
+ */
+export const ROLL_HISTORY_CAP = 50;
+
 export function cleanTextField(value, max = Infinity) {
     if (typeof value !== 'string') return '';
     return value.trim().slice(0, max);

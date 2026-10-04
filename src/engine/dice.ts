@@ -3,9 +3,15 @@
  * Uses crypto.getRandomValues() so the LLM can never influence results.
  */
 
+/**
+ * One minted roll. `subtotal` and `dice` are WORKING fields for the roll's own
+ * pipeline (combatMath's reroll / crit math) — the ledger's load projection
+ * (sanitizeRollHistoryEntry) drops them, and stamps `atMessage` instead of a
+ * wall-clock time: no consumer ever read a roll's `timestamp` (removed
+ * 2026-10-04), the product measures time in conversational distance.
+ */
 export interface DiceRollResult {
   id: string;
-  timestamp: number;
   notation: string;
   dice: { count: number; sides: number };
   rolls: number[];
@@ -19,6 +25,15 @@ export interface DiceRollResult {
   kind?: 'attack';
   /** Set by stampCriticalRoll for a Champion's natural 19. */
   criticalThreshold?: string;
+  /**
+   * Display-only fragments rollResolver stamps for the chat line it is about to
+   * post ("advantage: 14, 7", " GWF rerolls: 1→5"). Never persisted and never
+   * read from the ledger — a loaded roll does not carry them, by design.
+   */
+  advantageDetail?: string;
+  fightingStyleDetail?: string;
+  /** Stamped by appendRollHistory: the transcript length when the roll landed. */
+  atMessage?: number;
 }
 
 let rollIdCounter = 0;
@@ -104,7 +119,6 @@ export function rollWithModifier(
 
   return {
     id: `roll-${Date.now()}-${++rollIdCounter}`,
-    timestamp: Date.now(),
     notation: `${count}d${sides}${modifier >= 0 ? '+' + modifier : modifier}`,
     dice: { count, sides },
     rolls,

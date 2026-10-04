@@ -19,11 +19,18 @@
  * as `chapterRefs` on the metadata record). The summarized-message prefix is
  * deliberately NOT split — its rows still change (DELETE_MESSAGE flips flags).
  *
- * Pure helpers only — the IndexedDB wiring is persistence.js.
+ * ONE lane table since 2026-10-04 (`BLOB_LANES` at the bottom): the local
+ * IndexedDB path (persistence.js) and the cloud Firestore path (cloudSync.js)
+ * used to keep a table each, with a test whose only job was to keep the two
+ * copies equal. A lane's `id` is both its IndexedDB store name and its
+ * Firestore collection name.
+ *
+ * Pure helpers only — the IndexedDB wiring is persistence.js, the Firestore
+ * wiring cloudSync.js.
  */
 
 /** Below this a portrait is a plain URL (Pollinations prompt URL) and stays inline. */
-export const PORTRAIT_INLINE_MAX = 2000;
+const PORTRAIT_INLINE_MAX = 2000;
 
 // One memo per blob kind (text → key), so a chapter and a portrait can never
 // answer each other's key. 300 covers a mature campaign's 40 portraits + 20
@@ -46,7 +53,7 @@ function fnv1a(text, seed) {
  * face, so 32 bits alone is not enough). Memoized: a Map keyed by the string
  * costs one cached string hash per later save, not a 90k-char walk.
  */
-export function portraitKey(url) {
+function portraitKey(url) {
     return contentKey('p', url);
 }
 
@@ -56,7 +63,7 @@ export function portraitKey(url) {
  * newest is removable, player-facing, never in a prompt — and was 23–25 % of
  * every autosave). Same construction, its own prefix and memo.
  */
-export function chapterKey(text) {
+function chapterKey(text) {
     return contentKey('c', text);
 }
 
@@ -206,4 +213,64 @@ export function restoreChapters(payload, lookup) {
         .map(chapter => restoreRecord(chapter, lookup, CHAPTER_FIELD))
         .filter(chapter => chapter !== null);
     return { ...payload, chronicle };
+}
+
+/**
+ * THE blob lanes — every split of immutable bytes out of the save payload,
+ * read by BOTH storage paths. `id` is the IndexedDB store AND the Firestore
+ * collection (`users/{uid}/<id>/{key}`); `refsField` is the metadata field
+ * that lists a slot's refs (so an orphan sweep never opens a payload);
+ * `keyPattern` is the key shape a stored metadata record is trusted for;
+ * `label` names one blob in player-facing and log text.
+ */
+export const BLOB_LANES = [
+    {
+        id: 'portraits',
+        refsField: 'portraitRefs',
+        label: 'portrait',
+        keyPattern: /^p-[0-9a-z]{1,8}-[0-9a-z]{1,8}-[0-9a-z]{1,8}$/,
+        extract: extractPortraits,
+        collect: collectPortraitRefs,
+        restore: restorePortraits,
+    },
+    {
+        id: 'chronicleChapters',
+        refsField: 'chapterRefs',
+        label: 'chapter',
+        keyPattern: /^c-[0-9a-z]{1,8}-[0-9a-z]{1,8}-[0-9a-z]{1,8}$/,
+        extract: extractChapters,
+        collect: collectChapterRefs,
+        restore: restoreChapters,
+    },
+];
+
+/**
+ * Run every lane's extract over a serialized state: the slimmed state (refs in
+ * place of bytes) plus, per lane, the blobs to ensure and the ref list its
+ * metadata field carries.
+ */
+export function extractLanes(serializedState) {
+    let state = serializedState;
+    const lanes = BLOB_LANES.map(lane => {
+        const extracted = lane.extract(state);
+        state = extracted.state;
+        return { ...lane, blobs: extracted.blobs, refs: extracted.refs };
+    });
+    return { state, lanes };
+}
+
+/** The refs a stored payload names, lane by lane — only lanes that name any. */
+export function collectLaneRefs(state) {
+    return BLOB_LANES
+        .map(lane => ({ lane, refs: lane.collect(state) }))
+        .filter(entry => entry.refs.length > 0);
+}
+
+/**
+ * Inverse of `extractLanes`: `lookup(lane, key)` returns the stored bytes or
+ * nothing. A blob that is missing is a missing picture / a dropped chapter
+ * (each lane's own `onMissing`), never a failed load.
+ */
+export function restoreLanes(state, lookup) {
+    return BLOB_LANES.reduce((restored, lane) => lane.restore(restored, key => lookup(lane, key)), state);
 }

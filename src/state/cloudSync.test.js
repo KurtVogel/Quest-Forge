@@ -71,6 +71,10 @@ vi.mock('firebase/firestore', () => {
 
 const firestore = await import('firebase/firestore');
 const { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud, CLOUD_SAVE_BYTE_LIMIT } = await import('./cloudSync.js');
+const loadState = async (...args) => {
+    const loaded = await loadGameFromCloud(...args);
+    return loaded.ok ? loaded.state : null;
+};
 const { SAVE_VERSION } = await import('./persistence.js');
 
 function makeGameState(overrides = {}) {
@@ -118,7 +122,7 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         expect(main.payloadChunks).toBe(1);
         expect(chunkPaths()).toHaveLength(1);
 
-        const loaded = await loadGameFromCloud('u1', 'slot-1');
+        const loaded = await loadState('u1', 'slot-1');
         expect(loaded.fronts).toHaveLength(1);
         expect(loaded.messages).toHaveLength(2); // summarized messages are no longer trimmed
         // Settings (secrets included) are stripped from the snapshot entirely —
@@ -147,20 +151,22 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         expect(main.payloadChunks).toBeGreaterThanOrEqual(2);
         expect(chunkPaths()).toHaveLength(main.payloadChunks);
 
-        const loaded = await loadGameFromCloud('u1', 'slot-big');
+        const loaded = await loadState('u1', 'slot-big');
         expect(loaded.messages).toHaveLength(40);
         expect(loaded.messages[39].content).toBe('x'.repeat(20000));
         expect(loaded.character.name).toBe('Astra');
     });
 
-    it('returns null when the payload parses to a non-object (2026-07-25 audit)', async () => {
+    it('a payload that parses to a non-object — or does not parse — is a CORRUPT save, never a state (2026-07-25 audit)', async () => {
         // A corrupted payload parsing to a primitive/array passed callers'
         // truthy checks and reached LOAD_GAME as a non-save value.
         await saveGameToCloud('u1', 'slot-corrupt', makeGameState());
         const [chunkPath] = chunkPaths();
-        for (const junk of ['"corrupted string"', '42', '[1,2,3]', 'null']) {
+        for (const junk of ['"corrupted string"', '42', '[1,2,3]', 'null', '{"character":']) {
             firestore.__store.get(chunkPath).data = junk;
-            expect(await loadGameFromCloud('u1', 'slot-corrupt')).toBeNull();
+            const loaded = await loadGameFromCloud('u1', 'slot-corrupt');
+            expect(loaded, junk).toMatchObject({ ok: false, reason: 'corrupt' });
+            expect(loaded.message).toContain('unreadable');
         }
     });
 
@@ -169,11 +175,11 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
             slotId: 'legacy-slot', name: 'Old Cloud Save', payloadChunks: 0,
             payload: JSON.stringify({ character: { name: 'Legacy Hero' }, currentLocation: 'Old Keep' }),
         });
-        const loaded = await loadGameFromCloud('u1', 'legacy-slot');
+        const loaded = await loadState('u1', 'legacy-slot');
         expect(loaded.character.name).toBe('Legacy Hero');
         // A corrupt legacy inline payload still degrades to null.
         firestore.__store.get('users/u1/saves/legacy-slot').payload = '[1,2,3]';
-        expect(await loadGameFromCloud('u1', 'legacy-slot')).toBeNull();
+        expect(await loadState('u1', 'legacy-slot')).toBeNull();
     });
 
     it('never splits a surrogate pair at a chunk boundary', async () => {
@@ -186,7 +192,7 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
             expect(/^[\uDC00-\uDFFF]/.test(data)).toBe(false); // no lone low surrogate at start
             expect(/[\uD800-\uDBFF]$/.test(data)).toBe(false); // no lone high surrogate at end
         }
-        const loaded = await loadGameFromCloud('u1', 'slot-emoji');
+        const loaded = await loadState('u1', 'slot-emoji');
         expect(loaded.messages[0].content).toBe('💀'.repeat(200000));
     });
 
@@ -198,14 +204,24 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         expect(chunkPaths()).toHaveLength(1);
         const main = firestore.__store.get('users/u1/saves/slot-1');
         expect(main.payloadChunks).toBe(1);
-        expect((await loadGameFromCloud('u1', 'slot-1')).messages).toHaveLength(2);
+        expect((await loadState('u1', 'slot-1')).messages).toHaveLength(2);
     });
 
-    it('fails loudly rather than returning a truncated campaign when a chunk is missing', async () => {
+    it('fails loudly rather than returning a truncated campaign when a chunk is missing — and says which', async () => {
         await saveGameToCloud('u1', 'slot-big', makeHugeGameState());
         const [firstChunk] = chunkPaths();
         firestore.__store.delete(firstChunk);
-        expect(await loadGameFromCloud('u1', 'slot-big')).toBeNull();
+        const loaded = await loadGameFromCloud('u1', 'slot-big');
+        expect(loaded).toMatchObject({ ok: false, reason: 'corrupt' });
+        expect(loaded.message).toMatch(/chunk 1 of \d+ is missing/);
+    });
+
+    it('the loader bounds payloadChunks like both sweeps do: an impossible count is a corrupt save, not a loop', async () => {
+        await saveGameToCloud('u1', 'slot-1', makeGameState());
+        for (const payloadChunks of [200000, Infinity, 2.5]) {
+            firestore.__store.get('users/u1/saves/slot-1').payloadChunks = payloadChunks;
+            expect(await loadGameFromCloud('u1', 'slot-1'), String(payloadChunks)).toMatchObject({ ok: false, reason: 'corrupt' });
+        }
     });
 
     it('a mid-save failure leaves the previous save fully intact (one atomic transaction)', async () => {
@@ -222,13 +238,13 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         for (const [path, data] of before) {
             expect(firestore.__store.get(path)).toEqual(data);
         }
-        expect((await loadGameFromCloud('u1', 'slot-1')).messages).toHaveLength(40);
+        expect((await loadState('u1', 'slot-1')).messages).toHaveLength(40);
     });
 
     it('maps the reserved __autosave__ slot to a legal doc id', async () => {
         await saveGameToCloud('u1', '__autosave__', makeGameState());
         expect(firestore.__store.has('users/u1/saves/autosave')).toBe(true);
-        expect((await loadGameFromCloud('u1', '__autosave__')).character.name).toBe('Astra');
+        expect((await loadState('u1', '__autosave__')).character.name).toBe('Astra');
     });
 });
 
@@ -236,7 +252,7 @@ describe('listCloudSaves / deleteGameFromCloud', () => {
     it('lists manual saves without payloads and excludes the autosave doc', async () => {
         await saveGameToCloud('u1', 'slot-1', makeGameState());
         await saveGameToCloud('u1', '__autosave__', makeGameState());
-        const saves = await listCloudSaves('u1');
+        const saves = (await listCloudSaves('u1')).saves;
         expect(saves).toHaveLength(1);
         expect(saves[0].slotId).toBe('slot-1');
         expect(saves[0].payload).toBeUndefined();
@@ -246,22 +262,24 @@ describe('listCloudSaves / deleteGameFromCloud', () => {
     it('deletes the save document and all of its chunks', async () => {
         await saveGameToCloud('u1', 'slot-big', makeHugeGameState());
         expect(chunkPaths().length).toBeGreaterThan(0);
-        expect(await deleteGameFromCloud('u1', 'slot-big')).toBe(true);
+        expect((await deleteGameFromCloud('u1', 'slot-big')).ok).toBe(true);
         expect(firestore.__store.size).toBe(0);
     });
 });
 
 describe('guards and failure surfacing', () => {
     it('all four functions refuse a missing uid without touching Firestore', async () => {
-        expect(await saveGameToCloud('', 'slot-1', makeGameState())).toMatchObject({ ok: false, reason: 'signed-out' });
-        expect(await loadGameFromCloud('', 'slot-1')).toBeNull();
-        expect(await listCloudSaves('')).toEqual([]);
-        expect(await deleteGameFromCloud('', 'slot-1')).toBe(false);
+        const signedOut = { ok: false, reason: 'signed-out' };
+        expect(await saveGameToCloud('', 'slot-1', makeGameState())).toMatchObject(signedOut);
+        expect(await loadGameFromCloud('', 'slot-1')).toMatchObject(signedOut);
+        expect(await deleteGameFromCloud('', 'slot-1')).toMatchObject(signedOut);
+        // Nobody signed in means nothing to list, not a failure.
+        expect(await listCloudSaves('')).toEqual({ ok: true, saves: [] });
         expect(firestore.__store.size).toBe(0);
     });
 
     it('deleteGameFromCloud refuses a missing slotId', async () => {
-        expect(await deleteGameFromCloud('u1', '')).toBe(false);
+        expect((await deleteGameFromCloud('u1', '')).ok).toBe(false);
     });
 
     // 2026-09-02 audit: every failure used to collapse to `false`, so the UI could
@@ -315,22 +333,64 @@ describe('guards and failure surfacing', () => {
         expect(firestore.__store.size).toBe(0);
     });
 
-    it('loadGameFromCloud swallows a Firestore failure to null', async () => {
+    // 2026-10-04 audit: the save's result was typed on 09-02; its three siblings
+    // still swallowed every failure to null / false or rethrew, so a caller
+    // could only say "details in the browser console". One shape for all four.
+    it('loadGameFromCloud reports a Firestore failure as reason "error" with the cause', async () => {
         await saveGameToCloud('u1', 'slot-1', makeGameState());
         firestore.__fail.getDoc = new Error('unavailable');
-        expect(await loadGameFromCloud('u1', 'slot-1')).toBeNull();
+        const loaded = await loadGameFromCloud('u1', 'slot-1');
+        expect(loaded).toMatchObject({ ok: false, reason: 'error' });
+        expect(loaded.message).toContain('unavailable');
     });
 
-    it('listCloudSaves re-throws so the caller can show the error', async () => {
+    it('a caller can tell "no such save" from "permission denied" on load', async () => {
+        expect(await loadGameFromCloud('u1', 'never-saved')).toMatchObject({ ok: false, reason: 'not-found' });
+        await saveGameToCloud('u1', 'slot-1', makeGameState());
+        const denied = new Error('Missing or insufficient permissions.');
+        denied.code = 'permission-denied';
+        firestore.__fail.getDoc = denied;
+        const loaded = await loadGameFromCloud('u1', 'slot-1');
+        expect(loaded).toMatchObject({ ok: false, reason: 'permission-denied' });
+        expect(loaded.message).toContain('firestore.rules');
+    });
+
+    it('listCloudSaves reports a failure in the result (it used to rethrow) — permission denied carries the rules hint', async () => {
         firestore.__fail.getDocs = new Error('unavailable');
-        await expect(listCloudSaves('u1')).rejects.toThrow('unavailable');
+        const failed = await listCloudSaves('u1');
+        expect(failed).toMatchObject({ ok: false, reason: 'error' });
+        expect(failed.message).toContain('unavailable');
+        const denied = new Error('Missing or insufficient permissions.');
+        denied.code = 'permission-denied';
+        firestore.__fail.getDocs = denied;
+        const refused = await listCloudSaves('u1');
+        expect(refused).toMatchObject({ ok: false, reason: 'permission-denied' });
+        expect(refused.message).toContain('chunks/{chunkId}');
     });
 
-    it('deleteGameFromCloud swallows a Firestore failure to false and leaves the save intact', async () => {
+    it('deleteGameFromCloud reports a Firestore failure and leaves the save intact — a permission-denied delete carries the rules hint', async () => {
         await saveGameToCloud('u1', 'slot-1', makeGameState());
         firestore.__fail.commit = new Error('unavailable');
-        expect(await deleteGameFromCloud('u1', 'slot-1')).toBe(false);
+        expect(await deleteGameFromCloud('u1', 'slot-1')).toMatchObject({ ok: false, reason: 'error' });
         expect(firestore.__store.has('users/u1/saves/slot-1')).toBe(true);
+        const denied = new Error('Missing or insufficient permissions.');
+        denied.code = 'permission-denied';
+        firestore.__fail.commit = denied;
+        const refused = await deleteGameFromCloud('u1', 'slot-1');
+        expect(refused).toMatchObject({ ok: false, reason: 'permission-denied' });
+        expect(refused.message).toContain('firestore.rules');
+        expect(firestore.__store.has('users/u1/saves/slot-1')).toBe(true);
+    });
+
+    it('the rules hint names every blob lane (derived from the lane table, never hand-written)', async () => {
+        const { CLOUD_RULES_HINT, describeCloudUploads } = await import('./cloudSync.js');
+        const { BLOB_LANES } = await import('./portraitStore.js');
+        for (const lane of BLOB_LANES) {
+            expect(CLOUD_RULES_HINT).toContain(`\`${lane.id}\` collection`);
+            expect(CLOUD_RULES_HINT).toContain(`match /users/{userId}/${lane.id}/{${lane.label}Id}`);
+        }
+        expect(describeCloudUploads({ ok: true, uploaded: { portrait: 2, chapter: 1 } })).toBe('. 2 portraits and 1 chapter uploaded');
+        expect(describeCloudUploads({ ok: true, uploaded: { portrait: 0, chapter: 0 } })).toBe('');
     });
 });
 
@@ -349,25 +409,25 @@ describe('hostile metadata docs (2026-09-10 audit)', () => {
             expect(firestore.__store.get('users/u1/saves/slot-1').payloadChunks).toBe(1);
 
             firestore.__store.get('users/u1/saves/slot-1').payloadChunks = payloadChunks;
-            expect(await deleteGameFromCloud('u1', 'slot-1')).toBe(true);
+            expect((await deleteGameFromCloud('u1', 'slot-1')).ok).toBe(true);
             expect(firestore.__store.has('users/u1/saves/slot-1')).toBe(false);
         }
     });
 
     it('list rows are typed: a doc without a slotId field is addressed by its doc id, object text falls back', async () => {
         firestore.__store.set('users/u1/saves/orphan-doc', { name: { title: 'x' }, characterName: ['a'], characterLevel: '3', location: { name: 'Docks' }, savedAt: '2026-09-10T00:00:00.000Z' });
-        const [row] = await listCloudSaves('u1');
+        const [row] = (await listCloudSaves('u1')).saves;
         expect(row).toMatchObject({ slotId: 'orphan-doc', name: 'Unnamed Save', characterName: 'Unknown', characterLevel: 3, location: null });
         expect(row.payload).toBeUndefined();
         expect(row.payloadChunks).toBeUndefined();
         // Addressable now: delete by the projected slotId removes the doc.
-        expect(await deleteGameFromCloud('u1', row.slotId)).toBe(true);
+        expect((await deleteGameFromCloud('u1', row.slotId)).ok).toBe(true);
         expect(firestore.__store.has('users/u1/saves/orphan-doc')).toBe(false);
     });
 
     it('an object session.name / currentLocation in the SAVED state never reaches the list as an object', async () => {
         await saveGameToCloud('u1', 'slot-obj', makeGameState({ session: { id: 's1', name: { title: 'Campaign' } }, currentLocation: { name: 'Docks' } }));
-        const [row] = await listCloudSaves('u1');
+        const [row] = (await listCloudSaves('u1')).saves;
         expect(row.name).toBe('Unnamed Save');
         expect(row.location).toBeNull();
     });
@@ -395,7 +455,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
     it('a save with N portraits carries ZERO portrait bytes in its chunks, one chunk, N blob docs, and portraitRefs on the metadata doc', async () => {
         // Measured pre-fix: 12 NPC portraits = 2.38 MiB per save, 47 % portraits, 9 chunk docs.
         const result = await saveGameToCloud('u1', 'slot-gallery', gallery(12));
-        expect(result).toEqual({ ok: true, portraitsUploaded: 13, chaptersUploaded: 0 });
+        expect(result).toEqual({ ok: true, uploaded: { portrait: 13, chapter: 0 } });
         const main = firestore.__store.get('users/u1/saves/slot-gallery');
         expect(main.payloadChunks).toBe(1);
         expect(main.portraitRefs).toHaveLength(13);
@@ -418,24 +478,24 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
     it('a steady-state re-save (same slot or a new one) writes ZERO portrait docs and re-uploads zero portrait bytes', async () => {
         await saveGameToCloud('u1', 'slot-a', gallery(12));
         const again = await recordWrites(() => saveGameToCloud('u1', 'slot-a', gallery(12)));
-        expect(again.result).toEqual({ ok: true, portraitsUploaded: 0, chaptersUploaded: 0 });
+        expect(again.result).toEqual({ ok: true, uploaded: { portrait: 0, chapter: 0 } });
         expect(again.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(0);
         expect(again.writes.reduce((n, w) => n + w.chars, 0)).toBeLessThan(40_000);
         // A second slot of the same campaign shares the blobs by content key.
         const other = await recordWrites(() => saveGameToCloud('u1', 'slot-b', gallery(12)));
-        expect(other.result.portraitsUploaded).toBe(0);
+        expect(other.result.uploaded.portrait).toBe(0);
         expect(other.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(0);
         expect(portraitPaths()).toHaveLength(13);
         // Only the NEW picture is uploaded when one NPC gets a portrait.
         const third = await recordWrites(() => saveGameToCloud('u1', 'slot-a', gallery(13)));
-        expect(third.result.portraitsUploaded).toBe(1);
+        expect(third.result.uploaded.portrait).toBe(1);
         expect(third.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(1);
     });
 
     it('the loader rehydrates every ref: portraitUrl on the hero and each NPC, no portraitRef in what LOAD_GAME receives', async () => {
         const state = gallery(12);
         await saveGameToCloud('u1', 'slot-gallery', state);
-        const loaded = await loadGameFromCloud('u1', 'slot-gallery');
+        const loaded = await loadState('u1', 'slot-gallery');
         expect(loaded.character.portraitUrl).toBe(state.character.portraitUrl);
         expect(loaded.character.portraitProvider).toBe('xai');
         loaded.npcs.forEach((npc, i) => {
@@ -453,7 +513,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         const keyOf = (url) => main.portraitRefs.find(ref => firestore.__store.get(`users/u1/portraits/${ref}`)?.data === url);
         firestore.__store.delete(`users/u1/portraits/${keyOf(state.npcs[0].portraitUrl)}`);
         firestore.__store.get(`users/u1/portraits/${keyOf(state.npcs[1].portraitUrl)}`).data = 42;
-        const loaded = await loadGameFromCloud('u1', 'slot-gallery');
+        const loaded = await loadState('u1', 'slot-gallery');
         expect(loaded).not.toBeNull();
         expect(loaded.npcs[0]).toEqual({ id: 'npc-0', name: 'Villager 0' });
         expect(loaded.npcs[1]).toEqual({ id: 'npc-1', name: 'Villager 1' });
@@ -465,13 +525,13 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         await saveGameToCloud('u1', 'slot-a', gallery(2)); // hero + npc-0 + npc-1
         await saveGameToCloud('u1', 'slot-b', gallery(1)); // hero + npc-0
         expect(portraitPaths()).toHaveLength(3);
-        expect(await deleteGameFromCloud('u1', 'slot-a')).toBe(true);
+        expect((await deleteGameFromCloud('u1', 'slot-a')).ok).toBe(true);
         expect(portraitPaths()).toHaveLength(2);
         const bRefs = firestore.__store.get('users/u1/saves/slot-b').portraitRefs;
         expect(portraitPaths().map(p => p.split('/portraits/')[1]).sort()).toEqual([...bRefs].sort());
         // slot-b still loads whole.
-        expect((await loadGameFromCloud('u1', 'slot-b')).npcs[0].portraitUrl).toBe(portrait(0));
-        expect(await deleteGameFromCloud('u1', 'slot-b')).toBe(true);
+        expect((await loadState('u1', 'slot-b')).npcs[0].portraitUrl).toBe(portrait(0));
+        expect((await deleteGameFromCloud('u1', 'slot-b')).ok).toBe(true);
         expect(firestore.__store.size).toBe(0);
     });
 
@@ -480,7 +540,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         const oldRefs = firestore.__store.get('users/u1/saves/slot-a').portraitRefs;
         // Reroll: new pictures for the hero and the NPC.
         const rerolled = await saveGameToCloud('u1', 'slot-a', gallery(1, { seedOffset: 50 }));
-        expect(rerolled.portraitsUploaded).toBe(2);
+        expect(rerolled.uploaded.portrait).toBe(2);
         expect(portraitPaths()).toHaveLength(2);
         oldRefs.forEach(ref => expect(firestore.__store.has(`users/u1/portraits/${ref}`)).toBe(false));
         // With another slot still showing the old pictures, they stay.
@@ -488,17 +548,17 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         await saveGameToCloud('u1', 'slot-a', gallery(1));
         await saveGameToCloud('u1', 'slot-a', gallery(1, { seedOffset: 50 }));
         expect(portraitPaths()).toHaveLength(4);
-        expect((await loadGameFromCloud('u1', 'slot-b')).npcs[0].portraitUrl).toBe(portrait(0));
+        expect((await loadState('u1', 'slot-b')).npcs[0].portraitUrl).toBe(portrait(0));
     });
 
     it('100 portraits fit under the cloud limit with nothing dropped (the 2026-09-21 budget dropper is retired)', async () => {
         // ~10 MB of pictures used to be over the 9 MiB ceiling: 11 dropped and a second stringify.
         const state = gallery(100);
         const result = await saveGameToCloud('u1', 'slot-gallery', state);
-        expect(result).toEqual({ ok: true, portraitsUploaded: 101, chaptersUploaded: 0 });
+        expect(result).toEqual({ ok: true, uploaded: { portrait: 101, chapter: 0 } });
         expect(result.droppedPortraits).toBeUndefined();
         expect(firestore.__store.get('users/u1/saves/slot-gallery').payloadChunks).toBe(1);
-        const loaded = await loadGameFromCloud('u1', 'slot-gallery');
+        const loaded = await loadState('u1', 'slot-gallery');
         expect(loaded.npcs.filter(n => n.portraitUrl)).toHaveLength(100);
         expect(loaded.npcs[0].portraitUrl).toBe(portrait(0));
         expect(loaded.character.portraitUrl).toBe(state.character.portraitUrl);
@@ -508,9 +568,9 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         const state = gallery(2);
         state.npcs[1].portraitUrl = state.npcs[0].portraitUrl;
         const result = await saveGameToCloud('u1', 'slot-twins', state);
-        expect(result.portraitsUploaded).toBe(2); // hero + the shared picture
+        expect(result.uploaded.portrait).toBe(2); // hero + the shared picture
         expect(firestore.__store.get('users/u1/saves/slot-twins').portraitRefs).toHaveLength(2);
-        const loaded = await loadGameFromCloud('u1', 'slot-twins');
+        const loaded = await loadState('u1', 'slot-twins');
         expect(loaded.npcs[1].portraitUrl).toBe(loaded.npcs[0].portraitUrl);
     });
 
@@ -518,7 +578,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         const inline = gallery(1);
         firestore.__store.set('users/u1/saves/legacy', { slotId: 'legacy', payloadChunks: 1, payload: null });
         firestore.__store.set('users/u1/saves/legacy/chunks/0', { index: 0, data: JSON.stringify({ character: inline.character, npcs: inline.npcs }) });
-        const loaded = await loadGameFromCloud('u1', 'legacy');
+        const loaded = await loadState('u1', 'legacy');
         expect(loaded.character.portraitUrl).toBe(inline.character.portraitUrl);
         expect(loaded.npcs[0].portraitUrl).toBe(inline.npcs[0].portraitUrl);
         // Re-saving splits it.
@@ -544,7 +604,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
             const deletes = [];
             const origDelete = firestore.__store.delete.bind(firestore.__store);
             firestore.__store.delete = (key) => { deletes.push(key); return origDelete(key); };
-            expect(await deleteGameFromCloud('u1', 'slot-1')).toBe(true);
+            expect((await deleteGameFromCloud('u1', 'slot-1')).ok).toBe(true);
             firestore.__store.delete = origDelete;
             expect(deletes.filter(k => k.includes('/portraits/')).length).toBeLessThanOrEqual(512);
             // Only well-formed keys are ever addressed — never a path-shaped string.
@@ -558,18 +618,18 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         // Overwriting with a portrait-less state releases both refs; the only
         // getDocs that save makes is the sweep's claimed-refs read.
         firestore.__fail.getDocs = new Error('unavailable');
-        expect(await saveGameToCloud('u1', 'slot-a', makeGameState())).toEqual({ ok: true, portraitsUploaded: 0, chaptersUploaded: 0 });
+        expect(await saveGameToCloud('u1', 'slot-a', makeGameState())).toEqual({ ok: true, uploaded: { portrait: 0, chapter: 0 } });
         expect(portraitPaths()).toHaveLength(2); // orphans left behind, harmless
         await saveGameToCloud('u1', 'slot-b', gallery(1, { seedOffset: 50 }));
         firestore.__fail.getDocs = new Error('unavailable');
-        expect(await deleteGameFromCloud('u1', 'slot-b')).toBe(true);
+        expect((await deleteGameFromCloud('u1', 'slot-b')).ok).toBe(true);
         expect(firestore.__store.has('users/u1/saves/slot-b')).toBe(false);
         expect(portraitPaths()).toHaveLength(4);
     });
 
     it('the list never carries portraitRefs or blob bytes', async () => {
         await saveGameToCloud('u1', 'slot-gallery', gallery(12));
-        const [row] = await listCloudSaves('u1');
+        const [row] = (await listCloudSaves('u1')).saves;
         expect(row.portraitRefs).toBeUndefined();
         expect(JSON.stringify(row)).not.toContain('data:image/');
     });
