@@ -1,7 +1,7 @@
 /**
  * Scene-art image generation: xAI (Grok Imagine) first, Gemini image gen second.
  *
- * The prompt is composed upstream by the Scribe (see scribe.js `composeScenePrompt`),
+ * The prompt is composed upstream by the art director (sceneDirector.js `composeScenePrompt`),
  * which assembles the current situation plus the known visual details of the
  * characters/things in frame. This module just renders that finished prompt and
  * caches the result. Provider chain (DECISIONS.md 2026-07-25 spike):
