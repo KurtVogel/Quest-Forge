@@ -3102,3 +3102,24 @@ four cast-line composers still disagreeing (a focused NPC portrait paints `lastN
 and the two "is the hero still here" rules behind the hearsay and away blocks (the render guard gets
 an EMPTY locations list; a writer-side re-stamp compensates). None of it is a live bug; all of it is
 the shape that makes the next live bug.
+
+### [strengthening] A persisted key is found dead by grepping its READERS; a test that pins two tables agree is a duplication with a maintenance contract; a ledger needs a membership rule stated once — status: `idea` (2026-10-04 audit, dice-engine + cloud-sync Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+Four patterns from the third design-lap pair. **(1)** `session.prunedMessageCount` has two writers
+(`saveGame`, `saveGameToCloud`) and a load heal (`deriveSessionBoundaries`) that overwrites both on
+every LOAD_GAME; `rollHistory[].timestamp` has one writer, a typed load projection, and no reader at
+all — while the recall dossier's DICE row is the one ledger row that cannot say "N turns ago", because
+the stamp a roll carries is wall-clock and the one it needs (`atMessage`) was never minted. For every
+key a sanitizer keeps, grep the readers; a key with none is either dead or the wrong key. **(2)**
+`BLOB_STORES` and `CLOUD_BLOB_LANES` are one table written twice, and `cloudSync.lanes.test.js` exists
+to keep the copies equal — the test is the duplication's running cost (09-26 was the day they
+disagreed). One `BLOB_LANES` in `portraitStore.js` makes the agreement structural; the test then has
+nothing to compare. The same shape: both save paths run the same prologue (count, spread, extract,
+metadata) and both load paths the same epilogue (collect, fetch, restore) — `prepareSavePayload` /
+`restoreLanes`. **(3)** The roll ledger has eight append sites and no rule: an out-of-combat Cure
+Wounds and a Short Rest's hit dice roll real hero dice that never reach the Dice Log, RECENT DICE
+ROLLS, or the dossier, while the potion drunk beside them does. "A die the HERO's action rolled
+enters the ledger," stated once in `appendRollHistory`'s doc, and the two lanes join. **(4)** A module's
+first-line doc claim is a test to write — `cloudSync.js` opens with "both paths persist the SAME
+serialized state" and nothing checks it; four exports with four error contracts (typed result /
+swallow-to-null / rethrow / swallow-to-false) is the 09-02 fix that reached one sibling of four. None
+of it is a live bug; all of it is the shape that makes the next one.
