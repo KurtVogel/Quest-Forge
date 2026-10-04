@@ -333,9 +333,15 @@ describe('scene-driven curation and conversational windows (2026-09-06 audit)', 
     });
 
     it('roster dispositions and notes no longer feed the query tokens', () => {
-        const plain = scoreStoryMemory(smuggler, { ...scene, npcs: [{ name: 'Celeste' }] });
+        // One clock for both calls: the score's legacy recency term reads
+        // `now` (default Date.now()), so two calls a millisecond apart could
+        // differ in the last float digit and fail this exact comparison about
+        // one run in five (found 2026-10-04).
+        const now = Date.now();
+        const plain = scoreStoryMemory(smuggler, { ...scene, now, npcs: [{ name: 'Celeste' }] });
         const noisy = scoreStoryMemory(smuggler, {
             ...scene,
+            now,
             npcs: [{ name: 'Celeste', disposition: 'wary', lastNotes: 'Mentioned contraband, the toll gate, and the new moon smuggling run.' }],
         });
         expect(noisy).toBe(plain);

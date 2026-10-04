@@ -103,6 +103,13 @@ export const handlers = {
             martialArchetype: normalizeMartialArchetype(action.payload.character?.class, action.payload.character?.level, action.payload.character?.martialArchetype),
             ...normalizeAbilityScoreImprovementState(action.payload.character),
         };
+        // A hero who arrives WITH a picture (the wizard's reveal) gets its time
+        // stamped here — the reducer owns the stamp, as applyNpcPortrait does
+        // for an NPC (2026-10-03 audit: the component stamped the hero's, the
+        // reducer the NPC's). A roster hero keeps the stamp it carries.
+        if (character.portraitUrl && !Number.isFinite(character.portraitUpdatedAt)) {
+            character.portraitUpdatedAt = Date.now();
+        }
         return {
             ...state,
             character: {
@@ -126,6 +133,9 @@ export const handlers = {
             const safeUrl = sanitizePortraitUrl(payload.portraitUrl);
             if (safeUrl) {
                 payload.portraitUrl = safeUrl;
+                // A picture that lands is stamped HERE, whatever the caller
+                // sent — one owner of the stamp, the NPC path's rule.
+                payload.portraitUpdatedAt = Date.now();
             } else if (payload.portraitUrl === '' || payload.portraitUrl == null) {
                 // An explicit clear stays a clear.
                 payload.portraitUrl = '';

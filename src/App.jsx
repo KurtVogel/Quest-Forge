@@ -6,7 +6,6 @@ import CharacterCreation from './components/CharacterSheet/CharacterCreation.jsx
 import SettingsModal from './components/Settings/SettingsModal.jsx';
 import { loadAutoSave, listSaves, loadGame } from './state/persistence.js';
 import { loadGameFromCloud, listCloudSaves } from './state/cloudSync.js';
-import { clearImageCache } from './llm/providers/imageGen.js';
 import { describeTimeAgo } from './components/Chat/returnCard.js';
 import './App.css';
 
@@ -64,7 +63,6 @@ function StartScreen() {
     // Autosaves are deliberately per-device (local browser only); the cloud
     // carries manual saves. Continue always resumes this device's session.
     if (autoSaveData) {
-      clearImageCache(); // Scene-art cache is per-campaign — never show another campaign's art
       dispatch({ type: 'LOAD_GAME', payload: autoSaveData });
     }
   };
@@ -88,7 +86,6 @@ function StartScreen() {
       const savedState = isCloud ? (cloud.ok ? cloud.state : null) : await loadGame(slotId);
 
       if (savedState) {
-        clearImageCache();
         dispatch({ type: 'LOAD_GAME', payload: savedState });
       } else {
         setLoadError(cloud?.message || 'That save could not be loaded — details in the browser console.');

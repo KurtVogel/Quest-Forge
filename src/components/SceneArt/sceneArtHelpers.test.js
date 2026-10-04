@@ -8,6 +8,7 @@ import {
     fallbackNotice,
     pickSceneSituation,
 } from './sceneArtHelpers.js';
+import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 
 describe('pickSceneSituation — the moment the art director paints (2026-09-01 P1)', () => {
     const narration = { id: 'm-narr', role: 'assistant', content: 'Kraul lies dead at your feet; the goblins kneel.' };
@@ -69,7 +70,39 @@ describe('describeEntity', () => {
         expect(describeEntity({
             type: 'npc',
             entity: { name: 'Grub', species: 'goblin', gender: 'man', disposition: 'wary', lastNotes: 'Sells rope', lastLocation: 'Docks' },
-        })).toBe('Grub (goblin man), wary. Sells rope. Last seen at Docks.');
+        })).toBe('Grub (goblin man), wary. Context: Sells rope. Last seen at Docks.');
+    });
+
+    it('notes never become a look: a figure with no appearance record carries its notes under "Context:" in every composer (2026-10-03 audit)', () => {
+        // The focus list used to paint `lastNotes || notes` AS THE LOOK while
+        // the NPC portrait labeled the same text "Context:" — two composers,
+        // one record, two meanings.
+        const npc = { name: 'Grub', species: 'goblin', gender: 'man', disposition: 'wary', lastNotes: 'Sells rope by the weir' };
+        const focused = buildFocusedPrompt({ type: 'npc', label: 'Grub', entity: npc }, 'Docks');
+        const portrait = buildNpcPortraitPrompt(npc);
+        for (const prompt of [focused, portrait]) {
+            expect(prompt).toContain('Context: Sells rope by the weir');
+            expect(prompt).not.toMatch(/(?<!Context: )Sells rope by the weir/);
+        }
+        // With a look on record the look is the look, in both.
+        const seen = { ...npc, appearance: 'Wiry, one torn ear, a rope-burned palm' };
+        expect(describeEntity({ type: 'npc', entity: seen })).toBe('Grub (goblin man), wary. Wiry, one torn ear, a rope-burned palm');
+        expect(buildNpcPortraitPrompt(seen)).toContain('Wiry, one torn ear, a rope-burned palm Context: Sells rope by the weir');
+        // A companion's recruitment note is context too.
+        expect(describeEntity({ type: 'companion', entity: { name: 'Tammo', role: 'sellsword', notes: 'Owes the hero a debt' } }))
+            .toBe('Tammo, sellsword. Context: Owes the hero a debt');
+        // privateNotes never ride any prompt.
+        const secret = { ...npc, privateNotes: 'Informs for the Grey Ledger' };
+        expect(buildFocusedPrompt({ type: 'npc', label: 'Grub', entity: secret }, 'Docks')).not.toContain('Grey Ledger');
+        expect(buildNpcPortraitPrompt(secret)).not.toContain('Grey Ledger');
+    });
+
+    it('a focused portrait and the dedicated portrait lead with the SAME identity lock', () => {
+        const npc = { name: 'Maren', species: 'human', gender: 'woman', appearance: 'Bald, dark brown skin, statuesque, in her fifties' };
+        const focusedLock = buildFocusedPrompt({ type: 'npc', label: 'Maren', entity: npc }, 'Docks').split(' Focused waist-up')[0];
+        const portraitLock = buildNpcPortraitPrompt(npc).split(' Waist-up')[0];
+        expect(focusedLock).toContain('IDENTITY LOCK');
+        expect(focusedLock).toBe(portraitLock);
     });
 
     it('describes enemies with their condition and falls back to the label for unknown types', () => {

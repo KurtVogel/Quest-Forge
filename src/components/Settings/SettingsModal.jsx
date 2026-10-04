@@ -10,7 +10,6 @@ import { getFirebaseConfigError, initializeFirebase } from '../../config/firebas
 import { signInWithGoogle, logOut } from '../../state/auth.js';
 import { upgradeCampaignFrontsV2 } from '../../llm/frontUpgrade.js';
 import { FRONTS_VERSION } from '../../engine/fronts.js';
-import { clearImageCache } from '../../llm/providers/imageGen.js';
 import { describeKeyVendorMismatch } from '../../llm/machinery.js';
 import './Settings.css';
 
@@ -139,7 +138,6 @@ export default function SettingsModal() {
                 setSyncStatus(cloud?.message || 'That save could not be loaded — details in the browser console.');
                 return;
             }
-            clearImageCache(); // Scene-art cache is per-campaign — never show another campaign's art
             dispatch({ type: 'LOAD_GAME', payload: savedState });
             handleClose();
         } catch (e) {
@@ -223,7 +221,6 @@ export default function SettingsModal() {
 
     const handleNewGame = () => {
         if (confirm('Start a new game? Current unsaved progress will be lost.')) {
-            clearImageCache();
             dispatch({ type: 'NEW_GAME' });
             dispatch({ type: 'SET_UI', payload: { isCharacterCreationOpen: true, isSettingsOpen: false } });
         }

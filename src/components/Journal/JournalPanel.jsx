@@ -6,7 +6,7 @@ import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js'
 import { bondKindLabel, listNpcImpressions, scoreNpcForPrompt, splitBondMoments } from '../../engine/npcRoster.js';
 import { deriveRelationshipStage, describeAbsence, listKnownByNpc, resolveOpenThread } from '../../engine/relationshipArc.js';
 import { describeLastHere, describeTravelLink, groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
-import { generatePortraitImageDetailed, NPC_PORTRAIT_SIZE } from '../../llm/providers/imageGen.js';
+import { NPC_PORTRAIT_SIZE, requestPortrait } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 import LookEditor from './LookEditor.jsx';
 import { writeChronicleChapters, chronicleToMarkdown, collectChapterEntries, planChroniclePassages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
@@ -207,15 +207,13 @@ export default function JournalPanel({ isOpen, onClose, requestedTab = null }) {
         try {
             const meta = campaignStamp(state);
             const prompt = buildNpcPortraitPrompt(npc);
-            const result = await generatePortraitImageDetailed(prompt, state.settings?.imageApiKey, {
-                geminiApiKey: getMachineryGeminiKey(state.settings),
-                bypassCache: !!npc.portraitUrl, // reroll must paint a genuinely new image
+            const result = await requestPortrait(prompt, state.settings, {
+                existingUrl: npc.portraitUrl,
+                sessionScope: state.session?.id || '',
                 // Stored at the size it renders (2026-09-21 audit P2): the card
                 // draws it 84 px wide, so 256 covers a 3× DPR phone.
-                ...NPC_PORTRAIT_SIZE,
-                sessionScope: state.session?.id || '',
+                size: NPC_PORTRAIT_SIZE,
             });
-            if (!result?.url) throw new Error('No portrait returned.');
             if (!mountedRef.current) return;
             const portraitAction = {
                 type: 'SET_NPC_PORTRAIT',

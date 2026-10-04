@@ -7,7 +7,7 @@ import { RACES, RACE_LIST } from '../../data/races.js';
 import { CLASSES, CLASS_LIST } from '../../data/classes.js';
 import { SKILL_ABILITIES, computeACFromInventory, getModifier, getProficiencyBonus, getSkillModifier } from '../../engine/rules.js';
 import { getAbilityGuidance } from '../../engine/abilityGuidance.js';
-import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
+import { requestPortrait } from '../../llm/providers/imageGen.js';
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
 import { buildPortraitPrompt } from './portraitPrompt.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH, normalizeCampaignPremise } from '../../config/contentLimits.js';
@@ -213,14 +213,12 @@ export default function CharacterCreation() {
         try {
             const equippedNames = preview.inventory.filter(i => i.equipped && i.name).map(i => i.name);
             const prompt = buildPortraitPrompt(preview.character, appearance.trim(), equippedNames);
-            const result = await generatePortraitImageDetailed(prompt, state.settings?.imageApiKey, {
-                geminiApiKey: getMachineryGeminiKey(state.settings),
-                bypassCache: !!portraitUrl, // reroll must paint a genuinely new image
+            const result = await requestPortrait(prompt, state.settings, {
+                existingUrl: portraitUrl,
                 // Pre-session (the wizard runs before the campaign exists) — the
                 // draft scope keeps wizard renders apart from any live campaign.
                 sessionScope: 'creation-wizard',
             });
-            if (!result?.url) throw new Error('No portrait returned.');
             setPortraitUrl(result.url);
             setPortraitProvider(result.provider || '');
         } catch (e) {
@@ -274,10 +272,10 @@ export default function CharacterCreation() {
         // gold the player just confirmed are what the campaign starts with.
         if (preview) {
             const character = { ...preview.character };
+            // START_CHARACTER stamps the portrait's time (the reducer owns it).
             if (portraitUrl) {
                 character.portraitUrl = portraitUrl;
                 character.portraitProvider = portraitProvider;
-                character.portraitUpdatedAt = Date.now();
             }
             beginAdventure(character, preview.inventory);
             return;
@@ -291,7 +289,6 @@ export default function CharacterCreation() {
         if (portraitUrl) {
             character.portraitUrl = portraitUrl;
             character.portraitProvider = portraitProvider;
-            character.portraitUpdatedAt = Date.now();
         }
         const inventory = createStartingInventory(charClass);
         beginAdventure(character, inventory);

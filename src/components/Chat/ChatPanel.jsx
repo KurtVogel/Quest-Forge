@@ -8,7 +8,6 @@ import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { EPILOGUE_REQUEST_MESSAGE, isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
 import { saveRosterCharacter } from '../../state/persistence.js';
-import { clearImageCache } from '../../llm/providers/imageGen.js';
 import { addMemory, findSubjectsInText, retractMemoriesFromMessage, seedMemories } from '../../engine/vectorMemory.js';
 import { describeMemorySeedIncomplete, getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
@@ -973,7 +972,6 @@ export default function ChatPanel() {
             setEndingNotice(`Could not save ${character.name || 'the hero'} to the roster — browser storage failed (${e?.message || e?.name || 'unknown error'}). Export the hero from the Character Sheet instead.`);
             return;
         }
-        clearImageCache(); // Scene-art cache is per-campaign — never show another campaign's art
         dispatch({ type: 'NEW_GAME' });
         dispatch({
             type: 'SET_UI',

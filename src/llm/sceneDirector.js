@@ -6,10 +6,8 @@
  */
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
-import { curateNpcsForPrompt, resolveCompanionLook } from '../engine/npcRoster.js';
-import { classDisplayName, raceDisplayName } from '../engine/characterUtils.js';
-import { cleanTextField } from '../config/contentLimits.js';
-import { buildIdentityLockLine } from '../engine/appearanceIdentity.js';
+import { curateNpcsForPrompt } from '../engine/npcRoster.js';
+import { castNameTag, describeCastMember } from '../engine/castMember.js';
 
 /**
  * One foe's state for the art director's cast list (2026-09-01 P2): combat
@@ -69,16 +67,20 @@ export async function composeScenePrompt({ situation, character, party = [], npc
     if (currentLocation) lines.push(`Location: ${currentLocation}`);
     if (situation) lines.push(`Current situation: ${preserveSceneSituation(situation)}`);
 
+    // Every cast line is formatted from the one cast-member shelf
+    // (engine/castMember.js): string-or-empty fields (2026-09-09 audit P1 —
+    // these lines sit ABOVE the try below, so an object field rejected the
+    // whole compose call), the look is the appearance record and nothing else,
+    // and a figure with no look is described by who they are.
+    const castLine = (label, member, described, gearPhrase) =>
+        `${label} — ${castNameTag(member)}: ${described}${member.gear ? ` ${gearPhrase} ${member.gear}.` : ''}${member.lock ? ` ${member.lock}` : ''}`;
+
     if (character) {
-        // String-or-empty belts (2026-09-09 audit P1): this line sits ABOVE the
-        // try below, so an object field rejected the whole compose call and
-        // Scene mode showed the raw TypeError as its error.
-        const equipped = cleanTextField(character.equippedSummary);
-        const gender = cleanTextField(character.gender);
-        const desc = cleanTextField(character.appearance)
-            || `a ${gender ? `${gender} ` : ''}${raceDisplayName(character)} ${classDisplayName(character) || 'adventurer'}`.replace(/\s+/g, ' ').trim();
-        const lock = buildIdentityLockLine(character.name, cleanTextField(character.appearance), { species: raceDisplayName(character), gender });
-        lines.push(`Player character — ${character.name}${gender ? ` (${gender})` : ''}: ${desc}${equipped ? ` Wearing/wielding: ${equipped}.` : ''}${lock ? ` ${lock}` : ''}`);
+        const hero = describeCastMember('player', character, { gear: character.equippedSummary });
+        // With no look on record the hero is described by who they are; the
+        // gender rides the description too ("a woman Half-Orc Fighter").
+        const whoTheyAre = hero.tag ? hero.role.replace(/^a /, `a ${hero.tag} `) : hero.role;
+        lines.push(castLine('Player character', hero, hero.look || whoTheyAre, 'Wearing/wielding:'));
     }
 
     // Party companions stand beside the hero in nearly every frame — they get
@@ -89,12 +91,12 @@ export async function composeScenePrompt({ situation, character, party = [], npc
         companionNames.add(c.name.toLowerCase());
         // The roster record is the companion's living look (2026-09-12): the
         // party record alone painted a long-established companion from a thin
-        // recruitment note — or nothing — every time.
-        const look = resolveCompanionLook(c, npcs);
-        const identity = [look.species, look.gender].filter(Boolean).join(' ');
-        const desc = look.appearance || cleanTextField(c.notes) || cleanTextField(c.role) || 'companion';
-        const lock = buildIdentityLockLine(c.name, look.appearance, { species: look.species, gender: look.gender });
-        lines.push(`Party companion — ${c.name}${identity ? ` (${identity})` : ''}: ${desc}${c.weapon ? ` Wielding ${c.weapon}.` : ''}${lock ? ` ${lock}` : ''}`);
+        // recruitment note — or nothing — every time. With no look on record
+        // the line says who they are and carries the note AS a note.
+        const companion = describeCastMember('companion', c, { npcs });
+        const described = companion.look
+            || [companion.role, companion.context && `Context: ${companion.context}`].filter(Boolean).join('. ');
+        lines.push(castLine('Party companion', companion, described, 'Wielding'));
     }
 
     // Roster NPCs likely in frame: the shared prompt curation (location-aware,
@@ -105,10 +107,8 @@ export async function composeScenePrompt({ situation, character, party = [], npc
         .filter(n => !companionNames.has(n.name.toLowerCase()))
         .slice(0, 4);
     for (const n of recentNpcs) {
-        const identity = [n.species, n.gender].map(v => cleanTextField(v)).filter(Boolean).join(' ');
-        const desc = cleanTextField(n.appearance) || `${cleanTextField(n.disposition)} NPC`.trim();
-        const lock = buildIdentityLockLine(n.name, cleanTextField(n.appearance), { species: cleanTextField(n.species), gender: cleanTextField(n.gender) });
-        lines.push(`NPC — ${n.name}${identity ? ` (${identity})` : ''}: ${desc}${lock ? ` ${lock}` : ''}`);
+        const figure = describeCastMember('npc', n);
+        lines.push(castLine('NPC', figure, figure.look || (figure.role === 'NPC' ? 'NPC' : `${figure.role} NPC`)));
     }
 
     if (combat?.active && combat.enemies?.length > 0) {

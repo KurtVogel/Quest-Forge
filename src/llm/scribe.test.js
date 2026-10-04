@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, composeScenePrompt, preserveSceneSituation, runNpcFrontReflection, runScribe, shouldScribeCombatBeat } from './scribe.js';
+import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runNpcFrontReflection, runScribe, shouldScribeCombatBeat } from './scribe.js';
+import { composeScenePrompt, preserveSceneSituation } from './sceneDirector.js';
 import { sendMessage } from './adapter.js';
 
 vi.mock('./adapter.js', () => ({

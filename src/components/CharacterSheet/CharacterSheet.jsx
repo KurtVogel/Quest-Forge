@@ -5,8 +5,7 @@ import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/charact
 import { downloadCharacterExport } from '../../engine/characterVault.js';
 import { saveRosterCharacter } from '../../state/persistence.js';
 import { getExperienceThreshold, isMaxLevel } from '../../engine/progression.js';
-import { generatePortraitImageDetailed } from '../../llm/providers/imageGen.js';
-import { getMachineryGeminiKey } from '../../llm/machinery.js';
+import { requestPortrait } from '../../llm/providers/imageGen.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
 import { getKnownSpells, getSpellAttackBonus, getSpellSaveDC, isSpellcaster } from '../../engine/spellcasting.js';
@@ -156,23 +155,15 @@ export default function CharacterSheet() {
         setIsGeneratingPortrait(true);
         setPortraitError('');
         try {
-            const result = await generatePortraitImageDetailed(portraitPrompt, state.settings.imageApiKey, {
-                geminiApiKey: getMachineryGeminiKey(state.settings),
+            const result = await requestPortrait(portraitPrompt, state.settings, {
+                existingUrl: character.portraitUrl,
                 sessionScope: state.session?.id || '',
-                // Regenerate must paint a genuinely NEW image — the prompt is
-                // deterministic, so without the bypass the second click returned
-                // the identical cached portrait (2026-08-20 audit P1).
-                bypassCache: !!character.portraitUrl,
             });
-            if (!result?.url) throw new Error('No portrait returned.');
+            // The reducer stamps the time when the picture lands (one owner,
+            // like the NPC path's applyNpcPortrait).
             dispatch({
                 type: 'UPDATE_CHARACTER',
-                payload: {
-                    appearance,
-                    portraitUrl: result.url,
-                    portraitProvider: result.provider || '',
-                    portraitUpdatedAt: Date.now(),
-                },
+                payload: { appearance, portraitUrl: result.url, portraitProvider: result.provider || '' },
             });
         } catch (e) {
             setPortraitError(e.message || 'Portrait failed.');

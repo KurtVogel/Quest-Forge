@@ -6,8 +6,10 @@
  */
 import { classDisplayName, raceDisplayName } from '../../engine/characterUtils.js';
 import { findLatestNarration } from '../../llm/narrativeMessages.js';
-import { buildIdentityLockLine, IDENTITY_LOCK_REMINDER } from '../../engine/appearanceIdentity.js';
+import { IDENTITY_LOCK_REMINDER } from '../../engine/appearanceIdentity.js';
+import { castLookOrContext, castNameTag, describeCastMember } from '../../engine/castMember.js';
 import { PORTRAIT_STYLE } from '../CharacterSheet/portraitPrompt.js';
+import { isMissingKeyFallback, isXaiFilteredFallback } from '../../llm/providers/imageGen.js';
 
 export function equippedSummary(inventory = []) {
     return (inventory || [])
@@ -17,54 +19,40 @@ export function equippedSummary(inventory = []) {
         .join(', ');
 }
 
+/** The focus target as the shelf's cast member — one read for the description and the lock. */
+function castMemberOf(target) {
+    return describeCastMember(target.type, target.entity, { gear: target.gear });
+}
+
 export function describeEntity(target) {
     if (!target) return '';
-    if (target.type === 'player') {
-        const c = target.entity;
-        return [
-            `${c.name}${c.gender ? ` (${c.gender})` : ''}, a ${raceDisplayName(c)} ${classDisplayName(c) || 'adventurer'}`.replace(/\s+/g, ' ').trim(),
-            c.appearance,
-            target.gear && `Wearing/wielding: ${target.gear}.`,
-        ].filter(Boolean).join('. ');
-    }
-    if (target.type === 'companion') {
-        const c = target.entity;
-        const identity = [c.species, c.gender].filter(Boolean).join(' ');
-        return [
-            `${c.name}${identity ? ` (${identity})` : ''}, ${c.role || 'companion'}`,
-            c.appearance || c.notes,
-            c.weapon && `Wielding ${c.weapon}.`,
-        ].filter(Boolean).join('. ');
-    }
-    if (target.type === 'npc') {
-        const n = target.entity;
-        const identity = [n.species, n.gender].filter(Boolean).join(' ');
-        return [
-            // The registered species + gender ride right beside the name — the art
-            // director's inviolable-identity rule keys on this "(goblin woman)" tag.
-            `${n.name}${identity ? ` (${identity})` : ''}, ${n.disposition || 'NPC'}`,
-            n.appearance || n.lastNotes || n.notes,
-            n.lastLocation && `Last seen at ${n.lastLocation}.`,
-        ].filter(Boolean).join('. ');
-    }
+    if (!['player', 'companion', 'npc', 'enemy'].includes(target.type)) return target.label || '';
+    const member = castMemberOf(target);
+    // The registered species + gender ride right beside the name — the art
+    // director's inviolable-identity rule keys on this "(goblin woman)" tag.
+    const head = `${castNameTag(member)}, ${member.role}`;
     if (target.type === 'enemy') {
-        const e = target.entity;
-        return [
-            `${e.name}, hostile combatant`,
-            e.condition && `Condition: ${e.condition}.`,
-        ].filter(Boolean).join('. ');
+        return [head, member.context && `Condition: ${member.context}.`].filter(Boolean).join('. ');
     }
-    return target.label || '';
+    if (target.type === 'player') {
+        return [head, member.look, member.gear && `Wearing/wielding: ${member.gear}.`].filter(Boolean).join('. ');
+    }
+    const lastLocation = typeof target.entity?.lastLocation === 'string' ? target.entity.lastLocation.trim() : '';
+    return [
+        head,
+        // The look, or the notes under a "Context:" label — never notes painted
+        // as a look (2026-10-03 audit: a focused NPC with no appearance record
+        // was painted from last-scene notes).
+        castLookOrContext(member),
+        member.gear && `Wielding ${member.gear}.`,
+        target.type === 'npc' && lastLocation && `Last seen at ${lastLocation}.`,
+    ].filter(Boolean).join('. ');
 }
 
 export function buildFocusedPrompt(target, location) {
     const description = describeEntity(target);
-    const entity = target?.entity || {};
     // Identity lock leads (2026-09-12) — see engine/appearanceIdentity.js.
-    const lock = buildIdentityLockLine(entity.name || target?.label, entity.appearance, {
-        species: target?.type === 'player' ? raceDisplayName(entity) : entity.species,
-        gender: entity.gender,
-    });
+    const lock = target ? castMemberOf(target).lock : '';
     return [
         lock,
         `Focused waist-up portrait of ${target.label}.`,
@@ -122,22 +110,29 @@ export function pickSceneSituation({ messages = [], journal = [], location = '' 
     return { situation, narrationId: narration?.id ?? null };
 }
 
+/**
+ * Why a render did not come from xAI, in the player's words. The reason
+ * string's grammar belongs to imageGen.js; this reads it only through that
+ * module's own predicates, never by matching its text.
+ */
 export function fallbackNotice(result) {
     if (!result || result.provider === 'xai') return '';
+    const noKey = isMissingKeyFallback(result.fallbackReason);
+    const filtered = isXaiFilteredFallback(result.fallbackReason);
     if (result.provider === 'gemini') {
         // Gemini is a full-quality provider — only explain WHY xAI didn't render.
-        if (result.fallbackReason === 'missing-key') {
+        if (noKey) {
             return 'Rendered with Gemini (your machinery key). Add an xAI Image API Key in Settings for Grok Imagine art.';
         }
-        if (result.fallbackReason === 'xai-empty') {
+        if (filtered) {
             return 'xAI returned no image (possibly filtered) — rendered with Gemini instead.';
         }
         return 'xAI rendering failed — rendered with Gemini (your machinery key) instead.';
     }
-    if (result.fallbackReason === 'missing-key') {
+    if (noKey) {
         return 'Free fallback render — add an xAI Image API Key (or a Gemini machinery key) in Settings for the intended high-quality scene art.';
     }
-    if (result.fallbackReason?.includes('xai-empty')) {
+    if (filtered) {
         return 'No image provider produced an image, possibly because the prompt was filtered. This is a lower-quality free fallback.';
     }
     return 'Image rendering failed on the real providers, so this is a lower-quality free fallback. Check the image key or try again.';

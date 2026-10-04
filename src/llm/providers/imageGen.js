@@ -15,6 +15,7 @@
  */
 
 import { normalizeXaiApiKey } from './xaiKey.js';
+import { getMachineryGeminiKey } from '../machinery.js';
 
 const IMAGE_CACHE = new Map();
 const IMAGE_CACHE_MAX = 10;
@@ -196,48 +197,50 @@ async function downscaleDataUrl(dataUrl, { maxWidth, maxHeight, quality = 0.82, 
 }
 
 /**
- * Render a finished image prompt to a displayable image URL.
- * @param {string} prompt - The fully-composed visual prompt
- * @param {string} imageApiKey - xAI (Grok) API key
- * @param {object} options - Generation options
- * @returns {Promise<{url:string,provider:'xai'|'pollinations',fallbackReason:string|null}|null>}
+ * The fallback-reason GRAMMAR — written here, read by `fallbackNotice` in
+ * components/SceneArt/sceneArtHelpers.js through the two predicates below
+ * (2026-10-03 audit: the reasons were assembled as prose in this module and
+ * parsed with `===` / `includes` in that one, with no shared constant and no
+ * test that failed when a reason was renamed). A result's `fallbackReason` is
+ * null for the first tier that had a key, else the reasons of every tier that
+ * failed before it, joined with "; ":
+ *   missing-key                     no xAI key configured
+ *   <tier>-empty[ (<detail>)]       an OK reply with no image (usually moderation)
+ *   <tier>-http-<status>[: <body>]  the provider refused the request
+ *   <tier>-network: <message>       the request never completed (or stalled)
  */
-async function generateImageResult(prompt, imageApiKey, options = {}) {
-    if (!prompt) return null;
-    prompt = String(prompt).slice(0, PROVIDER_PROMPT_MAX);
+const REASON_MISSING_KEY = 'missing-key';
+const reason = {
+    empty: (tier, detail) => `${tier}-empty${detail ? ` (${detail})` : ''}`,
+    http: (tier, status, body) => `${tier}-http-${status}${body ? `: ${body}` : ''}`,
+    network: (tier, message) => `${tier}-network: ${message}`,
+};
 
-    const normalizedImageApiKey = normalizeXaiApiKey(imageApiKey);
-    const geminiApiKey = (options.geminiApiKey || '').trim();
-    const aspectRatio = options.aspectRatio || '16:9';
-    const fallbackWidth = options.fallbackWidth || 1280;
-    const fallbackHeight = options.fallbackHeight || 720;
-    // options.cacheKey lets the caller key on the render's INPUTS instead of
-    // the finished prompt. Scene prompts are written fresh by an LLM per click,
-    // so a prompt-derived key could never hit for them — every repeat Visualize
-    // paid a compose call + a full generation and pushed another full-res
-    // base64 into the cache (2026-08-01 audit P1).
-    // options.sessionScope folds the campaign id into every key so one
-    // campaign's cached render is unreachable from another BY CONSTRUCTION —
-    // the clearImageCache() calls at campaign boundaries are now belt-and-braces,
-    // not the only defense (2026-08-20 audit P2: START_CHARACTER never cleared).
-    const baseCacheKey = `${options.sessionScope || ''}|${options.cacheKey || `${aspectRatio}|${prompt.toLowerCase().trim()}`}`;
-    const preferredProvider = normalizedImageApiKey ? 'xai' : (geminiApiKey ? 'gemini' : 'pollinations');
-    const preferredCacheKey = `${preferredProvider}|${baseCacheKey}`;
-    // bypassCache is the reroll affordance: generation is the point of the
-    // feature, so "Visualize again" must be able to produce a NEW image.
-    if (!options.bypassCache && IMAGE_CACHE.has(preferredCacheKey)) {
-        return IMAGE_CACHE.get(preferredCacheKey);
-    }
+/** True when the render fell back ONLY because no xAI key is configured. */
+export function isMissingKeyFallback(fallbackReason) {
+    return fallbackReason === REASON_MISSING_KEY;
+}
 
-    let fallbackReason = normalizedImageApiKey ? 'xai-error' : 'missing-key';
-    if (normalizedImageApiKey) {
-        const guard = requestSignal(options.signal);
-        try {
-            const response = await fetch(XAI_IMAGE_ENDPOINT, {
+/** True when xAI answered OK with no image — most likely content moderation. */
+export function isXaiFilteredFallback(fallbackReason) {
+    return typeof fallbackReason === 'string' && fallbackReason.split('; ').includes(reason.empty('xai'));
+}
+
+/**
+ * The two real providers as descriptors: how to ask, and how to read an image
+ * out of an OK reply. Everything else — the stall guard, the cancel rule, the
+ * downscale, the cache write, the reason on failure — is ONE dance in
+ * `tryProvider` (the tiers were two ~45-line copies of it).
+ */
+const TIERS = {
+    xai: {
+        request: (prompt, apiKey) => ({
+            url: XAI_IMAGE_ENDPOINT,
+            init: {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${normalizedImageApiKey}`,
+                    'Authorization': `Bearer ${apiKey}`,
                 },
                 body: JSON.stringify({
                     model: XAI_IMAGE_MODEL,
@@ -245,47 +248,18 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                     n: 1,
                     response_format: 'b64_json',
                 }),
-                signal: guard.signal,
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                const b64 = base64ImageBody(data?.data?.[0]?.b64_json);
-                if (b64) {
-                    const dataUrl = `data:${mimeFromBase64(b64)};base64,${b64}`;
-                    const finalUrl = await downscaleDataUrl(dataUrl, {
-                        maxWidth: options.maxWidth,
-                        maxHeight: options.maxHeight,
-                        quality: options.quality,
-                    });
-                    const result = { url: finalUrl, provider: 'xai', fallbackReason: null };
-                    await cacheRender(`xai|${baseCacheKey}`, result, options);
-                    return result;
-                }
-                // OK status but no image — most likely filtered by content moderation.
-                fallbackReason = 'xai-empty';
-                console.log('[ImageGen] xAI returned no image (possibly filtered by moderation).');
-            } else {
-                const errText = await response.text().catch(() => '');
-                const compactError = errText.replace(/\s+/g, ' ').trim().slice(0, 300);
-                fallbackReason = `xai-http-${response.status}${compactError ? `: ${compactError}` : ''}`;
-                console.warn(`[ImageGen] xAI image request failed (Status ${response.status}). ${compactError}`);
-            }
-        } catch (e) {
-            rethrowIfCancelled(options);
-            fallbackReason = `xai-network: ${String(e.message || e).slice(0, 200)}`;
-            console.log('[ImageGen] xAI image generation failed, falling back:', e.message);
-        } finally {
-            guard.release();
-        }
-    }
-
-    // Gemini image fallback on the mandatory machinery key — every player has
-    // one, so the quality floor is a real image model, not Pollinations.
-    if (geminiApiKey) {
-        const guard = requestSignal(options.signal);
-        try {
-            const response = await fetch(`${GEMINI_IMAGE_ENDPOINT}?key=${encodeURIComponent(geminiApiKey)}`, {
+            },
+        }),
+        extract: (data) => {
+            const b64 = base64ImageBody(data?.data?.[0]?.b64_json);
+            return b64 ? `data:${mimeFromBase64(b64)};base64,${b64}` : null;
+        },
+        emptyDetail: () => '',
+    },
+    gemini: {
+        request: (prompt, apiKey, { aspectRatio }) => ({
+            url: `${GEMINI_IMAGE_ENDPOINT}?key=${encodeURIComponent(apiKey)}`,
+            init: {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -295,55 +269,120 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
                         imageConfig: { aspectRatio },
                     },
                 }),
-                signal: guard.signal,
-            });
-            if (response.ok) {
-                const data = await response.json();
-                const inline = geminiInlineImage(data?.candidates?.[0]?.content?.parts);
-                if (inline) {
-                    const dataUrl = `data:${inline.mimeType};base64,${inline.data}`;
-                    const finalUrl = await downscaleDataUrl(dataUrl, {
-                        maxWidth: options.maxWidth,
-                        maxHeight: options.maxHeight,
-                        quality: options.quality,
-                    });
-                    const result = { url: finalUrl, provider: 'gemini', fallbackReason };
-                    await cacheRender(`gemini|${baseCacheKey}`, result, options);
-                    return result;
-                }
-                const finish = data?.candidates?.[0]?.finishReason || 'no-image';
-                fallbackReason = `${fallbackReason}; gemini-empty (${finish})`;
-                console.log('[ImageGen] Gemini returned no image:', finish);
-            } else {
-                const errText = await response.text().catch(() => '');
-                fallbackReason = `${fallbackReason}; gemini-http-${response.status}`;
-                console.warn(`[ImageGen] Gemini image request failed (Status ${response.status}). ${errText.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
-            }
-        } catch (e) {
-            rethrowIfCancelled(options);
-            fallbackReason = `${fallbackReason}; gemini-network: ${String(e.message || e).slice(0, 200)}`;
-            console.log('[ImageGen] Gemini image generation failed, falling back:', e.message);
-        } finally {
-            guard.release();
+            },
+        }),
+        extract: (data) => {
+            const inline = geminiInlineImage(data?.candidates?.[0]?.content?.parts);
+            return inline ? `data:${inline.mimeType};base64,${inline.data}` : null;
+        },
+        emptyDetail: (data) => data?.candidates?.[0]?.finishReason || 'no-image',
+    },
+};
+
+/**
+ * Ask one provider. Resolves `{ result }` on an image, `{ reason }` on any
+ * provider failure (which falls through the chain), and THROWS only for the
+ * caller's own cancel — a deliberate cancel is never a provider failure.
+ */
+async function tryProvider(tier, apiKey, prompt, options, { cacheKey, priorReason }) {
+    const guard = requestSignal(options.signal);
+    try {
+        const { url, init } = TIERS[tier].request(prompt, apiKey, options);
+        const response = await fetch(url, { ...init, signal: guard.signal });
+        if (!response.ok) {
+            const body = (await response.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 300);
+            console.warn(`[ImageGen] ${tier} image request failed (Status ${response.status}). ${body}`);
+            return { reason: reason.http(tier, response.status, body) };
         }
+        const data = await response.json();
+        const dataUrl = TIERS[tier].extract(data);
+        if (!dataUrl) {
+            // OK status but no image — most likely filtered by content moderation.
+            const detail = TIERS[tier].emptyDetail(data);
+            console.warn(`[ImageGen] ${tier} returned no image (possibly filtered by moderation).`, detail);
+            return { reason: reason.empty(tier, detail) };
+        }
+        const finalUrl = await downscaleDataUrl(dataUrl, {
+            maxWidth: options.maxWidth,
+            maxHeight: options.maxHeight,
+            quality: options.quality,
+        });
+        const result = { url: finalUrl, provider: tier, fallbackReason: priorReason };
+        await cacheRender(`${tier}|${cacheKey}`, result, options);
+        return { result };
+    } catch (e) {
+        rethrowIfCancelled(options);
+        console.warn(`[ImageGen] ${tier} image generation failed, falling back:`, e.message);
+        return { reason: reason.network(tier, String(e.message || e).slice(0, 200)) };
+    } finally {
+        guard.release();
+    }
+}
+
+/** The best provider the configured keys allow — the cache is keyed on it, so a cached fallback never blocks a retry on a better tier. */
+function preferredProvider(imageApiKey, geminiApiKey) {
+    if (normalizeXaiApiKey(imageApiKey)) return 'xai';
+    return (typeof geminiApiKey === 'string' && geminiApiKey.trim()) ? 'gemini' : 'pollinations';
+}
+
+/**
+ * Render a finished image prompt to a displayable image URL.
+ * @param {string} prompt - The fully-composed visual prompt
+ * @param {string} imageApiKey - xAI (Grok) API key
+ * @param {object} options - Generation options
+ * @returns {Promise<{url:string,provider:'xai'|'gemini'|'pollinations',fallbackReason:string|null}|null>}
+ */
+async function generateImageResult(prompt, imageApiKey, options = {}) {
+    if (!prompt) return null;
+    prompt = String(prompt).slice(0, PROVIDER_PROMPT_MAX);
+
+    const keys = {
+        xai: normalizeXaiApiKey(imageApiKey),
+        gemini: (options.geminiApiKey || '').trim(),
+    };
+    const aspectRatio = options.aspectRatio || '16:9';
+    const fallbackWidth = options.fallbackWidth || 1280;
+    const fallbackHeight = options.fallbackHeight || 720;
+    // options.cacheKey lets the caller key on the render's INPUTS instead of
+    // the finished prompt. Scene prompts are written fresh by an LLM per click,
+    // so a prompt-derived key could never hit for them — every repeat Visualize
+    // paid a compose call + a full generation and pushed another full-res
+    // base64 into the cache (2026-08-01 audit P1).
+    // options.sessionScope folds the campaign id into every key so one
+    // campaign's cached render is unreachable from another BY CONSTRUCTION
+    // (2026-08-20 audit P2) — which is why no campaign boundary clears the
+    // cache any more (five call sites did, as a belt, until 2026-10-04).
+    const baseCacheKey = `${options.sessionScope || ''}|${options.cacheKey || `${aspectRatio}|${prompt.toLowerCase().trim()}`}`;
+    const preferredCacheKey = `${preferredProvider(imageApiKey, keys.gemini)}|${baseCacheKey}`;
+    // bypassCache is the reroll affordance: generation is the point of the
+    // feature, so "Visualize again" must be able to produce a NEW image.
+    if (!options.bypassCache && IMAGE_CACHE.has(preferredCacheKey)) {
+        return IMAGE_CACHE.get(preferredCacheKey);
+    }
+
+    // xAI first; then Gemini on the mandatory machinery key — every player has
+    // one, so the quality floor is a real image model, not Pollinations.
+    let fallbackReason = keys.xai ? null : REASON_MISSING_KEY;
+    for (const tier of ['xai', 'gemini']) {
+        if (!keys[tier]) continue;
+        const outcome = await tryProvider(tier, keys[tier], prompt, { ...options, aspectRatio }, { cacheKey: baseCacheKey, priorReason: fallbackReason });
+        if (outcome.result) return outcome.result;
+        fallbackReason = fallbackReason ? `${fallbackReason}; ${outcome.reason}` : outcome.reason;
     }
     rethrowIfCancelled(options);
 
     // Free fallback (no key required). Lower quality — used only when both real
-    // providers are unavailable.
-    try {
-        const seed = Math.floor(Math.random() * 100000);
-        const safePrompt = encodeURIComponent(prompt.slice(0, POLLINATIONS_PROMPT_MAX));
-        const fallbackUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=${fallbackWidth}&height=${fallbackHeight}&nologo=true&seed=${seed}`;
-        // Returned as an <img src> URL directly to avoid CORS issues on fetch.
-        const result = { url: fallbackUrl, provider: 'pollinations', fallbackReason };
-        cacheSet(`pollinations|${baseCacheKey}`, result);
-        return result;
-    } catch (e) {
-        console.warn('[ImageGen] Fallback failed:', e);
-    }
-
-    return null;
+    // providers are unavailable. Returned as an <img src> URL directly to avoid
+    // CORS issues on fetch.
+    const seed = Math.floor(Math.random() * 100000);
+    const safePrompt = encodeURIComponent(prompt.slice(0, POLLINATIONS_PROMPT_MAX));
+    const result = {
+        url: `https://image.pollinations.ai/prompt/${safePrompt}?width=${fallbackWidth}&height=${fallbackHeight}&nologo=true&seed=${seed}`,
+        provider: 'pollinations',
+        fallbackReason,
+    };
+    cacheSet(`pollinations|${baseCacheKey}`, result);
+    return result;
 }
 
 export async function generateSceneImageDetailed(prompt, imageApiKey, extraOptions = {}) {
@@ -375,14 +414,45 @@ export async function generatePortraitImageDetailed(prompt, imageApiKey, extraOp
  */
 export function peekCachedImage(cacheKey, { imageApiKey, geminiApiKey, sessionScope } = {}) {
     if (!cacheKey) return null;
-    const preferred = normalizeXaiApiKey(imageApiKey)
-        ? 'xai'
-        : ((geminiApiKey || '').trim() ? 'gemini' : 'pollinations');
-    return IMAGE_CACHE.get(`${preferred}|${sessionScope || ''}|${cacheKey}`) || null;
+    return IMAGE_CACHE.get(`${preferredProvider(imageApiKey, geminiApiKey)}|${sessionScope || ''}|${cacheKey}`) || null;
 }
 
 /**
- * Clear the image cache.
+ * The option set every image request shares — the machinery key for the
+ * Gemini tier and the campaign scope that keeps one campaign's cache apart
+ * from another's. One builder, so a caller cannot forget either.
+ */
+export function imageRequestOptions(settings, { sessionScope = '', bypassCache = false, signal } = {}) {
+    return {
+        geminiApiKey: getMachineryGeminiKey(settings),
+        sessionScope: typeof sessionScope === 'string' ? sessionScope : '',
+        bypassCache: !!bypassCache,
+        ...(signal && { signal }),
+    };
+}
+
+/**
+ * "Paint this character" — THE portrait request (2026-10-03 audit: the Journal
+ * card, the Character Sheet, the creation wizard and SceneArt's focus mode each
+ * assembled the same options and threw the same string). `existingUrl` makes
+ * the call a REROLL: the prompt is deterministic, so without the cache bypass
+ * a second click returned the identical picture (2026-08-20 audit P1). `size`
+ * stores the portrait at the size it renders (NPC_PORTRAIT_SIZE for a card).
+ * Resolves the render or throws — a caller shows `error.message`.
+ */
+export async function requestPortrait(prompt, settings, { existingUrl = '', sessionScope = '', size = null, signal } = {}) {
+    const result = await generatePortraitImageDetailed(prompt, settings?.imageApiKey, {
+        ...imageRequestOptions(settings, { sessionScope, bypassCache: !!existingUrl, signal }),
+        ...(size || {}),
+    });
+    if (!result?.url) throw new Error('No portrait returned.');
+    return result;
+}
+
+/**
+ * Clear the image cache. No production caller since 2026-10-04 — every key
+ * carries its campaign scope, so a boundary has nothing to clear; kept for
+ * tests and as the one manual reset.
  */
 export function clearImageCache() {
     IMAGE_CACHE.clear();

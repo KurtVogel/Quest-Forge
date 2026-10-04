@@ -34,10 +34,6 @@ import {
     runNarrationAudits,
 } from './scribeAudits.js';
 
-// The on-demand art director lives in its own module since the 2026-08-24
-// split; existing consumers keep importing it from here.
-export { composeScenePrompt, preserveSceneSituation } from './sceneDirector.js';
-
 const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Given a DM's narrative response and the player's action that prompted it, extract any new canonical facts about the game world. Every field you output is an UNVARNISHED record: complete and frank about every fact the fiction establishes, never a censored, selective, or tastefully vague account — written in neutral, matter-of-fact language (see the REGISTER rule).
 
 Output ONLY valid JSON:

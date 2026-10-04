@@ -1,11 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useGame } from '../../state/GameContext.jsx';
-import { generatePortraitImageDetailed, generateSceneImageDetailed, peekCachedImage } from '../../llm/providers/imageGen.js';
-import { getMachineryGeminiKey } from '../../llm/machinery.js';
+import { generatePortraitImageDetailed, generateSceneImageDetailed, imageRequestOptions, peekCachedImage } from '../../llm/providers/imageGen.js';
 import { resolveCompanionLook } from '../../engine/npcRoster.js';
 import { isSameLocation } from '../../engine/locationRegistry.js';
-import { composeScenePrompt } from '../../llm/scribe.js';
+import { composeScenePrompt } from '../../llm/sceneDirector.js';
 import {
     buildCustomPrompt,
     buildFallbackScenePrompt,
@@ -87,11 +86,18 @@ export default function SceneArt() {
         abortRef.current?.abort();
         const controller = new AbortController();
         abortRef.current = controller;
-        const genOptions = {
-            geminiApiKey: getMachineryGeminiKey(state.settings),
-            bypassCache: reroll,
+        const genOptions = imageRequestOptions(state.settings, {
             sessionScope: state.session?.id || '',
+            bypassCache: reroll,
             signal: controller.signal,
+        });
+        const imageApiKey = state.settings.imageApiKey;
+        // One way a finished render reaches the screen, whatever the mode.
+        const show = (result, caption, shape) => {
+            if (!result) return;
+            setIsHidden(false);
+            setCurrentImage({ url: result.url, caption, shape });
+            setGenerationNotice(fallbackNotice(result));
         };
 
         setIsLoading(true);
@@ -100,23 +106,14 @@ export default function SceneArt() {
         try {
             if (mode === 'focus') {
                 const prompt = buildFocusedPrompt(selectedTarget, location);
-                const result = await generatePortraitImageDetailed(prompt, state.settings.imageApiKey, genOptions);
-                if (result) {
-                    setIsHidden(false);
-                    setCurrentImage({ url: result.url, caption: selectedTarget.label, shape: 'portrait' });
-                    setGenerationNotice(fallbackNotice(result));
-                }
+                show(await generatePortraitImageDetailed(prompt, imageApiKey, genOptions), selectedTarget.label, 'portrait');
                 return;
             }
 
             if (mode === 'custom') {
-                const prompt = buildCustomPrompt(customSubject.trim(), location, state.character);
-                const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey, genOptions);
-                if (result) {
-                    setIsHidden(false);
-                    setCurrentImage({ url: result.url, caption: customSubject.trim(), shape: 'scene' });
-                    setGenerationNotice(fallbackNotice(result));
-                }
+                const subject = customSubject.trim();
+                const prompt = buildCustomPrompt(subject, location, state.character);
+                show(await generateSceneImageDetailed(prompt, imageApiKey, genOptions), subject, 'scene');
                 return;
             }
 
@@ -136,14 +133,12 @@ export default function SceneArt() {
             const sceneCacheKey = `scene|${narrationId || 'no-narration'}|${location}`;
             if (!reroll) {
                 const cached = peekCachedImage(sceneCacheKey, {
-                    imageApiKey: state.settings.imageApiKey,
+                    imageApiKey,
                     geminiApiKey: genOptions.geminiApiKey,
                     sessionScope: genOptions.sessionScope,
                 });
                 if (cached) {
-                    setIsHidden(false);
-                    setCurrentImage({ url: cached.url, caption: location, shape: 'scene' });
-                    setGenerationNotice(fallbackNotice(cached));
+                    show(cached, location, 'scene');
                     return;
                 }
             }
@@ -166,12 +161,7 @@ export default function SceneArt() {
             // Fallback prompt if the composer is unavailable (no chat key / call failed).
             const prompt = composed || buildFallbackScenePrompt({ location, character: state.character, situation });
 
-            const result = await generateSceneImageDetailed(prompt, state.settings.imageApiKey, { ...genOptions, cacheKey: sceneCacheKey });
-            if (result) {
-                setIsHidden(false);
-                    setCurrentImage({ url: result.url, caption: location, shape: 'scene' });
-                setGenerationNotice(fallbackNotice(result));
-            }
+            show(await generateSceneImageDetailed(prompt, imageApiKey, { ...genOptions, cacheKey: sceneCacheKey }), location, 'scene');
         } catch (e) {
             // A deliberate Cancel is not an error to report.
             if (e?.name !== 'AbortError') setError(e.message || 'Image failed.');

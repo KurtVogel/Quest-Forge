@@ -92,9 +92,23 @@ describe('UPDATE_CHARACTER portrait allowlist', () => {
             type: 'UPDATE_CHARACTER',
             payload: { portraitUrl: 'data:image/webp;base64,bmV3', portraitProvider: 'xai', portraitUpdatedAt: 5 },
         });
-        expect(next.character).toMatchObject({ portraitUrl: 'data:image/webp;base64,bmV3', portraitProvider: 'xai', portraitUpdatedAt: 5 });
+        expect(next.character).toMatchObject({ portraitUrl: 'data:image/webp;base64,bmV3', portraitProvider: 'xai' });
+        // The reducer OWNS the stamp (2026-10-03 audit: the component stamped
+        // the hero's portrait time, the reducer the NPC's) — a caller's value
+        // is ignored, exactly like applyNpcPortrait.
+        expect(next.character.portraitUpdatedAt).toBeGreaterThan(1_600_000_000_000);
         const cleared = gameReducer(next, { type: 'UPDATE_CHARACTER', payload: { portraitUrl: '' } });
         expect(cleared.character.portraitUrl).toBe('');
+    });
+
+    it('START_CHARACTER stamps a hero who arrives with a picture, and keeps the stamp a roster hero carries', () => {
+        const hero = { name: 'Astra', race: 'human', class: 'fighter', level: 1, portraitUrl: 'data:image/webp;base64,bmV3', portraitProvider: 'xai' };
+        const fresh = gameReducer(initialGameState, { type: 'START_CHARACTER', payload: { character: hero, inventory: [] } });
+        expect(fresh.character.portraitUpdatedAt).toBeGreaterThan(1_600_000_000_000);
+        const fromRoster = gameReducer(initialGameState, { type: 'START_CHARACTER', payload: { character: { ...hero, portraitUpdatedAt: 5 }, inventory: [] } });
+        expect(fromRoster.character.portraitUpdatedAt).toBe(5);
+        const bare = gameReducer(initialGameState, { type: 'START_CHARACTER', payload: { character: { name: 'Astra', race: 'human', class: 'fighter', level: 1 }, inventory: [] } });
+        expect(bare.character).not.toHaveProperty('portraitUpdatedAt');
     });
 
     it('non-portrait updates pass through untouched', () => {
