@@ -3130,7 +3130,7 @@ serialized state" and nothing checks it; four exports with four error contracts 
 swallow-to-null / rethrow / swallow-to-false) is the 09-02 fix that reached one sibling of four. None
 of it is a live bug; all of it is the shape that makes the next one.
 
-### [strengthening] A shelf built for one lane is a shelf the sibling never learned; a test fixture the reducer cannot produce keeps dead code green; "both lanes share X" must say what X is — status: `idea` (2026-10-05 audit, roll-resolution + combat-exchange Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+### [strengthening] A shelf built for one lane is a shelf the sibling never learned; a test fixture the reducer cannot produce keeps dead code green; "both lanes share X" must say what X is — status: `shipped` (2026-10-05, the same day's queue sweep — DECISIONS.md 2026-10-05; audit: roll-resolution + combat-exchange Lap 4)
 Four patterns from the fourth design-lap pair, one of them a live bug. **(1)** `canonicalRollKey`
 (2026-09-16) was built because a bare `.toLowerCase()` turned `sleightOfHand` into an untrained +0
 on the out-of-combat resolver — and `combatExchange.js` kept its private `SKILLS` set, its own
@@ -3149,3 +3149,17 @@ the die gets. A sharing claim names the function, or it is two copies with a slo
 exchange payload literal is written three times and the opening copy omits five of fourteen keys —
 silently, because a literal cannot default; one builder makes an omission a choice. None of (2)–(4)
 is a live bug; (1) is.
+
+### [strengthening] A table ruling ages by raw rows while every other ledger ages by turns — status: `open call for Vesa` (2026-10-05, left out of the queue sweep on purpose)
+`recentRulings` (withdrawn / set-aside checks that bind the DM through `## RECENT TABLE RULINGS`)
+stamps `messages.length` and expires after `RULING_MESSAGE_TTL` 24 RAW rows (`pruneRecentRulings`,
+`engine/roleplayCheck.js`; DECISIONS 2026-07-05). The 2026-07-30 rule moved every replay ledger to
+conversational distance because a dice turn burns ~5 raw rows (the roll lines, the hidden setup, the
+system notes); rulings were decided three weeks earlier and never listed. Effect: a ruling minted
+after a challenge binds the DM for nearer 4–5 dice turns than the "6–10 turns" its own comment
+promises — the DM may re-propose an overruled check sooner than the table was told it could.
+**Recommendation:** age it conversationally (`conversationalDistance(messages, r.atMessageCount,
+now) <= RULING_MESSAGE_TTL`, the stamp unchanged; `roleplayCheck.test.js` has one case pinning the
+raw count to rewrite). **Why it waited:** it lengthens a window a dated decision set, and the
+project rule is that a decision is revisited with the human, not by a sweep. A yes makes it a
+ten-minute change.
